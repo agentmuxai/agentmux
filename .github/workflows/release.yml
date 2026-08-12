@@ -3,9 +3,19 @@ name: Release
 # Triggered by pushing a semver tag (v0.50.0) or via workflow_dispatch for
 # emergency reruns. Verifies version consistency, builds all three platform
 # artifacts, publishes a GitHub Release (the single source of truth for
-# distribution), submits to WinGet and the Microsoft Store (non-blocking), and
-# triggers the landing page deploy. Asset mirroring to agentmux.ai is done by the
-# landing page itself (fetch-release.mjs) — this workflow never touches S3/AWS.
+# distribution), and triggers the landing page deploy. Asset mirroring to
+# agentmux.ai is done by the landing page itself (fetch-release.mjs) — this
+# workflow never touches S3/AWS.
+#
+# WinGet/Microsoft Store submission jobs are disabled (see "Phase 4" below,
+# commented out, 2026-08-12) — MS Store is uploaded manually. WinGet's
+# automated job never actually worked: `wingetcreate update` requires an
+# existing manifest in microsoft/winget-pkgs, which was never bootstrapped
+# via a first-time `wingetcreate new` submission, so every release back
+# through at least v0.54.14 failed this job identically
+# ("repos/microsoft/winget-pkgs/.../AgentMux was not found"). Re-enable once
+# a manifest actually exists there (or bootstrap one and switch back to
+# `update`).
 #
 # See docs/specs/SPEC_UNIFIED_RELEASE_CICD_2026_06_29.md and the correction
 # docs/specs/SPEC_RELEASE_CICD_CORRECTION_2026_06_30.md for the full design.
@@ -213,83 +223,85 @@ jobs:
             -f event_type=release \
             -F client_payload[version]="${VERSION}"
 
-  # ── Phase 4: Distribution channels (non-blocking, parallel) ───────────────
-  winget:
-    name: Submit WinGet update
-    needs: [verify, publish]
-    # microsoft/winget-create's release no longer ships a Linux binary (only
-    # wingetcreate.exe) — mirrors the ms-store job's runner below.
-    runs-on: windows-latest
-    continue-on-error: true
-    env:
-      VERSION: ${{ needs.verify.outputs.version }}
-    steps:
-      - name: Install wingetcreate
-        shell: pwsh
-        run: |
-          Invoke-WebRequest -Uri "https://github.com/microsoft/winget-create/releases/latest/download/wingetcreate.exe" -OutFile wingetcreate.exe
-
-      - name: Submit WinGet manifest PR
-        shell: bash
-        env:
-          WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Resolve the GitHub Release asset download URL directly — GitHub
-          # Releases is the source of truth (no separate CDN). package-installer.ps1
-          # produces AgentMux-<ver>-x64-setup.exe.
-          INSTALLER_URL=$(gh release view "v${VERSION}" \
-            --repo agentmuxai/agentmux \
-            --json assets \
-            --jq '.assets[] | select(.name | test("setup\\.exe$"; "i")) | .url' | head -1)
-          if [ -z "$INSTALLER_URL" ]; then
-            echo "❌ No setup.exe asset found in GitHub Release v${VERSION}" >&2
-            exit 1
-          fi
-          echo "WinGet installer URL: $INSTALLER_URL"
-          ./wingetcreate.exe update AgentMux.AgentMux \
-            --version "${VERSION}" \
-            --urls "$INSTALLER_URL" \
-            --submit \
-            --token "$WINGET_TOKEN"
-
-  ms-store:
-    name: Submit Microsoft Store update
-    needs: [verify, publish]
-    runs-on: windows-latest
-    continue-on-error: true
-    env:
-      VERSION: ${{ needs.verify.outputs.version }}
-    steps:
-      - name: Install msstore CLI
-        shell: pwsh
-        run: winget install Microsoft.StoreCLI --silent --accept-package-agreements --accept-source-agreements
-
-      - name: Configure msstore credentials
-        shell: pwsh
-        env:
-          MSSTORE_TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
-          MSSTORE_CLIENT_ID: ${{ secrets.MSSTORE_CLIENT_ID }}
-          MSSTORE_CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
-          MSSTORE_SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}
-        run: |
-          msstore settings --tenantId $env:MSSTORE_TENANT_ID `
-            --clientId $env:MSSTORE_CLIENT_ID `
-            --clientSecret $env:MSSTORE_CLIENT_SECRET `
-            --sellerId $env:MSSTORE_SELLER_ID
-
-      - name: Download MSIX from GitHub Release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release download "v${VERSION}" \
-            --repo agentmuxai/agentmux \
-            --pattern "*.msix" \
-            --dir msix-download
-
-      - name: Submit to Microsoft Store
-        shell: pwsh
-        run: |
-          $msix = Get-ChildItem msix-download -Filter "*.msix" | Select-Object -First 1
-          msstore publish $msix.FullName --no-confirmation
+  # ── Phase 4: Distribution channels — DISABLED 2026-08-12 ──────────────────
+  # MS Store is uploaded manually; WinGet automation never worked (see header
+  # comment above). Both job bodies kept for reference, fully commented out.
+  # winget:
+  #   name: Submit WinGet update
+  #   needs: [verify, publish]
+  #   # microsoft/winget-create's release no longer ships a Linux binary (only
+  #   # wingetcreate.exe) — mirrors the ms-store job's runner below.
+  #   runs-on: windows-latest
+  #   continue-on-error: true
+  #   env:
+  #     VERSION: ${{ needs.verify.outputs.version }}
+  #   steps:
+  #     - name: Install wingetcreate
+  #       shell: pwsh
+  #       run: |
+  #         Invoke-WebRequest -Uri "https://github.com/microsoft/winget-create/releases/latest/download/wingetcreate.exe" -OutFile wingetcreate.exe
+  #
+  #     - name: Submit WinGet manifest PR
+  #       shell: bash
+  #       env:
+  #         WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       run: |
+  #         # Resolve the GitHub Release asset download URL directly — GitHub
+  #         # Releases is the source of truth (no separate CDN). package-installer.ps1
+  #         # produces AgentMux-<ver>-x64-setup.exe.
+  #         INSTALLER_URL=$(gh release view "v${VERSION}" \
+  #           --repo agentmuxai/agentmux \
+  #           --json assets \
+  #           --jq '.assets[] | select(.name | test("setup\\.exe$"; "i")) | .url' | head -1)
+  #         if [ -z "$INSTALLER_URL" ]; then
+  #           echo "❌ No setup.exe asset found in GitHub Release v${VERSION}" >&2
+  #           exit 1
+  #         fi
+  #         echo "WinGet installer URL: $INSTALLER_URL"
+  #         ./wingetcreate.exe update AgentMux.AgentMux \
+  #           --version "${VERSION}" \
+  #           --urls "$INSTALLER_URL" \
+  #           --submit \
+  #           --token "$WINGET_TOKEN"
+  #
+  # ms-store:
+  #   name: Submit Microsoft Store update
+  #   needs: [verify, publish]
+  #   runs-on: windows-latest
+  #   continue-on-error: true
+  #   env:
+  #     VERSION: ${{ needs.verify.outputs.version }}
+  #   steps:
+  #     - name: Install msstore CLI
+  #       shell: pwsh
+  #       run: winget install Microsoft.StoreCLI --silent --accept-package-agreements --accept-source-agreements
+  #
+  #     - name: Configure msstore credentials
+  #       shell: pwsh
+  #       env:
+  #         MSSTORE_TENANT_ID: ${{ secrets.MSSTORE_TENANT_ID }}
+  #         MSSTORE_CLIENT_ID: ${{ secrets.MSSTORE_CLIENT_ID }}
+  #         MSSTORE_CLIENT_SECRET: ${{ secrets.MSSTORE_CLIENT_SECRET }}
+  #         MSSTORE_SELLER_ID: ${{ secrets.MSSTORE_SELLER_ID }}
+  #       run: |
+  #         msstore settings --tenantId $env:MSSTORE_TENANT_ID `
+  #           --clientId $env:MSSTORE_CLIENT_ID `
+  #           --clientSecret $env:MSSTORE_CLIENT_SECRET `
+  #           --sellerId $env:MSSTORE_SELLER_ID
+  #
+  #     - name: Download MSIX from GitHub Release
+  #       shell: bash
+  #       env:
+  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       run: |
+  #         gh release download "v${VERSION}" \
+  #           --repo agentmuxai/agentmux \
+  #           --pattern "*.msix" \
+  #           --dir msix-download
+  #
+  #     - name: Submit to Microsoft Store
+  #       shell: pwsh
+  #       run: |
+  #         $msix = Get-ChildItem msix-download -Filter "*.msix" | Select-Object -First 1
+  #         msstore publish $msix.FullName --no-confirmation
