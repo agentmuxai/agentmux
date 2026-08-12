@@ -1,0 +1,128 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Migrated from the original monolithic warden.scss's audit-feed rules, now
+// scoped to its own manager component. Extended with "nudge"/"declined"
+// status variants for Supervisor-originated rows (entry.outcome set) —
+// deliberately neutral (blue-ish), not red/green, since a decline is not a
+// failure and a nudge is not a success/error in the same sense an ordinary
+// jekt delivery is.
+
+.warden-audit-feed {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 0.85em;
+}
+
+.warden-audit-row {
+    display: grid;
+    grid-template-columns: 70px 1fr 55px 50px 1fr;
+    gap: var(--space-2);
+    padding: 2px var(--space-2);
+    border-radius: 0;
+
+    &[data-variant="err"] {
+        background: rgba(239, 68, 68, 0.08);
+    }
+
+    &[data-variant="nudge"],
+    &[data-variant="declined"] {
+        background: rgba(96, 165, 250, 0.08);
+    }
+}
+
+.warden-audit-time {
+    opacity: 0.55;
+    font-family: monospace;
+}
+
+.warden-audit-flow {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.warden-audit-status {
+    text-align: center;
+    text-transform: uppercase;
+    font-size: 0.8em;
+
+    &--ok {
+        color: #22c55e;
+    }
+
+    &--err {
+        color: #ef4444;
+    }
+
+    &--nudge,
+    &--declined {
+        color: #60a5fa;
+    }
+}
+
+.warden-audit-bytes {
+    text-align: right;
+    opacity: 0.55;
+    font-family: monospace;
+}
+
+.warden-audit-error {
+    opacity: 0.8;
+    color: #ef4444;
+    font-size: 0.95em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.warden-audit-reason {
+    opacity: 0.8;
+    color: #60a5fa;
+    font-size: 0.95em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+// ── Responsive container queries ─────────────────────────────────────────────
+
+// sm: drop bytes + error/reason columns from audit grid (3-col layout)
+@container warden (max-width: 767px) {
+    .warden-audit-row {
+        grid-template-columns: 60px 1fr 50px;
+    }
+
+    .warden-audit-bytes,
+    .warden-audit-error,
+    .warden-audit-reason {
+        display: none;
+    }
+}
+
+// xs: audit rows become stacked two-line cards
+@container warden (max-width: 479px) {
+    .warden-audit-row {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 4px var(--space-2);
+        border-bottom: 1px solid var(--border-color);
+    }
+
+    .warden-audit-bytes,
+    .warden-audit-error,
+    .warden-audit-reason {
+        display: block;
+    }
+
+    .warden-audit-flow {
+        white-space: normal;
+        overflow: visible;
+        text-overflow: unset;
+    }
+}
