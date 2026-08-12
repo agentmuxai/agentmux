@@ -27,7 +27,7 @@ wrap_client! {
         }
 
         fn keyboard_handler(&self) -> Option<KeyboardHandler> {
-            Some(AgentMuxKeyboardHandler::new())
+            Some(AgentMuxKeyboardHandler::new(self.inner.clone()))
         }
 
         fn life_span_handler(&self) -> Option<LifeSpanHandler> {
@@ -185,10 +185,98 @@ wrap_drag_handler! {
 
 /// CEF event flag: Ctrl key is held.
 const EVENTFLAG_CONTROL_DOWN: u32 = 1 << 2;
+/// CEF event flag: Alt key is held (cef_types.h `EVENTFLAG_ALT_DOWN`).
+const EVENTFLAG_ALT_DOWN: u32 = 1 << 3;
+/// CEF event flag: Cmd key is held (cef_types.h `EVENTFLAG_COMMAND_DOWN`) —
+/// macOS's Ctrl-equivalent modifier for the browser-pane shortcuts below
+/// (issue #1190's acceptance criteria: "same set with Cmd on macOS"). Not
+/// live-verified on macOS hardware — same caveat as issues #2188/#2189.
+#[cfg(target_os = "macos")]
+const EVENTFLAG_COMMAND_DOWN: u32 = 1 << 7;
 
 /// Windows virtual-key codes for shortcuts we want to forward to JS.
 const VK_P: i32 = 0x50; // Ctrl+P — command palette (not print)
 const VK_G: i32 = 0x47; // Ctrl+G — (reserve for app use)
+
+/// Windows virtual-key codes for browser-pane-only shortcuts (issue #1190).
+const VK_L: i32 = 0x4C; // Ctrl+L — focus address bar
+const VK_R: i32 = 0x52; // Ctrl+R — reload
+const VK_LEFT: i32 = 0x25; // Alt+Left — back
+const VK_RIGHT: i32 = 0x27; // Alt+Right — forward
+
+/// Reserved chrome-style shortcuts intercepted only when the focused CEF
+/// browser is a browser pane (see issue #1190 — browser panes are native
+/// CEF child windows, so normal app-level keydown handling never sees these
+/// keystrokes). Kept independent of any CEF/AppState types so the matching
+/// logic itself is unit-testable without a CEF runtime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BrowserPaneShortcut {
+    FocusAddress,
+    Reload,
+    GoBack,
+    GoForward,
+}
+
+/// Ctrl+T/Ctrl+W (new tab / close tab) are intentionally not matched here —
+/// they depend on browser-pane tabs, which don't exist yet (see the issue's
+/// own sequencing note). Ctrl+F (in-page find) is also deferred: it needs a
+/// find-bar UI (input + match-count display), not just an intercepted key.
+fn browser_pane_shortcut_for(ctrl: bool, alt: bool, vk: i32) -> Option<BrowserPaneShortcut> {
+    if ctrl && !alt {
+        match vk {
+            VK_L => Some(BrowserPaneShortcut::FocusAddress),
+            VK_R => Some(BrowserPaneShortcut::Reload),
+            _ => None,
+        }
+    } else if alt && !ctrl {
+        match vk {
+            VK_LEFT => Some(BrowserPaneShortcut::GoBack),
+            VK_RIGHT => Some(BrowserPaneShortcut::GoForward),
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
+/// Resolve the focused pane's `block_id` and run `shortcut` against it —
+/// either by emitting an event the frontend reacts to (`FocusAddress`, which
+/// needs to move DOM focus in the host webview) or by calling straight into
+/// `BrowserPaneManager` (`Reload`/`GoBack`/`GoForward`, the same methods the
+/// nav-bar buttons already use via IPC — see `ipc.rs`'s `browser_pane_go_back`
+/// etc.), so this stays consistent with the existing back/forward/reload path
+/// instead of poking CEF's `Browser` directly.
+fn run_browser_pane_shortcut(
+    inner: &Arc<Mutex<AgentMuxHandler>>,
+    browser: Option<&mut Browser>,
+    shortcut: BrowserPaneShortcut,
+) -> bool {
+    let handler = inner.lock();
+    if !handler.is_browser_pane {
+        return false;
+    }
+    let Some(b) = browser else { return false };
+    let Some(block_id) = crate::browser_pane::callbacks::resolve_pane_block_id(&handler.state, b)
+    else {
+        return false;
+    };
+    let state = handler.state.clone();
+    drop(handler);
+
+    match shortcut {
+        BrowserPaneShortcut::FocusAddress => {
+            crate::events::emit_event_from_state(
+                &state,
+                "browser-pane-shortcut",
+                &serde_json::json!({ "block_id": block_id, "action": "focus-address" }),
+            );
+        }
+        BrowserPaneShortcut::Reload => state.browser_panes.reload(&block_id, &state),
+        BrowserPaneShortcut::GoBack => state.browser_panes.go_back(&block_id, &state),
+        BrowserPaneShortcut::GoForward => state.browser_panes.go_forward(&block_id, &state),
+    }
+    true
+}
 
 // cef-rs declares `on_pre_key_event`'s `os_event` differently per platform:
 //   Windows → Option<&mut MSG>     (typed)
@@ -197,73 +285,102 @@ const VK_G: i32 = 0x47; // Ctrl+G — (reserve for app use)
 // A single signature can't satisfy all three, so we expand the macro per
 // target and forward to a shared body.
 fn handle_pre_key_event(
+    inner: &Arc<Mutex<AgentMuxHandler>>,
+    browser: Option<&mut Browser>,
     event: Option<&KeyEvent>,
     is_keyboard_shortcut: Option<&mut ::std::os::raw::c_int>,
 ) -> ::std::os::raw::c_int {
-    if let Some(ev) = event {
-        let ctrl = (ev.modifiers & EVENTFLAG_CONTROL_DOWN) != 0;
-        if ctrl && matches!(ev.windows_key_code, VK_P | VK_G) {
-            // Tell CEF this is a keyboard shortcut so it dispatches
-            // the keydown event to JavaScript instead of handling it
-            // as a built-in browser action (print dialog, etc.).
-            if let Some(flag) = is_keyboard_shortcut {
-                *flag = 1;
+    let Some(ev) = event else { return 0 };
+    let ctrl = (ev.modifiers & EVENTFLAG_CONTROL_DOWN) != 0;
+
+    if ctrl && matches!(ev.windows_key_code, VK_P | VK_G) {
+        // Tell CEF this is a keyboard shortcut so it dispatches
+        // the keydown event to JavaScript instead of handling it
+        // as a built-in browser action (print dialog, etc.).
+        if let Some(flag) = is_keyboard_shortcut {
+            *flag = 1;
+        }
+        // Return 0 = not consumed at pre-key stage; CEF will
+        // still call on_key_event where we return 0 again,
+        // letting JS handle it via the normal keydown path.
+        return 0;
+    }
+
+    // Browser-pane shortcuts (issue #1190) are handled entirely here — unlike
+    // Ctrl+P/Ctrl+G above, they must NOT reach the pane's own page JS (an
+    // arbitrary, possibly untrusted site), so we fully consume them (return 1)
+    // instead of forwarding. Gated on RAWKEYDOWN so the action fires once per
+    // physical key press — CEF also calls `on_pre_key_event` for the matching
+    // KEYUP, which would otherwise double-fire (e.g. two reloads per press).
+    if ev.type_ == KeyEventType::RAWKEYDOWN {
+        let alt = (ev.modifiers & EVENTFLAG_ALT_DOWN) != 0;
+        #[cfg(target_os = "macos")]
+        let pane_primary_mod = (ev.modifiers & EVENTFLAG_COMMAND_DOWN) != 0;
+        #[cfg(not(target_os = "macos"))]
+        let pane_primary_mod = ctrl;
+        if let Some(shortcut) = browser_pane_shortcut_for(pane_primary_mod, alt, ev.windows_key_code) {
+            if run_browser_pane_shortcut(inner, browser, shortcut) {
+                return 1;
             }
-            // Return 0 = not consumed at pre-key stage; CEF will
-            // still call on_key_event where we return 0 again,
-            // letting JS handle it via the normal keydown path.
         }
     }
+
     0 // not consumed
 }
 
 #[cfg(target_os = "windows")]
 wrap_keyboard_handler! {
-    struct AgentMuxKeyboardHandler;
+    struct AgentMuxKeyboardHandler {
+        inner: Arc<Mutex<AgentMuxHandler>>,
+    }
 
     impl KeyboardHandler {
         fn on_pre_key_event(
             &self,
-            _browser: Option<&mut Browser>,
+            browser: Option<&mut Browser>,
             event: Option<&KeyEvent>,
             _os_event: Option<&mut cef::sys::MSG>,
             is_keyboard_shortcut: Option<&mut ::std::os::raw::c_int>,
         ) -> ::std::os::raw::c_int {
-            handle_pre_key_event(event, is_keyboard_shortcut)
+            handle_pre_key_event(&self.inner, browser, event, is_keyboard_shortcut)
         }
     }
 }
 
 #[cfg(target_os = "linux")]
 wrap_keyboard_handler! {
-    struct AgentMuxKeyboardHandler;
+    struct AgentMuxKeyboardHandler {
+        inner: Arc<Mutex<AgentMuxHandler>>,
+    }
 
     impl KeyboardHandler {
         fn on_pre_key_event(
             &self,
-            _browser: Option<&mut Browser>,
+            browser: Option<&mut Browser>,
             event: Option<&KeyEvent>,
             _os_event: Option<&mut cef::sys::XEvent>,
             is_keyboard_shortcut: Option<&mut ::std::os::raw::c_int>,
         ) -> ::std::os::raw::c_int {
-            handle_pre_key_event(event, is_keyboard_shortcut)
+            handle_pre_key_event(&self.inner, browser, event, is_keyboard_shortcut)
         }
     }
 }
 
 #[cfg(target_os = "macos")]
 wrap_keyboard_handler! {
-    struct AgentMuxKeyboardHandler;
+    struct AgentMuxKeyboardHandler {
+        inner: Arc<Mutex<AgentMuxHandler>>,
+    }
 
     impl KeyboardHandler {
         fn on_pre_key_event(
             &self,
-            _browser: Option<&mut Browser>,
+            browser: Option<&mut Browser>,
             event: Option<&KeyEvent>,
             _os_event: *mut u8,
             is_keyboard_shortcut: Option<&mut ::std::os::raw::c_int>,
         ) -> ::std::os::raw::c_int {
-            handle_pre_key_event(event, is_keyboard_shortcut)
+            handle_pre_key_event(&self.inner, browser, event, is_keyboard_shortcut)
         }
     }
 }
@@ -503,5 +620,73 @@ wrap_permission_handler! {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod browser_pane_shortcut_tests {
+    use super::*;
+
+    #[test]
+    fn ctrl_l_focuses_address_bar() {
+        assert_eq!(
+            browser_pane_shortcut_for(true, false, VK_L),
+            Some(BrowserPaneShortcut::FocusAddress)
+        );
+    }
+
+    #[test]
+    fn ctrl_r_reloads() {
+        assert_eq!(
+            browser_pane_shortcut_for(true, false, VK_R),
+            Some(BrowserPaneShortcut::Reload)
+        );
+    }
+
+    #[test]
+    fn alt_left_goes_back() {
+        assert_eq!(
+            browser_pane_shortcut_for(false, true, VK_LEFT),
+            Some(BrowserPaneShortcut::GoBack)
+        );
+    }
+
+    #[test]
+    fn alt_right_goes_forward() {
+        assert_eq!(
+            browser_pane_shortcut_for(false, true, VK_RIGHT),
+            Some(BrowserPaneShortcut::GoForward)
+        );
+    }
+
+    #[test]
+    fn plain_keypress_without_modifier_is_not_a_shortcut() {
+        assert_eq!(browser_pane_shortcut_for(false, false, VK_L), None);
+        assert_eq!(browser_pane_shortcut_for(false, false, VK_LEFT), None);
+    }
+
+    #[test]
+    fn ctrl_alt_combo_matches_neither_group() {
+        // Ctrl+Alt+L / Ctrl+Alt+Left are not reserved shortcuts — only plain
+        // Ctrl+<key> and plain Alt+<key> are matched, so a page/site binding
+        // Ctrl+Alt+<key> for its own purposes isn't hijacked.
+        assert_eq!(browser_pane_shortcut_for(true, true, VK_L), None);
+        assert_eq!(browser_pane_shortcut_for(true, true, VK_LEFT), None);
+    }
+
+    #[test]
+    fn unrelated_key_is_not_a_shortcut() {
+        assert_eq!(browser_pane_shortcut_for(true, false, VK_P), None);
+    }
+
+    #[test]
+    fn ctrl_t_and_ctrl_w_are_not_yet_matched() {
+        // Tabs (#1190's Ctrl+T/Ctrl+W) depend on browser-pane tabs, which
+        // don't exist yet — asserting the non-match documents that this is
+        // deliberate, not an oversight, until that dependency lands.
+        const VK_T: i32 = 0x54;
+        const VK_W: i32 = 0x57;
+        assert_eq!(browser_pane_shortcut_for(true, false, VK_T), None);
+        assert_eq!(browser_pane_shortcut_for(true, false, VK_W), None);
     }
 }

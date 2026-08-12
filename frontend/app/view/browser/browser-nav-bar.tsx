@@ -1,8 +1,8 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createEffect, createSignal, Show, type JSX } from "solid-js";
-import { invokeCommand } from "@/app/platform/ipc";
+import { createEffect, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import type { BrowserViewModel } from "./browser-model";
 
@@ -85,6 +85,34 @@ export function BrowserNavBar(props: {
             handleNavigate();
         }
     };
+
+    // Ctrl+L (Cmd+L on macOS) is dead by default in a browser pane — CEF
+    // intercepts it at the pre-key stage (agentmux-cef/src/client/handlers.rs)
+    // since a pane's keystrokes go to the CEF child browser, not this webview,
+    // and emits `browser-pane-shortcut` instead of forwarding to the (possibly
+    // untrusted) page. See issue #1190.
+    onMount(() => {
+        let unsub: (() => void) | undefined;
+        void listenEvent<{ block_id: string; action: string }>(
+            "browser-pane-shortcut",
+            (payload) => {
+                if (payload.block_id !== model.blockId) return;
+                if (payload.action !== "focus-address") return;
+                diag(`shortcut-focus-address`);
+                // Same OS-focus handoff the address bar's own onMouseDown
+                // needs (see its comment above): the pane HWND currently
+                // holds OS keyboard focus, so a bare DOM .focus() call
+                // wouldn't actually move keystrokes to this input without
+                // first reclaiming OS focus for this window.
+                invokeCommand("main_window_focus", { window_label: windowLabel }).catch(() => {});
+                addressInputRef?.focus();
+                addressInputRef?.select();
+            }
+        ).then((fn) => {
+            unsub = fn;
+        });
+        onCleanup(() => unsub?.());
+    });
 
     return (
         <Show when={model.showControlsAtom()}>
