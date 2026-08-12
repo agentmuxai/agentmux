@@ -67,7 +67,7 @@ impl Store {
                 slug, branch_label, working_directory,
                 created_at, updated_at, is_seeded, user_hidden,
                 container_image, container_volumes, container_name,
-                use_ambient_login, model_vendor_base_url
+                use_ambient_login, model_vendor_base_url, auto_continue_enabled
              ) VALUES (
                 ?1, ?2, ?3, ?4,
                 ?5, ?6,
@@ -77,7 +77,7 @@ impl Store {
                 ?17, ?18, ?19,
                 ?20, ?21, ?22, ?23,
                 ?24, ?25, ?26,
-                ?27, ?28
+                ?27, ?28, ?29
              )
              ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
@@ -104,7 +104,8 @@ impl Store {
                 container_volumes = excluded.container_volumes,
                 container_name = excluded.container_name,
                 use_ambient_login = excluded.use_ambient_login,
-                model_vendor_base_url = excluded.model_vendor_base_url",
+                model_vendor_base_url = excluded.model_vendor_base_url,
+                auto_continue_enabled = excluded.auto_continue_enabled",
             params![
                 def.id,
                 def.name,
@@ -134,6 +135,7 @@ impl Store {
                 def.container_name,
                 def.use_ambient_login,
                 def.model_vendor_base_url,
+                def.auto_continue_enabled,
             ],
         )?;
         Ok(())
@@ -631,7 +633,7 @@ impl Store {
                     agent_type, environment, agent_bus_id, is_seeded,
                     accounts, parent_id, branch_label, updated_at,
                     user_hidden, container_image, container_volumes, container_name,
-                    use_ambient_login, model_vendor_base_url
+                    use_ambient_login, model_vendor_base_url, auto_continue_enabled
              FROM db_agent_definitions WHERE id = ?1",
         )?;
         let result = stmt.query_row(params![id], |row| {
@@ -663,6 +665,7 @@ impl Store {
                 container_name: row.get(24)?,
                 use_ambient_login: row.get(25)?,
                 model_vendor_base_url: row.get(26)?,
+                auto_continue_enabled: row.get(27)?,
             })
         });
         match result {
