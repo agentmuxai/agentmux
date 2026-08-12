@@ -169,6 +169,20 @@ pub struct AgentMuxHandler {
     /// removed on clean close, exactly like `crash_history`.
     /// See docs/specs/SPEC_GATED_RENDERER_RECOVERY_2026_06_01.md §6.B.
     memory_pause_history: HashMap<i32, VecDeque<Instant>>,
+    /// Count of browser-pane OAuth popups allowed by `on_before_popup` (return
+    /// false) whose `on_after_created` hasn't fired yet. A COUNTER, not a bool:
+    /// if a pane opens two popups before the first's `on_after_created` runs,
+    /// both must still be tagged into `popup_browser_ids` for managed close
+    /// (a bool would tag only the first — reagent P2 on PR #2545). Each popup's
+    /// `on_after_created` (the popup shares the spawning pane's handler)
+    /// decrements this and tags its browser id.
+    pending_popups: usize,
+    /// Browser identifiers of auth popups spawned from this pane. When such a
+    /// browser tears down (`do_close`), its hosting top-level Views window is
+    /// closed explicitly — otherwise the window lingers blank after the auth
+    /// completes (the "stray Sign In window"; reagent P1 on PR #2545), because
+    /// nothing else closes a popup's Views window when its browser dies.
+    popup_browser_ids: std::collections::HashSet<i32>,
 }
 
 impl AgentMuxHandler {
@@ -184,6 +198,8 @@ impl AgentMuxHandler {
             is_browser_pane,
             crash_history: HashMap::new(),
             memory_pause_history: HashMap::new(),
+            pending_popups: 0,
+            popup_browser_ids: std::collections::HashSet::new(),
         }))
     }
 
