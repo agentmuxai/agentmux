@@ -124,6 +124,17 @@ pub struct AuditLogEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
     pub request_id: String,
+    /// "nudge_sent" | "nudge_declined" — present only for Warden Supervisor-
+    /// originated entries (see ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_
+    /// WATCHER_2026_08_12.md); absent for ordinary jekt injections. A
+    /// "nudge_declined" entry has no corresponding delivery at all — this
+    /// field is the ONLY record that decision ever existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
+    /// The Supervisor's stated reasoning, populated alongside `outcome`.
+    /// Not used by ordinary (non-Supervisor) jekt entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// Poller configuration for AgentMux cloud service.
