@@ -547,37 +547,42 @@ impl AgentMuxHandler {
 
         let is_external = crate::commands::platform::is_external_http_url(&url);
 
-        // Route to the SYSTEM browser (never navigate the current frame) when:
-        //
-        //  * **App UI → external site** (Help pane's "Report Bugs & Issues",
-        //    docs, Discord, …). Navigating the app's own window to an external
-        //    origin replaces the whole AgentMux UI and tears down the host
-        //    bridge — the window comes back bridge-dead on "Can't reconnect".
-        //
-        //  * **Browser pane → external popup window** (OAuth/GIS/payment).
-        //    Collapsing such a popup into the pane's own frame is the bug in
-        //    docs/reports/REPORT_BROWSER_PANE_GOOGLE_LOGIN_INSTANCE_EXIT_AND_UAC_2026_08_11.md:
-        //    (a) it breaks the opener↔popup postMessage handshake the login
-        //    relies on, and (b) the popup's normal closing `window.close()`
-        //    then destroys the ENTIRE pane, which trips the last-window quit
-        //    watchdog and exits the app. Ordinary `target="_blank"` links in a
-        //    pane (tab dispositions) still navigate in-pane — for them
-        //    following a link IS the point, and they don't self-close.
+        // **Browser pane → real popup window** (OAuth / Google Identity
+        // Services sign-in, payment, …): let CEF create an ACTUAL child popup
+        // by returning false (don't cancel). This is what makes the login
+        // complete IN the pane: the popup shares the pane's browser/request
+        // context, so `window.opener` points at the pane's page, `postMessage`
+        // delivers the credential back to it, and cookies/session are shared —
+        // none of which work when the popup is a separate process (the
+        // "There was an error logging you in" symptom of routing it to the
+        // system browser). The popup's own `window.close()` then closes only
+        // the popup, not the pane (the instance-exit bug was the pane's OWN
+        // frame being navigated + self-closed; a distinct popup browser
+        // closing is normal and leaves the pane + main window untouched).
+        // Only real popups (window.open) take this path — ordinary
+        // `target="_blank"` links (tab dispositions) fall through to in-pane
+        // navigation below, unchanged.
+        if self.is_browser_pane && is_popup_window {
+            tracing::info!(
+                url = %url,
+                "browser-pane popup — allowing native CEF popup so the auth handshake (opener/postMessage/cookies) completes in the pane",
+            );
+            return false; // allow CEF to create the popup browser
+        }
+
+        // **App UI → external site** (Help pane's "Report Bugs & Issues",
+        // docs, Discord, …): open in the SYSTEM browser and cancel. Navigating
+        // the app's own window to an external origin replaces the whole
+        // AgentMux UI and tears down the host bridge — the window comes back
+        // bridge-dead on "Can't reconnect".
         //
         // `open_url_in_default_browser` only spawns a child process (rundll32 /
         // open / xdg-open); it never re-enters CEF or `self.inner`, so calling
         // it inline here (under the handler lock) cannot deadlock the way an
         // inline `load_url` would.
-        let route_to_system_browser =
-            is_external && (!self.is_browser_pane || is_popup_window);
-        if route_to_system_browser {
+        if !self.is_browser_pane && is_external {
             match crate::commands::platform::open_url_in_default_browser(&url) {
-                Ok(()) => tracing::info!(
-                    url = %url,
-                    is_browser_pane = %self.is_browser_pane,
-                    is_popup_window = %is_popup_window,
-                    "external popup/link opened in system browser",
-                ),
+                Ok(()) => tracing::info!(url = %url, "external link opened in system browser"),
                 Err(e) => tracing::warn!(
                     url = %url,
                     error = %e,
