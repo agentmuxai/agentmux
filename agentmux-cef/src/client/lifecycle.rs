@@ -56,11 +56,12 @@ impl AgentMuxHandler {
         };
         tracing::info!("Browser created (total: {})", self.browser_list.len() + 1);
 
-        // The popup allowed by on_before_popup (auth/GIS sign-in) is the next
-        // browser created on this pane's handler — record its id so do_close
-        // can close its hosting Views window (the stray-blank-window fix).
-        if self.pending_popup {
-            self.pending_popup = false;
+        // Each OAuth popup allowed by on_before_popup is created (as the next
+        // browser(s) on this pane's handler) — record its id so do_close can
+        // close its hosting Views window (the stray-blank-window fix). Counter,
+        // not a bool, so two popups in flight both get tagged.
+        if self.pending_popups > 0 {
+            self.pending_popups -= 1;
             let mut b = browser.clone();
             self.popup_browser_ids.insert(b.identifier());
             tracing::info!(popup_id = b.identifier(), "tagged browser-pane auth popup for managed close");
@@ -525,19 +526,24 @@ impl AgentMuxHandler {
     /// Intercept `target="_blank"` / `window.open()` from embedded pages so
     /// they don't spawn rogue top-level CEF windows.
     ///
-    /// Routing depends on who fired the popup and where it points:
-    /// * **App UI → external site** (e.g. the Help pane's GitHub / docs /
-    ///   Discord links): open in the **system browser** and cancel. Navigating
-    ///   the app window itself to an external origin replaces the AgentMux UI
-    ///   and strands the window on "Can't reconnect". See
-    ///   `SPEC_HELP_EXTERNAL_LINKS_AND_RESTORE_2026_06_17.md`.
-    /// * **Browser pane, or internal URL**: navigate the **current** frame to
-    ///   the target URL — matches the UX that AgentMux owns window management,
-    ///   and in a browser pane following a link IS the point.
-    ///
-    /// Returning non-zero cancels popup creation. Applies to both main and pane
-    /// clients; panes explicitly don't want top-level popups. See
-    /// specs/SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md.
+    /// Routing, by who fired the popup and where it points:
+    /// * **App UI → external site** (Help pane's GitHub / docs / Discord
+    ///   links): open in the **system browser** and cancel. Navigating the app
+    ///   window itself to an external origin replaces the AgentMux UI and
+    ///   strands it on "Can't reconnect" (`SPEC_HELP_EXTERNAL_LINKS_AND_RESTORE_2026_06_17.md`).
+    /// * **Browser pane → OAuth authorization popup** (a `window.open`
+    ///   popup-disposition request whose URL is an OAuth/OIDC authorize
+    ///   endpoint — `is_oauth_authorization_url`): allow CEF to create a REAL
+    ///   child popup (return false) so the `window.opener`/`postMessage`/cookie
+    ///   handshake completes the sign-in in the pane. Scoped tightly to auth
+    ///   URLs so this does NOT re-open the "rogue popup window" bug
+    ///   (`SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md`) for
+    ///   arbitrary `window.open` popups.
+    /// * **Browser pane → any other popup** (non-auth `window.open`): open in
+    ///   the **system browser** if external (no rogue in-app window, no
+    ///   hijacking the pane's frame), else cancel.
+    /// * **Browser pane → `target="_blank"` link, or internal URL**: navigate
+    ///   the **current** frame — in a pane, following a link IS the point.
     ///
     /// **The `load_url` call is deferred via `post_task`**, not run inline.
     /// Inline `load_url` caused a UI-thread deadlock on link click:
@@ -576,31 +582,46 @@ impl AgentMuxHandler {
 
         let is_external = crate::commands::platform::is_external_http_url(&url);
 
-        // **Browser pane → real popup window** (OAuth / Google Identity
-        // Services sign-in, payment, …): let CEF create an ACTUAL child popup
-        // by returning false (don't cancel). This is what makes the login
-        // complete IN the pane: the popup shares the pane's browser/request
-        // context, so `window.opener` points at the pane's page, `postMessage`
-        // delivers the credential back to it, and cookies/session are shared —
-        // none of which work when the popup is a separate process (the
-        // "There was an error logging you in" symptom of routing it to the
-        // system browser). The popup's own `window.close()` then closes only
-        // the popup, not the pane (the instance-exit bug was the pane's OWN
-        // frame being navigated + self-closed; a distinct popup browser
-        // closing is normal and leaves the pane + main window untouched).
-        // Only real popups (window.open) take this path — ordinary
-        // `target="_blank"` links (tab dispositions) fall through to in-pane
-        // navigation below, unchanged.
         if self.is_browser_pane && is_popup_window {
-            tracing::info!(
-                url = %url,
-                "browser-pane popup — allowing native CEF popup so the auth handshake (opener/postMessage/cookies) completes in the pane",
-            );
-            // Tag the browser about to be created (next on_after_created on this
-            // handler) as a popup, so do_close can close its Views window and
-            // it doesn't linger blank after the auth completes.
-            self.pending_popup = true;
-            return false; // allow CEF to create the popup browser
+            // **OAuth authorization popup only.** Let CEF create an ACTUAL
+            // child popup (return false) so the sign-in completes IN the pane:
+            // the popup shares the pane's browser/request context, so
+            // `window.opener` points at the pane's page, `postMessage` delivers
+            // the credential back to it, and cookies/session are shared — none
+            // of which work when the popup is a separate process (the "There
+            // was an error logging you in" symptom of routing it to the system
+            // browser). The popup's own `window.close()` closes only the popup
+            // (its hosting Views window is closed in do_close via
+            // popup_browser_ids), not the pane.
+            //
+            // Gated on `is_oauth_authorization_url` so ONLY genuine auth flows
+            // get a native window — an arbitrary `window.open` (ad window, chat
+            // widget, print dialog) does NOT, which is what keeps this from
+            // re-opening the rogue-popup-window bug the browser-pane popup spec
+            // was written to prevent.
+            if crate::commands::platform::is_oauth_authorization_url(&url) {
+                tracing::info!(
+                    url = %url,
+                    "browser-pane OAuth popup — allowing native CEF popup so the auth handshake completes in the pane",
+                );
+                // Count the popup about to be created; the matching number of
+                // subsequent on_after_created calls on this handler tag their
+                // browser ids for managed close (counter, not a bool, so two
+                // popups in flight both get tagged — reagent P2 on #2545).
+                self.pending_popups += 1;
+                return false; // allow CEF to create the popup browser
+            }
+
+            // Any OTHER pane popup (non-auth window.open): don't create a rogue
+            // in-app window and don't hijack the pane's own frame. Open it in
+            // the system browser if external; otherwise cancel.
+            if is_external {
+                match crate::commands::platform::open_url_in_default_browser(&url) {
+                    Ok(()) => tracing::info!(url = %url, "non-auth browser-pane popup opened in system browser"),
+                    Err(e) => tracing::warn!(url = %url, error = %e, "failed to open pane popup in system browser"),
+                }
+            }
+            return true; // cancel the in-app popup
         }
 
         // **App UI → external site** (Help pane's "Report Bugs & Issues",

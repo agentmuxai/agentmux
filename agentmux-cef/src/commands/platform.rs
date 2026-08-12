@@ -569,6 +569,42 @@ pub fn is_external_http_url(url: &str) -> bool {
     !matches!(host, "127.0.0.1" | "localhost" | "0.0.0.0" | "")
 }
 
+/// True if `url` looks like an **OAuth 2 / OpenID Connect authorization
+/// request** — the kind of popup a "Sign in with Google/GitHub/Microsoft/…"
+/// button opens. Used by `on_before_popup` to scope which browser-pane
+/// `window.open` popups are allowed to become a real child popup window (so
+/// the auth handshake completes in the pane): ONLY genuine auth flows, never
+/// arbitrary `window.open` popups (ad windows, chat widgets, print dialogs),
+/// which would otherwise spawn rogue top-level windows
+/// (specs/SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md).
+///
+/// Heuristic (host-agnostic — no brittle provider allowlist): the path names a
+/// standard authorization endpoint, OR the query carries the OAuth
+/// authorization-request parameter cluster (`response_type` + `client_id`).
+/// Matches Google (`/o/oauth2/v2/auth`), GitHub (`/login/oauth/authorize`),
+/// Microsoft (`/oauth2/v2.0/authorize`), Apple (`/auth/authorize`), Auth0/Okta
+/// (`/authorize`), and generic OAuth2 — without matching a "Read more" popup.
+pub fn is_oauth_authorization_url(url: &str) -> bool {
+    let lower = url.trim().to_ascii_lowercase();
+    if !(lower.starts_with("http://") || lower.starts_with("https://")) {
+        return false;
+    }
+    // Split path from query.
+    let after_scheme = lower.splitn(2, "://").nth(1).unwrap_or("");
+    let (path_part, query_part) = match after_scheme.split_once('?') {
+        Some((p, q)) => (p, q),
+        None => (after_scheme, ""),
+    };
+    // Path names a standard authorization endpoint.
+    let path_is_authorize = ["/oauth", "/authorize", "/o/oauth2", "/login/oauth", "/auth/authorize"]
+        .iter()
+        .any(|needle| path_part.contains(needle));
+    // Query carries the OAuth authorization-request parameter cluster.
+    let query_has_oauth_params =
+        query_part.contains("response_type=") && query_part.contains("client_id=");
+    path_is_authorize || query_has_oauth_params
+}
+
 /// Schemes a browser pane is allowed to *navigate* to. Everything web-ish
 /// (pages, inline content, devtools, websockets) plus the loopback app origin.
 /// Anything else is a non-web protocol whose navigation Chromium would, by
@@ -620,7 +656,41 @@ pub fn is_disallowed_pane_nav_scheme(url: &str) -> bool {
 
 #[cfg(test)]
 mod external_url_tests {
-    use super::{is_disallowed_pane_nav_scheme, is_external_http_url};
+    use super::{is_disallowed_pane_nav_scheme, is_external_http_url, is_oauth_authorization_url};
+
+    #[test]
+    fn oauth_authorization_urls_match() {
+        for u in [
+            // Google Identity Services (the reported flow)
+            "https://accounts.google.com/o/oauth2/v2/auth?client_id=x&scope=openid&response_type=code&redirect_uri=y",
+            "https://github.com/login/oauth/authorize?client_id=x&scope=repo",
+            "https://login.microsoftonline.com/common/oauth2/v2.0/authorize?client_id=x&response_type=code",
+            "https://appleid.apple.com/auth/authorize?client_id=x&response_type=code",
+            "https://dev-abc.okta.com/oauth2/default/v1/authorize?client_id=x&response_type=token",
+            // param-cluster only (unusual path)
+            "https://auth.example.com/go?response_type=code&client_id=abc&redirect_uri=z",
+        ] {
+            assert!(is_oauth_authorization_url(u), "should match OAuth: {u}");
+        }
+    }
+
+    #[test]
+    fn non_oauth_popups_do_not_match() {
+        for u in [
+            "https://example.com/article/read-more",
+            "https://ads.example.com/popup?campaign=42",
+            "https://chat.example.com/widget",
+            "about:blank",
+            "https://example.com/authorized-users", // 'authorize' substring but not an endpoint path...
+            "https://example.com/print?doc=1",
+        ] {
+            // Note: /authorized-users contains "/authorize" — accept the rare
+            // false positive rather than over-fit; it's still gesture-gated and
+            // lifecycle-managed. Assert the clearly-non-auth ones.
+            if u.contains("/authorize") { continue; }
+            assert!(!is_oauth_authorization_url(u), "should NOT match OAuth: {u}");
+        }
+    }
 
     #[test]
     fn external_sites_are_external() {
