@@ -605,6 +605,58 @@ pub fn is_oauth_authorization_url(url: &str) -> bool {
     path_is_authorize || query_has_oauth_params
 }
 
+/// Known identity-provider hosts that a browser pane is allowed to open a real
+/// native sign-in popup to. This allowlist — NOT URL shape — is the security
+/// boundary: browser panes load untrusted/attacker-controlled pages, and URL
+/// heuristics alone (OAuth-looking path/params) let any such page spawn
+/// unlimited native phishing windows (reagent P1 on PR #2545; the popup-
+/// explosion class SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md
+/// prevents). An attacker cannot serve from these domains, so gating the
+/// native popup on a known-IdP host makes it safe. A self-hosted / unlisted
+/// IdP simply doesn't get the in-pane popup (falls back to the system browser).
+/// Extend deliberately.
+const IDP_HOSTS_EXACT: &[&str] = &[
+    "accounts.google.com",           // Google (incl. GIS)
+    "github.com",                    // GitHub OAuth
+    "login.microsoftonline.com",     // Microsoft / Entra ID
+    "login.live.com",                // Microsoft consumer
+    "login.microsoft.com",
+    "appleid.apple.com",             // Apple
+    "www.facebook.com",              // Facebook Login
+    "facebook.com",
+    "discord.com",                   // Discord
+    "gitlab.com",                    // GitLab
+    "login.salesforce.com",          // Salesforce
+    "slack.com",                     // Slack
+    "www.linkedin.com",              // LinkedIn
+    "linkedin.com",
+    "id.atlassian.com",              // Atlassian
+    "auth.atlassian.com",
+    "login.yahoo.com",               // Yahoo
+    "www.dropbox.com",               // Dropbox
+];
+
+/// Host SUFFIXES for identity providers that give each tenant its own
+/// subdomain (Okta, Auth0, Azure AD B2C, Cognito, …). Matched as `.suffix` so
+/// `evil-okta.com` does NOT match `.okta.com` (must be a real subdomain).
+const IDP_HOST_SUFFIXES: &[&str] = &[
+    ".okta.com",
+    ".oktapreview.com",
+    ".auth0.com",
+    ".b2clogin.com",         // Azure AD B2C
+    ".amazoncognito.com",    // AWS Cognito
+    ".onelogin.com",
+    ".pingidentity.com",
+];
+
+/// True if `host` (no port) is a known identity provider from the allowlist
+/// above. The security gate for allowing a native in-pane OAuth popup.
+pub fn is_known_idp_host(host: &str) -> bool {
+    let host = host.split(':').next().unwrap_or(host);
+    IDP_HOSTS_EXACT.contains(&host)
+        || IDP_HOST_SUFFIXES.iter().any(|suf| host.ends_with(suf))
+}
+
 /// The lowercased `host[:port]` authority of an http(s) URL, or `None` for a
 /// non-http / malformed URL. Used to compare origins (a popup to a *different*
 /// host than the pane's current page). Deliberately host+port, not full origin
@@ -676,6 +728,27 @@ pub fn is_disallowed_pane_nav_scheme(url: &str) -> bool {
 #[cfg(test)]
 mod external_url_tests {
     use super::{is_disallowed_pane_nav_scheme, is_external_http_url, is_oauth_authorization_url, url_host};
+
+    #[test]
+    fn known_idp_hosts_match_only_real_providers() {
+        use super::is_known_idp_host;
+        for h in [
+            "accounts.google.com", "github.com", "login.microsoftonline.com",
+            "appleid.apple.com", "dev-12345.okta.com", "acme.auth0.com",
+            "contoso.b2clogin.com", "myapp.amazoncognito.com", "discord.com",
+        ] {
+            assert!(is_known_idp_host(h), "should be a known IdP: {h}");
+        }
+        // Attacker-controlled / lookalike hosts must NOT match.
+        for h in [
+            "evil.com", "accounts.google.com.evil.com", "evil-okta.com",
+            "notauth0.com", "google.com", "login.evil.com", "",
+        ] {
+            assert!(!is_known_idp_host(h), "must NOT be a known IdP: {h}");
+        }
+        // Port is ignored.
+        assert!(is_known_idp_host("accounts.google.com:443"));
+    }
 
     #[test]
     fn url_host_extracts_authority_for_cross_origin_check() {

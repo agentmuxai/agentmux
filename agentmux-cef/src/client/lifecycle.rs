@@ -26,6 +26,11 @@ use super::wndproc::{install_top_level_focus_restore_hook, set_window_icon, skip
 pub(crate) const BACKEND_WINDOW_ID_RETRY_ATTEMPTS: u32 = 5;
 pub(crate) const BACKEND_WINDOW_ID_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(200);
 
+/// Upper bound on `AgentMuxHandler::pending_popups` — no realistic pane has
+/// this many OAuth sign-in popups mid-creation at once. Caps a leak if CEF
+/// never fires `on_after_created` for a popup it declined to create.
+const POPUP_PENDING_CAP: usize = 8;
+
 /// Poll `lookup` up to `max_attempts` times, sleeping `delay` between each
 /// attempt (via the injected `sleep` so tests don't have to wait in real
 /// time), returning the first `Some` result or `None` if every attempt
@@ -648,41 +653,46 @@ impl AgentMuxHandler {
             // (its hosting Views window is closed in do_close via
             // popup_browser_ids), not the pane.
             //
-            // Gated on TWO conditions so ONLY genuine auth flows get a native
-            // window — an arbitrary `window.open` (ad window, chat widget, print
-            // dialog) does NOT, keeping this from re-opening the rogue-popup bug
-            // the browser-pane popup spec was written to prevent:
-            //   1. `is_oauth_authorization_url` — the URL is an OAuth/OIDC
-            //      authorize request (endpoint path, or response_type+client_id).
-            //   2. **cross-origin** to the pane's current page. A real sign-in
-            //      popup always goes to the identity provider's host (claude.ai →
-            //      accounts.google.com); a page crafting OAuth-shaped query
-            //      params to force a popup onto ITSELF is same-origin and is
-            //      rejected here (reagent P2 round 2 on #2545 — URL shape alone
-            //      is gameable). Cross-origin is required; if the pane's URL
-            //      can't be read, fall back to allowing (fail-open — a rare
-            //      missing main-frame URL shouldn't break real sign-ins).
-            let pane_host = browser
-                .as_ref()
-                .and_then(|b| b.main_frame())
-                .map(|f| CefString::from(&f.url()).to_string())
-                .and_then(|u| crate::commands::platform::url_host(&u));
+            // SECURITY GATE — the native popup is allowed ONLY when BOTH hold:
+            //   1. the target host is a **known identity provider**
+            //      (`is_known_idp_host`), and
+            //   2. the URL is an OAuth/OIDC authorization request
+            //      (`is_oauth_authorization_url`).
+            //
+            // Condition 1 is the real boundary. Browser panes load
+            // untrusted/attacker pages; URL-shape heuristics alone let any such
+            // page spawn unlimited native phishing popups (reagent P1 on #2545,
+            // the popup-explosion class SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_
+            // 2026_04_21.md prevents). An attacker can't serve from
+            // accounts.google.com / github.com / *.okta.com / …, so gating on a
+            // known-IdP host makes the native popup safe — a real sign-in always
+            // targets the provider's host. A self-hosted / unlisted IdP simply
+            // doesn't get the in-pane popup and falls through to the system
+            // browser below.
             let popup_host = crate::commands::platform::url_host(&url);
-            let cross_origin = match (&pane_host, &popup_host) {
-                (Some(p), Some(q)) => p != q,
-                _ => true, // can't determine — don't block a genuine sign-in
-            };
-            if crate::commands::platform::is_oauth_authorization_url(&url) && cross_origin {
+            let is_trusted_idp = popup_host
+                .as_deref()
+                .map(crate::commands::platform::is_known_idp_host)
+                .unwrap_or(false);
+            if is_trusted_idp && crate::commands::platform::is_oauth_authorization_url(&url) {
                 tracing::info!(
                     target: "oauth-popup",
                     url = %url,
-                    "[oauth-popup] step 1/4: on_before_popup — OAuth URL matched, allowing native CEF child popup (returning false)",
+                    popup_host = ?popup_host,
+                    "[oauth-popup] step 1/4: on_before_popup — trusted-IdP OAuth URL, allowing native CEF child popup (returning false)",
                 );
                 // Count the popup about to be created; the matching number of
                 // subsequent on_after_created calls on this handler tag their
                 // browser ids for managed close (counter, not a bool, so two
                 // popups in flight both get tagged — reagent P2 on #2545).
-                self.pending_popups += 1;
+                // Bounded so a popup CEF never actually creates (resource
+                // exhaustion / pane destroyed mid-creation → no on_after_created
+                // to decrement) can't leak the counter unboundedly; it's also
+                // reset to 0 when the pane closes (on_before_close). A pane's
+                // handler only ever creates popups after its pane, so even a
+                // stale count would at worst mis-tag another popup (still a
+                // popup) — the cap+reset bounds it fully (reagent P2 round 5).
+                self.pending_popups = self.pending_popups.saturating_add(1).min(POPUP_PENDING_CAP);
                 return false; // allow CEF to create the popup browser
             }
 
@@ -855,6 +865,9 @@ impl AgentMuxHandler {
                     cef::post_task(cef::ThreadId::UI, Some(&mut task));
                 }
             }
+            // The pane is gone — no popup can still be pending on its handler.
+            // Clears any leaked increment (reagent P2 round 5 counter-leak).
+            self.pending_popups = 0;
         }
 
         // Unregister browser from the reducer's `browsers` map and get its

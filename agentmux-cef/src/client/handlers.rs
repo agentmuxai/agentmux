@@ -535,10 +535,12 @@ wrap_load_handler! {
 }
 
 // ---------------------------------------------------------------------------
-// RequestHandler — render-process termination (white-screen recovery)
+// RequestHandler — render-process termination, external-protocol guard, auth
 // ---------------------------------------------------------------------------
 //
-// We only override `on_render_process_terminated` here. Everything else
+// Overrides here: `on_before_browse` (external-protocol / OS-handoff guard for
+// browser panes), `on_render_process_terminated` (white-screen recovery), and
+// `auth_credentials` (HTTP Basic/Digest → BrowserAuthModal). Everything else
 // inherits the default (no-op) implementations from the cef-rs trait.
 // See SPEC_GRACEFUL_CRASH_HANDLING_2026_04_13.md (PR 1).
 
