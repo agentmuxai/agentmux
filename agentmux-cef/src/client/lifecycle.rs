@@ -625,12 +625,31 @@ impl AgentMuxHandler {
             // (its hosting Views window is closed in do_close via
             // popup_browser_ids), not the pane.
             //
-            // Gated on `is_oauth_authorization_url` so ONLY genuine auth flows
-            // get a native window — an arbitrary `window.open` (ad window, chat
-            // widget, print dialog) does NOT, which is what keeps this from
-            // re-opening the rogue-popup-window bug the browser-pane popup spec
-            // was written to prevent.
-            if crate::commands::platform::is_oauth_authorization_url(&url) {
+            // Gated on TWO conditions so ONLY genuine auth flows get a native
+            // window — an arbitrary `window.open` (ad window, chat widget, print
+            // dialog) does NOT, keeping this from re-opening the rogue-popup bug
+            // the browser-pane popup spec was written to prevent:
+            //   1. `is_oauth_authorization_url` — the URL is an OAuth/OIDC
+            //      authorize request (endpoint path, or response_type+client_id).
+            //   2. **cross-origin** to the pane's current page. A real sign-in
+            //      popup always goes to the identity provider's host (claude.ai →
+            //      accounts.google.com); a page crafting OAuth-shaped query
+            //      params to force a popup onto ITSELF is same-origin and is
+            //      rejected here (reagent P2 round 2 on #2545 — URL shape alone
+            //      is gameable). Cross-origin is required; if the pane's URL
+            //      can't be read, fall back to allowing (fail-open — a rare
+            //      missing main-frame URL shouldn't break real sign-ins).
+            let pane_host = browser
+                .as_ref()
+                .and_then(|b| b.main_frame())
+                .map(|f| CefString::from(&f.url()).to_string())
+                .and_then(|u| crate::commands::platform::url_host(&u));
+            let popup_host = crate::commands::platform::url_host(&url);
+            let cross_origin = match (&pane_host, &popup_host) {
+                (Some(p), Some(q)) => p != q,
+                _ => true, // can't determine — don't block a genuine sign-in
+            };
+            if crate::commands::platform::is_oauth_authorization_url(&url) && cross_origin {
                 tracing::info!(
                     target: "oauth-popup",
                     url = %url,
@@ -781,7 +800,38 @@ impl AgentMuxHandler {
         // Defensive: drop any popup tag (do_close normally consumes it and
         // closes the window; this prevents a stale id if a popup ever tears
         // down without do_close firing).
-        self.popup_browser_ids.remove(&browser.identifier());
+        let closing_id = browser.identifier();
+        let closing_was_popup = self.popup_browser_ids.remove(&closing_id);
+
+        // Cascade-close orphaned OAuth popups when THIS PANE closes. The popup
+        // shares the pane's handler, so its browser id lives in
+        // popup_browser_ids; if the user closes the pane (or the workspace) while
+        // a sign-in popup is still open, nothing else would close it and it would
+        // survive as an orphaned top-level window — the exact failure
+        // SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md prevents (reagent
+        // P1 round 2 on #2545). The closing browser is the PANE (not a popup
+        // itself) when its id was NOT in popup_browser_ids; force-close every
+        // still-tracked popup, deferred via post_task (never call close_browser
+        // inline from on_before_close — it re-enters CEF and hangs the UI thread,
+        // the reason ClosePoolBrowserTask exists).
+        if !closing_was_popup && self.is_browser_pane && !self.popup_browser_ids.is_empty() {
+            let popup_ids: Vec<i32> = self.popup_browser_ids.drain().collect();
+            for pid in popup_ids {
+                if let Some(popup) = self.browser_list.iter().find(|b| {
+                    let mut b = (*b).clone();
+                    b.identifier() == pid
+                }) {
+                    tracing::info!(
+                        target: "oauth-popup",
+                        pane_closing = true,
+                        popup_id = pid,
+                        "[oauth-popup] pane closing — force-closing its still-open OAuth popup",
+                    );
+                    let mut task = super::ClosePoolBrowserTask::new(popup.clone());
+                    cef::post_task(cef::ThreadId::UI, Some(&mut task));
+                }
+            }
+        }
 
         // Unregister browser from the reducer's `browsers` map and get its
         // label. Phase H.2.d — legacy `state.browsers.lock().remove` removed;

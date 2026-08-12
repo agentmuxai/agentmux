@@ -605,6 +605,25 @@ pub fn is_oauth_authorization_url(url: &str) -> bool {
     path_is_authorize || query_has_oauth_params
 }
 
+/// The lowercased `host[:port]` authority of an http(s) URL, or `None` for a
+/// non-http / malformed URL. Used to compare origins (a popup to a *different*
+/// host than the pane's current page). Deliberately host+port, not full origin
+/// with scheme — good enough to tell "same site" from "cross-site" for the
+/// OAuth-popup gate, and tolerant of http/https mixups.
+pub fn url_host(url: &str) -> Option<String> {
+    let lower = url.trim().to_ascii_lowercase();
+    let rest = lower
+        .strip_prefix("http://")
+        .or_else(|| lower.strip_prefix("https://"))?;
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = authority.rsplit('@').next().unwrap_or(authority);
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
+}
+
 /// Schemes a browser pane is allowed to *navigate* to. Everything web-ish
 /// (pages, inline content, devtools, websockets) plus the loopback app origin.
 /// Anything else is a non-web protocol whose navigation Chromium would, by
@@ -656,7 +675,18 @@ pub fn is_disallowed_pane_nav_scheme(url: &str) -> bool {
 
 #[cfg(test)]
 mod external_url_tests {
-    use super::{is_disallowed_pane_nav_scheme, is_external_http_url, is_oauth_authorization_url};
+    use super::{is_disallowed_pane_nav_scheme, is_external_http_url, is_oauth_authorization_url, url_host};
+
+    #[test]
+    fn url_host_extracts_authority_for_cross_origin_check() {
+        assert_eq!(url_host("https://accounts.google.com/o/oauth2/v2/auth?x=1"), Some("accounts.google.com".into()));
+        assert_eq!(url_host("https://claude.ai/login"), Some("claude.ai".into()));
+        assert_eq!(url_host("http://user@evil.com:8080/x"), Some("evil.com:8080".into()));
+        assert_eq!(url_host("about:blank"), None);
+        assert_eq!(url_host(""), None);
+        // Same host, different path → same host (so same-origin popup is rejected).
+        assert_eq!(url_host("https://evil.com/oauth?response_type=code&client_id=x"), url_host("https://evil.com/"));
+    }
 
     #[test]
     fn oauth_authorization_urls_match() {
