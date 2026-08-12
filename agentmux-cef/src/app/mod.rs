@@ -578,10 +578,32 @@ wrap_app! {
                 // kNoValidation) — the policy is read before FeatureList init so
                 // this runtime flag cannot apply in time and is NOT the load-bearing
                 // mechanism. Do not remove the patch thinking these flags cover it.
+                //   WebRtcHideLocalIpsWithMdns — Chromium's network service
+                //     binds an mDNS (multicast DNS) listener on UDP
+                //     0.0.0.0:5353 to mint `.local` hostnames that hide local
+                //     IPs from WebRTC peers. It binds this proactively at
+                //     startup even with no active WebRTC (confirmed via
+                //     `netstat -ano`: a Chromium network subprocess holds
+                //     `UDP 0.0.0.0:5353`). That all-interfaces bind is what
+                //     raises the Windows Defender Firewall "Windows Security
+                //     Alert" on first run — labelled "CEF Bootstrap
+                //     Application" because agentmux-cef.exe is CEF's bootstrap
+                //     stub, whose PE version-info carries CEF's default
+                //     description (build.rs stamps the AgentMux metadata onto
+                //     the .dll, not the stub). MediaRouter (the other mDNS
+                //     source) is already disabled above; disabling this one
+                //     removes the last proactive 5353 bind, so no firewall
+                //     prompt. Tradeoff: a browser-pane page using
+                //     RTCPeerConnection would expose local IPs instead of
+                //     `.local` names (pre-2019 Chrome default) — acceptable for
+                //     a local single-user workbench; AgentMux's own UI uses no
+                //     WebRTC, and voice input (getUserMedia audio) is
+                //     unaffected. See feedback_no_os_notices_at_launch.
                 let val = CefString::from(
                     "CalculateNativeWinOcclusion,MediaRouter,PreconnectToSearch,\
                      AutofillServerCommunication,MachPortRendezvousValidatePeerRequirements,\
-                     MachPortRendezvousEnforcePeerRequirements,MacAppCodeSignClone",
+                     MachPortRendezvousEnforcePeerRequirements,MacAppCodeSignClone,\
+                     WebRtcHideLocalIpsWithMdns",
                 );
                 cmd.append_switch_with_value(Some(&key), Some(&val));
 
