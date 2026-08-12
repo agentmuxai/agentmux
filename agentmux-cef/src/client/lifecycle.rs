@@ -71,7 +71,11 @@ impl AgentMuxHandler {
             self.pending_popups -= 1;
             let mut b = browser.clone();
             self.popup_browser_ids.insert(b.identifier());
-            tracing::info!(popup_id = b.identifier(), "tagged browser-pane auth popup (managed close, excluded from quit gate)");
+            tracing::info!(
+                target: "oauth-popup",
+                popup_id = b.identifier(),
+                "[oauth-popup] step 3/4: on_after_created — tagged + classified BrowserKind::Popup (EXCLUDED from last-window quit gate; skips full-window hooks)",
+            );
         }
 
         // Phase 1 diagnostic tracing — find the exact line that silences the
@@ -519,11 +523,20 @@ impl AgentMuxHandler {
         if let Some(b) = browser {
             let id = b.identifier();
             if self.popup_browser_ids.remove(&id) {
-                if let Some(view) = browser_view_get_for_browser(Some(b)) {
-                    if let Some(mut win) = view.window() {
-                        tracing::info!(popup_id = id, "closing hosting Views window for auth popup on do_close");
+                match browser_view_get_for_browser(Some(b)).and_then(|v| v.window()) {
+                    Some(mut win) => {
+                        tracing::info!(
+                            target: "oauth-popup",
+                            popup_id = id,
+                            "[oauth-popup] step 4/4: do_close — auth popup tearing down, closing its own Views window",
+                        );
                         win.close();
                     }
+                    None => tracing::warn!(
+                        target: "oauth-popup",
+                        popup_id = id,
+                        "[oauth-popup] step 4/4: do_close — auth popup has no resolvable Views window to close (may already be gone)",
+                    ),
                 }
             }
         }
@@ -613,8 +626,9 @@ impl AgentMuxHandler {
             // was written to prevent.
             if crate::commands::platform::is_oauth_authorization_url(&url) {
                 tracing::info!(
+                    target: "oauth-popup",
                     url = %url,
-                    "browser-pane OAuth popup — allowing native CEF popup so the auth handshake completes in the pane",
+                    "[oauth-popup] step 1/4: on_before_popup — OAuth URL matched, allowing native CEF child popup (returning false)",
                 );
                 // Count the popup about to be created; the matching number of
                 // subsequent on_after_created calls on this handler tag their

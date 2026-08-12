@@ -383,6 +383,13 @@ wrap_browser_view_delegate! {
             } else {
                 None
             };
+            if is_devtools == 0 {
+                tracing::info!(
+                    target: "oauth-popup",
+                    ?initial_bounds,
+                    "[oauth-popup] step 2/4: on_popup_browser_view_created — creating tall frameless popup window",
+                );
+            }
             let mut window_delegate = AgentMuxWindowDelegate::new(
                 RefCell::new(popup_browser_view.cloned()),
                 initial_bounds,
