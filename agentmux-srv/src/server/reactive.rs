@@ -718,6 +718,17 @@ pub(super) async fn handle_reactive_supervisor_decision(
     // check belongs at the HTTP boundary where `state.wstore` is available,
     // not inside `record_supervisor_decision`. Decline never delivers
     // anything, so it isn't gated.
+    //
+    // Match on `d.slug`, NOT `d.name` (reagentx P0, round 3 — every
+    // delivery path keys registration off `AGENTMUX_AGENT_ID`, which
+    // `agent_open.rs` sets to the agent's stable `slug`, not its
+    // renameable display `name`. Matching on `name` here let a renamed
+    // agent's own opt-in go unrecognized, and — worse — let one agent's
+    // slug collide with an unrelated agent's current display name,
+    // authorizing a nudge off the wrong definition's flag. Same
+    // name/slug cross-namespace hazard `agents.rs`'s
+    // `instance_get_by_name_and_by_slug_never_cross_the_others_namespace`
+    // regression-tests for the read path.)
     if matches!(action, SupervisorAction::Nudge) {
         let opted_in = state
             .wstore
@@ -725,7 +736,7 @@ pub(super) async fn handle_reactive_supervisor_decision(
             .ok()
             .and_then(|defs| {
                 defs.into_iter()
-                    .find(|d| d.name.eq_ignore_ascii_case(&req.target_agent))
+                    .find(|d| d.slug.eq_ignore_ascii_case(&req.target_agent))
             })
             .map(|d| d.auto_continue_enabled != 0)
             .unwrap_or(false);
