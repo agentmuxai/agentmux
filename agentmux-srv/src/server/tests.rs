@@ -540,10 +540,15 @@ async fn reactive_supervisor_decision_nudge_rejected_when_not_opted_in() {
 #[tokio::test]
 async fn reactive_supervisor_decision_nudge_rejected_when_opted_out() {
     let state = test_state();
+    // `target_agent` is what every delivery path actually keys on:
+    // AGENTMUX_AGENT_ID, which agent_open.rs sets to the stable `slug`, NOT
+    // the renameable `name` (reagentx P0, round 3). `name` is deliberately
+    // a different string here so this test also guards against the gate
+    // matching on `name` again.
     let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
         "id": "def-supervisor-nudge-opted-out",
-        "slug": "supervisor-nudge-opted-out-slug",
-        "name": "supervisor-nudge-test-opted-out",
+        "slug": "supervisor-nudge-test-opted-out",
+        "name": "Opted-Out Display Name",
         "icon": "robot",
         "provider": "claude",
         "description": "test agent",
@@ -577,10 +582,12 @@ async fn reactive_supervisor_decision_nudge_rejected_when_opted_out() {
 #[tokio::test]
 async fn reactive_supervisor_decision_nudge_passes_gate_when_opted_in() {
     let state = test_state();
+    // Same slug/name distinction as the opted-out test above — `name` is
+    // deliberately not what `target_agent` matches.
     let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
         "id": "def-supervisor-nudge-opted-in",
-        "slug": "supervisor-nudge-opted-in-slug",
-        "name": "supervisor-nudge-test-opted-in",
+        "slug": "supervisor-nudge-test-opted-in",
+        "name": "Opted-In Display Name",
         "icon": "robot",
         "provider": "claude",
         "description": "test agent",
@@ -607,6 +614,64 @@ async fn reactive_supervisor_decision_nudge_passes_gate_when_opted_in() {
         resp.status(),
         StatusCode::FORBIDDEN,
         "an opted-in target must not be blocked by the entitlement gate"
+    );
+}
+
+/// reagentx P0, round 3: the exact cross-namespace collision the entitlement
+/// gate must not fall into. Agent A's own SLUG is unrelated, but its
+/// display NAME happens to equal Agent B's slug; Agent A is opted OUT.
+/// Agent B is opted IN. A nudge for `target_agent = "collision"` (which is
+/// how every delivery path — and thus this gate — must resolve it: as
+/// Agent B's slug) must pass the gate, not get wrongly authorized OR
+/// wrongly rejected off Agent A's unrelated definition via a name match.
+/// Mirrors `agents.rs`'s own
+/// `instance_get_by_name_and_by_slug_never_cross_the_others_namespace`.
+#[tokio::test]
+async fn reactive_supervisor_decision_nudge_slug_match_does_not_cross_into_a_colliding_display_name() {
+    let state = test_state();
+    let mut agent_a: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
+        "id": "def-collision-agent-a",
+        "slug": "agent-a-unrelated-slug",
+        "name": "collision",
+        "icon": "robot",
+        "provider": "claude",
+        "description": "test agent",
+        "created_at": 1,
+        "auto_continue_enabled": 0,
+    }))
+    .expect("definition fixture");
+    state.wstore.agent_def_insert(&mut agent_a).expect("insert agent a");
+
+    let mut agent_b: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
+        "id": "def-collision-agent-b",
+        "slug": "collision",
+        "name": "Agent B Unrelated Display Name",
+        "icon": "robot",
+        "provider": "claude",
+        "description": "test agent",
+        "created_at": 1,
+        "auto_continue_enabled": 1,
+    }))
+    .expect("definition fixture");
+    state.wstore.agent_def_insert(&mut agent_b).expect("insert agent b");
+
+    let app = build_router(state);
+    let body = serde_json::json!({
+        "target_agent": "collision",
+        "action": "nudge",
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/agentmux/reactive/supervisor-decision")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_ne!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "must resolve to Agent B (slug match, opted in), not Agent A (name match, opted out)"
     );
 }
 
