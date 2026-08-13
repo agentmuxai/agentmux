@@ -36,6 +36,26 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
 
+      # GH-hosted Windows runners scan every new/exec'd file with Defender
+      # real-time protection by default; node.exe invoked from a Rust test
+      # (agentmux-srv/tests/subprocess_io.rs::create_no_window_flag_set) has
+      # hit slow-enough cold starts to flake past a 15s read timeout twice
+      # (2026-06-28, 2026-08-13) — see
+      # docs/specs/PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13.md.
+      # Exclude the checkout/build paths and the toolchain's own processes
+      # rather than disabling real-time protection outright.
+      - name: Exclude build paths + toolchain processes from Windows Defender
+        if: matrix.os == 'windows-latest'
+        shell: powershell
+        run: |
+          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"
+          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
+          Add-MpPreference -ExclusionPath "$env:USERPROFILE\.cargo"
+          Add-MpPreference -ExclusionProcess "node.exe"
+          Add-MpPreference -ExclusionProcess "cargo.exe"
+          Add-MpPreference -ExclusionProcess "rustc.exe"
+          Add-MpPreference -ExclusionProcess "link.exe"
+
       # cef-dll-sys builds CEF's C wrapper with CMake + Ninja.
       - name: Install Ninja (Windows — CMake ships with VS)
         if: matrix.os == 'windows-latest'

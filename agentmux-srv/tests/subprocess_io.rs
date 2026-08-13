@@ -180,28 +180,76 @@ async fn create_no_window_flag_set() {
     // we CAN verify that stdio piping works with CREATE_NO_WINDOW set
     // (the bug was that without this flag, stdout went to the console
     // instead of the pipe, producing zero output).
-    let mut child = spawn_node("echo-stdin.js", &[]);
-    let mut stdin = child.stdin.take().unwrap();
-    let stdout = child.stdout.take().unwrap();
+    //
+    // Bounded retry instead of one long timeout: this test flaked on a slow
+    // node.exe cold-start on GH-hosted Windows runners twice (2026-06-28,
+    // 2026-08-13), both times "fixed" by widening a single timeout (5s then
+    // 15s) that just moved the goalpost past the one observed data point.
+    // A retry across fresh child processes distinguishes "occasionally
+    // slow" from "actually broken": the real regression this test guards
+    // against (stdout going to a console instead of the pipe) reproduces on
+    // every attempt, a slow spawn doesn't. This also keeps the common-case
+    // runtime unchanged (one fast attempt) instead of paying a doubled
+    // worst-case timeout on every run. See
+    // docs/specs/PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13.md.
+    const ATTEMPTS: u32 = 3;
+    const PER_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(10);
 
-    stdin.write_all(b"windows pipe test\n").await.unwrap();
-    stdin.flush().await.unwrap();
-    drop(stdin);
+    let mut last_elapsed = Duration::ZERO;
+    for attempt in 1..=ATTEMPTS {
+        let mut child = spawn_node("echo-stdin.js", &[]);
+        let mut stdin = child.stdin.take().unwrap();
+        let stdout = child.stdout.take().unwrap();
 
-    let mut reader = BufReader::new(stdout).lines();
-    // 15s (not 5s) to tolerate node.exe cold-start on a loaded Windows CI
-    // runner — the assertion still catches the real regression (output that
-    // never arrives because node wrote to a console instead of the pipe),
-    // just without flaking on a slow process spawn.
-    let result = timeout(Duration::from_secs(15), reader.next_line()).await;
+        stdin.write_all(b"windows pipe test\n").await.unwrap();
+        stdin.flush().await.unwrap();
+        drop(stdin);
 
-    assert!(
-        result.is_ok(),
-        "CREATE_NO_WINDOW: stdout pipe produced no data — \
-         node.exe may be writing to a console instead of the pipe"
+        let mut reader = BufReader::new(stdout).lines();
+        let attempt_start = std::time::Instant::now();
+        let result = timeout(PER_ATTEMPT_TIMEOUT, reader.next_line()).await;
+        last_elapsed = attempt_start.elapsed();
+
+        if let Ok(Ok(Some(line))) = result {
+            assert!(line.contains("windows pipe test"));
+            child.wait().await.unwrap();
+            if attempt > 1 {
+                eprintln!(
+                    "create_no_window_flag_set: passed on attempt {attempt}/{ATTEMPTS} \
+                     (took {last_elapsed:?}) — node.exe cold-start was slow, not broken"
+                );
+            }
+            return;
+        }
+
+        // child is dropped here; kill_on_drop(true) (set in spawn_node) reaps it.
+        if attempt < ATTEMPTS {
+            eprintln!(
+                "create_no_window_flag_set: attempt {attempt}/{ATTEMPTS} produced no stdout \
+                 within {PER_ATTEMPT_TIMEOUT:?} (took {last_elapsed:?}) — retrying"
+            );
+        }
+    }
+
+    // All attempts failed identically — a genuinely slow-but-working spawn
+    // would be expected to clear within a couple of 10s attempts, so this is
+    // unlikely to be cold-start variance. Capture Defender status since
+    // neither prior incident on this test was root-caused past "loaded
+    // runner" — this is the data point to check that guess next time.
+    let defender_status = std::process::Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-Command",
+            "Get-MpComputerStatus | Format-List",
+        ])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|e| format!("<failed to query Defender status: {e}>"));
+
+    panic!(
+        "CREATE_NO_WINDOW: stdout pipe produced no data after {ATTEMPTS} attempts \
+         (last attempt took {last_elapsed:?}, per-attempt timeout {PER_ATTEMPT_TIMEOUT:?}) — \
+         node.exe may be writing to a console instead of the pipe.\n\
+         Windows Defender status at failure:\n{defender_status}"
     );
-
-    let line = result.unwrap().unwrap().unwrap();
-    assert!(line.contains("windows pipe test"));
-    child.wait().await.unwrap();
 }
