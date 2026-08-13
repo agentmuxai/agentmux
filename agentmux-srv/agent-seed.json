@@ -75,6 +75,30 @@
       ]
     },
     {
+      "id": "antigravity",
+      "name": "Antigravity",
+      "icon": "\u269b",
+      "provider": "antigravity",
+      "agent_type": "host",
+      "description": "Google's agentic coding CLI harness (AGY)",
+      "working_directory": "",
+      "shell": "pwsh",
+      "agent_bus_id": "antigravity",
+      "content": {
+        "env": "AGENT_NAME=antigravity\nAGENTMUX_AGENT_ID=Antigravity",
+        "startup": "__SKIP__"
+      },
+      "skills": [
+        {
+          "name": "Startup Verification",
+          "trigger": "startup",
+          "skill_type": "prompt",
+          "description": "Re-run tool verification checks and report status table",
+          "content": "Run the verification round from your startup instructions. Check identity (gh, git), dev-tools (@a5af/* packages \u2014 install if missing), secrets access, and MCP servers. Report a status table with OK/FAIL for each check. Fix any failures automatically if possible."
+        }
+      ]
+    },
+    {
       "id": "kimi",
       "name": "Kimi",
       "icon": "\u25c8",
