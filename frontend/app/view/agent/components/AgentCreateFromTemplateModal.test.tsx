@@ -212,4 +212,52 @@ describe("AgentCreateFromTemplateModalPanel", () => {
         await flush();
         expect(onSubmit).not.toHaveBeenCalled();
     });
+
+    it("shows the Model Vendor / Custom Endpoint field for a provider that declares baseUrlEnvVar (claude) and includes it in the submit payload", async () => {
+        const onSubmit = vi.fn().mockResolvedValue(undefined);
+        render(() => (
+            <AgentCreateFromTemplateModalPanel
+                template={template}
+                onSubmit={onSubmit}
+                onCancel={vi.fn()}
+            />
+        ));
+        await flush();
+        await flush();
+        await flush();
+        const input = screen.getByTestId(
+            "create-from-template-vendor-base-url-input",
+        ) as HTMLInputElement;
+        fireEvent.input(input, { target: { value: "https://my-proxy.example.com" } });
+
+        const submit = screen.getByTestId("create-from-template-submit");
+        fireEvent.click(submit);
+
+        await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+        expect(onSubmit.mock.calls[0][0].modelVendorBaseUrl).toBe(
+            "https://my-proxy.example.com",
+        );
+    });
+
+    it("hides the Model Vendor / Custom Endpoint field for a provider that doesn't declare baseUrlEnvVar, and submits an empty override", async () => {
+        const codexTemplate = { ...template, provider: "codex" } as AgentDefinition;
+        const onSubmit = vi.fn().mockResolvedValue(undefined);
+        render(() => (
+            <AgentCreateFromTemplateModalPanel
+                template={codexTemplate}
+                onSubmit={onSubmit}
+                onCancel={vi.fn()}
+            />
+        ));
+        await flush();
+        await flush();
+        await flush();
+        expect(screen.queryByTestId("create-from-template-vendor-base-url-input")).toBeNull();
+
+        const submit = screen.getByTestId("create-from-template-submit");
+        fireEvent.click(submit);
+
+        await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+        expect(onSubmit.mock.calls[0][0].modelVendorBaseUrl).toBe("");
+    });
 });

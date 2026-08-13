@@ -213,7 +213,7 @@ export function renderRequest(
                         // (spec note on CreateFromTemplateRequest) so
                         // `submitting()` covers both RPC steps and ESC
                         // / backdrop dismiss stay blocked end-to-end.
-                        onSubmit={async ({ name, accountId, memoryId, agentType }) => {
+                        onSubmit={async ({ name, accountId, memoryId, agentType, modelVendorBaseUrl }) => {
                             setSubmitting(true);
                             try {
                                 const resp = await RpcApi.AgentDefCreateFromTemplateCommand(
@@ -227,6 +227,13 @@ export function renderRequest(
                                         // new user-owned definition so later
                                         // reattach/auto-continue uses it too.
                                         agent_type: agentType,
+                                        // Always sent explicitly (never
+                                        // omitted) — the form always has a
+                                        // concrete value in scope (defaults
+                                        // to the template's own), so there's
+                                        // no "leave untouched" case to
+                                        // distinguish here.
+                                        model_vendor_base_url: modelVendorBaseUrl,
                                     },
                                 );
                                 await req.onCreatedAndLaunch(

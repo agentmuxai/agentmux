@@ -318,6 +318,15 @@ pub struct CommandAgentDefCreateFromTemplateData {
     /// inheriting the (now container-defaulted) template value.
     #[serde(default)]
     pub agent_type: String,
+    /// Custom model vendor base URL override for the cloned agent.
+    /// `None` (omitted) → inherit the template's own value (the prior,
+    /// only behavior). `Some(url)` → use `url` instead, including
+    /// `Some("")` to explicitly clear a template-inherited override.
+    /// Validated the same way `agent.define` validates it — rejected
+    /// unless the template's provider declares `base_url_env_var`. See
+    /// `agent_define::validate_vendor_base_url`.
+    #[serde(default)]
+    pub model_vendor_base_url: Option<String>,
 }
 
 /// Response for `agentdefcreatefromtemplate`. The frontend uses
@@ -442,6 +451,15 @@ pub struct CommandUpdateAgentDefinitionData {
     /// docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
     #[serde(default)]
     pub auto_continue_enabled: Option<i64>,
+    /// Custom model vendor base URL override — see
+    /// `AgentDefinition.model_vendor_base_url`. `None` (omitted) preserves
+    /// the stored value, same "None = don't touch" idiom as
+    /// `use_ambient_login`/`auto_continue_enabled` above. `Some("")`
+    /// explicitly clears an existing override back to the harness's
+    /// default vendor endpoint. Validated the same way `agent.define`
+    /// does — see `agent_define::validate_vendor_base_url`.
+    #[serde(default)]
+    pub model_vendor_base_url: Option<String>,
 }
 
 /// Input for deleteagent

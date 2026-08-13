@@ -32,6 +32,9 @@ const PROVIDER_ID_ALIASES: Record<string, string> = {
     copilot_cli: "copilot",
     "mux-code": "muxcode",
     mux_code: "muxcode",
+    agy: "antigravity",
+    "antigravity-cli": "antigravity",
+    antigravity_cli: "antigravity",
 };
 
 /** Resolve a possibly-legacy provider ID to its canonical form. Returns the

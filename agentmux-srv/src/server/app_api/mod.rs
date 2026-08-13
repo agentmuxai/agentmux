@@ -28,6 +28,11 @@ use crate::server::cli_handlers::resolve_cli_on_path;
 mod agent_open;
 mod agent_io;
 mod agent_define;
+/// Re-exported so the human-facing creation/edit RPC handlers
+/// (`server::agent_handlers::template`/`core`) can reuse the same
+/// vendor-base-url validation `agent.define` already uses, instead of
+/// duplicating it.
+pub(crate) use agent_define::validate_vendor_base_url;
 mod pane;
 mod blockfile;
 pub(crate) mod session;

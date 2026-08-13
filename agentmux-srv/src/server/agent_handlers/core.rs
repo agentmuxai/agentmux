@@ -173,6 +173,19 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let existing = wstore.agent_def_list().map_err(|e| format!("updateagent: {e}"))?;
                 let old = existing.iter().find(|a| a.id == cmd.id)
                     .ok_or_else(|| format!("updateagent: agent {} not found", cmd.id))?;
+                // Model vendor base URL: `None` (omitted) preserves the
+                // stored value; `Some(url)` overrides it (including
+                // `Some("")` to explicitly clear). Validated against the
+                // (possibly also-updated) `cmd.provider` — same check
+                // `agent.define` applies.
+                let chosen_model_vendor_base_url = match &cmd.model_vendor_base_url {
+                    Some(url) => {
+                        crate::server::app_api::validate_vendor_base_url(&cmd.provider, url)
+                            .map_err(|e| format!("updateagent: {e}"))?;
+                        url.clone()
+                    }
+                    None => old.model_vendor_base_url.clone(),
+                };
                 // slug is preserved from the existing row — it's
                 // immutable after creation. The update path never
                 // accepts a new slug from the client.
@@ -229,11 +242,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // accounts). The Agent setup modal's Accounts tab sends
                     // Some(0|1) to flip it. Spec §2.3.
                     use_ambient_login: cmd.use_ambient_login.unwrap_or(old.use_ambient_login),
-                    // Not carried by CommandUpdateAgentDefinitionData yet —
-                    // always preserve, same as container_name/parent_id
-                    // above, so a UI-driven save never silently wipes a
-                    // vendor override set via `agent.define`.
-                    model_vendor_base_url: old.model_vendor_base_url.clone(),
+                    model_vendor_base_url: chosen_model_vendor_base_url,
                     // Preserve the auto-continue opt-in when the caller omits
                     // the field (Option — most callers only edit name/icon/
                     // accounts). The Warden Supervisor panel sends Some(0|1)

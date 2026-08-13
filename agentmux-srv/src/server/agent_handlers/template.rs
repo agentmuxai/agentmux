@@ -105,6 +105,21 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 } else {
                     "local".to_string()
                 };
+                // Model vendor base URL: `None` (omitted) inherits the
+                // template's own value (the only behavior before this
+                // field existed on this RPC); `Some(url)` overrides it,
+                // including `Some("")` to explicitly clear a
+                // template-inherited override. Same validation `agent.define`
+                // already applies — rejected unless the template's provider
+                // declares `base_url_env_var`.
+                let chosen_model_vendor_base_url = match &cmd.model_vendor_base_url {
+                    Some(url) => {
+                        crate::server::app_api::validate_vendor_base_url(&template.provider, url)
+                            .map_err(|e| format!("agentdefcreatefromtemplate: {e}"))?;
+                        url.clone()
+                    }
+                    None => template.model_vendor_base_url.clone(),
+                };
                 let mut new_def = AgentDefinition {
                     id: uuid::Uuid::new_v4().to_string(),
                     // agent_def_insert derives a unique slug from the
@@ -144,7 +159,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     container_volumes: template.container_volumes.clone(),
                     container_name: String::new(),
                     use_ambient_login: 0,
-                    model_vendor_base_url: template.model_vendor_base_url.clone(),
+                    model_vendor_base_url: chosen_model_vendor_base_url,
                     auto_continue_enabled: 0,
                 };
                 wstore

@@ -83,6 +83,16 @@ pub struct ProviderConfig {
     /// declared capability side of that split. Set only where independently
     /// verified, not guessed. See docs/specs for the harness/vendor concept.
     pub base_url_env_var: Option<&'static str>,
+    /// Intelligence model vendors this harness talks to, most-default-first
+    /// (e.g. claude → `&["anthropic"]`, openclaw → `&["openai", "anthropic",
+    /// "google"]` since it's model-agnostic). Purely descriptive/display
+    /// data — drives the dual-icon vendor badge and the picker's default
+    /// vendor inference (`resolveEffectiveVendor` on the frontend); does not
+    /// gate anything at spawn time. The one thing that DOES gate spawn-time
+    /// behavior is `base_url_env_var` above — a provider can be redirected
+    /// to a custom endpoint independent of whether that endpoint's vendor
+    /// is even listed here.
+    pub supported_vendors: &'static [&'static str],
 }
 
 impl ProviderConfig {
@@ -180,6 +190,7 @@ static CLAUDE: ProviderConfig = ProviderConfig {
     // Documented Claude Code behavior: redirects the CLI at a non-Anthropic
     // (or proxied) backend — Bedrock, Vertex, OpenRouter, a custom proxy.
     base_url_env_var: Some("ANTHROPIC_BASE_URL"),
+    supported_vendors: &["anthropic"],
 };
 
 static CODEX: ProviderConfig = ProviderConfig {
@@ -206,6 +217,7 @@ static CODEX: ProviderConfig = ProviderConfig {
     npm_package: "@openai/codex",
     pinned_version: "0.116.0",
     base_url_env_var: None,
+    supported_vendors: &["openai"],
 };
 
 static GEMINI: ProviderConfig = ProviderConfig {
@@ -226,6 +238,7 @@ static GEMINI: ProviderConfig = ProviderConfig {
     npm_package: "@google/gemini-cli",
     pinned_version: "0.32.1",
     base_url_env_var: None,
+    supported_vendors: &["google"],
 };
 
 // Qwen Code — Alibaba's open-source coding agent, a fork of Gemini CLI.
@@ -259,6 +272,7 @@ static QWEN: ProviderConfig = ProviderConfig {
     // that's baked-in default routing, not a confirmed user-configurable
     // override mechanism, so this stays unset rather than guessed.
     base_url_env_var: None,
+    supported_vendors: &["openrouter"],
 };
 
 static KIMI: ProviderConfig = ProviderConfig {
@@ -284,6 +298,7 @@ static KIMI: ProviderConfig = ProviderConfig {
     npm_package: "",
     pinned_version: "",
     base_url_env_var: None,
+    supported_vendors: &["moonshot"],
 };
 
 static OPENCLAW: ProviderConfig = ProviderConfig {
@@ -314,6 +329,7 @@ static OPENCLAW: ProviderConfig = ProviderConfig {
     npm_package: "openclaw",
     pinned_version: "2026.6.10",
     base_url_env_var: None,
+    supported_vendors: &["openai", "anthropic", "google"],
 };
 
 static PI: ProviderConfig = ProviderConfig {
@@ -332,6 +348,7 @@ static PI: ProviderConfig = ProviderConfig {
     npm_package: "@mariozechner/pi-coding-agent",
     pinned_version: "0.73.1",
     base_url_env_var: None,
+    supported_vendors: &["pi"],
 };
 
 // Mux Code — AgentMux's first-party agentic coding CLI.
@@ -360,6 +377,7 @@ static MUX_CODE: ProviderConfig = ProviderConfig {
     npm_package: "@agentmuxai/muxcode",
     pinned_version: "0.1.0",
     base_url_env_var: None,
+    supported_vendors: &["ollama", "anthropic", "openai"],
 };
 
 // GitHub Copilot CLI — Microsoft's coding agent. Runs in ACP mode via
@@ -382,6 +400,32 @@ static COPILOT: ProviderConfig = ProviderConfig {
     npm_package: "@github/copilot",
     pinned_version: "1.0.65",
     base_url_env_var: None,
+    supported_vendors: &["github"],
+};
+
+// Antigravity (AGY) — Google's agentic coding CLI harness. Emits the same
+// stream-json NDJSON envelope as Gemini CLI (its sibling harness), so it
+// reuses the gemini translator (styled_output_format "gemini-json") rather
+// than a new one. No base_url_env_var — not independently verified to
+// support a custom-endpoint override (same "unset unless confirmed"
+// discipline as every other non-claude provider above).
+static ANTIGRAVITY: ProviderConfig = ProviderConfig {
+    id: "antigravity",
+    cli_command: "agy",
+    controller_type: ControllerType::Subprocess,
+    launch_args: &["--output-format", "stream-json", "--yolo", "-p", ""],
+    persistent_launch_args: None,
+    resume_flag: Some("-r"),
+    session_id_field: "session_id",
+    styled_output_format: "gemini-json",
+    auth_config_dir_env_var: "ANTIGRAVITY_CONFIG_DIR",
+    auth_dir_name: "antigravity",
+    auth_extra_env: &[("ANTIGRAVITY_FORCE_FILE_STORAGE", "true")],
+    unset_env: &[],
+    npm_package: "@google/antigravity-cli",
+    pinned_version: "1.0.0",
+    base_url_env_var: None,
+    supported_vendors: &["google"],
 };
 
 // ─── Static registry ─────────────────────────────────────────────────────────
@@ -397,6 +441,7 @@ static REGISTRY: LazyLock<HashMap<&'static str, &'static ProviderConfig>> = Lazy
     m.insert(PI.id, &PI);
     m.insert(COPILOT.id, &COPILOT);
     m.insert(MUX_CODE.id, &MUX_CODE);
+    m.insert(ANTIGRAVITY.id, &ANTIGRAVITY);
     m
 });
 
@@ -418,6 +463,9 @@ static ALIASES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(||
     m.insert("copilot_cli", "copilot");
     m.insert("mux-code", "muxcode");
     m.insert("mux_code", "muxcode");
+    m.insert("agy", "antigravity");
+    m.insert("antigravity-cli", "antigravity");
+    m.insert("antigravity_cli", "antigravity");
     m
 });
 
@@ -467,6 +515,21 @@ mod tests {
         assert!(get_provider("openclaw").is_some());
         assert!(get_provider("qwen").is_some());
         assert!(get_provider("muxcode").is_some());
+        assert!(get_provider("antigravity").is_some());
+    }
+
+    #[test]
+    fn antigravity_is_subprocess_with_gemini_stream_json() {
+        let p = get_provider("antigravity").unwrap();
+        assert_eq!(p.controller_type, ControllerType::Subprocess);
+        assert_eq!(p.controller_type_str(), "subprocess");
+        assert_eq!(p.styled_output_format, "gemini-json");
+        assert_eq!(p.cli_command, "agy");
+        assert_eq!(p.session_id_field, "session_id");
+        assert_eq!(p.resume_flag, Some("-r"));
+        assert_eq!(p.npm_package, "@google/antigravity-cli");
+        assert_eq!(p.supported_vendors, &["google"]);
+        assert!(p.base_url_env_var.is_none());
     }
 
     #[test]
@@ -484,6 +547,22 @@ mod tests {
     }
 
     #[test]
+    fn every_provider_declares_at_least_one_supported_vendor() {
+        for id in ["claude", "codex", "gemini", "qwen", "kimi", "openclaw", "pi", "muxcode", "copilot", "antigravity"] {
+            let p = get_provider(id).unwrap_or_else(|| panic!("provider '{id}' not registered"));
+            assert!(
+                !p.supported_vendors.is_empty(),
+                "provider '{id}' declares no supported_vendors"
+            );
+        }
+    }
+
+    #[test]
+    fn claude_default_vendor_is_anthropic() {
+        assert_eq!(get_provider("claude").unwrap().supported_vendors, &["anthropic"]);
+    }
+
+    #[test]
     fn aliases_resolve() {
         assert_eq!(get_provider("claude-code").unwrap().id, "claude");
         assert_eq!(get_provider("claude_code").unwrap().id, "claude");
@@ -493,6 +572,9 @@ mod tests {
         assert_eq!(get_provider("qwen3-coder").unwrap().id, "qwen");
         assert_eq!(get_provider("kimi-cli").unwrap().id, "kimi");
         assert_eq!(get_provider("openclaw-cli").unwrap().id, "openclaw");
+        assert_eq!(get_provider("agy").unwrap().id, "antigravity");
+        assert_eq!(get_provider("antigravity-cli").unwrap().id, "antigravity");
+        assert_eq!(get_provider("antigravity_cli").unwrap().id, "antigravity");
     }
 
     #[test]
@@ -568,7 +650,7 @@ mod tests {
 
     #[test]
     fn non_claude_providers_have_no_base_url_env_var() {
-        for id in ["codex", "gemini", "qwen", "kimi", "openclaw", "pi", "copilot", "muxcode"] {
+        for id in ["codex", "gemini", "qwen", "kimi", "openclaw", "pi", "copilot", "muxcode", "antigravity"] {
             let p = get_provider(id).unwrap();
             assert!(
                 p.base_url_env_var.is_none(),

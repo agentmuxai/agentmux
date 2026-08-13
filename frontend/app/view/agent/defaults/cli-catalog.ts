@@ -87,6 +87,19 @@ const CLI_CATALOG: CliCatalogEntry[] = [
         containerSupported: false,
     },
     {
+        provider: "antigravity",
+        displayName: "Antigravity (AGY)",
+        icon: "⚛",
+        blurb: "Google's agentic coding CLI harness",
+        primaryContextFile: "AGENTS.md",
+        mcpSupport: "stdio+http",
+        popoverMarkdown:
+            "Google's agentic coding CLI harness — a sibling to Gemini CLI, sharing its stream-json output. Emphasizes high-throughput agentic task execution with native skill discovery and subagent support. Uses your Google account.",
+        hostSupported: true,
+        // No container image built yet — host-only until agentmux/antigravity ships.
+        containerSupported: false,
+    },
+    {
         provider: "qwen",
         displayName: "Qwen Code",
         icon: "❖",
