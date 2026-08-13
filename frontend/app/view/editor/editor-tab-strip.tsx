@@ -45,6 +45,7 @@ export function EditorTabStrip(props: Props): JSX.Element {
         <PaneTabStrip<EditorTab>
             tabs={tabs()}
             activeId={activeId()}
+            zoomFactor={props.model.zoomAtom}
             getId={(tab) => tab.id}
             getLabel={basenameOf}
             getTooltip={(tab) =>

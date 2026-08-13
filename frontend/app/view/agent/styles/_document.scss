@@ -111,6 +111,30 @@
         // the pane's own left-edge breathing room, which nobody reported
         // an issue with.
         padding: var(--space-0-5) 0 var(--space-0-5) var(--space-1);
+        // Reserves the pane tab strip's real (zoom-aware) rendered height
+        // so the first message of a short/unscrolled conversation never
+        // renders behind it. The strip floats over this content
+        // (agent-view.scss, position: absolute) with no reserved row of
+        // its own — fine for a conversation long enough to scroll (the
+        // strip only ever overlaps whatever's currently scrolled behind
+        // it), but with nothing to scroll, a conversation short enough to
+        // never overflow had its first message permanently hidden with no
+        // way to reveal it. See
+        // docs/specs/SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md §B.
+        // Pure calc(), not a ResizeObserver like padding-bottom below —
+        // the strip's height is a known formula (baseline × this pane's
+        // own zoom factor, both already CSS custom properties), not
+        // something that needs live measurement the way AgentWorkingRow's
+        // variable content does. `--agent-pane-zoom` (NOT the global
+        // chrome-zoom `--zoomfactor`) — this pane's own per-pane content
+        // zoom, already set on `.agent-view`'s root
+        // (AgentPresentationView, agent-view.tsx) and already inherited
+        // here since `.agent-document` is `.agent-view`'s descendant; the
+        // tab strip needs its own separately-plumbed
+        // `--pane-tab-strip-zoom` only because it's a DOM sibling of
+        // `.agent-view`, not a descendant (§A.3) — this rule has no such
+        // problem and reads the existing variable directly.
+        padding-top: calc(var(--space-0-5) + var(--pane-tab-strip-height, 28px) * var(--agent-pane-zoom, 1));
         // Reserves exactly AgentWorkingRow's current rendered height (0 when
         // hidden) so scrolling to true bottom leaves the last message above
         // the floating row, not hidden underneath it. Set on
