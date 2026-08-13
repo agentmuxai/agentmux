@@ -47,6 +47,7 @@ pub(super) fn echo_jekt_to_sender(
     msgid: &str,
     effective_tier: Option<&str>,
     delivery_tier: &str,
+    sig_verified: Option<bool>,
     priority: &str,
 ) {
     let Some(src) = source_agent.filter(|s| !s.is_empty()) else {
@@ -66,6 +67,7 @@ pub(super) fn echo_jekt_to_sender(
         target_agent,
         effective_tier.unwrap_or("coord"),
         delivery_tier,
+        sig_verified,
         msgid,
         priority,
     );
@@ -90,7 +92,7 @@ pub(super) fn echo_jekt_to_sender(
 
 pub(super) async fn handle_reactive_inject(
     State(state): State<AppState>,
-    Json(req): Json<InjectionRequest>,
+    Json(mut req): Json<InjectionRequest>,
 ) -> Json<serde_json::Value> {
     tracing::info!(
         target_agent = %req.target_agent,
@@ -98,6 +100,32 @@ pub(super) async fn handle_reactive_inject(
         msg_len = req.message.len(),
         "reactive inject request received"
     );
+
+    // Host-tier sender verification (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md
+    // §2.2). Only meaningful for host-tier delivery — wan/lan are already
+    // unconditionally sensitive downstream regardless of this. Deliberately
+    // left unchecked (req.sig_verified stays None, no escalation) when the
+    // claimed source_agent has never had a signing key minted — that's the
+    // common case for non-agent callers (the Slack/Discord/Telegram/WhatsApp
+    // bridges, which self-declare a fixed source_agent like "slack") and for
+    // a real agent that hasn't been (re)spawned since this feature shipped.
+    // Forcing either of those to SENSITIVE would be noise, not a security
+    // signal — the escalation only fires once a source_agent is actually
+    // capable of signing and didn't.
+    if req.delivery_tier.as_deref().unwrap_or("host") == "host" {
+        if let Some(claimed) = req.source_agent.clone().filter(|s| !s.is_empty()) {
+            if let Ok(Some(key)) = state.wstore.agent_jekt_key_load(&claimed) {
+                let msgid = req.request_id.clone().unwrap_or_default();
+                let ts = req.ts_secs.unwrap_or(0);
+                let verified = req.jekt_sig.as_deref().map_or(false, |sig| {
+                    agentmux_common::jekt_sign::verify_jekt(
+                        &key, &msgid, &claimed, &req.target_agent, ts, &req.message, sig,
+                    )
+                });
+                req.sig_verified = Some(verified);
+            }
+        }
+    }
 
     // 1. Try local ReactiveHandler first (fast path — same instance).
     let resp = state.reactive_handler.inject_message(req.clone());
@@ -110,6 +138,7 @@ pub(super) async fn handle_reactive_inject(
             &resp.request_id,
             resp.effective_tier.as_deref(),
             req.delivery_tier.as_deref().unwrap_or("host"),
+            req.sig_verified,
             req.priority.as_deref().unwrap_or("normal"),
         );
         return Json(serde_json::to_value(&resp).unwrap_or_default());
@@ -165,6 +194,7 @@ pub(super) async fn handle_reactive_inject(
                                     body.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
                                     body.get("effective_tier").and_then(|v| v.as_str()),
                                     "host",
+                                    req.sig_verified,
                                     req.priority.as_deref().unwrap_or("normal"),
                                 );
                                 return Json(body);
@@ -249,6 +279,7 @@ pub(super) async fn handle_reactive_inject(
                                     body.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
                                     body.get("effective_tier").and_then(|v| v.as_str()),
                                     "host",
+                                    req.sig_verified,
                                     req.priority.as_deref().unwrap_or("normal"),
                                 );
                                 return Json(body);
@@ -326,6 +357,7 @@ pub(super) async fn handle_reactive_inject(
                                 body.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
                                 body.get("effective_tier").and_then(|v| v.as_str()),
                                 "lan",
+                                None,
                                 req.priority.as_deref().unwrap_or("normal"),
                             );
                             return Json(body);

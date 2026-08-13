@@ -426,6 +426,7 @@ async fn handle_incoming_text(
                         jekt_tier: None,   // auto-detected from keywords
                         delivery_tier: Some("host".to_string()),
                         forward_hops: 0,
+                        ..Default::default()
                     };
                     let resp = state.reactive_handler.inject_message(reactive_req);
                     if resp.success {
@@ -438,6 +439,7 @@ async fn handle_incoming_text(
                             &resp.request_id,
                             resp.effective_tier.as_deref(),
                             "host",
+                            None,
                             incoming.priority.as_deref().unwrap_or("normal"),
                         );
                         let ack = json!({ "type": "bus:injected", "via": "pty", "block_id": resp.block_id });
@@ -478,6 +480,7 @@ async fn handle_incoming_text(
                                 &msg_id,
                                 None,
                                 "host",
+                                None,
                                 incoming.priority.as_deref().unwrap_or("normal"),
                             );
                             let ack = json!({ "type": "bus:injected", "via": "messagebus", "message_id": msg_id });

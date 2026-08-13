@@ -423,6 +423,7 @@ fn handle_dispatch(
                 jekt_tier: None,
                 delivery_tier: Some("wan".to_string()),
                 forward_hops: 0,
+                ..Default::default()
             };
             let result = handler.inject_message(req);
             if result.success {
