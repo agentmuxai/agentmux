@@ -10,7 +10,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// without the async `Store`/`Broker` harness `agent_define_core` needs.
 /// An empty `base_url` is always fine — that's "use the harness's default
 /// vendor endpoint," never rejected regardless of provider.
-pub(super) fn validate_vendor_base_url(provider_id: &str, base_url: &str) -> Result<(), String> {
+///
+/// `pub(crate)` (not `pub(super)`) so `server::agent_handlers::template`'s
+/// `agentdefcreatefromtemplate` and `server::agent_handlers::core`'s
+/// `updateagent` handlers can reuse it too, instead of duplicating this
+/// check for the human-facing creation/edit paths.
+pub(crate) fn validate_vendor_base_url(provider_id: &str, base_url: &str) -> Result<(), String> {
     if base_url.is_empty() {
         return Ok(());
     }

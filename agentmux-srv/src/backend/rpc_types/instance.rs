@@ -133,6 +133,13 @@ pub struct RecentSessionRow {
     pub definition_id: String,
     pub definition_name: String,
     pub provider: String,
+    /// Custom model vendor base URL override, mirrored from
+    /// `AgentDefinition.model_vendor_base_url` — empty means the harness
+    /// talks to its own default vendor. Lets `MyAgentsList` compute the
+    /// dual-icon vendor badge (`resolveEffectiveVendor`) without a second
+    /// round trip per row.
+    #[serde(default)]
+    pub model_vendor_base_url: String,
     pub working_directory: String,
     pub identity_id: String,
     pub identity_name: String,

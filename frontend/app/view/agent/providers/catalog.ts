@@ -84,6 +84,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // (or proxied) backend — Bedrock, Vertex, OpenRouter, a custom proxy.
         // Mirrors agentmux-srv/src/backend/providers.rs `base_url_env_var`.
         baseUrlEnvVar: "ANTHROPIC_BASE_URL",
+        supportedVendors: ["anthropic"],
         launchArgs: ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--dangerously-skip-permissions"],
         resumeFlag: "--resume",
         sessionIdField: "session_id",
@@ -147,6 +148,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         icon: "robot",
         authConfigDirEnvVar: "CODEX_HOME",
         authDirName: "codex",
+        supportedVendors: ["openai"],
         launchArgs: ["exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "-"],
         // Codex resume requires a subcommand change (exec resume <id>), not a simple flag.
         resumeFlag: null,
@@ -190,6 +192,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         icon: "brain",
         authConfigDirEnvVar: "MUXCODE_CONFIG_DIR",
         authDirName: "muxcode",
+        supportedVendors: ["ollama", "anthropic", "openai"],
         launchArgs: ["run", "-p"],
         resumeFlag: "--resume",
         sessionIdField: "session_id",
@@ -217,6 +220,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         icon: "diamond",
         authConfigDirEnvVar: "GEMINI_CLI_HOME",
         authDirName: "gemini",
+        supportedVendors: ["google"],
         authExtraEnv: { GEMINI_FORCE_FILE_STORAGE: "true" },
         launchArgs: ["--output-format", "stream-json", "--yolo", "-p", ""],
         resumeFlag: "-r",
@@ -256,6 +260,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         icon: "feather",
         authConfigDirEnvVar: "QWEN_HOME",
         authDirName: "qwen",
+        supportedVendors: ["openrouter"],
         launchArgs: ["--output-format", "stream-json", "--yolo", "-p", ""],
         resumeFlag: null,
         sessionIdField: "session_id",
@@ -309,6 +314,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         icon: "lobster",
         authConfigDirEnvVar: "OPENCLAW_HOME",
         authDirName: "openclaw",
+        supportedVendors: ["openai", "anthropic", "google"],
         launchArgs: ["acp"],
         resumeFlag: null,
         sessionIdField: "sessionId",
@@ -341,6 +347,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         unsetEnv: [],
         authConfigDirEnvVar: "KIMI_SHARE_DIR",
         authDirName: "kimi",
+        supportedVendors: ["moonshot"],
         launchArgs: ["--print", "--output-format", "stream-json", "--yolo", "-p", ""],
         resumeFlag: null,
         sessionIdField: "session_id",
@@ -374,6 +381,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         icon: "github",
         authConfigDirEnvVar: "COPILOT_HOME",
         authDirName: "copilot",
+        supportedVendors: ["github"],
         launchArgs: ["--acp"],
         resumeFlag: null,
         sessionIdField: "sessionId",
@@ -402,10 +410,49 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         icon: "terminal",
         authConfigDirEnvVar: "PI_HOME",
         authDirName: "pi",
+        supportedVendors: ["pi"],
         launchArgs: ["--json"],
         resumeFlag: null,
         sessionIdField: "sessionId",
         controllerType: "acp",
+    },
+    // Antigravity (AGY) — Google's agentic coding CLI harness. Emits the
+    // same stream-json NDJSON envelope as Gemini CLI (its sibling
+    // harness), so it reuses the gemini translator (styledOutputFormat
+    // "gemini-json"). Mirrors agentmux-srv/src/backend/providers.rs
+    // `static ANTIGRAVITY`.
+    antigravity: {
+        id: "antigravity",
+        displayName: "Antigravity (AGY)",
+        cliCommand: "agy",
+        defaultArgs: [],
+        styledArgs: ["--output-format", "stream-json", "--yolo", "-p", ""],
+        outputFormat: "raw",
+        styledOutputFormat: "gemini-json",
+        authType: "oauth",
+        authCheckCommand: ["auth", "status"],
+        authLoginCommand: ["auth", "login"],
+        npmPackage: "@google/antigravity-cli",
+        pinnedVersion: "1.0.0",
+        docsUrl: "https://ai.google.dev/antigravity",
+        windowsInstallCommand: "npm install -g @google/antigravity-cli",
+        unixInstallCommand: "npm install -g @google/antigravity-cli",
+        icon: "zap",
+        authConfigDirEnvVar: "ANTIGRAVITY_CONFIG_DIR",
+        authDirName: "antigravity",
+        authExtraEnv: { ANTIGRAVITY_FORCE_FILE_STORAGE: "true" },
+        supportedVendors: ["google"],
+        launchArgs: ["--output-format", "stream-json", "--yolo", "-p", ""],
+        resumeFlag: "-r",
+        sessionIdField: "session_id",
+        controllerType: "subprocess",
+        contextWindow: 1_000_000,
+        models: [
+            { value: "gemini-3.6-flash", label: "Gemini 3.6 Flash", default: true, description: "Fast, highly capable frontier model with 1M context" },
+            { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro", description: "Deep reasoning and complex coding" },
+            { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash", description: "Balanced performance and speed" },
+            { value: "gemini-2.0-flash-thinking", label: "Gemini 2.0 Flash Thinking", description: "Chain-of-thought agentic reasoning" },
+        ],
     },
 };
 
@@ -426,8 +473,31 @@ export const PROVIDER_ALIASES: Record<string, string> = {
     "copilot_cli": "copilot",
     "mux-code": "muxcode",
     "mux_code": "muxcode",
+    "agy": "antigravity",
+    "antigravity-cli": "antigravity",
+    "antigravity_cli": "antigravity",
 };
 
 export function resolveProviderAlias(id: string): string {
     return PROVIDER_ALIASES[id] ?? id;
+}
+
+/**
+ * The vendor concept is computed, not stored: a non-empty
+ * `modelVendorBaseUrl` means the harness has been redirected off its
+ * default backend, so the effective vendor is "custom" regardless of what
+ * `provider` declares as its default. An empty/absent override means the
+ * harness is talking to its own default vendor — the first entry in that
+ * provider's `supportedVendors` (falls back to the harness id itself for a
+ * provider with no `supportedVendors` declared, e.g. a not-yet-cataloged
+ * one from an older DB row).
+ */
+export function resolveEffectiveVendor(
+    provider: string,
+    modelVendorBaseUrl: string | undefined | null,
+): string {
+    if (modelVendorBaseUrl && modelVendorBaseUrl.trim().length > 0) {
+        return "custom";
+    }
+    return PROVIDERS[provider]?.supportedVendors?.[0] ?? provider;
 }

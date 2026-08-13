@@ -77,6 +77,10 @@ export const AgentApi = {
             /** Runtime to persist on the cloned definition ("host" |
              *  "container"). Omitted → backend keeps the template's. */
             agent_type?: string;
+            /** Custom model vendor base URL override for the cloned
+             *  agent. Omitted → backend keeps the template's own value.
+             *  `""` explicitly clears a template-inherited override. */
+            model_vendor_base_url?: string;
         },
         opts?: RpcOpts,
     ): Promise<{ definition_id: string; identity_id: string; memory_id: string }> {

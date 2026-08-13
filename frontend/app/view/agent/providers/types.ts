@@ -131,4 +131,13 @@ export interface ProviderDefinition {
      * verified, not guessed.
      */
     baseUrlEnvVar?: string;
+    /**
+     * Intelligence model vendors this harness talks to, most-default-first
+     * (e.g. claude → `["anthropic"]`, openclaw → `["openai", "anthropic",
+     * "google"]` since it's model-agnostic). Purely descriptive/display
+     * data — drives the dual-icon vendor badge and `resolveEffectiveVendor`'s
+     * default-vendor inference; does not gate anything at launch. Mirrors
+     * Rust's `ProviderConfig::supported_vendors`.
+     */
+    supportedVendors?: string[];
 }

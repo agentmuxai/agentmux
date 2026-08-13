@@ -20,8 +20,9 @@
  */
 
 import { createMemo, onMount, Show, type JSX } from "solid-js";
-import { ProviderLogo } from "@/element/ProviderLogo";
+import { DualProviderLogo } from "@/element/DualProviderLogo";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
+import { resolveEffectiveVendor } from "../providers/catalog";
 
 interface AgentCardProps {
     agent: AgentDefinition;
@@ -118,7 +119,12 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
             aria-disabled={props.disabled}
             aria-label={`Launch ${caption()}`}
         >
-            <ProviderLogo provider={props.agent.provider} size={28} class="agent-card-icon" />
+            <DualProviderLogo
+                harness={props.agent.provider}
+                vendor={resolveEffectiveVendor(props.agent.provider, props.agent.model_vendor_base_url)}
+                size={28}
+                class="agent-card-icon"
+            />
             <span class="agent-card-info">
                 <span class="agent-card-title">{title()}</span>
                 <span class="agent-card-caption">{caption()}</span>

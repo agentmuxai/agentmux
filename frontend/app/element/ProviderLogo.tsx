@@ -82,7 +82,7 @@ export const ProviderLogo = (props: ProviderLogoProps): JSX.Element => {
         if (p === "anthropic" || p === "claude") return { html: claudeColorSvg };
         if (p === "codex") return { html: codexColorSvg };
         if (p === "openai") return { html: openaiSvg };
-        if (p === "gemini") return { html: geminiColorSvg };
+        if (p === "gemini" || p === "antigravity" || p === "agy") return { html: geminiColorSvg };
         if (p === "github") return { html: githubSvg };
         if (p === "copilot" || p === "githubcopilot" || p === "github-copilot") return { html: copilotColorSvg };
         if (p === "kimi") return { html: kimiSvg };
