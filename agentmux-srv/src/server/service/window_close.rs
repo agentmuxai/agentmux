@@ -40,6 +40,20 @@ pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) ->
             ));
         }
     };
+    // Restore-on-relaunch (SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13
+    // Feature 1) — snapshot this window's workspace BEFORE the destroy
+    // cascade below removes it, so the next cold launch has something to
+    // restore instead of always reseeding the default layout. Best-effort
+    // and independent of the cascade: a failure here must never block the
+    // close itself (see `session_restore` module docs for why this is a
+    // separate durable record, not a change to the cascade).
+    if let Some(ref ws_id_for_snapshot) = ws_id {
+        if let Some(snapshot) =
+            super::session_restore::snapshot_workspace(store, ws_id_for_snapshot)
+        {
+            super::session_restore::save_last_session_snapshot(store, snapshot);
+        }
+    }
     // Step 1: drop the window mapping in reducer.
     let close_events = dispatch_to_reducer(
         state,
