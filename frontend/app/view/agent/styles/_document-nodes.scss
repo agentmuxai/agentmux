@@ -1684,22 +1684,34 @@
     gap: 3px;
     padding: 10px var(--space-2);
     user-select: none;
-    position: relative;
 
-    &::before,
-    &::after {
-        content: "";
-        position: absolute;
-        top: 50%;
-        width: 25%;
-        height: 1px;
-        background: var(--border-color, rgba(255, 255, 255, 0.12));
+    // Single-row rule — `top: 50%` bisects only this row (the pill), never
+    // the detail row below it. See
+    // docs/specs/SPEC_DIVIDER_PILL_RULE_MISALIGNMENT_2026_08_12.md.
+    .agent-context-compacted-rule {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        position: relative;
+
+        &::before,
+        &::after {
+            content: "";
+            position: absolute;
+            top: 50%;
+            width: 25%;
+            height: 1px;
+            background: var(--border-color, rgba(255, 255, 255, 0.12));
+        }
+
+        &::before { left: 0; }
+        &::after  { right: 0; }
     }
 
-    &::before { left: 0; }
-    &::after  { right: 0; }
-
     .agent-context-compacted-label {
+        position: relative; // stack above the rule's ::before/::after
+        z-index: 1;
         font-size: 11px;
         font-weight: 600;
         letter-spacing: 0.06em;
@@ -1708,6 +1720,9 @@
         padding: 2px 10px;
         border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
         border-radius: 10px;
+        // Masks the rule segment that would otherwise render behind the
+        // pill — matches .agent-day-divider-label's treatment.
+        background: var(--panel-bg-color, rgba(255, 255, 255, 0.04));
     }
 
     .agent-context-compacted-detail {
@@ -1795,22 +1810,32 @@
     gap: 3px;
     padding: 10px var(--space-2);
     user-select: none;
-    position: relative;
 
-    &::before,
-    &::after {
-        content: "";
-        position: absolute;
-        top: 50%;
-        width: 25%;
-        height: 1px;
-        background: var(--border-color, rgba(255, 255, 255, 0.12));
+    // Single-row rule — see the comment on .agent-context-compacted-rule.
+    .agent-session-outcome-rule {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        position: relative;
+
+        &::before,
+        &::after {
+            content: "";
+            position: absolute;
+            top: 50%;
+            width: 25%;
+            height: 1px;
+            background: var(--border-color, rgba(255, 255, 255, 0.12));
+        }
+
+        &::before { left: 0; }
+        &::after  { right: 0; }
     }
 
-    &::before { left: 0; }
-    &::after  { right: 0; }
-
     .agent-session-outcome-label {
+        position: relative;
+        z-index: 1;
         font-size: 11px;
         font-weight: 600;
         letter-spacing: 0.06em;
@@ -1819,6 +1844,7 @@
         padding: 2px 10px;
         border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
         border-radius: 10px;
+        background: var(--panel-bg-color, rgba(255, 255, 255, 0.04));
     }
 
     .agent-session-outcome-detail {
@@ -1827,9 +1853,11 @@
     }
 
     &.agent-session-outcome-fresh {
-        &::before,
-        &::after {
-            background: color-mix(in srgb, var(--warning-color, #d9a441) 40%, transparent);
+        .agent-session-outcome-rule {
+            &::before,
+            &::after {
+                background: color-mix(in srgb, var(--warning-color, #d9a441) 40%, transparent);
+            }
         }
 
         .agent-session-outcome-label {
