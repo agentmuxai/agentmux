@@ -82,6 +82,12 @@ pub(super) const MAX_CONSECUTIVE_AUTO_CONTINUES: u32 = 5;
 /// session even without a fresh `registration_nonce`.
 pub(super) const NUDGE_COOLDOWN_RESET_MS: u64 = 30 * 60 * 1000;
 
+/// The one, fixed message a `SupervisorAction::Nudge` ever delivers.
+/// Deliberately not a parameter — see the doc on `record_supervisor_decision`'s
+/// `Nudge` arm for why a free-form message defeats the guardrail this
+/// exists for.
+pub(super) const NUDGE_MESSAGE: &str = "Continue the task you were already doing.";
+
 // ---- Handler ----
 
 /// Core reactive messaging handler.
@@ -288,19 +294,25 @@ impl Handler {
     /// then spawns 3 delayed `\r` sends at 200ms intervals as separate
     /// PTY writes to ensure submission. See `specs/jekt-inject-timing.md`.
     pub fn inject_message(&mut self, req: InjectionRequest) -> InjectionResponse {
-        self.inject_message_inner(req, None, None)
+        self.inject_message_inner(req, None, None, None)
     }
 
     /// Shared delivery path behind both `inject_message` (ordinary jekt,
-    /// `outcome`/`reason` always `None`) and `record_supervisor_decision`'s
-    /// `Nudge` arm (`outcome: Some("nudge_sent")`, `reason` the Supervisor's
-    /// stated reasoning) — every audit-log write below carries these
-    /// through instead of the two call sites duplicating sanitize/deliver
-    /// logic.
+    /// every `outcome`/`reason` param always `None`) and
+    /// `record_supervisor_decision`'s `Nudge` arm (`outcome_on_success:
+    /// Some("nudge_sent")`, `outcome_on_failure: Some("nudge_failed")`,
+    /// `reason` the Supervisor's stated reasoning) — every audit-log write
+    /// below carries these through instead of the two call sites
+    /// duplicating sanitize/deliver logic. Two separate outcome params
+    /// (rather than one applied uniformly) so a failed delivery is audited
+    /// distinctly from a successful one (reagentx P2 on PR #2557 — the
+    /// Supervisor UI's decision feed must not show "nudged" for a delivery
+    /// that actually failed).
     fn inject_message_inner(
         &mut self,
         mut req: InjectionRequest,
-        outcome: Option<&str>,
+        outcome_on_success: Option<&str>,
+        outcome_on_failure: Option<&str>,
         reason: Option<&str>,
     ) -> InjectionResponse {
         let now = now_unix_millis();
@@ -351,7 +363,7 @@ impl Handler {
                     false,
                     Some(&err),
                     &request_id,
-                    outcome,
+                    outcome_on_failure,
                     reason,
                 );
                 return InjectionResponse {
@@ -429,7 +441,7 @@ impl Handler {
                         true,
                         None,
                         &request_id,
-                        outcome,
+                        outcome_on_success,
                         reason,
                     );
                     return InjectionResponse {
@@ -462,7 +474,7 @@ impl Handler {
                         false,
                         Some(&e),
                         &request_id,
-                        outcome,
+                        outcome_on_failure,
                         reason,
                     );
                     return InjectionResponse {
@@ -490,7 +502,7 @@ impl Handler {
                     false,
                     Some(&err),
                     &request_id,
-                    outcome,
+                    outcome_on_failure,
                     reason,
                 );
                 return InjectionResponse {
@@ -531,7 +543,7 @@ impl Handler {
                 false,
                 Some(&e),
                 &request_id,
-                outcome,
+                outcome_on_failure,
                 reason,
             );
             return InjectionResponse {
@@ -565,7 +577,7 @@ impl Handler {
             true,
             None,
             &request_id,
-            outcome,
+            outcome_on_success,
             reason,
         );
 
@@ -643,7 +655,7 @@ impl Handler {
                     effective_tier: None,
                 })
             }
-            SupervisorAction::Nudge(message) => {
+            SupervisorAction::Nudge => {
                 // Bound `nudge_counters`' growth (reagentx P2 on PR #2557):
                 // an entry idle past the cooldown window is about to be
                 // treated as stale on next use anyway, so dropping it here
@@ -657,29 +669,37 @@ impl Handler {
                     .get(&target_key)
                     .map(|info| info.registration_nonce)
                     .unwrap_or(0);
-                let entry = self.nudge_counters.entry(target_key).or_insert(NudgeCounterState {
-                    registration_nonce: current_nonce,
-                    block_id: block_id.clone(),
-                    count: 0,
-                    last_nudge_at_ms: 0,
-                });
-                // registration_nonce only distinguishes a respawn for
-                // persistent-controller agents (real nonces, ≥ 1);
-                // PTY/shell/HTTP-register paths always register with 0, so
-                // block_id is the fallback signal for those (reagentx P1 on
-                // PR #2557 — nonce alone never fired for them, leaving a
-                // respawned PTY agent stuck behind its prior run's
-                // exhausted ceiling for up to the full cooldown window).
-                let stale = entry.registration_nonce != current_nonce
-                    || entry.block_id != block_id
-                    || now.saturating_sub(entry.last_nudge_at_ms) > NUDGE_COOLDOWN_RESET_MS;
-                if stale {
-                    entry.registration_nonce = current_nonce;
-                    entry.block_id = block_id.clone();
-                    entry.count = 0;
-                }
 
-                if entry.count >= MAX_CONSECUTIVE_AUTO_CONTINUES {
+                // Scoped borrow: check/reset staleness and read the
+                // pre-delivery count, then drop the borrow before calling
+                // `inject_message_inner` (which needs `&mut self` too).
+                let count_before = {
+                    let entry = self.nudge_counters.entry(target_key.clone()).or_insert(NudgeCounterState {
+                        registration_nonce: current_nonce,
+                        block_id: block_id.clone(),
+                        count: 0,
+                        last_nudge_at_ms: 0,
+                    });
+                    // registration_nonce only distinguishes a respawn for
+                    // persistent-controller agents (real nonces, ≥ 1);
+                    // PTY/shell/HTTP-register paths always register with 0,
+                    // so block_id is the fallback signal for those
+                    // (reagentx P1 on PR #2557 — nonce alone never fired
+                    // for them, leaving a respawned PTY agent stuck behind
+                    // its prior run's exhausted ceiling for up to the full
+                    // cooldown window).
+                    let stale = entry.registration_nonce != current_nonce
+                        || entry.block_id != block_id
+                        || now.saturating_sub(entry.last_nudge_at_ms) > NUDGE_COOLDOWN_RESET_MS;
+                    if stale {
+                        entry.registration_nonce = current_nonce;
+                        entry.block_id = block_id.clone();
+                        entry.count = 0;
+                    }
+                    entry.count
+                };
+
+                if count_before >= MAX_CONSECUTIVE_AUTO_CONTINUES {
                     let ceiling_reason = "consecutive-nudge ceiling reached".to_string();
                     self.log_audit(
                         source_agent,
@@ -695,12 +715,20 @@ impl Handler {
                     return Err(ceiling_reason);
                 }
 
-                entry.count += 1;
-                entry.last_nudge_at_ms = now;
-
+                // Fixed, narrow continuation template — deliberately NOT
+                // free-form text composed by the calling Supervisor agent.
+                // ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_
+                // 2026_08_12.md §4.3: "The nudge text should be a fixed,
+                // narrow template... not a free-form instruction the
+                // watcher composes per-situation — this is the direct
+                // mitigation for consent-chain degradation." (reagentx P1
+                // on PR #2557 — SupervisorNudge used to accept arbitrary
+                // `message` text.) `reason` (the Supervisor's own
+                // reasoning) still travels separately, into the audit log
+                // only — never into what's delivered to the target.
                 let req = InjectionRequest {
                     target_agent: target_agent.to_string(),
-                    message,
+                    message: NUDGE_MESSAGE.to_string(),
                     source_agent: source_agent.map(|s| s.to_string()),
                     request_id: Some(request_id.to_string()),
                     priority: Some("normal".to_string()),
@@ -709,7 +737,25 @@ impl Handler {
                     delivery_tier: Some("host".to_string()),
                     forward_hops: 0,
                 };
-                Ok(self.inject_message_inner(req, Some("nudge_sent"), Some(reason)))
+                let resp = self.inject_message_inner(
+                    req,
+                    Some("nudge_sent"),
+                    Some("nudge_failed"),
+                    Some(reason),
+                );
+
+                // Only a successful delivery consumes the ceiling
+                // (reagentx P2 on PR #2557) — a rate-limited/unavailable-
+                // controller failure shouldn't cost the Supervisor one of
+                // its 5 consecutive attempts for this target.
+                if resp.success {
+                    if let Some(entry) = self.nudge_counters.get_mut(&target_key) {
+                        entry.count += 1;
+                        entry.last_nudge_at_ms = now;
+                    }
+                }
+
+                Ok(resp)
             }
         }
     }

@@ -21,9 +21,12 @@ export interface AuditEntry {
     success: boolean;
     error_message?: string;
     request_id: string;
-    /** "nudge_sent" | "nudge_declined" — present only for Supervisor-
-     *  originated entries; absent for ordinary jekt entries. Mirrors
-     *  AuditLogEntry.outcome (agentmux-srv/src/backend/reactive/types.rs). */
+    /** "nudge_sent" | "nudge_failed" | "nudge_declined" — present only for
+     *  Supervisor-originated entries; absent for ordinary jekt entries.
+     *  "nudge_sent" only when delivery actually succeeded; "nudge_failed"
+     *  when a nudge was attempted but delivery itself failed (see
+     *  `success`/`error_message`). Mirrors AuditLogEntry.outcome
+     *  (agentmux-srv/src/backend/reactive/types.rs). */
     outcome?: string;
     /** Supervisor's stated reasoning, populated alongside `outcome`. */
     reason?: string;

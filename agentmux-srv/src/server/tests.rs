@@ -448,10 +448,21 @@ async fn reactive_supervisor_decision_unknown_action_is_400() {
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
+/// reagentx P1 on PR #2557: `SupervisorAction::Nudge` delivers a fixed,
+/// server-owned message (`handler::NUDGE_MESSAGE`) — it no longer accepts
+/// (or requires) caller-supplied text at all. A `message` field in the
+/// request body, if a caller sends one out of habit, must be silently
+/// ignored (serde's default unknown-field behavior), not error and not
+/// influence what's delivered — this regression-guards against the
+/// free-form-text contract reagentx flagged ever coming back.
 #[tokio::test]
-async fn reactive_supervisor_decision_nudge_without_message_is_400() {
+async fn reactive_supervisor_decision_nudge_ignores_a_stray_message_field() {
     let app = test_router();
-    let body = serde_json::json!({"target_agent": "some-agent", "action": "nudge"});
+    let body = serde_json::json!({
+        "target_agent": "some-agent",
+        "action": "nudge",
+        "message": "do something completely different",
+    });
     let req = Request::builder()
         .method("POST")
         .uri("/agentmux/reactive/supervisor-decision")
@@ -460,7 +471,11 @@ async fn reactive_supervisor_decision_nudge_without_message_is_400() {
         .body(Body::from(body.to_string()))
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    // "some-agent" has no AgentDefinition in this hermetic store, so the
+    // entitlement gate refuses it — same as any other not-opted-in target.
+    // The point of this test is that a stray `message` field didn't change
+    // that outcome (e.g. by being misparsed into some other code path).
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]
@@ -501,7 +516,6 @@ async fn reactive_supervisor_decision_nudge_rejected_when_not_opted_in() {
     let body = serde_json::json!({
         "target_agent": "supervisor-nudge-test-not-opted-in",
         "action": "nudge",
-        "message": "keep going",
     });
     let req = Request::builder()
         .method("POST")
@@ -543,7 +557,6 @@ async fn reactive_supervisor_decision_nudge_rejected_when_opted_out() {
     let body = serde_json::json!({
         "target_agent": "supervisor-nudge-test-opted-out",
         "action": "nudge",
-        "message": "keep going",
     });
     let req = Request::builder()
         .method("POST")
@@ -581,7 +594,6 @@ async fn reactive_supervisor_decision_nudge_passes_gate_when_opted_in() {
     let body = serde_json::json!({
         "target_agent": "supervisor-nudge-test-opted-in",
         "action": "nudge",
-        "message": "keep going",
     });
     let req = Request::builder()
         .method("POST")

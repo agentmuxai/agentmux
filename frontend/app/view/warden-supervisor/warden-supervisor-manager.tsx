@@ -153,15 +153,22 @@ export const WardenSupervisorManager = (): JSX.Element => {
                 <ul class="warden-supervisor-decision-feed">
                     <For each={decisions()}>
                         {(entry) => {
-                            const nudged = () => entry.outcome === "nudge_sent";
+                            const statusLabel = () => {
+                                if (entry.outcome === "nudge_sent") return "nudged";
+                                if (entry.outcome === "nudge_failed") return "nudge failed";
+                                return "declined";
+                            };
                             return (
-                                <li class="warden-supervisor-decision-row">
+                                <li
+                                    class="warden-supervisor-decision-row"
+                                    data-variant={entry.outcome === "nudge_failed" ? "failed" : "ok"}
+                                >
                                     <span class="warden-supervisor-decision-time">
                                         {formatAge(ageMs(entry.timestamp, now()))} ago
                                     </span>
                                     <span class="warden-manager-mono">{entry.target_agent}</span>
                                     <span class="warden-supervisor-decision-status">
-                                        {nudged() ? "nudged" : "declined"}
+                                        {statusLabel()}
                                     </span>
                                     <Show when={entry.reason} fallback={<span class="warden-manager-dim">—</span>}>
                                         <span class="warden-supervisor-decision-reason">{entry.reason}</span>

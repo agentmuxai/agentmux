@@ -124,11 +124,15 @@ pub struct AuditLogEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
     pub request_id: String,
-    /// "nudge_sent" | "nudge_declined" — present only for Warden Supervisor-
-    /// originated entries (see ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_
-    /// WATCHER_2026_08_12.md); absent for ordinary jekt injections. A
-    /// "nudge_declined" entry has no corresponding delivery at all — this
-    /// field is the ONLY record that decision ever existed.
+    /// "nudge_sent" | "nudge_failed" | "nudge_declined" — present only for
+    /// Warden Supervisor-originated entries (see
+    /// ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md);
+    /// absent for ordinary jekt injections. "nudge_sent" only when delivery
+    /// actually succeeded; "nudge_failed" when the Supervisor attempted a
+    /// nudge but delivery itself failed (rate limit, unavailable
+    /// controller, etc — see `entry.success`/`error_message` for why). A
+    /// "nudge_declined" entry has no corresponding delivery attempt at
+    /// all — this field is the ONLY record that decision ever existed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<String>,
     /// The Supervisor's stated reasoning, populated alongside `outcome`.
@@ -142,11 +146,18 @@ pub struct AuditLogEntry {
 /// isn't opted in, or the Supervisor judged it genuinely done/blocked).
 /// See `Handler::record_supervisor_decision` and
 /// ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum SupervisorAction {
-    /// Deliver `message` to the target as an ordinary jekt (via the same
-    /// path `inject_message` uses), then log the decision.
-    Nudge(String),
+    /// Deliver a fixed, narrow continuation message to the target as an
+    /// ordinary jekt (via the same path `inject_message` uses), then log
+    /// the decision. Deliberately carries no caller-supplied text — the
+    /// message itself is a constant (`handler::NUDGE_MESSAGE`), not
+    /// composed by the calling Supervisor agent. See
+    /// ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md
+    /// §4.3 ("never a free-form instruction the watcher composes
+    /// per-situation") — reagentx P1 on PR #2557 flagged an earlier
+    /// version of this type that accepted arbitrary text.
+    Nudge,
     /// No delivery — just log that the Supervisor decided not to nudge.
     Decline,
 }
