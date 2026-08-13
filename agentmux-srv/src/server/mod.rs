@@ -298,6 +298,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/agentmux/reactive/transcript",
             get(reactive::handle_reactive_transcript),
+        )
+        .route(
+            "/agentmux/reactive/supervisor-decision",
+            post(reactive::handle_reactive_supervisor_decision),
         );
 
     // MessageBus routes (authed, localhost-only)

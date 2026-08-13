@@ -1,0 +1,70 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+//
+// Warden — Supervisor section styles. Dedicated (not shared with
+// warden-audit-manager.scss's `.warden-audit-row`) so this decision feed's
+// column layout can't silently drift out of sync with the Audit tab's.
+
+.warden-supervisor-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    cursor: pointer;
+}
+
+.warden-supervisor-decision-feed {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 0.85em;
+}
+
+.warden-supervisor-decision-row {
+    display: grid;
+    grid-template-columns: 70px 1fr 60px 1fr;
+    gap: var(--space-2);
+    padding: 2px var(--space-2);
+    background: rgba(96, 165, 250, 0.08);
+
+    &[data-variant="failed"] {
+        background: rgba(239, 68, 68, 0.08);
+    }
+}
+
+.warden-supervisor-decision-time {
+    opacity: 0.55;
+    font-family: monospace;
+}
+
+.warden-supervisor-decision-status {
+    text-align: center;
+    text-transform: uppercase;
+    font-size: 0.8em;
+    color: #60a5fa;
+
+    [data-variant="failed"] & {
+        color: #ef4444;
+    }
+}
+
+.warden-supervisor-decision-reason {
+    opacity: 0.8;
+    color: #60a5fa;
+    font-size: 0.95em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+@container warden (max-width: 479px) {
+    .warden-supervisor-decision-row {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 4px var(--space-2);
+        border-bottom: 1px solid var(--border-color);
+    }
+}
