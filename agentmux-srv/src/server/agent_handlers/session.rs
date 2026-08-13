@@ -384,6 +384,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             .map(|d| d.name.clone())
                             .unwrap_or_else(|| "(missing definition)".to_string()),
                         provider: def.map(|d| d.provider.clone()).unwrap_or_default(),
+                        model_vendor_base_url: def.map(|d| d.model_vendor_base_url.clone()).unwrap_or_default(),
                         working_directory: inst.working_directory,
                         identity_id: inst.identity_id,
                         identity_name,

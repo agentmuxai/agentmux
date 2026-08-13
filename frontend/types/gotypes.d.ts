@@ -761,6 +761,11 @@ declare global {
         definition_id: string;
         definition_name: string;
         provider: string;
+        /** Custom model vendor base URL override, mirrored from
+         *  AgentDefinition.model_vendor_base_url. Empty means the harness
+         *  talks to its own default vendor. See providers/catalog.ts's
+         *  resolveEffectiveVendor. */
+        model_vendor_base_url?: string;
         working_directory: string;
         identity_id: string;
         identity_name: string;
@@ -842,6 +847,12 @@ declare global {
          * preserve the stored value. See AgentDefinition.auto_continue_enabled.
          */
         auto_continue_enabled?: number;
+        /**
+         * Custom model vendor base URL override. Omit to preserve the
+         * stored value; "" explicitly clears it back to the harness's
+         * default vendor endpoint. See AgentDefinition.model_vendor_base_url.
+         */
+        model_vendor_base_url?: string;
     };
 
     // CommandDeleteAgentDefinitionData

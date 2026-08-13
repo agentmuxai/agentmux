@@ -28,6 +28,7 @@ import { Button } from "@/element/button";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
+import { PROVIDERS } from "../providers/catalog";
 import { isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
 import { refreshAccountCache, type Account } from "@/app/view/identity/identity-model";
 
@@ -39,6 +40,11 @@ interface CreateFromTemplateFormData {
      *  it is NOT a property of the template (a template is runtime-
      *  agnostic). "container" requires a reachable Docker runtime. */
     agentType: "host" | "container";
+    /** Custom model vendor base URL override (e.g. a proxy in front of
+     *  Anthropic's API). Empty string = use the harness's default vendor
+     *  endpoint. Only meaningful — and only shown in the form — when the
+     *  template's provider declares `baseUrlEnvVar` in the catalog. */
+    modelVendorBaseUrl: string;
 }
 
 interface AgentCreateFromTemplateModalPanelProps {
@@ -62,6 +68,17 @@ export const AgentCreateFromTemplateModalPanel = (
     const [memories, setMemories] = createSignal<Memory[]>([]);
     const [submitting, setSubmitting] = createSignal(false);
     const [error, setError] = createSignal<string | null>(null);
+    const [modelVendorBaseUrl, setModelVendorBaseUrl] = createSignal(
+        props.template.model_vendor_base_url ?? "",
+    );
+
+    // Only providers that declare `baseUrlEnvVar` (currently just claude)
+    // can actually be redirected to a custom endpoint — see
+    // agent_define::validate_vendor_base_url on the backend, which rejects
+    // a non-empty override for any other provider.
+    const supportsCustomEndpoint = createMemo(
+        () => !!PROVIDERS[props.template.provider]?.baseUrlEnvVar,
+    );
 
     // ── Runtime (host vs container) ────────────────────────────────
     // Runtime is decided HERE, when instantiating the template — it's
@@ -163,6 +180,7 @@ export const AgentCreateFromTemplateModalPanel = (
                 accountId: accountId(),
                 memoryId: memoryId(),
                 agentType: runtime(),
+                modelVendorBaseUrl: supportsCustomEndpoint() ? modelVendorBaseUrl().trim() : "",
             });
             // Layer unmounts via close-on-success. Reset is defensive.
             setSubmitting(false);
@@ -237,6 +255,26 @@ export const AgentCreateFromTemplateModalPanel = (
                         </span>
                     </Show>
                 </label>
+                <Show when={supportsCustomEndpoint()}>
+                    <label class="agent-new-bundle-modal-field">
+                        <span class="agent-new-bundle-modal-label">Model Vendor / Custom Endpoint</span>
+                        <input
+                            type="text"
+                            class="agent-new-bundle-modal-input"
+                            placeholder={`Default (${PROVIDERS[props.template.provider]?.baseUrlEnvVar})`}
+                            value={modelVendorBaseUrl()}
+                            onInput={(e) => setModelVendorBaseUrl(e.currentTarget.value)}
+                            onKeyDown={onKeyDown}
+                            disabled={submitting()}
+                            data-testid="create-from-template-vendor-base-url-input"
+                        />
+                        <span class="agent-new-bundle-modal-hint">
+                            Redirect this agent's harness at a custom API endpoint
+                            (e.g. a proxy or alternate model backend) instead of the
+                            default vendor. Leave blank to use the default.
+                        </span>
+                    </label>
+                </Show>
                 <label class="agent-new-bundle-modal-field">
                     <span class="agent-new-bundle-modal-label">Identity</span>
                     <select

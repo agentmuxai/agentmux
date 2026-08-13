@@ -31,7 +31,7 @@
  * Spec: SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md §4.
  */
 
-import { createSignal, onCleanup, type JSX } from "solid-js";
+import { createMemo, createSignal, onCleanup, Show, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import {
@@ -40,6 +40,7 @@ import {
     type AgentAccounts,
 } from "@/app/view/identity/identity-model";
 import { AgentIdentityPanel } from "./AgentIdentityPanel";
+import { PROVIDERS } from "../providers/catalog";
 
 interface AgentIdentityModalPanelProps {
     agent: AgentDefinition;
@@ -87,6 +88,39 @@ export const AgentIdentityModalPanel = (props: AgentIdentityModalPanelProps): JS
         setLiveAgent({ ...a, accounts: serialized });
     };
 
+    // ── Model vendor / custom endpoint ─────────────────────────────
+    // Only providers that declare `baseUrlEnvVar` (currently just claude)
+    // can actually be redirected — see agent_define::validate_vendor_base_url
+    // on the backend, which rejects a non-empty override for any other
+    // provider.
+    const supportsCustomEndpoint = createMemo(
+        () => !!PROVIDERS[liveAgent().provider]?.baseUrlEnvVar,
+    );
+    const [modelVendorBaseUrl, setModelVendorBaseUrl] = createSignal(
+        props.agent.model_vendor_base_url ?? "",
+    );
+    const [vendorSaving, setVendorSaving] = createSignal(false);
+    const [vendorError, setVendorError] = createSignal<string | null>(null);
+
+    const handleVendorSave = async (): Promise<void> => {
+        const a = liveAgent();
+        const url = modelVendorBaseUrl().trim();
+        setVendorSaving(true);
+        setVendorError(null);
+        try {
+            await RpcApi.UpdateAgentDefinitionCommand(TabRpcClient, {
+                ...basePayload(a),
+                accounts: a.accounts,
+                model_vendor_base_url: url,
+            });
+            setLiveAgent({ ...a, model_vendor_base_url: url });
+        } catch (e) {
+            setVendorError((e as Error)?.message ?? String(e));
+        } finally {
+            setVendorSaving(false);
+        }
+    };
+
     return (
         <div class="agent-identity-modal-body">
             <AgentIdentityPanel
@@ -94,6 +128,37 @@ export const AgentIdentityModalPanel = (props: AgentIdentityModalPanelProps): JS
                 model={model}
                 onUpdate={handleUpdate}
             />
+            <Show when={supportsCustomEndpoint()}>
+                <div class="agent-identity-vendor-section">
+                    <span class="agent-identity-vendor-label">Model Vendor / Custom Endpoint</span>
+                    <div class="agent-identity-vendor-row">
+                        <input
+                            type="text"
+                            class="agent-identity-vendor-input"
+                            placeholder={`Default (${PROVIDERS[liveAgent().provider]?.baseUrlEnvVar})`}
+                            value={modelVendorBaseUrl()}
+                            onInput={(e) => setModelVendorBaseUrl(e.currentTarget.value)}
+                            disabled={vendorSaving()}
+                            data-testid="agent-identity-vendor-base-url-input"
+                        />
+                        <button
+                            class="agent-identity-vendor-save-btn"
+                            disabled={vendorSaving() || modelVendorBaseUrl().trim() === (liveAgent().model_vendor_base_url ?? "")}
+                            onClick={() => void handleVendorSave()}
+                            data-testid="agent-identity-vendor-base-url-save"
+                        >
+                            {vendorSaving() ? "Saving…" : "Save"}
+                        </button>
+                    </div>
+                    <span class="agent-identity-vendor-hint">
+                        Redirect this agent's harness at a custom API endpoint instead
+                        of the default vendor. Leave blank to use the default.
+                    </span>
+                    <Show when={vendorError()}>
+                        <div class="agent-identity-vendor-error">{vendorError()}</div>
+                    </Show>
+                </div>
+            </Show>
             <div class="agent-modal-footer">
                 <button
                     class="agent-modal-done-btn"
