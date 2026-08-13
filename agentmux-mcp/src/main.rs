@@ -144,13 +144,12 @@ const GET_AGENT_TRANSCRIPT_TOOL: &str = r#"{
 
 const SUPERVISOR_NUDGE_TOOL: &str = r#"{
   "name": "SupervisorNudge",
-  "description": "For a Warden Supervisor watcher agent: record a decision about a target agent that just ended its turn, after inspecting it with GetAgentTranscript. action=\"nudge\" delivers `message` to the target as an ordinary jekt telling it to continue, and logs the decision. action=\"decline\" sends nothing and just logs that you chose not to nudge (e.g. the target isn't opted in, or looks genuinely done/blocked, not merely pausing to ask). A nudge that would exceed the server-side consecutive-nudge ceiling is refused (HTTP 429/tool error) — treat that as a signal to stop nudging this target and escalate to a human via SendMessage instead of retrying.",
+  "description": "For a Warden Supervisor watcher agent: record a decision about a target agent that just ended its turn, after inspecting it with GetAgentTranscript. action=\"nudge\" delivers a fixed, server-owned continuation message to the target as an ordinary jekt and logs the decision — this tool does NOT accept custom message text; the nudge is deliberately a narrow, non-composable template, not an instruction you write per-situation. action=\"decline\" sends nothing and just logs that you chose not to nudge (e.g. the target isn't opted in, or looks genuinely done/blocked, not merely pausing to ask). A nudge is refused (tool error) if the target hasn't opted in via auto_continue_enabled, or if it would exceed the server-side consecutive-nudge ceiling — treat either as a signal to stop nudging this target and escalate to a human via SendMessage instead of retrying.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "target_agent": { "type": "string", "description": "Name of the agent this decision is about (its AGENTMUX_AGENT_ID value)" },
       "action":       { "type": "string", "enum": ["nudge", "decline"], "description": "Whether to nudge the target to continue or decline to" },
-      "message":      { "type": "string", "description": "Required when action is \"nudge\" — the message delivered to the target as a jekt" },
       "reason":       { "type": "string", "description": "Your stated reasoning for this decision, recorded in the audit log" }
     },
     "required": ["target_agent", "action"]
@@ -1142,10 +1141,6 @@ async fn call_tool(
             if action != "nudge" && action != "decline" {
                 anyhow::bail!("invalid action: {action} (expected \"nudge\" or \"decline\")");
             }
-            let message = arguments.get("message").and_then(|v| v.as_str());
-            if action == "nudge" && message.map(|m| m.is_empty()).unwrap_or(true) {
-                anyhow::bail!("message is required when action is \"nudge\"");
-            }
             let reason = arguments.get("reason").and_then(|v| v.as_str());
 
             if local_url.is_empty() || auth_key.is_empty() {
@@ -1166,7 +1161,6 @@ async fn call_tool(
             let body = json!({
                 "target_agent": target_agent,
                 "action": action,
-                "message": message,
                 "reason": reason,
                 "source_agent": source_agent,
             });
@@ -1191,6 +1185,21 @@ async fn call_tool(
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown error");
                 anyhow::bail!("supervisor decision rejected: HTTP {status} — {err}");
+            }
+
+            // The route always returns HTTP 200 for a request that passed
+            // the entitlement/ceiling gates — actual delivery success is
+            // only reflected in the response body's `success` field (a
+            // failed nudge still gets logged and returned as 200/success:
+            // false, same as SendMessage's InjectionResponse). Checking
+            // HTTP status alone previously reported a failed delivery to
+            // the calling Supervisor as success (reagentx P2 on PR #2557).
+            if result.get("success").and_then(|v| v.as_bool()) != Some(true) {
+                let err = result
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown error");
+                anyhow::bail!("supervisor decision delivery failed: {err}");
             }
 
             Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))

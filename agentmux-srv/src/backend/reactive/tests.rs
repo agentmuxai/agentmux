@@ -691,6 +691,51 @@ fn test_record_supervisor_decision_decline_logs_one_entry_no_delivery() {
     );
 }
 
+/// A failed delivery (no input sender configured) must be audited as
+/// `nudge_failed`, not `nudge_sent` — and must NOT consume the
+/// consecutive-nudge ceiling, since nothing was actually delivered
+/// (reagentx P2 on PR #2557, round 2).
+#[tokio::test]
+async fn test_record_supervisor_decision_nudge_failure_is_audited_and_not_counted() {
+    let mut handler = Handler::new();
+    // Deliberately no `set_input_sender` — delivery will fail with
+    // "input sender not configured".
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler
+        .record_supervisor_decision(
+            "agent1",
+            SupervisorAction::Nudge,
+            "target looks stalled",
+            "req-fail-1",
+            Some("warden-supervisor"),
+        )
+        .expect("a failed delivery is still Ok — it's not a ceiling refusal");
+    assert!(!resp.success);
+
+    let log = handler.get_audit_log(10);
+    assert_eq!(log.len(), 1);
+    assert_eq!(log[0].outcome.as_deref(), Some("nudge_failed"));
+    assert!(!log[0].success);
+
+    // Wire up a working sender and confirm the full ceiling is still
+    // available — the failed attempt above must not have consumed any of
+    // it.
+    handler.set_input_sender(Arc::new(|_block_id: &str, _data: &[u8]| Ok(())));
+    for i in 0..MAX_CONSECUTIVE_AUTO_CONTINUES {
+        let resp = handler
+            .record_supervisor_decision(
+                "agent1",
+                SupervisorAction::Nudge,
+                "still making progress",
+                &format!("req-ok-{i}"),
+                Some("warden-supervisor"),
+            )
+            .unwrap_or_else(|e| panic!("nudge {i} should not hit the ceiling: {e}"));
+        assert!(resp.success);
+    }
+}
+
 /// `MAX_CONSECUTIVE_AUTO_CONTINUES` nudges to the same target succeed; the
 /// next one is refused with the ceiling error and logs a `nudge_declined`
 /// entry instead of attempting delivery.
@@ -704,7 +749,7 @@ async fn test_record_supervisor_decision_nudge_ceiling() {
         let resp = handler
             .record_supervisor_decision(
                 "agent1",
-                SupervisorAction::Nudge("keep going".to_string()),
+                SupervisorAction::Nudge,
                 "still making progress",
                 &format!("req-{i}"),
                 Some("warden-supervisor"),
@@ -716,7 +761,7 @@ async fn test_record_supervisor_decision_nudge_ceiling() {
     let err = handler
         .record_supervisor_decision(
             "agent1",
-            SupervisorAction::Nudge("keep going".to_string()),
+            SupervisorAction::Nudge,
             "still making progress",
             "req-over",
             Some("warden-supervisor"),
@@ -756,7 +801,7 @@ async fn test_record_supervisor_decision_nudge_ceiling_resets_on_new_registratio
         handler
             .record_supervisor_decision(
                 "agent1",
-                SupervisorAction::Nudge("keep going".to_string()),
+                SupervisorAction::Nudge,
                 "still making progress",
                 &format!("req-{i}"),
                 Some("warden-supervisor"),
@@ -767,7 +812,7 @@ async fn test_record_supervisor_decision_nudge_ceiling_resets_on_new_registratio
         handler
             .record_supervisor_decision(
                 "agent1",
-                SupervisorAction::Nudge("keep going".to_string()),
+                SupervisorAction::Nudge,
                 "still making progress",
                 "req-over",
                 Some("warden-supervisor"),
@@ -784,7 +829,7 @@ async fn test_record_supervisor_decision_nudge_ceiling_resets_on_new_registratio
     let resp = handler
         .record_supervisor_decision(
             "agent1",
-            SupervisorAction::Nudge("keep going".to_string()),
+            SupervisorAction::Nudge,
             "fresh run, target paused again",
             "req-after-respawn",
             Some("warden-supervisor"),
@@ -811,7 +856,7 @@ async fn test_record_supervisor_decision_nudge_ceiling_resets_on_new_block_id_wh
         handler
             .record_supervisor_decision(
                 "agent1",
-                SupervisorAction::Nudge("keep going".to_string()),
+                SupervisorAction::Nudge,
                 "still making progress",
                 &format!("req-{i}"),
                 Some("warden-supervisor"),
@@ -822,7 +867,7 @@ async fn test_record_supervisor_decision_nudge_ceiling_resets_on_new_block_id_wh
         handler
             .record_supervisor_decision(
                 "agent1",
-                SupervisorAction::Nudge("keep going".to_string()),
+                SupervisorAction::Nudge,
                 "still making progress",
                 "req-over",
                 Some("warden-supervisor"),
@@ -839,7 +884,7 @@ async fn test_record_supervisor_decision_nudge_ceiling_resets_on_new_block_id_wh
     let resp = handler
         .record_supervisor_decision(
             "agent1",
-            SupervisorAction::Nudge("keep going".to_string()),
+            SupervisorAction::Nudge,
             "fresh run in a new pane, target paused again",
             "req-after-relaunch",
             Some("warden-supervisor"),

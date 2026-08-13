@@ -667,10 +667,6 @@ pub(super) struct SupervisorDecisionRequest {
     target_agent: String,
     /// "nudge" | "decline".
     action: String,
-    /// Required when `action == "nudge"` — the message delivered to
-    /// `target_agent` as an ordinary jekt.
-    #[serde(default)]
-    message: Option<String>,
     #[serde(default)]
     reason: Option<String>,
     #[serde(default)]
@@ -684,13 +680,14 @@ pub(super) struct SupervisorDecisionRequest {
 
 /// `POST /agentmux/reactive/supervisor-decision` — a Warden Supervisor
 /// watcher agent's decision about a target agent it just polled (see
-/// `GetAgentTranscript`). `action: "nudge"` delivers `message` to
-/// `target_agent` through the same path `SendMessage`/`Loop` use and audits
-/// it as a Supervisor-originated entry; `action: "decline"` sends nothing
-/// and just audits the decision. A nudge that would exceed the
-/// consecutive-nudge ceiling is refused with HTTP 429 — the calling agent
-/// should treat that as a signal to stop and escalate to a human instead of
-/// retrying.
+/// `GetAgentTranscript`). `action: "nudge"` delivers a fixed continuation
+/// message (not caller-supplied text — see `SupervisorAction::Nudge`'s
+/// doc) to `target_agent` through the same path `SendMessage`/`Loop` use
+/// and audits it as a Supervisor-originated entry; `action: "decline"`
+/// sends nothing and just audits the decision. A nudge that would exceed
+/// the consecutive-nudge ceiling is refused with HTTP 429 — the calling
+/// agent should treat that as a signal to stop and escalate to a human
+/// instead of retrying.
 pub(super) async fn handle_reactive_supervisor_decision(
     State(state): State<AppState>,
     Json(req): Json<SupervisorDecisionRequest>,
@@ -704,16 +701,7 @@ pub(super) async fn handle_reactive_supervisor_decision(
     }
 
     let action = match req.action.as_str() {
-        "nudge" => {
-            let Some(message) = req.message.filter(|m| !m.is_empty()) else {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "message is required when action is \"nudge\""})),
-                )
-                    .into_response();
-            };
-            SupervisorAction::Nudge(message)
-        }
+        "nudge" => SupervisorAction::Nudge,
         "decline" => SupervisorAction::Decline,
         other => {
             return (
@@ -730,7 +718,7 @@ pub(super) async fn handle_reactive_supervisor_decision(
     // check belongs at the HTTP boundary where `state.wstore` is available,
     // not inside `record_supervisor_decision`. Decline never delivers
     // anything, so it isn't gated.
-    if matches!(action, SupervisorAction::Nudge(_)) {
+    if matches!(action, SupervisorAction::Nudge) {
         let opted_in = state
             .wstore
             .agent_def_list()

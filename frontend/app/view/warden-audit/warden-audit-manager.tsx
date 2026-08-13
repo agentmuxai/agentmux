@@ -59,18 +59,21 @@ export const WardenAuditManager = (): JSX.Element => {
                 <ul class="warden-audit-feed">
                     <For each={audit()}>
                         {(entry) => {
-                            // Supervisor rows (outcome set) get neutral/informational
-                            // styling regardless of `success` — a "declined" entry has
-                            // success=true (nothing failed, it just chose not to act)
-                            // and shouldn't read as an error.
+                            // Supervisor rows get styling by their own outcome, not a
+                            // blanket "outcome set → neutral" rule — a "declined" entry
+                            // has success=true (nothing failed, it just chose not to
+                            // act) and shouldn't read as an error, but "nudge_failed"
+                            // means delivery genuinely failed and must read as one.
                             const statusVariant = () => {
                                 if (entry.outcome === "nudge_sent") return "nudge";
                                 if (entry.outcome === "nudge_declined") return "declined";
+                                if (entry.outcome === "nudge_failed") return "err";
                                 return entry.success ? "ok" : "err";
                             };
                             const statusLabel = () => {
                                 if (entry.outcome === "nudge_sent") return "nudged";
                                 if (entry.outcome === "nudge_declined") return "declined";
+                                if (entry.outcome === "nudge_failed") return "nudge failed";
                                 return entry.success ? "ok" : "err";
                             };
                             return (
