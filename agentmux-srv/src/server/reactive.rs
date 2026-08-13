@@ -8,7 +8,7 @@ use axum::{
 };
 use serde_json::json;
 
-use crate::backend::reactive::InjectionRequest;
+use crate::backend::reactive::{InjectionRequest, SupervisorAction};
 use crate::backend::reactive::registry as agent_registry;
 use crate::backend::subagent_watcher;
 use crate::backend::base;
@@ -660,4 +660,118 @@ pub(super) async fn handle_reactive_transcript(
         "truncated": truncated,
     }))
     .into_response()
+}
+
+#[derive(serde::Deserialize)]
+pub(super) struct SupervisorDecisionRequest {
+    target_agent: String,
+    /// "nudge" | "decline".
+    action: String,
+    #[serde(default)]
+    reason: Option<String>,
+    #[serde(default)]
+    request_id: Option<String>,
+    /// The calling Supervisor agent's own identity — same shape as
+    /// `InjectRequest::source_agent` (`SendMessage`/`Loop`). `None` for
+    /// callers that omit it (e.g. cron-driven).
+    #[serde(default)]
+    source_agent: Option<String>,
+}
+
+/// `POST /agentmux/reactive/supervisor-decision` — a Warden Supervisor
+/// watcher agent's decision about a target agent it just polled (see
+/// `GetAgentTranscript`). `action: "nudge"` delivers a fixed continuation
+/// message (not caller-supplied text — see `SupervisorAction::Nudge`'s
+/// doc) to `target_agent` through the same path `SendMessage`/`Loop` use
+/// and audits it as a Supervisor-originated entry; `action: "decline"`
+/// sends nothing and just audits the decision. A nudge that would exceed
+/// the consecutive-nudge ceiling is refused with HTTP 429 — the calling
+/// agent should treat that as a signal to stop and escalate to a human
+/// instead of retrying.
+pub(super) async fn handle_reactive_supervisor_decision(
+    State(state): State<AppState>,
+    Json(req): Json<SupervisorDecisionRequest>,
+) -> Response {
+    if req.target_agent.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "missing target_agent"})),
+        )
+            .into_response();
+    }
+
+    let action = match req.action.as_str() {
+        "nudge" => SupervisorAction::Nudge,
+        "decline" => SupervisorAction::Decline,
+        other => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": format!("unknown action: {other} (expected \"nudge\" or \"decline\")")})),
+            )
+                .into_response();
+        }
+    };
+
+    // Entitlement gate (reagentx P1 on PR #2557): a Nudge must not deliver
+    // unless the target has actually opted in via `auto_continue_enabled`.
+    // `Handler` (backend::reactive) has no `Store` access by design — this
+    // check belongs at the HTTP boundary where `state.wstore` is available,
+    // not inside `record_supervisor_decision`. Decline never delivers
+    // anything, so it isn't gated.
+    //
+    // Match on `d.slug`, NOT `d.name` (reagentx P0, round 3 — every
+    // delivery path keys registration off `AGENTMUX_AGENT_ID`, which
+    // `agent_open.rs` sets to the agent's stable `slug`, not its
+    // renameable display `name`. Matching on `name` here let a renamed
+    // agent's own opt-in go unrecognized, and — worse — let one agent's
+    // slug collide with an unrelated agent's current display name,
+    // authorizing a nudge off the wrong definition's flag. Same
+    // name/slug cross-namespace hazard `agents.rs`'s
+    // `instance_get_by_name_and_by_slug_never_cross_the_others_namespace`
+    // regression-tests for the read path.)
+    if matches!(action, SupervisorAction::Nudge) {
+        let opted_in = state
+            .wstore
+            .agent_def_list()
+            .ok()
+            .and_then(|defs| {
+                defs.into_iter()
+                    .find(|d| d.slug.eq_ignore_ascii_case(&req.target_agent))
+            })
+            .map(|d| d.auto_continue_enabled != 0)
+            .unwrap_or(false);
+        if !opted_in {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({
+                    "error": format!(
+                        "target agent '{}' has not opted in to auto_continue_enabled",
+                        req.target_agent
+                    )
+                })),
+            )
+                .into_response();
+        }
+    }
+
+    let reason = req.reason.unwrap_or_default();
+    let request_id = req
+        .request_id
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    match state.reactive_handler.record_supervisor_decision(
+        &req.target_agent,
+        action,
+        &reason,
+        &request_id,
+        req.source_agent.as_deref(),
+    ) {
+        Ok(resp) => Json(serde_json::to_value(&resp).unwrap_or_default()).into_response(),
+        Err(e) => (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({"error": e})),
+        )
+            .into_response(),
+    }
 }

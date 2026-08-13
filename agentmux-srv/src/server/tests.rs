@@ -401,6 +401,281 @@ async fn reactive_transcript_unknown_agent_is_404() {
 }
 
 #[tokio::test]
+async fn reactive_supervisor_decision_missing_target_agent_is_rejected() {
+    // `target_agent` is a required field on `SupervisorDecisionRequest`, so
+    // an omitted key fails at axum's Json extractor (422), before the
+    // handler's own empty-string check (400) ever runs.
+    let app = test_router();
+    let body = serde_json::json!({"action": "decline"});
+    let req = Request::builder()
+        .method("POST")
+        .uri("/agentmux/reactive/supervisor-decision")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn reactive_supervisor_decision_empty_target_agent_is_400() {
+    let app = test_router();
+    let body = serde_json::json!({"target_agent": "", "action": "decline"});
+    let req = Request::builder()
+        .method("POST")
+        .uri("/agentmux/reactive/supervisor-decision")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn reactive_supervisor_decision_unknown_action_is_400() {
+    let app = test_router();
+    let body = serde_json::json!({"target_agent": "some-agent", "action": "maybe"});
+    let req = Request::builder()
+        .method("POST")
+        .uri("/agentmux/reactive/supervisor-decision")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+/// reagentx P1 on PR #2557: `SupervisorAction::Nudge` delivers a fixed,
+/// server-owned message (`handler::NUDGE_MESSAGE`) — it no longer accepts
+/// (or requires) caller-supplied text at all. A `message` field in the
+/// request body, if a caller sends one out of habit, must be silently
+/// ignored (serde's default unknown-field behavior), not error and not
+/// influence what's delivered — this regression-guards against the
+/// free-form-text contract reagentx flagged ever coming back.
+#[tokio::test]
+async fn reactive_supervisor_decision_nudge_ignores_a_stray_message_field() {
+    let app = test_router();
+    let body = serde_json::json!({
+        "target_agent": "some-agent",
+        "action": "nudge",
+        "message": "do something completely different",
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/agentmux/reactive/supervisor-decision")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    // "some-agent" has no AgentDefinition in this hermetic store, so the
+    // entitlement gate refuses it — same as any other not-opted-in target.
+    // The point of this test is that a stray `message` field didn't change
+    // that outcome (e.g. by being misparsed into some other code path).
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn reactive_supervisor_decision_decline_succeeds_for_unregistered_target() {
+    // Decline never attempts delivery, so it succeeds even for a target
+    // that isn't (or is no longer) registered — matching a Supervisor
+    // deciding not to nudge an agent it can no longer see.
+    let app = test_router();
+    let body = serde_json::json!({
+        "target_agent": "supervisor-decision-test-decline-target-http",
+        "action": "decline",
+        "reason": "target looks done"
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/agentmux/reactive/supervisor-decision")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json["success"].as_bool().unwrap());
+}
+
+/// reagentx P1 on PR #2557: a Nudge must not deliver unless the target
+/// has actually opted in via `auto_continue_enabled`. An agent with no
+/// matching `AgentDefinition` at all (never opted in — the default) must
+/// be refused with 403, not silently attempted.
+#[tokio::test]
+async fn reactive_supervisor_decision_nudge_rejected_when_not_opted_in() {
+    let app = test_router();
+    let body = serde_json::json!({
+        "target_agent": "supervisor-nudge-test-not-opted-in",
+        "action": "nudge",
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/agentmux/reactive/supervisor-decision")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json["error"].as_str().unwrap().contains("auto_continue_enabled"));
+}
+
+/// The same gate must actively check the flag's value, not just presence
+/// of a definition row — `auto_continue_enabled: 0` (the default) is
+/// still a rejection.
+#[tokio::test]
+async fn reactive_supervisor_decision_nudge_rejected_when_opted_out() {
+    let state = test_state();
+    // `target_agent` is what every delivery path actually keys on:
+    // AGENTMUX_AGENT_ID, which agent_open.rs sets to the stable `slug`, NOT
+    // the renameable `name` (reagentx P0, round 3). `name` is deliberately
+    // a different string here so this test also guards against the gate
+    // matching on `name` again.
+    let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
+        "id": "def-supervisor-nudge-opted-out",
+        "slug": "supervisor-nudge-test-opted-out",
+        "name": "Opted-Out Display Name",
+        "icon": "robot",
+        "provider": "claude",
+        "description": "test agent",
+        "created_at": 1,
+        "auto_continue_enabled": 0,
+    }))
+    .expect("definition fixture");
+    state.wstore.agent_def_insert(&mut def).expect("insert definition");
+
+    let app = build_router(state);
+    let body = serde_json::json!({
+        "target_agent": "supervisor-nudge-test-opted-out",
+        "action": "nudge",
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/agentmux/reactive/supervisor-decision")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+/// An opted-in target's Nudge must pass the entitlement gate (i.e. NOT get
+/// refused with 403) — whatever happens next is ordinary delivery
+/// machinery (in this hermetic test harness, delivery itself fails because
+/// no input sender is wired into the shared global reactive handler, which
+/// is a test-environment gap unrelated to the gate this test targets).
+#[tokio::test]
+async fn reactive_supervisor_decision_nudge_passes_gate_when_opted_in() {
+    let state = test_state();
+    // Same slug/name distinction as the opted-out test above — `name` is
+    // deliberately not what `target_agent` matches.
+    let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
+        "id": "def-supervisor-nudge-opted-in",
+        "slug": "supervisor-nudge-test-opted-in",
+        "name": "Opted-In Display Name",
+        "icon": "robot",
+        "provider": "claude",
+        "description": "test agent",
+        "created_at": 1,
+        "auto_continue_enabled": 1,
+    }))
+    .expect("definition fixture");
+    state.wstore.agent_def_insert(&mut def).expect("insert definition");
+
+    let app = build_router(state);
+    let body = serde_json::json!({
+        "target_agent": "supervisor-nudge-test-opted-in",
+        "action": "nudge",
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/agentmux/reactive/supervisor-decision")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_ne!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "an opted-in target must not be blocked by the entitlement gate"
+    );
+}
+
+/// reagentx P0, round 3: the exact cross-namespace collision the entitlement
+/// gate must not fall into. Agent A's own SLUG is unrelated, but its
+/// display NAME happens to equal Agent B's slug; Agent A is opted OUT.
+/// Agent B is opted IN. A nudge for `target_agent = "collision"` (which is
+/// how every delivery path — and thus this gate — must resolve it: as
+/// Agent B's slug) must pass the gate, not get wrongly authorized OR
+/// wrongly rejected off Agent A's unrelated definition via a name match.
+/// Mirrors `agents.rs`'s own
+/// `instance_get_by_name_and_by_slug_never_cross_the_others_namespace`.
+#[tokio::test]
+async fn reactive_supervisor_decision_nudge_slug_match_does_not_cross_into_a_colliding_display_name() {
+    let state = test_state();
+    let mut agent_a: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
+        "id": "def-collision-agent-a",
+        "slug": "agent-a-unrelated-slug",
+        "name": "collision",
+        "icon": "robot",
+        "provider": "claude",
+        "description": "test agent",
+        "created_at": 1,
+        "auto_continue_enabled": 0,
+    }))
+    .expect("definition fixture");
+    state.wstore.agent_def_insert(&mut agent_a).expect("insert agent a");
+
+    let mut agent_b: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
+        "id": "def-collision-agent-b",
+        "slug": "collision",
+        "name": "Agent B Unrelated Display Name",
+        "icon": "robot",
+        "provider": "claude",
+        "description": "test agent",
+        "created_at": 1,
+        "auto_continue_enabled": 1,
+    }))
+    .expect("definition fixture");
+    state.wstore.agent_def_insert(&mut agent_b).expect("insert agent b");
+
+    let app = build_router(state);
+    let body = serde_json::json!({
+        "target_agent": "collision",
+        "action": "nudge",
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/agentmux/reactive/supervisor-decision")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_ne!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "must resolve to Agent B (slug match, opted in), not Agent A (name match, opted out)"
+    );
+}
+
+#[tokio::test]
 async fn reactive_poller_status() {
     let app = test_router();
     let req = Request::builder()
