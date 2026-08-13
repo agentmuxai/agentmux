@@ -163,6 +163,72 @@ pub(crate) fn on_frontend_first_paint(state: Arc<AppState>, label: String) {
     post_task(ThreadId::UI, Some(&mut task));
 }
 
+/// Bound on how many times `on_load_end`'s top-level `window.show()` retries
+/// when `browser_view_get_for_browser()`/`BrowserView::window()` return
+/// `None` at load-end, instead of the previous silent no-op that left the
+/// window permanently hidden with zero diagnostic trace. This is the same
+/// class of CEF Views timing quirk already diagnosed and worked around on
+/// the pool-window path (`commands/window_pool.rs`'s `POOL_HWND_CACHE`,
+/// `SPEC_POOL_WINDOW_HWND_NULL_2026_05_06.md`) but was never ported to the
+/// main/top-level window path — see
+/// `docs/retro/RETRO_MAIN_WINDOW_SHOW_SILENT_NOOP_2026_08_13.md`.
+const SHOW_WINDOW_MAX_RETRIES: u32 = 10;
+/// Delay between retries — short enough that a handful still resolves within
+/// a user-imperceptible instant if the window becomes resolvable a frame or
+/// two later, long enough not to busy-loop the UI thread.
+const SHOW_WINDOW_RETRY_DELAY_MS: i64 = 50;
+
+/// Show + focus a top-level (non-pool) window by label if its `BrowserView`/
+/// `Window` are resolvable and it isn't already visible. Returns `true` once
+/// resolved (shown or already visible), `false` if the CEF Views objects
+/// aren't available yet — caller should retry rather than give up silently.
+fn try_show_top_level_window(state: &std::sync::Arc<crate::state::AppState>, label: &str) -> bool {
+    let Some(mut browser) = state.get_browser(label) else { return false };
+    let Some(bv) = browser_view_get_for_browser(Some(&mut browser)) else { return false };
+    let Some(window) = bv.window() else { return false };
+    if window.is_visible() == 0 {
+        window.show();
+        if let Some(host) = browser.host() {
+            host.set_focus(1);
+        }
+    }
+    true
+}
+
+wrap_task! {
+    struct ShowWindowRetryTask {
+        state: std::sync::Arc<crate::state::AppState>,
+        label: String,
+        retries_left: u32,
+    }
+    impl Task { fn execute(&self) {
+        if try_show_top_level_window(&self.state, &self.label) {
+            tracing::info!(
+                target: "wrr",
+                label = %self.label,
+                retries_left = self.retries_left,
+                "[on_load_end] show() retry succeeded"
+            );
+            return;
+        }
+        if self.retries_left == 0 {
+            tracing::error!(
+                target: "wrr",
+                label = %self.label,
+                max_retries = SHOW_WINDOW_MAX_RETRIES,
+                "[on_load_end] browser_view/window still not resolvable after all retries — window will stay hidden"
+            );
+            return;
+        }
+        let mut next = ShowWindowRetryTask::new(
+            self.state.clone(),
+            self.label.clone(),
+            self.retries_left - 1,
+        );
+        post_delayed_task(ThreadId::UI, Some(&mut next), SHOW_WINDOW_RETRY_DELAY_MS);
+    }}
+}
+
 impl AgentMuxHandler {
     /// CEF fires this whenever the browser's loading/history state changes
     /// (navigation started, navigation committed, back/forward enabled).
@@ -331,8 +397,10 @@ impl AgentMuxHandler {
             .map_or(false, |l| l.starts_with("window-pool-") || l.starts_with("floating-pool-"));
 
         if !is_pool_window {
+            let mut resolved = false;
             if let Some(bv) = browser_view_get_for_browser(browser_cloned.as_mut()) {
                 if let Some(window) = bv.window() {
+                    resolved = true;
                     if window.is_visible() == 0 {
                         // Linux: defer the actual show()/focus (and the splash
                         // dismiss above) until the frontend confirms a real
@@ -400,6 +468,30 @@ impl AgentMuxHandler {
                             }
                         }
                     }
+                }
+            }
+            if !resolved {
+                // browser_view_get_for_browser()/bv.window() returned None —
+                // the CEF Views timing quirk documented on
+                // ShowWindowRetryTask above. Previously this silently left
+                // the window hidden forever; now retry on a short backoff.
+                if let Some(label) = browser_label.clone() {
+                    tracing::warn!(
+                        target: "wrr",
+                        label = %label,
+                        "[on_load_end] browser_view/window not resolvable at load-end — scheduling show() retry"
+                    );
+                    let mut task = ShowWindowRetryTask::new(
+                        self.state.clone(),
+                        label,
+                        SHOW_WINDOW_MAX_RETRIES,
+                    );
+                    post_delayed_task(ThreadId::UI, Some(&mut task), SHOW_WINDOW_RETRY_DELAY_MS);
+                } else {
+                    tracing::error!(
+                        target: "wrr",
+                        "[on_load_end] browser_view/window not resolvable AND label unknown — cannot retry show(), window will stay hidden"
+                    );
                 }
             }
         }
