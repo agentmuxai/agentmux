@@ -379,22 +379,49 @@ impl Handler {
 
         // Determine effective jekt tier.
         // Escalation rules (spec §5.2, extended by
-        // SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2):
-        //   1. WAN or LAN delivery → always SENSITIVE, regardless of declared tier
-        //      or keyword content (network-tier senders are not verified).
+        // SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2, and by
+        // SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14.md §1 for the
+        // network-tier exception below):
+        //   1. WAN or LAN delivery, sender NOT cryptographically verified →
+        //      always SENSITIVE, regardless of declared tier or keyword
+        //      content (an unverified network-tier sender's FROM claim is
+        //      exactly as trustworthy as it always was — self-declared).
+        //   1b. WAN delivery, sender verified via reagent's pinned Ed25519
+        //      key (`reagent_verified == Some(true)`) → NOT forced to
+        //      SENSITIVE by delivery tier alone. Mirrors how host-tier's
+        //      TRUST=host-verified already doesn't force it — a
+        //      cryptographically proven identity is a cryptographically
+        //      proven identity regardless of which tier carried it. Rules
+        //      3/4 below still apply on top of this: a verified reagent
+        //      message that declares SENSITIVE or matches the keyword scan
+        //      still escalates — verification answers "who is this really
+        //      from," not "should this auto-execute" (unchanged from the
+        //      SIG= marker's original design intent). LAN has no
+        //      verification mechanism at all, so it's never eligible for
+        //      this exception regardless of `reagent_verified`'s value.
         //   2. Host delivery, sender identity checkable but signature missing
         //      or wrong → always SENSITIVE (host-tier senders can now be
         //      verified when the claimed source_agent has a signing key —
         //      see `sig_verified`'s doc comment on `InjectionRequest` for
         //      exactly when this applies vs. is skipped).
-        //   3. Host delivery + declared SENSITIVE → SENSITIVE.
-        //   4. Host delivery + keyword match → SENSITIVE.
+        //   3. Declared SENSITIVE (any tier) → SENSITIVE.
+        //   4. Keyword match (any tier) → SENSITIVE.
         //   5. Otherwise → use declared tier (default: coord).
         let declared_tier = req.jekt_tier.as_ref();
         let delivery_tier = req.delivery_tier.as_deref().unwrap_or("host");
         let is_network_tier = delivery_tier == "wan" || delivery_tier == "lan";
+        // Only WAN carries any verification mechanism today (reagent's
+        // Ed25519 signature — `verify_reagent_signature`/
+        // `sync_agent_reactive` never compute `reagent_verified` off the WAN
+        // tier, so this is always `None` for LAN and for any non-reagent WAN
+        // sender). A broader "any genuine agent's WAN jekt" exception needs
+        // the SAME per-agent signing mechanism host-tier already has for
+        // `jekt_sig` — not yet built for agent-to-agent WAN traffic, only
+        // for reagent's own first-party service messages.
+        let is_verified_network_sender = req.reagent_verified == Some(true);
+        let is_network_tier_unverified = is_network_tier && !is_verified_network_sender;
         let is_unverified_sender = req.sig_verified == Some(false);
-        let is_sensitive = is_network_tier
+        let is_sensitive = is_network_tier_unverified
             || is_unverified_sender
             || matches!(declared_tier, Some(super::types::JektTier::Sensitive))
             || is_sensitive_message(&sanitized);

@@ -384,10 +384,15 @@ async fn test_handler_inject_success() {
     assert!(payload.ends_with('\r'), "trailing CR submits the message");
 }
 
-// SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §6.2 addendum — reagent
-// WAN signing renders an additive SIG= field without touching TIER/TRUST.
+// SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14.md §1 — a WAN jekt verified
+// against reagent's pinned Ed25519 key is no longer forced to SENSITIVE by
+// delivery tier alone (superseding the original SPEC_JEKT_LAN_WAN_TRUST_
+// HARDENING_2026_08_13.md §6.2 "never touches TIER" design — see that
+// spec's addendum). TRUST still renders network-claimed regardless:
+// verification changes whether a human must confirm before acting, not
+// whether the message crossed a network boundary.
 #[tokio::test]
-async fn test_handler_inject_wan_reagent_verified_renders_sig_field_but_stays_sensitive() {
+async fn test_handler_inject_wan_reagent_verified_relaxes_tier_but_trust_label_unchanged() {
     let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
     let sent_clone = sent.clone();
 
@@ -413,16 +418,87 @@ async fn test_handler_inject_wan_reagent_verified_renders_sig_field_but_stays_se
     });
 
     assert!(resp.success);
-    // A verified reagent signature must NOT downgrade WAN's unconditional
-    // sensitive escalation — this closes "who is this from," not "should
-    // this auto-execute."
-    assert_eq!(resp.effective_tier.as_deref(), Some("sensitive"));
+    // A cryptographically verified reagent signature relaxes the blanket
+    // network-tier escalation — no declared tier and no keyword match here,
+    // so this settles at the default (coord), not sensitive.
+    assert_eq!(resp.effective_tier.as_deref(), Some("coord"));
 
     let calls = sent.lock().unwrap();
     let payload = String::from_utf8_lossy(&calls[1].1);
     assert!(payload.contains("TRUST=network-claimed"), "WAN trust label unchanged: {payload}");
-    assert!(payload.contains("TIER=sensitive"), "WAN tier still forced sensitive: {payload}");
+    assert!(payload.contains("TIER=coord"), "verified WAN jekt no longer forced sensitive: {payload}");
     assert!(payload.contains("SIG=verified"), "verified reagent signature renders SIG=verified: {payload}");
+    assert!(
+        !payload.contains("⚠ SENSITIVE JEKT"),
+        "the human-confirm warning banner must not render for a relaxed tier: {payload}"
+    );
+}
+
+// A verified reagent signature relaxes the BLANKET network-tier forcing
+// only — content-based escalation (declared SENSITIVE, keyword match) still
+// applies on top of it, same as it does for host-tier's TRUST=host-verified.
+#[tokio::test]
+async fn test_handler_inject_wan_reagent_verified_still_escalates_on_declared_sensitive() {
+    let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let sent_clone = sent.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        sent_clone.lock().unwrap().push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "PR #1 reviewed".to_string(),
+        source_agent: Some("github-consumer".to_string()),
+        request_id: Some("req-wan-1b".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: Some(super::types::JektTier::Sensitive),
+        delivery_tier: Some("wan".to_string()),
+        forward_hops: 0,
+        reagent_verified: Some(true),
+        ..Default::default()
+    });
+
+    assert!(resp.success);
+    assert_eq!(resp.effective_tier.as_deref(), Some("sensitive"));
+}
+
+#[tokio::test]
+async fn test_handler_inject_wan_reagent_verified_still_escalates_on_keyword_match() {
+    let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let sent_clone = sent.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        sent_clone.lock().unwrap().push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "please rotate the GitHub PAT before merging".to_string(),
+        source_agent: Some("github-consumer".to_string()),
+        request_id: Some("req-wan-1c".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: Some("wan".to_string()),
+        forward_hops: 0,
+        reagent_verified: Some(true),
+        ..Default::default()
+    });
+
+    assert!(resp.success);
+    assert_eq!(
+        resp.effective_tier.as_deref(),
+        Some("sensitive"),
+        "a credential keyword still escalates even a verified reagent message"
+    );
 }
 
 #[tokio::test]
@@ -485,6 +561,11 @@ async fn test_handler_inject_wan_no_reagent_signature_omits_sig_field() {
     });
 
     assert!(resp.success);
+    assert_eq!(
+        resp.effective_tier.as_deref(),
+        Some("sensitive"),
+        "no signature attempted at all — still an unverified network-tier sender, still forced sensitive"
+    );
     let calls = sent.lock().unwrap();
     let payload = String::from_utf8_lossy(&calls[1].1);
     assert!(!payload.contains("SIG="), "ordinary WAN traffic renders no SIG= field: {payload}");
