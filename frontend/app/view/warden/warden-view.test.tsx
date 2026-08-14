@@ -7,6 +7,7 @@
  * Internet, Audit, Supervisor).
  */
 
+import { createSignal } from "solid-js";
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -26,7 +27,26 @@ vi.mock("@/app/view/warden-supervisor/warden-supervisor-manager", () => ({
     WardenSupervisorManager: () => <div data-testid="supervisor-manager" />,
 }));
 
-const setMetaMock = vi.fn().mockResolvedValue(undefined);
+// blockMeta is a real Solid signal, not a plain object — warden-model.ts's
+// sectionAtom/viewName are createMemo-derived from model.blockAtom(), so
+// reading a plain (non-reactive) stub only ever satisfies a memo's *first*
+// (eager, at-construction) computation. Backing the mock with a genuine
+// signal, and having the SetMetaCommand mock write into it, reproduces the
+// real write -> WPS push -> blockAtom update round trip closely enough for
+// clicking a rail item to actually flip the visible/active section here,
+// the same way it does against the real backend. Mirrors armory-view.test.tsx.
+const [blockMeta, setBlockMeta] = createSignal<Record<string, unknown>>({});
+vi.mock("@/app/store/wos", () => ({
+    makeORef: (type: string, id: string) => `${type}:${id}`,
+    getWaveObjectAtom: () => () => ({ meta: blockMeta() }),
+    getObjectValue: () => ({}),
+}));
+
+const setMetaMock = vi.fn((..._args: unknown[]) => {
+    const opts = _args[1] as { oref: string; meta: Record<string, unknown> };
+    setBlockMeta((prev) => ({ ...prev, ...opts.meta }));
+    return Promise.resolve(undefined);
+});
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         SetMetaCommand: (...args: unknown[]) => setMetaMock(...args),
@@ -39,6 +59,7 @@ import { WardenViewModel } from "./warden-model";
 describe("WardenView rail", () => {
     afterEach(() => {
         cleanup();
+        setBlockMeta({});
     });
 
     function renderWarden() {
@@ -97,10 +118,79 @@ describe("WardenView rail", () => {
     });
 });
 
+describe("WardenView pane title", () => {
+    afterEach(() => {
+        cleanup();
+        setMetaMock.mockClear();
+        setBlockMeta({});
+    });
+
+    function renderWarden() {
+        const model = new WardenViewModel("test-block", null as any);
+        const result = render(() => (
+            <WardenView
+                blockId="test-block"
+                model={model}
+                blockRef={{ current: null }}
+                contentRef={{ current: null }}
+            />
+        ));
+        return { ...result, model };
+    }
+
+    it("defaults viewName() to 'Host' with no warden:section meta", () => {
+        const { model } = renderWarden();
+        expect(model.viewName()).toBe("Host");
+    });
+
+    it("clicking a rail item writes warden:section via SetMetaCommand and updates viewName()", () => {
+        const { model } = renderWarden();
+        const rail = screen.getByLabelText("Warden section", { selector: "nav.bundle-manager-rail" });
+        const auditButton = Array.from(rail.querySelectorAll("button")).find(
+            (b) => b.textContent?.includes("Audit"),
+        ) as HTMLButtonElement;
+        auditButton.click();
+        expect(setMetaMock).toHaveBeenCalledWith(
+            undefined,
+            { oref: "block:test-block", meta: { "warden:section": "audit" } },
+        );
+        expect(model.viewName()).toBe("Audit");
+        const auditPane = screen.getByTestId("audit-manager").closest(".bundle-manager-pane");
+        expect(auditPane?.classList.contains("is-hidden")).toBe(false);
+    });
+
+    it("clicking a bottom tab-bar item writes warden:section via SetMetaCommand and updates viewName()", () => {
+        const { model } = renderWarden();
+        const tabBar = screen.getByLabelText("Warden section", { selector: "nav.bundle-manager-tab-bar" });
+        const supervisorButton = Array.from(tabBar.querySelectorAll("button")).find(
+            (b) => b.textContent?.includes("Supervisor"),
+        ) as HTMLButtonElement;
+        supervisorButton.click();
+        expect(setMetaMock).toHaveBeenCalledWith(
+            undefined,
+            { oref: "block:test-block", meta: { "warden:section": "supervisor" } },
+        );
+        expect(model.viewName()).toBe("Supervisor");
+    });
+
+    it("viewName() reflects a pre-seeded warden:section meta value", () => {
+        setBlockMeta({ "warden:section": "lan" });
+        const model = new WardenViewModel("test-block", null as any);
+        expect(model.viewName()).toBe("LAN");
+    });
+
+    it("falls back to 'Host' for an invalid warden:section meta value", () => {
+        setBlockMeta({ "warden:section": "not-a-real-section" });
+        const model = new WardenViewModel("test-block", null as any);
+        expect(model.viewName()).toBe("Host");
+    });
+});
+
 describe("WardenView zoom", () => {
     afterEach(() => {
         cleanup();
         setMetaMock.mockClear();
+        setBlockMeta({});
     });
 
     function renderWarden() {

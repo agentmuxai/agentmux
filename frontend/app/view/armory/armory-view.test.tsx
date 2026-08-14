@@ -15,6 +15,7 @@
  * needed for that part).
  */
 
+import { createSignal } from "solid-js";
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -34,7 +35,30 @@ vi.mock("@/app/view/skill/skill-manager", () => ({
     SkillManager: () => <div data-testid="skill-manager" />,
 }));
 
-const setMetaMock = vi.fn().mockResolvedValue(undefined);
+// blockMeta is a real Solid signal, not a plain object — armory-model.ts's
+// sectionAtom/viewName are createMemo-derived from model.blockAtom(), so
+// reading a plain (non-reactive) stub only ever satisfies a memo's *first*
+// (eager, at-construction) computation. Backing the mock with a genuine
+// signal, and having the SetMetaCommand mock write into it, reproduces the
+// real write -> WPS push -> blockAtom update round trip closely enough for
+// clicking a rail item to actually flip the visible/active section here,
+// the same way it does against the real backend.
+const [blockMeta, setBlockMeta] = createSignal<Record<string, unknown>>({});
+vi.mock("@/app/store/wos", () => ({
+    makeORef: (type: string, id: string) => `${type}:${id}`,
+    getWaveObjectAtom: () => () => ({ meta: blockMeta() }),
+    // global.ts/window-identity.ts evaluate a `tabAtom` createMemo at
+    // module-init time that calls WOS.getObjectValue — without this stub
+    // the import chain crashes during test setup (same gap browser-model
+    // .test.ts's wos mock documents).
+    getObjectValue: () => ({}),
+}));
+
+const setMetaMock = vi.fn((..._args: unknown[]) => {
+    const opts = _args[1] as { oref: string; meta: Record<string, unknown> };
+    setBlockMeta((prev) => ({ ...prev, ...opts.meta }));
+    return Promise.resolve(undefined);
+});
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         SetMetaCommand: (...args: unknown[]) => setMetaMock(...args),
@@ -47,6 +71,7 @@ import { ArmoryViewModel } from "./armory-model";
 describe("ArmoryView rail", () => {
     afterEach(() => {
         cleanup();
+        setBlockMeta({});
     });
 
     function renderArmory() {
@@ -90,10 +115,79 @@ describe("ArmoryView rail", () => {
     });
 });
 
+describe("ArmoryView pane title", () => {
+    afterEach(() => {
+        cleanup();
+        setMetaMock.mockClear();
+        setBlockMeta({});
+    });
+
+    function renderArmory() {
+        const model = new ArmoryViewModel("test-block", null as any);
+        const result = render(() => (
+            <ArmoryView
+                blockId="test-block"
+                model={model}
+                blockRef={{ current: null }}
+                contentRef={{ current: null }}
+            />
+        ));
+        return { ...result, model };
+    }
+
+    it("defaults viewName() to 'Accounts' with no armory:section meta", () => {
+        const { model } = renderArmory();
+        expect(model.viewName()).toBe("Accounts");
+    });
+
+    it("clicking a rail item writes armory:section via SetMetaCommand and updates viewName()", () => {
+        const { model } = renderArmory();
+        const rail = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-rail" });
+        const skillsButton = Array.from(rail.querySelectorAll("button")).find(
+            (b) => b.textContent?.includes("Skills"),
+        ) as HTMLButtonElement;
+        skillsButton.click();
+        expect(setMetaMock).toHaveBeenCalledWith(
+            undefined,
+            { oref: "block:test-block", meta: { "armory:section": "skills" } },
+        );
+        expect(model.viewName()).toBe("Skills");
+        const skillsPane = screen.getByTestId("skill-manager").closest(".bundle-manager-pane");
+        expect(skillsPane?.classList.contains("is-hidden")).toBe(false);
+    });
+
+    it("clicking a bottom tab-bar item writes armory:section via SetMetaCommand and updates viewName()", () => {
+        const { model } = renderArmory();
+        const tabBar = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-tab-bar" });
+        const mcpButton = Array.from(tabBar.querySelectorAll("button")).find(
+            (b) => b.textContent?.includes("MCP Servers"),
+        ) as HTMLButtonElement;
+        mcpButton.click();
+        expect(setMetaMock).toHaveBeenCalledWith(
+            undefined,
+            { oref: "block:test-block", meta: { "armory:section": "mcp" } },
+        );
+        expect(model.viewName()).toBe("MCP Servers");
+    });
+
+    it("viewName() reflects a pre-seeded armory:section meta value", () => {
+        setBlockMeta({ "armory:section": "bundles" });
+        const model = new ArmoryViewModel("test-block", null as any);
+        expect(model.viewName()).toBe("ABF");
+    });
+
+    it("falls back to 'Accounts' for an invalid armory:section meta value", () => {
+        setBlockMeta({ "armory:section": "not-a-real-section" });
+        const model = new ArmoryViewModel("test-block", null as any);
+        expect(model.viewName()).toBe("Accounts");
+    });
+});
+
 describe("ArmoryView zoom", () => {
     afterEach(() => {
         cleanup();
         setMetaMock.mockClear();
+        setBlockMeta({});
     });
 
     function renderArmory() {
