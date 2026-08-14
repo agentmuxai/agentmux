@@ -48,6 +48,31 @@
     font-size: 11px;
 }
 
+// MuxBus connection status row (header). The diamond is decorative — same
+// glyph as .instance-panel-pane-icon — the pill next to it is the actual
+// signal: it only renders when this instance has no valid muxbus session,
+// which otherwise fails completely silently (no WAN jekt delivery, no
+// error anywhere) — see SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14.md's
+// verification writeup for the incident that motivated this.
+.instance-panel-muxbus-icon {
+    flex: 0 0 auto;
+    color: var(--accent-color, var(--secondary-text-color));
+    font-size: 11px;
+    margin-right: var(--space-1);
+}
+
+.instance-panel-muxbus-pill {
+    display: inline-flex;
+    align-items: center;
+    font-size: 10px;
+    font-weight: 500;
+    padding: 1px 8px;
+    border-radius: 999px;
+    color: var(--error-color);
+    background: color-mix(in srgb, var(--error-color) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--error-color) 40%, transparent);
+}
+
 .instance-panel-copy {
     flex: 0 0 auto;
     background: transparent;
