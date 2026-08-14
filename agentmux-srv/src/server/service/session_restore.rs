@@ -56,6 +56,15 @@ fn placeholder_idx(s: &str) -> Option<usize> {
 pub(crate) fn snapshot_workspace(store: &Store, workspace_id: &str) -> Option<Value> {
     let workspace = store.get::<Workspace>(workspace_id).ok().flatten()?;
     let mut tabs = Vec::new();
+    // Position of `workspace.activetabid` WITHIN the successfully-captured
+    // `tabs` array (reagentx P2 on PR #2560: previously never captured at
+    // all, so a restore always focused whichever tab `CreateTab`'s
+    // first-tab-wins default left active — see `wcore/tab.rs`'s
+    // `ws.activetabid.is_empty()` check). Same "index by position in the
+    // list that actually survived" reasoning as blocks below: if the
+    // originally-active tab is one that fails to load, this simply stays
+    // `None` and restore falls back to whatever `CreateTab` leaves active.
+    let mut active_tab_index: Option<usize> = None;
     // `pinnedtabids` is a legacy field (pinning was removed from AgentMux —
     // see `tab_lifecycle.rs`); a workspace the reducer hasn't touched yet
     // (e.g. straight out of `ensure_initial_data`) can still have its one
@@ -87,8 +96,8 @@ pub(crate) fn snapshot_workspace(store: &Store, workspace_id: &str) -> Option<Va
         if blocks.is_empty() {
             continue;
         }
-        let (rootnode, focusednodeid) = if tab.layoutstate.is_empty() {
-            (None, String::new())
+        let (rootnode, focusednodeid, magnifiednodeid) = if tab.layoutstate.is_empty() {
+            (None, String::new(), String::new())
         } else {
             match store.get::<LayoutState>(&tab.layoutstate) {
                 Ok(Some(layout)) => {
@@ -96,22 +105,26 @@ pub(crate) fn snapshot_workspace(store: &Store, workspace_id: &str) -> Option<Va
                         placeholderize(&mut tree, &idx_by_block_id);
                         tree
                     });
-                    (rootnode, layout.focusednodeid)
+                    (rootnode, layout.focusednodeid, layout.magnifiednodeid)
                 }
-                _ => (None, String::new()),
+                _ => (None, String::new(), String::new()),
             }
         };
+        if tab_id == &workspace.activetabid {
+            active_tab_index = Some(tabs.len());
+        }
         tabs.push(json!({
             "name": tab.name,
             "blocks": blocks,
             "rootnode": rootnode,
             "focusednodeid": focusednodeid,
+            "magnifiednodeid": magnifiednodeid,
         }));
     }
     if tabs.is_empty() {
         return None;
     }
-    Some(json!({ "tabs": tabs }))
+    Some(json!({ "tabs": tabs, "active_tab_index": active_tab_index }))
 }
 
 /// Replace every leaf's real block id (in `data.block_id`, `block_stack`,
@@ -170,15 +183,28 @@ fn resolve_placeholders(node: &mut LayoutNode, new_ids: &[String]) {
 /// Persist a snapshot as the durable "last session" record, overwriting
 /// whatever was there before. Best-effort: a write failure is logged, never
 /// propagated — this must never block the close it rides alongside.
+///
+/// Reads-then-writes the singleton `Client` row inside a single
+/// `with_tx` (reagentx P1 on PR #2560): the two used to be separate
+/// `store.get_all`/`store.update` calls, unlike `persist_subscriber`'s
+/// window handlers which already wrap this exact shape in a transaction.
+/// A concurrent write to `Client` between the read and the write here
+/// (e.g. another in-flight `CloseWindow` pruning `windowids`, or a second
+/// concurrent snapshot save/clear) would silently lose whichever change
+/// didn't win the race — a classic lost-update. `with_tx` holds the
+/// store's connection lock for the whole read+write, so no other caller
+/// can observe or write an intermediate state.
 pub(crate) fn save_last_session_snapshot(store: &Store, snapshot: Value) {
-    let Ok(clients) = store.get_all::<Client>() else {
-        return;
-    };
-    let Some(mut client) = clients.into_iter().next() else {
-        return;
-    };
-    client.meta.insert(SNAPSHOT_META_KEY.to_string(), snapshot);
-    if let Err(e) = store.update(&mut client) {
+    let result = store.with_tx(|tx| {
+        let clients = tx.get_all::<Client>()?;
+        let Some(mut client) = clients.into_iter().next() else {
+            return Ok(());
+        };
+        client.meta.insert(SNAPSHOT_META_KEY.to_string(), snapshot);
+        tx.update(&mut client)?;
+        Ok(())
+    });
+    if let Err(e) = result {
         tracing::warn!(
             error = %e,
             "session_restore: failed to persist last-session snapshot"
@@ -201,16 +227,21 @@ fn load_last_session_snapshot(store: &Store) -> Option<Value> {
 /// (`handle_create_window`) already independently guards against — this is
 /// defense in depth, not the only thing preventing duplicates.
 pub(crate) fn clear_last_session_snapshot(store: &Store) {
-    let Ok(clients) = store.get_all::<Client>() else {
-        return;
-    };
-    let Some(mut client) = clients.into_iter().next() else {
-        return;
-    };
-    if client.meta.remove(SNAPSHOT_META_KEY).is_none() {
-        return; // nothing to clear
-    }
-    if let Err(e) = store.update(&mut client) {
+    // Same `with_tx`-atomicity reasoning as `save_last_session_snapshot`
+    // above (reagentx P1 on PR #2560) — this read-then-write was
+    // previously two separate store calls.
+    let result = store.with_tx(|tx| {
+        let clients = tx.get_all::<Client>()?;
+        let Some(mut client) = clients.into_iter().next() else {
+            return Ok(());
+        };
+        if client.meta.remove(SNAPSHOT_META_KEY).is_none() {
+            return Ok(()); // nothing to clear
+        }
+        tx.update(&mut client)?;
+        Ok(())
+    });
+    if let Err(e) = result {
         tracing::warn!(
             error = %e,
             "session_restore: failed to clear last-session snapshot after restore"
@@ -285,8 +316,15 @@ pub(crate) async fn restore_last_session(
 
     let mut all_events = ws_events;
     let mut restored_any_tab = false;
+    // Maps this tab's position in the ORIGINAL snapshot (`tabs_json`) to its
+    // freshly-created id, for tabs that actually made it through restore —
+    // resolves `active_tab_index` below the same way `resolve_placeholders`
+    // resolves block placeholders: by position among what actually survived,
+    // not raw snapshot index (a tab that fails to restore must not desync
+    // this lookup for every tab after it).
+    let mut new_tab_ids_by_snapshot_index: HashMap<usize, String> = HashMap::new();
 
-    for tab_json in &tabs_json {
+    for (snapshot_idx, tab_json) in tabs_json.iter().enumerate() {
         let name = tab_json
             .get("name")
             .and_then(|v| v.as_str())
@@ -347,6 +385,7 @@ pub(crate) async fn restore_last_session(
             continue;
         }
         restored_any_tab = true;
+        new_tab_ids_by_snapshot_index.insert(snapshot_idx, tab_id.clone());
 
         if let Some(rootnode_json) = tab_json.get("rootnode").filter(|v| !v.is_null()) {
             if let Ok(mut tree) = serde_json::from_value::<LayoutNode>(rootnode_json.clone()) {
@@ -356,7 +395,21 @@ pub(crate) async fn restore_last_session(
                     .and_then(|v| v.as_str())
                     .unwrap_or_default()
                     .to_string();
-                if let Err(e) = seed_layout_via_reducer(state, &tab_id, tree, focused, Vec::new()).await {
+                // `magnifiednodeid` refers to a LayoutNode.id, not a block
+                // id — like `focusednodeid`, it survives the snapshot
+                // round-trip verbatim (only `data.block_id`/`block_stack`/
+                // `active_block_id` get placeholder-remapped, never
+                // `LayoutNode.id` itself), so no resolve_placeholders-style
+                // step is needed here. Previously never captured/passed at
+                // all (reagentx P2 on PR #2560), so a tab closed with a
+                // pane magnified always relaunched showing the full split
+                // tree.
+                let magnified = tab_json
+                    .get("magnifiednodeid")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                if let Err(e) = seed_layout_via_reducer(state, &tab_id, tree, focused, Vec::new(), magnified).await {
                     tracing::warn!(
                         tab_id = %tab_id,
                         error = %e,
@@ -379,6 +432,33 @@ pub(crate) async fn restore_last_session(
         let _ = apply_and_publish(state, &comp).await;
         super::reducer_helpers::publish_events(state, &comp);
         return Ok(None);
+    }
+
+    // Restore which tab was active (reagentx P2 on PR #2560: previously
+    // never captured/restored at all — every relaunch focused whichever tab
+    // `CreateTab`'s own first-tab-wins default (`wcore/tab.rs`) happened to
+    // leave active, i.e. always the first). `None` (no index in the
+    // snapshot, or that index's tab didn't survive restore) leaves that
+    // default in place rather than erroring — an unset/stale active tab is
+    // a cosmetic miss, not a reason to fail the whole restore.
+    if let Some(active_snapshot_idx) = snapshot.get("active_tab_index").and_then(|v| v.as_u64()) {
+        if let Some(new_active_tab_id) = new_tab_ids_by_snapshot_index.get(&(active_snapshot_idx as usize)) {
+            let active_events = dispatch_to_reducer(
+                state,
+                Command::SetActiveTab {
+                    workspace_id: ws_id.clone(),
+                    tab_id: new_active_tab_id.clone(),
+                },
+            )
+            .await;
+            if let Some(err) = find_error(&active_events) {
+                tracing::warn!(error = %err, "restore_last_session: SetActiveTab failed — leaving default active tab");
+            } else if apply_and_publish(state, &active_events).await.is_err() {
+                tracing::warn!("restore_last_session: SetActiveTab SQLite write failed — leaving default active tab");
+            } else {
+                all_events.extend(active_events);
+            }
+        }
     }
 
     Ok(Some((ws_id, all_events)))
@@ -541,7 +621,7 @@ mod tests {
             data: None,
             extra: Default::default(),
         };
-        seed_layout_via_reducer(&state, &tab_id, tree, "left".into(), Vec::new())
+        seed_layout_via_reducer(&state, &tab_id, tree, "left".into(), Vec::new(), String::new())
             .await
             .unwrap();
 
@@ -582,6 +662,173 @@ mod tests {
             .collect();
         assert_eq!(leaf_block_ids, vec![new_tab.blockids[0].clone(), new_tab.blockids[1].clone()]);
         assert!(!leaf_block_ids.iter().any(|id| id.starts_with("__snap_block_")));
+    }
+
+    // reagentx P2 on PR #2560: `LayoutState.magnifiednodeid` was never
+    // captured/restored, so a tab closed with a pane magnified always
+    // relaunched showing the full split tree instead of the magnified pane.
+    #[tokio::test]
+    async fn snapshot_and_restore_preserves_magnifiednodeid() {
+        let state = test_state();
+        let ws_evs = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() }).await;
+        let ws_id = ws_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let tab_evs = dispatch_apply(
+            &state,
+            Command::CreateTab { workspace_id: ws_id.clone(), name: "mytab".into() },
+        )
+        .await;
+        let tab_id = tab_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        let blk1 = dispatch_apply(
+            &state,
+            Command::CreateBlock { tab_id: tab_id.clone(), meta: json!({"view": "agent"}) },
+        )
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+        let blk2 = dispatch_apply(
+            &state,
+            Command::CreateBlock { tab_id: tab_id.clone(), meta: json!({"view": "sysinfo"}) },
+        )
+        .await
+        .iter()
+        .find_map(|e| match e {
+            Event::BlockCreated { block_id, .. } => Some(block_id.clone()),
+            _ => None,
+        })
+        .unwrap();
+        let tree = agentmux_common::LayoutNode {
+            id: "root".into(),
+            flex_direction: agentmux_common::FlexDirection::Row,
+            size: 10.0,
+            children: vec![
+                agentmux_common::LayoutNode {
+                    id: "left".into(),
+                    size: 5.0,
+                    data: Some(agentmux_common::LayoutNodeData { block_id: blk1.clone(), ..Default::default() }),
+                    ..Default::default()
+                },
+                agentmux_common::LayoutNode {
+                    id: "right".into(),
+                    size: 5.0,
+                    data: Some(agentmux_common::LayoutNodeData { block_id: blk2.clone(), ..Default::default() }),
+                    ..Default::default()
+                },
+            ],
+            data: None,
+            extra: Default::default(),
+        };
+        // "left" pane is magnified.
+        seed_layout_via_reducer(&state, &tab_id, tree, "left".into(), Vec::new(), "left".into())
+            .await
+            .unwrap();
+
+        let snap = snapshot_workspace(&state.wstore, &ws_id).expect("snapshot should be produced");
+        assert_eq!(snap["tabs"][0]["magnifiednodeid"], "left", "magnifiednodeid captured in snapshot");
+        save_last_session_snapshot(&state.wstore, snap);
+
+        let (new_ws_id, _events) = restore_last_session(&state).await.unwrap().unwrap();
+        let new_workspace = state.wstore.get::<Workspace>(&new_ws_id).unwrap().unwrap();
+        let new_tab = state.wstore.get::<Tab>(&new_workspace.tabids[0]).unwrap().unwrap();
+        let new_layout = state.wstore.get::<LayoutState>(&new_tab.layoutstate).unwrap().unwrap();
+        assert_eq!(
+            new_layout.magnifiednodeid, "left",
+            "magnifiednodeid restored — LayoutNode.id values aren't placeholder-remapped, \
+             only block ids are, so this survives verbatim"
+        );
+    }
+
+    // reagentx P2 on PR #2560: `Workspace.activetabid` was never
+    // captured/restored, so a relaunch always focused the first tab
+    // regardless of which was actually active at close.
+    #[tokio::test]
+    async fn snapshot_and_restore_preserves_active_tab_when_not_the_first() {
+        let state = test_state();
+        let ws_evs = dispatch_apply(&state, Command::CreateWorkspace { name: "w".into() }).await;
+        let ws_id = ws_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::WorkspaceCreated { workspace_id, .. } => Some(workspace_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+
+        // tab1 is created first (and would be the default active tab per
+        // wcore/tab.rs's first-tab-wins rule) but tab2 is the one the user
+        // actually left active.
+        let tab1_evs = dispatch_apply(
+            &state,
+            Command::CreateTab { workspace_id: ws_id.clone(), name: "tab-one".into() },
+        )
+        .await;
+        let tab1_id = tab1_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        dispatch_apply(
+            &state,
+            Command::CreateBlock { tab_id: tab1_id.clone(), meta: json!({"view": "agent"}) },
+        )
+        .await;
+
+        let tab2_evs = dispatch_apply(
+            &state,
+            Command::CreateTab { workspace_id: ws_id.clone(), name: "tab-two".into() },
+        )
+        .await;
+        let tab2_id = tab2_evs
+            .iter()
+            .find_map(|e| match e {
+                Event::TabCreated { tab_id, .. } => Some(tab_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        dispatch_apply(
+            &state,
+            Command::CreateBlock { tab_id: tab2_id.clone(), meta: json!({"view": "sysinfo"}) },
+        )
+        .await;
+
+        dispatch_apply(
+            &state,
+            Command::SetActiveTab { workspace_id: ws_id.clone(), tab_id: tab2_id.clone() },
+        )
+        .await;
+        let workspace_before = state.wstore.get::<Workspace>(&ws_id).unwrap().unwrap();
+        assert_eq!(workspace_before.activetabid, tab2_id, "precondition: tab-two is active");
+
+        let snap = snapshot_workspace(&state.wstore, &ws_id).expect("snapshot should be produced");
+        assert_eq!(snap["active_tab_index"], 1, "active tab is the SECOND captured tab");
+        save_last_session_snapshot(&state.wstore, snap);
+
+        let (new_ws_id, _events) = restore_last_session(&state).await.unwrap().unwrap();
+        let new_workspace = state.wstore.get::<Workspace>(&new_ws_id).unwrap().unwrap();
+        assert_eq!(new_workspace.tabids.len(), 2);
+        let new_tab2 = state.wstore.get::<Tab>(&new_workspace.tabids[1]).unwrap().unwrap();
+        assert_eq!(new_tab2.name, "tab-two");
+        assert_eq!(
+            new_workspace.activetabid, new_tab2.oid,
+            "the restored workspace's active tab is the NEW tab-two, not whichever \
+             CreateTab's first-tab-wins default would otherwise leave active"
+        );
     }
 
     #[tokio::test]
