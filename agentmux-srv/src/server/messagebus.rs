@@ -130,7 +130,7 @@ pub(super) async fn handle_inject(
     Json(req): Json<InjectRequest>,
 ) -> Json<Value> {
     // Try direct PTY injection via ReactiveHandler (agent has registered block_id)
-    let reactive_req = InjectionRequest {
+    let mut reactive_req = InjectionRequest {
         target_agent: req.target.clone(),
         message: req.message.clone(),
         source_agent: Some(req.from.clone()),
@@ -140,7 +140,15 @@ pub(super) async fn handle_inject(
         jekt_tier: None,
         delivery_tier: Some("host".to_string()),
         forward_hops: 0,
+        ..Default::default()
     };
+    // reagentx P0 on PR #2565: this endpoint used to call inject_message
+    // directly with a fully client-controlled `source_agent`, bypassing
+    // host-tier signature verification entirely — closing that gap here
+    // means a claimed identity with a signing key on file (this endpoint
+    // never carries a signature) now correctly renders TRUST=unverified and
+    // forces TIER=sensitive, instead of silently passing as self-declared.
+    super::reactive::verify_jekt_signature(&state, &mut reactive_req);
     let resp = state.reactive_handler.inject_message(reactive_req);
     if resp.success {
         return Json(json!({

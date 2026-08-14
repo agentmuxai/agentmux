@@ -194,12 +194,34 @@ pub fn is_sensitive_message(msg: &str) -> bool {
 ///
 /// The marker is machine-parseable (first line) and human-readable (the rest).
 /// `effective_tier` should already account for keyword-based escalation.
+///
+/// `sig_verified` (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2) is a
+/// genuine three-state signal, not a bool — collapsing "never checked" into
+/// "verified" would mislabel every caller that has no signing key at all
+/// (the Slack/Discord/Telegram/WhatsApp bridges, or an agent not yet
+/// respawned since this feature shipped) as cryptographically proven when
+/// nothing was actually checked:
+///   - `Some(true)`  — claimed source_agent has a key on file AND the
+///     signature verified. Renders `TRUST=host-verified`. This is the only
+///     case where sender identity is actually PROVEN, not merely assumed.
+///   - `Some(false)` — claimed source_agent has a key on file but the
+///     signature was missing or didn't match. Renders `TRUST=unverified` —
+///     a real red flag; the caller escalates this to TIER=sensitive.
+///   - `None`        — no signing key exists for the claimed source_agent at
+///     all, so nothing was checked (today's pre-existing behavior for every
+///     host-tier caller, unaffected by this feature). Renders
+///     `TRUST=self-declared` — explicitly NOT the same as "verified."
+/// Ignored (always renders `TRUST=network-claimed`) for any non-host
+/// delivery tier — network delivery is never treated as verified regardless
+/// of this signal, by design (see the "what does NOT change" note in the
+/// spec above).
 pub fn wrap_jekt_message(
     msg: &str,
     source_agent: Option<&str>,
     target_agent: &str,
     effective_tier: &str,
     delivery_tier: &str,
+    sig_verified: Option<bool>,
     msg_id: &str,
     priority: &str,
 ) -> String {
@@ -210,7 +232,15 @@ pub fn wrap_jekt_message(
         .unwrap_or(0);
 
     let from = source_agent.unwrap_or("unknown");
-    let trust = if delivery_tier == "host" { "host-verified" } else { "network-claimed" };
+    let trust = if delivery_tier != "host" {
+        "network-claimed"
+    } else {
+        match sig_verified {
+            Some(true) => "host-verified",
+            Some(false) => "unverified",
+            None => "self-declared",
+        }
+    };
 
     let structured_tag = format!(
         "[JEKT:FROM={from} TO={target_agent} TIER={effective_tier} DELIVERY={delivery_tier} TRUST={trust} MSGID={msg_id} PRIORITY={priority} TS={ts_secs}]"

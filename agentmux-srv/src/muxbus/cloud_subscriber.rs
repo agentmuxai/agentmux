@@ -786,6 +786,7 @@ async fn sync_agent_reactive(
             jekt_tier: None,       // auto-detected from keywords
             delivery_tier: Some("wan".to_string()),
             forward_hops: 0,
+            ..Default::default()
         };
         let delivery = handler.inject_message(req);
         tracing::debug!(

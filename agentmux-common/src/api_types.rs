@@ -121,12 +121,30 @@ pub struct ShellStatusResponse {
 /// `POST /agentmux/reactive/inject` — deliver a message to an agent.
 ///
 /// Used by the `SendMessage` and `Loop` MCP tools.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InjectRequest {
     pub target_agent: String,
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_agent: Option<String>,
+    /// Message id this jekt was signed under — required for `jekt_sig` to be
+    /// verifiable (the signed material binds msgid, sender, target, and
+    /// timestamp together). `None` when unsigned (e.g. `AGENTMUX_JEKT_KEY`
+    /// wasn't available — legacy/unverified, same as omitting `jekt_sig`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    /// Unix seconds this jekt was signed at — part of the signed material,
+    /// not just a display timestamp. See `agentmux_common::jekt_sign`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ts_secs: Option<i64>,
+    /// Base64 HMAC-SHA256 over (msgid, source_agent, target_agent, ts_secs,
+    /// message), signed with the sender's own `AGENTMUX_JEKT_KEY`. Absent
+    /// when the sending agent has no key yet (first-ever send before one is
+    /// provisioned) — srv treats an absent/invalid signature as unverified,
+    /// not as an error, and downgrades trust accordingly rather than
+    /// rejecting the message outright.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jekt_sig: Option<String>,
 }
 
 // ── Pane ──────────────────────────────────────────────────────────────────────
