@@ -1,5 +1,25 @@
 # AgentMux Version History
 
+## 0.55.8 — 2026-08-14
+
+- feat(window): restore last session's tabs/panes on relaunch
+- fix(ci): retry create_no_window_flag_set + exclude Windows Defender scanning on CI
+- fix(agent-view): stop transcript divider rules from crossing pill text
+- feat(jekt): Ed25519 WAN signing for reagent's review notifications
+- fix(lan): stop broadcasting the full-access auth_key to LAN peers
+- fix(muxbus): treat a 403 (agent-binding rejection) the same as 401 in cloud_subscriber
+- fix(jekt): correct reagent_key_id doc comment to match partial-signature-is-unsigned behavior
+- fix(muxbus): don't reconnect the shared WAN session on a 403 binding-mismatch rejection
+- feat(muxbus): verify reagent Ed25519 signatures on the HTTP /agentmux/reactive/inject path
+- fix(muxbus): cool down a per-agent credential after a binding-mismatch 403, not just clear its token
+- fix(bashwrap): stop leaking orphaned bash/PTY processes on a1 test retry timeout
+- fix(window): close TOCTOU races in session-restore snapshot save/clear and restore activetabid/magnifiednodeid
+- fix(agent-pane): stop truncating AskUserQuestion answers in tool summary row
+- feat(jekt): relax TIER=sensitive for WAN jekts verified against reagent's Ed25519 signature
+- fix(agent-pane): wire up SubmitTimeoutElapsed dispatch + visibility catch-up watchdog tick
+- fix(agent-pane): composer strip stable width + deliberate edge-split tiers
+
+
 ## 0.55.7 — 2026-08-13
 
 - fix(browser-pane): OAuth/GIS sign-in works in-pane again — no instance-exit, real child popup completes the login, external-protocol guard
