@@ -414,6 +414,7 @@ async fn test_handler_inject_wan_reagent_verified_relaxes_tier_but_trust_label_u
         delivery_tier: Some("wan".to_string()),
         forward_hops: 0,
         reagent_verified: Some(true),
+        reagent_key_id: Some("reagent-v1".to_string()),
         ..Default::default()
     });
 
@@ -460,6 +461,7 @@ async fn test_handler_inject_wan_reagent_verified_still_escalates_on_declared_se
         delivery_tier: Some("wan".to_string()),
         forward_hops: 0,
         reagent_verified: Some(true),
+        reagent_key_id: Some("reagent-v1".to_string()),
         ..Default::default()
     });
 
@@ -490,6 +492,7 @@ async fn test_handler_inject_wan_reagent_verified_still_escalates_on_keyword_mat
         delivery_tier: Some("wan".to_string()),
         forward_hops: 0,
         reagent_verified: Some(true),
+        reagent_key_id: Some("reagent-v1".to_string()),
         ..Default::default()
     });
 
@@ -499,6 +502,56 @@ async fn test_handler_inject_wan_reagent_verified_still_escalates_on_keyword_mat
         Some("sensitive"),
         "a credential keyword still escalates even a verified reagent message"
     );
+}
+
+// reagentx P0 on PR #2576: `reagent-v1-dev`'s private key is documented as
+// exposed since generation (see jekt_sign.rs's `reagent_public_key` doc
+// comment), so a signature verifying under it proves nothing about sender
+// identity beyond "someone who read the source/docs." A WAN jekt signed
+// under it must still be forced to SENSITIVE by delivery tier, exactly like
+// an ordinary unverified WAN jekt — only `reagent-v1` (the key whose private
+// half was generated straight into Secrets Manager, never exposed) may
+// relax the gate. See `is_reagent_trusted_signing_key` in
+// agentmux-common/src/jekt_sign.rs.
+#[tokio::test]
+async fn test_handler_inject_wan_reagent_verified_under_exposed_dev_key_does_not_relax_tier() {
+    let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let sent_clone = sent.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        sent_clone.lock().unwrap().push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "PR #1 reviewed".to_string(),
+        source_agent: Some("github-consumer".to_string()),
+        request_id: Some("req-wan-1d".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: Some("wan".to_string()),
+        forward_hops: 0,
+        // The signature genuinely verifies (reagent_verified: Some(true)) —
+        // the point of this test is that verifying isn't enough on its own.
+        reagent_verified: Some(true),
+        reagent_key_id: Some("reagent-v1-dev".to_string()),
+        ..Default::default()
+    });
+
+    assert!(resp.success);
+    assert_eq!(
+        resp.effective_tier.as_deref(),
+        Some("sensitive"),
+        "a signature verified under the known-exposed dev key must not bypass TIER=sensitive"
+    );
+    let calls = sent.lock().unwrap();
+    let payload = String::from_utf8_lossy(&calls[1].1);
+    assert!(payload.contains("SIG=verified"), "the signature itself still renders as verified: {payload}");
+    assert!(payload.contains("TIER=sensitive"), "but the tier is not relaxed: {payload}");
 }
 
 #[tokio::test]

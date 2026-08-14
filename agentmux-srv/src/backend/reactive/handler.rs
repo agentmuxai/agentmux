@@ -418,7 +418,22 @@ impl Handler {
         // the SAME per-agent signing mechanism host-tier already has for
         // `jekt_sig` — not yet built for agent-to-agent WAN traffic, only
         // for reagent's own first-party service messages.
-        let is_verified_network_sender = req.reagent_verified == Some(true);
+        //
+        // `reagent_verified == Some(true)` alone is NOT enough here: it just
+        // means the signature checked out against SOME registered key_id,
+        // and `reagent-v1-dev` is registered (so already-in-flight
+        // dev-signed traffic keeps rendering `SIG=verified`) despite its
+        // private half being documented as exposed since generation.
+        // Tier relaxation is a stronger claim than "renders SIG=verified in
+        // the marker" — it must additionally check the claimed key_id
+        // against `is_reagent_trusted_signing_key`, or anyone holding the
+        // known-exposed dev key could forge a WAN jekt that bypasses this
+        // gate entirely (reagentx P0 on PR #2576).
+        let is_verified_network_sender = req.reagent_verified == Some(true)
+            && req
+                .reagent_key_id
+                .as_deref()
+                .is_some_and(agentmux_common::jekt_sign::is_reagent_trusted_signing_key);
         let is_network_tier_unverified = is_network_tier && !is_verified_network_sender;
         let is_unverified_sender = req.sig_verified == Some(false);
         let is_sensitive = is_network_tier_unverified
