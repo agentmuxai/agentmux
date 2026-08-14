@@ -625,6 +625,47 @@ fn agent_slug() -> Result<String> {
     Ok(slug)
 }
 
+/// Process-wide counter for `generate_jekt_msgid` — millis-timestamp alone
+/// isn't guaranteed unique if two jekts are sent in the same millisecond.
+static JEKT_MSGID_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// A unique-enough message id for a signed jekt: no `uuid` dependency needed
+/// (this crate doesn't otherwise pull one in) — timestamp + this process's
+/// own pid + a monotonic counter is unique enough for its one purpose (a
+/// value both this signer and the receiving srv agree to include in the
+/// signed material, so a signature can't be replayed under a different id).
+fn generate_jekt_msgid() -> String {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let n = JEKT_MSGID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{}-{}-{}", now.as_millis(), std::process::id(), n)
+}
+
+/// Build the id/timestamp/signature triple for an outgoing jekt
+/// (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2). Reads this
+/// process's OWN `AGENTMUX_JEKT_KEY` — injected at spawn alongside
+/// `AGENTMUX_AGENT_ID`, into this agent's env only, never any other agent's
+/// — and signs over (msgid, source_agent, target_agent, ts_secs, message).
+///
+/// Returns `(request_id, ts_secs, jekt_sig)`. `jekt_sig` is `None` — not an
+/// error — when no key is available (an agent whose `.mcp.json` predates
+/// this feature, or `source_agent` itself unresolved): srv treats an absent
+/// signature as "unverified," never as a reason to fail delivery, so a
+/// missing key here must never block `SendMessage`/`Loop` from sending.
+fn sign_outgoing_jekt(source_agent: Option<&str>, target_agent: &str, message: &str) -> (String, i64, Option<String>) {
+    let msgid = generate_jekt_msgid();
+    let ts_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let sig = (|| {
+        let key_b64 = std::env::var("AGENTMUX_JEKT_KEY").ok().filter(|s| !s.is_empty())?;
+        let key = agentmux_common::jekt_sign::decode_key(&key_b64)?;
+        let src = source_agent?;
+        Some(agentmux_common::jekt_sign::sign_jekt(&key, &msgid, src, target_agent, ts_secs, message))
+    })();
+    (msgid, ts_secs, sig)
+}
+
 async fn call_tool(
     params: &Value,
     local_url: &str,
@@ -1014,6 +1055,9 @@ async fn call_tool(
                 .ok()
                 .filter(|s| !s.is_empty());
 
+            let (request_id, ts_secs, jekt_sig) =
+                sign_outgoing_jekt(source_agent.as_deref(), to, message);
+
             let url = format!(
                 "{}/agentmux/reactive/inject",
                 local_url.trim_end_matches('/')
@@ -1022,6 +1066,9 @@ async fn call_tool(
                 target_agent: to.to_string(),
                 message: message.to_string(),
                 source_agent,
+                request_id: Some(request_id),
+                ts_secs: Some(ts_secs),
+                jekt_sig,
             };
 
             let resp = client
@@ -1504,10 +1551,15 @@ async fn call_tool(
                     tokio::time::sleep(interval).await;
                 }
                 loop {
+                    let (request_id, ts_secs, jekt_sig) =
+                        sign_outgoing_jekt(task_source.as_deref(), &task_target, &task_prompt);
                     let req = InjectRequest {
                         target_agent: task_target.clone(),
                         message: task_prompt.clone(),
                         source_agent: task_source.clone(),
+                        request_id: Some(request_id),
+                        ts_secs: Some(ts_secs),
+                        jekt_sig,
                     };
                     let _ = task_client
                         .post(&url)

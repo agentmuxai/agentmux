@@ -33,7 +33,7 @@ impl std::fmt::Display for JektTier {
 }
 
 /// Request to inject a message into an agent's terminal.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InjectionRequest {
     pub target_agent: String,
     pub message: String,
@@ -62,6 +62,40 @@ pub struct InjectionRequest {
     /// any request that predates this field) default to 0, unaffected.
     #[serde(default)]
     pub forward_hops: u8,
+    /// Unix seconds this jekt was signed at (part of the signed material,
+    /// not just a display timestamp) — see `agentmux_common::jekt_sign` and
+    /// `jekt_sig` below. `None` for unsigned/legacy requests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ts_secs: Option<i64>,
+    /// Base64 HMAC-SHA256 signature over (request_id, source_agent,
+    /// target_agent, ts_secs, message), produced by the sender's own
+    /// `AGENTMUX_JEKT_KEY`. Verified against the claimed `source_agent`'s
+    /// stored key (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2);
+    /// absent, unverifiable, or mismatched all mean "unverified" — the
+    /// message still delivers, but downgraded to TRUST=unverified and
+    /// escalated to TIER=sensitive, never silently trusted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jekt_sig: Option<String>,
+    /// Server-computed verification outcome — `#[serde(skip_deserializing)]`
+    /// means an attacker-supplied JSON body can NEVER set this field, even
+    /// by including it; only `handle_reactive_inject`
+    /// (`server/reactive.rs`, which has `AppState::wstore`) may set it,
+    /// after independently looking up the claimed `source_agent`'s stored
+    /// key and verifying `jekt_sig` against it, before handing the request
+    /// to `Handler::inject_message` (which has no `Store` access "by
+    /// design" — see `record_supervisor_decision`'s doc comment for why).
+    /// `None` = not checked (network-tier messages are already
+    /// unconditionally sensitive regardless of signature; or the claimed
+    /// `source_agent` has never had a key minted, so there's nothing to
+    /// verify against — see the rollout-safety note in
+    /// `handle_reactive_inject`, this deliberately does NOT escalate a
+    /// caller — e.g. the Slack/Discord/Telegram/WhatsApp bridges, or an
+    /// agent not yet respawned since this feature shipped — that was never
+    /// capable of signing in the first place). `Some(false)` is the real
+    /// signal: this `source_agent` DOES have a key, and either no signature
+    /// was given or it didn't match.
+    #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
+    pub sig_verified: Option<bool>,
 }
 
 /// Response from a message injection attempt.

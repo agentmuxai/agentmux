@@ -47,6 +47,7 @@ pub(super) fn echo_jekt_to_sender(
     msgid: &str,
     effective_tier: Option<&str>,
     delivery_tier: &str,
+    sig_verified: Option<bool>,
     priority: &str,
 ) {
     let Some(src) = source_agent.filter(|s| !s.is_empty()) else {
@@ -66,6 +67,7 @@ pub(super) fn echo_jekt_to_sender(
         target_agent,
         effective_tier.unwrap_or("coord"),
         delivery_tier,
+        sig_verified,
         msgid,
         priority,
     );
@@ -88,9 +90,65 @@ pub(super) fn echo_jekt_to_sender(
     );
 }
 
+/// Max age (seconds) a signed jekt's `ts_secs` may be from "now" and still
+/// verify (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2, anti-replay
+/// — reagentx P1 on PR #2565: `ts_secs` was bound into the signed material
+/// specifically for this purpose per `jekt_sign.rs`'s own doc comments, but
+/// nothing actually checked it, so a captured valid signature verified
+/// forever). Generous enough for normal host-tier delivery latency and
+/// modest clock skew between the signing agent process and this srv
+/// instance (same machine, but not guaranteed same clock read down to the
+/// second); tight enough to bound replay to a narrow window instead of
+/// indefinite reuse.
+const JEKT_SIG_MAX_AGE_SECS: i64 = 300;
+
+fn now_unix_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Host-tier jekt sender verification (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md
+/// §2.2). Mutates `req.sig_verified` in place based on whether the claimed
+/// `source_agent`'s stored signing key (if any) verifies `req.jekt_sig`,
+/// within the anti-replay freshness window.
+///
+/// **Every entry point that can build a host-tier `InjectionRequest` from
+/// client-supplied fields MUST call this before handing it to
+/// `Handler::inject_message`** — reagentx P0 on PR #2565 found two call
+/// sites (`messagebus.rs::handle_inject`, `websocket.rs`'s `bus:inject`
+/// message handling) that built `InjectionRequest` with a fully
+/// client-controlled `source_agent` and called `inject_message` directly,
+/// bypassing this entirely — those messages rendered `TRUST=self-declared`
+/// (unescalated) exactly as if this feature didn't exist. Both now call
+/// this too.
+pub(super) fn verify_jekt_signature(state: &AppState, req: &mut InjectionRequest) {
+    if req.delivery_tier.as_deref().unwrap_or("host") != "host" {
+        return;
+    }
+    let Some(claimed) = req.source_agent.clone().filter(|s| !s.is_empty()) else {
+        return;
+    };
+    let Ok(Some(key)) = state.wstore.agent_jekt_key_load(&claimed) else {
+        return;
+    };
+    let msgid = req.request_id.clone().unwrap_or_default();
+    let ts = req.ts_secs.unwrap_or(0);
+    let within_freshness_window =
+        ts > 0 && (now_unix_secs() - ts).abs() <= JEKT_SIG_MAX_AGE_SECS;
+    let verified = within_freshness_window
+        && req.jekt_sig.as_deref().map_or(false, |sig| {
+            agentmux_common::jekt_sign::verify_jekt(
+                &key, &msgid, &claimed, &req.target_agent, ts, &req.message, sig,
+            )
+        });
+    req.sig_verified = Some(verified);
+}
+
 pub(super) async fn handle_reactive_inject(
     State(state): State<AppState>,
-    Json(req): Json<InjectionRequest>,
+    Json(mut req): Json<InjectionRequest>,
 ) -> Json<serde_json::Value> {
     tracing::info!(
         target_agent = %req.target_agent,
@@ -98,6 +156,8 @@ pub(super) async fn handle_reactive_inject(
         msg_len = req.message.len(),
         "reactive inject request received"
     );
+
+    verify_jekt_signature(&state, &mut req);
 
     // 1. Try local ReactiveHandler first (fast path — same instance).
     let resp = state.reactive_handler.inject_message(req.clone());
@@ -110,6 +170,7 @@ pub(super) async fn handle_reactive_inject(
             &resp.request_id,
             resp.effective_tier.as_deref(),
             req.delivery_tier.as_deref().unwrap_or("host"),
+            req.sig_verified,
             req.priority.as_deref().unwrap_or("normal"),
         );
         return Json(serde_json::to_value(&resp).unwrap_or_default());
@@ -165,6 +226,7 @@ pub(super) async fn handle_reactive_inject(
                                     body.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
                                     body.get("effective_tier").and_then(|v| v.as_str()),
                                     "host",
+                                    req.sig_verified,
                                     req.priority.as_deref().unwrap_or("normal"),
                                 );
                                 return Json(body);
@@ -249,6 +311,7 @@ pub(super) async fn handle_reactive_inject(
                                     body.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
                                     body.get("effective_tier").and_then(|v| v.as_str()),
                                     "host",
+                                    req.sig_verified,
                                     req.priority.as_deref().unwrap_or("normal"),
                                 );
                                 return Json(body);
@@ -326,6 +389,7 @@ pub(super) async fn handle_reactive_inject(
                                 body.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
                                 body.get("effective_tier").and_then(|v| v.as_str()),
                                 "lan",
+                                None,
                                 req.priority.as_deref().unwrap_or("normal"),
                             );
                             return Json(body);
@@ -773,5 +837,161 @@ pub(super) async fn handle_reactive_supervisor_decision(
             Json(json!({"error": e})),
         )
             .into_response(),
+    }
+}
+
+/// `verify_jekt_signature` unit tests (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md
+/// §2.2, reagentx review on PR #2565). Deliberately test the extracted
+/// function directly rather than the full `handle_inject`/websocket
+/// handlers it's now called from: `server::tests::test_state()`'s
+/// `reactive_handler` is a *global* singleton shared across every test in
+/// the binary (`backend_reactive::get_global_handler()`), so exercising it
+/// end-to-end here risks cross-test interference on shared agent
+/// registrations. `verify_jekt_signature` itself only touches `state.wstore`
+/// (key lookup), not the handler, so it's safe to test in isolation with no
+/// such risk — and it's the one piece of logic actually being fixed here;
+/// the two call sites (messagebus.rs, websocket.rs) are a one-line "call
+/// this before inject_message" wiring, visible directly in their diffs.
+#[cfg(test)]
+mod verify_jekt_signature_tests {
+    use super::*;
+    use crate::server::tests::test_state;
+
+    fn base_req(source_agent: &str, target_agent: &str, message: &str) -> InjectionRequest {
+        InjectionRequest {
+            target_agent: target_agent.to_string(),
+            message: message.to_string(),
+            source_agent: Some(source_agent.to_string()),
+            delivery_tier: Some("host".to_string()),
+            ..Default::default()
+        }
+    }
+
+    fn now() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+    }
+
+    #[tokio::test]
+    async fn a_correctly_signed_message_verifies_true() {
+        let state = test_state();
+        let key = state.wstore.agent_jekt_key_ensure("agentx").unwrap();
+
+        let mut req = base_req("agentx", "agenty", "hello");
+        req.request_id = Some("msg-1".to_string());
+        req.ts_secs = Some(now());
+        req.jekt_sig = Some(agentmux_common::jekt_sign::sign_jekt(
+            &key,
+            req.request_id.as_deref().unwrap(),
+            "agentx",
+            "agenty",
+            req.ts_secs.unwrap(),
+            "hello",
+        ));
+
+        verify_jekt_signature(&state, &mut req);
+        assert_eq!(req.sig_verified, Some(true));
+    }
+
+    /// The core P0 fix this whole file's `verify_jekt_signature` extraction
+    /// exists for: a claimed sender with a real key on file but NO
+    /// signature attached (exactly what `messagebus.rs::handle_inject` and
+    /// websocket.rs's `bus:inject` used to send, pre-fix) must render as a
+    /// real, escalating "unverified" — not silently pass through unchecked.
+    #[tokio::test]
+    async fn a_claimed_sender_with_a_key_but_no_signature_is_unverified() {
+        let state = test_state();
+        state.wstore.agent_jekt_key_ensure("agentx").unwrap();
+
+        let mut req = base_req("agentx", "agenty", "hello");
+        req.request_id = Some("msg-1".to_string());
+        req.ts_secs = Some(now());
+        // req.jekt_sig deliberately left None — the exact bypass shape.
+
+        verify_jekt_signature(&state, &mut req);
+        assert_eq!(
+            req.sig_verified,
+            Some(false),
+            "a signable identity with no signature must be a real 'unverified,' not skipped"
+        );
+    }
+
+    #[tokio::test]
+    async fn no_key_on_file_leaves_sig_verified_unset() {
+        let state = test_state();
+        // No agent_jekt_key_ensure call — "slack", or any non-agent caller.
+        let mut req = base_req("slack", "agenty", "hello");
+        verify_jekt_signature(&state, &mut req);
+        assert_eq!(
+            req.sig_verified, None,
+            "no key on file means nothing to check — must not be escalated"
+        );
+    }
+
+    #[tokio::test]
+    async fn network_tier_is_never_checked_regardless_of_signature() {
+        let state = test_state();
+        state.wstore.agent_jekt_key_ensure("agentx").unwrap();
+        let mut req = base_req("agentx", "agenty", "hello");
+        req.delivery_tier = Some("wan".to_string());
+        verify_jekt_signature(&state, &mut req);
+        assert_eq!(req.sig_verified, None, "wan/lan never run this check");
+    }
+
+    /// Anti-replay (reagentx P1 on PR #2565): a signature that was valid
+    /// once must stop verifying once its `ts_secs` falls outside the
+    /// freshness window — otherwise a captured signed jekt replays forever.
+    #[tokio::test]
+    async fn a_stale_timestamp_fails_verification_even_with_a_correct_signature() {
+        let state = test_state();
+        let key = state.wstore.agent_jekt_key_ensure("agentx").unwrap();
+
+        let stale_ts = now() - JEKT_SIG_MAX_AGE_SECS - 60; // well outside the window
+        let mut req = base_req("agentx", "agenty", "hello");
+        req.request_id = Some("msg-1".to_string());
+        req.ts_secs = Some(stale_ts);
+        req.jekt_sig = Some(agentmux_common::jekt_sign::sign_jekt(
+            &key, "msg-1", "agentx", "agenty", stale_ts, "hello",
+        ));
+
+        verify_jekt_signature(&state, &mut req);
+        assert_eq!(
+            req.sig_verified,
+            Some(false),
+            "a mathematically correct signature must still fail outside the freshness window"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_timestamp_just_inside_the_window_still_verifies() {
+        let state = test_state();
+        let key = state.wstore.agent_jekt_key_ensure("agentx").unwrap();
+
+        let recent_ts = now() - (JEKT_SIG_MAX_AGE_SECS - 10);
+        let mut req = base_req("agentx", "agenty", "hello");
+        req.request_id = Some("msg-1".to_string());
+        req.ts_secs = Some(recent_ts);
+        req.jekt_sig = Some(agentmux_common::jekt_sign::sign_jekt(
+            &key, "msg-1", "agentx", "agenty", recent_ts, "hello",
+        ));
+
+        verify_jekt_signature(&state, &mut req);
+        assert_eq!(req.sig_verified, Some(true));
+    }
+
+    #[tokio::test]
+    async fn a_wrong_signature_is_unverified() {
+        let state = test_state();
+        state.wstore.agent_jekt_key_ensure("agentx").unwrap();
+
+        let mut req = base_req("agentx", "agenty", "hello");
+        req.request_id = Some("msg-1".to_string());
+        req.ts_secs = Some(now());
+        req.jekt_sig = Some("forged-not-a-real-signature".to_string());
+
+        verify_jekt_signature(&state, &mut req);
+        assert_eq!(req.sig_verified, Some(false));
     }
 }

@@ -227,6 +227,7 @@ impl CronScheduler {
             target_agent: target.to_string(),
             message: prompt.to_string(),
             source_agent: Some("cron".to_string()),
+            ..Default::default()
         };
 
         match self.http_client.post(&url).header("X-AuthKey", &self.auth_key).json(&req).send().await {

@@ -116,7 +116,14 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 7;
 ///        server-side consecutive-nudge ceiling). Defaults to 0 (opt-in
 ///        required — fail-by-default, same posture as use_ambient_login).
 ///        See docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
-pub const OBJECT_SCHEMA_VERSION: i64 = 17;
+///   v18 — db_agent_jekt_keys: per-agent HMAC-SHA256 signing key for
+///        host-tier jekt sender verification. One row per agent_id, minted
+///        on first use and injected into that agent's own MCP server
+///        process env (AGENTMUX_JEKT_KEY) at spawn — never into any other
+///        agent's env, so a signature can only be produced by the agent it
+///        claims to be from. See
+///        docs/specs/SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2.
+pub const OBJECT_SCHEMA_VERSION: i64 = 18;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -566,6 +573,18 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             last_seen_path     TEXT NOT NULL DEFAULT '',
             last_seen_mtime_ms INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (agent_id, filename)
+        );
+
+        -- v18: per-agent HMAC-SHA256 signing key for host-tier jekt sender
+        -- verification (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2).
+        -- hmac_key is base64-encoded, 32 random bytes, minted on first use
+        -- (agent_jekt_key_ensure) and never rotated automatically. Local to
+        -- this instance's data dir only — not synced anywhere, not the same
+        -- secret as any Armory/GitHub credential.
+        CREATE TABLE IF NOT EXISTS db_agent_jekt_keys (
+            agent_id   TEXT PRIMARY KEY,
+            hmac_key   TEXT NOT NULL,
+            created_at INTEGER NOT NULL DEFAULT 0
         );",
     )?;
 

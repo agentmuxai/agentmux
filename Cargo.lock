@@ -78,9 +78,12 @@ dependencies = [
 name = "agentmux-common"
 version = "0.55.6"
 dependencies = [
+ "base64",
  "dirs",
+ "hmac",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
