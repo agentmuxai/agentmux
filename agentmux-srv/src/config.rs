@@ -36,6 +36,23 @@ pub enum SrvCommand {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub auth_key: String,
+    /// A separate, narrowly-scoped credential for LAN peer discovery
+    /// (mDNS TXT record + UDP broadcast responder) — NOT `auth_key`.
+    /// Minted fresh per-launch, internal to srv only (never needs to
+    /// leave this process except via the LAN broadcast itself, unlike
+    /// `auth_key` which the launcher/frontend also need — see
+    /// `LanDiscovery`'s doc comment). Broadcasting the full-access
+    /// `auth_key` to anything that can receive an mDNS multicast packet
+    /// or send a UDP probe used to mean a passive LAN listener got
+    /// standing access to the ENTIRE local `/agentmux/service` surface,
+    /// not just LAN-forwarding — this key is accepted only by the two
+    /// routes LAN peer forwarding actually needs
+    /// (`lan_or_full_auth_middleware` in `server/mod.rs`), so a captured
+    /// value's blast radius shrinks to "can forward jekts to this
+    /// instance and query which agents live here." See
+    /// docs/specs/SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §2.1/§3
+    /// LAN P0-1.
+    pub lan_key: String,
     pub data_home: String,
     pub config_home: String,
     pub app_path: String,
@@ -82,8 +99,17 @@ impl Config {
             Some(agentmux_common::RuntimeMode::Dev { .. })
         );
 
+        // Two v4 UUIDs concatenated for margin over a single UUID's 122 bits
+        // of randomness — same "avoid a rand/getrandom dependency just for
+        // this" reasoning as agent_jekt_keys.rs's random_key_bytes(), but
+        // kept as a plain string here (not raw bytes) since this only ever
+        // travels as a String — an mDNS TXT record value / UDP JSON field /
+        // HTTP header — never binary-serialized or HMAC-keyed.
+        let lan_key = format!("{}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+
         Ok(Config {
             auth_key,
+            lan_key,
             data_home,
             config_home,
             app_path,
@@ -181,6 +207,34 @@ mod tests {
         assert_eq!(config.config_home, "/config");
         assert_eq!(config.app_path, "/app");
         assert!(config.is_dev);
+        clear_env();
+    }
+
+    #[test]
+    fn lan_key_is_generated_nonempty_and_distinct_from_auth_key() {
+        let _lock = lock();
+        clear_env();
+        std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-67890");
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None };
+        let config = Config::from_env_and_args(&args).unwrap();
+        assert!(!config.lan_key.is_empty());
+        assert_ne!(
+            config.lan_key, config.auth_key,
+            "the LAN-broadcast credential must never equal the full-access auth_key"
+        );
+        clear_env();
+    }
+
+    #[test]
+    fn lan_key_is_freshly_generated_per_call_not_a_fixed_constant() {
+        let _lock = lock();
+        clear_env();
+        std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-67890");
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None };
+        let first = Config::from_env_and_args(&args).unwrap().lan_key;
+        std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-67890");
+        let second = Config::from_env_and_args(&args).unwrap().lan_key;
+        assert_ne!(first, second, "each process launch must mint its own lan_key");
         clear_env();
     }
 }
