@@ -3264,10 +3264,15 @@ mod tests {
         // `run_via_pty` clean up after itself before this test ever sees
         // control back — no external timeout, no orphan.
         let _env_guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let prev_idle_timeout = std::env::var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS").ok();
-        unsafe {
-            std::env::set_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", "15");
-        }
+        // reagentx P2 on PR #2569 (re-review): a manual save-now/restore-
+        // at-the-end dance doesn't run on an early exit — `Err(e) =>
+        // panic!(...)` and the `assert_eq!` below can both unwind straight
+        // out of the loop, skipping the restore and leaving this env var
+        // permanently set to "15" for the rest of the test binary process.
+        // `EnvVarGuard` (used elsewhere in this file for exactly this
+        // reason) restores it in `Drop`, which runs on every exit path
+        // including a panic unwind.
+        let _idle_timeout_guard = EnvVarGuard::set("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", "15");
 
         const MAX_ATTEMPTS: u32 = 5;
         // reagentx P2 on PR #2559 (re-review): must be updated on EVERY
@@ -3331,13 +3336,6 @@ mod tests {
                 "{last_outcome} (retrying: real OS scheduling can occasionally push the 70ms \
                  pause outside A1's ~50-100ms defer window)"
             );
-        }
-
-        unsafe {
-            match prev_idle_timeout {
-                Some(v) => std::env::set_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", v),
-                None => std::env::remove_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS"),
-            }
         }
 
         if skipped || collapsed {
