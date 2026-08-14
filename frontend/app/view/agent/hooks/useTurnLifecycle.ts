@@ -27,7 +27,7 @@ import * as WOS from "@/app/store/wos";
 import { recordTurn } from "@/store/token-usage";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
-import type { TurnPhase } from "@/app/store/agent-pane-state/types";
+import { SUBMIT_TIMEOUT_MS, type TurnPhase } from "@/app/store/agent-pane-state/types";
 import type { SignalPair } from "../state";
 import type { DocumentNode, SessionStats } from "../types";
 import type { StreamFlushQueue } from "../stream-flush-queue";
@@ -226,6 +226,51 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
         }
     });
 
+    // Submit-ack fallback timer (issue #728 gap 2 / spec §8's
+    // `SubmitTimeoutElapsed` contract). `TurnStart` puts the phase in
+    // `Submitting` and the reducer emits `schedule-submit-timeout` on
+    // entry, but nothing ever consumed that event to arm a real timer —
+    // PR D (#994, 2026-05-23) shipped the reducer half only and
+    // explicitly deferred "dispatch-side setTimeout in useAgentStream /
+    // model layer" to a follow-up that never landed (confirmed via a
+    // repo-wide grep finding zero consumers outside reducer/types/tests,
+    // 2026-08-14). Without this, a turn whose backend ack is lost
+    // (dropped RPC, network blip, crash before first output) left the
+    // pane in `Submitting` — and therefore "Working…" — forever, with
+    // no recovery path at all. Mirrors `stopFallbackTimer` above exactly
+    // (reactive effect on `turnPhase.kind`, not an event-listener on
+    // `schedule-submit-timeout`, which sidesteps needing a second wiring
+    // mechanism entirely) but dispatches the reducer's own
+    // `SubmitTimeoutElapsed` command instead of calling `finalizeTurn`
+    // directly, so the transition goes through the documented,
+    // already-tested `Submitting → Done.errored` contract (reducer.ts's
+    // `SubmitTimeoutElapsed` arm no-ops if the phase already moved off
+    // Submitting by the time this fires — safe by construction, same
+    // guard `stopFallbackTimer` relies on). See
+    // docs/reports/REPORT_AGENTA_STUCK_WORKING_INVESTIGATION_2026_08_14.md §7.
+    let submitTimeoutTimer: number | null = null;
+    createEffect(() => {
+        const submitting = getTurnPhase().kind === "Submitting";
+        if (submitTimeoutTimer != null) {
+            clearTimeout(submitTimeoutTimer);
+            submitTimeoutTimer = null;
+        }
+        if (submitting) {
+            submitTimeoutTimer = window.setTimeout(() => {
+                submitTimeoutTimer = null;
+                if (getTurnPhase().kind === "Submitting") {
+                    opts.model.dispatchPane({ type: "SubmitTimeoutElapsed", at: Date.now() });
+                }
+            }, SUBMIT_TIMEOUT_MS);
+        }
+    });
+    onCleanup(() => {
+        if (submitTimeoutTimer != null) {
+            clearTimeout(submitTimeoutTimer);
+            submitTimeoutTimer = null;
+        }
+    });
+
     // Stuck-stream watchdog (issue #728 gap 3). The reducer evaluates
     // each tick against `lastEventMs` and emits a `stream-stuck`
     // event when the gap exceeds `STUCK_THRESHOLD_MS`. The interval
@@ -237,6 +282,37 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
         });
     }, WATCHDOG_INTERVAL_MS);
     onCleanup(() => clearInterval(watchdogId));
+
+    // Visibility catch-up tick — belt-and-suspenders for the interval
+    // above. A confirmed live incident
+    // (docs/reports/REPORT_AGENTA_STUCK_WORKING_INVESTIGATION_2026_08_14.md
+    // §3-4) found a pane stuck `Streaming`/`toolsActive:0` for 29+
+    // minutes after a stray/late `StreamFlushObserved` re-promotion —
+    // the exact shape `StreamWatchdogTick`'s 180s unconditional recovery
+    // exists to catch — with zero evidence the interval above ever
+    // ticked during that window (component-unmount and a reducer-logic
+    // bug were both ruled out; the leading remaining explanation is
+    // renderer/window-level timer throttling for a backgrounded pane in
+    // this app's multi-window CEF architecture, not fully confirmed).
+    // `document.visibilitychange` fires reliably even for throttled
+    // content — it's the signal browsers use to drive that throttling
+    // in the first place — so firing one extra tick the instant
+    // visibility returns recovers a stuck pane the moment a human next
+    // looks at the app, without waiting on the interval to resume.
+    // Safe/cheap: `StreamWatchdogTick`'s recovery math is already
+    // wall-clock-based (`nowMs - lastEventMs`), not tick-counted, so an
+    // extra or redundant tick is a same-reference no-op for every pane
+    // that isn't actually stuck.
+    const onVisibilityChange = () => {
+        if (document.visibilityState === "visible") {
+            opts.model.dispatchPane({
+                type: "StreamWatchdogTick",
+                nowMs: Date.now(),
+            });
+        }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    onCleanup(() => document.removeEventListener("visibilitychange", onVisibilityChange));
 
     return { finalizeTurn };
 }
