@@ -32,13 +32,13 @@ Pillar 1 ("crash reproject," `docs/specs/SPEC_PILLAR1_HOST_REPROJECT_DESIGN_2026
 
 ## 4. Net conclusion
 
-There is no bug left to fix here in the narrow sense — the leak that accidentally produced "restore on reopen" was real, harmful (permanent DB row growth, a ghost-window resurrection bug), and is correctly fixed. But it means AgentMux currently has **zero deliberate mechanism** for restoring a user's layout after a normal quit: every graceful close destroys the workspace, and every launch starts from the default 3-pane seed. Getting the user's remembered behavior back — on purpose, correctly, without reintroducing the leak-prone semantics — is new work, not a revert. Two shapes of that work (auto-restore-last-session, and named on-demand snapshots) are scoped in `docs/specs/SPEC_WORKSPACE_SNAPSHOTS_2026_08_13.md`.
+There is no bug left to fix here in the narrow sense — the leak that accidentally produced "restore on reopen" was real, harmful (permanent DB row growth, a ghost-window resurrection bug), and is correctly fixed. But it means AgentMux currently has **zero deliberate mechanism** for restoring a user's layout after a normal quit: every graceful close destroys the workspace, and every launch starts from the default 3-pane seed. Getting the user's remembered behavior back — on purpose, correctly, without reintroducing the leak-prone semantics — is new work, not a revert. Two shapes of that work (auto-restore-last-session, and named on-demand Layouts) are scoped in `docs/specs/SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md`.
 
 ## 5. Sources
 
 - `frontend/app-init.ts:317-345` (`initHostWave` cold-start path)
 - `agentmux-srv/src/server/service/window_create.rs:107-211` (`default_three_pane_tree` seed)
-- `agentmux-cef/src/backend/wcore/window.rs:139-161` / `agentmux-cef/src/backend/wcore/tab.rs` (cascade delete on close)
+- `agentmux-srv/src/backend/wcore/window.rs:139-161` / `agentmux-srv/src/backend/wcore/tab.rs` (cascade delete on close)
 - `agentmux-srv/src/server/service/window_close.rs:24-186` (`CloseWindow` RPC cascade)
 - Commit `e3a6f85c2069e5f5ea9358b3dae85f8594ac0d0d` (2026-04-04, PR #299)
 - Commit `4cbf856b7fceba371b8b4545c0c8cc0eced6d3fd` (2026-07-16, PR #2186)
