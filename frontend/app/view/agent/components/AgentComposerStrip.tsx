@@ -3,15 +3,22 @@
 
 /**
  * AgentComposerStrip — status row that sits directly above the textarea in
- * the agent pane composer region. Below the widest tier: left-justified,
- * wrapping onto additional lines (no hard cap — see _composer-strip.scss's
- * file header) rather than clipping when the pane narrows — see
- * docs/specs/SPEC_COMPOSER_STRIP_LEFT_JUSTIFIED_TIERED_WRAP_2026_08_03.md.
- * At the widest tier (≥482px, live-measured — the real 1-line/2-line wrap
- * point, not an estimate): controls left / stats zone true-centered / right
- * zone right — restored the same day after the left-justify-always behavior
- * above silently dropped the centered stats presentation as a side effect
- * (the narrow-tier wrap/no-clip fix itself is unchanged either way).
+ * the agent pane composer region. Deliberate tiered split points (not
+ * organic flex-wrap reflow), always edge-split — same left/center/right
+ * visual language as the widest tier, extended to fewer zones per line as
+ * the pane narrows, never a centered blob — see
+ * docs/specs/SPEC_COMPOSER_STRIP_CENTERED_SMART_SPLIT_2026_08_14.md
+ * (supersedes SPEC_COMPOSER_STRIP_LEFT_JUSTIFIED_TIERED_WRAP_2026_08_03.md's
+ * "always left-justify below the widest tier" design, reverted per direct
+ * user feedback; an intermediate "center everything as one group" revision
+ * was itself corrected same day per further feedback). <280px: controls /
+ * stats / right, each its own line, each keeping its identity (left /
+ * center / right) exactly as it would sit at the widest tier, just
+ * stacked. 280-481px: [controls left | stats right] on line 1, right
+ * alone (right-anchored) on line 2. >=482px (live-measured — the real
+ * 1-line/2-line wrap point, not an estimate): controls left / stats zone
+ * true-centered / right right — see _composer-strip.scss for the actual
+ * container queries.
  *
  * In flow order:
  *   1. AgentRuntimeDropup (single Mode · Model · Effort trigger)
