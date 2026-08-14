@@ -19,7 +19,6 @@
 - fix(agent-pane): wire up SubmitTimeoutElapsed dispatch + visibility catch-up watchdog tick
 - fix(agent-pane): composer strip stable width + deliberate edge-split tiers
 
-
 ## 0.55.7 — 2026-08-13
 
 - fix(browser-pane): OAuth/GIS sign-in works in-pane again — no instance-exit, real child popup completes the login, external-protocol guard
