@@ -123,13 +123,35 @@ pub struct InjectionRequest {
     /// couldn't already.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reagent_key_id: Option<String>,
+    /// Message id that was part of `reagent_sig`'s signed material — the
+    /// same `id` field the cloud muxbus server assigns each pending
+    /// injection (see `PendingInj`/`Injection.reagent_msg_id` on the
+    /// agentmux-cloud side). Distinct from `request_id` above, which is
+    /// this request's own (possibly re-derived, e.g. across a cross-instance
+    /// forward) identifier — `reagent_msg_id` must stay exactly what was
+    /// signed for verification to succeed regardless of how `request_id`
+    /// is set on this particular hop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reagent_msg_id: Option<String>,
+    /// Unix seconds `reagent_sig` was signed at — part of the signed
+    /// material, checked for anti-replay against a max-age window (the WS
+    /// path's `cloud_subscriber::REAGENT_SIG_MAX_AGE_SECS`, or the HTTP
+    /// path's own constant of the same name in `server/reactive.rs`), same
+    /// purpose as `ts_secs`/`JEKT_SIG_MAX_AGE_SECS` for host-tier `jekt_sig`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reagent_ts_secs: Option<i64>,
     /// Server-computed verification outcome for `reagent_sig` — same
     /// `#[serde(skip_deserializing)]` guarantee as `sig_verified`: no
-    /// attacker-supplied JSON body can set this directly, only
-    /// `cloud_subscriber::sync_agent_reactive` (the one caller that
-    /// actually receives WAN injections) after checking `reagent_sig`
-    /// against the pinned key. `Some(true)` renders `SIG=verified` in the
-    /// marker; `Some(false)` (a `reagent_sig` was present but didn't
+    /// attacker-supplied JSON body can set this directly. Set by whichever
+    /// caller actually received this WAN injection and independently
+    /// verified `reagent_sig` against the pinned key —
+    /// `cloud_subscriber::sync_agent_reactive` for the desktop app's WS
+    /// delivery path, or `server/reactive.rs::verify_reagent_signature` for
+    /// the HTTP `/agentmux/reactive/inject` path used by standalone pollers
+    /// like `@agentmuxai/muxbus-client` (reagentx P1 on PR #41 — that path
+    /// used to receive the four reagent_* fields over HTTP with nothing on
+    /// the receiving end able to verify them at all). `Some(true)` renders
+    /// `SIG=verified` in the marker; `Some(false)` (a `reagent_sig` was present but didn't
     /// verify) renders `SIG=invalid` — a real red flag, same spirit as
     /// host-tier's `TRUST=unverified`. `None` (no `reagent_sig` attempted)
     /// renders no `SIG=` field at all, keeping ordinary WAN traffic
