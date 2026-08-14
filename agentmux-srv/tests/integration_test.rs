@@ -319,15 +319,22 @@ fn restore_last_session_survives_a_real_process_restart() {
     // --- Process 1: create a window, add a marked block, close gracefully ---
     let (guard1, web_addr, _ws_addr, auth_key) = spawn_backend_with_data_dir(data_dir.path());
 
-    let window = rpc(
-        &client,
-        &web_addr,
-        &auth_key,
-        "window",
-        "CreateWindow",
-        serde_json::json!([null, "", "main", true]),
-    );
-    let window_id = window["oid"].as_str().expect("window oid").to_string();
+    // Mirror the real frontend cold-start path (`initHostWave` in
+    // `app-init.ts`): a fresh server has already bootstrapped a "Starter
+    // workspace" window via `ensure_initial_data` at startup, so
+    // `Client.windowids` is non-empty here — the frontend reuses
+    // `windowids[0]` rather than calling `CreateWindow` again. Calling
+    // `CreateWindow` unconditionally here (as this test used to) would spawn
+    // a SECOND window that the bootstrap window still keeps alive,
+    // permanently pinning `Client.windowids` above one entry — CloseWindow
+    // would never see it empty out, so it (correctly, per
+    // `will_empty_windowids`) would never write a snapshot.
+    let client_data = rpc(&client, &web_addr, &auth_key, "client", "GetClientData", serde_json::json!([]));
+    let window_id = client_data["windowids"][0]
+        .as_str()
+        .expect("bootstrap window id")
+        .to_string();
+    let window = rpc(&client, &web_addr, &auth_key, "window", "GetWindow", serde_json::json!([window_id]));
     let workspace_id = window["workspaceid"].as_str().expect("window workspaceid").to_string();
 
     let workspace = rpc(
@@ -338,7 +345,15 @@ fn restore_last_session_survives_a_real_process_restart() {
         "GetObject",
         serde_json::json!([format!("workspace:{}", workspace_id)]),
     );
-    let tab_id = workspace["tabids"][0].as_str().expect("workspace has a tab").to_string();
+    // The bootstrap workspace's initial tab can still be sitting in the
+    // legacy `pinnedtabids` field rather than `tabids` (drained into
+    // `tabids` only on the next `TabsReordered` event) — check both, same
+    // as `session_restore::snapshot_workspace`.
+    let tab_id = workspace["tabids"][0]
+        .as_str()
+        .or_else(|| workspace["pinnedtabids"][0].as_str())
+        .expect("workspace has a tab")
+        .to_string();
 
     let marker_block = rpc(
         &client,

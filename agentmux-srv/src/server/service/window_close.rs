@@ -387,6 +387,26 @@ mod snapshot_timing_tests {
         snapshot["tabs"][0]["name"].as_str().map(|s| s.to_string())
     }
 
+    /// `test_state()` seeds a "Starter workspace" bootstrap window
+    /// (`wcore::ensure_initial_data`) before any test code runs — without
+    /// closing it first, `Client.windowids` always has that extra entry, so
+    /// `will_empty_windowids` never actually goes true in these tests no
+    /// matter how many test-created windows get closed. Close it before
+    /// setting up a test's own "N independent windows" scenario.
+    async fn close_bootstrap_window(state: &crate::server::AppState) {
+        let bootstrap_id = state
+            .wstore
+            .get_all::<Client>()
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap()
+            .windowids[0]
+            .clone();
+        let ret = handle_window_service(state, &close_call(&bootstrap_id)).await;
+        assert!(ret.success, "closing bootstrap window failed: {:?}", ret.error);
+    }
+
     /// The core fix: with two independent windows open, closing the FIRST
     /// one (the other is still open — `Client.windowids` does NOT empty)
     /// must not touch the snapshot at all. Only closing the SECOND (last)
@@ -396,23 +416,25 @@ mod snapshot_timing_tests {
     #[tokio::test]
     async fn closing_one_of_two_open_windows_does_not_touch_the_snapshot() {
         let state = test_state();
+        // Closing the lone bootstrap window IS a genuine terminal close (it
+        // empties `Client.windowids` on its own), so it legitimately writes
+        // a snapshot of its own — capture that as the baseline rather than
+        // assuming "no snapshot yet".
+        close_bootstrap_window(&state).await;
+        let snapshot_after_bootstrap_close = last_session_snapshot_tab_name(&state);
 
         let first = create_window(&state).await;
         rename_first_tab(&state, &first.workspaceid, "first-window-tab");
         let second = create_window(&state).await;
         rename_first_tab(&state, &second.workspaceid, "second-window-tab");
 
-        assert!(
-            last_session_snapshot_tab_name(&state).is_none(),
-            "precondition: no snapshot exists yet"
-        );
-
         // Close the FIRST window while the second is still open.
         let ret = handle_window_service(&state, &close_call(&first.oid)).await;
         assert!(ret.success, "CloseWindow failed: {:?}", ret.error);
 
-        assert!(
-            last_session_snapshot_tab_name(&state).is_none(),
+        assert_eq!(
+            last_session_snapshot_tab_name(&state),
+            snapshot_after_bootstrap_close,
             "closing one of two open windows must not write a snapshot — \
              the session hasn't actually ended yet"
         );
@@ -439,6 +461,11 @@ mod snapshot_timing_tests {
     #[tokio::test]
     async fn snapshot_reflects_whichever_close_actually_empties_windowids() {
         let state = test_state();
+        // See `closing_one_of_two_open_windows_does_not_touch_the_snapshot`:
+        // closing the lone bootstrap window is itself a terminal close, so
+        // it writes a snapshot — capture that as the baseline.
+        close_bootstrap_window(&state).await;
+        let snapshot_after_bootstrap_close = last_session_snapshot_tab_name(&state);
 
         let main = create_window(&state).await;
         rename_first_tab(&state, &main.workspaceid, "main-session");
@@ -448,8 +475,9 @@ mod snapshot_timing_tests {
         // Close "main" first — does NOT empty windowids (tearoff still open).
         let ret = handle_window_service(&state, &close_call(&main.oid)).await;
         assert!(ret.success);
-        assert!(
-            last_session_snapshot_tab_name(&state).is_none(),
+        assert_eq!(
+            last_session_snapshot_tab_name(&state),
+            snapshot_after_bootstrap_close,
             "closing main first must not snapshot — it isn't the terminal close"
         );
 

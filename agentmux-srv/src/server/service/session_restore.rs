@@ -56,7 +56,13 @@ fn placeholder_idx(s: &str) -> Option<usize> {
 pub(crate) fn snapshot_workspace(store: &Store, workspace_id: &str) -> Option<Value> {
     let workspace = store.get::<Workspace>(workspace_id).ok().flatten()?;
     let mut tabs = Vec::new();
-    for tab_id in &workspace.tabids {
+    // `pinnedtabids` is a legacy field (pinning was removed from AgentMux —
+    // see `tab_lifecycle.rs`); a workspace the reducer hasn't touched yet
+    // (e.g. straight out of `ensure_initial_data`) can still have its one
+    // tab sitting there instead of in `tabids` until the next
+    // `TabsReordered` event drains it. Read both so a snapshot taken before
+    // that drain doesn't silently see zero tabs.
+    for tab_id in workspace.pinnedtabids.iter().chain(workspace.tabids.iter()) {
         let Some(tab) = store.get::<Tab>(tab_id).ok().flatten() else {
             continue;
         };
