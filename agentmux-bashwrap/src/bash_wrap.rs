@@ -3245,8 +3245,34 @@ mod tests {
         let bash = locate_bash().expect("locate_bash for test — same dependency the whole binary needs");
         let command = "printf 'Installing deps...'; sleep 0.07; printf '\\rInstalling deps... done\\n'";
 
+        // reagentx P2 on PR #2569: a hung/slow attempt used to be retried by
+        // wrapping `run_via_pty` in an EXTERNAL `tokio::time::timeout` and
+        // `continue`ing past the deadline. That leaked a process: dropping
+        // the outer future does NOT abort `wait_task`/`pty_reader_loop`
+        // (independent `spawn_blocking` tasks already running by the time
+        // the timeout could preempt anything), so the underlying bash/PTY
+        // child from the timed-out attempt kept running detached — up to
+        // MAX_ATTEMPTS - 1 of them per flaky run, none ever cleaned up.
+        //
+        // `run_via_pty` already has a CORRECT internal kill path for exactly
+        // "this attempt is stuck": its idle-timeout branch tree-kills the
+        // child (via `kill_process_tree` + `clone_killer`) and returns exit
+        // code 124 BEFORE returning at all. Rather than fight that with a
+        // second, incomplete external timeout, lower its threshold for this
+        // test (well above what this ~70ms command legitimately needs, but
+        // short enough to bound a genuinely stuck attempt) and let
+        // `run_via_pty` clean up after itself before this test ever sees
+        // control back — no external timeout, no orphan.
+        let _env_guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev_idle_timeout = std::env::var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS").ok();
+        unsafe {
+            std::env::set_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", "15");
+        }
+
         const MAX_ATTEMPTS: u32 = 5;
         let mut last_blob = String::new();
+        let mut collapsed = false;
+        let mut skipped = false;
         for attempt in 1..=MAX_ATTEMPTS {
             let pty_system = native_pty_system();
             let pair = match pty_system.openpty(PtySize {
@@ -3258,7 +3284,8 @@ mod tests {
                 Ok(p) => p,
                 Err(e) => {
                     eprintln!("skipping: PTY unavailable in this environment: {e}");
-                    return;
+                    skipped = true;
+                    break;
                 }
             };
             let args = Args {
@@ -3268,35 +3295,28 @@ mod tests {
             };
             let buffered = Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new()));
 
-            // A hung/slow attempt is treated the same as a wrong-occurrence
-            // attempt (retry, don't hard-fail): a loaded CI runner can push
-            // process-spawn latency past a fixed per-attempt budget without
-            // that being evidence of a real bug in `run_via_pty` itself —
-            // same rationale as the occurrence-count retry below, just
-            // covering the timeout path too (previously a timeout here
-            // bypassed the retry loop entirely via a hard `.expect()`).
-            let outcome = tokio::time::timeout(
-                Duration::from_secs(20),
-                run_via_pty(&args, command, None, buffered.clone(), &bash, pair),
-            )
-            .await;
-            let result = match outcome {
-                Ok(Ok(r)) => r,
-                Ok(Err(e)) => panic!("run_via_pty should return Ok, got: {e}"),
-                Err(_) => {
-                    eprintln!(
-                        "attempt {attempt}/{MAX_ATTEMPTS}: run_via_pty did not complete within \
-                         20s (retrying: a loaded CI runner can delay process spawn/scheduling)"
-                    );
-                    continue;
-                }
+            let result = match run_via_pty(&args, command, None, buffered.clone(), &bash, pair).await {
+                Ok(r) => r,
+                Err(e) => panic!("run_via_pty should return Ok, got: {e}"),
             };
+            if result == 124 {
+                // Idle-killed by run_via_pty's own internal mechanism — the
+                // process tree is already cleaned up by the time this
+                // returns, nothing left behind to leak.
+                eprintln!(
+                    "attempt {attempt}/{MAX_ATTEMPTS}: run_via_pty's own idle-kill fired \
+                     (likely a loaded CI runner delaying process spawn/scheduling) — \
+                     retrying, already cleaned up"
+                );
+                continue;
+            }
             assert_eq!(result, 0, "command should exit cleanly");
 
             let blob = String::from_utf8_lossy(&buffered.lock().await).into_owned();
             let occurrences = blob.matches("Installing deps").count();
             if occurrences == 1 && blob.contains("Installing deps... done") {
-                return; // demonstrated: the collapse happened as designed
+                collapsed = true; // demonstrated: the collapse happened as designed
+                break;
             }
             eprintln!(
                 "attempt {attempt}/{MAX_ATTEMPTS}: expected 1 occurrence + the settled frame, \
@@ -3304,6 +3324,17 @@ mod tests {
                  can occasionally push the 70ms pause outside A1's ~50-100ms defer window)"
             );
             last_blob = blob;
+        }
+
+        unsafe {
+            match prev_idle_timeout {
+                Some(v) => std::env::set_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", v),
+                None => std::env::remove_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS"),
+            }
+        }
+
+        if skipped || collapsed {
+            return;
         }
         panic!(
             "the static label + its delayed \\r-overwrite must collapse to ONE occurrence across \
