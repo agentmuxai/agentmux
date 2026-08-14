@@ -110,8 +110,17 @@ pub struct InjectionRequest {
     pub reagent_sig: Option<String>,
     /// Which pinned public key `reagent_sig` claims to be signed under —
     /// see `agentmux_common::jekt_sign::reagent_public_key` for the
-    /// rotation rationale. `None` alongside `reagent_sig` is treated the
-    /// same as an unrecognized key id: verification fails closed.
+    /// rotation rationale. A legitimate sender always sends all four
+    /// signing fields (`reagent_sig`, `reagent_key_id`, `reagent_msg_id`,
+    /// `reagent_ts_secs`) together, so `None` here alongside a present
+    /// `reagent_sig` is treated the same as no signature having been
+    /// attempted at all (`reagent_verified` resolves to `None`, not
+    /// `Some(false)`) — see `cloud_subscriber::sync_agent_reactive`'s match
+    /// on all four fields. This does not weaken verification: `SIG=`
+    /// never affects `TIER`/`TRUST` escalation either way (see
+    /// `reagent_verified`'s doc comment below), so a stripped/partial
+    /// signature cannot buy an attacker anything a fully-absent one
+    /// couldn't already.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reagent_key_id: Option<String>,
     /// Server-computed verification outcome for `reagent_sig` — same
