@@ -382,9 +382,22 @@ export class TermWrap {
         // events that re-synced PSReadLine. To get the same outcome
         // unconditionally, replay one synthetic resize cycle ~250ms
         // post-init: that gap is enough for the first prompt to land
-        // but short enough to feel immediate. Split across rAF ticks
-        // because xterm coalesces back-to-back same-frame resizes
-        // into a single SIGWINCH.
+        // but short enough to feel immediate.
+        //
+        // Sends the two SIGWINCH-equivalent notifications directly via
+        // sendTermSize(override) WITHOUT ever calling this.terminal.resize() —
+        // PSReadLine's resync only needs the BACKEND PTY to see a size change;
+        // the frontend's own rendered grid never needs to move at all to
+        // achieve that. The original implementation called
+        // this.terminal.resize() for both steps, which is real and visible:
+        // xterm reallocates its canvas and redraws at the new grid size, a
+        // one-frame ~9px width blip confirmed via live CDP trace (every open,
+        // ~300-500ms after mount) — see
+        // docs/specs/SPEC_AGENT_SHELL_PSREADLINE_THAW_VISIBLE_RESIZE_2026-08-14.md.
+        // Still split across rAF ticks (not just two sendTermSize calls back
+        // to back) to preserve the original timing shape the backend/PSReadLine
+        // side was tuned against, even though xterm itself no longer coalesces
+        // anything here (there's no xterm-side resize to coalesce).
         //
         // Gated to Windows (PLATFORM === "win32") because PSReadLine /
         // ConPTY are the affected stack. Non-Windows shells (bash, zsh,
@@ -401,25 +414,25 @@ export class TermWrap {
                 const baseRows = this.terminal.rows;
                 if (baseCols < 4) return; // too narrow to safely toggle ±1
                 try {
-                    const targetCols1 = baseCols + 1;
-                    this.terminal.resize(targetCols1, baseRows);
-                    this.sendTermSize();
+                    this.sendTermSize({ cols: baseCols + 1, rows: baseRows });
                     this.thawRafId = requestAnimationFrame(() => {
                         this.thawRafId = null;
                         if (this.disposed || !this.terminal) return;
-                        // If something else (e.g. a sibling-split firing
-                        // handleResize between step 1 and now) changed the
-                        // grid since step 1's +1, that resize ALREADY fired
-                        // its own SIGWINCH at the current correct size —
-                        // restoring to baseCols here would force xterm back
-                        // to stale geometry and send a wrong SIGWINCH.
-                        // Skip step 2 in that case. Codex P2 on #1043.
-                        if (this.terminal.cols !== targetCols1 || this.terminal.rows !== baseRows) {
+                        // If a REAL resize happened between step 1 and now (e.g. a
+                        // sibling-split firing handleResize), the terminal's actual
+                        // grid has already moved on and already sent its own correct
+                        // SIGWINCH — sending our stale baseCols/baseRows now would
+                        // clobber that with an outdated size. Unlike the previous
+                        // (resize-based) version, step 1 never touched
+                        // this.terminal.cols/rows at all, so comparing against
+                        // baseCols/baseRows directly (not some step-1-mutated target)
+                        // is what detects "did anything real happen meanwhile."
+                        // Codex P2 on #1043 (same underlying concern, adapted).
+                        if (this.terminal.cols !== baseCols || this.terminal.rows !== baseRows) {
                             return;
                         }
                         try {
-                            this.terminal.resize(baseCols, baseRows);
-                            this.sendTermSize();
+                            this.sendTermSize({ cols: baseCols, rows: baseRows });
                         } catch (e) {
                             console.warn("[term] PSReadLine-thaw step 2 failed", e);
                         }
@@ -747,8 +760,14 @@ export class TermWrap {
         this.heldData = [];
     }
 
-    private sendTermSize() {
-        const termSize: TermSize = { rows: this.terminal.rows, cols: this.terminal.cols };
+    /**
+     * `override`, when given, tells the backend PTY a size WITHOUT touching this
+     * terminal's own rendered grid — used by the PSReadLine thaw below to deliver a
+     * synthetic SIGWINCH pair with no visible resize (SPEC_AGENT_SHELL_PSREADLINE_THAW_VISIBLE_RESIZE_2026-08-14.md).
+     * Every other call site omits it and keeps sending the terminal's actual current size.
+     */
+    private sendTermSize(override?: TermSize) {
+        const termSize: TermSize = override ?? { rows: this.terminal.rows, cols: this.terminal.cols };
         const wsCommand: SetBlockTermSizeWSCommand = {
             wscommand: "setblocktermsize",
             blockid: this.blockId,
