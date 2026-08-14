@@ -152,10 +152,22 @@ centered filler when alone). `-stats-zone`'s `text-align: center` was
 already correct under this model — its identity *is* "centered," matching
 its widest-tier role — and needed no change.
 
-The design and table in the body above already reflect both corrections;
-this addendum exists so the "why" (two real revisions, not typos) has a
-record, matching this file's established pattern (see the 08-03 spec's
-own same-day addendum).
+**Round 3 (PR #2577 review) — the flicker fix (§1) never actually took
+effect.** `.agent-composer-strip-stats` is a plain `<span>` in
+`AgentComposerStrip.tsx`, and its parent (`.agent-composer-strip-stats-zone`)
+is not itself a flex/grid container — unlike `-controls`/`-right`'s
+children, nothing blockifies it, so it stayed genuinely `display: inline`.
+`min-width` has no effect on non-replaced inline elements per the CSS box
+model spec, so the `min-width: 12ch` from §1 silently did nothing — caught
+by reagent's automated review, not by any of the manual/live verification
+above. **Fix:** added `display: inline-block` to
+`.agent-composer-strip-stats`, which makes `min-width` actually apply
+while keeping the element sitting inline with any siblings.
+
+The design and table in the body above already reflect all three
+corrections; this addendum exists so the "why" (three real revisions, not
+typos) has a record, matching this file's established pattern (see the
+08-03 spec's own same-day addendum).
 
 ## Files changed
 

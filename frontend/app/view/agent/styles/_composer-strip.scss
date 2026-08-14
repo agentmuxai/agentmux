@@ -384,6 +384,15 @@
 }
 
 .agent-composer-strip-stats {
+    // This is a plain <span> (AgentComposerStrip.tsx), and its parent
+    // (.agent-composer-strip-stats-zone) is not a flex/grid container —
+    // unlike -controls/-right's children, nothing blockifies this element,
+    // so it stays genuinely `display: inline` unless overridden here.
+    // `min-width` has no effect on non-replaced inline elements per the
+    // CSS box model spec — without this, the min-width below silently did
+    // nothing (reagent P1, PR #2577). `inline-block` keeps it sitting
+    // inline with any siblings while making min-width actually apply.
+    display: inline-block;
     font-family: var(--termfontfamily, monospace);
     font-size: 11px;
     color: var(--secondary-text-color);
