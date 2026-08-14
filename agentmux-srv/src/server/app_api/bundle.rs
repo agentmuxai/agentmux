@@ -112,6 +112,103 @@ fn register_bundle_validate(engine: &Arc<WshRpcEngine>, _state: &AppState) {
     engine.register_handler(COMMAND_BUNDLE_VALIDATE, handler);
 }
 
+/// Reject a `bundle.upsert` write that would change `provider`/`model` on
+/// an existing bundle that already has them set —
+/// ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §7.4.2. These are
+/// readonly-once-set: an ABF's portability guarantee (it's self-describing
+/// about what it needs to run) depends on them never silently changing
+/// after creation, and the UI-only disabling in `memory-manager.tsx` is
+/// advisory, not a guarantee — this is the actual enforcement.
+///
+/// `existing = None` (fresh insert) or an existing row with `provider`/
+/// `model` still empty (legacy row awaiting backfill, or was raced to
+/// create without them) always allows the write — that's how a bundle's
+/// provider/model get set the FIRST time. Once non-empty, they're locked.
+///
+/// Pure — no I/O — directly unit-testable without spinning up an
+/// `AppState`, mirroring `agent_open.rs`'s `resolve_vendor_env_override`.
+fn check_provider_model_immutable(existing: Option<&Memory>, incoming: &Memory) -> Result<(), String> {
+    let Some(existing) = existing else { return Ok(()) };
+    if !existing.provider.is_empty() && existing.provider != incoming.provider {
+        return Err(format!(
+            "FORBIDDEN: bundle {} provider is readonly once set (has '{}', got '{}')",
+            existing.id, existing.provider, incoming.provider
+        ));
+    }
+    if !existing.model.is_empty() && existing.model != incoming.model {
+        return Err(format!(
+            "FORBIDDEN: bundle {} model is readonly once set (has '{}', got '{}')",
+            existing.id, existing.model, incoming.model
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod check_provider_model_immutable_tests {
+    use super::*;
+
+    fn memory(id: &str, provider: &str, model: &str) -> Memory {
+        Memory {
+            id: id.to_string(),
+            name: "T".to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: false,
+            provider: provider.to_string(),
+            model: model.to_string(),
+            instructions: String::new(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    #[test]
+    fn allows_a_fresh_insert_to_set_provider_and_model() {
+        let incoming = memory("b1", "claude", "anthropic");
+        assert!(check_provider_model_immutable(None, &incoming).is_ok());
+    }
+
+    #[test]
+    fn allows_setting_provider_and_model_the_first_time_on_an_existing_empty_row() {
+        // Legacy row awaiting backfill, or a bundle created before this
+        // field existed — first write that populates them must succeed.
+        let existing = memory("b1", "", "");
+        let incoming = memory("b1", "claude", "anthropic");
+        assert!(check_provider_model_immutable(Some(&existing), &incoming).is_ok());
+    }
+
+    #[test]
+    fn allows_an_unrelated_field_edit_that_resends_the_same_provider_and_model() {
+        let existing = memory("b1", "claude", "anthropic");
+        let incoming = memory("b1", "claude", "anthropic");
+        assert!(check_provider_model_immutable(Some(&existing), &incoming).is_ok());
+    }
+
+    #[test]
+    fn rejects_changing_provider_once_set() {
+        let existing = memory("b1", "claude", "anthropic");
+        let incoming = memory("b1", "codex", "anthropic");
+        let err = check_provider_model_immutable(Some(&existing), &incoming).unwrap_err();
+        assert!(err.contains("FORBIDDEN"));
+        assert!(err.contains("provider"));
+    }
+
+    #[test]
+    fn rejects_changing_model_once_set() {
+        let existing = memory("b1", "claude", "anthropic");
+        let incoming = memory("b1", "claude", "custom");
+        let err = check_provider_model_immutable(Some(&existing), &incoming).unwrap_err();
+        assert!(err.contains("FORBIDDEN"));
+        assert!(err.contains("model"));
+    }
+}
+
 fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let make = |state: &AppState| -> crate::backend::rpc::engine::CommandHandler {
         let id_store = state.id_store.clone();
@@ -138,6 +235,12 @@ fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         if existing.is_global {
                             return Err("FORBIDDEN: cannot mutate a global bundle".to_string());
                         }
+                        // provider/model are readonly once set — the actual
+                        // enforcement behind the portability guarantee (the
+                        // bundle editor's disabled-input UI is advisory
+                        // only). See check_provider_model_immutable's doc
+                        // comment.
+                        check_provider_model_immutable(Some(&existing), &memory)?;
                     }
                 }
                 if memory.id.is_empty() {
