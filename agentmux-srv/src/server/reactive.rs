@@ -68,6 +68,9 @@ pub(super) fn echo_jekt_to_sender(
         effective_tier.unwrap_or("coord"),
         delivery_tier,
         sig_verified,
+        // Sender-echo is inherently host-tier (the sender only ever sees
+        // this in their own pane) — reagent signing is WAN-only.
+        None,
         msgid,
         priority,
     );
@@ -146,6 +149,66 @@ pub(super) fn verify_jekt_signature(state: &AppState, req: &mut InjectionRequest
     req.sig_verified = Some(verified);
 }
 
+/// Anti-replay window for `req.reagent_ts_secs`, same purpose as
+/// `JEKT_SIG_MAX_AGE_SECS` above but WAN-scoped: wider than host-tier's
+/// 300s because this covers real network delivery latency, not a
+/// same-machine call — matches `cloud_subscriber::REAGENT_SIG_MAX_AGE_SECS`
+/// (the WS delivery path's own constant of the same value) and the
+/// github-consumer Lambda's own REVIEW_NOTIFICATION_TTL_SECONDS delivery
+/// window in the agentmux-cloud repo.
+const REAGENT_SIG_MAX_AGE_SECS: i64 = 600;
+
+/// WAN-tier reagent-signature verification for the HTTP
+/// `/agentmux/reactive/inject` path — mirrors
+/// `cloud_subscriber::sync_agent_reactive`'s in-process verification of the
+/// same four fields for the desktop app's WS delivery path, but for callers
+/// that deliver over HTTP instead (`@agentmuxai/muxbus-client`'s
+/// `pollAndDeliverInjections`, and any future standalone poller). Before
+/// this, `InjectionRequest` declared `reagent_sig`/`reagent_key_id` as
+/// deserializable input fields but nothing on the HTTP path ever read them
+/// — a reagent-signed notification delivered through this path arrived
+/// unsigned in effect, `reagent_verified` always `None`, and could never
+/// render `SIG=verified` (reagentx P1 on PR #41).
+///
+/// Only meaningful for `delivery_tier == "wan"` — same scoping as
+/// `reagent_verified`'s doc comment ("meaningless off the WAN tier"). A
+/// partial set of the four fields (e.g. a sig but no key_id) is treated the
+/// same as "not signed" (`reagent_verified` stays `None`), not "signed but
+/// broken" — matches `cloud_subscriber.rs`'s identical policy: a legitimate
+/// sender always sends all four together, and this field never affects
+/// `TIER`/`TRUST` escalation either way, so a stripped signature can't buy
+/// an attacker anything a fully-absent one couldn't already.
+///
+/// Takes `now` explicitly (rather than calling `now_unix_secs()` itself),
+/// same reasoning as `cloud_subscriber::reagent_sig_is_fresh`: the pinned
+/// Ed25519 key's matching private half isn't in this repo (it lives only in
+/// agentmux-cloud's Secrets Manager), so tests can't mint a fresh signature
+/// on demand the way the host-tier HMAC tests below do — only a fixed
+/// offline-signed fixture at a fixed `ts_secs`. Injecting `now` lets a test
+/// hold that fixture inside the freshness window without mocking the clock.
+pub(super) fn verify_reagent_signature(req: &mut InjectionRequest, now: i64) {
+    if req.delivery_tier.as_deref() != Some("wan") {
+        return;
+    }
+    let (Some(sig), Some(key_id), Some(msg_id), Some(ts_secs)) =
+        (req.reagent_sig.as_deref(), req.reagent_key_id.as_deref(), req.reagent_msg_id.as_deref(), req.reagent_ts_secs)
+    else {
+        return;
+    };
+    let within_freshness_window = ts_secs > 0 && (now - ts_secs).abs() <= REAGENT_SIG_MAX_AGE_SECS;
+    let verified = within_freshness_window
+        && agentmux_common::jekt_sign::verify_reagent_jekt(
+            key_id,
+            msg_id,
+            req.source_agent.as_deref().unwrap_or(""),
+            &req.target_agent,
+            ts_secs,
+            &req.message,
+            sig,
+        );
+    req.reagent_verified = Some(verified);
+}
+
 pub(super) async fn handle_reactive_inject(
     State(state): State<AppState>,
     Json(mut req): Json<InjectionRequest>,
@@ -158,6 +221,7 @@ pub(super) async fn handle_reactive_inject(
     );
 
     verify_jekt_signature(&state, &mut req);
+    verify_reagent_signature(&mut req, now_unix_secs());
 
     // 1. Try local ReactiveHandler first (fast path — same instance).
     let resp = state.reactive_handler.inject_message(req.clone());
@@ -993,5 +1057,115 @@ mod verify_jekt_signature_tests {
 
         verify_jekt_signature(&state, &mut req);
         assert_eq!(req.sig_verified, Some(false));
+    }
+}
+
+/// `verify_reagent_signature` unit tests (reagentx P1 on PR #41 —
+/// `InjectionRequest` declared `reagent_sig`/`reagent_key_id` as
+/// deserializable input fields but nothing on the HTTP
+/// `/agentmux/reactive/inject` path ever verified them, so a reagent-signed
+/// notification delivered through `@agentmuxai/muxbus-client`'s
+/// `pollAndDeliverInjections` arrived unsigned in effect).
+#[cfg(test)]
+mod verify_reagent_signature_tests {
+    use super::*;
+
+    // Reuses the exact fixture from agentmux-common/src/jekt_sign.rs's own
+    // `a_correctly_signed_reagent_message_verifies` test: a signature
+    // produced offline against the "reagent-v1-dev" pinned public key's
+    // matching private half, over signed_material("msg-1",
+    // "github-consumer", "agentx", 1000, "hello"). The private key isn't in
+    // this repo (agentmux-cloud's Secrets Manager only) so a fresh signature
+    // can't be minted at test time — `now` is passed explicitly instead of
+    // wall-clock so this fixed ts_secs=1000 can be held inside the
+    // freshness window on demand.
+    const FIXTURE_SIG_B64: &str =
+        "QehidZjJa2jYLPIPYSsVxUlm86W5Fdbr9PV3P4HJyZwJ68/HZR9EaAL0MpcVtTuZJW2+MMGebc0RH9HITNJGCw==";
+    const FIXTURE_TS_SECS: i64 = 1_000;
+
+    fn wan_req() -> InjectionRequest {
+        InjectionRequest {
+            target_agent: "agentx".to_string(),
+            message: "hello".to_string(),
+            source_agent: Some("github-consumer".to_string()),
+            delivery_tier: Some("wan".to_string()),
+            reagent_sig: Some(FIXTURE_SIG_B64.to_string()),
+            reagent_key_id: Some("reagent-v1-dev".to_string()),
+            reagent_msg_id: Some("msg-1".to_string()),
+            reagent_ts_secs: Some(FIXTURE_TS_SECS),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_correctly_signed_and_fresh_reagent_message_verifies() {
+        let mut req = wan_req();
+        verify_reagent_signature(&mut req, FIXTURE_TS_SECS);
+        assert_eq!(req.reagent_verified, Some(true));
+    }
+
+    #[test]
+    fn a_correct_signature_outside_the_freshness_window_fails() {
+        let mut req = wan_req();
+        verify_reagent_signature(&mut req, FIXTURE_TS_SECS + REAGENT_SIG_MAX_AGE_SECS + 60);
+        assert_eq!(
+            req.reagent_verified,
+            Some(false),
+            "a mathematically correct signature must still fail outside the freshness window"
+        );
+    }
+
+    #[test]
+    fn host_tier_is_never_checked_regardless_of_signature() {
+        let mut req = wan_req();
+        req.delivery_tier = Some("host".to_string());
+        verify_reagent_signature(&mut req, FIXTURE_TS_SECS);
+        assert_eq!(req.reagent_verified, None, "reagent signing only applies to the WAN tier");
+    }
+
+    #[test]
+    fn lan_tier_is_never_checked_regardless_of_signature() {
+        let mut req = wan_req();
+        req.delivery_tier = Some("lan".to_string());
+        verify_reagent_signature(&mut req, FIXTURE_TS_SECS);
+        assert_eq!(req.reagent_verified, None, "reagent signing only applies to the WAN tier");
+    }
+
+    #[test]
+    fn a_wrong_signature_is_unverified() {
+        let mut req = wan_req();
+        req.reagent_sig = Some("forged-not-a-real-signature".to_string());
+        verify_reagent_signature(&mut req, FIXTURE_TS_SECS);
+        assert_eq!(req.reagent_verified, Some(false));
+    }
+
+    #[test]
+    fn an_unknown_key_id_is_unverified() {
+        let mut req = wan_req();
+        req.reagent_key_id = Some("reagent-v2-does-not-exist".to_string());
+        verify_reagent_signature(&mut req, FIXTURE_TS_SECS);
+        assert_eq!(req.reagent_verified, Some(false));
+    }
+
+    // A partial set of the four fields is "not signed," not "signed but
+    // broken" — matches cloud_subscriber.rs's identical policy (see
+    // reagent_key_id's doc comment in types.rs).
+    #[test]
+    fn a_partial_signature_set_is_treated_as_unsigned_not_invalid() {
+        let mut req = wan_req();
+        req.reagent_key_id = None;
+        verify_reagent_signature(&mut req, FIXTURE_TS_SECS);
+        assert_eq!(req.reagent_verified, None);
+    }
+
+    #[test]
+    fn no_reagent_fields_at_all_is_left_unset() {
+        let mut req = wan_req();
+        req.reagent_sig = None;
+        req.reagent_key_id = None;
+        req.reagent_msg_id = None;
+        req.reagent_ts_secs = None;
+        verify_reagent_signature(&mut req, FIXTURE_TS_SECS);
+        assert_eq!(req.reagent_verified, None);
     }
 }
