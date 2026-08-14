@@ -96,6 +96,42 @@ pub struct InjectionRequest {
     /// was given or it didn't match.
     #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
     pub sig_verified: Option<bool>,
+    /// Base64 Ed25519 signature over the same signed material as `jekt_sig`
+    /// (request_id, source_agent, target_agent, ts_secs, message), produced
+    /// by an AgentMux-operated WAN-tier service sender (currently only the
+    /// GitHub review-notification consumer, "reagent") using a private key
+    /// held exclusively in agentmux-cloud's Secrets Manager. Distinct from
+    /// `jekt_sig` (host-tier HMAC, symmetric, one key per local instance) —
+    /// see `agentmux_common::jekt_sign`'s module doc for why WAN needs an
+    /// asymmetric scheme instead. `None` for any non-reagent WAN sender or
+    /// any host/lan-tier request — this field is meaningless off the WAN
+    /// tier and verification is skipped entirely when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reagent_sig: Option<String>,
+    /// Which pinned public key `reagent_sig` claims to be signed under —
+    /// see `agentmux_common::jekt_sign::reagent_public_key` for the
+    /// rotation rationale. `None` alongside `reagent_sig` is treated the
+    /// same as an unrecognized key id: verification fails closed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reagent_key_id: Option<String>,
+    /// Server-computed verification outcome for `reagent_sig` — same
+    /// `#[serde(skip_deserializing)]` guarantee as `sig_verified`: no
+    /// attacker-supplied JSON body can set this directly, only
+    /// `cloud_subscriber::sync_agent_reactive` (the one caller that
+    /// actually receives WAN injections) after checking `reagent_sig`
+    /// against the pinned key. `Some(true)` renders `SIG=verified` in the
+    /// marker; `Some(false)` (a `reagent_sig` was present but didn't
+    /// verify) renders `SIG=invalid` — a real red flag, same spirit as
+    /// host-tier's `TRUST=unverified`. `None` (no `reagent_sig` attempted)
+    /// renders no `SIG=` field at all, keeping ordinary WAN traffic
+    /// unchanged. **Never affects `TIER`/`TRUST` escalation** — WAN jekts
+    /// stay unconditionally `TRUST=network-claimed` / eligible for
+    /// `TIER=sensitive` regardless of this field, per
+    /// docs/specs/SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §4 ("what
+    /// does NOT change"). This answers "who is this really from," not
+    /// "should this auto-execute."
+    #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
+    pub reagent_verified: Option<bool>,
 }
 
 /// Response from a message injection attempt.

@@ -68,6 +68,9 @@ pub(super) fn echo_jekt_to_sender(
         effective_tier.unwrap_or("coord"),
         delivery_tier,
         sig_verified,
+        // Sender-echo is inherently host-tier (the sender only ever sees
+        // this in their own pane) — reagent signing is WAN-only.
+        None,
         msgid,
         priority,
     );

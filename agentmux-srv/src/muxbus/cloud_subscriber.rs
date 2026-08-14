@@ -605,6 +605,19 @@ async fn sync_agent_reactive(
         source_agent: Option<String>,
         message: String,
         priority: Option<String>,
+        // Present only for messages signed by an AgentMux-operated WAN
+        // sender (currently just the GitHub review-notification consumer,
+        // "reagent") — see agentmux_common::jekt_sign::verify_reagent_jekt.
+        // All four travel together; verification is attempted only when
+        // every one of them deserializes present (see below).
+        #[serde(default)]
+        reagent_sig: Option<String>,
+        #[serde(default)]
+        reagent_key_id: Option<String>,
+        #[serde(default)]
+        reagent_msg_id: Option<String>,
+        #[serde(default)]
+        reagent_ts_secs: Option<i64>,
     }
     #[derive(Deserialize)]
     struct AckResp {
@@ -776,6 +789,29 @@ async fn sync_agent_reactive(
             continue;
         }
 
+        // Verify a reagent-signed WAN message (see PendingInj's doc comment)
+        // before delivery. Only attempted when every one of the four
+        // signing fields is present — a partial set (e.g. a sig but no
+        // key_id) is treated the same as "not signed," not "signed but
+        // broken," since a legitimate sender always sends all four
+        // together. Never affects escalation (WAN stays unconditionally
+        // TRUST=network-claimed / sensitive-eligible) — only which SIG=
+        // marker field renders. See InjectionRequest::reagent_verified.
+        let reagent_verified = match (&inj.reagent_sig, &inj.reagent_key_id, &inj.reagent_msg_id, inj.reagent_ts_secs) {
+            (Some(sig), Some(key_id), Some(msg_id), Some(ts_secs)) => Some(
+                agentmux_common::jekt_sign::verify_reagent_jekt(
+                    key_id,
+                    msg_id,
+                    inj.source_agent.as_deref().unwrap_or(""),
+                    agent_id,
+                    ts_secs,
+                    &inj.message,
+                    sig,
+                ),
+            ),
+            _ => None,
+        };
+
         let req = InjectionRequest {
             target_agent: agent_id.to_string(),
             message: inj.message.clone(),
@@ -786,6 +822,7 @@ async fn sync_agent_reactive(
             jekt_tier: None,       // auto-detected from keywords
             delivery_tier: Some("wan".to_string()),
             forward_hops: 0,
+            reagent_verified,
             ..Default::default()
         };
         let delivery = handler.inject_message(req);

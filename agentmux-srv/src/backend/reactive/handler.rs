@@ -422,6 +422,7 @@ impl Handler {
             effective_tier,
             delivery_tier,
             req.sig_verified,
+            req.reagent_verified,
             &request_id,
             priority,
         );
