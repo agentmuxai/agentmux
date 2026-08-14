@@ -574,10 +574,29 @@ enum AgentSyncOutcome {
     /// non-fatal error) — nothing further to signal to the caller.
     Ok,
     /// The SHARED account-level token (not a per-agent credential) was
-    /// rejected — the whole WS session's auth is stale and needs a
-    /// reconnect. Only ever produced when no per-agent credential was in
-    /// play for the rejected call.
+    /// rejected — either genuinely expired (401) or, now, bound-agent
+    /// mismatched (403, once `ENFORCE_AGENT_BINDING` is live — see
+    /// `SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §5.2) — the whole
+    /// WS session's auth is stale and needs a reconnect either way. Only
+    /// ever produced when no per-agent credential was in play for the
+    /// rejected call.
     ReconnectSharedTokenExpired,
+}
+
+/// Does `status` mean "this credential is not accepted for this request,"
+/// regardless of the specific reason? 401 = expired/invalid token. 403 =
+/// `checkAgentBinding` rejected it (this credential is bound to a
+/// different agent_id than the one it's being used for — see
+/// `SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §5.2). Both mean the
+/// SAME thing operationally for a poller: the credential in hand can't be
+/// used for this agent, so invalidate-and-retry-with-the-shared-token (or,
+/// if the shared token itself is what was rejected, reconnect the whole
+/// session) applies identically to either status. Before this, only 401
+/// triggered that recovery path — a 403 fell into the generic non-2xx
+/// branch, silently stalling that agent's WAN delivery for the rest of the
+/// poll cycle with no retry and no user-visible error.
+fn is_credential_rejected(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN
 }
 
 /// One registered agent's full pending-fetch → claim → deliver cycle for an
@@ -586,10 +605,15 @@ enum AgentSyncOutcome {
 /// `join_all` instead of sequentially — see the call site's own comment.
 ///
 /// Retries once with the shared `token` if a per-agent credential is
-/// rejected (401) — without this, invalidating the credential alone left
-/// this agent's pending injection undelivered until an unrelated
-/// InjectAvailable broadcast happened to fire again (no periodic resync
-/// exists). reagentx P1 (round 4) on PR #2342.
+/// rejected (401 or 403 — see `is_credential_rejected`) — without this,
+/// invalidating the credential alone left this agent's pending injection
+/// undelivered until an unrelated InjectAvailable broadcast happened to
+/// fire again (no periodic resync exists). reagentx P1 (round 4) on
+/// PR #2342; 403 coverage added per
+/// SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §5.2 (a prerequisite
+/// this spec identified before `ENFORCE_AGENT_BINDING` is safe to flip —
+/// without it, a genuine binding mismatch degrades to a silent stall
+/// instead of falling back the same way an expired token already does).
 async fn sync_agent_reactive(
     agent_id: &str,
     token: &str,
@@ -639,19 +663,21 @@ async fn sync_agent_reactive(
             }
         };
 
-        if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+        if is_credential_rejected(resp.status()) {
             if using_per_agent {
                 // The per-agent credential's cached token is stale/revoked
-                // server-side even though it looked locally valid —
-                // invalidate it (so the next agent_credentials call
-                // re-fetches instead of retrying the same rejected token)
-                // and retry THIS fetch immediately with the shared token,
-                // rather than tearing down the whole shared session (which
-                // would starve delivery for every OTHER agent too).
+                // or binding-mismatched server-side even though it looked
+                // locally valid — invalidate it (so the next
+                // agent_credentials call re-fetches instead of retrying the
+                // same rejected token) and retry THIS fetch immediately
+                // with the shared token, rather than tearing down the
+                // whole shared session (which would starve delivery for
+                // every OTHER agent too).
                 crate::muxbus::agent_credentials::invalidate_cached_token(agent_id, wstore);
                 tracing::warn!(
                     agent_id = %agent_id,
-                    "cloud_subscriber: per-agent credential rejected (401) — invalidated, retrying with shared token",
+                    status = %resp.status(),
+                    "cloud_subscriber: per-agent credential rejected — invalidated, retrying with shared token",
                 );
                 agent_token = token.to_string();
                 using_per_agent = false;
@@ -710,9 +736,9 @@ async fn sync_agent_reactive(
             }
         };
 
-        if claim_resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+        if is_credential_rejected(claim_resp.status()) {
             if using_per_agent {
-                // Same reasoning as the /reactive/pending 401 branch above:
+                // Same reasoning as the /reactive/pending branch above:
                 // invalidate and retry THIS claim immediately with the
                 // shared token, rather than reconnecting the whole session
                 // or leaving this agent's already-fetched pending
@@ -720,7 +746,8 @@ async fn sync_agent_reactive(
                 crate::muxbus::agent_credentials::invalidate_cached_token(agent_id, wstore);
                 tracing::warn!(
                     agent_id = %agent_id,
-                    "cloud_subscriber: per-agent credential rejected (401) on claim — invalidated, retrying with shared token",
+                    status = %claim_resp.status(),
+                    "cloud_subscriber: per-agent credential rejected on claim — invalidated, retrying with shared token",
                 );
                 agent_token = token.to_string();
                 using_per_agent = false;
@@ -903,10 +930,47 @@ fn classify_refresh_token_error(e: crate::muxbus::pkce::RefreshTokenError) -> Re
 #[cfg(test)]
 mod tests {
     use super::classify_refresh_token_error;
+    use super::is_credential_rejected;
     use crate::broker::RefreshErrorKind;
     use crate::muxbus::pkce::RefreshTokenError;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     use tokio_tungstenite::tungstenite::ClientRequestBuilder;
+
+    // SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §5.2 — a
+    // checkAgentBinding rejection (403) must trigger the exact same
+    // invalidate-and-retry-with-shared-token recovery as an expired token
+    // (401), not silently fall through to a stalled, unretried delivery.
+    #[test]
+    fn treats_401_as_credential_rejected() {
+        assert!(is_credential_rejected(reqwest::StatusCode::UNAUTHORIZED));
+    }
+
+    #[test]
+    fn treats_403_as_credential_rejected() {
+        assert!(is_credential_rejected(reqwest::StatusCode::FORBIDDEN));
+    }
+
+    #[test]
+    fn does_not_treat_other_client_errors_as_credential_rejected() {
+        // 400/404/429 etc. are real errors but not "this credential doesn't
+        // work here" — retrying with a different credential wouldn't help,
+        // so these must keep falling into the generic non-2xx branch
+        // (logged, not retried) rather than triggering credential swap.
+        for status in [
+            reqwest::StatusCode::BAD_REQUEST,
+            reqwest::StatusCode::NOT_FOUND,
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+        ] {
+            assert!(!is_credential_rejected(status), "{status} must not be treated as a credential rejection");
+        }
+    }
+
+    #[test]
+    fn does_not_treat_success_or_server_error_as_credential_rejected() {
+        for status in [reqwest::StatusCode::OK, reqwest::StatusCode::INTERNAL_SERVER_ERROR] {
+            assert!(!is_credential_rejected(status));
+        }
+    }
 
     #[test]
     fn no_refresh_token_is_permanent() {
