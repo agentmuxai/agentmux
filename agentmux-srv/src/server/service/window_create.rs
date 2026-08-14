@@ -29,7 +29,26 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
     // (tear-off, "Open New Window", the workspace-missing error-recovery
     // fallback) omits it and gets the pre-existing default-seed behavior,
     // completely unchanged, below.
-    let restore_if_available: bool = service::get_arg(args, 3).unwrap_or(false);
+    //
+    // The client's own claim isn't trusted alone (reagentx P2 on PR #2560):
+    // re-check `Client.windowids` server-side too, so a stray/duplicate/
+    // misused call with `restoreIfAvailable: true` mid-session (when other
+    // windows are legitimately still open) can't resurrect the last snapshot
+    // into a spurious extra workspace.
+    let client_windowids_empty = store
+        .get_all::<Client>()
+        .ok()
+        .and_then(|cs| cs.into_iter().next())
+        .map(|c| c.windowids.is_empty())
+        .unwrap_or(true);
+    let restore_if_available: bool =
+        service::get_arg(args, 3).unwrap_or(false) && client_windowids_empty;
+    // Set when a restore actually replays the last snapshot — gates clearing
+    // it (see the final read-back below) so a genuinely successful restore
+    // can't be replayed again by a later call, while a crash mid-restore
+    // (this flag set, but the function never reaches that final clear)
+    // leaves the snapshot intact for the next launch to retry.
+    let mut did_restore = false;
     // Resolve / create the workspace.
     let (ws_id, fresh_workspace_events): (String, Vec<agentmux_common::ipc::Event>) =
         if requested_ws_id.is_empty() {
@@ -49,6 +68,7 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
                 None
             };
             if let Some(result) = restored_from_last_session {
+                did_restore = true;
                 result
             } else {
             // Step 1: create workspace.
@@ -351,7 +371,23 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
     publish_events(state, &all_events);
     // Return the Window struct (matches the prior RPC contract).
     match store.must_get::<Window>(&window_id) {
-        Ok(win) => WebReturnType::success(serde_json::to_value(&win).unwrap_or_default()),
+        Ok(win) => {
+            // Restore-on-relaunch (SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13
+            // Feature 1) — only clear the snapshot once the restore it
+            // produced has fully, successfully completed (this read-back is
+            // the last step of that path). A crash between
+            // `restore_last_session` returning and reaching this line never
+            // executes this clear, so the next launch's `Client.windowids`
+            // is still empty and retries against the same intact snapshot —
+            // deliberately not cleared any earlier than this. Reviewer-caught
+            // (reagentx P2 on PR #2560): without this, a stray repeat call
+            // could replay the same snapshot into a second duplicate
+            // workspace even after a genuinely successful restore.
+            if did_restore {
+                super::session_restore::clear_last_session_snapshot(store);
+            }
+            WebReturnType::success(serde_json::to_value(&win).unwrap_or_default())
+        }
         Err(e) => WebReturnType::error(format!(
             "CreateWindow: window read-back failed: {}",
             e

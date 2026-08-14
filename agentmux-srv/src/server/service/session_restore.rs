@@ -60,13 +60,22 @@ pub(crate) fn snapshot_workspace(store: &Store, workspace_id: &str) -> Option<Va
         let Some(tab) = store.get::<Tab>(tab_id).ok().flatten() else {
             continue;
         };
+        // Index by position WITHIN `blocks` (the successfully-loaded list),
+        // not position within `tab.blockids` (the full original list) —
+        // reviewer-caught bug (reagentx P2 on PR #2560): a single unreadable
+        // block previously desynced every subsequent placeholder index
+        // against restore's `new_block_ids` (built from the same
+        // successfully-recreated count), silently misattributing later
+        // blocks' layout positions. `blocks.len()` at insert time is always
+        // this block's actual final position, skipped entries included or
+        // not.
         let mut idx_by_block_id: HashMap<String, usize> = HashMap::new();
         let mut blocks = Vec::new();
-        for (i, block_id) in tab.blockids.iter().enumerate() {
+        for block_id in &tab.blockids {
             let Some(block) = store.get::<Block>(block_id).ok().flatten() else {
                 continue;
             };
-            idx_by_block_id.insert(block_id.clone(), i);
+            idx_by_block_id.insert(block_id.clone(), blocks.len());
             blocks.push(json!({ "meta": block.meta }));
         }
         if blocks.is_empty() {
@@ -175,6 +184,32 @@ fn load_last_session_snapshot(store: &Store) -> Option<Value> {
     let clients = store.get_all::<Client>().ok()?;
     let client = clients.into_iter().next()?;
     client.meta.get(SNAPSHOT_META_KEY).cloned()
+}
+
+/// Consume the durable "last session" record after a fully successful
+/// restore (called only once `window_create::handle_create_window`'s final
+/// window read-back succeeds — see that call site's comment for why not any
+/// earlier). Best-effort, same as `save_last_session_snapshot`: a failure to
+/// clear just means a future stray/misused restore call could replay this
+/// snapshot again, which `client_windowids_empty`'s server-side check
+/// (`handle_create_window`) already independently guards against — this is
+/// defense in depth, not the only thing preventing duplicates.
+pub(crate) fn clear_last_session_snapshot(store: &Store) {
+    let Ok(clients) = store.get_all::<Client>() else {
+        return;
+    };
+    let Some(mut client) = clients.into_iter().next() else {
+        return;
+    };
+    if client.meta.remove(SNAPSHOT_META_KEY).is_none() {
+        return; // nothing to clear
+    }
+    if let Err(e) = store.update(&mut client) {
+        tracing::warn!(
+            error = %e,
+            "session_restore: failed to clear last-session snapshot after restore"
+        );
+    }
 }
 
 fn find_error(events: &[Event]) -> Option<String> {
