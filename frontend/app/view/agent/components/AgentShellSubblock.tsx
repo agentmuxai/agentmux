@@ -282,35 +282,43 @@ export const AgentShellSubblock = (props: AgentShellSubblockProps): JSX.Element 
                     props.onSubBlockCreated(id);
                 }
 
-                // Seed the persisted zoom BEFORE constructing TermWrap, so the
-                // very first paint already uses the correct font size instead
-                // of the BASE_FONT_SIZE default followed by a visible
-                // correction jerk — see
-                // docs/specs/SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md. A
-                // freshly created sub-block has no persisted term:zoom yet
-                // (the already-correct default of 1.0 applies), so only the
-                // reused-existing-block path needs to wait for anything.
+                // Seed BOTH persisted zoom inputs BEFORE constructing TermWrap, so the
+                // very first paint (and termFontSize()'s very first computation) already
+                // uses the correct final font size instead of a default followed by a
+                // visible correction jerk. termFontSize = BASE_FONT_SIZE * termZoom() /
+                // agentPaneZoom() has two independent async-resolved inputs — see
+                // docs/specs/SPEC_AGENT_SHELL_ZOOM_SEED_RACE_2026-08-10.md (fixed the
+                // first) and docs/specs/SPEC_AGENT_SHELL_PARENT_PANE_ZOOM_SEED_RACE_2026-08-14.md
+                // (fixed the second, this block).
                 //
-                // Deliberately does NOT call WOS.reloadWaveObject here: the
-                // `subBlockAtom` memo above already triggered a fetch for
-                // this exact oref as a side effect of being constructed
-                // (WOS.getWaveObjectAtom → getWaveObjectValue eagerly fetches
-                // on first read, and that memo runs synchronously at
-                // component construction, before this async IIFE even
-                // starts). Calling reloadWaveObject here would force a
-                // SECOND, redundant GetObject round-trip for the same object
-                // on every reused-sub-block drawer open (reagentx P1 on
-                // #2522). Instead, just wait for that already-in-flight
-                // fetch to settle, bounded by a timeout so a genuine network
-                // failure (which can leave the loading atom stuck, per
-                // wos.ts's own comment on GetObject rejections) can't hang
-                // shell startup indefinitely — falls back to whatever
-                // termFontSize() currently computes (default zoom) if it
-                // times out; the live-update effect below corrects it later
-                // if a subsequent fetch/push succeeds.
-                if (isExistingBlock) {
-                    await waitForWaveObjectSettled(WOS.makeORef("block", id));
-                }
+                // Deliberately does NOT call WOS.reloadWaveObject for either oref: both
+                // atoms already have an eager fetch in flight as a side effect of being
+                // constructed/read (this component's own `subBlockAtom` memo for the shell's
+                // oref; agent-view.tsx's `model.blockAtom` for the parent's, read live via
+                // props.agentPaneZoom — its owning memo triggers the same eager
+                // getWaveObjectAtom → getWaveObjectValue fetch on first read, well before
+                // this drawer ever mounts). Calling reloadWaveObject here would force a
+                // SECOND, redundant GetObject round-trip on every open (reagentx P1 on
+                // #2522, for the shell's own oref — same reasoning applies to the parent's).
+                // Instead, just wait for whichever fetches are still in flight to settle,
+                // bounded by a timeout so a genuine network failure (which can leave a
+                // loading atom stuck, per wos.ts's own comment on GetObject rejections)
+                // can't hang shell startup indefinitely — falls back to whatever
+                // termFontSize() currently computes if either times out; the live-update
+                // effect below corrects it later if a subsequent fetch/push succeeds.
+                //
+                // The shell's own oref only needs waiting for on the reused-existing-block
+                // path (a freshly created sub-block has no persisted term:zoom yet — the
+                // already-correct default of 1.0 applies immediately). The PARENT's oref
+                // wait is unconditional: whether the pane's own zoom fetch is still in
+                // flight when this drawer opens is independent of whether this particular
+                // shell sub-block is new or reused. Run both concurrently rather than
+                // sequentially so a reused shell with its own pending fetch doesn't pay
+                // both round-trips back-to-back.
+                await Promise.all([
+                    isExistingBlock ? waitForWaveObjectSettled(WOS.makeORef("block", id)) : Promise.resolve(),
+                    waitForWaveObjectSettled(WOS.makeORef("block", props.parentBlockId)),
+                ]);
                 setZoomSeeded(true);
 
                 if (disposed || !containerRef) return;

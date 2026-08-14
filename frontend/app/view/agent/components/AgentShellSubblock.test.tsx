@@ -23,6 +23,7 @@
  */
 
 import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentShellSubblock } from "./AgentShellSubblock";
 
@@ -126,10 +127,23 @@ function resolveSeedFetch(oref: string) {
     set({ value: meta ? { meta } : null, loading: false });
 }
 
+/** All tests use parentBlockId="parent-1" — pre-settle its oref as "already
+ *  resolved, empty" by default (the realistic common case: the pane's own
+ *  zoom fetch finished before the shell was ever opened), so the new
+ *  parent-oref wait (SPEC_AGENT_SHELL_PARENT_PANE_ZOOM_SEED_RACE_2026-08-14.md)
+ *  doesn't add latency/timeout delay to every other test in this file. Tests
+ *  that specifically exercise that race overwrite this back to loading
+ *  before render. */
+const PARENT_OREF = "block:parent-1";
+function preSettleOref(oref: string) {
+    blockDataSignals.set(oref, createSignal<{ value: any; loading: boolean }>({ value: null, loading: false }));
+}
+
 beforeEach(() => {
     blockDataSignals.clear();
     seedData.clear();
     termWrapInstances.length = 0;
+    preSettleOref(PARENT_OREF);
     // jsdom has no ResizeObserver; AgentShellSubblock sets one up
     // unconditionally after a successful init().
     (globalThis as any).ResizeObserver =
@@ -325,4 +339,87 @@ describe("AgentShellSubblock — zoom seed race (SPEC_AGENT_SHELL_ZOOM_SEED_RACE
         set({ value: { meta: { "term:zoom": 2.0 } }, loading: false });
         await waitFor(() => expect(termWrapInstances[0].terminal.options.fontSize).toBe(26));
     });
+});
+
+describe("AgentShellSubblock — parent pane zoom seed race (SPEC_AGENT_SHELL_PARENT_PANE_ZOOM_SEED_RACE_2026-08-14)", () => {
+    it("waits for the parent pane's zoom fetch to settle before constructing the terminal, even for a freshly created sub-block", async () => {
+        // Freshly created sub-block — no wait needed on its OWN oref (matches the
+        // existing "defaults to BASE_FONT_SIZE" test) — but the parent's oref is
+        // still loading here (overwriting beforeEach's default settled state),
+        // which alone must be enough to block construction. This is exactly the
+        // gap the 08-10 fix didn't close: that fix only ever waited on the
+        // shell's own oref.
+        blockDataSignals.set(PARENT_OREF, createSignal<{ value: any; loading: boolean }>({ value: null, loading: true }));
+
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={undefined}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+            />
+        ));
+
+        // Still waiting on the parent — old code (pre-fix) would have
+        // constructed TermWrap here already, since a fresh sub-block never
+        // waited on anything at all.
+        await new Promise((r) => setTimeout(r, 10));
+        expect(termWrapInstances.length).toBe(0);
+
+        const [, setParent] = blockDataSignals.get(PARENT_OREF)!;
+        setParent({ value: null, loading: false });
+
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+    });
+
+    it("waits for the parent's fetch even when the shell's own (reused) oref already resolved", async () => {
+        const existingId = "existing-sub-block";
+        const oref = `block:${existingId}`;
+        queueSeedMeta(oref, { "term:zoom": 1.0 });
+        blockDataSignals.set(PARENT_OREF, createSignal<{ value: any; loading: boolean }>({ value: null, loading: true }));
+
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={existingId}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+            />
+        ));
+
+        // Settle the shell's own oref immediately — construction must still
+        // block on the parent's, since the two waits are independent inputs
+        // to the same gate (Promise.all), not "either one is enough."
+        resolveSeedFetch(oref);
+        await new Promise((r) => setTimeout(r, 10));
+        expect(termWrapInstances.length).toBe(0);
+
+        const [, setParent] = blockDataSignals.get(PARENT_OREF)!;
+        setParent({ value: null, loading: false });
+
+        await waitFor(() => expect(termWrapInstances.length).toBe(1));
+        expect(termWrapInstances[0].fontSize).toBe(13);
+    });
+
+    it("falls back to constructing the terminal after the bounded wait if only the parent's fetch hangs", async () => {
+        // Deliberately never resolve the parent's oref — simulates the same
+        // class of genuine-failure scenario the existing shell-oref hang test
+        // covers, mirrored for the new wait.
+        blockDataSignals.set(PARENT_OREF, createSignal<{ value: any; loading: boolean }>({ value: null, loading: true }));
+
+        render(() => (
+            <AgentShellSubblock
+                parentBlockId="parent-1"
+                cwd="/tmp"
+                existingSubBlockId={undefined}
+                onSubBlockCreated={() => {}}
+                agentPaneZoom={() => 1}
+            />
+        ));
+
+        await waitFor(() => expect(termWrapInstances.length).toBe(1), { timeout: 3000 });
+        expect(termWrapInstances[0].fontSize).toBe(13);
+    }, 5000);
 });
