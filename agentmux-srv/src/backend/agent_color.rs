@@ -11,10 +11,13 @@
 //! existing pane-frame rendering displays it with no frontend changes.
 //! See `docs/specs/SPEC_AGENT_COLOR_2026_08_08.md`.
 
-/// The 14-hue palette — hex values mirror the frontend's `TAB_COLORS`
-/// (`frontend/app/tab/tab.tsx`). Duplicated deliberately: assigned colors
-/// are STORED, not derived, so palette drift between the two lists cannot
-/// recolor existing agents.
+/// The 14-hue palette — hex values mirror the frontend's
+/// `AGENT_COLOR_PALETTE` (`frontend/app/view/agent/agent-color.ts`).
+/// Duplicated deliberately: assigned colors are STORED, not derived, so
+/// palette drift between the two lists cannot recolor existing agents.
+/// This is a distinct, deliberately-vivid array from the frontend's tab
+/// strip colors (`frontend/app/tab/tab.tsx`'s `TAB_COLORS`) — see
+/// docs/specs/SPEC_TAB_COLOR_DESATURATION_2026_08_13.md.
 pub const AGENT_COLOR_PALETTE: [&str; 14] = [
     "#ef4444", // Red
     "#f97316", // Orange

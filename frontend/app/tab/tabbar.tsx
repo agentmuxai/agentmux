@@ -113,13 +113,13 @@ function TabBar(props: TabBarProps): JSX.Element {
         // tab. Without this guard, a user who clears the color on a single-
         // tab workspace would have it silently restored on the next mount.
         if (tab.meta?.["tab:color-initialized"]) return;
-        // #3b82f6 is the "Blue" entry in TAB_COLORS — same as the color
+        // #2d4976 is the "Blue" entry in TAB_COLORS — same as the color
         // picker's blue swatch, so stays consistent with user-chosen blue.
         fireAndForget(async () => {
             try {
                 await ObjectService.UpdateObjectMeta(
                     makeORef("tab", firstId),
-                    { "tab:color": "#3b82f6", "tab:color-initialized": true } as MetaType,
+                    { "tab:color": "#2d4976", "tab:color-initialized": true } as MetaType,
                 );
             } catch (e) {
                 console.error("[tabbar] startup-tab color apply failed:", e);
