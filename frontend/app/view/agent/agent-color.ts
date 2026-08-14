@@ -15,9 +15,27 @@
 // (either path) just reads that stored value back. See
 // docs/specs/SPEC_AGENT_COLOR_2026_08_08.md.
 
-import { TAB_COLORS } from "@/app/tab/tab";
-
-const AGENT_COLOR_PALETTE: string[] = TAB_COLORS.map((c) => c.hex);
+// Deliberately NOT derived from tab.tsx's TAB_COLORS — that array was
+// desaturated for the tab strip (docs/specs/SPEC_TAB_COLOR_DESATURATION_2026_08_13.md)
+// and agent pane borders must keep the original vivid hues. Mirrors
+// agentmux-srv/src/backend/agent_color.rs::AGENT_COLOR_PALETTE (same 14
+// hexes, same order — keep both in sync if this list changes).
+export const AGENT_COLOR_PALETTE: string[] = [
+    "#ef4444", // Red
+    "#f97316", // Orange
+    "#f59e0b", // Amber
+    "#eab308", // Yellow
+    "#84cc16", // Lime
+    "#22c55e", // Green
+    "#14b8a6", // Teal
+    "#06b6d4", // Cyan
+    "#3b82f6", // Blue
+    "#6366f1", // Indigo
+    "#8b5cf6", // Violet
+    "#d946ef", // Fuchsia
+    "#ec4899", // Pink
+    "#f43f5e", // Rose
+];
 
 /** Deterministic FNV-1a hash of the agent id onto the palette — stable
  * across reloads/machines, no RNG needed. Mirrors

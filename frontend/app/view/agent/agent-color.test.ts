@@ -2,8 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { TAB_COLORS } from "@/app/tab/tab";
-import { dimAgentColor, isValidAgentColor, pickAgentColor } from "./agent-color";
+import { AGENT_COLOR_PALETTE, dimAgentColor, isValidAgentColor, pickAgentColor } from "./agent-color";
 
 describe("pickAgentColor", () => {
     it("is deterministic", () => {
@@ -11,7 +10,7 @@ describe("pickAgentColor", () => {
     });
 
     it("returns a palette member", () => {
-        const palette = new Set(TAB_COLORS.map((c) => c.hex));
+        const palette = new Set(AGENT_COLOR_PALETTE);
         for (const id of ["a", "b", "c", "0d5b45f1-9b2c-4a7e-8f3d-1234567890ab", ""]) {
             expect(palette.has(pickAgentColor(id))).toBe(true);
         }
@@ -25,8 +24,8 @@ describe("pickAgentColor", () => {
 
 describe("isValidAgentColor", () => {
     it("accepts every palette color", () => {
-        for (const c of TAB_COLORS) {
-            expect(isValidAgentColor(c.hex)).toBe(true);
+        for (const hex of AGENT_COLOR_PALETTE) {
+            expect(isValidAgentColor(hex)).toBe(true);
         }
     });
 
@@ -45,10 +44,10 @@ describe("dimAgentColor", () => {
     it("scales channels down and stays valid", () => {
         expect(dimAgentColor("#ffffff")).toBe("#8c8c8c");
         expect(dimAgentColor("#000000")).toBe("#000000");
-        for (const c of TAB_COLORS) {
-            const dimmed = dimAgentColor(c.hex);
+        for (const hex of AGENT_COLOR_PALETTE) {
+            const dimmed = dimAgentColor(hex);
             expect(isValidAgentColor(dimmed)).toBe(true);
-            expect(dimmed).not.toBe(c.hex);
+            expect(dimmed).not.toBe(hex);
         }
     });
 
