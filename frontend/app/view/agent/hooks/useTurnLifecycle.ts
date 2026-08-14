@@ -248,13 +248,38 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
     // Submitting by the time this fires — safe by construction, same
     // guard `stopFallbackTimer` relies on). See
     // docs/reports/REPORT_AGENTA_STUCK_WORKING_INVESTIGATION_2026_08_14.md §7.
+    //
+    // Deliberately scoped to "did the backend ever acknowledge receiving
+    // this message" — NOT "did the model produce its first token" (codex
+    // P1 on PR #2575): `usePendingMessageAcceptance.ts` intentionally
+    // leaves an idle send in `Submitting` after `AgentMessageAccepted`
+    // arrives (its own comment: re-dispatching TurnStart there would
+    // regress Streaming → Submitting and re-arm this exact timer
+    // unnecessarily), and a backend-accepted turn can legitimately take
+    // well over 30s to produce its first token (large context, a long
+    // agentic tool chain) — that window is already independently bounded
+    // server-side by `HealthMonitor`'s own Stalled(30s)/Dead(120s)
+    // silence detection once the backend marks the turn active, which
+    // surfaces as a real `AgentFailure` → `FailureObserved` → this same
+    // `Done.errored` transition through an already-tested, unrelated
+    // path. A blind 30s bound here would misfire on exactly that healthy
+    // case — and since neither `StreamFlushObserved` nor `bumpEvent`
+    // re-promote an `errored` `Done` phase, the eventual real response
+    // would arrive with the lifecycle stuck errored and the UI free to
+    // start an overlapping second turn. `acceptedUnsub` below clears the
+    // timer the instant the backend proves it's alive for this pane,
+    // narrowing this timeout to only the "message never reached the
+    // backend at all" case it exists to catch.
     let submitTimeoutTimer: number | null = null;
-    createEffect(() => {
-        const submitting = getTurnPhase().kind === "Submitting";
+    const clearSubmitTimeoutTimer = () => {
         if (submitTimeoutTimer != null) {
             clearTimeout(submitTimeoutTimer);
             submitTimeoutTimer = null;
         }
+    };
+    createEffect(() => {
+        const submitting = getTurnPhase().kind === "Submitting";
+        clearSubmitTimeoutTimer();
         if (submitting) {
             submitTimeoutTimer = window.setTimeout(() => {
                 submitTimeoutTimer = null;
@@ -264,11 +289,14 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
             }, SUBMIT_TIMEOUT_MS);
         }
     });
+    const acceptedUnsub = waveEventSubscribe({
+        eventType: WpsEvent.AgentMessageAccepted,
+        scope: WOS.makeORef("block", opts.blockId),
+        handler: clearSubmitTimeoutTimer,
+    });
     onCleanup(() => {
-        if (submitTimeoutTimer != null) {
-            clearTimeout(submitTimeoutTimer);
-            submitTimeoutTimer = null;
-        }
+        acceptedUnsub();
+        clearSubmitTimeoutTimer();
     });
 
     // Stuck-stream watchdog (issue #728 gap 3). The reducer evaluates
