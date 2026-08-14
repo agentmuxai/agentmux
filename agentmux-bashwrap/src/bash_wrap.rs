@@ -3148,17 +3148,24 @@ mod tests {
     #[tokio::test]
     async fn run_via_pty_does_not_misclassify_fast_success_as_idle_timeout() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let prev = std::env::var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS").ok();
-        unsafe {
-            // 1s was tight enough that a loaded CI runner's PTY-reader-thread
-            // scheduling delay alone could exceed it before `echo hello` ever
-            // produced output — a genuine idle-kill by the test's own
-            // (deliberately short) timeout, not the idle_rx/wait_task
-            // misclassification race this test exists to catch. 3s keeps the
-            // race window this test targets while giving scheduling enough
-            // slack not to trip the timeout on its own.
-            std::env::set_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", "3");
-        }
+        // reagentx P2 on PR #2569 (re-review): a manual save-now/restore-
+        // at-the-end dance doesn't run on an early exit — the `panic!`s in
+        // the loop below (via `unwrap_or_else`) and the `assert_eq!`/
+        // `assert!` calls can all unwind straight past the restore code
+        // that used to sit at the bottom of this function, leaking this env
+        // var's override to every subsequent test in the process. Same bug
+        // class already fixed via `EnvVarGuard` (defined above, used
+        // elsewhere in this file for exactly this reason) for the
+        // neighboring `a1_e2e` test — applied here too.
+        //
+        // 1s was tight enough that a loaded CI runner's PTY-reader-thread
+        // scheduling delay alone could exceed it before `echo hello` ever
+        // produced output — a genuine idle-kill by the test's own
+        // (deliberately short) timeout, not the idle_rx/wait_task
+        // misclassification race this test exists to catch. 3s keeps the
+        // race window this test targets while giving scheduling enough
+        // slack not to trip the timeout on its own.
+        let _idle_timeout_guard = EnvVarGuard::set("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", "3");
 
         let bash = locate_bash().expect("locate_bash for test — same dependency the whole binary needs");
 
@@ -3206,13 +3213,6 @@ mod tests {
                 blob.contains("hello"),
                 "iteration {i}: expected the command's real output in the blob, got: {blob:?}"
             );
-        }
-
-        unsafe {
-            match prev {
-                Some(v) => std::env::set_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", v),
-                None => std::env::remove_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS"),
-            }
         }
     }
 
