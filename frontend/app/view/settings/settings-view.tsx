@@ -5,7 +5,7 @@ import { For, Match, Show, Switch, type JSX } from "solid-js";
 
 import { fullConfigAtom } from "@/app/store/global";
 import { invokeCommand } from "@/app/platform/ipc";
-import type { SettingsSection, SettingsViewModel } from "./settings-model";
+import { SETTINGS_SECTION_LABELS, type SettingsSection, type SettingsViewModel } from "./settings-model";
 import { AppearanceSection } from "./sections/appearance-section";
 import { WindowPanesSection } from "./sections/window-panes-section";
 import { TerminalSection } from "./sections/terminal-section";
@@ -46,11 +46,11 @@ function ConfigErrorsBanner(): JSX.Element {
 // ── Rail ──────────────────────────────────────────────────────────────────────
 
 const RAIL: { id: SettingsSection; label: string; icon: string }[] = [
-    { id: "appearance", label: "Appearance",     icon: "palette" },
-    { id: "window",     label: "Window & Panes", icon: "table-cells" },
-    { id: "terminal",   label: "Terminal",       icon: "square-terminal" },
-    { id: "sounds",     label: "Sounds",         icon: "volume-high" },
-    { id: "advanced",   label: "Advanced",       icon: "sliders" },
+    { id: "appearance", label: SETTINGS_SECTION_LABELS.appearance, icon: "palette" },
+    { id: "window",     label: SETTINGS_SECTION_LABELS.window,     icon: "table-cells" },
+    { id: "terminal",   label: SETTINGS_SECTION_LABELS.terminal,   icon: "square-terminal" },
+    { id: "sounds",     label: SETTINGS_SECTION_LABELS.sounds,     icon: "volume-high" },
+    { id: "advanced",   label: SETTINGS_SECTION_LABELS.advanced,   icon: "sliders" },
 ];
 
 // ── Main view ─────────────────────────────────────────────────────────────────

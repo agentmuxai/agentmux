@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createSignal, For, onCleanup, onMount, type JSX } from "solid-js";
+import { For, onCleanup, onMount, type JSX } from "solid-js";
 
 import { Tooltip } from "@/app/element/tooltip";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -11,20 +11,28 @@ import { AccountsManager } from "@/app/view/accounts/accounts-manager";
 import { GlobalBrainManager } from "@/app/view/brain/global-brain-manager";
 import { McpManager } from "@/app/view/mcp/mcp-manager";
 import { SkillManager } from "@/app/view/skill/skill-manager";
-import type { ArmorySection, ArmoryViewModel } from "./armory-model";
+import { ARMORY_SECTION_LABELS, type ArmorySection, type ArmoryViewModel } from "./armory-model";
 import "./armory-view.scss";
 
 const RAIL: { id: ArmorySection; label: string; tooltip?: string; icon: string }[] = [
-    { id: "accounts", label: "Accounts",    icon: "key" },
-    { id: "memory",   label: "Memories",    icon: "brain" },
-    { id: "skills",   label: "Skills",      icon: "wand-magic-sparkles" },
-    { id: "mcp",      label: "MCP Servers", icon: "plug" },
-    { id: "bundles",  label: "ABF",         tooltip: "Armory Bundle Format (ABF)", icon: "layer-group" },
+    { id: "accounts", label: ARMORY_SECTION_LABELS.accounts, icon: "key" },
+    { id: "memory",   label: ARMORY_SECTION_LABELS.memory,   icon: "brain" },
+    { id: "skills",   label: ARMORY_SECTION_LABELS.skills,   icon: "wand-magic-sparkles" },
+    { id: "mcp",      label: ARMORY_SECTION_LABELS.mcp,      icon: "plug" },
+    { id: "bundles",  label: ARMORY_SECTION_LABELS.bundles,  tooltip: "Armory Bundle Format (ABF)", icon: "layer-group" },
 ];
 
 export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Element {
-    const [section, setSection] = createSignal<ArmorySection>("accounts");
     const model = props.model;
+    // Meta-backed on the model (armory-model.ts's sectionAtom) rather than a
+    // local createSignal — so ArmoryViewModel.viewName can react to it, and
+    // the selected tab survives a block remount.
+    const section = model.sectionAtom;
+    const setSection = (id: ArmorySection) =>
+        void RpcApi.SetMetaCommand(TabRpcClient, {
+            oref: `block:${model.blockId}`,
+            meta: { "armory:section": id },
+        });
     let viewRef: HTMLDivElement | undefined;
 
     // Ctrl+Wheel zoom — same term:zoom-on-block-meta pipeline as editor/term/

@@ -1,7 +1,7 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createSignal, For, onCleanup, onMount, type JSX } from "solid-js";
+import { For, onCleanup, onMount, type JSX } from "solid-js";
 
 import { Tooltip } from "@/app/element/tooltip";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -11,20 +11,28 @@ import { WardenLanManager } from "@/app/view/warden-lan/warden-lan-manager";
 import { WardenInternetStub } from "@/app/view/warden-internet/warden-internet-stub";
 import { WardenAuditManager } from "@/app/view/warden-audit/warden-audit-manager";
 import { WardenSupervisorManager } from "@/app/view/warden-supervisor/warden-supervisor-manager";
-import type { WardenSection, WardenViewModel } from "./warden-model";
+import { WARDEN_SECTION_LABELS, type WardenSection, type WardenViewModel } from "./warden-model";
 import "./warden-view.scss";
 
 const RAIL: { id: WardenSection; label: string; icon: string }[] = [
-    { id: "host",       label: "Host",       icon: "server" },
-    { id: "lan",        label: "LAN",        icon: "network-wired" },
-    { id: "internet",   label: "Internet",   icon: "globe" },
-    { id: "audit",      label: "Audit",      icon: "list-check" },
-    { id: "supervisor", label: "Supervisor", icon: "user-shield" },
+    { id: "host",       label: WARDEN_SECTION_LABELS.host,       icon: "server" },
+    { id: "lan",        label: WARDEN_SECTION_LABELS.lan,        icon: "network-wired" },
+    { id: "internet",   label: WARDEN_SECTION_LABELS.internet,   icon: "globe" },
+    { id: "audit",      label: WARDEN_SECTION_LABELS.audit,      icon: "list-check" },
+    { id: "supervisor", label: WARDEN_SECTION_LABELS.supervisor, icon: "user-shield" },
 ];
 
 export function WardenView(props: ViewComponentProps<WardenViewModel>): JSX.Element {
-    const [section, setSection] = createSignal<WardenSection>("host");
     const model = props.model;
+    // Meta-backed on the model (warden-model.ts's sectionAtom) rather than a
+    // local createSignal — so WardenViewModel.viewName can react to it, and
+    // the selected tab survives a block remount. Mirrors armory-view.tsx.
+    const section = model.sectionAtom;
+    const setSection = (id: WardenSection) =>
+        void RpcApi.SetMetaCommand(TabRpcClient, {
+            oref: `block:${model.blockId}`,
+            meta: { "warden:section": id },
+        });
     let viewRef: HTMLDivElement | undefined;
 
     // Ctrl+Wheel zoom — identical pipeline to Armory's (armory-view.tsx is
