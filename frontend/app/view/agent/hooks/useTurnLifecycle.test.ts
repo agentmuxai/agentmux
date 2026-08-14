@@ -6,11 +6,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const hub = vi.hoisted(() => ({
     handlers: new Map<string, (e: unknown) => void>(),
+    // Every handler ever registered for "agent-message-accepted", in
+    // registration order — including ones already unsubscribed — so tests
+    // can grab a STALE reference and invoke it directly, simulating a
+    // transport-level "delivered after unsubscribe" race independent of
+    // whatever this mock's own Map bookkeeping does.
+    acceptedHistory: [] as Array<(e: unknown) => void>,
 }));
 
 vi.mock("@/app/store/wps", () => ({
     waveEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
         hub.handlers.set(sub.eventType, sub.handler);
+        if (sub.eventType === "agent-message-accepted") hub.acceptedHistory.push(sub.handler);
         return () => {
             hub.handlers.delete(sub.eventType);
         };
@@ -56,6 +63,7 @@ describe("useTurnLifecycle — dispatch-side timeout wiring", () => {
         vi.useFakeTimers();
         dispatchPane = vi.fn();
         hub.handlers.clear();
+        hub.acceptedHistory.length = 0;
     });
 
     afterEach(() => {
@@ -165,6 +173,49 @@ describe("useTurnLifecycle — dispatch-side timeout wiring", () => {
         // A brand-new send whose RPC genuinely never reaches the backend —
         // no AgentMessageAccepted this time — must still be caught.
         setPhase({ kind: "Submitting", submittedAt: Date.now(), pendingContent: "" } as TurnPhase);
+        vi.advanceTimersByTime(SUBMIT_TIMEOUT_MS);
+        expect(dispatchPane).toHaveBeenCalledWith(expect.objectContaining({ type: "SubmitTimeoutElapsed" }));
+    });
+
+    // reagentx P1 (round 2, on the acceptance-cancels-timer fix itself): a
+    // STALE accepted event for an EARLIER episode — one whose own listener
+    // was already unsubscribed — must not be able to disarm a NEWER
+    // episode's timer even if something outside this hook's control (a
+    // transport-level race) still manages to invoke that old handler
+    // reference directly. Captures episode A's handler from
+    // `acceptedHistory` (bypassing the mock's current-handler lookup
+    // entirely, which would just find episode B's fresh one), lets episode
+    // A time out normally, starts an unrelated episode B, then fires the
+    // STALE captured reference directly.
+    it("a stale accepted-event handler captured from an earlier, already-timed-out episode cannot disarm a later episode's timer", () => {
+        let setPhase!: (p: TurnPhase) => void;
+        createRoot((d) => {
+            dispose = d;
+            const [getPhase, setP] = createSignal<TurnPhase>({ kind: "Idle" });
+            setPhase = setP;
+            useTurnLifecycle(mkOpts(getPhase, setP));
+        });
+
+        setPhase({ kind: "Submitting", submittedAt: 1000, pendingContent: "" } as TurnPhase);
+        expect(hub.acceptedHistory).toHaveLength(1);
+        const staleHandlerForEpisodeA = hub.acceptedHistory[0];
+
+        // Episode A genuinely never gets accepted and times out normally.
+        vi.advanceTimersByTime(SUBMIT_TIMEOUT_MS);
+        expect(dispatchPane).toHaveBeenCalledWith(expect.objectContaining({ type: "SubmitTimeoutElapsed" }));
+        dispatchPane.mockClear();
+
+        // User retries — a brand-new episode B, unrelated to A, whose own
+        // acceptance genuinely never arrives either.
+        setPhase({ kind: "Done", outcome: "errored", finishedAt: Date.now() } as TurnPhase);
+        setPhase({ kind: "Submitting", submittedAt: 2000, pendingContent: "" } as TurnPhase);
+        expect(hub.acceptedHistory).toHaveLength(2);
+
+        // A's stale, already-unsubscribed handler fires anyway (simulating
+        // a delivery race this hook can't prevent at the transport layer).
+        staleHandlerForEpisodeA({ data: { message_id: "msg-A" } });
+
+        // B's own timer must be unaffected — it still times out normally.
         vi.advanceTimersByTime(SUBMIT_TIMEOUT_MS);
         expect(dispatchPane).toHaveBeenCalledWith(expect.objectContaining({ type: "SubmitTimeoutElapsed" }));
     });

@@ -270,33 +270,64 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
     // timer the instant the backend proves it's alive for this pane,
     // narrowing this timeout to only the "message never reached the
     // backend at all" case it exists to catch.
-    let submitTimeoutTimer: number | null = null;
-    const clearSubmitTimeoutTimer = () => {
-        if (submitTimeoutTimer != null) {
-            clearTimeout(submitTimeoutTimer);
-            submitTimeoutTimer = null;
-        }
-    };
+    //
+    // reagentx P1 (round 2): a per-hook-lifetime `AgentMessageAccepted`
+    // listener (the original shape of this fix) carries no correlation to
+    // WHICH `Submitting` episode it's really for — a stale/late accepted
+    // event for an EARLIER message, delivered after that episode already
+    // timed out and a NEWER, still-genuinely-unacknowledged `TurnStart`
+    // began (e.g. the backend's own retried WPS push, or a reconnect
+    // backlog replay, landing well after the client already gave up and
+    // the user retried), would incorrectly disarm the NEWER episode's
+    // timer — silently reintroducing the exact stuck-Submitting bug this
+    // fix exists to close. `usePendingMessageAcceptance.ts` guards this by
+    // matching the event's `message_id` against its own pending-queue
+    // entry; that queue isn't available here, and `Submitting` carries no
+    // message_id to match against directly (a comparable timestamp-based
+    // guard was tried and rejected — it only tracks "whatever the latest
+    // armed episode is," which a stale event for ANY prior episode would
+    // still match against once a new one has armed, not an actual fix).
+    // Scoping BOTH the timer handle and the subscription to a fresh local
+    // closure per episode — armed inside the effect body, torn down via
+    // SolidJS's per-run `onCleanup` the instant the phase changes — is
+    // structurally correct instead: once episode A's run of this effect is
+    // cleaned up (the phase changed away from Submitting), A's listener is
+    // unsubscribed and A's timer handle is cleared, so a stale event for A
+    // literally has nothing left to disarm by the time episode B's own
+    // fresh timer/listener pair is live. Deliberately a per-run LOCAL
+    // variable, not one shared across the whole hook — if `waveEventSubscribe`
+    // ever delivered to an already-unsubscribed handler (a transport-level
+    // race this hook has no control over), that stale handler's closure
+    // would still only ever see episode A's own (already cleared or
+    // already-fired) timer handle, never episode B's, so it cannot affect a
+    // different episode's timer even in that adversarial case. No timestamp
+    // comparison, no message_id needed.
     createEffect(() => {
-        const submitting = getTurnPhase().kind === "Submitting";
-        clearSubmitTimeoutTimer();
-        if (submitting) {
-            submitTimeoutTimer = window.setTimeout(() => {
-                submitTimeoutTimer = null;
-                if (getTurnPhase().kind === "Submitting") {
-                    opts.model.dispatchPane({ type: "SubmitTimeoutElapsed", at: Date.now() });
+        const phase = getTurnPhase();
+        if (phase.kind !== "Submitting") return;
+        let timer: number | null = window.setTimeout(() => {
+            timer = null;
+            if (getTurnPhase().kind === "Submitting") {
+                opts.model.dispatchPane({ type: "SubmitTimeoutElapsed", at: Date.now() });
+            }
+        }, SUBMIT_TIMEOUT_MS);
+        const acceptedUnsub = waveEventSubscribe({
+            eventType: WpsEvent.AgentMessageAccepted,
+            scope: WOS.makeORef("block", opts.blockId),
+            handler: () => {
+                if (timer != null) {
+                    clearTimeout(timer);
+                    timer = null;
                 }
-            }, SUBMIT_TIMEOUT_MS);
-        }
-    });
-    const acceptedUnsub = waveEventSubscribe({
-        eventType: WpsEvent.AgentMessageAccepted,
-        scope: WOS.makeORef("block", opts.blockId),
-        handler: clearSubmitTimeoutTimer,
-    });
-    onCleanup(() => {
-        acceptedUnsub();
-        clearSubmitTimeoutTimer();
+            },
+        });
+        onCleanup(() => {
+            acceptedUnsub();
+            if (timer != null) {
+                clearTimeout(timer);
+                timer = null;
+            }
+        });
     });
 
     // Stuck-stream watchdog (issue #728 gap 3). The reducer evaluates
