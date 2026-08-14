@@ -19,7 +19,6 @@
 - fix(tabs): desaturate tab color picker, keep agent pane borders vivid
 - feat(pane-tab-strip): frosted-glass trailing space, per-pane zoom binding, top scroll-clearance for short agent conversations
 
-
 ## 0.55.6 — 2026-08-11
 
 - fix(agent-pane): progress bar renders above the tab strip, not overlapping the content region
