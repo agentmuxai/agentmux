@@ -416,7 +416,7 @@ async fn handle_incoming_text(
                     (&incoming.target, &incoming.bus_message_text)
                 {
                     // Try direct PTY injection via ReactiveHandler first
-                    let reactive_req = crate::backend::reactive::InjectionRequest {
+                    let mut reactive_req = crate::backend::reactive::InjectionRequest {
                         target_agent: target.clone(),
                         message: message.clone(),
                         source_agent: Some(from.to_string()),
@@ -428,6 +428,12 @@ async fn handle_incoming_text(
                         forward_hops: 0,
                         ..Default::default()
                     };
+                    // reagentx P0 on PR #2565: same bypass as
+                    // messagebus.rs::handle_inject — this WS message type
+                    // built InjectionRequest from client-controlled
+                    // `incoming.from` and called inject_message directly,
+                    // never going through host-tier signature verification.
+                    super::reactive::verify_jekt_signature(state, &mut reactive_req);
                     let resp = state.reactive_handler.inject_message(reactive_req);
                     if resp.success {
                         // Sender-side echo (SPEC_JEKT_SECURITY_AND_VISIBILITY §3.2)
