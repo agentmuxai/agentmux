@@ -178,19 +178,77 @@ const SHOW_WINDOW_MAX_RETRIES: u32 = 10;
 /// two later, long enough not to busy-loop the UI thread.
 const SHOW_WINDOW_RETRY_DELAY_MS: i64 = 50;
 
-/// Show + focus a top-level (non-pool) window by label if its `BrowserView`/
-/// `Window` are resolvable and it isn't already visible. Returns `true` once
-/// resolved (shown or already visible), `false` if the CEF Views objects
-/// aren't available yet — caller should retry rather than give up silently.
+/// Show (or, on Linux, arm the startup-paint gate for) a top-level window's
+/// Views `Window`, once confirmed not yet visible. Shared by `on_load_end`'s
+/// primary resolution path and `ShowWindowRetryTask`'s retry path so BOTH
+/// respect the same Linux paint gating
+/// (`linux_paint_gate_pending`/`reveal_gated_window`,
+/// `SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md`) — reagentx P1 on this PR:
+/// the retry path originally called `window.show()` unconditionally on every
+/// platform, bypassing the gate entirely. Whenever a *retry* (not the first
+/// `on_load_end` pass) is what actually resolves the window, that would
+/// reintroduce the Linux white-flash bug the gate exists to prevent.
+///
+/// `label` is `None` only when the window label couldn't be resolved at all
+/// — matches the pre-existing "can't gate safely on an unknown label"
+/// fallback (immediate show, every platform).
+///
+/// `state`/`label` are only read inside the `#[cfg(target_os = "linux")]`
+/// branch below — unused on every other platform, hence the `allow`.
+#[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
+fn reveal_top_level_window(
+    state: &std::sync::Arc<crate::state::AppState>,
+    label: Option<&str>,
+    window: &cef::Window,
+    browser: Option<&mut Browser>,
+) {
+    #[cfg(target_os = "linux")]
+    if let Some(label) = label {
+        // The real paint signal can race ahead of this call (see
+        // handle_first_paint_signal) — if it already arrived, reveal
+        // immediately instead of arming a gate + safety timeout for a paint
+        // that already happened.
+        let already_painted = state.linux_first_paint_seen.lock().remove(label);
+        // Fresh epoch per arm — see PAINT_GATE_NEXT_EPOCH and
+        // reveal_gated_window's doc comment. Guards against a reload/retry
+        // re-arming this same label before a timeout fires.
+        let epoch = PAINT_GATE_NEXT_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        state
+            .linux_paint_gate_pending
+            .lock()
+            .insert(label.to_string(), (std::time::Instant::now(), epoch));
+        if already_painted {
+            reveal_gated_window(state, label, "signal-early", None);
+        } else {
+            let mut timeout_task = PaintGateRevealTask::new(
+                state.clone(),
+                label.to_string(),
+                "timeout",
+                Some(epoch),
+            );
+            post_delayed_task(ThreadId::UI, Some(&mut timeout_task), PAINT_GATE_SAFETY_TIMEOUT_MS);
+        }
+        return;
+    }
+    window.show();
+    if let Some(b) = browser {
+        if let Some(host) = b.host() {
+            host.set_focus(1);
+        }
+    }
+}
+
+/// Resolve a top-level (non-pool) window by label and reveal it (via
+/// `reveal_top_level_window`) if its `BrowserView`/`Window` are resolvable
+/// and it isn't already visible. Returns `true` once resolved (shown,
+/// gate-armed, or already visible), `false` if the CEF Views objects aren't
+/// available yet — caller should retry rather than give up silently.
 fn try_show_top_level_window(state: &std::sync::Arc<crate::state::AppState>, label: &str) -> bool {
     let Some(mut browser) = state.get_browser(label) else { return false };
     let Some(bv) = browser_view_get_for_browser(Some(&mut browser)) else { return false };
     let Some(window) = bv.window() else { return false };
     if window.is_visible() == 0 {
-        window.show();
-        if let Some(host) = browser.host() {
-            host.set_focus(1);
-        }
+        reveal_top_level_window(state, Some(label), &window, Some(&mut browser));
     }
     true
 }
@@ -409,64 +467,15 @@ impl AgentMuxHandler {
                         // docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md.
                         // Falls back to the old immediate-show behavior if the
                         // window label can't be resolved (can't gate safely on
-                        // an unknown label).
-                        #[cfg(target_os = "linux")]
-                        let gate_label = browser_label.clone();
-                        #[cfg(target_os = "linux")]
-                        let gated = gate_label.is_some();
-                        #[cfg(target_os = "linux")]
-                        if let Some(label) = gate_label {
-                            // The real paint signal can race ahead of this
-                            // on_load_end call (see handle_first_paint_signal)
-                            // — if it already arrived, reveal immediately
-                            // instead of arming a gate + safety timeout for a
-                            // paint that already happened.
-                            let already_painted =
-                                self.state.linux_first_paint_seen.lock().remove(&label);
-                            // Fresh epoch per arm — see PAINT_GATE_NEXT_EPOCH
-                            // and reveal_gated_window's doc comment. Guards
-                            // against a reload/retry re-arming this same
-                            // label before a timeout fires.
-                            let epoch = PAINT_GATE_NEXT_EPOCH
-                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            self.state
-                                .linux_paint_gate_pending
-                                .lock()
-                                .insert(label.clone(), (std::time::Instant::now(), epoch));
-                            if already_painted {
-                                reveal_gated_window(&self.state, &label, "signal-early", None);
-                            } else {
-                                let mut timeout_task = PaintGateRevealTask::new(
-                                    self.state.clone(),
-                                    label,
-                                    "timeout",
-                                    Some(epoch),
-                                );
-                                post_delayed_task(
-                                    ThreadId::UI,
-                                    Some(&mut timeout_task),
-                                    PAINT_GATE_SAFETY_TIMEOUT_MS,
-                                );
-                            }
-                        }
-                        #[cfg(target_os = "linux")]
-                        if !gated {
-                            window.show();
-                            if let Some(ref mut b) = browser_cloned {
-                                if let Some(host) = b.host() {
-                                    host.set_focus(1);
-                                }
-                            }
-                        }
-                        #[cfg(not(target_os = "linux"))]
-                        {
-                            window.show();
-                            if let Some(ref mut b) = browser_cloned {
-                                if let Some(host) = b.host() {
-                                    host.set_focus(1);
-                                }
-                            }
-                        }
+                        // an unknown label). Shared with ShowWindowRetryTask's
+                        // retry path via reveal_top_level_window so both
+                        // respect the same gating.
+                        reveal_top_level_window(
+                            &self.state,
+                            browser_label.as_deref(),
+                            &window,
+                            browser_cloned.as_mut(),
+                        );
                     }
                 }
             }
