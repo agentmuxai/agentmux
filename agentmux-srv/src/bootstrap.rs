@@ -1191,8 +1191,11 @@ pub async fn bind_listeners_and_network(
 ) -> NetworkBundle {
     // When LAN discovery is enabled the user has explicitly opted in to network
     // visibility. Bind to 0.0.0.0 so devices on the same network can reach the
-    // port that mDNS advertises. The auth_key (X-AuthKey header, broadcast in
-    // the mDNS TXT record) gates every API route.
+    // port that mDNS advertises. The scoped `lan_key` (X-AuthKey header,
+    // broadcast in the mDNS TXT record) gates only the two LAN-forwarding
+    // routes (`lan_or_full_auth_middleware`) — not the full auth_key
+    // previously broadcast here, which gated the entire API surface (see
+    // Config::lan_key's doc comment).
     //
     // Known limitation: `bind_addr` is resolved once at startup. The toggle is
     // therefore only fully effective before launch (settings.json) or after a
@@ -1200,7 +1203,7 @@ pub async fn bind_listeners_and_network(
     //   OFF→ON: mDNS re-advertises the LAN IP but listeners stay on 127.0.0.1,
     //           so remote devices cannot connect until restart.
     //   ON→OFF: mDNS is stopped but listeners remain on 0.0.0.0 and are still
-    //           reachable on the LAN until restart (auth_key still gates routes).
+    //           reachable on the LAN until restart (lan_key still gates routes).
     // A future improvement would re-bind listeners on toggle; deferred because
     // rebinding an active axum server is non-trivial.
     let bind_addr = if config_watcher.get_settings().network_lan_discovery {
@@ -1240,7 +1243,7 @@ pub async fn bind_listeners_and_network(
         version.to_string(),
         web_addr.port(),
         event_bus.clone(),
-        config.auth_key.clone(),
+        config.lan_key.clone(),
     ));
     // Honor the current setting at boot — starts the daemon if enabled.
     lan_discovery.apply(config_watcher.get_settings().network_lan_discovery);
@@ -1411,6 +1414,7 @@ pub fn build_app_state(
 
     AppState {
         auth_key: config.auth_key.clone(),
+        lan_key: config.lan_key.clone(),
         boot_id: Arc::from(uuid::Uuid::new_v4().to_string()),
         version,
         app_path: config.app_path.clone(),

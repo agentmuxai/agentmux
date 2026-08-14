@@ -318,6 +318,7 @@ mod recent_sessions_tests {
         let fs_watch_pool = crate::backend::fs_watch::FsWatchPool::new();
         let state = AppState {
             auth_key: "test".to_string(),
+            lan_key: "test-lan".to_string(),
             boot_id: std::sync::Arc::from("test-boot"),
             version: "test".to_string(),
             app_path: String::new(),
@@ -648,6 +649,7 @@ mod recent_sessions_tests {
         let fs_watch_pool = crate::backend::fs_watch::FsWatchPool::new();
         let state = AppState {
             auth_key: "test".to_string(),
+            lan_key: "test-lan".to_string(),
             boot_id: std::sync::Arc::from("test-boot"),
             version: "test".to_string(),
             app_path: String::new(),
