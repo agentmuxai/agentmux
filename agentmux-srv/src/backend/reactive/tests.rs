@@ -384,6 +384,112 @@ async fn test_handler_inject_success() {
     assert!(payload.ends_with('\r'), "trailing CR submits the message");
 }
 
+// SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §6.2 addendum — reagent
+// WAN signing renders an additive SIG= field without touching TIER/TRUST.
+#[tokio::test]
+async fn test_handler_inject_wan_reagent_verified_renders_sig_field_but_stays_sensitive() {
+    let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let sent_clone = sent.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        sent_clone.lock().unwrap().push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "PR #1 reviewed".to_string(),
+        source_agent: Some("github-consumer".to_string()),
+        request_id: Some("req-wan-1".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: Some("wan".to_string()),
+        forward_hops: 0,
+        reagent_verified: Some(true),
+        ..Default::default()
+    });
+
+    assert!(resp.success);
+    // A verified reagent signature must NOT downgrade WAN's unconditional
+    // sensitive escalation — this closes "who is this from," not "should
+    // this auto-execute."
+    assert_eq!(resp.effective_tier.as_deref(), Some("sensitive"));
+
+    let calls = sent.lock().unwrap();
+    let payload = String::from_utf8_lossy(&calls[1].1);
+    assert!(payload.contains("TRUST=network-claimed"), "WAN trust label unchanged: {payload}");
+    assert!(payload.contains("TIER=sensitive"), "WAN tier still forced sensitive: {payload}");
+    assert!(payload.contains("SIG=verified"), "verified reagent signature renders SIG=verified: {payload}");
+}
+
+#[tokio::test]
+async fn test_handler_inject_wan_reagent_invalid_signature_renders_sig_invalid() {
+    let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let sent_clone = sent.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        sent_clone.lock().unwrap().push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "PR #1 reviewed".to_string(),
+        source_agent: Some("github-consumer".to_string()),
+        request_id: Some("req-wan-2".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: Some("wan".to_string()),
+        forward_hops: 0,
+        reagent_verified: Some(false),
+        ..Default::default()
+    });
+
+    assert!(resp.success);
+    assert_eq!(resp.effective_tier.as_deref(), Some("sensitive"));
+    let calls = sent.lock().unwrap();
+    let payload = String::from_utf8_lossy(&calls[1].1);
+    assert!(payload.contains("SIG=invalid"), "a present-but-wrong signature renders SIG=invalid: {payload}");
+}
+
+#[tokio::test]
+async fn test_handler_inject_wan_no_reagent_signature_omits_sig_field() {
+    let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let sent_clone = sent.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        sent_clone.lock().unwrap().push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "ordinary WAN jekt, not from reagent".to_string(),
+        source_agent: Some("someone".to_string()),
+        request_id: Some("req-wan-3".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: Some("wan".to_string()),
+        forward_hops: 0,
+        reagent_verified: None,
+        ..Default::default()
+    });
+
+    assert!(resp.success);
+    let calls = sent.lock().unwrap();
+    let payload = String::from_utf8_lossy(&calls[1].1);
+    assert!(!payload.contains("SIG="), "ordinary WAN traffic renders no SIG= field: {payload}");
+}
+
 // Controller-aware delivery (SPEC_AGENT_CONTROL_PROTOCOL §6 / Phase 3).
 
 // A structured (persistent/ACP) controller delivers via the message_sender and
