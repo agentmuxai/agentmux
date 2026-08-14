@@ -281,8 +281,10 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                         : "";
                     return (
                         <div class="agent-context-compacted">
-                            <div class="agent-context-compacted-label">
-                                context compacted{triggerLabel ? ` — ${triggerLabel}` : ""}
+                            <div class="agent-context-compacted-rule">
+                                <span class="agent-context-compacted-label">
+                                    context compacted{triggerLabel ? ` — ${triggerLabel}` : ""}
+                                </span>
                             </div>
                             <div class="agent-context-compacted-detail">
                                 Earlier history summarized · {fmt(n.tokensBefore)} → {fmt(n.tokensAfter)} tokens{durationLabel}
@@ -346,8 +348,10 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     const resumed = n.outcome === "resumed";
                     return (
                         <div class={resumed ? "agent-session-outcome" : "agent-session-outcome agent-session-outcome-fresh"}>
-                            <div class="agent-session-outcome-label">
-                                {resumed ? "Session continued" : "New session started"}
+                            <div class="agent-session-outcome-rule">
+                                <span class="agent-session-outcome-label">
+                                    {resumed ? "Session continued" : "New session started"}
+                                </span>
                             </div>
                             <Show when={!resumed}>
                                 <div class="agent-session-outcome-detail">
