@@ -116,11 +116,20 @@ pub struct InjectionRequest {
     /// `reagent_sig` is treated the same as no signature having been
     /// attempted at all (`reagent_verified` resolves to `None`, not
     /// `Some(false)`) — see `cloud_subscriber::sync_agent_reactive`'s match
-    /// on all four fields. This does not weaken verification: `SIG=`
-    /// never affects `TIER`/`TRUST` escalation either way (see
-    /// `reagent_verified`'s doc comment below), so a stripped/partial
-    /// signature cannot buy an attacker anything a fully-absent one
-    /// couldn't already.
+    /// on all four fields. This does not weaken verification: dropping this
+    /// field can only ever *lose* a legitimate `SIG=verified`/possible tier
+    /// relaxation, never grant one — see `reagent_verified`'s doc comment
+    /// below for what this field, once present, is now also used for
+    /// besides rendering `SIG=`.
+    ///
+    /// Whichever caller builds the `InjectionRequest` that ultimately
+    /// reaches `Handler::inject_message` MUST carry this field through from
+    /// wherever it originated (e.g. `cloud_subscriber::sync_agent_reactive`
+    /// copying it from the `Injection` it received) — `handler.rs`'s tier-
+    /// relaxation gate checks THIS field, not just whether `reagent_sig`
+    /// verified, so dropping it silently disables relaxation on that
+    /// delivery path even when `reagent_verified` is correctly `Some(true)`
+    /// (reagentx P0 on PR #2576 — exactly this omission on the WS path).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reagent_key_id: Option<String>,
     /// Message id that was part of `reagent_sig`'s signed material — the
@@ -155,12 +164,25 @@ pub struct InjectionRequest {
     /// verify) renders `SIG=invalid` — a real red flag, same spirit as
     /// host-tier's `TRUST=unverified`. `None` (no `reagent_sig` attempted)
     /// renders no `SIG=` field at all, keeping ordinary WAN traffic
-    /// unchanged. **Never affects `TIER`/`TRUST` escalation** — WAN jekts
-    /// stay unconditionally `TRUST=network-claimed` / eligible for
-    /// `TIER=sensitive` regardless of this field, per
-    /// docs/specs/SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §4 ("what
-    /// does NOT change"). This answers "who is this really from," not
-    /// "should this auto-execute."
+    /// unchanged.
+    ///
+    /// **Never affects `TRUST`** — WAN jekts stay unconditionally
+    /// `TRUST=network-claimed` regardless of this field; verification
+    /// answers "who is this really from," not "did this cross a network
+    /// boundary."
+    ///
+    /// **DOES affect `TIER`, as of
+    /// docs/specs/SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14.md**
+    /// (superseding `SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md` §4's
+    /// original "what does NOT change" claim, true when written, no longer
+    /// true today): `handler.rs`'s tier-escalation block no longer forces
+    /// `TIER=sensitive` by delivery tier alone when this is `Some(true)` AND
+    /// the request's `reagent_key_id` passes
+    /// `agentmux_common::jekt_sign::is_reagent_trusted_signing_key` (i.e. is
+    /// the production key specifically, not the known-exposed dev
+    /// placeholder — `Some(true)` alone from a dev-key signature is NOT
+    /// sufficient, see that function's doc comment). Declared-sensitive and
+    /// keyword-match escalation still apply unconditionally on top.
     #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
     pub reagent_verified: Option<bool>,
 }

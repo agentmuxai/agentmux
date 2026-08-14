@@ -103,21 +103,54 @@ pub fn verify_jekt(
 /// key. The matching private key is never present in this repo — it lives
 /// only in agentmux-cloud's Secrets Manager, held by the signing service.
 ///
-/// `reagent-v1-dev` is a placeholder minted during initial implementation
+/// `reagent-v1-dev` was a placeholder minted during initial implementation
 /// (its private half was generated in a local shell for wiring/testing
-/// purposes and must be treated as already-exposed) — production
-/// deployment must generate a fresh keypair via a secure channel (not a
-/// transcript-visible shell command) and register the real public key here
-/// under a new `key_id` before the private key is ever loaded into
-/// Secrets Manager for live traffic.
+/// purposes and was treated as already-exposed from the moment it was
+/// generated) — kept registered here, but agentmux-cloud's signer
+/// (`muxbus/consumers/github/handler.ts`'s `REAGENT_KEY_ID`) no longer signs
+/// under it, so no genuine production traffic uses it. Left in place only
+/// so any message that happened to be signed under it before the rotation
+/// still verifies, matching this map's whole "add, don't replace" design.
+///
+/// `reagent-v1` (2026-08-14) is the real production key: generated via
+/// `crypto.generateKeyPairSync('ed25519', ...)` in a one-off Node script
+/// whose output was piped directly into `aws secretsmanager put-secret-value`
+/// without the private key ever being printed, logged, or otherwise
+/// appearing in any transcript — the private half lives only in
+/// agentmux-cloud's Secrets Manager (`services/infra`'s
+/// `reagent-jekt-signing-key` field), consistent with the exposure lesson
+/// `reagent-v1-dev` was kept around specifically to document.
 fn reagent_public_key(key_id: &str) -> Option<[u8; 32]> {
     match key_id {
         "reagent-v1-dev" => Some([
             104, 98, 241, 120, 99, 50, 230, 185, 228, 117, 241, 110, 130, 85, 252, 75, 141, 152,
             224, 92, 125, 154, 123, 40, 96, 149, 214, 172, 94, 120, 116, 200,
         ]),
+        "reagent-v1" => Some([
+            185, 72, 99, 0, 119, 36, 15, 50, 117, 0, 134, 93, 66, 39, 65, 21, 64, 229, 3, 157,
+            238, 188, 79, 40, 74, 42, 99, 108, 28, 101, 243, 205,
+        ]),
         _ => None,
     }
+}
+
+/// The one `key_id` whose matching private key is believed secret today —
+/// i.e. the only key a caller should treat as *authorization to relax
+/// `TIER=sensitive`* for a WAN jekt, as opposed to merely "the signature
+/// checks out cryptographically." `reagent-v1-dev` also verifies
+/// successfully via `verify_reagent_jekt` (its entry stays in
+/// `reagent_public_key` so already-in-flight dev-signed messages don't
+/// break), but its private half is documented above as exposed since the
+/// moment it was generated — anyone holding it can mint a signature that
+/// verifies. `reagent_verified == Some(true)` alone therefore answers "did
+/// a registered key sign this," not "did a key nobody else has sign this";
+/// callers making a trust decision (not just rendering `SIG=` in a marker)
+/// must additionally check the key_id against this function. See
+/// `agentmux-srv/src/backend/reactive/handler.rs`'s `is_verified_network_sender`
+/// (reagentx P0 on PR #2576 — the dev key's known exposure meant a WAN jekt
+/// forged under it could bypass the tier-relaxation gate entirely).
+pub fn is_reagent_trusted_signing_key(key_id: &str) -> bool {
+    key_id == "reagent-v1"
 }
 
 /// Verify a WAN-tier jekt's claimed `reagent_sig` against the pinned public
@@ -126,6 +159,12 @@ fn reagent_public_key(key_id: &str) -> Option<[u8; 32]> {
 /// signature that simply doesn't verify — callers should treat all of
 /// these identically: "not verified," rendering `SIG=invalid` rather than
 /// `SIG=verified` in the marker (see `wrap_jekt_message`'s doc comment).
+///
+/// This function alone does NOT tell you whether the message is safe to
+/// treat as more trusted than an ordinary WAN jekt — see
+/// `is_reagent_trusted_signing_key`'s doc comment. A message signed under
+/// `reagent-v1-dev` verifies here (`true`) but must not be used to relax
+/// `TIER=sensitive`.
 pub fn verify_reagent_jekt(
     key_id: &str,
     msgid: &str,
@@ -235,6 +274,86 @@ mod tests {
             "hello",
             FIXTURE_SIG_B64,
         ));
+    }
+
+    // Same fixture material, signed under the real production key
+    // (`reagent-v1`, provisioned 2026-08-14 — see this key's own doc comment
+    // on `reagent_public_key` for how the private half was generated and
+    // provisioned without ever appearing in a transcript). Proves the
+    // production key is genuinely wired up and verifiable end to end, not
+    // just registered as an unused map entry.
+    const PROD_FIXTURE_SIG_B64: &str =
+        "FCFjcvAzla329a39u8fFxOvRWaH1R2fUn8RsGtP9RaIbLbaS3aXgAQ7YB4ssWV5TDvAeGrwSkHfoeGi11iCPBg==";
+
+    #[test]
+    fn a_correctly_signed_reagent_message_verifies_under_the_production_key() {
+        assert!(verify_reagent_jekt(
+            "reagent-v1",
+            "msg-1",
+            "github-consumer",
+            "agentx",
+            1_000,
+            "hello",
+            PROD_FIXTURE_SIG_B64,
+        ));
+    }
+
+    #[test]
+    fn the_dev_and_prod_reagent_keys_are_not_interchangeable() {
+        // The prod fixture must NOT verify against the dev key id, and
+        // vice versa -- proves these are genuinely two distinct keys, not
+        // the same key registered twice under different names.
+        assert!(!verify_reagent_jekt(
+            "reagent-v1-dev",
+            "msg-1",
+            "github-consumer",
+            "agentx",
+            1_000,
+            "hello",
+            PROD_FIXTURE_SIG_B64,
+        ));
+        assert!(!verify_reagent_jekt(
+            "reagent-v1",
+            "msg-1",
+            "github-consumer",
+            "agentx",
+            1_000,
+            "hello",
+            FIXTURE_SIG_B64,
+        ));
+    }
+
+    // ---- is_reagent_trusted_signing_key ----
+    //
+    // The dev key verifies signatures fine (it's a real registered key) but
+    // must never be treated as authorization to relax TIER=sensitive — its
+    // private half is documented as exposed since generation. Only the
+    // production key is "trusted" in that stronger sense.
+
+    #[test]
+    fn the_production_key_is_trusted_for_tier_relaxation() {
+        assert!(is_reagent_trusted_signing_key("reagent-v1"));
+    }
+
+    #[test]
+    fn the_exposed_dev_key_is_not_trusted_for_tier_relaxation_even_though_it_verifies() {
+        assert!(!is_reagent_trusted_signing_key("reagent-v1-dev"));
+        // Sanity check: it's not untrusted because it's unregistered — it
+        // genuinely verifies signatures, it's just not the trusted one.
+        assert!(verify_reagent_jekt(
+            "reagent-v1-dev",
+            "msg-1",
+            "github-consumer",
+            "agentx",
+            1_000,
+            "hello",
+            FIXTURE_SIG_B64,
+        ));
+    }
+
+    #[test]
+    fn an_unregistered_key_id_is_not_trusted_for_tier_relaxation() {
+        assert!(!is_reagent_trusted_signing_key("reagent-v2-does-not-exist"));
     }
 
     #[test]
