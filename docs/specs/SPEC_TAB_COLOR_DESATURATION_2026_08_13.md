@@ -1,8 +1,17 @@
 # Spec: Desaturate tab colors, keep agent pane border colors as-is
 
 **Date:** 2026-08-13
-**Status:** Proposed
-**Scope:** `frontend/app/tab/tab.tsx`, `frontend/app/tab/tab.scss`
+**Status:** Implemented (see revision note below)
+**Scope:** `frontend/app/tab/tab.tsx`, `frontend/app/tab/tabbar.tsx`, `frontend/app/view/agent/agent-color.ts`, `agentmux-srv/src/backend/agent_color.rs` (doc comment only)
+
+**Revision (same day):** the first implementation used a fully muted
+`S=45%/L=32%` palette (§3 table below). User feedback: "a little too
+desaturated" — go halfway between the original vivid hues and that muted
+set. The shipped values are the per-hue average of the original and muted
+HSL (S and L each averaged independently, hue unchanged), with lightness
+nudged down slightly on 7 of the 14 colors (Orange/Amber/Yellow/Lime/
+Green/Teal/Cyan) where the raw average dropped below WCAG AA. See the
+"Shipped (halfway)" column in §3.
 
 ## Problem
 
@@ -57,22 +66,22 @@ unchanged.
    desaturate-and-darken approach used for tab/label chips in tools like
    Linear and GitHub issue labels).
 
-   | Name    | Current (vivid) | Proposed (muted) | Contrast vs white text |
-   |---------|------------------|-------------------|------------------------|
-   | Red     | `#ef4444`        | `#762d2d`         | 9.61:1 |
-   | Orange  | `#f97316`        | `#764b2d`         | 7.45:1 |
-   | Amber   | `#f59e0b`        | `#765b2d`         | 6.35:1 |
-   | Yellow  | `#eab308`        | `#76642d`         | 5.75:1 |
-   | Lime    | `#84cc16`        | `#59762d`         | 5.16:1 |
-   | Green   | `#22c55e`        | `#2d7648`         | 5.51:1 |
-   | Teal    | `#14b8a6`        | `#2d766e`         | 5.32:1 |
-   | Cyan    | `#06b6d4`        | `#2d6c76`         | 5.99:1 |
-   | Blue    | `#3b82f6`        | `#2d4976`         | 9.05:1 |
-   | Indigo  | `#6366f1`        | `#2d2e76`         | 11.85:1 |
-   | Violet  | `#8b5cf6`        | `#432d76`         | 11.19:1 |
-   | Fuchsia | `#d946ef`        | `#6d2d76`         | 9.20:1 |
-   | Pink    | `#ec4899`        | `#762d51`         | 9.26:1 |
-   | Rose    | `#f43f5e`        | `#762d39`         | 9.51:1 |
+   | Name    | Current (vivid) | Muted (first pass, not shipped) | Shipped (halfway) | Contrast vs white text |
+   |---------|------------------|----------------------------------|---------------------|------------------------|
+   | Red     | `#ef4444`        | `#762d2d`                        | `#c22a2a`           | 5.77:1 |
+   | Orange  | `#f97316`        | `#764b2d`                        | `#b75e20`           | 4.51:1 |
+   | Amber   | `#f59e0b`        | `#765b2d`                        | `#9d6d1d`           | 4.51:1 |
+   | Yellow  | `#eab308`        | `#76642d`                        | `#90731a`           | 4.52:1 |
+   | Lime    | `#84cc16`        | `#59762d`                        | `#5a821e`           | 4.52:1 |
+   | Green   | `#22c55e`        | `#2d7648`                        | `#248749`           | 4.52:1 |
+   | Teal    | `#14b8a6`        | `#2d766e`                        | `#1e8479`           | 4.51:1 |
+   | Cyan    | `#06b6d4`        | `#2d6c76`                        | `#1a8294`           | 4.51:1 |
+   | Blue    | `#3b82f6`        | `#2d4976`                        | `#2562c5`           | 5.79:1 |
+   | Indigo  | `#6366f1`        | `#2d2e76`                        | `#2d30cf`           | 8.61:1 |
+   | Violet  | `#8b5cf6`        | `#432d76`                        | `#5c29d2`           | 7.77:1 |
+   | Fuchsia | `#d946ef`        | `#6d2d76`                        | `#ae2ac2`           | 5.36:1 |
+   | Pink    | `#ec4899`        | `#762d51`                        | `#c02b75`           | 5.45:1 |
+   | Rose    | `#f43f5e`        | `#762d39`                        | `#c42742`           | 5.64:1 |
 
    All 14 exceed WCAG AA (4.5:1) for normal text, so no change needed to
    the tab-label text color or the `!important` white override at

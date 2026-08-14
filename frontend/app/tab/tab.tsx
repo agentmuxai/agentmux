@@ -17,26 +17,29 @@ import { measureTabWidth } from "./tab-measure";
 import "./tab.scss";
 
 // 14 colors — same hues as the agent-pane border palette
-// (agent-color.ts's AGENT_COLOR_PALETTE), desaturated to HSL S=45%/L=32%
-// for a muted, non-fluorescent tab strip. Deliberately a separate array,
-// not derived from the agent border palette — see
-// docs/specs/SPEC_TAB_COLOR_DESATURATION_2026_08_13.md for why the two
-// must not share one source (editing this must never affect pane borders).
+// (agent-color.ts's AGENT_COLOR_PALETTE), desaturated to roughly halfway
+// between the original Tailwind-500 vivid hues and a fully muted
+// (S=45%/L=32%) set — per-hue lightness nudged down slightly where needed
+// to keep WCAG AA (>=4.5:1) contrast against the existing white tab-label
+// text. Deliberately a separate array, not derived from the agent border
+// palette — see docs/specs/SPEC_TAB_COLOR_DESATURATION_2026_08_13.md for
+// why the two must not share one source (editing this must never affect
+// pane borders).
 export const TAB_COLORS: { name: string; hex: string }[] = [
-    { name: "Red",     hex: "#762d2d" },
-    { name: "Orange",  hex: "#764b2d" },
-    { name: "Amber",   hex: "#765b2d" },
-    { name: "Yellow",  hex: "#76642d" },
-    { name: "Lime",    hex: "#59762d" },
-    { name: "Green",   hex: "#2d7648" },
-    { name: "Teal",    hex: "#2d766e" },
-    { name: "Cyan",    hex: "#2d6c76" },
-    { name: "Blue",    hex: "#2d4976" },
-    { name: "Indigo",  hex: "#2d2e76" },
-    { name: "Violet",  hex: "#432d76" },
-    { name: "Fuchsia", hex: "#6d2d76" },
-    { name: "Pink",    hex: "#762d51" },
-    { name: "Rose",    hex: "#762d39" },
+    { name: "Red",     hex: "#c22a2a" },
+    { name: "Orange",  hex: "#b75e20" },
+    { name: "Amber",   hex: "#9d6d1d" },
+    { name: "Yellow",  hex: "#90731a" },
+    { name: "Lime",    hex: "#5a821e" },
+    { name: "Green",   hex: "#248749" },
+    { name: "Teal",    hex: "#1e8479" },
+    { name: "Cyan",    hex: "#1a8294" },
+    { name: "Blue",    hex: "#2562c5" },
+    { name: "Indigo",  hex: "#2d30cf" },
+    { name: "Violet",  hex: "#5c29d2" },
+    { name: "Fuchsia", hex: "#ae2ac2" },
+    { name: "Pink",    hex: "#c02b75" },
+    { name: "Rose",    hex: "#c42742" },
 ];
 
 interface TabContextPanelProps {
