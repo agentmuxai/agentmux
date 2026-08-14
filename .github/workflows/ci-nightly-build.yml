@@ -43,18 +43,31 @@ jobs:
       # (2026-06-28, 2026-08-13) — see
       # docs/specs/PLAN_WINDOWS_CI_SUBPROCESS_IO_FLAKE_FIX_2026_08_13.md.
       # Exclude the checkout/build paths and the toolchain's own processes
-      # rather than disabling real-time protection outright.
+      # rather than disabling real-time protection outright. Best-effort: on
+      # the one hard-gated leg in this workflow, a cmdlet failing here (e.g.
+      # Defender module unavailable, access denied on some runner image)
+      # must not fail the build — that would defeat this step's own purpose
+      # of making that leg more reliable. Each exclusion is wrapped so a
+      # failure just logs a warning and the rest still get attempted.
       - name: Exclude build paths + toolchain processes from Windows Defender
         if: matrix.os == 'windows-latest'
         shell: powershell
         run: |
-          Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE"
-          Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP"
-          Add-MpPreference -ExclusionPath "$env:USERPROFILE\.cargo"
-          Add-MpPreference -ExclusionProcess "node.exe"
-          Add-MpPreference -ExclusionProcess "cargo.exe"
-          Add-MpPreference -ExclusionProcess "rustc.exe"
-          Add-MpPreference -ExclusionProcess "link.exe"
+          function Add-ExclusionSafe {
+            param([scriptblock]$Body, [string]$Desc)
+            try {
+              & $Body
+            } catch {
+              Write-Warning "Defender exclusion failed ($Desc): $_"
+            }
+          }
+          Add-ExclusionSafe { Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE" -ErrorAction Stop } "workspace path"
+          Add-ExclusionSafe { Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP" -ErrorAction Stop } "runner temp path"
+          Add-ExclusionSafe { Add-MpPreference -ExclusionPath "$env:USERPROFILE\.cargo" -ErrorAction Stop } "cargo home path"
+          Add-ExclusionSafe { Add-MpPreference -ExclusionProcess "node.exe" -ErrorAction Stop } "node.exe"
+          Add-ExclusionSafe { Add-MpPreference -ExclusionProcess "cargo.exe" -ErrorAction Stop } "cargo.exe"
+          Add-ExclusionSafe { Add-MpPreference -ExclusionProcess "rustc.exe" -ErrorAction Stop } "rustc.exe"
+          Add-ExclusionSafe { Add-MpPreference -ExclusionProcess "link.exe" -ErrorAction Stop } "link.exe"
 
       # cef-dll-sys builds CEF's C wrapper with CMake + Ninja.
       - name: Install Ninja (Windows — CMake ships with VS)

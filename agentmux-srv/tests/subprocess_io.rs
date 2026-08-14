@@ -236,13 +236,14 @@ async fn create_no_window_flag_set() {
     // unlikely to be cold-start variance. Capture Defender status since
     // neither prior incident on this test was root-caused past "loaded
     // runner" — this is the data point to check that guess next time.
-    let defender_status = std::process::Command::new("powershell")
+    let defender_status = tokio::process::Command::new("powershell")
         .args([
             "-NoProfile",
             "-Command",
             "Get-MpComputerStatus | Format-List",
         ])
         .output()
+        .await
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_else(|e| format!("<failed to query Defender status: {e}>"));
 
