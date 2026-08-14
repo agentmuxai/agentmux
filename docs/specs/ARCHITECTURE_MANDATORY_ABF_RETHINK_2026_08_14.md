@@ -242,6 +242,42 @@ above), and not proposed anywhere else in the repo (verified by search).
 Recorded here because it changes what "unit of portability" means for
 everything above.
 
+### 7.0 Correction found during implementation (2026-08-14): this reverses a prior deliberate decision, not "adding new fields"
+
+While implementing §7.4.1-7.4.3 against the actual schema, found that
+`db_bundles.provider`/`.model` **already exist as columns** — in both the
+object and shared-store schemas (`migrations.rs:333-334`, `:812`ish). §7.1
+below was written assuming these needed to be added; they don't. What
+actually needs to change is smaller (no new migration/columns) but the
+*decision* being made is bigger than "revive vestigial fields": these
+columns were deliberately zeroed by a named, dated, reasoned architectural
+decision — `docs/specs/archive/SPEC_MEMORY_IDENTITY_ARCH_2026_06_19.md
+§4.1a` (2026-06-20): "A preset is the agent's reusable, **provider-agnostic**
+capability pack... Provider + model belong to the agent... A preset can then
+be paired with an agent of any provider." `frontend/app/view/memory/
+memory-model.ts:130-133` is where that decision is enforced today —
+`draftToWire` writes `provider: "", model: ""` unconditionally on every
+save specifically so "the ON CONFLICT update clears any stale legacy
+value."
+
+**This section is reversing that decision, not fixing an oversight.** The
+tradeoff §4.1a optimized for — one preset reusable across agents on
+*different* providers — is exactly what §7's readonly-per-ABF model gives
+up: once provider/model are fixed at creation, an ABF can only ever pair
+with one specific harness+model combination, forever. §4.1a's world valued
+cross-provider reusability; this doc's world values self-contained
+portability. Both are legitimate goals — they're just in real tension, and
+this doc is choosing portability over reusability for the reasons in §7.2.
+Worth being explicit about this in whatever PR does the implementation,
+since it's the kind of reversal a reviewer familiar with the June decision
+should be able to see was made on purpose.
+
+Practical effect: **no new schema/migration work for these two fields**
+(§7.5 step 2 is now just "stop zeroing them," not "add columns") — but the
+Presets/Armory bundle editor needs its Provider/Model fields *back*
+(removed by §4.1a's own action item) — as readonly-after-creation fields,
+not the freely-editable ones that existed before.
+
 ### 7.1 The idea
 
 Reframe: the portable unit isn't "the agent," it's the **ABF**. Today
@@ -350,24 +386,41 @@ memory files) — a harness/auth-availability check would live in the same
 place, same shape, whenever this becomes a real scenario. Not a blocker for
 an initial version scoped to this machine's actual current agents.
 
-### 7.5 Suggested sequencing relative to §6
+### 7.5 Suggested sequencing relative to §6 (revised per §7.0)
 
-With 7.4.1-7.4.3 resolved, this extension should fold directly into §6 step
-2 (backfill migration `m0021`), not follow it as a separate migration: the
-same one-time pass that provisions a dedicated bundle per existing agent
-also sets `harness='claude'`, `model='oauth-anthropic'` on that bundle in
-the same write (§7.3). Revised implementation order:
+**Naming correction:** use the existing column names throughout —
+`db_bundles.provider` (not "harness" — same concept, matches
+`AgentDefinition.provider`'s existing naming) and `db_bundles.model`. For
+`model`'s value: §4.1a's own text notes the actual model checkpoint
+(`--model <x>`) rides in `provider_flags`, not a clean single field — and
+the shipped vendor-separation work (PR #2505/#2558) already has a distinct,
+better-fitting concept for "which backend" (`resolveEffectiveVendor`).
+**Decision: `db_bundles.model` stores the resolved *vendor* string** (e.g.
+`"anthropic"`, the provider's default per `PROVIDERS[provider].supportedVendors[0]`,
+or `"custom"` if a base-URL override applies) — not a specific model
+checkpoint. That's the actually-portable "which backend does this need"
+information; checkpoint selection stays a runtime/launch-time choice, not
+frozen into the ABF. Flagging this as a judgment call, easily revisited if
+wrong. So the operator's "harness is claude code, the API is Oauth
+anthropic" backfills to `provider='claude'`, `model='anthropic'`.
 
-1. `bundle.upsert` readonly guard (7.4.2) — standalone, no dependency on
-   anything else, safe to land first.
-2. Schema: add `harness`/`model` columns to `db_bundles` (currently absent
-   entirely, per §1.1/§7.1).
+With 7.4.1-7.4.3 and 7.0's correction applied, no new migration is needed
+for these two fields — they already exist in both schemas. Revised
+implementation order:
+
+1. Stop zeroing `provider`/`model` at write time
+   (`frontend/app/view/memory/memory-model.ts:130-133`) and restore
+   Provider/Model fields to the Presets/Armory bundle editor — but readonly
+   once set (not the freely-editable pre-§4.1a fields).
+2. `bundle.upsert` readonly guard (7.4.2) — backend enforcement, same PR as
+   step 1 ideally since they're the two halves of the same readonly
+   guarantee.
 3. `m0021` backfill migration — provisions a dedicated bundle per existing
-   unbound agent (§6 step 2) AND sets harness/model on it in the same pass
-   (§7.3) — one migration, not two.
+   unbound agent (§6 step 2) AND sets `provider`/`model` on it in the same
+   pass (§7.3, using the naming from above) — one migration, not two.
 4. Definition-time provisioning for new agents (§6 step 3), setting
-   harness/model at creation from whatever the create flow already knows
-   (the harness the user picked to create the agent with).
+   `provider`/`model` at creation from whatever the create flow already
+   knows (the provider the user picked to create the agent with).
 5. Spawn-time read-path change (7.4.1) — `agent_open.rs` +
    `agent-model.ts` resolve provider/vendor through the bound bundle
    instead of `AgentDefinition`'s own fields.

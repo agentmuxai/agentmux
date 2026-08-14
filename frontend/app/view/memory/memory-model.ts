@@ -8,11 +8,15 @@
 // docs/specs/SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md
 // for the format itself.
 //
-// A bundle is the agent's provider-agnostic capability stack: system
-// instructions, context files, MCP servers, skills. Provider/model are NOT
-// part of a bundle — they belong to the agent (§4.1a). Bundles are
-// reusable across many agent instances — pick one in the launch modal
-// alongside an Identity bundle.
+// A bundle is the agent's capability stack: system instructions, context
+// files, MCP servers, skills — plus, as of
+// ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §7, the provider
+// (harness) + model it's meant to run on, set once at creation and readonly
+// thereafter. This reverses SPEC_MEMORY_IDENTITY_ARCH §4.1a's "presets are
+// provider-agnostic, reusable across any provider" decision on purpose: an
+// ABF is now a self-contained, portable unit (can be exported and
+// reconstitute the same agent elsewhere) rather than a config fragment
+// meant to be mixed into agents of any provider.
 //
 // This module is the ViewModel for `view: "memory"` panes. It owns the
 // list of memories, the currently-selected one, and the in-flight edit
@@ -33,9 +37,19 @@ export interface MemoryDraft {
     id?: string;
     name: string;
     description: string;
-    // provider/model intentionally absent: an ABF bundle is provider-agnostic.
-    // The CLI provider + model belong to the agent (AgentDefinition.provider
-    // + provider_flags), not the bundle. See SPEC_MEMORY_IDENTITY_ARCH §4.1a.
+    /** The CLI/harness this ABF runs on (e.g. "claude"), and the resolved
+     *  model vendor (e.g. "anthropic"). Readonly once set — enforced by
+     *  the backend (`bundle.upsert`), not just this form: an ABF's whole
+     *  portability guarantee (it's self-describing about what it needs to
+     *  run) depends on these never silently changing after creation. Empty
+     *  string means "not yet set" (only valid pre-creation, on a brand-new
+     *  draft with no id). See
+     *  ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §7 — this reverses
+     *  SPEC_MEMORY_IDENTITY_ARCH §4.1a's "presets are provider-agnostic"
+     *  decision on purpose, trading cross-provider reusability for
+     *  self-contained portability. */
+    provider: string;
+    model: string;
     instructions: string;
     /** Preserved verbatim through the edit round-trip — ABF v0.2 §2.2
      *  provider-scoped variants, not yet editable through this form (no
@@ -68,6 +82,8 @@ export function emptyDraft(): MemoryDraft {
         id: undefined,
         name: "",
         description: "",
+        provider: "",
+        model: "",
         instructions: "",
         instructions_by_provider: "{}",
         context_files: [],
@@ -91,6 +107,8 @@ export function draftFromMemory(m: Memory): MemoryDraft {
         id: m.id,
         name: m.name,
         description: m.description ?? "",
+        provider: m.provider ?? "",
+        model: m.model ?? "",
         instructions: m.instructions ?? "",
         // Preserved, not parsed — this form has no field that edits
         // per-provider variants yet, so the draft only needs to carry
@@ -127,10 +145,10 @@ export function draftToWire(d: MemoryDraft): Memory {
         // Preserve the global flag so editing a global bundle does not
         // silently strip it (the upsert ON CONFLICT overwrites is_global).
         is_global: d.is_global ?? false,
-        // provider/model are deprecated on ABF bundles (provider-agnostic, §4.1a).
-        // Write empty so the ON CONFLICT update clears any stale legacy value.
-        provider: "",
-        model: "",
+        // Sent through as-is (readonly-once-set is backend-enforced, not
+        // stripped here) — see MemoryDraft.provider's doc comment.
+        provider: d.provider,
+        model: d.model,
         instructions: d.instructions,
         instructions_by_provider: d.instructions_by_provider || "{}",
         context_files: JSON.stringify(d.context_files),
