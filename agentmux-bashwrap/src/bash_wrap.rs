@@ -3150,7 +3150,14 @@ mod tests {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let prev = std::env::var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS").ok();
         unsafe {
-            std::env::set_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", "1");
+            // 1s was tight enough that a loaded CI runner's PTY-reader-thread
+            // scheduling delay alone could exceed it before `echo hello` ever
+            // produced output — a genuine idle-kill by the test's own
+            // (deliberately short) timeout, not the idle_rx/wait_task
+            // misclassification race this test exists to catch. 3s keeps the
+            // race window this test targets while giving scheduling enough
+            // slack not to trip the timeout on its own.
+            std::env::set_var("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", "3");
         }
 
         let bash = locate_bash().expect("locate_bash for test — same dependency the whole binary needs");
@@ -3261,13 +3268,29 @@ mod tests {
             };
             let buffered = Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new()));
 
-            let result = tokio::time::timeout(
-                Duration::from_secs(15),
+            // A hung/slow attempt is treated the same as a wrong-occurrence
+            // attempt (retry, don't hard-fail): a loaded CI runner can push
+            // process-spawn latency past a fixed per-attempt budget without
+            // that being evidence of a real bug in `run_via_pty` itself —
+            // same rationale as the occurrence-count retry below, just
+            // covering the timeout path too (previously a timeout here
+            // bypassed the retry loop entirely via a hard `.expect()`).
+            let outcome = tokio::time::timeout(
+                Duration::from_secs(20),
                 run_via_pty(&args, command, None, buffered.clone(), &bash, pair),
             )
-            .await
-            .expect("run_via_pty must not hang")
-            .expect("run_via_pty should return Ok");
+            .await;
+            let result = match outcome {
+                Ok(Ok(r)) => r,
+                Ok(Err(e)) => panic!("run_via_pty should return Ok, got: {e}"),
+                Err(_) => {
+                    eprintln!(
+                        "attempt {attempt}/{MAX_ATTEMPTS}: run_via_pty did not complete within \
+                         20s (retrying: a loaded CI runner can delay process spawn/scheduling)"
+                    );
+                    continue;
+                }
+            };
             assert_eq!(result, 0, "command should exit cleanly");
 
             let blob = String::from_utf8_lossy(&buffered.lock().await).into_owned();

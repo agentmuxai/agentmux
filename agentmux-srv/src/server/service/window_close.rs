@@ -106,6 +106,44 @@ pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) ->
                 .map(|ws| ws.iter().any(|w| w.workspaceid == ws_id))
                 .unwrap_or(true);
             if !any_other_window {
+                // Restore-on-relaunch (SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13
+                // Feature 1) — is THIS close the one that empties
+                // `Client.windowids`, i.e. a genuine "the user is fully
+                // quitting" moment? Deliberately NOT the same question as
+                // `!any_other_window` above (that's workspace-sharing,
+                // answered independently per window, true for basically
+                // every close in the common 1:1 window:workspace case) —
+                // reviewer-caught bug (reagentx P1 on PR #2560): gating on
+                // workspace-destruction alone still let closing a small
+                // independent tear-off window (its own small 1:1 workspace,
+                // so `!any_other_window` is true for it too) AFTER the real
+                // main window overwrite the just-saved full-session
+                // snapshot with the tear-off's tiny one. Gating on
+                // "windowids is about to be empty" instead ties the
+                // snapshot to the same trigger `restore_last_session` itself
+                // waits for on the read side.
+                //
+                // Read FRESH here, not once up front at function entry
+                // (reagentx P1 on PR #2560, re-review): `apply_srv_window_closed`
+                // above already pruned this window's id, so this reflects
+                // the post-prune state. A stale pre-dispatch read let
+                // concurrent CloseWindow calls during a multi-window quit
+                // each independently see "the other window is still there"
+                // and conclude `will_empty_windowids = false` for BOTH,
+                // losing the snapshot entirely even though the user
+                // genuinely closed everything.
+                let will_empty_windowids = store
+                    .get_all::<Client>()
+                    .ok()
+                    .and_then(|cs| cs.into_iter().next())
+                    .map(|c| c.windowids.is_empty())
+                    .unwrap_or(false);
+                // Best-effort: a failure here must never block the close itself.
+                if will_empty_windowids {
+                    if let Some(snapshot) = super::session_restore::snapshot_workspace(store, &ws_id) {
+                        super::session_restore::save_last_session_snapshot(store, snapshot);
+                    }
+                }
                 // A workspace the reducer tracks goes through the
                 // saga (keeps reducer + store consistent, durable
                 // provenance). One it never knew — the usual case
@@ -169,6 +207,29 @@ pub(crate) async fn handle_close_window(state: &AppState, call: &WebCallType) ->
             s.windows.values().any(|w| w.workspace_id == ws_id)
         };
         if !any_other_window {
+            // Restore-on-relaunch (SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13
+            // Feature 1) — see the divergence-path branch above for why this
+            // is gated on "windowids is now empty" rather than
+            // `!any_other_window` (a workspace-sharing question, not a
+            // full-quit one). Workspace tabs/blocks are still fully intact
+            // at this point — `CloseWindowInternal`'s already-applied events
+            // (line 182-189 above) only touched Window/Client, the actual
+            // tab/block cascade is the saga call right below this — so
+            // `Client.windowids` reflects this window's own prune already,
+            // and reading it fresh here (not a stale function-entry
+            // snapshot — reagentx P1 on PR #2560, re-review) is what makes
+            // this correct under a concurrent multi-window quit.
+            let will_empty_windowids = store
+                .get_all::<Client>()
+                .ok()
+                .and_then(|cs| cs.into_iter().next())
+                .map(|c| c.windowids.is_empty())
+                .unwrap_or(false);
+            if will_empty_windowids {
+                if let Some(snapshot) = super::session_restore::snapshot_workspace(store, &ws_id) {
+                    super::session_restore::save_last_session_snapshot(store, snapshot);
+                }
+            }
             if let Err(e) =
                 crate::sagas::delete_workspace::run(state, ws_id.clone()).await
             {
@@ -281,5 +342,200 @@ mod close_window_divergence_tests {
         let state = test_state();
         let ret = handle_window_service(&state, &close_call("no-such-window")).await;
         assert!(ret.success, "idempotent CloseWindow failed: {:?}", ret.error);
+    }
+}
+
+/// Restore-on-relaunch snapshot-timing regression tests
+/// (SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13.md Feature 1).
+/// Reviewer-caught bug (reagentx P1 on PR #2560): the original
+/// implementation snapshotted unconditionally on every window close, so
+/// closing a second, independent window AFTER the real session's window
+/// would silently overwrite the correct snapshot with the second window's
+/// (typically much smaller) content — since each window normally owns its
+/// own 1:1 workspace, "does this close destroy its own workspace" was true
+/// for nearly every close, not a useful filter. These pin the fix: the
+/// snapshot now only fires on the close that actually empties
+/// `Client.windowids` — the same condition the read side already requires.
+#[cfg(test)]
+mod snapshot_timing_tests {
+    use super::super::window::handle_window_service;
+    use super::super::window_create::handle_create_window;
+    use crate::backend::obj::{Client, Tab, Window, Workspace};
+    use crate::backend::service::WebCallType;
+    use crate::server::tests::test_state;
+
+    fn close_call(window_id: &str) -> WebCallType {
+        WebCallType {
+            service: "window".to_string(),
+            method: "CloseWindow".to_string(),
+            uicontext: None,
+            args: vec![serde_json::Value::String(window_id.to_string())],
+        }
+    }
+
+    async fn create_window(state: &crate::server::AppState) -> Window {
+        let call = WebCallType {
+            service: "window".to_string(),
+            method: "CreateWindow".to_string(),
+            uicontext: None,
+            args: vec![serde_json::Value::Null, serde_json::Value::String(String::new())],
+        };
+        let resp = handle_create_window(state, &call).await;
+        assert!(resp.success, "CreateWindow failed: {:?}", resp.error);
+        serde_json::from_value(resp.data.unwrap()).unwrap()
+    }
+
+    fn rename_first_tab(state: &crate::server::AppState, workspace_id: &str, name: &str) {
+        let ws = state.wstore.get::<Workspace>(workspace_id).unwrap().unwrap();
+        let mut tab = state.wstore.get::<Tab>(&ws.tabids[0]).unwrap().unwrap();
+        tab.name = name.to_string();
+        state.wstore.update(&mut tab).unwrap();
+    }
+
+    fn last_session_snapshot_tab_name(state: &crate::server::AppState) -> Option<String> {
+        let client = state.wstore.get_all::<Client>().unwrap().into_iter().next()?;
+        let snapshot = client.meta.get("session:last_topology")?;
+        snapshot["tabs"][0]["name"].as_str().map(|s| s.to_string())
+    }
+
+    /// `test_state()` seeds a "Starter workspace" bootstrap window
+    /// (`wcore::ensure_initial_data`) before any test code runs — without
+    /// closing it first, `Client.windowids` always has that extra entry, so
+    /// `will_empty_windowids` never actually goes true in these tests no
+    /// matter how many test-created windows get closed. Close it before
+    /// setting up a test's own "N independent windows" scenario.
+    async fn close_bootstrap_window(state: &crate::server::AppState) {
+        let bootstrap_id = state
+            .wstore
+            .get_all::<Client>()
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap()
+            .windowids[0]
+            .clone();
+        let ret = handle_window_service(state, &close_call(&bootstrap_id)).await;
+        assert!(ret.success, "closing bootstrap window failed: {:?}", ret.error);
+    }
+
+    /// The core fix: with two independent windows open, closing the FIRST
+    /// one (the other is still open — `Client.windowids` does NOT empty)
+    /// must not touch the snapshot at all. Only closing the SECOND (last)
+    /// window may write one. Under the pre-fix code (unconditional
+    /// snapshot-on-every-close) this test fails at the first assertion —
+    /// the first close already wrote a snapshot.
+    #[tokio::test]
+    async fn closing_one_of_two_open_windows_does_not_touch_the_snapshot() {
+        let state = test_state();
+        // Closing the lone bootstrap window IS a genuine terminal close (it
+        // empties `Client.windowids` on its own), so it legitimately writes
+        // a snapshot of its own — capture that as the baseline rather than
+        // assuming "no snapshot yet".
+        close_bootstrap_window(&state).await;
+        let snapshot_after_bootstrap_close = last_session_snapshot_tab_name(&state);
+
+        let first = create_window(&state).await;
+        rename_first_tab(&state, &first.workspaceid, "first-window-tab");
+        let second = create_window(&state).await;
+        rename_first_tab(&state, &second.workspaceid, "second-window-tab");
+
+        // Close the FIRST window while the second is still open.
+        let ret = handle_window_service(&state, &close_call(&first.oid)).await;
+        assert!(ret.success, "CloseWindow failed: {:?}", ret.error);
+
+        assert_eq!(
+            last_session_snapshot_tab_name(&state),
+            snapshot_after_bootstrap_close,
+            "closing one of two open windows must not write a snapshot — \
+             the session hasn't actually ended yet"
+        );
+
+        // Now close the SECOND (last) window — this is the real end of the
+        // session, and must snapshot the second window's own content.
+        let ret = handle_window_service(&state, &close_call(&second.oid)).await;
+        assert!(ret.success, "CloseWindow failed: {:?}", ret.error);
+
+        assert_eq!(
+            last_session_snapshot_tab_name(&state).as_deref(),
+            Some("second-window-tab"),
+            "the terminal close must snapshot ITS OWN (last) window's content"
+        );
+    }
+
+    /// Direct regression for the reviewer's exact scenario: close the
+    /// window with the "real" session first, then a smaller second window
+    /// — the smaller window's close (being the one that actually empties
+    /// `Client.windowids`) legitimately becomes the final snapshot, but the
+    /// key guarantee is that this reflects a real, coherent design decision
+    /// (snapshot = "whatever was open at the moment of full quit") rather
+    /// than an arbitrary race between two unconditional writes.
+    #[tokio::test]
+    async fn snapshot_reflects_whichever_close_actually_empties_windowids() {
+        let state = test_state();
+        // See `closing_one_of_two_open_windows_does_not_touch_the_snapshot`:
+        // closing the lone bootstrap window is itself a terminal close, so
+        // it writes a snapshot — capture that as the baseline.
+        close_bootstrap_window(&state).await;
+        let snapshot_after_bootstrap_close = last_session_snapshot_tab_name(&state);
+
+        let main = create_window(&state).await;
+        rename_first_tab(&state, &main.workspaceid, "main-session");
+        let tearoff = create_window(&state).await;
+        rename_first_tab(&state, &tearoff.workspaceid, "tiny-tearoff");
+
+        // Close "main" first — does NOT empty windowids (tearoff still open).
+        let ret = handle_window_service(&state, &close_call(&main.oid)).await;
+        assert!(ret.success);
+        assert_eq!(
+            last_session_snapshot_tab_name(&state),
+            snapshot_after_bootstrap_close,
+            "closing main first must not snapshot — it isn't the terminal close"
+        );
+
+        // Close "tearoff" last — THIS empties windowids, so it (correctly,
+        // by definition of "what was open at full quit") is what's saved.
+        let ret = handle_window_service(&state, &close_call(&tearoff.oid)).await;
+        assert!(ret.success);
+        assert_eq!(
+            last_session_snapshot_tab_name(&state).as_deref(),
+            Some("tiny-tearoff")
+        );
+    }
+
+    /// reagentx P1 on PR #2560 (re-review): `will_empty_windowids` used to
+    /// be computed once at function entry, off a snapshot of
+    /// `Client.windowids` taken BEFORE this call's own dispatch mutated
+    /// anything. Under genuine concurrent overlap (two `CloseWindow` calls
+    /// as part of one multi-window quit), each could read "the other
+    /// window is still there" and both conclude `will_empty_windowids =
+    /// false` — losing the snapshot entirely even though the user closed
+    /// everything. Reading fresh, after each call's own prune has already
+    /// landed, closes that gap: whichever close actually observes an empty
+    /// `Client.windowids` afterward saves a snapshot, so at least one of
+    /// two concurrent terminal closes always does.
+    #[tokio::test]
+    async fn concurrent_close_of_the_last_two_windows_still_saves_a_snapshot() {
+        let state = test_state();
+        close_bootstrap_window(&state).await;
+
+        let first = create_window(&state).await;
+        rename_first_tab(&state, &first.workspaceid, "first-window-tab");
+        let second = create_window(&state).await;
+        rename_first_tab(&state, &second.workspaceid, "second-window-tab");
+
+        let first_call = close_call(&first.oid);
+        let second_call = close_call(&second.oid);
+        let (ret1, ret2) = tokio::join!(
+            handle_window_service(&state, &first_call),
+            handle_window_service(&state, &second_call),
+        );
+        assert!(ret1.success, "first concurrent close failed: {:?}", ret1.error);
+        assert!(ret2.success, "second concurrent close failed: {:?}", ret2.error);
+
+        assert!(
+            last_session_snapshot_tab_name(&state).is_some(),
+            "closing the last two windows concurrently must still save SOME \
+             snapshot, not lose it entirely"
+        );
     }
 }

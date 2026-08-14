@@ -22,6 +22,7 @@ mod misc;
 mod object;
 mod object_helpers;
 mod reducer_helpers;
+pub(crate) mod session_restore;
 mod tab_lifecycle;
 mod tab_move;
 mod tear_off;
