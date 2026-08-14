@@ -25,9 +25,23 @@
     display: inline-flex;
     align-self: flex-start;
     max-width: 100%;
-    flex-direction: row;
-    align-items: stretch;
-    height: 28px;
+    // Real, un-zoomed pixels — deliberately NOT `zoom: var(--pane-tab-strip-zoom)`
+    // here. See docs/specs/SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md
+    // §A.1-§A.2: `window-header.*.scss` already hit a real platform
+    // divergence combining `zoom` with edge-anchored sizing (Win/Linux
+    // need explicit width compensation; the identical fix double-divides
+    // on macOS/WebKit — see that file's own comment). The agent pane's
+    // `right: 0` override (agent-view.scss) is exactly that shape of box.
+    // Keeping THIS box un-zoomed sidesteps the whole problem: only
+    // `.pane-tab-strip-inner` (below) scales, so there is nothing here
+    // that needs platform-specific compensation. `height` still has to
+    // track zoom so the box doesn't clip/underfill the now-scaled inner
+    // content — via `calc()`, not `zoom`, which is exactly the
+    // distinction that keeps this safe. `--pane-tab-strip-zoom` is a
+    // per-INSTANCE value set inline by PaneTabStrip.tsx from the
+    // `zoomFactor` prop (each pane type's own content zoom) — not the
+    // global chrome-zoom `--zoomfactor` used by window-header/status-bar.
+    height: calc(var(--pane-tab-strip-height, 28px) * var(--pane-tab-strip-zoom, 1));
     border-bottom: 1px solid var(--border-color);
     // No fill on the container itself — only .pane-tab (active/hover) and
     // .pane-tab-strip-add (hover) paint a background. Any stray width the
@@ -41,9 +55,9 @@
     // `visible` one computes to `auto` instead (not `visible`), silently.
     // With no overflow-y set here, that made this container's real
     // computed overflow-y `auto` the whole time: any content even a
-    // fraction of a pixel taller than the declared `height: 28px` (a
-    // native `<button>`'s own intrinsic sizing is a plausible source —
-    // see .pane-tab-strip-add's `appearance: none` fix) triggered a real
+    // fraction of a pixel taller than the declared height (a native
+    // `<button>`'s own intrinsic sizing is a plausible source — see
+    // .pane-tab-strip-add's `appearance: none` fix) triggered a real
     // vertical scrollbar at this box's own right edge. Reported live
     // 2026-08-11 as a thin, semi-transparent, hover-highlighting vertical
     // strip immediately right of the "+" that never showed up in the DOM
@@ -52,6 +66,20 @@
     // fit-content` on the strip; `appearance: none` on the buttons) missed
     // this because neither touches the vertical axis.
     overflow-y: hidden;
+}
+
+// The zoomed layer — carries the flex layout the outer box used to own
+// directly, plus `zoom` itself. Its own height is the plain, un-zoomed
+// baseline (`--pane-tab-strip-height`, default 28px); `zoom` scales its
+// rendered size (and everything inside — tab labels, the "+" glyph, the
+// 28×28px add button) to match the outer box's now-calc'd height above.
+// See SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md §A.2.
+.pane-tab-strip-inner {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    height: var(--pane-tab-strip-height, 28px);
+    zoom: var(--pane-tab-strip-zoom, 1);
 }
 
 // Tooltip wrapper (shared Tooltip component) — carries the flex sizing the

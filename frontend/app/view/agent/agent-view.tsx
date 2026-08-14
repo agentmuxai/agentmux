@@ -256,6 +256,24 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
         layoutModel.localTreeStateAtom();
         return layoutModel.getNodeByBlockId(model.blockId)?.data?.activeBlockId ?? model.blockId;
     });
+    // Per-pane zoom for the tab strip itself — mirrors
+    // AgentPresentationView's own zoomFactor memo (term:zoom block meta +
+    // clamp, further down this file) but keyed off activeBlockId() rather
+    // than model.blockId: this component renders the tab strip for the
+    // whole stack, so the strip's zoom must track whichever tab is
+    // actually active, not the pane's own root block — the two diverge
+    // once more than one tab/fork is open. Independent read of the same
+    // live meta key labelForBlock (above) already reads for non-active
+    // stack members — not a shared computation with
+    // AgentPresentationView's own memo, which lives in a child component
+    // out of scope here (SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md §A.3).
+    const tabStripZoomFactor = createMemo(() => {
+        const id = activeBlockId();
+        const meta = id === model.blockId ? block()?.meta : WOS.getObjectValue<Block>(WOS.makeORef("block", id))?.meta;
+        const z = meta?.["term:zoom"];
+        if (z == null || typeof z !== "number" || isNaN(z)) return 1.0;
+        return Math.max(0.5, Math.min(2.0, z));
+    });
     // Activating a tab has two cases, both "switch," neither "create": (1)
     // the target block already lives in THIS pane's own block-stack — swap
     // the active member in place; (2) a fork open as its own separate
@@ -408,6 +426,7 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
                     <PaneTabStrip
                         tabs={visibleTabs()}
                         activeId={activeBlockId()}
+                        zoomFactor={tabStripZoomFactor}
                         getId={(t) => t.blockId}
                         getLabel={(t) => t.label}
                         onActivate={handleTabSwitch}

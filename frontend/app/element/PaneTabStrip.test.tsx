@@ -165,8 +165,12 @@ describe("PaneTabStrip", () => {
             />
         ));
         const addBtn = screen.getByRole("button", { name: "New shell tab" });
-        const strip = container.querySelector(".pane-tab-strip");
-        expect(strip?.lastElementChild).toBe(addBtn);
+        // .pane-tab-strip-inner (not .pane-tab-strip itself) owns tab/+
+        // layout as of
+        // docs/specs/SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md
+        // §A.2 — the outer box now only wraps that one inner layer.
+        const inner = container.querySelector(".pane-tab-strip-inner");
+        expect(inner?.lastElementChild).toBe(addBtn);
         const user = userEvent.setup();
         await user.click(addBtn);
         expect(onAdd).toHaveBeenCalledTimes(1);

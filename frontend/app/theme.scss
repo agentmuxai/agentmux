@@ -102,6 +102,14 @@
     // recessed tab-strip behind it.
     --workspace-surface: var(--block-bg-color);
     --tab-strip-bg: rgba(255, 255, 255, 0.03);
+    // Baseline (un-zoomed) height of the pane-level tab strip
+    // (PaneTabStrip.scss) — not a color, so unlike --tab-strip-bg it has
+    // no per-theme override; declared once here so both the strip's own
+    // `height` calc and the agent pane's top scroll-clearance calc
+    // (_document.scss) reference the same number instead of a bare `28px`
+    // duplicated in two files. See
+    // docs/specs/SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md.
+    --pane-tab-strip-height: 28px;
     // The bottom status bar's own recessed strip — same concept as
     // --tab-strip-bg (Layer A) but a separate token: StatusBar.scss used to
     // hardcode this as a bare `rgba(0, 0, 0, 0.35)` literal, which is why it

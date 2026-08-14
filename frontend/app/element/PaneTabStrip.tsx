@@ -22,13 +22,22 @@
  * Spec: docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §3.1.
  */
 
-import { For, Show, type JSX } from "solid-js";
+import { For, Show, type Accessor, type JSX } from "solid-js";
 import { Tooltip } from "./tooltip";
 import "./PaneTabStrip.scss";
 
 export interface PaneTabStripProps<T> {
     tabs: T[];
     activeId: string | null;
+
+    /** This pane's own content zoom (term:zoom block meta) — agent's
+     *  zoomFactor memo, editor's model.zoomAtom, terminal's
+     *  model.termZoomAtom. NOT the global chrome-zoom control
+     *  (window-header/status-bar's --zoomfactor) — deliberately per-pane,
+     *  so tabs scale with the content they belong to, not uniformly
+     *  across every pane in the window. Omit for 1 (unzoomed). See
+     *  docs/specs/SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md §A. */
+    zoomFactor?: Accessor<number>;
 
     getId: (tab: T) => string;
     getLabel: (tab: T) => string;
@@ -64,35 +73,48 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
             // maximize the pane — matches the icon-toggle pattern from
             // blockframe.tsx. True for every consumer, not just the editor.
             onDblClick={(e) => e.stopPropagation()}
+            // Set on the OUTER div (not inner) so it cascades down to both
+            // this box's own `height` calc (PaneTabStrip.scss) and the
+            // inner layer's `zoom` — a custom property set here is visible
+            // to any descendant, which is all that's needed; the outer box
+            // itself is deliberately never zoomed (§A.2 in the spec above).
+            style={{ "--pane-tab-strip-zoom": String(props.zoomFactor?.() ?? 1) }}
         >
-            <For each={props.tabs}>
-                {(tab) => (
-                    <PaneTabStripItem
-                        tab={tab}
-                        active={props.activeId === props.getId(tab)}
-                        getId={props.getId}
-                        getLabel={props.getLabel}
-                        getTooltip={props.getTooltip}
-                        getAttention={props.getAttention}
-                        getTabClass={props.getTabClass}
-                        onActivate={props.onActivate}
-                        onClose={props.onClose}
-                        onDoubleClick={props.onTabDoubleClick}
-                        renderLabel={props.renderLabel}
-                    />
-                )}
-            </For>
-            <Show when={props.onAdd}>
-                <button
-                    type="button"
-                    class="pane-tab-strip-add"
-                    title={props.addTitle ?? "New tab"}
-                    aria-label={props.addTitle ?? "New tab"}
-                    onClick={() => props.onAdd!()}
-                >
-                    +
-                </button>
-            </Show>
+            {/* Zoom lives here, not on .pane-tab-strip itself — see
+                docs/specs/SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md
+                §A.2. The outer div stays real-pixel-sized (so an agent
+                pane's edge-anchored `right: 0` never needs platform-
+                specific zoom compensation); only this inner layer scales. */}
+            <div class="pane-tab-strip-inner">
+                <For each={props.tabs}>
+                    {(tab) => (
+                        <PaneTabStripItem
+                            tab={tab}
+                            active={props.activeId === props.getId(tab)}
+                            getId={props.getId}
+                            getLabel={props.getLabel}
+                            getTooltip={props.getTooltip}
+                            getAttention={props.getAttention}
+                            getTabClass={props.getTabClass}
+                            onActivate={props.onActivate}
+                            onClose={props.onClose}
+                            onDoubleClick={props.onTabDoubleClick}
+                            renderLabel={props.renderLabel}
+                        />
+                    )}
+                </For>
+                <Show when={props.onAdd}>
+                    <button
+                        type="button"
+                        class="pane-tab-strip-add"
+                        title={props.addTitle ?? "New tab"}
+                        aria-label={props.addTitle ?? "New tab"}
+                        onClick={() => props.onAdd!()}
+                    >
+                        +
+                    </button>
+                </Show>
+            </div>
         </div>
     );
 }

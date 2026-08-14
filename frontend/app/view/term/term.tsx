@@ -525,6 +525,7 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
             <PaneTabStrip
                 tabs={visibleTermTabs()}
                 activeId={activeBlockId()}
+                zoomFactor={model.termZoomAtom}
                 getId={(t) => t.blockId}
                 getLabel={(t) => t.label}
                 onActivate={handleTermTabSwitch}

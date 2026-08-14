@@ -45,6 +45,18 @@ export function EditorTabStrip(props: Props): JSX.Element {
         <PaneTabStrip<EditorTab>
             tabs={tabs()}
             activeId={activeId()}
+            // Deliberately NOT model.zoomAtom here — <EditorTabStrip> renders
+            // inside .editor-view (editor-view.tsx:701-705), which already
+            // has `style={{ zoom: model.zoomAtom() }}` on that ancestor.
+            // Unlike the agent pane (where the tab strip is a DOM SIBLING of
+            // .agent-view, specifically so it needs its own explicit zoom —
+            // SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md
+            // §A.3), the editor tab strip is a DESCENDANT of the
+            // already-zoomed root: ambient ancestor zoom already scales this
+            // entire subtree (including PaneTabStrip.scss's own height calc
+            // and inner zoom, both of which default to 1/28px when this prop
+            // is omitted) automatically. Passing zoomAtom here compounds it
+            // (zoomAtom()²) — caught in review on PR #2566.
             getId={(tab) => tab.id}
             getLabel={basenameOf}
             getTooltip={(tab) =>

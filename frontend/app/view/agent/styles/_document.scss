@@ -111,6 +111,41 @@
         // the pane's own left-edge breathing room, which nobody reported
         // an issue with.
         padding: var(--space-0-5) 0 var(--space-0-5) var(--space-1);
+        // Reserves the pane tab strip's real (zoom-aware) rendered height
+        // so the first message of a short/unscrolled conversation never
+        // renders behind it. The strip floats over this content
+        // (agent-view.scss, position: absolute) with no reserved row of
+        // its own — fine for a conversation long enough to scroll (the
+        // strip only ever overlaps whatever's currently scrolled behind
+        // it), but with nothing to scroll, a conversation short enough to
+        // never overflow had its first message permanently hidden with no
+        // way to reveal it. See
+        // docs/specs/SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md §B.
+        // Pure calc(), not a ResizeObserver like padding-bottom below —
+        // the strip's height is a known formula, not something that needs
+        // live measurement the way AgentWorkingRow's variable content does.
+        //
+        // Deliberately NOT multiplied by any zoom factor, despite this
+        // needing to track the strip's real (zoom-scaled) height —
+        // `.agent-document` is a descendant of `.agent-view`, which already
+        // has `style={{ zoom: zoomFactor() }}` applied (agent-view.tsx).
+        // Every length in this subtree, including this padding-top's
+        // resolved value, is already auto-scaled by that ambient zoom by
+        // the browser — multiplying by `--agent-pane-zoom` here as well
+        // double-scales it (baseline×zoom² instead of baseline×zoom):
+        // over-reserving space at zoom>1 and, more seriously,
+        // under-reserving at zoom<1 (min clamp 0.5), reintroducing the
+        // exact "first message hidden behind the strip" bug this rule
+        // exists to fix. Caught in review on PR #2566. The plain baseline
+        // (`--pane-tab-strip-height`, unscaled) is correct as-is: it's
+        // written once here in this subtree's own local (pre-ambient-zoom)
+        // coordinate space, and the browser's zoom scales it up/down to
+        // match the strip's real on-screen height automatically — the two
+        // zoom factors (this pane's ambient zoom, and the tab strip's own,
+        // `--pane-tab-strip-zoom` in PaneTabStrip.scss) are always equal
+        // for the agent pane specifically (both derive from the same
+        // active block's term:zoom meta, §A.3), so they cancel exactly.
+        padding-top: calc(var(--space-0-5) + var(--pane-tab-strip-height, 28px));
         // Reserves exactly AgentWorkingRow's current rendered height (0 when
         // hidden) so scrolling to true bottom leaves the last message above
         // the floating row, not hidden underneath it. Set on
