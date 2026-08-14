@@ -1,5 +1,25 @@
 # AgentMux Version History
 
+## 0.55.7 — 2026-08-13
+
+- fix(browser-pane): OAuth/GIS sign-in works in-pane again — no instance-exit, real child popup completes the login, external-protocol guard
+- feat(browser-pane): wire Ctrl+L / Ctrl+R / Alt+Left / Alt+Right shortcuts (#1190)
+- fix(cef): stop mDNS 0.0.0.0:5353 bind that triggers the Windows Firewall prompt on launch
+- test(lan-discovery): mark mDNS wire-discovery test ignored — environment-fragile, not flaky
+- feat(warden): rebuild as a 5-section rail matching Armory's UI pattern
+- feat(warden): extend AuditLogEntry with outcome/reason for Supervisor decisions
+- feat(warden): add auto_continue_enabled per-agent opt-in field for Supervisor
+- feat(warden): add transcript-read route + GetAgentTranscript MCP tool
+- feat(warden): add SupervisorNudge route + MCP tool + consecutive-nudge ceiling
+- feat(warden): add Supervisor manager UI + fix nudge entitlement/ceiling gaps
+- feat(agent): expose model vendor / custom endpoint UI + add Antigravity harness
+- feat(armory): dynamic pane title reflects selected rail section (also warden, settings)
+- feat(jekt): add host-tier per-agent HMAC signing for sender verification
+- fix(menu): context-submenu wrong-strategy positioning + main window silent show() no-op
+- fix(tabs): desaturate tab color picker, keep agent pane borders vivid
+- feat(pane-tab-strip): frosted-glass trailing space, per-pane zoom binding, top scroll-clearance for short agent conversations
+
+
 ## 0.55.6 — 2026-08-11
 
 - fix(agent-pane): progress bar renders above the tab strip, not overlapping the content region
