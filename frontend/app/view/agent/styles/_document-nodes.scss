@@ -468,6 +468,29 @@
         }
     }
 
+    // AskUserQuestion's answer should read like a normal typed message once answered —
+    // wrap and stay visible, not clip to one line + ellipsis like every other tool's
+    // collapsed summary (the default above, meant for command names and file paths).
+    // A free-text "Other" response can be a full sentence, unreadable if truncated —
+    // the only way to see it was previously the hover-peek tooltip.
+    .agent-tool-block[data-tool="askuserquestion"] {
+        .agent-tool-summary {
+            white-space: normal;
+            align-items: flex-start;
+        }
+
+        .agent-tool-name-peek-anchor {
+            overflow: visible;
+        }
+
+        .agent-tool-name {
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            overflow: visible;
+            text-overflow: unset;
+        }
+    }
+
     // Per-tool-type color on the collapsed summary name.
     // Requires data-tool attribute on .agent-tool-block (ToolBlock.tsx).
     .agent-tool-block[data-tool="bash"]   .agent-tool-name { color: var(--term-bright-green); }
