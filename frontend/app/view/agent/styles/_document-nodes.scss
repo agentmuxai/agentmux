@@ -1688,30 +1688,33 @@
     // Single-row rule — `top: 50%` bisects only this row (the pill), never
     // the detail row below it. See
     // docs/specs/SPEC_DIVIDER_PILL_RULE_MISALIGNMENT_2026_08_12.md.
+    //
+    // The rule lines are real flex items (`::before`/`::after` participate
+    // in flex layout as the first/last item), sized with `flex: 1 1 auto`
+    // so they share the remaining width around the pill instead of being
+    // absolutely positioned at a fixed 25% and relying on the pill's
+    // background to mask any overlap. `--panel-bg-color` is only ~3-5%
+    // opaque on light themes, so a wide pill (long trigger label, narrow
+    // pane) previously let the rule show straight through — reagent P2 on
+    // PR #2563. Flex distribution makes overlap structurally impossible
+    // regardless of pill width or background opacity.
     .agent-context-compacted-rule {
         display: flex;
         align-items: center;
-        justify-content: center;
+        gap: var(--space-2);
         width: 100%;
-        position: relative;
 
         &::before,
         &::after {
             content: "";
-            position: absolute;
-            top: 50%;
-            width: 25%;
+            flex: 1 1 auto;
             height: 1px;
             background: var(--border-color, rgba(255, 255, 255, 0.12));
         }
-
-        &::before { left: 0; }
-        &::after  { right: 0; }
     }
 
     .agent-context-compacted-label {
-        position: relative; // stack above the rule's ::before/::after
-        z-index: 1;
+        flex-shrink: 0;
         font-size: 11px;
         font-weight: 600;
         letter-spacing: 0.06em;
@@ -1720,8 +1723,6 @@
         padding: 2px 10px;
         border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
         border-radius: 10px;
-        // Masks the rule segment that would otherwise render behind the
-        // pill — matches .agent-day-divider-label's treatment.
         background: var(--panel-bg-color, rgba(255, 255, 255, 0.04));
     }
 
@@ -1815,27 +1816,20 @@
     .agent-session-outcome-rule {
         display: flex;
         align-items: center;
-        justify-content: center;
+        gap: var(--space-2);
         width: 100%;
-        position: relative;
 
         &::before,
         &::after {
             content: "";
-            position: absolute;
-            top: 50%;
-            width: 25%;
+            flex: 1 1 auto;
             height: 1px;
             background: var(--border-color, rgba(255, 255, 255, 0.12));
         }
-
-        &::before { left: 0; }
-        &::after  { right: 0; }
     }
 
     .agent-session-outcome-label {
-        position: relative;
-        z-index: 1;
+        flex-shrink: 0;
         font-size: 11px;
         font-weight: 600;
         letter-spacing: 0.06em;

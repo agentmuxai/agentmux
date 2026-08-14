@@ -175,10 +175,11 @@ untouched (see "Out of Scope").
 
 ### CSS change (`_document-nodes.scss`)
 
-Move `position: relative` and the `::before`/`::after` rule off the outer
-(multi-row) container and onto the new single-row `-rule` element, matching
-`.agent-day-divider`'s shape exactly. The outer container goes back to being
-a plain vertical stack with no rule of its own:
+Move the rule off the outer (multi-row) container and onto the new
+single-row `-rule` element — but rather than absolutely-positioning the
+lines at a fixed `width: 25%` and relying on the pill's background to mask
+any overlap (revised below), lay the lines out as real flex items that
+share the remaining space around the pill:
 
 ```scss
 .agent-context-compacted {
@@ -188,28 +189,29 @@ a plain vertical stack with no rule of its own:
     gap: 3px;
     padding: 10px var(--space-2);
     user-select: none;
-    // no position: relative, no ::before/::after here anymore
 
     .agent-context-compacted-rule {
         display: flex;
         align-items: center;
-        justify-content: center;
+        gap: var(--space-2);
         width: 100%;
-        position: relative;
 
+        // `::before`/`::after` participate in flex layout as the
+        // first/last flex item — `flex: 1 1 auto` makes each line grow
+        // or shrink to fill exactly the space NOT taken by the pill.
+        // No absolute positioning, no fixed width, no possibility of
+        // the line rendering behind the pill regardless of pill width
+        // or background opacity.
         &::before, &::after {
             content: "";
-            position: absolute;
-            top: 50%;
-            width: 25%;
+            flex: 1 1 auto;
             height: 1px;
             background: var(--border-color, rgba(255, 255, 255, 0.12));
         }
-        &::before { left: 0; }
-        &::after  { right: 0; }
     }
 
     .agent-context-compacted-label {
+        flex-shrink: 0;
         font-size: 11px;
         font-weight: 600;
         letter-spacing: 0.06em;
@@ -218,9 +220,7 @@ a plain vertical stack with no rule of its own:
         padding: 2px 10px;
         border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
         border-radius: 10px;
-        background: var(--panel-bg-color, rgba(255, 255, 255, 0.04)); // masks the rule
-        position: relative; // stack above the rule's ::before/::after
-        z-index: 1;
+        background: var(--panel-bg-color, rgba(255, 255, 255, 0.04));
     }
 
     .agent-context-compacted-detail {
@@ -233,20 +233,37 @@ a plain vertical stack with no rule of its own:
 Apply the same restructuring to `.agent-session-outcome`, keeping its
 existing accent color (warning-tinted rule + border for
 `.agent-session-outcome-fresh`, neutral otherwise) — only the
-background/rule scoping changes, not the color logic.
+rule/layout scoping changes, not the color logic.
 
-`.agent-day-divider` needs no change; it already has this shape (it just
-never grew a second row).
+`.agent-day-divider` needs no change; it already has a single-row shape
+(it just never grew a second row), and its date labels are short/fixed-
+format enough that the same latent width-vs-mask problem (see below) is
+low-risk there. Worth a follow-up if it's ever observed in practice.
 
 ### Why this fixes it
 
-- The rule row now only ever contains the pill, so `top: 50%` on that row is
-  always exactly the pill's vertical center — content-length-independent,
-  matching `.agent-day-divider`'s already-correct behavior.
-- The detail line lives entirely outside the rule row, so it can wrap to any
-  number of lines without ever being crossed by the rule.
-- The pill's explicit background masks the rule segment behind it in every
-  variant, not just the day-divider.
+- The rule row now only ever contains the pill, so the rule is always
+  exactly level with the pill — content-length-independent, matching
+  `.agent-day-divider`'s already-correct vertical alignment.
+- The detail line lives entirely outside the rule row, so it can wrap to
+  any number of lines without ever being crossed by the rule.
+- **Revision (2026-08-13, reagent + Codex review on PR #2563):** the first
+  version of this fix kept the original `position: absolute; width: 25%`
+  line layout and added `background: var(--panel-bg-color, ...)` on the
+  pill to mask the line behind it (matching `.agent-day-divider-label`'s
+  existing treatment). Codex correctly flagged that `--panel-bg-color` is
+  only ~3-5% opaque on light/latte/gruvbox-light themes
+  (`themes/light.scss:21` etc.) — nowhere near opaque enough to mask
+  anything. Worse, the lines are fixed at 25% width regardless of pill
+  width: if the pill (a long trigger label on a narrow pane) grows past
+  the middle 50% of the row, the fixed-width lines run *underneath* it
+  with nothing solid to hide them, and the rule shows straight through the
+  label text again — the exact bug this spec set out to fix, just
+  triggered by a different condition (pane width / label length) instead
+  of container shape. Switching the lines to `flex: 1 1 auto` flex items
+  removes the masking requirement entirely: the lines and the pill share
+  the row's width via normal flex distribution, so overlap is structurally
+  impossible regardless of theme opacity or content length.
 
 ## Files
 
