@@ -194,12 +194,58 @@ pub fn is_sensitive_message(msg: &str) -> bool {
 ///
 /// The marker is machine-parseable (first line) and human-readable (the rest).
 /// `effective_tier` should already account for keyword-based escalation.
+///
+/// `sig_verified` (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2) is a
+/// genuine three-state signal, not a bool — collapsing "never checked" into
+/// "verified" would mislabel every caller that has no signing key at all
+/// (the Slack/Discord/Telegram/WhatsApp bridges, or an agent not yet
+/// respawned since this feature shipped) as cryptographically proven when
+/// nothing was actually checked:
+///   - `Some(true)`  — claimed source_agent has a key on file AND the
+///     signature verified. Renders `TRUST=host-verified`. This is the only
+///     case where sender identity is actually PROVEN, not merely assumed.
+///   - `Some(false)` — claimed source_agent has a key on file but the
+///     signature was missing or didn't match. Renders `TRUST=unverified` —
+///     a real red flag; the caller escalates this to TIER=sensitive.
+///   - `None`        — no signing key exists for the claimed source_agent at
+///     all, so nothing was checked (today's pre-existing behavior for every
+///     host-tier caller, unaffected by this feature). Renders
+///     `TRUST=self-declared` — explicitly NOT the same as "verified."
+/// Ignored (always renders `TRUST=network-claimed`) for any non-host
+/// delivery tier — network delivery is never treated as verified regardless
+/// of this signal, by design (see the "what does NOT change" note in the
+/// spec above).
+///
+/// `reagent_verified` (SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §6.2
+/// addendum) answers an orthogonal question, additively: not "how was this
+/// delivered" (that's `TRUST`, unconditionally `network-claimed` for any
+/// non-host tier, unaffected by this parameter) but "is this specific
+/// message cryptographically proven to come from an AgentMux-operated WAN
+/// service sender" (currently only the GitHub review-notification
+/// consumer). Renders a new, independent `SIG=` marker field:
+///   - `Some(true)`  — the sender's Ed25519 signature verified against the
+///     pinned public key. Renders `SIG=verified`.
+///   - `Some(false)` — a signature was present but didn't verify (wrong
+///     key, tampered content, or unrecognized key id). Renders
+///     `SIG=invalid` — a real red flag, same spirit as host-tier's
+///     `TRUST=unverified`.
+///   - `None` — no signature was attempted (the overwhelming majority of
+///     WAN traffic, and all host/lan traffic). No `SIG=` field is rendered
+///     at all, so existing marker parsing/tests are unaffected.
+/// **Never changes `TRUST` or `effective_tier`** — a verified reagent
+/// signature still delivers as `TRUST=network-claimed`/whatever tier
+/// escalation already produced. This closes "who is this really from," not
+/// "should this auto-execute" — the same separation of concerns host-tier
+/// signing established, extended to a second, independent field so the two
+/// axes can never be conflated by a caller that only checks one of them.
 pub fn wrap_jekt_message(
     msg: &str,
     source_agent: Option<&str>,
     target_agent: &str,
     effective_tier: &str,
     delivery_tier: &str,
+    sig_verified: Option<bool>,
+    reagent_verified: Option<bool>,
     msg_id: &str,
     priority: &str,
 ) -> String {
@@ -210,10 +256,24 @@ pub fn wrap_jekt_message(
         .unwrap_or(0);
 
     let from = source_agent.unwrap_or("unknown");
-    let trust = if delivery_tier == "host" { "host-verified" } else { "network-claimed" };
+    let trust = if delivery_tier != "host" {
+        "network-claimed"
+    } else {
+        match sig_verified {
+            Some(true) => "host-verified",
+            Some(false) => "unverified",
+            None => "self-declared",
+        }
+    };
+
+    let sig_field = match reagent_verified {
+        Some(true) => " SIG=verified",
+        Some(false) => " SIG=invalid",
+        None => "",
+    };
 
     let structured_tag = format!(
-        "[JEKT:FROM={from} TO={target_agent} TIER={effective_tier} DELIVERY={delivery_tier} TRUST={trust} MSGID={msg_id} PRIORITY={priority} TS={ts_secs}]"
+        "[JEKT:FROM={from} TO={target_agent} TIER={effective_tier} DELIVERY={delivery_tier} TRUST={trust}{sig_field} MSGID={msg_id} PRIORITY={priority} TS={ts_secs}]"
     );
 
     let sensitive_warning = if effective_tier == "sensitive" {

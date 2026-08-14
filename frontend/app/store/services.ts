@@ -109,7 +109,14 @@ class WindowServiceType {
     // the caller's CEF window label, persisted as a `host:label` meta crumb on
     // the created Window row so srv-side cleanup can attribute rows without
     // the host registration chain.
-    CreateWindow(winSize: WinSize, workspaceId: string, hostLabel?: string): Promise<WaveWindow> {
+    //
+    // `restoreIfAvailable` (optional, SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_
+    // 2026_08_13 Feature 1): only the true cold-start call site in
+    // app-init.ts sets this — it tells srv to replay the last-session
+    // snapshot (if one exists) instead of seeding the hardcoded default
+    // 3-pane layout. Every other caller (tear-off, "Open New Window") omits
+    // it and keeps today's always-blank-workspace behavior.
+    CreateWindow(winSize: WinSize, workspaceId: string, hostLabel?: string, restoreIfAvailable?: boolean): Promise<WaveWindow> {
         return WOS.callBackendService("window", "CreateWindow", Array.from(arguments))
     }
     GetWindow(windowId: string): Promise<WaveWindow> {

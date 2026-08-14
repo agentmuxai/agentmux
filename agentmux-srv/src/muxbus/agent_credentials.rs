@@ -140,6 +140,90 @@ pub fn invalidate_cached_token(agent_id: &str, wstore: &Arc<Store>) {
     }
 }
 
+/// Same token invalidation as `invalidate_cached_token`, PLUS a
+/// `CREDENTIAL_RETRY_COOLDOWN` failure record — for a 403 (binding
+/// mismatch) specifically, not a plain 401 (expired token).
+///
+/// A 401 means the token expired; clearing just the cached token is enough,
+/// because the very same `client_id`/`client_secret` is still good and the
+/// next `ensure_agent_credential` call correctly mints a fresh token from
+/// it. A 403 means the CREDENTIAL ITSELF (not just its cached token) is
+/// bound to the wrong agent_id — clearing only the token doesn't fix that:
+/// `ensure_agent_credential` still finds the same `client_id` on file,
+/// happily mints ANOTHER token from it (Cognito issues tokens for a
+/// syntactically valid client/secret regardless of binding correctness —
+/// the mismatch is caught downstream by the muxbus server's
+/// `checkAgentBinding`, not at token-issuance time), and the very next
+/// `/reactive/pending` or `/reactive/ack` call 403s again — repeating the
+/// exact same failed round trip on every subsequent `InjectAvailable`
+/// broadcast instead of falling back to the shared token (reagentx P2 on
+/// PR #2573, flagged by chatgpt-codex-connector originally). Reusing the
+/// existing cooldown here bounds that to once per
+/// `CREDENTIAL_RETRY_COOLDOWN` window instead of once per broadcast, same
+/// throttling this module already applies to a provisioning/fetch failure.
+pub fn invalidate_binding_mismatched_credential(agent_id: &str, wstore: &Arc<Store>) {
+    let key = agent_id.to_lowercase();
+    invalidate_cached_token(&key, wstore);
+    record_credential_failure(&key);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // credential_cooldown() is a process-wide static shared across every
+    // test in this binary — each test below uses its own unique agent_id
+    // (not shared with any other test file) so none of them can observe
+    // another test's cooldown state.
+
+    #[test]
+    fn an_untouched_agent_has_no_recorded_failure() {
+        assert!(!credential_recently_failed("test-agent-credentials-untouched"));
+    }
+
+    #[test]
+    fn record_credential_failure_is_visible_to_credential_recently_failed() {
+        let agent_id = "test-agent-credentials-record-failure";
+        assert!(!credential_recently_failed(agent_id));
+        record_credential_failure(agent_id);
+        assert!(credential_recently_failed(agent_id));
+    }
+
+    // reagentx P2 on PR #2573: a 403 (binding mismatch) must do more than
+    // clear the cached token, or ensure_agent_credential just re-mints
+    // another token from the same permanently-mismatched client on the very
+    // next call. invalidate_binding_mismatched_credential's whole point is
+    // making that next call skip the per-agent pipeline entirely via the
+    // cooldown.
+    #[test]
+    fn invalidate_binding_mismatched_credential_starts_a_cooldown() {
+        let wstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+        let agent_id = "test-agent-credentials-binding-mismatch";
+        assert!(!credential_recently_failed(agent_id));
+
+        invalidate_binding_mismatched_credential(agent_id, &wstore);
+
+        assert!(
+            credential_recently_failed(agent_id),
+            "a 403 binding mismatch must cool down the per-agent pipeline, not just clear the cached token"
+        );
+    }
+
+    // A plain 401 (expired token) is a normal, expected, recurring event —
+    // it must NOT cool down the per-agent pipeline, or a busy agent would
+    // get throttled onto the shared token for a full CREDENTIAL_RETRY_COOLDOWN
+    // window every time its token simply expires.
+    #[test]
+    fn invalidate_cached_token_alone_does_not_start_a_cooldown() {
+        let wstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+        let agent_id = "test-agent-credentials-plain-401";
+
+        invalidate_cached_token(agent_id, &wstore);
+
+        assert!(!credential_recently_failed(agent_id));
+    }
+}
+
 /// Calls POST /agents/provision (authenticated with the human's own PKCE
 /// token — an M2M agent credential can never provision another one) and
 /// caches the returned client_id/client_secret.

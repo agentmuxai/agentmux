@@ -33,7 +33,7 @@ impl std::fmt::Display for JektTier {
 }
 
 /// Request to inject a message into an agent's terminal.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InjectionRequest {
     pub target_agent: String,
     pub message: String,
@@ -62,6 +62,107 @@ pub struct InjectionRequest {
     /// any request that predates this field) default to 0, unaffected.
     #[serde(default)]
     pub forward_hops: u8,
+    /// Unix seconds this jekt was signed at (part of the signed material,
+    /// not just a display timestamp) — see `agentmux_common::jekt_sign` and
+    /// `jekt_sig` below. `None` for unsigned/legacy requests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ts_secs: Option<i64>,
+    /// Base64 HMAC-SHA256 signature over (request_id, source_agent,
+    /// target_agent, ts_secs, message), produced by the sender's own
+    /// `AGENTMUX_JEKT_KEY`. Verified against the claimed `source_agent`'s
+    /// stored key (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2);
+    /// absent, unverifiable, or mismatched all mean "unverified" — the
+    /// message still delivers, but downgraded to TRUST=unverified and
+    /// escalated to TIER=sensitive, never silently trusted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jekt_sig: Option<String>,
+    /// Server-computed verification outcome — `#[serde(skip_deserializing)]`
+    /// means an attacker-supplied JSON body can NEVER set this field, even
+    /// by including it; only `handle_reactive_inject`
+    /// (`server/reactive.rs`, which has `AppState::wstore`) may set it,
+    /// after independently looking up the claimed `source_agent`'s stored
+    /// key and verifying `jekt_sig` against it, before handing the request
+    /// to `Handler::inject_message` (which has no `Store` access "by
+    /// design" — see `record_supervisor_decision`'s doc comment for why).
+    /// `None` = not checked (network-tier messages are already
+    /// unconditionally sensitive regardless of signature; or the claimed
+    /// `source_agent` has never had a key minted, so there's nothing to
+    /// verify against — see the rollout-safety note in
+    /// `handle_reactive_inject`, this deliberately does NOT escalate a
+    /// caller — e.g. the Slack/Discord/Telegram/WhatsApp bridges, or an
+    /// agent not yet respawned since this feature shipped — that was never
+    /// capable of signing in the first place). `Some(false)` is the real
+    /// signal: this `source_agent` DOES have a key, and either no signature
+    /// was given or it didn't match.
+    #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
+    pub sig_verified: Option<bool>,
+    /// Base64 Ed25519 signature over the same signed material as `jekt_sig`
+    /// (request_id, source_agent, target_agent, ts_secs, message), produced
+    /// by an AgentMux-operated WAN-tier service sender (currently only the
+    /// GitHub review-notification consumer, "reagent") using a private key
+    /// held exclusively in agentmux-cloud's Secrets Manager. Distinct from
+    /// `jekt_sig` (host-tier HMAC, symmetric, one key per local instance) —
+    /// see `agentmux_common::jekt_sign`'s module doc for why WAN needs an
+    /// asymmetric scheme instead. `None` for any non-reagent WAN sender or
+    /// any host/lan-tier request — this field is meaningless off the WAN
+    /// tier and verification is skipped entirely when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reagent_sig: Option<String>,
+    /// Which pinned public key `reagent_sig` claims to be signed under —
+    /// see `agentmux_common::jekt_sign::reagent_public_key` for the
+    /// rotation rationale. A legitimate sender always sends all four
+    /// signing fields (`reagent_sig`, `reagent_key_id`, `reagent_msg_id`,
+    /// `reagent_ts_secs`) together, so `None` here alongside a present
+    /// `reagent_sig` is treated the same as no signature having been
+    /// attempted at all (`reagent_verified` resolves to `None`, not
+    /// `Some(false)`) — see `cloud_subscriber::sync_agent_reactive`'s match
+    /// on all four fields. This does not weaken verification: `SIG=`
+    /// never affects `TIER`/`TRUST` escalation either way (see
+    /// `reagent_verified`'s doc comment below), so a stripped/partial
+    /// signature cannot buy an attacker anything a fully-absent one
+    /// couldn't already.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reagent_key_id: Option<String>,
+    /// Message id that was part of `reagent_sig`'s signed material — the
+    /// same `id` field the cloud muxbus server assigns each pending
+    /// injection (see `PendingInj`/`Injection.reagent_msg_id` on the
+    /// agentmux-cloud side). Distinct from `request_id` above, which is
+    /// this request's own (possibly re-derived, e.g. across a cross-instance
+    /// forward) identifier — `reagent_msg_id` must stay exactly what was
+    /// signed for verification to succeed regardless of how `request_id`
+    /// is set on this particular hop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reagent_msg_id: Option<String>,
+    /// Unix seconds `reagent_sig` was signed at — part of the signed
+    /// material, checked for anti-replay against a max-age window (the WS
+    /// path's `cloud_subscriber::REAGENT_SIG_MAX_AGE_SECS`, or the HTTP
+    /// path's own constant of the same name in `server/reactive.rs`), same
+    /// purpose as `ts_secs`/`JEKT_SIG_MAX_AGE_SECS` for host-tier `jekt_sig`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reagent_ts_secs: Option<i64>,
+    /// Server-computed verification outcome for `reagent_sig` — same
+    /// `#[serde(skip_deserializing)]` guarantee as `sig_verified`: no
+    /// attacker-supplied JSON body can set this directly. Set by whichever
+    /// caller actually received this WAN injection and independently
+    /// verified `reagent_sig` against the pinned key —
+    /// `cloud_subscriber::sync_agent_reactive` for the desktop app's WS
+    /// delivery path, or `server/reactive.rs::verify_reagent_signature` for
+    /// the HTTP `/agentmux/reactive/inject` path used by standalone pollers
+    /// like `@agentmuxai/muxbus-client` (reagentx P1 on PR #41 — that path
+    /// used to receive the four reagent_* fields over HTTP with nothing on
+    /// the receiving end able to verify them at all). `Some(true)` renders
+    /// `SIG=verified` in the marker; `Some(false)` (a `reagent_sig` was present but didn't
+    /// verify) renders `SIG=invalid` — a real red flag, same spirit as
+    /// host-tier's `TRUST=unverified`. `None` (no `reagent_sig` attempted)
+    /// renders no `SIG=` field at all, keeping ordinary WAN traffic
+    /// unchanged. **Never affects `TIER`/`TRUST` escalation** — WAN jekts
+    /// stay unconditionally `TRUST=network-claimed` / eligible for
+    /// `TIER=sensitive` regardless of this field, per
+    /// docs/specs/SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §4 ("what
+    /// does NOT change"). This answers "who is this really from," not
+    /// "should this auto-execute."
+    #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
+    pub reagent_verified: Option<bool>,
 }
 
 /// Response from a message injection attempt.

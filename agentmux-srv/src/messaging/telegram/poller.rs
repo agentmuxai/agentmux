@@ -202,6 +202,7 @@ fn handle_update(update: &Update, config: &TelegramConfig, health: &Arc<Mutex<Br
         jekt_tier: None,
         delivery_tier: Some("wan".to_string()),
         forward_hops: 0,
+        ..Default::default()
     };
     let result = handler.inject_message(req);
     if result.success {

@@ -378,16 +378,24 @@ impl Handler {
         };
 
         // Determine effective jekt tier.
-        // Escalation rules (spec §5.2):
+        // Escalation rules (spec §5.2, extended by
+        // SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2):
         //   1. WAN or LAN delivery → always SENSITIVE, regardless of declared tier
         //      or keyword content (network-tier senders are not verified).
-        //   2. Host delivery + declared SENSITIVE → SENSITIVE.
-        //   3. Host delivery + keyword match → SENSITIVE.
-        //   4. Otherwise → use declared tier (default: coord).
+        //   2. Host delivery, sender identity checkable but signature missing
+        //      or wrong → always SENSITIVE (host-tier senders can now be
+        //      verified when the claimed source_agent has a signing key —
+        //      see `sig_verified`'s doc comment on `InjectionRequest` for
+        //      exactly when this applies vs. is skipped).
+        //   3. Host delivery + declared SENSITIVE → SENSITIVE.
+        //   4. Host delivery + keyword match → SENSITIVE.
+        //   5. Otherwise → use declared tier (default: coord).
         let declared_tier = req.jekt_tier.as_ref();
         let delivery_tier = req.delivery_tier.as_deref().unwrap_or("host");
         let is_network_tier = delivery_tier == "wan" || delivery_tier == "lan";
+        let is_unverified_sender = req.sig_verified == Some(false);
         let is_sensitive = is_network_tier
+            || is_unverified_sender
             || matches!(declared_tier, Some(super::types::JektTier::Sensitive))
             || is_sensitive_message(&sanitized);
         let effective_tier = if is_sensitive { "sensitive" } else {
@@ -400,12 +408,21 @@ impl Handler {
         let priority = req.priority.as_deref().unwrap_or("normal");
 
         // Wrap in JEKT marker block (structured tag + human-readable header).
+        // Note: `req.sig_verified` (three-state) is passed through as-is for
+        // the marker's TRUST label — `is_unverified_sender` above only
+        // captures the `Some(false)` case (the one that forces SENSITIVE);
+        // the marker itself also needs to distinguish `None` ("never
+        // checked," e.g. a Slack-bridge message) from `Some(true)`
+        // ("actually verified") rather than collapsing both to the same
+        // label — see `wrap_jekt_message`'s doc comment.
         let wrapped = wrap_jekt_message(
             &sanitized,
             req.source_agent.as_deref(),
             &req.target_agent,
             effective_tier,
             delivery_tier,
+            req.sig_verified,
+            req.reagent_verified,
             &request_id,
             priority,
         );
@@ -736,6 +753,7 @@ impl Handler {
                     jekt_tier: Some(super::types::JektTier::Coord),
                     delivery_tier: Some("host".to_string()),
                     forward_hops: 0,
+                    ..Default::default()
                 };
                 let resp = self.inject_message_inner(
                     req,

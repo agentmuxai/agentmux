@@ -82,12 +82,13 @@ pub(crate) async fn seed_layout_via_reducer(
     new_tree: agentmux_common::LayoutNode,
     focused_node_id: String,
     leaforder: Vec<crate::backend::obj::LeafOrderEntry>,
+    magnified_node_id: String,
 ) -> Result<(), String> {
     let store = &state.wstore;
     let slices = agentmux_common::LayoutClientSlices {
         leaforder: serde_json::to_value(&leaforder).ok(),
         focused_node_id,
-        magnified_node_id: String::new(),
+        magnified_node_id,
         // Fresh-tab seed: REPLACE semantics clear any stale queue.
         pending_backend_actions: None,
     };

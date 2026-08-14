@@ -468,6 +468,32 @@
         }
     }
 
+    // AskUserQuestion's answer should read like a normal typed message once answered —
+    // wrap and stay visible, not clip to one line + ellipsis like every other tool's
+    // collapsed summary (the default above, meant for command names and file paths).
+    // A free-text "Other" response can be a full sentence, unreadable if truncated —
+    // the only way to see it was previously the hover-peek tooltip.
+    // Must target data-tool-name (raw provider name), not data-tool: AskUserQuestion isn't
+    // in normalizeToolName's knownTools list, so data-tool collapses it to "other" — matching
+    // on that would also affect every other unrecognized tool's summary row (codex review).
+    .agent-tool-block[data-tool-name="askuserquestion"] {
+        .agent-tool-summary {
+            white-space: normal;
+            align-items: flex-start;
+        }
+
+        .agent-tool-name-peek-anchor {
+            overflow: visible;
+        }
+
+        .agent-tool-name {
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            overflow: visible;
+            text-overflow: unset;
+        }
+    }
+
     // Per-tool-type color on the collapsed summary name.
     // Requires data-tool attribute on .agent-tool-block (ToolBlock.tsx).
     .agent-tool-block[data-tool="bash"]   .agent-tool-name { color: var(--term-bright-green); }
@@ -1684,22 +1710,37 @@
     gap: 3px;
     padding: 10px var(--space-2);
     user-select: none;
-    position: relative;
 
-    &::before,
-    &::after {
-        content: "";
-        position: absolute;
-        top: 50%;
-        width: 25%;
-        height: 1px;
-        background: var(--border-color, rgba(255, 255, 255, 0.12));
+    // Single-row rule — `top: 50%` bisects only this row (the pill), never
+    // the detail row below it. See
+    // docs/specs/SPEC_DIVIDER_PILL_RULE_MISALIGNMENT_2026_08_12.md.
+    //
+    // The rule lines are real flex items (`::before`/`::after` participate
+    // in flex layout as the first/last item), sized with `flex: 1 1 auto`
+    // so they share the remaining width around the pill instead of being
+    // absolutely positioned at a fixed 25% and relying on the pill's
+    // background to mask any overlap. `--panel-bg-color` is only ~3-5%
+    // opaque on light themes, so a wide pill (long trigger label, narrow
+    // pane) previously let the rule show straight through — reagent P2 on
+    // PR #2563. Flex distribution makes overlap structurally impossible
+    // regardless of pill width or background opacity.
+    .agent-context-compacted-rule {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        width: 100%;
+
+        &::before,
+        &::after {
+            content: "";
+            flex: 1 1 auto;
+            height: 1px;
+            background: var(--border-color, rgba(255, 255, 255, 0.12));
+        }
     }
 
-    &::before { left: 0; }
-    &::after  { right: 0; }
-
     .agent-context-compacted-label {
+        flex-shrink: 0;
         font-size: 11px;
         font-weight: 600;
         letter-spacing: 0.06em;
@@ -1708,6 +1749,7 @@
         padding: 2px 10px;
         border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
         border-radius: 10px;
+        background: var(--panel-bg-color, rgba(255, 255, 255, 0.04));
     }
 
     .agent-context-compacted-detail {
@@ -1795,22 +1837,25 @@
     gap: 3px;
     padding: 10px var(--space-2);
     user-select: none;
-    position: relative;
 
-    &::before,
-    &::after {
-        content: "";
-        position: absolute;
-        top: 50%;
-        width: 25%;
-        height: 1px;
-        background: var(--border-color, rgba(255, 255, 255, 0.12));
+    // Single-row rule — see the comment on .agent-context-compacted-rule.
+    .agent-session-outcome-rule {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+        width: 100%;
+
+        &::before,
+        &::after {
+            content: "";
+            flex: 1 1 auto;
+            height: 1px;
+            background: var(--border-color, rgba(255, 255, 255, 0.12));
+        }
     }
 
-    &::before { left: 0; }
-    &::after  { right: 0; }
-
     .agent-session-outcome-label {
+        flex-shrink: 0;
         font-size: 11px;
         font-weight: 600;
         letter-spacing: 0.06em;
@@ -1819,6 +1864,7 @@
         padding: 2px 10px;
         border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
         border-radius: 10px;
+        background: var(--panel-bg-color, rgba(255, 255, 255, 0.04));
     }
 
     .agent-session-outcome-detail {
@@ -1827,9 +1873,11 @@
     }
 
     &.agent-session-outcome-fresh {
-        &::before,
-        &::after {
-            background: color-mix(in srgb, var(--warning-color, #d9a441) 40%, transparent);
+        .agent-session-outcome-rule {
+            &::before,
+            &::after {
+                background: color-mix(in srgb, var(--warning-color, #d9a441) 40%, transparent);
+            }
         }
 
         .agent-session-outcome-label {

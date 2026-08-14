@@ -302,6 +302,7 @@ fn test_handler_inject_no_sender() {
         jekt_tier: None,
         delivery_tier: None,
         forward_hops: 0,
+        ..Default::default()
     });
 
     assert!(!resp.success);
@@ -322,6 +323,7 @@ fn test_handler_inject_agent_not_found() {
         jekt_tier: None,
         delivery_tier: None,
         forward_hops: 0,
+        ..Default::default()
     });
 
     assert!(!resp.success);
@@ -358,6 +360,7 @@ async fn test_handler_inject_success() {
         jekt_tier: None,
         delivery_tier: None,
         forward_hops: 0,
+        ..Default::default()
     });
 
     assert!(resp.success);
@@ -379,6 +382,112 @@ async fn test_handler_inject_success() {
     assert!(payload.contains("[/JEKT]"), "JEKT close marker present");
     assert!(payload.contains("hello"), "message payload present");
     assert!(payload.ends_with('\r'), "trailing CR submits the message");
+}
+
+// SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §6.2 addendum — reagent
+// WAN signing renders an additive SIG= field without touching TIER/TRUST.
+#[tokio::test]
+async fn test_handler_inject_wan_reagent_verified_renders_sig_field_but_stays_sensitive() {
+    let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let sent_clone = sent.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        sent_clone.lock().unwrap().push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "PR #1 reviewed".to_string(),
+        source_agent: Some("github-consumer".to_string()),
+        request_id: Some("req-wan-1".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: Some("wan".to_string()),
+        forward_hops: 0,
+        reagent_verified: Some(true),
+        ..Default::default()
+    });
+
+    assert!(resp.success);
+    // A verified reagent signature must NOT downgrade WAN's unconditional
+    // sensitive escalation — this closes "who is this from," not "should
+    // this auto-execute."
+    assert_eq!(resp.effective_tier.as_deref(), Some("sensitive"));
+
+    let calls = sent.lock().unwrap();
+    let payload = String::from_utf8_lossy(&calls[1].1);
+    assert!(payload.contains("TRUST=network-claimed"), "WAN trust label unchanged: {payload}");
+    assert!(payload.contains("TIER=sensitive"), "WAN tier still forced sensitive: {payload}");
+    assert!(payload.contains("SIG=verified"), "verified reagent signature renders SIG=verified: {payload}");
+}
+
+#[tokio::test]
+async fn test_handler_inject_wan_reagent_invalid_signature_renders_sig_invalid() {
+    let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let sent_clone = sent.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        sent_clone.lock().unwrap().push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "PR #1 reviewed".to_string(),
+        source_agent: Some("github-consumer".to_string()),
+        request_id: Some("req-wan-2".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: Some("wan".to_string()),
+        forward_hops: 0,
+        reagent_verified: Some(false),
+        ..Default::default()
+    });
+
+    assert!(resp.success);
+    assert_eq!(resp.effective_tier.as_deref(), Some("sensitive"));
+    let calls = sent.lock().unwrap();
+    let payload = String::from_utf8_lossy(&calls[1].1);
+    assert!(payload.contains("SIG=invalid"), "a present-but-wrong signature renders SIG=invalid: {payload}");
+}
+
+#[tokio::test]
+async fn test_handler_inject_wan_no_reagent_signature_omits_sig_field() {
+    let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let sent_clone = sent.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        sent_clone.lock().unwrap().push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "ordinary WAN jekt, not from reagent".to_string(),
+        source_agent: Some("someone".to_string()),
+        request_id: Some("req-wan-3".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: Some("wan".to_string()),
+        forward_hops: 0,
+        reagent_verified: None,
+        ..Default::default()
+    });
+
+    assert!(resp.success);
+    let calls = sent.lock().unwrap();
+    let payload = String::from_utf8_lossy(&calls[1].1);
+    assert!(!payload.contains("SIG="), "ordinary WAN traffic renders no SIG= field: {payload}");
 }
 
 // Controller-aware delivery (SPEC_AGENT_CONTROL_PROTOCOL §6 / Phase 3).
@@ -420,6 +529,7 @@ fn test_handler_inject_structured_delivery_skips_pty() {
         jekt_tier: None,
         delivery_tier: None,
         forward_hops: 0,
+        ..Default::default()
     });
 
     assert!(resp.success);
@@ -466,6 +576,7 @@ async fn test_handler_inject_pty_fallback() {
         jekt_tier: None,
         delivery_tier: None,
         forward_hops: 0,
+        ..Default::default()
     });
 
     assert!(resp.success);
@@ -513,6 +624,7 @@ fn test_handler_inject_structured_failure_no_pty_fallback() {
         jekt_tier: None,
         delivery_tier: None,
         forward_hops: 0,
+        ..Default::default()
     });
 
     assert!(!resp.success);
@@ -539,6 +651,7 @@ fn test_handler_audit_log() {
         jekt_tier: None,
         delivery_tier: None,
         forward_hops: 0,
+        ..Default::default()
     });
 
     let log = handler.get_audit_log(10);
@@ -565,6 +678,7 @@ fn test_handler_audit_log_ordinary_jekt_has_no_outcome() {
         jekt_tier: None,
         delivery_tier: None,
         forward_hops: 0,
+        ..Default::default()
     });
 
     let log = handler.get_audit_log(10);
@@ -989,6 +1103,7 @@ fn test_injection_request_serde() {
         jekt_tier: None,
         delivery_tier: None,
         forward_hops: 0,
+        ..Default::default()
     };
 
     let json = serde_json::to_string(&req).unwrap();
@@ -1093,4 +1208,193 @@ fn injection_request_forward_hops_round_trips() {
     });
     let req: InjectionRequest = serde_json::from_value(json).unwrap();
     assert_eq!(req.forward_hops, 2);
+}
+
+// -- sig_verified is never client-settable (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2) --
+
+#[test]
+fn injection_request_sig_verified_cannot_be_set_from_the_wire() {
+    // The whole point of #[serde(skip_deserializing)] on this field: an
+    // attacker-supplied request body that includes "sig_verified": true must
+    // NOT be able to self-declare verification. Only handle_reactive_inject's
+    // own server-side lookup+verify may ever set this field.
+    let json = serde_json::json!({
+        "target_agent": "agent1",
+        "message": "hello",
+        "sig_verified": true,
+    });
+    let req: InjectionRequest = serde_json::from_value(json).unwrap();
+    assert_eq!(req.sig_verified, None, "sig_verified must be ignored on deserialize, not trusted from the wire");
+}
+
+// -- Host-tier sender verification (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2) --
+//
+// `sig_verified` is set by `handle_reactive_inject` (server/reactive.rs), not
+// by `Handler` itself ("no Store access by design" — see
+// `record_supervisor_decision`'s doc comment) — these tests exercise
+// `Handler::inject_message`'s own reaction to that pre-computed signal
+// directly, the same way the HTTP layer would hand it off after doing its
+// own key lookup + verification.
+
+#[tokio::test]
+async fn test_handler_inject_sig_verified_false_forces_sensitive_and_unverified_trust() {
+    let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let sent_clone = sent.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        sent_clone.lock().unwrap().push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "hello".to_string(),
+        source_agent: Some("agent2".to_string()),
+        request_id: Some("req-1".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None, // would default to "coord" absent the sig_verified signal
+        delivery_tier: None, // host
+        forward_hops: 0,
+        sig_verified: Some(false), // key on file, signature missing/wrong
+        ..Default::default()
+    });
+
+    assert!(resp.success);
+    assert_eq!(
+        resp.effective_tier.as_deref(),
+        Some("sensitive"),
+        "an unverified sender (key exists, signature didn't match) must force SENSITIVE \
+         even though nothing else about this message would have"
+    );
+
+    let calls = sent.lock().unwrap();
+    let payload = String::from_utf8_lossy(&calls[1].1);
+    assert!(payload.contains("TRUST=unverified"), "marker must render TRUST=unverified, got: {payload}");
+    assert!(payload.contains("TIER=sensitive"), "marker must render TIER=sensitive, got: {payload}");
+    assert!(
+        payload.contains("SENSITIVE JEKT"),
+        "the human-visible warning banner must appear for a forced-sensitive jekt"
+    );
+}
+
+#[tokio::test]
+async fn test_handler_inject_sig_verified_true_stays_default_tier_and_host_verified_trust() {
+    let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let sent_clone = sent.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        sent_clone.lock().unwrap().push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "hello".to_string(),
+        source_agent: Some("agent2".to_string()),
+        request_id: Some("req-1".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: None, // host
+        forward_hops: 0,
+        sig_verified: Some(true), // signature actually verified
+        ..Default::default()
+    });
+
+    assert!(resp.success);
+    assert_eq!(
+        resp.effective_tier.as_deref(),
+        Some("coord"),
+        "a genuinely verified sender must NOT be escalated — default tier applies"
+    );
+
+    let calls = sent.lock().unwrap();
+    let payload = String::from_utf8_lossy(&calls[1].1);
+    assert!(payload.contains("TRUST=host-verified"), "marker must render TRUST=host-verified, got: {payload}");
+}
+
+#[tokio::test]
+async fn test_handler_inject_sig_verified_none_is_self_declared_not_escalated() {
+    // The common case for a caller with no signing key at all (a Slack/
+    // Discord/etc. bridge, or an agent not yet respawned since this feature
+    // shipped) — must NOT be escalated (that would make every such caller's
+    // message sensitive, which is noise, not a security signal — see
+    // SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2's rollout-safety
+    // note) — but must also NOT be mislabeled as if it had been verified.
+    let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let sent_clone = sent.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        sent_clone.lock().unwrap().push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "hello".to_string(),
+        source_agent: Some("slack".to_string()),
+        request_id: Some("req-1".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: None, // host
+        forward_hops: 0,
+        sig_verified: None, // nothing to check against — not attempted
+        ..Default::default()
+    });
+
+    assert!(resp.success);
+    assert_eq!(resp.effective_tier.as_deref(), Some("coord"), "must not be escalated");
+
+    let calls = sent.lock().unwrap();
+    let payload = String::from_utf8_lossy(&calls[1].1);
+    assert!(
+        payload.contains("TRUST=self-declared"),
+        "must be labeled self-declared, NOT host-verified — nothing was actually checked, got: {payload}"
+    );
+    assert!(!payload.contains("TRUST=host-verified"));
+}
+
+#[tokio::test]
+async fn test_handler_inject_wan_tier_is_always_network_claimed_regardless_of_sig_verified() {
+    // Sanity: sig_verified must never upgrade a network-tier delivery to
+    // host-verified — the "what does NOT change" guarantee from the spec.
+    let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let sent_clone = sent.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        sent_clone.lock().unwrap().push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "hello".to_string(),
+        source_agent: Some("agent2".to_string()),
+        request_id: Some("req-1".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: Some("wan".to_string()),
+        forward_hops: 0,
+        sig_verified: Some(true), // even if somehow set true, must not matter for wan
+        ..Default::default()
+    });
+
+    assert!(resp.success);
+    assert_eq!(resp.effective_tier.as_deref(), Some("sensitive"), "wan is always sensitive");
+
+    let calls = sent.lock().unwrap();
+    let payload = String::from_utf8_lossy(&calls[1].1);
+    assert!(payload.contains("TRUST=network-claimed"), "got: {payload}");
+    assert!(!payload.contains("TRUST=host-verified"));
 }

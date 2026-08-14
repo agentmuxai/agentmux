@@ -17,6 +17,18 @@ serde_json = "1"
 # Cross-platform home/data/config-dir lookup for the unified data-dir
 # layout (see docs/specs/SPEC_DATA_DIR_UNIFICATION_2026-05-05.md).
 dirs = "5"
+# Host-tier jekt sender signing (jekt_sign.rs) — shared by agentmux-srv
+# (verification) and agentmux-mcp (signing), so the two can never drift on
+# the signed-material format. Same versions already pinned in agentmux-srv.
+hmac = "0.12"
+sha2 = "0.10"
+base64 = "0.22"
+# WAN-tier jekt sender signing (jekt_sign.rs's reagent_* functions) — verify
+# only, on the agentmux-srv side. Asymmetric (not HMAC like host-tier)
+# because the verifying population is every AgentMux instance on WAN, not a
+# single srv that minted its own key — see
+# docs/specs/SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §6.2 addendum.
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 
 # Windows page-file volume tracking (pagefile.rs), shared by agentmux-srv
 # and agentmux-cef — see docs/specs/SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07.md §4.
