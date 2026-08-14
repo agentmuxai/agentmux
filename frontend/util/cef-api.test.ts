@@ -129,8 +129,14 @@ describe("showJsContextMenu — submenu placement", () => {
             expect(sub.style.display).toBe("");
             expect(sub.style.visibility).toBe("hidden");
 
-            // Let the in-flight computeMenuPosition promise resolve.
-            await vi.advanceTimersByTimeAsync(0);
+            // computeMenuPosition itself is deferred one requestAnimationFrame
+            // (avoids measuring mid-reflow) before the in-flight promise even
+            // starts, so flush the frame first, then let the promise resolve.
+            // vitest 3.2 has no advanceTimersToNextFrameAsync — a plain
+            // time-based advance past a frame (~16ms) flushes both the
+            // requestAnimationFrame callback and the computeMenuPosition
+            // promise chained after it.
+            await vi.advanceTimersByTimeAsync(20);
             expect(sub.style.visibility).toBe("");
             expect(sub.style.position).toBe("fixed");
             expect(sub.style.left).toMatch(/^-?\d+px$/);
@@ -169,8 +175,16 @@ describe("showJsContextMenu — submenu placement", () => {
             // while computeMenuPosition's promise is still in flight.
             sub.style.display = "none";
 
-            // Let the in-flight computeMenuPosition promise settle.
-            await vi.advanceTimersByTimeAsync(0);
+            // Flush the requestAnimationFrame computeMenuPosition is deferred
+            // behind, then let the in-flight promise settle. The rAF callback
+            // itself re-checks display/isConnected too (guards the "closed
+            // during the frame wait, before computeMenuPosition was even
+            // called" case), so this also exercises that guard.
+            // vitest 3.2 has no advanceTimersToNextFrameAsync — a plain
+            // time-based advance past a frame (~16ms) flushes both the
+            // requestAnimationFrame callback and the computeMenuPosition
+            // promise chained after it.
+            await vi.advanceTimersByTimeAsync(20);
 
             // The guard (`sub.style.display === "none"` check in the `.then()`)
             // must not re-reveal a submenu whose hover already ended.
