@@ -271,22 +271,58 @@ export function showJsContextMenu(
                     onOpen: () => {
                         sub.style.visibility = "hidden";
                         sub.style.display = "";
-                        void computeMenuPosition(
-                            {
-                                anchor: row.getBoundingClientRect(),
-                                placement: "right-start",
-                                avoidNativePanes: false,
-                            },
-                            sub,
-                        ).then((pos) => {
-                            // Hover may have left (or the whole menu closed)
-                            // before the async placement resolved.
+                        // Deferred one rAF (mirrors flyoutmenu.tsx's SubMenu /
+                        // registerSubMenu) so the display:none→"" reflow has
+                        // settled before anything gets measured.
+                        requestAnimationFrame(() => {
                             if (!sub.isConnected || sub.style.display === "none") return;
-                            applyMenuPosition(sub, pos);
-                            sub.style.visibility = "";
-                            assertMenuInPaintableArea(sub, "context-submenu");
-                        }).catch(() => {
-                            if (sub.isConnected) sub.style.visibility = "";
+                            // The actual bug (root-caused live 2026-08-13,
+                            // reproduced deterministically regardless of anchor
+                            // position — left:121px, top:-393px every time,
+                            // ruling out a mere layout-timing race): `sub`
+                            // starts `position:absolute` (inherited from the
+                            // `.menu` class) as a deliberate row-relative
+                            // fallback for the .catch() below, but
+                            // computeMenuPosition computes coordinates for
+                            // `strategy:"fixed"`. floating-ui resolves the
+                            // floating element's offset parent from its
+                            // CURRENT position at measurement time, so calling
+                            // it while `sub` is still `position:absolute`
+                            // (nested inside `row`, which has
+                            // `position:relative`) resolves coordinates
+                            // against the wrong containing block entirely.
+                            // FlyoutMenu's Solid sibling never hits this
+                            // because its placeholder style is already
+                            // `position:fixed;left:0px;top:0px` before it ever
+                            // calls computeMenuPosition — match that here:
+                            // switch to fixed strategy BEFORE measuring, and
+                            // restore the absolute row-relative fallback
+                            // explicitly if placement itself fails.
+                            sub.style.position = "fixed";
+                            void computeMenuPosition(
+                                {
+                                    anchor: row.getBoundingClientRect(),
+                                    placement: "right-start",
+                                    avoidNativePanes: false,
+                                },
+                                sub,
+                            ).then((pos) => {
+                                // Hover may have left (or the whole menu closed)
+                                // before the async placement resolved.
+                                if (!sub.isConnected || sub.style.display === "none") return;
+                                applyMenuPosition(sub, pos);
+                                sub.style.visibility = "";
+                                assertMenuInPaintableArea(sub, "context-submenu");
+                            }).catch(() => {
+                                if (!sub.isConnected) return;
+                                // Restore the row-relative absolute fallback —
+                                // position:fixed with left:100% would otherwise
+                                // pin it just off the right edge of the screen.
+                                sub.style.position = "absolute";
+                                sub.style.left = "100%";
+                                sub.style.top = "0";
+                                sub.style.visibility = "";
+                            });
                         });
                     },
                     onClose: () => {
