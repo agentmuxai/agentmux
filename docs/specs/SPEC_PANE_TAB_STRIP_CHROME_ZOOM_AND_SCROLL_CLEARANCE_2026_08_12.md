@@ -2,22 +2,32 @@
 
 **Date:** 2026-08-12 (Part A corrected before implementation — see §A.0's
 note).
-**Status:** implemented and live-verified against this corrected design.
-(History: an earlier draft bound to the wrong zoom control — global
-chrome zoom, `--zoomfactor` — was implemented and live-verified, then
-corrected to the per-pane design below before landing anywhere.) Live
-check used a **real Ctrl+Wheel zoom gesture** (CDP-dispatched, not a
-simulated CSS variable override) on an agent pane: tabs, `+`, and
-conversation content scaled together (0.97 → 1.3, matching the pane's
-actual persisted `term:zoom`), `--pane-tab-strip-zoom` and the
-pre-existing `--agent-pane-zoom` agreed exactly at every step (both
-derive from the same block meta via separate paths — §A.3/§B.3), and the
-strip's right edge stayed pixel-identical to the pane's real right edge
-at zoom (312.5 = 312.5, zero drift) — the one measurement that directly
-confirms §A.1's landmine is still avoided with the corrected value
-source. §A.3's agent-wiring question is resolved: a new
-`tabStripZoomFactor` memo in `AgentViewWrapper`
-(`agent-view.tsx`), keyed off `activeBlockId()`.
+**Status:** implemented, with two further correctness bugs caught in
+PR #2566 review after this doc's own live verification missed them —
+fixed, not yet independently re-verified live a third time. History:
+
+1. An earlier draft bound to the wrong zoom control entirely (global
+   chrome zoom, `--zoomfactor`) — implemented, live-verified, then
+   corrected to the per-pane design below before landing anywhere.
+2. This per-pane version was implemented and live-verified — **but only
+   on the agent pane.** Live check used a real Ctrl+Wheel zoom gesture
+   (CDP-dispatched) on an agent pane: tabs, `+`, and conversation content
+   scaled together (0.97 → 1.3), `--pane-tab-strip-zoom` and
+   `--agent-pane-zoom` agreed exactly, and the strip's right edge stayed
+   pixel-identical to the pane's real right edge at zoom (zero drift,
+   confirming §A.1's landmine stayed avoided). None of this exercised
+   editor's zoom at all, and the agent padding-top check's own numbers
+   (a `docPaddingTop` reading that didn't match the expected formula)
+   were misread as `getComputedStyle` ambiguity inside nested `zoom`
+   rather than recognized as the double-scaling bug it actually was.
+3. `reagentx-workflow[bot]`'s PR review caught both: editor's
+   `zoomFactor` prop double-compounds with `.editor-view`'s own ambient
+   `zoom` (§A.3), and `_document.scss`'s `padding-top` double-scaled the
+   same way (§B.3). Both fixed below — the editor fix is to *not* pass
+   `zoomFactor` at all (ambient zoom already covers it "for free"), and
+   the padding-top fix is to drop the zoom multiplication entirely (same
+   reason). Terminal was re-checked and confirmed to have no ambient
+   `zoom` anywhere in its tree, so its wiring was correct as shipped.
 **Related:** `docs/specs/SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md` (agent
 strip floats over content), `docs/specs/SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md`
 (shipped — made the agent strip a full-width, 28px-tall blurred band,
@@ -164,13 +174,39 @@ visible to both.
 
 ## A.3 Per-pane-type wiring
 
-- **Editor** (`editor-tab-strip.tsx`) — trivial. `EditorTabStrip`
-  already receives `model` as a prop (`editor-tab-strip.tsx:39-42`,
-  passed from `editor-view.tsx:742`), so its `<PaneTabStrip>` call adds
-  `zoomFactor={props.model.zoomAtom}`.
-- **Terminal** (`term.tsx`) — trivial. Same component that owns `model`
-  calls `<PaneTabStrip>` (`term.tsx:525+`); add
-  `zoomFactor={model.termZoomAtom}`.
+**Correction (caught in review on PR #2566, after this design first
+shipped): whether a pane type passes `zoomFactor` at all depends on
+where its `<PaneTabStrip>` renders relative to that pane's own
+`zoom`-scaled root — not just on whether a zoom accessor happens to be
+in scope.** The inner-wrapper's `zoom` (§A.2) is only correct to apply
+when `<PaneTabStrip>` is *outside* the pane's own already-zoomed
+subtree (the agent case, a DOM sibling of `.agent-view` — §A.0). Passing
+`zoomFactor` when the strip is *already inside* a zoomed ancestor
+double-compounds: CSS `zoom` on nested elements multiplies
+(`ambient_zoom × own_zoom`), not adds, so a pane zoomed to 1.5× would
+render its tabs at `1.5² = 2.25×`.
+
+- **Editor** (`editor-tab-strip.tsx`) — **do NOT pass `zoomFactor`**.
+  `<EditorTabStrip>` renders inside `.editor-view`
+  (`editor-view.tsx:701-742`), which already has
+  `style={{ zoom: model.zoomAtom() }}` on that root — `<PaneTabStrip>` is
+  a *descendant* of the already-zoomed element, not a sibling like
+  agent's. Ambient zoom already scales the entire tab-strip subtree
+  (`.pane-tab-strip`'s height calc defaults to the plain
+  `--pane-tab-strip-height` baseline, `.pane-tab-strip-inner`'s own
+  `zoom` defaults to `1` — both correct, with the prop simply omitted) —
+  the earlier version of this doc called this wiring "trivial" and got
+  it backwards; the trivial part was that `model.zoomAtom` was *in
+  scope*, not that passing it was correct.
+- **Terminal** (`term.tsx`) — passes `zoomFactor={model.termZoomAtom}`,
+  confirmed correct (not just "trivial because in scope," verified
+  properly this time): terminal has **no ambient CSS `zoom` anywhere in
+  its own tree** — grepped `term.tsx` for `zoom`, only hits are the
+  `term:zoom` meta key and this prop itself — it applies its zoom via
+  xterm font-size recomputation instead (`term.tsx:341,354-362`), a
+  wholly different mechanism from agent/editor's `style={{ zoom }}`. No
+  ambient zoom to inherit, so the strip legitimately needs its own
+  explicit `zoom`, same reasoning as agent.
 - **Agent** (`agent-view.tsx`) — **not trivial, the one open question
   left in this spec.** `<PaneTabStrip>` is called from
   `AgentViewWrapper` (`:408-429`), a *parent* of `AgentPresentationView`
@@ -225,12 +261,14 @@ visible to both.
 - `frontend/app/element/PaneTabStrip.scss` — split base rule per §A.2.
 - `frontend/app/theme.scss` — `--pane-tab-strip-height: 28px` (unchanged
   from the prior draft — still needed, still not zoom-related itself).
-- `frontend/app/view/editor/editor-tab-strip.tsx` — pass
-  `zoomFactor={props.model.zoomAtom}`.
+- `frontend/app/view/editor/editor-tab-strip.tsx` — touched, but
+  deliberately does **not** pass `zoomFactor` (§A.3 correction) — a
+  comment explaining why, so a future reader doesn't "fix" the
+  omission.
 - `frontend/app/view/term/term.tsx` — pass `zoomFactor={model.termZoomAtom}`.
-- `frontend/app/view/agent/agent-view.tsx` — new zoom-for-active-block
-  memo in `AgentViewWrapper`, passed to the `<PaneTabStrip>` call (§A.3,
-  exact mechanism TBD).
+- `frontend/app/view/agent/agent-view.tsx` — new `tabStripZoomFactor`
+  memo in `AgentViewWrapper`, keyed off `activeBlockId()`, passed to the
+  `<PaneTabStrip>` call.
 - **No `theme.scss`/global `--zoomfactor` involvement at all** — that
   variable is uninvolved in the corrected design; nothing here touches
   chrome zoom or `window-header`/`status-bar`.
@@ -285,33 +323,47 @@ scroll-snap) but not the same *mechanism* — see §B.3.
 
 ## B.3 Implemented fix
 
-The strip's real height is a known, computable quantity
-(`var(--pane-tab-strip-height, 28px) * var(--agent-pane-zoom, 1)` — using
-the agent pane's *own* zoom variable, already set on `.agent-view`'s root
-by `AgentPresentationView` and already inherited by `.agent-document` as
-its descendant, §A.0), so the top case skips the `ResizeObserver`
-entirely and uses a pure-CSS `calc()`:
+**Correction (caught in review on PR #2566, same double-scaling class of
+bug as §A.3's editor mistake): do NOT multiply by any zoom variable
+here.** The strip's real (on-screen) height is
+`--pane-tab-strip-height × --pane-tab-strip-zoom` — a quantity computed
+entirely in real, un-zoomed screen pixels (§A.2's outer box is
+deliberately never itself zoomed). But `.agent-document` is a descendant
+of `.agent-view`, which already has `style={{ zoom: zoomFactor() }}`
+applied — so *any* length this rule writes gets auto-scaled by that
+ambient zoom by the browser, for free, as part of normal `zoom`
+semantics. Multiplying by `--agent-pane-zoom` *again* here double-scales
+the result (`baseline × zoom²` once ambient zoom applies on top of an
+already-multiplied value) — over-reserving space at zoom > 1 and, more
+seriously, under-reserving at zoom < 1 (the clamp allows down to `0.5`),
+reintroducing the exact "first message hidden" bug this rule exists to
+fix. The two zoom factors cancel out exactly (see derivation below), so
+the correct fix is the *unscaled* baseline:
 
 ```scss
-// _document.scss:113-114, as shipped
+// _document.scss:113-114, as shipped (corrected)
 padding: var(--space-0-5) 0 var(--space-0-5) var(--space-1);
-padding-top: calc(var(--space-0-5) + var(--pane-tab-strip-height, 28px) * var(--agent-pane-zoom, 1));
+padding-top: calc(var(--space-0-5) + var(--pane-tab-strip-height, 28px));
 ```
 
 A separate `padding-top` longhand, not merged into the shorthand —
 matching how `padding-bottom` is already its own separate longhand
 rather than folded into the same `padding:` line.
 
-**Note on the two zoom variables**: `--agent-pane-zoom` (used here,
-already existing) and Part A's new `--pane-tab-strip-zoom` (§A.2, on the
-tab strip itself) are two *separately plumbed* CSS custom properties,
-but for the agent pane specifically they should always hold the *same*
-runtime number — both ultimately derive from the same active block's
-`term:zoom` meta, just delivered via two different DOM paths because the
-tab strip and `.agent-document` are not in the same subtree (§A.3). Worth
-a live sanity check once §A.3's agent wiring is resolved: zoom the pane
-and confirm the strip's visible size and the clearance below it grow
-together, not independently.
+**Why the plain baseline is exactly right, not an approximation**: write
+`padding-top: P` inside a `zoom: Z` ancestor, and the browser renders it
+on-screen as `P × Z`. Setting `P = --pane-tab-strip-height` (unscaled)
+renders on-screen as `height × Z`. The strip's own real on-screen height
+is `height × --pane-tab-strip-zoom`. Since `--agent-pane-zoom` (this
+pane's ambient `Z`) and `--pane-tab-strip-zoom` (the tab strip's own,
+§A.2) are two *separately plumbed* CSS custom properties that always
+hold the *same* runtime number for the agent pane specifically — both
+derive from the exact same active block's `term:zoom` meta, just
+delivered via two different DOM paths because the strip and
+`.agent-document` aren't in the same subtree (§A.3) — the two expressions
+are equal: `height × Z = height × --pane-tab-strip-zoom`. No `calc()`
+multiplication needed on this side at all; the ambient zoom *is* the
+multiplication.
 
 ### B.3.1 Sequencing
 
