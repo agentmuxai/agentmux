@@ -473,7 +473,10 @@
     // collapsed summary (the default above, meant for command names and file paths).
     // A free-text "Other" response can be a full sentence, unreadable if truncated —
     // the only way to see it was previously the hover-peek tooltip.
-    .agent-tool-block[data-tool="askuserquestion"] {
+    // Must target data-tool-name (raw provider name), not data-tool: AskUserQuestion isn't
+    // in normalizeToolName's knownTools list, so data-tool collapses it to "other" — matching
+    // on that would also affect every other unrecognized tool's summary row (codex review).
+    .agent-tool-block[data-tool-name="askuserquestion"] {
         .agent-tool-summary {
             white-space: normal;
             align-items: flex-start;
