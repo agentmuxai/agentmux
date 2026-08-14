@@ -3270,7 +3270,12 @@ mod tests {
         }
 
         const MAX_ATTEMPTS: u32 = 5;
-        let mut last_blob = String::new();
+        // reagentx P2 on PR #2559 (re-review): must be updated on EVERY
+        // retry path, not just the occurrence-mismatch one — the idle-kill
+        // branch below used to leave this at its initial empty value, so if
+        // every attempt got idle-killed the final panic misleadingly
+        // reported an empty blob instead of indicating a timeout occurred.
+        let mut last_outcome = String::new();
         let mut collapsed = false;
         let mut skipped = false;
         for attempt in 1..=MAX_ATTEMPTS {
@@ -3303,10 +3308,10 @@ mod tests {
                 // Idle-killed by run_via_pty's own internal mechanism — the
                 // process tree is already cleaned up by the time this
                 // returns, nothing left behind to leak.
+                last_outcome = format!("attempt {attempt}/{MAX_ATTEMPTS}: idle-killed by run_via_pty \
+                    (likely a loaded CI runner delaying process spawn/scheduling), no output captured");
                 eprintln!(
-                    "attempt {attempt}/{MAX_ATTEMPTS}: run_via_pty's own idle-kill fired \
-                     (likely a loaded CI runner delaying process spawn/scheduling) — \
-                     retrying, already cleaned up"
+                    "{last_outcome} — retrying, already cleaned up"
                 );
                 continue;
             }
@@ -3318,12 +3323,14 @@ mod tests {
                 collapsed = true; // demonstrated: the collapse happened as designed
                 break;
             }
-            eprintln!(
+            last_outcome = format!(
                 "attempt {attempt}/{MAX_ATTEMPTS}: expected 1 occurrence + the settled frame, \
-                 got {occurrences} occurrence(s) — blob: {blob:?} (retrying: real OS scheduling \
-                 can occasionally push the 70ms pause outside A1's ~50-100ms defer window)"
+                 got {occurrences} occurrence(s) — blob: {blob:?}"
             );
-            last_blob = blob;
+            eprintln!(
+                "{last_outcome} (retrying: real OS scheduling can occasionally push the 70ms \
+                 pause outside A1's ~50-100ms defer window)"
+            );
         }
 
         unsafe {
@@ -3338,7 +3345,7 @@ mod tests {
         }
         panic!(
             "the static label + its delayed \\r-overwrite must collapse to ONE occurrence across \
-             {MAX_ATTEMPTS} attempts — last blob: {last_blob:?}"
+             {MAX_ATTEMPTS} attempts — last outcome: {last_outcome}"
         );
     }
 }
