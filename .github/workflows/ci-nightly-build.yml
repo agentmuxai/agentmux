@@ -49,6 +49,15 @@ jobs:
       # must not fail the build — that would defeat this step's own purpose
       # of making that leg more reliable. Each exclusion is wrapped so a
       # failure just logs a warning and the rest still get attempted.
+      #
+      # -ExclusionProcess by itself does not reliably exempt a process from
+      # exec-time scanning — Microsoft's own guidance is that the process's
+      # actual file path needs to be excluded too. Static guesses at
+      # node.exe/cargo.exe/rustc.exe's install paths would drift across
+      # runner-image and toolchain versions, so resolve the real paths on
+      # this runner via Get-Command instead (this step runs after
+      # dtolnay/rust-toolchain@stable, so cargo/rustc are already on PATH;
+      # node.exe ships preinstalled on GH-hosted windows-latest images).
       - name: Exclude build paths + toolchain processes from Windows Defender
         if: matrix.os == 'windows-latest'
         shell: powershell
@@ -61,13 +70,30 @@ jobs:
               Write-Warning "Defender exclusion failed ($Desc): $_"
             }
           }
+
+          foreach ($exe in @("node.exe", "cargo.exe", "rustc.exe")) {
+            $resolved = Get-Command $exe -ErrorAction SilentlyContinue
+            if ($resolved) {
+              Add-ExclusionSafe { Add-MpPreference -ExclusionPath $resolved.Source -ErrorAction Stop } "$exe path ($($resolved.Source))"
+            } else {
+              Write-Warning "Defender exclusion: could not resolve a path for $exe via Get-Command"
+            }
+            Add-ExclusionSafe { Add-MpPreference -ExclusionProcess $exe -ErrorAction Stop } "$exe process"
+          }
+
+          # link.exe (MSVC linker) isn't on PATH outside a Developer Command
+          # Prompt, so Get-Command can't resolve it here. Exclude the whole
+          # Visual Studio install root instead — this is an ephemeral,
+          # single-purpose CI runner, so a broad exclusion here carries no
+          # meaningful risk, unlike on a persistent/shared machine.
+          Add-ExclusionSafe { Add-MpPreference -ExclusionPath "C:\Program Files\Microsoft Visual Studio" -ErrorAction Stop } "VS install root (Program Files)"
+          Add-ExclusionSafe { Add-MpPreference -ExclusionPath "C:\Program Files (x86)\Microsoft Visual Studio" -ErrorAction Stop } "VS install root (Program Files x86)"
+          Add-ExclusionSafe { Add-MpPreference -ExclusionProcess "link.exe" -ErrorAction Stop } "link.exe process"
+
           Add-ExclusionSafe { Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE" -ErrorAction Stop } "workspace path"
           Add-ExclusionSafe { Add-MpPreference -ExclusionPath "$env:RUNNER_TEMP" -ErrorAction Stop } "runner temp path"
           Add-ExclusionSafe { Add-MpPreference -ExclusionPath "$env:USERPROFILE\.cargo" -ErrorAction Stop } "cargo home path"
-          Add-ExclusionSafe { Add-MpPreference -ExclusionProcess "node.exe" -ErrorAction Stop } "node.exe"
-          Add-ExclusionSafe { Add-MpPreference -ExclusionProcess "cargo.exe" -ErrorAction Stop } "cargo.exe"
-          Add-ExclusionSafe { Add-MpPreference -ExclusionProcess "rustc.exe" -ErrorAction Stop } "rustc.exe"
-          Add-ExclusionSafe { Add-MpPreference -ExclusionProcess "link.exe" -ErrorAction Stop } "link.exe"
+          Add-ExclusionSafe { Add-MpPreference -ExclusionPath "$env:USERPROFILE\.rustup" -ErrorAction Stop } "rustup toolchains path"
 
       # cef-dll-sys builds CEF's C wrapper with CMake + Ninja.
       - name: Install Ninja (Windows — CMake ships with VS)
