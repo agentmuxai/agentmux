@@ -38,6 +38,7 @@ pub(crate) fn test_state() -> AppState {
 
     AppState {
         auth_key: "test-secret-key".to_string(),
+        lan_key: "test-lan-key".to_string(),
         boot_id: std::sync::Arc::from("test-boot"),
         version: "0.28.20".to_string(),
         app_path: String::new(),
@@ -784,6 +785,103 @@ async fn self_endpoint_resolves_seeded_agent() {
     assert_eq!(json["workspace_name"], "Starter workspace");
     assert!(json["workspace_id"].is_string(), "workspace_id resolved");
     assert!(json["window_id"].is_string(), "window_id resolved via reverse lookup");
+}
+
+// SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md LAN P0-1 — the scoped
+// `lan_key` (broadcast via mDNS/UDP for LAN peer discovery) must be
+// accepted by the two LAN-forwarding routes but rejected everywhere else,
+// and the full `auth_key` must keep working on those same two routes
+// (the normal, non-LAN case — e.g. agentmux-mcp's SendMessage tool).
+
+#[tokio::test]
+async fn lan_key_is_accepted_on_reactive_agent_lookup() {
+    let app = test_router();
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/agentmux/reactive/agent?id=nonexistent")
+        .header("X-AuthKey", "test-lan-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    // 404 (agent not found), not 401 — proves the lan_key cleared auth and
+    // the request reached the handler.
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn full_auth_key_still_works_on_reactive_agent_lookup() {
+    let app = test_router();
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/agentmux/reactive/agent?id=nonexistent")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn lan_key_is_accepted_on_reactive_inject() {
+    let app = test_router();
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/agentmux/reactive/inject")
+        .header("X-AuthKey", "test-lan-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            serde_json::json!({"target_agent": "nonexistent", "message": "hi"}).to_string(),
+        ))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    // The route itself always returns 200 with a success:false body for an
+    // unknown target (see handle_reactive_inject) — the point here is just
+    // that it's not 401.
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn garbage_key_is_rejected_on_reactive_inject() {
+    let app = test_router();
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/agentmux/reactive/inject")
+        .header("X-AuthKey", "not-a-real-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            serde_json::json!({"target_agent": "nonexistent", "message": "hi"}).to_string(),
+        ))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// The whole point of LAN P0-1: a captured `lan_key` must NOT grant access
+/// to the general API surface, only the two LAN-forwarding routes.
+#[tokio::test]
+async fn lan_key_is_rejected_on_the_general_service_route() {
+    let app = test_router();
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/api/v1/self?block_id=anything")
+        .header("X-AuthKey", "test-lan-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn lan_key_is_rejected_on_other_reactive_routes() {
+    let app = test_router();
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/agentmux/reactive/agents")
+        .header("X-AuthKey", "test-lan-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
 
 /// `/api/v1/self` is auth-gated like every other route.

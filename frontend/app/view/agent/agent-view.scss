@@ -53,10 +53,14 @@
     position: relative;
 
     // Floats over the content instead of reserving its own row —
-    // SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md. The goal: with one
+    // SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md. Originally: with one
     // conversation open, nothing but the "+" button's own 28×28px box
-    // should ever obstruct the conversation, which now renders (and
-    // scrolls) underneath the rest of this row.
+    // should ever obstruct the conversation. Revised by
+    // SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md: the trailing space
+    // past "+" is now a frosted-glass panel (see `> .pane-tab-strip` below)
+    // rather than fully see-through — still click/scroll-through
+    // (`pointer-events: none` on the empty area), just no longer visually
+    // invisible.
     //
     // Overrides PaneTabStrip.scss's own `align-self: flex-start` (a no-op
     // once out of flow — harmless to leave, not worth overriding just to
@@ -88,19 +92,56 @@
         position: absolute;
         top: 0;
         left: 0;
+        right: 0;   // Was `width: fit-content` (shrink-to-fit) — now spans
+                    // the full pane so the glass fill below covers the
+                    // whole trailing area past "+", not just [tabs][+]
+                    // itself. See
+                    // docs/specs/SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md.
         z-index: var(--z-pane-overlay, 4);
-        // Explicit shrink-to-fit, not just relying on the implicit
-        // absolute-positioning auto-width algorithm — belt-and-suspenders;
-        // the algorithm should already size this to its content per spec
-        // (only `left`, not `right`, is set). Not itself the fix for the
-        // semi-transparent-rectangle-next-to-"+" report live-tested
-        // 2026-08-11: that turned out to be `appearance: auto`'s native
-        // button chrome on `.pane-tab-strip-add` (PaneTabStrip.scss),
-        // unrelated to this container's own width — confirmed by the
-        // rectangle staying a fixed size regardless of pane width and
-        // appearing with a single conversation open (only the "+"
-        // rendered, no tab pill to have been mis-sized).
-        width: fit-content;
+
+        // Glass panel over the trailing space right of "+" —
+        // SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md. `backdrop-filter`
+        // (not `filter: blur()`) blurs whatever renders BEHIND this box
+        // (the scrolling conversation), compositing this translucent tint
+        // on top — the same primitive `.modal-backdrop` (modal.scss) and
+        // the magnified-pane backdrop (block.scss) already use for a
+        // frosted-glass surface over live content. `filter: blur()` would
+        // instead blur the tab labels/"+" glyph themselves — wrong effect.
+        // `var(--tab-strip-bg)` (not fully transparent) is what makes this
+        // read as a panel rather than just "blurry conversation" — same
+        // "Layer A / recessed tab-strip" token the window-level tab bar
+        // (window-header.*.scss) already uses, just not previously applied
+        // to this pane-level strip. `2px` (not modal.scss's `blur(8px)`,
+        // tried first and rejected live 2026-08-12 — full letterforms
+        // dissolved into an unreadable smear) matches tilelayout.scss's
+        // `--block-blur: 2px` instead, a softer touch already established
+        // in this codebase for "still legible, just softened" (drag/resize
+        // states) rather than modal.scss's "fully obscure" full-pane
+        // backdrop. Individual letters stay distinguishable at this
+        // radius; only fine detail (exact word boundaries) softens.
+        background: var(--tab-strip-bg);
+        backdrop-filter: blur(2px);
+        -webkit-backdrop-filter: blur(2px);
+
+        // The box now spans the full pane width, but only [tabs][+] should
+        // stay clickable — the empty trailing area must let clicks/scroll
+        // pass through to the conversation underneath (the interaction
+        // half of the original "unobstructed" goal from
+        // SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md still holds; only
+        // the visual half changed, per the blur spec above). `.pane-tab-tip`
+        // (the Tooltip wrapper around each tab, PaneTabStrip.tsx), not
+        // `.pane-tab` directly, is the child that needs `auto` restored.
+        // Plain descendant selectors (no `>`) below, deliberately — both
+        // now sit one level deeper, inside `.pane-tab-strip-inner`
+        // (SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md
+        // §A.2), and a descendant combinator keeps matching regardless of
+        // nesting depth — no change needed here when that layer was added.
+        pointer-events: none;
+
+        .pane-tab-tip,
+        .pane-tab-strip-add {
+            pointer-events: auto;
+        }
 
         // PaneTabStrip.scss's shared "+" and tab styling is transparent by
         // default (opaque only on hover/active) — correct for editor/

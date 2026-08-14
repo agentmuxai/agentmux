@@ -21,6 +21,7 @@
 //! against a different target or reattributed to a different claimed sender.
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
@@ -75,6 +76,72 @@ pub fn verify_jekt(
     let Ok(mut mac) = HmacSha256::new_from_slice(key) else { return false };
     mac.update(material.as_bytes());
     mac.verify_slice(&sig).is_ok()
+}
+
+// ---- WAN-tier sender signing (Ed25519) ----
+//
+// Distinct signing scheme from host-tier's HMAC above, and deliberately so:
+// host-tier's key is minted per-instance and never leaves the srv process
+// that owns it, so a symmetric secret shared only between "sign" and
+// "verify" on the very same machine is the right tool. A WAN-tier service
+// sender (e.g. the GitHub review-notification consumer, "reagent") is
+// verified by *every* AgentMux instance on the network, not just its own
+// account — an HMAC key distributed that widely is no longer meaningfully
+// secret. Asymmetric signing lets the private key stay in exactly one
+// place (agentmux-cloud's Secrets Manager) while every client ships only
+// the public key, openly. See
+// docs/specs/SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §6.2 addendum.
+//
+// Reuses the exact same `signed_material` construction as host-tier HMAC —
+// same replay/reattribution-resistance properties (msgid+source+target+ts
+// bound into what's signed), just a different signature algorithm over it.
+
+/// Pinned Ed25519 public keys for AgentMux's own WAN-tier service senders.
+/// Keyed by `key_id` (carried alongside the signature in the wire format)
+/// so a future key rotation can add a new entry without invalidating
+/// verification of messages already in flight when signed under the old
+/// key. The matching private key is never present in this repo — it lives
+/// only in agentmux-cloud's Secrets Manager, held by the signing service.
+///
+/// `reagent-v1-dev` is a placeholder minted during initial implementation
+/// (its private half was generated in a local shell for wiring/testing
+/// purposes and must be treated as already-exposed) — production
+/// deployment must generate a fresh keypair via a secure channel (not a
+/// transcript-visible shell command) and register the real public key here
+/// under a new `key_id` before the private key is ever loaded into
+/// Secrets Manager for live traffic.
+fn reagent_public_key(key_id: &str) -> Option<[u8; 32]> {
+    match key_id {
+        "reagent-v1-dev" => Some([
+            104, 98, 241, 120, 99, 50, 230, 185, 228, 117, 241, 110, 130, 85, 252, 75, 141, 152,
+            224, 92, 125, 154, 123, 40, 96, 149, 214, 172, 94, 120, 116, 200,
+        ]),
+        _ => None,
+    }
+}
+
+/// Verify a WAN-tier jekt's claimed `reagent_sig` against the pinned public
+/// key for `key_id`. Returns `false` (never panics) for an unknown
+/// `key_id`, malformed base64, a malformed/wrong-length signature, or a
+/// signature that simply doesn't verify — callers should treat all of
+/// these identically: "not verified," rendering `SIG=invalid` rather than
+/// `SIG=verified` in the marker (see `wrap_jekt_message`'s doc comment).
+pub fn verify_reagent_jekt(
+    key_id: &str,
+    msgid: &str,
+    source_agent: &str,
+    target_agent: &str,
+    ts_secs: i64,
+    message: &str,
+    sig_b64: &str,
+) -> bool {
+    let Some(pubkey_bytes) = reagent_public_key(key_id) else { return false };
+    let Ok(verifying_key) = VerifyingKey::from_bytes(&pubkey_bytes) else { return false };
+    let Ok(sig_bytes) = BASE64.decode(sig_b64) else { return false };
+    let Ok(sig_arr) = <[u8; 64]>::try_from(sig_bytes.as_slice()) else { return false };
+    let signature = Signature::from_bytes(&sig_arr);
+    let material = signed_material(msgid, source_agent, target_agent, ts_secs, message);
+    verifying_key.verify(material.as_bytes(), &signature).is_ok()
 }
 
 #[cfg(test)]
@@ -145,5 +212,148 @@ mod tests {
     #[test]
     fn empty_signature_fails_verification() {
         assert!(!verify_jekt(&key(), "msg-1", "agentx", "agenty", 1_000, "hello", ""));
+    }
+
+    // ---- verify_reagent_jekt (Ed25519) ----
+    //
+    // Fixture signature produced offline against the "reagent-v1-dev" pinned
+    // public key's matching private key, over signed_material("msg-1",
+    // "github-consumer", "agentx", 1000, "hello") — i.e. the exact material
+    // `signed_material()` above constructs for those arguments. Exercises the
+    // real pinned key path end to end rather than a separate test-only key.
+    const FIXTURE_SIG_B64: &str =
+        "QehidZjJa2jYLPIPYSsVxUlm86W5Fdbr9PV3P4HJyZwJ68/HZR9EaAL0MpcVtTuZJW2+MMGebc0RH9HITNJGCw==";
+
+    #[test]
+    fn a_correctly_signed_reagent_message_verifies() {
+        assert!(verify_reagent_jekt(
+            "reagent-v1-dev",
+            "msg-1",
+            "github-consumer",
+            "agentx",
+            1_000,
+            "hello",
+            FIXTURE_SIG_B64,
+        ));
+    }
+
+    #[test]
+    fn reagent_unknown_key_id_fails_verification() {
+        assert!(!verify_reagent_jekt(
+            "reagent-v2-does-not-exist",
+            "msg-1",
+            "github-consumer",
+            "agentx",
+            1_000,
+            "hello",
+            FIXTURE_SIG_B64,
+        ));
+    }
+
+    #[test]
+    fn reagent_tampered_message_fails_verification() {
+        assert!(!verify_reagent_jekt(
+            "reagent-v1-dev",
+            "msg-1",
+            "github-consumer",
+            "agentx",
+            1_000,
+            "goodbye",
+            FIXTURE_SIG_B64,
+        ));
+    }
+
+    #[test]
+    fn reagent_wrong_target_fails_verification() {
+        // Same reattribution/replay resistance as host-tier HMAC — the
+        // signature is bound to target_agent, so it can't be replayed
+        // claiming delivery to a different agent.
+        assert!(!verify_reagent_jekt(
+            "reagent-v1-dev",
+            "msg-1",
+            "github-consumer",
+            "agenty",
+            1_000,
+            "hello",
+            FIXTURE_SIG_B64,
+        ));
+    }
+
+    #[test]
+    fn reagent_wrong_source_fails_verification() {
+        assert!(!verify_reagent_jekt(
+            "reagent-v1-dev",
+            "msg-1",
+            "someone-else",
+            "agentx",
+            1_000,
+            "hello",
+            FIXTURE_SIG_B64,
+        ));
+    }
+
+    #[test]
+    fn reagent_wrong_timestamp_fails_verification() {
+        assert!(!verify_reagent_jekt(
+            "reagent-v1-dev",
+            "msg-1",
+            "github-consumer",
+            "agentx",
+            1_001,
+            "hello",
+            FIXTURE_SIG_B64,
+        ));
+    }
+
+    #[test]
+    fn reagent_wrong_msgid_fails_verification() {
+        assert!(!verify_reagent_jekt(
+            "reagent-v1-dev",
+            "msg-2",
+            "github-consumer",
+            "agentx",
+            1_000,
+            "hello",
+            FIXTURE_SIG_B64,
+        ));
+    }
+
+    #[test]
+    fn reagent_malformed_base64_signature_fails_verification_not_panics() {
+        assert!(!verify_reagent_jekt(
+            "reagent-v1-dev",
+            "msg-1",
+            "github-consumer",
+            "agentx",
+            1_000,
+            "hello",
+            "not-valid-base64!!",
+        ));
+    }
+
+    #[test]
+    fn reagent_wrong_length_signature_fails_verification_not_panics() {
+        assert!(!verify_reagent_jekt(
+            "reagent-v1-dev",
+            "msg-1",
+            "github-consumer",
+            "agentx",
+            1_000,
+            "hello",
+            "dG9vc2hvcnQ=", // "tooshort" base64 — decodes fine, wrong length
+        ));
+    }
+
+    #[test]
+    fn reagent_empty_signature_fails_verification() {
+        assert!(!verify_reagent_jekt(
+            "reagent-v1-dev",
+            "msg-1",
+            "github-consumer",
+            "agentx",
+            1_000,
+            "hello",
+            "",
+        ));
     }
 }

@@ -66,6 +66,31 @@ const CLIENT_PING_INTERVAL_SECS: u64 = 240;
 // short interval is fine.
 const BROKER_SWEEP_INTERVAL_SECS: u64 = 60;
 
+// Max age (seconds) a reagent-signed WAN jekt's `reagent_ts_secs` may be
+// from "now" and still verify — anti-replay, same purpose as
+// server/reactive.rs's JEKT_SIG_MAX_AGE_SECS for host-tier (reagentx P1 on
+// PR #2570). Wider than host-tier's 300s because this covers real network
+// delivery latency, not a same-machine call — matches the github-consumer
+// Lambda's own REVIEW_NOTIFICATION_TTL_SECONDS delivery window.
+const REAGENT_SIG_MAX_AGE_SECS: i64 = 600;
+
+fn now_unix_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Is `ts_secs` (a reagent signature's claimed signing time) within
+/// `REAGENT_SIG_MAX_AGE_SECS` of `now`? Extracted as a pure function (takes
+/// `now` explicitly rather than calling `now_unix_secs()` itself) so it's
+/// unit-testable without mocking the system clock. `ts_secs <= 0` is never
+/// fresh — a zero/negative timestamp only happens for a malformed or
+/// missing claim, never a genuine signature.
+fn reagent_sig_is_fresh(ts_secs: i64, now: i64) -> bool {
+    ts_secs > 0 && (now - ts_secs).abs() <= REAGENT_SIG_MAX_AGE_SECS
+}
+
 // ── Wire protocol ─────────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -667,6 +692,19 @@ async fn sync_agent_reactive(
         source_agent: Option<String>,
         message: String,
         priority: Option<String>,
+        // Present only for messages signed by an AgentMux-operated WAN
+        // sender (currently just the GitHub review-notification consumer,
+        // "reagent") — see agentmux_common::jekt_sign::verify_reagent_jekt.
+        // All four travel together; verification is attempted only when
+        // every one of them deserializes present (see below).
+        #[serde(default)]
+        reagent_sig: Option<String>,
+        #[serde(default)]
+        reagent_key_id: Option<String>,
+        #[serde(default)]
+        reagent_msg_id: Option<String>,
+        #[serde(default)]
+        reagent_ts_secs: Option<i64>,
     }
     #[derive(Deserialize)]
     struct AckResp {
@@ -852,6 +890,44 @@ async fn sync_agent_reactive(
             continue;
         }
 
+        // Verify a reagent-signed WAN message (see PendingInj's doc comment)
+        // before delivery. Only attempted when every one of the four
+        // signing fields is present — a partial set (e.g. a sig but no
+        // key_id) is treated the same as "not signed," not "signed but
+        // broken," since a legitimate sender always sends all four
+        // together. Never affects escalation (WAN stays unconditionally
+        // TRUST=network-claimed / sensitive-eligible) — only which SIG=
+        // marker field renders. See InjectionRequest::reagent_verified.
+        //
+        // Anti-replay (reagentx P1 on PR #2570): a captured, validly-signed
+        // (reagent_sig, reagent_key_id, reagent_msg_id, reagent_ts_secs,
+        // message) tuple could otherwise be resubmitted under a brand-new
+        // injection `id` indefinitely and still render SIG=verified — same
+        // class of gap host-tier's `verify_jekt_signature` closed with
+        // `JEKT_SIG_MAX_AGE_SECS`. `REAGENT_SIG_MAX_AGE_SECS` is wider
+        // (600s vs. 300s) because this is real network delivery, not a
+        // same-machine call — matches the github-consumer Lambda's own
+        // REVIEW_NOTIFICATION_TTL_SECONDS delivery window, so a message
+        // that's still legitimately within its own staleness budget never
+        // spuriously fails signature freshness on top of that.
+        let reagent_verified = match (&inj.reagent_sig, &inj.reagent_key_id, &inj.reagent_msg_id, inj.reagent_ts_secs) {
+            (Some(sig), Some(key_id), Some(msg_id), Some(ts_secs)) => {
+                Some(
+                    reagent_sig_is_fresh(ts_secs, now_unix_secs())
+                        && agentmux_common::jekt_sign::verify_reagent_jekt(
+                            key_id,
+                            msg_id,
+                            inj.source_agent.as_deref().unwrap_or(""),
+                            agent_id,
+                            ts_secs,
+                            &inj.message,
+                            sig,
+                        ),
+                )
+            }
+            _ => None,
+        };
+
         let req = InjectionRequest {
             target_agent: agent_id.to_string(),
             message: inj.message.clone(),
@@ -862,6 +938,7 @@ async fn sync_agent_reactive(
             jekt_tier: None,       // auto-detected from keywords
             delivery_tier: Some("wan".to_string()),
             forward_hops: 0,
+            reagent_verified,
             ..Default::default()
         };
         let delivery = handler.inject_message(req);
@@ -982,6 +1059,7 @@ mod tests {
     use super::is_credential_rejected;
     use super::shared_token_rejection_outcome;
     use super::AgentSyncOutcome;
+    use super::{reagent_sig_is_fresh, REAGENT_SIG_MAX_AGE_SECS};
     use crate::broker::RefreshErrorKind;
     use crate::muxbus::pkce::RefreshTokenError;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -1038,6 +1116,38 @@ mod tests {
         for status in [reqwest::StatusCode::OK, reqwest::StatusCode::INTERNAL_SERVER_ERROR] {
             assert!(!is_credential_rejected(status));
         }
+    }
+
+    // SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §6.2 addendum —
+    // anti-replay for reagent-signed WAN jekts (reagentx P1 on PR #2570).
+    #[test]
+    fn reagent_sig_exactly_now_is_fresh() {
+        assert!(reagent_sig_is_fresh(1_000, 1_000));
+    }
+
+    #[test]
+    fn reagent_sig_within_the_window_is_fresh() {
+        assert!(reagent_sig_is_fresh(1_000, 1_000 + REAGENT_SIG_MAX_AGE_SECS));
+        assert!(reagent_sig_is_fresh(1_000, 1_000 - REAGENT_SIG_MAX_AGE_SECS));
+    }
+
+    #[test]
+    fn reagent_sig_just_past_the_window_is_not_fresh() {
+        assert!(!reagent_sig_is_fresh(1_000, 1_000 + REAGENT_SIG_MAX_AGE_SECS + 1));
+        assert!(!reagent_sig_is_fresh(1_000, 1_000 - REAGENT_SIG_MAX_AGE_SECS - 1));
+    }
+
+    #[test]
+    fn reagent_sig_far_in_the_past_is_not_fresh() {
+        // The exact scenario this exists to stop: a captured signature from
+        // hours ago resubmitted under a new injection id.
+        assert!(!reagent_sig_is_fresh(1_000, 1_000 + 3600));
+    }
+
+    #[test]
+    fn reagent_sig_zero_or_negative_timestamp_is_never_fresh() {
+        assert!(!reagent_sig_is_fresh(0, 0));
+        assert!(!reagent_sig_is_fresh(-1, 0));
     }
 
     #[test]

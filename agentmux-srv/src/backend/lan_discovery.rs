@@ -581,16 +581,26 @@ impl LanDiscoveryController {
     }
 
     /// Query LAN peers for which one hosts `agent_id`. Returns `(peer_url,
-    /// auth_key)` for the first peer that responds 2xx to the agent-lookup
+    /// lan_key)` for the first peer that responds 2xx to the agent-lookup
     /// endpoint. Results — both positive and negative — are cached for
     /// `LAN_AGENT_CACHE_TTL_SECS` seconds to avoid a blocking peer fan-out on
     /// every inject for cloud-only agents.
     ///
-    /// Security: `auth_key` is broadcast in the mDNS TXT record. This is
-    /// intentional and matches the same trust assumption as tier-2 loopback
-    /// forwarding — LAN traffic is trusted (private network). Anyone on the LAN
-    /// who can already intercept mDNS multicast can intercept the HTTP traffic
-    /// too, so the key adds no exposure beyond what already exists.
+    /// Security (SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md LAN P0-1):
+    /// the value broadcast in the mDNS TXT record / UDP probe response
+    /// (`self.auth_key` field name kept for wire back-compat with older
+    /// peer versions — see `Config::lan_key`'s doc comment) is now a
+    /// separate, narrowly-scoped credential, NOT the instance's full-access
+    /// `auth_key`. A passive LAN listener who captures it gets standing
+    /// access to only the two LAN-forwarding routes
+    /// (`lan_or_full_auth_middleware` in `server/mod.rs`) — not the full
+    /// `/agentmux/service` surface this used to expose. Broadcasting
+    /// *something* in cleartext to the LAN is still an accepted trade-off
+    /// of this opt-in feature (mDNS/UDP have no confidentiality of their
+    /// own); this change is about shrinking what a captured value is worth,
+    /// not about hiding it in transit — see the spec's LAN P1-1 for the
+    /// separate, not-yet-implemented "encrypt/authenticate the transport
+    /// too" hardening.
     pub async fn find_agent(
         &self,
         agent_id: &str,

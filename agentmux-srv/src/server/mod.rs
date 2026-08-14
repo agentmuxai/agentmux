@@ -68,6 +68,10 @@ use agentmux_common::api_types::{
 #[derive(Clone)]
 pub struct AppState {
     pub auth_key: String,
+    /// LAN peer-discovery credential — see `Config::lan_key`'s doc comment.
+    /// Accepted only by `lan_or_full_auth_middleware`'s two routes, never
+    /// the general `auth_middleware` gating everything else.
+    pub lan_key: String,
     /// Random identifier generated once per process boot — NOT the
     /// `--instance` channel name (`config.instance_id`), which is
     /// stable across restarts and shared by every process on the same
@@ -266,17 +270,34 @@ pub fn build_router(state: AppState) -> Router {
         // allow_origin comment above).
         .expose_headers(vec!["X-ZoneFileInfo".parse().unwrap()]);
 
+    // The two routes an LAN peer actually calls when forwarding a jekt or
+    // looking up which agents this instance hosts
+    // (`LanDiscoveryController::find_agent`, `server/reactive.rs`'s Tier-3
+    // forward). Kept OUT of `reactive_routes`/`authed_routes` deliberately
+    // — merged at the top level with their own `lan_or_full_auth_middleware`
+    // instead, so a LAN peer's scoped `lan_key` (see `Config::lan_key`) is
+    // accepted here without also being accepted by `authed_routes`'s much
+    // broader surface (the general `auth_middleware` there requires the
+    // full `auth_key` only). See `lan_or_full_auth_middleware`'s doc
+    // comment for why this can't just be nested inside `authed_routes`.
+    let lan_forward_routes = Router::new()
+        .route("/agentmux/reactive/inject", post(reactive::handle_reactive_inject))
+        .route("/agentmux/reactive/agent", get(reactive::handle_reactive_agent))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            lan_or_full_auth_middleware,
+        ));
+
     // Reactive routes. Previously registered without auth on the
     // assumption that localhost is a trust boundary; the 2026-05-11
     // security audit (C1 + C2) showed that any local process — or a
     // web page driving 127.0.0.1 via the permissive CORS layer — could
     // drive `/agentmux/reactive/inject` and reconfigure the cloud
     // muxbus poller. These routes are now merged into `authed_routes`
-    // below and gated by `auth_middleware`.
+    // below and gated by `auth_middleware`. (`/inject` and `/agent` are
+    // NOT here — see `lan_forward_routes` above.)
     let reactive_routes = Router::new()
-        .route("/agentmux/reactive/inject", post(reactive::handle_reactive_inject))
         .route("/agentmux/reactive/agents", get(reactive::handle_reactive_agents))
-        .route("/agentmux/reactive/agent", get(reactive::handle_reactive_agent))
         .route("/agentmux/reactive/audit", get(reactive::handle_reactive_audit))
         .route("/agentmux/reactive/register", post(reactive::handle_reactive_register))
         .route(
@@ -446,6 +467,7 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .merge(health)
         .merge(whatsapp_webhooks)
+        .merge(lan_forward_routes)
         .merge(authed_routes)
         .layer(cors)
         .with_state(state)
@@ -1371,6 +1393,49 @@ async fn auth_middleware(
 
     match auth_key {
         Some(key) if key == state.auth_key => next.run(req).await,
+        _ => (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "unauthorized"})),
+        )
+            .into_response(),
+    }
+}
+
+/// Auth middleware for the two LAN-forwarding-relevant reactive routes
+/// (`/agentmux/reactive/agent`, `/agentmux/reactive/inject`) — accepts
+/// EITHER `state.auth_key` (the normal, full-access case: every other
+/// caller of these two routes, e.g. agentmux-mcp's SendMessage tool for a
+/// plain host-tier inject) OR `state.lan_key` (a LAN peer forwarding a
+/// jekt or looking up which agents this instance hosts).
+///
+/// Deliberately a SEPARATE middleware from `auth_middleware`, applied to a
+/// standalone router merged at the top level rather than nested inside
+/// `authed_routes` — nesting would put `authed_routes`'s own
+/// `route_layer(auth_middleware)` on the outside, rejecting the LAN key
+/// before this middleware ever ran. This is why these two routes live in
+/// their own `lan_forward_routes` router in `router()`, not in
+/// `reactive_routes`.
+///
+/// `state.lan_key` grants access to ONLY these two routes — never the rest
+/// of `/agentmux/service`, `/agentmux/file`, shell creation, credential/
+/// identity endpoints, etc. See `Config::lan_key`'s doc comment for why
+/// this exists (SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md LAN P0-1).
+async fn lan_or_full_auth_middleware(
+    State(state): State<AppState>,
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    if req.method() == Method::OPTIONS {
+        return next.run(req).await;
+    }
+
+    let auth_key = req
+        .headers()
+        .get("X-AuthKey")
+        .and_then(|v| v.to_str().ok());
+
+    match auth_key {
+        Some(key) if key == state.auth_key || key == state.lan_key => next.run(req).await,
         _ => (
             StatusCode::UNAUTHORIZED,
             Json(json!({"error": "unauthorized"})),
