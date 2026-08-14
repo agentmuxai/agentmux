@@ -703,15 +703,22 @@ async fn sync_agent_reactive(
 
         if is_credential_rejected(resp.status()) {
             if using_per_agent {
-                // The per-agent credential's cached token is stale/revoked
-                // or binding-mismatched server-side even though it looked
-                // locally valid — invalidate it (so the next
-                // agent_credentials call re-fetches instead of retrying the
-                // same rejected token) and retry THIS fetch immediately
-                // with the shared token, rather than tearing down the
-                // whole shared session (which would starve delivery for
-                // every OTHER agent too).
-                crate::muxbus::agent_credentials::invalidate_cached_token(agent_id, wstore);
+                // The per-agent credential's cached token is stale/revoked,
+                // or the credential itself is binding-mismatched server-side
+                // even though it looked locally valid — invalidate it (so
+                // the next agent_credentials call re-fetches instead of
+                // retrying the same rejected token) and retry THIS fetch
+                // immediately with the shared token, rather than tearing
+                // down the whole shared session (which would starve
+                // delivery for every OTHER agent too). 403 additionally
+                // records a cooldown — see
+                // invalidate_binding_mismatched_credential's doc comment for
+                // why a plain token-clear isn't enough for that status.
+                if resp.status() == reqwest::StatusCode::FORBIDDEN {
+                    crate::muxbus::agent_credentials::invalidate_binding_mismatched_credential(agent_id, wstore);
+                } else {
+                    crate::muxbus::agent_credentials::invalidate_cached_token(agent_id, wstore);
+                }
                 tracing::warn!(
                     agent_id = %agent_id,
                     status = %resp.status(),
@@ -781,7 +788,11 @@ async fn sync_agent_reactive(
                 // shared token, rather than reconnecting the whole session
                 // or leaving this agent's already-fetched pending
                 // injections unclaimed until an unrelated broadcast fires.
-                crate::muxbus::agent_credentials::invalidate_cached_token(agent_id, wstore);
+                if claim_resp.status() == reqwest::StatusCode::FORBIDDEN {
+                    crate::muxbus::agent_credentials::invalidate_binding_mismatched_credential(agent_id, wstore);
+                } else {
+                    crate::muxbus::agent_credentials::invalidate_cached_token(agent_id, wstore);
+                }
                 tracing::warn!(
                     agent_id = %agent_id,
                     status = %claim_resp.status(),
