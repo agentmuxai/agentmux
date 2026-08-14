@@ -502,7 +502,20 @@ existing `TRUST=host-verified` behavior exactly: a cryptographically proven
 sender identity earns the same non-forced treatment regardless of which
 delivery tier carried it. `SIG=invalid` (present but wrong) or no `SIG=`
 field at all (the overwhelming majority of WAN traffic) both still force
-`TIER=sensitive` unconditionally, unchanged. See
+`TIER=sensitive` unconditionally, unchanged.
+
+**`SIG=verified` in the marker alone is not quite the full story:** two
+distinct pinned keys can produce it — the real production key AND a
+placeholder key (`reagent-v1-dev`) whose private half is documented as
+exposed since the moment it was generated, kept registered only so
+already-in-flight dev-signed messages still verify. The server-side code
+already accounts for this (`is_reagent_trusted_signing_key` gates tier
+relaxation on the specific key id, not just "some registered key verified")
+— so by the time you see the marker, `TIER` has already been computed
+correctly and this distinction is not something you need to re-check
+yourself. It's noted here only so this rule stays accurate relative to the
+implementation; don't take `SIG=verified` alone (independent of `TIER`) as
+proof of trust-worthiness in any other context. See
 `SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14.md` for the full rationale
 and why this is scoped to reagent specifically, not WAN traffic in general.
 
