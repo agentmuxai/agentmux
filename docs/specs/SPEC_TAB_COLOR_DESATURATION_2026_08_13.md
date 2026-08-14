@@ -46,10 +46,15 @@ unchanged.
 ## Proposed change
 
 1. Add a new `TAB_COLORS` replacement (muted) in `tab.tsx`, keeping the same
-   14 names/order so existing per-tab `--tab-color` values (stored as hex
-   strings, e.g. in saved layouts) still resolve to a color — old saved tab
-   colors will just render muted after this change, no migration needed
-   since the value itself is a plain hex string, not an index.
+   14 names/order for consistency with the picker UI. Note this does
+   **not** migrate existing tabs: `tab:color` stores the literal hex
+   string, not a name/index into `TAB_COLORS`, and there is no migration
+   logic anywhere in the codebase. A tab whose color was set before this
+   change keeps its old vivid hex indefinitely — it renders muted only if
+   the user re-picks a color from the (now-muted) swatch panel. Only newly
+   created tabs (`randomNewTabColor()` in `tab-actions.ts`) and the
+   startup-tab default (`tabbar.tsx`) pick up the new values immediately,
+   since those read `TAB_COLORS` at call time rather than a stored hex.
 
 2. Rename the current vivid array (don't delete it) to
    `AGENT_BORDER_COLORS` and move it to `frontend/app/view/agent/agent-color.ts`
