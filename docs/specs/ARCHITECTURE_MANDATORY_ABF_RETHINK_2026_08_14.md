@@ -516,8 +516,37 @@ implementation order:
 4. Definition-time provisioning for new agents (§6 step 3), setting
    `provider`/`model` at creation from whatever the create flow already
    knows (the provider the user picked to create the agent with).
-5. Spawn-time read-path change (7.4.1) — `agent_open.rs` +
-   `agent-model.ts` resolve provider/vendor through the bound bundle
-   instead of `AgentDefinition`'s own fields.
+5. **DONE (2026-08-15), backend half only.** Spawn-time read-path change
+   (7.4.1) — `agent_open.rs` resolves the ACTUAL harness for a spawn
+   through the bound bundle, not `AgentDefinition.provider` directly.
+   Implemented as one pure, unit-tested function
+   (`resolve_effective_provider_id`, 4 tests) called once right after the
+   agent definition loads, which then overwrites the local `agent.provider`
+   copy — every downstream read in the handler (~10 sites: CLI path,
+   launch args, auth dir, container command, output format, meta tags,
+   the `AgentOpenResult` response) picks up the resolved value for free,
+   matching the "shadow, don't rewrite call sites" shape this section
+   originally sketched. This also fixes a real (if currently only
+   theoretical, per §7.3) correctness gap the sketch didn't call out:
+   `AgentDefinition.provider` is NOT actually immutable post-creation —
+   `agent.define`'s `if_exists=update` path can still change it via
+   `agent_def_update` — while the bundle's own copy IS backend-enforced
+   immutable (7.4.2's guard). So the two *can* legitimately diverge after
+   an update, and the bundle is the one guaranteed trustworthy; spawn now
+   reads that one. Falls back to `agent.provider` when there's no bundle
+   to consult (unbound legacy agent, missing row) so a spawn never
+   hard-fails on this alone.
+   **NOT DONE: the frontend half** (`agent-model.ts`'s pre-flight
+   `launchAgentDefinition` — Node.js availability check, CLI dir
+   resolution, log lines — still reads `agent.provider` directly, before
+   the RPC call reaches the now-correct backend resolution). Deliberately
+   deferred: fixing it means either an extra bundle-fetch round-trip on
+   every launch, or teaching `agent_def_list()` itself to shadow
+   `provider` for every consumer app-wide (Armory, agent settings, the
+   picker — a much bigger blast radius than this one spawn path). Low
+   real-world impact today since drift requires an explicit
+   `agent.define update` with a changed provider on an already-bundled
+   agent, which doesn't happen in current usage (§7.3). Flagging as a
+   known gap for whoever picks this up next, not silently dropping it.
 6. Bundle export/import field addition (7.4.3) — smallest piece, land last
    once the fields exist and are populated everywhere.
