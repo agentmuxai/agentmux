@@ -197,23 +197,44 @@ message merely claims to be."
 
 ## 3. Fixing the `delivery_tier` self-declaration gap (§1.2)
 
-The server, not the client, must determine `delivery_tier`. Concretely, in
-`handle_reactive_inject`: after auth middleware already establishes which key
-matched (`state.auth_key` vs `state.lan_key`), thread that outcome into the
-handler and **override** whatever `delivery_tier` the request body claims:
+**Revised after reagentx P0 on the implementing PR** — the original version
+of this section also downgraded a "lan" claim authenticated via the full
+`auth_key` to "host." That broke same-host forwarding: Tier 2a/2b in
+`server/reactive.rs` (relaying to a sibling channel/instance on this same
+machine when the target agent isn't found locally) re-authenticates using
+the SIBLING's own full `auth_key` — `lan_key` is a peer-to-peer credential
+between distinct machines, never shared across same-host channels. A jekt
+legitimately authenticated via `lan_key` at its first hop, whose LAN
+signature verification correctly detected a forgery
+(`lan_verified = Some(false)`, forcing `TIER=sensitive`), would have that
+escalation silently discarded on the second hop: `lan_verified` is
+`#[serde(skip_deserializing)]` (resets to `None` on every hop by design —
+see §2.4), and downgrading `delivery_tier` to "host" there meant
+`verify_lan_signature` never got the chance to re-derive it from the
+still-present `lan_sig` field.
+
+The actual gap only needs a one-directional fix. The server, not the
+client, must determine when a request is *forced* to be treated as LAN —
+but a client's own "lan" claim, when authenticated via the full key, isn't
+a bypass of anything: holding the full local `auth_key` already grants
+complete control over this instance, so self-labeling a request's tier
+grants nothing beyond what that credential already allows (at worst it
+triggers MORE scrutiny — `verify_lan_signature` running — never less).
+Concretely, in `handle_reactive_inject`, after auth middleware establishes
+which key matched:
 
 - Authenticated via `state.lan_key` → force `delivery_tier = "lan"`,
-  regardless of what the body said.
-- Authenticated via `state.auth_key` → the body's own `delivery_tier` is
-  trusted **only** for the "host" vs "wan" distinction (both are legitimately
-  self-originated from this same instance: "host" for a local MCP tool call,
-  "wan" for the muxbus cloud subscriber relaying a cloud-delivered message
-  into local injection) — never "lan," since a `lan_key`-holder is the only
-  caller who could have legitimately crossed the LAN boundary.
+  regardless of what the body said. This is the actual bypass this section
+  closes: without it, a `lan_key`-only holder could self-label a request
+  "host" to dodge LAN's stricter verification entirely.
+- Authenticated via `state.auth_key` → the body's own `delivery_tier` claim
+  is trusted as-is (host, wan, *or* lan) — no downgrade. Falls back to
+  `"host"` only when the body omits the field entirely.
 
 This is a small, mechanical change (thread one bool/enum through one function
-signature) but closes a real gap that would otherwise make §2's signing work
-bypassable by simply not claiming LAN delivery in the first place.
+signature) that closes the real one-directional gap (LAN-key holder claiming
+non-LAN) without breaking the legitimate multi-hop case (full-auth_key holder
+relaying an already-LAN-tagged jekt onward).
 
 ## 4. Failure semantics (matches existing patterns exactly)
 

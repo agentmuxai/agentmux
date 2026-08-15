@@ -1422,15 +1422,18 @@ async fn auth_middleware(
 /// this exists (SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md LAN P0-1).
 /// Which of the two credentials `lan_or_full_auth_middleware` accepted
 /// authenticated this specific request. Inserted into the request's
-/// extensions so `handle_reactive_inject` can derive `delivery_tier`
-/// server-side instead of trusting whatever the JSON body claims — see
-/// docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §3. A `lan_key`
-/// holder is the ONLY caller who could have legitimately crossed the LAN
-/// boundary; the full `auth_key` covers everything self-originated from
-/// this same instance (a local MCP tool call, or the muxbus cloud
-/// subscriber relaying a WAN delivery into local injection) and is NOT
-/// sufficient on its own to distinguish which of those two the body's own
-/// `delivery_tier` claim should be trusted for.
+/// extensions so `handle_reactive_inject` can force `delivery_tier = "lan"`
+/// whenever `LanKey` authenticated the request, regardless of what the JSON
+/// body itself claims — closing the bypass where a `lan_key`-only holder
+/// could otherwise just self-label a request "host" to dodge LAN's stricter
+/// verification entirely. See
+/// docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §3 for the full
+/// rationale, including why the reverse (downgrading a "lan" claim seen
+/// under `FullAuthKey`) is deliberately NOT done — reagentx P0 found that
+/// same-host forwarding (Tier 2a/2b in `reactive.rs`) legitimately
+/// re-authenticates an already-LAN-originated jekt with a sibling
+/// instance's own full `auth_key`, so downgrading there silently discarded
+/// an already-detected signature failure's forced-sensitive escalation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ReactiveAuthVia {
     FullAuthKey,

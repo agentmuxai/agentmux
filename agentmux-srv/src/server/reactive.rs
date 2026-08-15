@@ -272,6 +272,41 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
     req.lan_verified = Some(verified);
 }
 
+/// Server-derived `delivery_tier` for the LAN-key case only —
+/// docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §3, revised after
+/// reagentx P0 on the implementing PR: an earlier version of this override
+/// also force-downgraded a "lan" claim to "host" whenever auth was via the
+/// full `auth_key`, reasoning that "nothing authenticated via the full key
+/// could have genuinely crossed the LAN boundary." That's false once
+/// same-host forwarding (Tier 2a/2b below in `handle_reactive_inject`) is
+/// considered: a jekt legitimately authenticated via `lan_key` at its FIRST
+/// hop, then relayed to a sibling channel/instance on this same machine,
+/// authenticates that SECOND hop with the sibling's own full `auth_key`
+/// (not `lan_key` — that credential is peer-to-peer between distinct
+/// machines, never shared across same-host channels). Downgrading there
+/// silently discarded an already-detected LAN signature failure's
+/// forced-sensitive escalation (`lan_verified`/`reagent_verified` are
+/// `#[serde(skip_deserializing)]`, so they reset to `None` on every hop and
+/// must be free to re-derive from whatever `delivery_tier` the forward
+/// legitimately carries).
+///
+/// The actual gap this closes is narrower than "full auth_key can never
+/// claim lan": a `lan_key` holder is the ONLY credential that can FORCE
+/// `delivery_tier = "lan"` regardless of what the body says (closing the
+/// original bypass — claim "host" instead to dodge LAN scrutiny entirely).
+/// A full-`auth_key` caller's own claim (host/wan/lan) is otherwise trusted
+/// as-is: holding the full local key already grants complete control over
+/// this instance, so which tier it self-labels a request as grants nothing
+/// extra — at worst it triggers MORE verification
+/// (`verify_lan_signature` running), never less.
+fn resolve_delivery_tier(auth_via: super::ReactiveAuthVia, claimed: Option<&str>) -> String {
+    if auth_via == super::ReactiveAuthVia::LanKey {
+        "lan".to_string()
+    } else {
+        claimed.unwrap_or("host").to_string()
+    }
+}
+
 pub(super) async fn handle_reactive_inject(
     State(state): State<AppState>,
     Extension(auth_via): Extension<super::ReactiveAuthVia>,
@@ -284,25 +319,7 @@ pub(super) async fn handle_reactive_inject(
         "reactive inject request received"
     );
 
-    // Server-derived delivery_tier, not the client's own claim —
-    // docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §3. A `lan_key`
-    // holder is the ONLY caller who could have legitimately crossed the LAN
-    // boundary, so that credential unconditionally means "lan," regardless
-    // of what the body says. The full `auth_key` covers everything
-    // self-originated from this same instance (a local MCP tool call, or
-    // the muxbus cloud subscriber relaying a WAN delivery) — the body's own
-    // claim is trusted for the host/wan distinction ONLY, never "lan":
-    // nothing authenticated via the full key could have genuinely crossed
-    // the LAN boundary, so a bogus `delivery_tier: "lan"` claim downgrades
-    // to "host" rather than being honored.
-    req.delivery_tier = Some(match auth_via {
-        super::ReactiveAuthVia::LanKey => "lan".to_string(),
-        super::ReactiveAuthVia::FullAuthKey => match req.delivery_tier.as_deref() {
-            Some("lan") => "host".to_string(),
-            Some(other) => other.to_string(),
-            None => "host".to_string(),
-        },
-    });
+    req.delivery_tier = Some(resolve_delivery_tier(auth_via, req.delivery_tier.as_deref()));
 
     verify_jekt_signature(&state, &mut req);
     verify_reagent_signature(&mut req, now_unix_secs());
@@ -1342,5 +1359,36 @@ mod verify_lan_signature_tests {
             req.lan_verified, None,
             "an unfindable public key must not be conflated with a failed verification"
         );
+    }
+}
+
+#[cfg(test)]
+mod resolve_delivery_tier_tests {
+    use super::*;
+
+    #[test]
+    fn lan_key_forces_lan_regardless_of_claim() {
+        assert_eq!(resolve_delivery_tier(super::super::ReactiveAuthVia::LanKey, Some("host")), "lan");
+        assert_eq!(resolve_delivery_tier(super::super::ReactiveAuthVia::LanKey, Some("wan")), "lan");
+        assert_eq!(resolve_delivery_tier(super::super::ReactiveAuthVia::LanKey, None), "lan");
+    }
+
+    #[test]
+    fn full_auth_key_trusts_the_body_claim_including_lan() {
+        // reagentx P0 regression: same-host Tier 2a/2b forwarding
+        // re-authenticates an already-lan-tagged jekt with a sibling
+        // instance's own full auth_key. If this ever downgrades "lan" to
+        // "host" again, an already-detected LAN signature failure's
+        // forced-sensitive escalation silently disappears on the second
+        // hop (lan_verified resets to None, and verify_lan_signature only
+        // runs when delivery_tier == "lan").
+        assert_eq!(resolve_delivery_tier(super::super::ReactiveAuthVia::FullAuthKey, Some("lan")), "lan");
+        assert_eq!(resolve_delivery_tier(super::super::ReactiveAuthVia::FullAuthKey, Some("wan")), "wan");
+        assert_eq!(resolve_delivery_tier(super::super::ReactiveAuthVia::FullAuthKey, Some("host")), "host");
+    }
+
+    #[test]
+    fn full_auth_key_defaults_to_host_when_body_omits_the_field() {
+        assert_eq!(resolve_delivery_tier(super::super::ReactiveAuthVia::FullAuthKey, None), "host");
     }
 }
