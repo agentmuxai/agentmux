@@ -1309,7 +1309,7 @@ async fn layout_seeders_route_through_reducer_coherently() {
     let (tree, focused, leaforder) =
         crate::backend::wcore::default_three_pane_tree("b-agent", "b-sysinfo", "b-swarm");
     crate::server::service::seed_layout_via_reducer(
-        &state, &tab1, tree, focused, leaforder,
+        &state, &tab1, tree, focused, leaforder, String::new(),
     )
     .await
     .expect("three-pane seed via reducer");
@@ -1376,7 +1376,7 @@ async fn layout_seed_unknown_tab_errors() {
     let (tree, focused, leaforder) =
         crate::backend::wcore::default_three_pane_tree("a", "b", "c");
     let err = crate::server::service::seed_layout_via_reducer(
-        &state, "ghost-tab", tree, focused, leaforder,
+        &state, "ghost-tab", tree, focused, leaforder, String::new(),
     )
     .await
     .expect_err("unknown tab must error");

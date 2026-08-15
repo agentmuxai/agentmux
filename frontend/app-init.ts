@@ -336,10 +336,16 @@ async function initHostWave(): Promise<void> {
 
         let windowId = clientData.windowids?.[0];
 
-        // If no windows exist, create one
+        // If no windows exist, create one. This is the genuine cold-start
+        // case (SPEC_SESSION_RESTORE_AND_SAVED_LAYOUTS_2026_08_13 Feature 1)
+        // — `Client.windowids` is empty, which only happens right after a
+        // graceful quit (the destroy-on-close cascade always empties it) or
+        // on a truly first-ever launch. Pass `restoreIfAvailable: true` so
+        // srv replays the last-session snapshot if one was saved on close,
+        // instead of always seeding the hardcoded default 3-pane layout.
         if (!windowId) {
             t = performance.now();
-            const newWindow = await withTimeout(WindowService.CreateWindow(null, "", currentWindowLabel()), RPC_TIMEOUT, "CreateWindow");
+            const newWindow = await withTimeout(WindowService.CreateWindow(null, "", currentWindowLabel(), true), RPC_TIMEOUT, "CreateWindow");
             tlog("CreateWindow (no windows)", t);
             windowId = newWindow.oid;
         }
