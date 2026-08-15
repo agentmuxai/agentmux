@@ -57,15 +57,32 @@ lands on.
 has to happen in application logic (validation at write time) and/or by
 changing what counts as "having an ABF."
 
+**Correction found during implementation (2026-08-14), more significant
+than §1.1's provider/model correction:** the earlier draft of this section
+mis-cited `agent_handlers/memory.rs:74` — that line sets a **bundle's own**
+`Memory.id` in the legacy `upsertmemory` handler, unrelated to an agent's
+FK. The actual FK lives in exactly two places: `db_agent_instances.memory_id`
+(a launched instance) and `db_agents.memory_id` — and `db_agents`' own
+schema comment says it plainly: *"Bindings (was on instance — only
+meaningful when `is_template=0`). For template rows these stay empty."*
+**`db_agent_definitions` — the durable "my agent" row users actually
+think of as "the agent" — has no `memory_id` column at all.** There is
+currently no way to bind a bundle to an agent *definition*, only to a
+specific *launch* of one. This means §3 below (definition-time
+provisioning) needs a genuine new column, not just enforcement logic on an
+existing field — revised in §3.1.
+
 ### 1.2 Agent creation → bundle binding happens late, and inconsistently
 
-Three separate creation paths, three different levels of enforcement:
+Three separate creation paths — revised after the correction above, since
+none of them actually operate at the definition level for `memory_id`
+today (there's no column to write to):
 
-| Path | Where | Requires a bundle? |
+| Path | Where | Binds a bundle to...? |
 |---|---|---|
-| `agent.define` (bare definition) | `agent_handlers/memory.rs:74` | No — `memory_id: String::new()` unconditionally |
-| "+ New from template" | `AgentCreateFromTemplateModal.tsx:162-171` | No — auto-picks first non-blank bundle *if one exists*, but `canSubmit` doesn't require it |
-| Launch modal (ad-hoc/continuation launch) | `AgentLaunchModal.tsx:401` | **Yes** — `canSubmit` genuinely blocks on `memoryId() !== ""`, picker filters out the blank singleton |
+| `agent.define` (bare definition) | `agent_handlers/*` | Nothing — `db_agent_definitions` has no `memory_id` column to set |
+| "+ New from template" | `AgentCreateFromTemplateModal.tsx:162-171`, `agent_handlers/template.rs:180` | The created **instance** (`AgentInstance.memory_id`) — auto-picks first non-blank bundle *if one exists*, `canSubmit` doesn't require it |
+| Launch modal (ad-hoc/continuation launch) | `AgentLaunchModal.tsx:401`, `agent_handlers/instance.rs:93` | The launched **instance** — `canSubmit` genuinely blocks on `memoryId() !== ""`, picker filters out the blank singleton |
 
 So the one place that actually enforces a real (non-blank) bundle is the
 *launch* modal — which fires per-instance, not per-agent-definition. An
@@ -136,17 +153,52 @@ rather than still-open.
 
 ## 3. Proposed architecture (assuming reading (b))
 
-### 3.1 Schema
-- Keep `memory_id: TEXT NOT NULL` (no destructive schema change to the
-  column itself — too many read/write call sites depend on the current
-  shape) but add an application-level invariant: no `db_agents` row may
-  have `memory_id=''` or `memory_id='blank'` after this ships.
+### 3.1 Schema (revised per §1.2's correction)
+
+Genuine new schema needed — not just an invariant on an existing field:
+
+- **Add `memory_id TEXT NOT NULL DEFAULT ''` to `db_agent_definitions`.**
+  This is the column that doesn't exist today; without it there is nowhere
+  to durably bind a bundle to an agent's definition (only to a specific
+  launched instance).
+- **Relax `db_agents.memory_id`'s current meaning.** It already exists on
+  `db_agents` but is documented as "only meaningful when `is_template=0`"
+  (i.e. template/definition rows leave it empty by convention, same soft
+  rule as the rest of this doc's §1.1 finding). Since `db_agents` is the
+  eventual consolidated table (dual-write today per its own migration
+  history, `OBJECT_SCHEMA_VERSION` v4 comment), no column addition needed
+  there — just start writing definition-level bundle bindings into it too,
+  and stop treating template rows' `memory_id` as always-empty.
+- **Decision (2026-08-15): do NOT wire this into the `db_agents` dual-write
+  path.** Traced `dual_write.rs`'s `agents_dual_write_definition_upsert` —
+  it deliberately omits `memory_id` from both its INSERT and its
+  `ON CONFLICT DO UPDATE` (only `agents_dual_write_instance_create`/
+  `_update`/`_repoint` ever write that column), exactly matching
+  `db_agents`' own schema comment ("only meaningful when `is_template=0`").
+  Touching that would force resolving "which wins, a definition's default
+  or an instance's explicit override" on a table that's mid-refactor
+  (Phase 3a dual-write only; Phase 3b/3c — reader flip, legacy table drop —
+  haven't happened yet) other in-flight work may depend on. Since Phase 3b
+  hasn't happened, `db_agents` isn't read from yet for this purpose anyway
+  — leaving it untouched costs nothing today and avoids the risk entirely.
+  `db_agent_definitions.memory_id` stands alone, read directly (same as
+  every other definition field is read today, pre-Phase-3b). Flagging
+  explicitly for whoever does Phase 3b later: this field needs a decision
+  then, not now.
+- `AgentInstance.memory_id` (launch-time) is unaffected and stays — a
+  launched instance can still be pointed at a *different* bundle than its
+  definition's default if a user explicitly does that via the launch modal
+  (§4's "not proposing to restrict sharing" already covers this); the new
+  definition-level field is just the *default* an instance inherits if the
+  launch modal doesn't override it.
 - New migration `m0021_backfill_agent_bundles.rs` (mirrors `m0020`'s
-  pattern): for every existing agent (global registry, not just local
-  SQLite — same trap `m0020` already documents) with `memory_id in ('', 'blank')`,
-  create a fresh `db_bundles` row (empty/default content, `is_blank=false`,
-  `name` derived from the agent's own name for discoverability in Armory's
-  bundle list) and point `memory_id` at it.
+  pattern): for every existing agent DEFINITION (global registry, not just
+  local SQLite — same trap `m0020` already documents) with
+  `memory_id in ('', 'blank')`, create a fresh `db_bundles` row
+  (empty/default content, `is_blank=false`, `provider='claude'`,
+  `model='anthropic'` per §7.3/§7.5, `name` derived from the agent's own
+  name for discoverability in Armory's bundle list) and point the
+  definition's new `memory_id` at it.
 
 ### 3.2 Creation-path unification
 - Move the "must have a bundle" decision from launch-time to

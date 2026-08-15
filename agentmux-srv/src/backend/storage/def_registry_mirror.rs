@@ -125,6 +125,12 @@ pub(super) fn record_to_agent_definition(rec: &DefinitionRecord) -> AgentDefinit
         // with the harness's default vendor. Known limitation, not a bug.
         model_vendor_base_url: String::new(),
         auto_continue_enabled: d.auto_continue_enabled,
+        // Same known limitation as model_vendor_base_url just above —
+        // DefinitionRecordV1 doesn't carry it yet, so a cross-channel
+        // reopen starts unbound. m0021's backfill only ever sees the LOCAL
+        // channel's SQLite for this reason; a genuinely global backfill
+        // needs this field added to the registry wire format first.
+        memory_id: String::new(),
     }
 }
 
@@ -380,6 +386,7 @@ mod tests {
             use_ambient_login: 0,
             model_vendor_base_url: String::new(),
             auto_continue_enabled: 0,
+            memory_id: String::new(),
         }
     }
 

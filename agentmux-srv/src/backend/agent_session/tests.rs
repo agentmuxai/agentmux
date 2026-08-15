@@ -493,7 +493,8 @@ fn insert_template(
         use_ambient_login: 0,
         auto_continue_enabled: 0,
         model_vendor_base_url: String::new(),
-    };
+    
+        memory_id: String::new(),};
     wstore.agent_def_insert(&mut def).unwrap();
     def
 }
@@ -728,7 +729,8 @@ fn template_promote_does_not_reuse_clone_with_active_zone() {
         use_ambient_login: 0,
         auto_continue_enabled: 0,
         model_vendor_base_url: String::new(),
-    };
+    
+        memory_id: String::new(),};
     wstore.agent_def_insert(&mut user_clone).unwrap();
     // The user's clone has its OWN active conversation.
     write_session_state(
@@ -837,7 +839,8 @@ fn template_promote_preserves_user_continuation_on_clone() {
         use_ambient_login: 0,
         auto_continue_enabled: 0,
         model_vendor_base_url: String::new(),
-    };
+    
+        memory_id: String::new(),};
     wstore.agent_def_insert(&mut prior_target).unwrap();
     // Seeded `:current` has the OLDER stale snapshot the prior
     // run's `delete_zone` failed to remove. Write it FIRST so
@@ -938,7 +941,8 @@ fn template_promote_recovers_partial_copy_at_zone() {
         use_ambient_login: 0,
         auto_continue_enabled: 0,
         model_vendor_base_url: String::new(),
-    };
+    
+        memory_id: String::new(),};
     wstore.agent_def_insert(&mut prior_target).unwrap();
 
     // Seeded `:current` has BOTH files.
@@ -1041,7 +1045,8 @@ fn template_promote_promotes_newer_source_over_stale_destination() {
         use_ambient_login: 0,
         auto_continue_enabled: 0,
         model_vendor_base_url: String::new(),
-    };
+    
+        memory_id: String::new(),};
     wstore.agent_def_insert(&mut prior_target).unwrap();
 
     // Destination has the prior copy (will become OLDER).
@@ -1163,7 +1168,8 @@ fn template_promote_idempotent_under_partial_failure_at_archive_move() {
         use_ambient_login: 0,
         auto_continue_enabled: 0,
         model_vendor_base_url: String::new(),
-    };
+    
+        memory_id: String::new(),};
     wstore.agent_def_insert(&mut prior_target).unwrap();
     // Realistic partial-failure shape: run 1 copied :current
     // successfully (dest and source have IDENTICAL bytes from
@@ -1302,7 +1308,8 @@ fn template_promote_skips_already_user_owned_definitions() {
         use_ambient_login: 0,
         auto_continue_enabled: 0,
         model_vendor_base_url: String::new(),
-    };
+    
+        memory_id: String::new(),};
     wstore.agent_def_insert(&mut user_def).unwrap();
     write_session_state(&filestore, &user_def.id, br#"{"nodes":[]}"#).unwrap();
 
