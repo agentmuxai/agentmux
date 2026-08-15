@@ -54,6 +54,117 @@ fn resolve_vendor_env_override(
         .map(|var| (var, agent.model_vendor_base_url.clone()))
 }
 
+/// Resolve the effective harness/provider id for a spawn. The agent's
+/// bound ABF bundle is the readonly-once-set source of truth
+/// (`ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md` §7.4.1):
+/// `AgentDefinition.provider` can still drift after creation via
+/// `agent.define`'s `if_exists=update` path, while the bundle's own copy
+/// cannot (backend-enforced in `bundle.upsert`, see
+/// `check_provider_model_immutable` in `bundle.rs`). Falls back to
+/// `agent.provider` when there's no bundle to consult — an unbound
+/// legacy agent predating `m0021`, or a bundle row that's gone missing —
+/// so a spawn never hard-fails on this alone. Pure, so it's unit-testable
+/// without the full async spawn-time harness, same as
+/// `resolve_vendor_env_override` above.
+fn resolve_effective_provider_id(agent: &AgentDefinition, bundle: Option<&Memory>) -> String {
+    match bundle {
+        Some(b) if !b.provider.is_empty() => b.provider.clone(),
+        _ => agent.provider.clone(),
+    }
+}
+
+#[cfg(test)]
+mod resolve_effective_provider_id_tests {
+    use super::*;
+
+    fn base_agent(provider: &str, memory_id: &str) -> AgentDefinition {
+        AgentDefinition {
+            id: "a1".to_string(),
+            slug: "a1".to_string(),
+            name: "T".to_string(),
+            icon: String::new(),
+            provider: provider.to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
+            auto_continue_enabled: 0,
+            memory_id: memory_id.to_string(),
+        }
+    }
+
+    fn bundle_with_provider(provider: &str) -> Memory {
+        Memory {
+            id: "mem1".to_string(),
+            name: "Bundle".to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: false,
+            provider: provider.to_string(),
+            model: "anthropic".to_string(),
+            instructions: String::new(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    #[test]
+    fn prefers_the_bundles_provider_over_a_drifted_agent_column() {
+        // Simulates the exact drift this exists to correct: agent.define's
+        // if_exists=update path changed agent.provider after creation, but
+        // the bundle's own copy is backend-enforced immutable.
+        let agent = base_agent("codex", "mem1");
+        let bundle = bundle_with_provider("claude");
+        assert_eq!(resolve_effective_provider_id(&agent, Some(&bundle)), "claude");
+    }
+
+    #[test]
+    fn falls_back_to_agent_provider_when_unbound() {
+        let agent = base_agent("claude", "");
+        assert_eq!(resolve_effective_provider_id(&agent, None), "claude");
+    }
+
+    #[test]
+    fn falls_back_to_agent_provider_when_bundle_missing() {
+        // memory_id points somewhere, but the caller couldn't load a row
+        // for it (deleted, or a lookup error swallowed upstream).
+        let agent = base_agent("claude", "mem1");
+        assert_eq!(resolve_effective_provider_id(&agent, None), "claude");
+    }
+
+    #[test]
+    fn falls_back_to_agent_provider_when_bundle_provider_is_empty() {
+        // The shared "blank" singleton and pre-§7 bundles have an empty
+        // provider column — must not shadow a real value with "".
+        let agent = base_agent("claude", "mem1");
+        let bundle = bundle_with_provider("");
+        assert_eq!(resolve_effective_provider_id(&agent, Some(&bundle)), "claude");
+    }
+}
+
 #[cfg(test)]
 mod resolve_vendor_env_override_tests {
     use super::*;
@@ -150,10 +261,22 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // 1. Load the agent definition (by id or name)
                 let agents = wstore.agent_def_list()
                     .map_err(|e| format!("agent.open: {e}"))?;
-                let agent = agents.iter()
+                let mut agent = agents.iter()
                     .find(|a| a.id == cmd.agent_id || a.name.eq_ignore_ascii_case(&cmd.agent_id))
                     .ok_or_else(|| format!("AGENT_NOT_FOUND: no agent definition with id '{}'", cmd.agent_id))?
                     .clone();
+
+                // Shadow `agent.provider` with the bound ABF bundle's copy,
+                // the readonly-once-set source of truth (see
+                // resolve_effective_provider_id's own doc comment) — one
+                // lookup here instead of rewriting every downstream
+                // `agent.provider` read in this handler.
+                let bundle = if agent.memory_id.is_empty() {
+                    None
+                } else {
+                    wstore.bundle_memory_get(&agent.memory_id).ok().flatten()
+                };
+                agent.provider = resolve_effective_provider_id(&agent, bundle.as_ref());
 
                 // Serialize the rest of this handler per agent definition —
                 // held until the function returns (guard drops at every exit
