@@ -169,22 +169,32 @@ Genuine new schema needed — not just an invariant on an existing field:
   history, `OBJECT_SCHEMA_VERSION` v4 comment), no column addition needed
   there — just start writing definition-level bundle bindings into it too,
   and stop treating template rows' `memory_id` as always-empty.
-- **Decision (2026-08-15): do NOT wire this into the `db_agents` dual-write
-  path.** Traced `dual_write.rs`'s `agents_dual_write_definition_upsert` —
-  it deliberately omits `memory_id` from both its INSERT and its
-  `ON CONFLICT DO UPDATE` (only `agents_dual_write_instance_create`/
-  `_update`/`_repoint` ever write that column), exactly matching
-  `db_agents`' own schema comment ("only meaningful when `is_template=0`").
-  Touching that would force resolving "which wins, a definition's default
-  or an instance's explicit override" on a table that's mid-refactor
-  (Phase 3a dual-write only; Phase 3b/3c — reader flip, legacy table drop —
-  haven't happened yet) other in-flight work may depend on. Since Phase 3b
-  hasn't happened, `db_agents` isn't read from yet for this purpose anyway
-  — leaving it untouched costs nothing today and avoids the risk entirely.
-  `db_agent_definitions.memory_id` stands alone, read directly (same as
-  every other definition field is read today, pre-Phase-3b). Flagging
-  explicitly for whoever does Phase 3b later: this field needs a decision
-  then, not now.
+- **Superseded (2026-08-15, correction — this decision as originally
+  written did NOT survive contact with the code, and a P2 finding on PR
+  #2587's review caught the doc/code mismatch): the plan below was "do
+  NOT wire this into the `db_agents` dual-write path... `db_agents` isn't
+  read from yet for this purpose anyway."** That premise was wrong: while
+  implementing the backfill migration, `m0021`'s first run kept
+  re-processing the same agent on every rerun
+  (`UNIQUE constraint failed: db_bundles.name`) because
+  `agent_def_list()` — the function `m0021` (and every creation-path
+  provisioning site) uses to enumerate/read agents — turned out to
+  **already read from the consolidated `db_agents` table, not
+  `db_agent_definitions` directly** (an earlier, undocumented partial
+  Phase 3b reader-flip). A definition-level field invisible to that table
+  is invisible to every consumer of `agent_def_list()`, which is most of
+  this codebase.
+  **What actually shipped instead:** a SECOND new column,
+  `db_agents.default_memory_id` — deliberately a distinct name from the
+  existing instance-scoped `db_agents.memory_id`, to avoid exactly the
+  "which wins" ambiguity this original decision was trying to dodge.
+  `agents_dual_write_definition_upsert` (`dual_write.rs`) DOES write
+  `default_memory_id` (both INSERT and `ON CONFLICT DO UPDATE`) — the
+  opposite of what this section used to claim. The one true part of the
+  original reasoning: `db_agents.memory_id` (singular, instance-scoped)
+  is still untouched by this work, so the "which wins" question for
+  *that* column genuinely doesn't arise. It's specifically
+  `default_memory_id` that's new and dual-written.
 - `AgentInstance.memory_id` (launch-time) is unaffected and stays — a
   launched instance can still be pointed at a *different* bundle than its
   definition's default if a user explicitly does that via the launch modal
@@ -193,12 +203,24 @@ Genuine new schema needed — not just an invariant on an existing field:
   launch modal doesn't override it.
 - New migration `m0021_backfill_agent_bundles.rs` (mirrors `m0020`'s
   pattern): for every existing agent DEFINITION (global registry, not just
-  local SQLite — same trap `m0020` already documents) with
-  `memory_id in ('', 'blank')`, create a fresh `db_bundles` row
-  (empty/default content, `is_blank=false`, `provider='claude'`,
-  `model='anthropic'` per §7.3/§7.5, `name` derived from the agent's own
-  name for discoverability in Armory's bundle list) and point the
-  definition's new `memory_id` at it.
+  local SQLite — same trap `m0020` already documents) with an empty
+  `memory_id`, create a fresh `db_bundles` row (empty/default content,
+  `is_blank=false`, `name` derived from the agent's own name for
+  discoverability in Armory's bundle list) and point the definition's new
+  `memory_id` at it. **Provider/model correction (2026-08-15, P0 finding
+  on PR #2587's review):** originally hardcoded `provider='claude'`,
+  `model='anthropic'` for every backfilled agent per §7.3's "every agent
+  on this instance is Claude Code + OAuth Anthropic." That's true today
+  but unsafe to bake into the migration — combined with
+  `check_provider_model_immutable`'s enforcement and `agent_open.rs`'s
+  spawn-time bundle-provider preference (step 5 below), it would have
+  silently and permanently reassigned any non-Claude agent's harness on
+  backfill. Fixed to derive `provider` from the DEFINITION's own
+  `provider` column (already known, no inference needed) and `model` from
+  that provider's first declared `supported_vendors` entry — same
+  derivation new-agent provisioning already uses. Falls back to
+  `claude`/`anthropic` only for the degenerate case of a definition with
+  no provider set at all.
 
 ### 3.2 Creation-path unification
 - Move the "must have a bundle" decision from launch-time to
@@ -523,7 +545,10 @@ checkpoint. That's the actually-portable "which backend does this need"
 information; checkpoint selection stays a runtime/launch-time choice, not
 frozen into the ABF. Flagging this as a judgment call, easily revisited if
 wrong. So the operator's "harness is claude code, the API is Oauth
-anthropic" backfills to `provider='claude'`, `model='anthropic'`.
+anthropic" backfills a claude-provider agent to `provider='claude'`,
+`model='anthropic'` — **not** every agent unconditionally regardless of
+its own provider; see §6 step 2's 2026-08-15 correction for the P0 bug
+that assumption caused when first implemented literally.
 
 With 7.4.1-7.4.3 and 7.0's correction applied, no new migration is needed
 for these two fields — they already exist in both schemas. Revised
