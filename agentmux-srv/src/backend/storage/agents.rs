@@ -415,7 +415,8 @@ impl Store {
                         agent_type, environment, agent_bus_id, is_seeded,
                         accounts, parent_template_id, branch_label, updated_at,
                         user_hidden, container_image, container_volumes, container_name,
-                        use_ambient_login, model_vendor_base_url, auto_continue_enabled, memory_id
+                        use_ambient_login, model_vendor_base_url, auto_continue_enabled,
+                        default_memory_id
                  FROM db_agents
                  ORDER BY updated_at DESC, created_at ASC",
             )?;
@@ -901,6 +902,57 @@ impl Store {
                     hidden,
                     error = %e,
                     "db_agents dual-write: template hide flag mirror failed",
+                );
+            }
+        }
+        Ok(rows > 0)
+    }
+
+    /// Set `memory_id` on a LOCAL agent definition — but only if it's
+    /// currently empty. Exists because `agent_def_update`'s SET clause
+    /// deliberately never touches this column (readonly-after-creation, see
+    /// its own field doc comment) — this is the one narrow, explicit path
+    /// allowed to set it, and only the FIRST time, for `m0021`'s backfill
+    /// and definition-time provisioning to use. Returns `Ok(true)` if the
+    /// row existed and had an empty `memory_id` (write applied), `Ok(false)`
+    /// if the row doesn't exist locally OR already has a non-empty value
+    /// (no-op, not an error — matches the "set once" semantic silently
+    /// rather than requiring every caller to pre-check).
+    ///
+    /// LOCAL ONLY, deliberately — a cross-channel (global-registry-only)
+    /// definition can't be reached this way today because
+    /// `DefinitionRecordV1` doesn't carry `memory_id` yet (same accepted gap
+    /// as `model_vendor_base_url`, see `def_registry_mirror.rs`). Callers
+    /// backfilling across the whole agent population must check
+    /// `agent_def_get_local_only` first and skip (with a log) anything that
+    /// only resolves via the global registry.
+    pub fn agent_def_set_memory_id_if_empty(
+        &self,
+        id: &str,
+        memory_id: &str,
+    ) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "UPDATE db_agent_definitions SET memory_id = ?1 WHERE id = ?2 AND memory_id = ''",
+            params![memory_id, id],
+        )?;
+        if rows > 0 {
+            // Mirror into db_agents' SEPARATE default_memory_id column (see
+            // its own CREATE TABLE comment) so agent_def_list — which reads
+            // from db_agents, not db_agent_definitions — sees the binding
+            // too. Same secondary-mirror pattern as agent_def_set_hidden
+            // just above. Best-effort: a mirror failure here would leave
+            // db_agents transiently stale, same posture as that function's
+            // own error handling (log + continue, not fail the caller).
+            if let Err(e) = conn.execute(
+                "UPDATE db_agents SET default_memory_id = ?1 WHERE id = ?2",
+                params![memory_id, id],
+            ) {
+                tracing::error!(
+                    id = %id,
+                    memory_id = %memory_id,
+                    error = %e,
+                    "db_agents dual-write: default_memory_id mirror failed",
                 );
             }
         }

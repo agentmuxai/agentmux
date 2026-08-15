@@ -36,6 +36,7 @@ mod m0017_ambient_login_grandfather;
 mod m0018_ambient_login_registry;
 mod m0019_repair_malformed_secret_ref;
 mod m0020_agent_color_backfill;
+mod m0021_backfill_agent_bundles;
 mod runner;
 
 pub use runner::count_pending_migrations;
@@ -132,4 +133,5 @@ static REGISTRY: &[&(dyn Migration + Sync)] = &[
     &m0018_ambient_login_registry::M0018AmbientLoginRegistry,
     &m0019_repair_malformed_secret_ref::M0019RepairMalformedSecretRef,
     &m0020_agent_color_backfill::M0020AgentColorBackfill,
+    &m0021_backfill_agent_bundles::M0021BackfillAgentBundles,
 ];
