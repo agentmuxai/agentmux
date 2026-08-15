@@ -166,6 +166,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 wstore
                     .agent_def_insert(&mut new_def)
                     .map_err(|e| format!("agentdefcreatefromtemplate: insert: {e}"))?;
+                // Own dedicated ABF bundle, not the template's — every
+                // agent has its own (ARCHITECTURE_MANDATORY_ABF_RETHINK_
+                // 2026_08_14.md §3.2, "strong reading").
+                wstore.agent_def_provision_and_bind_bundle(&mut new_def, now);
 
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "agents:changed".to_string(),
@@ -377,6 +381,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 wstore
                     .agent_def_insert(&mut fork)
                     .map_err(|e| format!("forkagentdefinition: {e}"))?;
+                // Own dedicated ABF bundle, not the source's — same "every
+                // agent has its own" rule as the template-clone path above.
+                wstore.agent_def_provision_and_bind_bundle(&mut fork, now);
 
                 // Deep-copy content blobs + skills from source. Cascade foreign
                 // keys on the source are unaffected — we're copying out, not

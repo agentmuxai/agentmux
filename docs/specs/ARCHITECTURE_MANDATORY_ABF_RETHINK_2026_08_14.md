@@ -298,10 +298,34 @@ convention seen elsewhere, e.g. the ABF v0.2 spec's own phased rollout):
    `test_support::ISOLATED_AUTH_ENV_LOCK` every other consumer already
    used — separate mutexes don't serialize against each other, so they
    raced under parallel test execution. Both switched to the shared lock.
-3. Definition-time provisioning for new agents (`agent.define` +
-   template-clone path). NOT YET DONE — `m0021` only backfills EXISTING
-   agents; nothing yet stops a newly-created agent from landing at
-   `memory_id=''` again.
+3. **DONE (2026-08-15).** Definition-time provisioning for new agents.
+   Scoped wider than the original "`agent.define` + template-clone path"
+   wording once the actual creation surface was cataloged — SIX
+   production entry points build a fresh `AgentDefinition` and insert it
+   (`createagent`, `importagentfromclaw`, `importagents` bulk import,
+   `agentdefcreatefromtemplate`, `forkagentdefinition`, `agent.define`),
+   and "every agent must have an ABF" doesn't hold if only two of six are
+   covered. Added `Store::bundle_provision_for_new_agent` (builds the
+   bundle, carrying the agent's own already-known `provider` — unlike
+   `m0021`'s backfill, a brand-new agent's harness isn't a guess) and
+   `Store::agent_def_provision_and_bind_bundle` (provisions + binds,
+   writing the new id back into the caller's `&mut AgentDefinition` so
+   RPC responses that serialize the struct directly reflect it, same
+   "caller's struct reflects what landed" convention `agent_def_update`
+   already follows). Deliberately a POST-insert step, not part of the
+   initial `INSERT`: `agent_define_core`'s `agent_def_find_or_insert`
+   uses its struct as both the lookup key and the conditional-insert
+   payload, so a bundle built up-front would leak (created, never bound)
+   on every `if_exists=skip`/`update` call against an already-existing
+   name — and `agent.define` is meant to be called repeatedly/
+   idempotently. Binding only after a genuinely-fresh insert is confirmed
+   avoids that leak (covered by a dedicated test in both the RPC-level
+   and `agent_define_core`-level suites). Vendor default derived from
+   `crate::backend::providers::get_provider(provider).supported_vendors
+   .first()` — the Rust-side equivalent of the frontend's
+   `resolveDefaultVendor`/`catalog.ts`, already existed for other
+   purposes (the `every_provider_declares_at_least_one_supported_vendor`
+   test), just not wired into bundle creation before now.
 4. (If wanted) delete-cascade or orphan-handling for agent-owned bundles.
    NOT YET DONE.
 

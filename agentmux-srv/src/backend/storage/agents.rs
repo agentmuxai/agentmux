@@ -959,6 +959,102 @@ impl Store {
         Ok(rows > 0)
     }
 
+    /// Provision a fresh, dedicated ABF bundle for a NEW agent definition —
+    /// the definition-time half of
+    /// `docs/specs/ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md` §3.2
+    /// (m0021 is the backfill half, for agents that already existed before
+    /// this shipped). Callers pass the not-yet-inserted `AgentDefinition`
+    /// so its already-known `provider` (harness) carries straight onto the
+    /// bundle — unlike `m0021`'s backfill, which hardcodes `claude`/
+    /// `anthropic` because it can't know a legacy agent's real harness,
+    /// a brand-new agent's harness is already a required field at this
+    /// point, so there's no need to guess.
+    ///
+    /// The bundle's `model` (vendor) defaults to the harness's first
+    /// declared `supported_vendors` entry (mirrors the frontend's
+    /// `resolveDefaultVendor`, `frontend/app/view/agent/providers/
+    /// catalog.ts`) — falls back to the provider id itself if the provider
+    /// isn't in the registry (e.g. a stale/custom provider string), same
+    /// fallback the frontend uses.
+    ///
+    /// Does NOT mutate `agent` or touch `db_agent_definitions` — returns
+    /// the new bundle's id; callers set `agent.memory_id` themselves before
+    /// their own insert (so the existing `agent_def_insert*` INSERT
+    /// statements, which already include `memory_id`, pick it up with no
+    /// separate write).
+    pub fn bundle_provision_for_new_agent(
+        &self,
+        agent: &AgentDefinition,
+        now: i64,
+    ) -> Result<String, StoreError> {
+        let vendor = crate::backend::providers::get_provider(&agent.provider)
+            .and_then(|p| p.supported_vendors.first().copied())
+            .unwrap_or(agent.provider.as_str());
+        let bundle_id = uuid::Uuid::new_v4().to_string();
+        let bundle = super::memory_bundles::Memory {
+            id: bundle_id.clone(),
+            name: format!("{} — ABF", agent.name),
+            description: String::new(),
+            is_blank: false,
+            is_global: false,
+            provider: agent.provider.clone(),
+            model: vendor.to_string(),
+            instructions: String::new(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: now,
+            updated_at: now,
+        };
+        self.bundle_memory_upsert(&bundle)?;
+        Ok(bundle_id)
+    }
+
+    /// Provision + bind a fresh bundle to an ALREADY-INSERTED agent
+    /// definition — the two-step, post-insert counterpart to
+    /// `bundle_provision_for_new_agent` above. Deliberately separate from
+    /// the insert itself (rather than setting `memory_id` on the struct
+    /// before calling `agent_def_insert*`/`agent_def_find_or_insert`):
+    /// `agent_def_find_or_insert` in particular uses its `AgentDefinition`
+    /// argument as BOTH the lookup key and the conditional-insert payload,
+    /// so a bundle built up-front would go to waste (leaked, unbound) on
+    /// every `if_exists=skip`/`update` call against an already-existing
+    /// name — and `agent.define` is meant to be called repeatedly/
+    /// idempotently. Binding after the fact, only once the caller has
+    /// confirmed a row was genuinely freshly inserted, avoids that leak.
+    ///
+    /// Best-effort by design (matches `createagent`'s own color-assignment
+    /// comment: a failure here shouldn't fail agent creation) — logs and
+    /// returns on either step's failure rather than propagating, since the
+    /// agent row itself is already durably committed by the time this
+    /// runs, and a still-unbound agent is exactly the pre-existing
+    /// `memory_id=''` state `m0021` already knows how to backfill later.
+    ///
+    /// Takes `&mut AgentDefinition` and writes the new bundle id back into
+    /// `agent.memory_id` on success — same "caller's struct reflects what
+    /// landed" convention `agent_def_update` documents just below — so RPC
+    /// handlers that serialize `agent` straight back to the caller (e.g.
+    /// `createagent`, `importagentfromclaw`) return the real value instead
+    /// of the empty string the struct held before this call.
+    pub fn agent_def_provision_and_bind_bundle(&self, agent: &mut AgentDefinition, now: i64) {
+        let bundle_id = match self.bundle_provision_for_new_agent(agent, now) {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::warn!(agent_id = %agent.id, error = %e, "agent_def_provision_and_bind_bundle: bundle create failed (non-fatal)");
+                return;
+            }
+        };
+        match self.agent_def_set_memory_id_if_empty(&agent.id, &bundle_id) {
+            Ok(true) => agent.memory_id = bundle_id,
+            Ok(false) => {}
+            Err(e) => {
+                tracing::warn!(agent_id = %agent.id, bundle_id = %bundle_id, error = %e, "agent_def_provision_and_bind_bundle: bind failed (non-fatal)");
+            }
+        }
+    }
+
     /// Update an existing agent definition (all fields except id, created_at, is_seeded, `parent_id`).
     /// `parent_id` is NOT updatable post-insert — it describes the agent's
     /// lineage; re-parenting is done by creating a new fork, not mutating the

@@ -137,6 +137,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 
                     memory_id: String::new(),};
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("createagent: {e}"))?;
+                // Every agent gets its own dedicated ABF bundle
+                // (ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.2).
+                // Best-effort, same posture as the color assignment below.
+                wstore.agent_def_provision_and_bind_bundle(&mut agent, now);
                 // Assign the agent its display color at creation
                 // (SPEC_AGENT_COLOR_2026_08_08.md). Best-effort: a failure
                 // here shouldn't fail the create — agent.open assigns a
@@ -456,6 +460,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 
                     memory_id: String::new(),};
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("importagentfromclaw: {e}"))?;
+                wstore.agent_def_provision_and_bind_bundle(&mut agent, now);
 
                 // Read CLAUDE.md → agentmd content
                 let claude_md_path = workspace_path.join("CLAUDE.md");
@@ -599,6 +604,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         failed.push(format!("{}: {e}", agent_import.name));
                         continue;
                     }
+                    wstore.agent_def_provision_and_bind_bundle(&mut agent, now);
 
                     // Insert content types
                     let mut content_ok = true;
