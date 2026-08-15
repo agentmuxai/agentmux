@@ -8,6 +8,7 @@ import { ConfigStatus } from "./ConfigStatus";
 import { GpuStatus } from "./GpuStatus";
 import { HostPopover } from "./HostPopover";
 import { InstancePanel } from "./InstancePanel";
+import { MuxBusStatusChip } from "./MuxBusStatusChip";
 import { SystemStats } from "./SystemStats";
 import { TokenUsageIndicator } from "./TokenUsageIndicator";
 import { UpdateStatus } from "./UpdateStatus";
@@ -75,6 +76,7 @@ const StatusBar = (): JSX.Element => {
                 <TokenUsageIndicator />
                 <ConfigStatus />
                 <UpdateStatus />
+                <MuxBusStatusChip />
                 <HostPopover />
                 <Show when={version}>
                     <Show
