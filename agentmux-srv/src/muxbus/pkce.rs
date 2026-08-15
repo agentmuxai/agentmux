@@ -28,10 +28,61 @@ pub struct PkceResult {
     pub credentials: MuxBusCredentials,
 }
 
+fn try_bind_callback_listener(port: u16) -> Result<tokio::net::TcpListener, String> {
+    let tcp_sock = TcpSocket::new_v4()
+        .map_err(|e| format!("failed to create callback socket: {e}"))?;
+    #[cfg(unix)]
+    tcp_sock
+        .set_reuseaddr(true)
+        .map_err(|e| format!("failed to set SO_REUSEADDR: {e}"))?;
+    tcp_sock
+        .bind(format!("127.0.0.1:{port}").parse().unwrap())
+        .map_err(|e| {
+            format!("failed to bind callback port {port}: {e} — another process may be holding the port")
+        })?;
+    tcp_sock
+        .listen(10)
+        .map_err(|e| format!("failed to listen on callback port {port}: {e}"))
+}
+
+// Only one login flow may exist per process. Two concurrent flows both bind
+// the fixed callback port, and (on Windows, where SO_REUSEADDR permits binding
+// a port another live socket already holds) the browser's redirect lands on
+// whichever listener the OS picks — a 400 state-mismatch coin flip. The newest
+// attempt is the one the user actually wants: abort the predecessor.
+static ACTIVE_LOGIN: std::sync::Mutex<Option<tokio::task::AbortHandle>> =
+    std::sync::Mutex::new(None);
+
 pub async fn run_pkce_login(
     cognito_domain: &str,
     client_id: &str,
     http_client: &reqwest::Client,
+) -> Result<PkceResult, String> {
+    // Abort the predecessor BEFORE spawning, so its port-9379 listener is
+    // (about to be) released; the bind retry loop below absorbs the drop
+    // latency of the aborted task.
+    if let Some(prev) = ACTIVE_LOGIN.lock().unwrap().take() {
+        prev.abort();
+    }
+    let task = tokio::spawn(run_pkce_login_inner(
+        cognito_domain.to_string(),
+        client_id.to_string(),
+        http_client.clone(),
+    ));
+    *ACTIVE_LOGIN.lock().unwrap() = Some(task.abort_handle());
+    match task.await {
+        Ok(r) => r,
+        Err(e) if e.is_cancelled() => {
+            Err("this login attempt was superseded by a newer one".to_string())
+        }
+        Err(e) => Err(format!("login task failed: {e}")),
+    }
+}
+
+async fn run_pkce_login_inner(
+    cognito_domain: String,
+    client_id: String,
+    http_client: reqwest::Client,
 ) -> Result<PkceResult, String> {
     // 1. Generate code_verifier (43–128 chars of URL-safe chars)
     let v1 = uuid::Uuid::new_v4();
@@ -51,21 +102,31 @@ pub async fn run_pkce_login(
     let state = uuid::Uuid::new_v4().to_string();
 
     // 4. Bind fixed port 9379 — must match Cognito callbackUrls exactly.
-    //    SO_REUSEADDR allows immediate re-login after a cancelled attempt whose
-    //    socket is still in TIME_WAIT (would otherwise hit EADDRINUSE).
+    //    SO_REUSEADDR is Unix-only: there it just allows rebinding through a
+    //    predecessor's TIME_WAIT. On Windows it means something stronger —
+    //    binding a port ANOTHER LIVE SOCKET currently holds — which is
+    //    exactly the double-listener misdelivery this fix removes; a genuine
+    //    conflict there should fail loudly instead. The retry loop absorbs
+    //    the drop latency of a just-aborted predecessor flow.
     const CALLBACK_PORT: u16 = 9379;
     let redirect_uri = format!("http://127.0.0.1:{CALLBACK_PORT}/callback");
-    let tcp_sock = TcpSocket::new_v4()
-        .map_err(|e| format!("failed to create callback socket: {e}"))?;
-    tcp_sock
-        .set_reuseaddr(true)
-        .map_err(|e| format!("failed to set SO_REUSEADDR: {e}"))?;
-    tcp_sock
-        .bind(format!("127.0.0.1:{CALLBACK_PORT}").parse().unwrap())
-        .map_err(|e| format!("failed to bind callback port {CALLBACK_PORT}: {e} — another process may be holding the port"))?;
-    let listener = tcp_sock
-        .listen(10)
-        .map_err(|e| format!("failed to listen on callback port {CALLBACK_PORT}: {e}"))?;
+    let listener = {
+        let mut listener = None;
+        for attempt in 0..10u32 {
+            if attempt > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            match try_bind_callback_listener(CALLBACK_PORT) {
+                Ok(l) => {
+                    listener = Some(l);
+                    break;
+                }
+                Err(e) if attempt == 9 => return Err(e),
+                Err(_) => continue,
+            }
+        }
+        listener.expect("bind loop either sets the listener or returns")
+    };
 
     // 5. Build auth URL
     let scopes = "openid+email+profile+https%3A%2F%2Fmuxbus.agentmux.ai%2Fread+https%3A%2F%2Fmuxbus.agentmux.ai%2Fwrite";
@@ -81,8 +142,11 @@ pub async fn run_pkce_login(
         redirect_uri_enc = percent_encode(&redirect_uri),
     );
 
-    // 6. Open browser
-    open_browser(&auth_url);
+    // 6. Open browser (suppressed under test — the supersede test drives
+    //    real flows that would otherwise launch real browser windows)
+    if !cfg!(test) {
+        open_browser(&auth_url);
+    }
 
     tracing::info!(
         cognito_domain = cognito_domain,
@@ -169,7 +233,7 @@ pub async fn run_pkce_login(
     let token_url = format!("{cognito_domain}/oauth2/token");
     let params = [
         ("grant_type", "authorization_code"),
-        ("client_id", client_id),
+        ("client_id", client_id.as_str()),
         ("code", &code),
         ("redirect_uri", &redirect_uri),
         ("code_verifier", &code_verifier),
@@ -376,3 +440,49 @@ fn extract_jwt_claims(token: &str) -> (String, String) {
     (email, sub)
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The superseded-login guarantee: starting flow B while flow A is pending
+    // must abort A (releasing the callback port for B) rather than leaving
+    // two listeners racing for the browser redirect. Uses the real
+    // run_pkce_login entry so the abort-registry path itself is exercised;
+    // an unroutable cognito domain keeps both flows pending at the
+    // await-callback stage without any network dependency.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn second_login_supersedes_first() {
+        let http = reqwest::Client::new();
+        let flow_a = tokio::spawn({
+            let http = http.clone();
+            async move { run_pkce_login("http://127.0.0.1:1", "test-client", &http).await }
+        });
+        // Give A time to register + bind before B supersedes it.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        let flow_b = tokio::spawn({
+            let http = http.clone();
+            async move { run_pkce_login("http://127.0.0.1:1", "test-client", &http).await }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        // A must have resolved as superseded; B must still be pending (proving
+        // it bound the port A released rather than dying on EADDRINUSE).
+        let a = tokio::time::timeout(std::time::Duration::from_secs(2), flow_a)
+            .await
+            .expect("flow A should resolve promptly after being superseded")
+            .expect("flow A task must not panic");
+        assert!(
+            a.as_ref().is_err_and(|e| e.contains("superseded")),
+            "flow A should report being superseded, got: {a:?}"
+        );
+        assert!(!flow_b.is_finished(), "flow B should still be awaiting its callback");
+
+        // Cleanup: abort B's inner flow via the registry.
+        if let Some(h) = ACTIVE_LOGIN.lock().unwrap().take() {
+            h.abort();
+        }
+        flow_b.abort();
+    }
+}
