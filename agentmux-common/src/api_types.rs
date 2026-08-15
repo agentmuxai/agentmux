@@ -145,6 +145,17 @@ pub struct InjectRequest {
     /// rejecting the message outright.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub jekt_sig: Option<String>,
+    /// Base64 Ed25519 signature over the same signed material as `jekt_sig`,
+    /// produced with the sender's own `AGENTMUX_LAN_KEY`
+    /// (SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.3). Sent unconditionally
+    /// alongside `jekt_sig` regardless of the message's actual destination
+    /// — this process can't know in advance whether delivery will end up
+    /// LAN, host, or WAN (that's a server-side routing decision); srv only
+    /// ever consults this field when it has independently determined
+    /// `delivery_tier == "lan"`, so it's simply ignored otherwise. Absent
+    /// under the same "no key yet" conditions as `jekt_sig`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lan_sig: Option<String>,
 }
 
 // ── Pane ──────────────────────────────────────────────────────────────────────
