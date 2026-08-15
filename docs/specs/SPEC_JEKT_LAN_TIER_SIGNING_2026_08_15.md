@@ -243,12 +243,7 @@ see §2.4), and downgrading `delivery_tier` to "host" there meant
 still-present `lan_sig` field.
 
 The actual gap only needs a one-directional fix. The server, not the
-client, must determine when a request is *forced* to be treated as LAN —
-but a client's own "lan" claim, when authenticated via the full key, isn't
-a bypass of anything: holding the full local `auth_key` already grants
-complete control over this instance, so self-labeling a request's tier
-grants nothing beyond what that credential already allows (at worst it
-triggers MORE scrutiny — `verify_lan_signature` running — never less).
+client, must determine when a request is *forced* to be treated as LAN.
 Concretely, in `handle_reactive_inject`, after auth middleware establishes
 which key matched:
 
@@ -260,10 +255,37 @@ which key matched:
   is trusted as-is (host, wan, *or* lan) — no downgrade. Falls back to
   `"host"` only when the body omits the field entirely.
 
-This is a small, mechanical change (thread one bool/enum through one function
-signature) that closes the real one-directional gap (LAN-key holder claiming
-non-LAN) without breaking the legitimate multi-hop case (full-auth_key holder
-relaying an already-LAN-tagged jekt onward).
+**Second revision, reagentx P0 (round 2):** this section originally also
+claimed "holding the full local `auth_key` already grants complete control
+over this instance, so self-labeling a request's tier grants nothing beyond
+what that credential already allows (at worst it triggers MORE scrutiny,
+never less)." **That claim was wrong**, and the wrongness was exploitable:
+every locally-spawned agent shares the SAME instance-wide `auth_key`
+(`agentmux-srv/src/server/agent_handlers/input.rs`), and
+`verify_jekt_signature` (host-tier HMAC verification) was gated on
+`delivery_tier == "host"`. A request claiming `delivery_tier: "lan"` (or
+`"wan"`) for a `source_agent` that IS a real, locally-known agent (one this
+instance minted a `jekt_sig` key for) skipped host-tier verification
+*entirely* — with no `jekt_sig`/`lan_sig` provided, both
+`verify_jekt_signature` (never ran) and `verify_lan_signature` (nothing to
+check, unsigned traffic isn't forced sensitive by design) stayed silent,
+and the impersonation landed at default `TIER=coord`, fully actionable.
+Self-labeling a request's tier is NOT scrutiny-neutral — it's a way to pick
+*which* verification mechanism (if any) gets to run.
+
+**Fix:** `verify_jekt_signature` is no longer gated on `delivery_tier` at
+all — it runs unconditionally, and only ever does anything when
+`agent_jekt_key_load` finds a LOCAL signing key for the claimed
+`source_agent`. That's `None` for any genuinely-remote LAN/WAN sender this
+instance never spawned (zero behavior change for real network traffic —
+the whole point of per-agent keys being minted only for locally-spawned
+agents), but it now catches an unsigned or wrong-signature impersonation of
+an agent this instance actually knows, regardless of what tier the request
+claims to be. This is the real fix; `resolve_delivery_tier` trusting the
+body's tier claim for full-`auth_key` callers (needed for legitimate
+same-host forwarding, §3 above) is no longer relied on as a security
+boundary on its own — verification no longer depends on tier labeling
+being honest.
 
 ## 4. Failure semantics (matches existing patterns exactly)
 

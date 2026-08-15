@@ -634,7 +634,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             created_at INTEGER NOT NULL DEFAULT 0
         );
 
-        -- v19: per-agent Ed25519 keypair for LAN-tier jekt sender
+        -- v20: per-agent Ed25519 keypair for LAN-tier jekt sender
         -- verification (SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.1).
         -- public_key is not secret (distributed to LAN peers on demand);
         -- private_key is base64, 32-byte seed, minted on first use
@@ -647,7 +647,7 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             created_at  INTEGER NOT NULL DEFAULT 0
         );
 
-        -- v20: trust-on-first-use pin of a remote agent_id's LAN public key
+        -- v21: trust-on-first-use pin of a remote agent_id's LAN public key
         -- (SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.2, reagentx P0).
         -- Distinct from db_agent_lan_keys (this instance's OWN agents'
         -- keypairs, private half included) — this table holds only public

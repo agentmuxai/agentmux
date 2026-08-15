@@ -129,10 +129,25 @@ fn now_unix_secs() -> i64 {
 /// bypassing this entirely — those messages rendered `TRUST=self-declared`
 /// (unescalated) exactly as if this feature didn't exist. Both now call
 /// this too.
+///
+/// **Deliberately NOT gated on `delivery_tier == "host"`** (reagentx P0 on
+/// the LAN signing PR — this WAS gated that way originally, and it was the
+/// bug): `delivery_tier` is a value this instance largely trusts as
+/// self-declared by whoever authenticated with the full local `auth_key`
+/// (needed so legitimate same-host forwarding can carry an already-`"lan"`
+/// jekt through unmolested — see `resolve_delivery_tier`'s doc comment).
+/// That means a request claiming `delivery_tier: "lan"` (or `"wan"`) was
+/// otherwise a way to dodge THIS check entirely — impersonate a real,
+/// locally-known agent by simply not calling it "host," since
+/// `verify_lan_signature`/`verify_reagent_signature` only fire for their
+/// own tiers and leave an unsigned claim unforced by design. Running this
+/// check unconditionally closes that: it only ever does anything when
+/// `agent_jekt_key_load` finds a LOCAL key for the claimed `source_agent` —
+/// which is `None` for any genuinely-remote LAN/WAN sender this instance
+/// never spawned (no behavior change for real network traffic), but
+/// catches an unsigned/wrong-signature impersonation of an agent THIS
+/// instance actually knows, regardless of what tier the request claims.
 pub(super) fn verify_jekt_signature(state: &AppState, req: &mut InjectionRequest) {
-    if req.delivery_tier.as_deref().unwrap_or("host") != "host" {
-        return;
-    }
     let Some(claimed) = req.source_agent.clone().filter(|s| !s.is_empty()) else {
         return;
     };
@@ -1155,14 +1170,45 @@ mod verify_jekt_signature_tests {
         );
     }
 
+    // Was named "network_tier_is_never_checked_regardless_of_signature" and
+    // asserted the OPPOSITE of what's below — reagentx P0 (round 2) on the
+    // LAN signing PR: that WAS the bypass. Gating this check on
+    // delivery_tier meant a request could claim "wan"/"lan" for a
+    // source_agent this instance actually has a local key for, skip host
+    // verification entirely, and land unescalated. Flipped, not deleted, to
+    // document the fix rather than silently change it — see
+    // docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §3's second
+    // revision.
     #[tokio::test]
-    async fn network_tier_is_never_checked_regardless_of_signature() {
+    async fn a_locally_known_sender_is_still_checked_even_under_a_claimed_network_tier() {
         let state = test_state();
         state.wstore.agent_jekt_key_ensure("agentx").unwrap();
         let mut req = base_req("agentx", "agenty", "hello");
         req.delivery_tier = Some("wan".to_string());
+        // req.jekt_sig deliberately left None — claiming "wan" must not be a
+        // way to dodge this check for an agent this instance actually knows.
         verify_jekt_signature(&state, &mut req);
-        assert_eq!(req.sig_verified, None, "wan/lan never run this check");
+        assert_eq!(
+            req.sig_verified,
+            Some(false),
+            "a locally-known agent's identity, unsigned, must still be flagged regardless of \
+             what delivery_tier the request claims — that claim is not a trust boundary"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_genuinely_unknown_remote_sender_is_unaffected_by_a_claimed_network_tier() {
+        let state = test_state();
+        // No agent_jekt_key_ensure call — this instance never spawned "korp,"
+        // exactly the shape of a real remote LAN/WAN agent.
+        let mut req = base_req("korp", "agenty", "hello");
+        req.delivery_tier = Some("lan".to_string());
+        verify_jekt_signature(&state, &mut req);
+        assert_eq!(
+            req.sig_verified, None,
+            "no local key for the claimed sender means nothing to check — running this \
+             unconditionally must not manufacture a finding for genuinely remote traffic"
+        );
     }
 
     /// Anti-replay (reagentx P1 on PR #2565): a signature that was valid
