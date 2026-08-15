@@ -1017,9 +1017,10 @@ impl Store {
     ) -> Result<String, StoreError> {
         let vendor = Self::resolve_effective_vendor(&agent.provider, &agent.model_vendor_base_url);
         let bundle_id = uuid::Uuid::new_v4().to_string();
+        let name = self.resolve_unique_bundle_name(&format!("{} — ABF", agent.name))?;
         let bundle = super::memory_bundles::Memory {
             id: bundle_id.clone(),
-            name: format!("{} — ABF", agent.name),
+            name,
             description: String::new(),
             is_blank: false,
             is_global: false,
@@ -1036,6 +1037,37 @@ impl Store {
         };
         self.bundle_memory_upsert(&bundle)?;
         Ok(bundle_id)
+    }
+
+    /// Resolve a `db_bundles.name` guaranteed not to collide with an
+    /// existing row — that column is `TEXT NOT NULL UNIQUE`, but only
+    /// `AgentDefinition.slug` is guaranteed unique, not the display
+    /// `name`, so a naive `"{agent.name} — ABF"` collides whenever two
+    /// agents share a display name. Appends a numeric suffix on
+    /// collision, same shape `agent_def_insert_local_only` already uses
+    /// for slug collisions.
+    ///
+    /// P1 fix (2026-08-15, ReAgent review on PR #2587 round 4): before
+    /// this, a collision here silently left a runtime-provisioned agent
+    /// unbound (the caller's best-effort error handling swallowed it) and
+    /// — worse — unconditionally ABORTED `m0021`'s entire backfill loop
+    /// via `?` on the very first collision, permanently stalling backfill
+    /// for every agent processed after it, on every subsequent boot,
+    /// until the underlying name collision was manually resolved.
+    pub(crate) fn resolve_unique_bundle_name(&self, base_name: &str) -> Result<String, StoreError> {
+        let existing_names: std::collections::HashSet<String> =
+            self.bundle_memory_list()?.into_iter().map(|b| b.name).collect();
+        if !existing_names.contains(base_name) {
+            return Ok(base_name.to_string());
+        }
+        let mut n: u32 = 2;
+        loop {
+            let candidate = format!("{base_name} ({n})");
+            if !existing_names.contains(&candidate) {
+                return Ok(candidate);
+            }
+            n += 1;
+        }
     }
 
     /// Provision + bind a fresh bundle to an ALREADY-INSERTED agent
@@ -2742,5 +2774,73 @@ mod bundle_provisioning_store_separation_tests {
             bundle_store.bundle_memory_get(&agent.memory_id).unwrap().is_some(),
             "bundle must be reachable via the explicit bundle_store"
         );
+    }
+
+    // P1 regression tests (ReAgent review on PR #2587 round 4):
+    // db_bundles.name is UNIQUE but only AgentDefinition.slug is
+    // guaranteed unique, not the display name two agents can share — a
+    // naive "{name} — ABF" used to collide, silently leaving a
+    // runtime-provisioned agent unbound and unconditionally aborting
+    // m0021's entire backfill loop on the first collision.
+
+    #[test]
+    fn resolve_unique_bundle_name_returns_the_base_name_when_no_collision() {
+        let store = Store::open_in_memory().unwrap();
+        assert_eq!(store.resolve_unique_bundle_name("Agent One — ABF").unwrap(), "Agent One — ABF");
+    }
+
+    #[test]
+    fn resolve_unique_bundle_name_disambiguates_on_collision() {
+        let store = Store::open_in_memory().unwrap();
+        let agent_a = base_agent("a1", "Same Name", "claude", "");
+        store.bundle_provision_for_new_agent(&agent_a, 0).unwrap();
+
+        let unique = store.resolve_unique_bundle_name("Same Name — ABF").unwrap();
+        assert_eq!(unique, "Same Name — ABF (2)");
+    }
+
+    #[test]
+    fn resolve_unique_bundle_name_walks_past_multiple_collisions() {
+        let store = Store::open_in_memory().unwrap();
+        store.bundle_provision_for_new_agent(&base_agent("a1", "Dup", "claude", ""), 0).unwrap();
+        // Directly seed the "(2)" slot too, so the resolver must walk to "(3)".
+        let taken = super::super::memory_bundles::Memory {
+            id: "taken-2".to_string(),
+            name: "Dup — ABF (2)".to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: false,
+            provider: String::new(),
+            model: String::new(),
+            instructions: String::new(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+        };
+        store.bundle_memory_upsert(&taken).unwrap();
+
+        let unique = store.resolve_unique_bundle_name("Dup — ABF").unwrap();
+        assert_eq!(unique, "Dup — ABF (3)");
+    }
+
+    #[test]
+    fn two_agents_with_the_same_display_name_both_get_bound_not_left_unbound_on_collision() {
+        let definition_store = Store::open_in_memory().unwrap();
+        let bundle_store = Store::open_in_memory().unwrap();
+        let mut agent_a = base_agent("a1", "Twin", "claude", "");
+        let mut agent_b = base_agent("a2", "Twin", "claude", "");
+        definition_store.agent_def_insert(&mut agent_a).unwrap();
+        definition_store.agent_def_insert(&mut agent_b).unwrap();
+
+        definition_store.agent_def_provision_and_bind_bundle(&bundle_store, &mut agent_a, 0);
+        definition_store.agent_def_provision_and_bind_bundle(&bundle_store, &mut agent_b, 0);
+
+        assert!(!agent_a.memory_id.is_empty(), "first same-named agent must still get bound");
+        assert!(!agent_b.memory_id.is_empty(), "second same-named agent must NOT be silently left unbound");
+        assert_ne!(agent_a.memory_id, agent_b.memory_id, "each agent still gets its own distinct bundle");
     }
 }

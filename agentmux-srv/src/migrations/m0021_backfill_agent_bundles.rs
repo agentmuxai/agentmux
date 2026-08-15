@@ -156,9 +156,20 @@ impl Migration for M0021BackfillAgentBundles {
             }
             let bundle_id = uuid::Uuid::new_v4().to_string();
             let (provider, model) = resolve_backfill_provider_and_model(&def.provider, &def.model_vendor_base_url);
+            // P1 fix (ReAgent review on PR #2587 round 4): db_bundles.name
+            // is UNIQUE but only AgentDefinition.slug is guaranteed
+            // unique, not the display name — a naive "{name} — ABF" on
+            // two same-named pre-existing agents used to abort this
+            // ENTIRE backfill loop via the `?` below on the very first
+            // collision, permanently stalling backfill for every agent
+            // processed after it. resolve_unique_bundle_name (shared with
+            // the runtime provisioning path) disambiguates instead.
+            let name = bundle_store
+                .resolve_unique_bundle_name(&format!("{} — ABF", def.name))
+                .map_err(|e| MigrationError(format!("backfill_agent_bundles: resolve unique bundle name for {}: {}", def.id, e)))?;
             let bundle = Memory {
                 id: bundle_id.clone(),
-                name: format!("{} — ABF", def.name),
+                name,
                 description: String::new(),
                 is_blank: false,
                 is_global: false,
@@ -498,6 +509,64 @@ mod tests {
             assert!(!bundle_a.is_empty());
             assert!(!bundle_b.is_empty());
             assert_ne!(bundle_a, bundle_b, "each agent must get its OWN dedicated bundle");
+        });
+    }
+
+    // P1 regression test (ReAgent review on PR #2587 round 4): two
+    // pre-existing agent definitions sharing the same display name (only
+    // `slug` is guaranteed unique, not `name`) used to abort this ENTIRE
+    // migration on the second agent's bundle-name collision — every
+    // definition processed after the collision stayed unbound
+    // permanently, on every subsequent boot, until manually resolved.
+    #[test]
+    fn backfills_both_agents_when_two_definitions_share_a_display_name() {
+        with_isolated_home(|_home| {
+            let tmp = tempfile::NamedTempFile::new().unwrap();
+            let shared_tmp = tempfile::NamedTempFile::new().unwrap();
+            let wstore = Store::open(tmp.path()).unwrap();
+            let mut def_a = AgentDefinition {
+                id: "test-twin-a".to_string(),
+                slug: String::new(),
+                name: "Twin".to_string(),
+                icon: String::new(),
+                provider: "claude".to_string(),
+                description: String::new(),
+                working_directory: String::new(),
+                shell: String::new(),
+                provider_flags: String::new(),
+                auto_start: 0,
+                restart_on_crash: 0,
+                idle_timeout_minutes: 0,
+                created_at: 1,
+                agent_type: "host".to_string(),
+                environment: String::new(),
+                agent_bus_id: String::new(),
+                is_seeded: 0,
+                accounts: String::new(),
+                parent_id: String::new(),
+                branch_label: String::new(),
+                updated_at: 1,
+                user_hidden: 0,
+                container_image: String::new(),
+                container_volumes: "[]".to_string(),
+                container_name: String::new(),
+                use_ambient_login: 0,
+                auto_continue_enabled: 0,
+                model_vendor_base_url: String::new(),
+                memory_id: String::new(),
+            };
+            let mut def_b = def_a.clone();
+            def_b.id = "test-twin-b".to_string();
+            wstore.agent_def_insert(&mut def_a).unwrap();
+            wstore.agent_def_insert(&mut def_b).unwrap();
+
+            M0021BackfillAgentBundles.up(&ctx_for(tmp.path(), shared_tmp.path())).unwrap();
+
+            let bound_a = wstore.agent_def_get(&def_a.id).unwrap().unwrap().memory_id;
+            let bound_b = wstore.agent_def_get(&def_b.id).unwrap().unwrap().memory_id;
+            assert!(!bound_a.is_empty(), "first same-named agent must be backfilled");
+            assert!(!bound_b.is_empty(), "second same-named agent must NOT be left unbound by a collision");
+            assert_ne!(bound_a, bound_b, "each agent still gets its own distinct bundle");
         });
     }
 
