@@ -457,8 +457,26 @@ impl Store {
             // documented for. Preserve the local row's value when one
             // exists; only a truly cross-channel agent (no local row) sees
             // the empty default. (reagent P0 on PR #2505.)
+            //
+            // memory_id needs the IDENTICAL treatment, for the identical
+            // reason (P0 fix, ReAgent review on PR #2587 round 6):
+            // DefinitionRecordV1 doesn't carry memory_id either (same
+            // documented gap, def_registry_mirror.rs), so
+            // record_to_agent_definition always returns "" for it too.
+            // Every local write auto-mirrors into the global registry
+            // (agent_def_insert -> registry_def_upsert), so this overlay
+            // fires for virtually every agent whenever a shared store is
+            // configured — the "normal case," not an edge case. Without
+            // this fix, agent_def_list() would silently zero memory_id on
+            // every read, defeating agent_open.rs's spawn-time bundle
+            // resolution (falls back to the driftable agent.provider
+            // instead of the immutable bundle) and m0021's own
+            // memory_id-empty backfill filter (which would re-process
+            // every already-bound agent on every migration run, since it
+            // reads through this same function).
             if let Some(existing) = by_id.get(&def.id) {
                 def.model_vendor_base_url = existing.model_vendor_base_url.clone();
+                def.memory_id = existing.memory_id.clone();
             }
             by_id.insert(def.id.clone(), def);
         }
