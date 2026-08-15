@@ -466,14 +466,16 @@
         cursor: default;
     }
 
-    // "Sign in" / expired states — muted, accent on hover.
+    // "Sign in" / expired states — red, matching the status bar's muxbus dot
+    // so the cause of that dot is unmistakable once the panel is open.
     &.muxbus-login-chip-signin {
-        opacity: 0.5;
+        color: var(--error-color);
+        background: color-mix(in srgb, var(--error-color) 12%, transparent);
+        border-radius: 4px;
+        cursor: pointer;
 
         &:hover:not(:disabled) {
-            opacity: 1;
-            background: var(--hover-bg-color);
-            color: var(--accent-color);
+            background: color-mix(in srgb, var(--error-color) 22%, transparent);
         }
     }
 
@@ -557,5 +559,23 @@
     }
     to {
         transform: rotate(360deg);
+    }
+}
+
+// ── MuxBus session dot (on the network pill, next to the LAN diamond) ──────
+// Red = no valid MuxBus session (WAN jekt delivery dead — click the pill and
+// sign in from the panel); green = connected. Deliberately quiet: a dot, not
+// a chip — but always visible, unlike the Instance Panel pill (#2580).
+.status-muxbus-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--error-color);
+    margin-left: 4px;
+    flex-shrink: 0;
+
+    &--ok {
+        background: var(--success-color, #4caf50);
     }
 }
