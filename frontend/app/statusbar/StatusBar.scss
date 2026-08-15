@@ -466,14 +466,16 @@
         cursor: default;
     }
 
-    // "Sign in" / expired states — muted, accent on hover.
+    // "Sign in" / expired states — red, matching the status bar's muxbus dot
+    // so the cause of that dot is unmistakable once the panel is open.
     &.muxbus-login-chip-signin {
-        opacity: 0.5;
+        color: var(--error-color);
+        background: color-mix(in srgb, var(--error-color) 12%, transparent);
+        border-radius: 4px;
+        cursor: pointer;
 
         &:hover:not(:disabled) {
-            opacity: 1;
-            background: var(--hover-bg-color);
-            color: var(--accent-color);
+            background: color-mix(in srgb, var(--error-color) 22%, transparent);
         }
     }
 
