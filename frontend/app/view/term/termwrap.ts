@@ -95,7 +95,7 @@ export class TermWrap {
     // on a disposed Terminal. dispose() doesn't null `this.terminal`, so
     // a null-check guard alone isn't enough.
     private thawTimeoutId: ReturnType<typeof setTimeout> | null = null;
-    private thawRafId: number | null = null;
+    private thawStep2TimeoutId: ReturnType<typeof setTimeout> | null = null;
     private disposed: boolean = false;
     // Tracks the fire-and-forget resyncController("init") call so the
     // post-paint rAF re-fit (below) can wait for the controller to actually
@@ -394,10 +394,17 @@ export class TermWrap {
         // one-frame ~9px width blip confirmed via live CDP trace (every open,
         // ~300-500ms after mount) — see
         // docs/specs/SPEC_AGENT_SHELL_PSREADLINE_THAW_VISIBLE_RESIZE_2026-08-14.md.
-        // Still split across rAF ticks (not just two sendTermSize calls back
+        // Still split across two ticks (not just two sendTermSize calls back
         // to back) to preserve the original timing shape the backend/PSReadLine
         // side was tuned against, even though xterm itself no longer coalesces
-        // anything here (there's no xterm-side resize to coalesce).
+        // anything here (there's no xterm-side resize to coalesce). Step 2 uses
+        // setTimeout, not requestAnimationFrame: rAF callbacks are suspended
+        // indefinitely by Chromium while the tab/window isn't visible, which
+        // would leave the backend PTY at baseCols+1 with no bound on how long
+        // the frontend/backend size disagreement persists — reproducing the
+        // exact desync class this thaw exists to prevent, for output produced
+        // during that window. setTimeout still fires (throttled, not paused)
+        // in background tabs, bounding the mismatch instead. Reagent P1.
         //
         // Gated to Windows (PLATFORM === "win32") because PSReadLine /
         // ConPTY are the affected stack. Non-Windows shells (bash, zsh,
@@ -415,8 +422,8 @@ export class TermWrap {
                 if (baseCols < 4) return; // too narrow to safely toggle ±1
                 try {
                     this.sendTermSize({ cols: baseCols + 1, rows: baseRows });
-                    this.thawRafId = requestAnimationFrame(() => {
-                        this.thawRafId = null;
+                    this.thawStep2TimeoutId = setTimeout(() => {
+                        this.thawStep2TimeoutId = null;
                         if (this.disposed || !this.terminal) return;
                         // If a REAL resize happened between step 1 and now (e.g. a
                         // sibling-split firing handleResize), the terminal's actual
@@ -436,7 +443,7 @@ export class TermWrap {
                         } catch (e) {
                             console.warn("[term] PSReadLine-thaw step 2 failed", e);
                         }
-                    });
+                    }, 16);
                 } catch (e) {
                     console.warn("[term] PSReadLine-thaw step 1 failed", e);
                 }
@@ -459,9 +466,9 @@ export class TermWrap {
             clearTimeout(this.thawTimeoutId);
             this.thawTimeoutId = null;
         }
-        if (this.thawRafId !== null) {
-            cancelAnimationFrame(this.thawRafId);
-            this.thawRafId = null;
+        if (this.thawStep2TimeoutId !== null) {
+            clearTimeout(this.thawStep2TimeoutId);
+            this.thawStep2TimeoutId = null;
         }
         const agentId = registeredAgentsByBlock.get(this.blockId);
         if (agentId) {
