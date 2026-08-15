@@ -358,6 +358,7 @@ pub fn allocate_agent_workdir(desired: &str) -> Result<String, String> {
 
 pub(crate) async fn agent_define_core(
     wstore: Arc<Store>,
+    id_store: Arc<Store>,
     broker: Arc<crate::backend::wps::Broker>,
     cmd: CommandAgentDefineData,
 ) -> Result<AgentDefineResult, String> {
@@ -584,7 +585,7 @@ pub(crate) async fn agent_define_core(
     // NEW definition — not before, or every idempotent `if_exists=skip`/
     // `update` call against an existing name would leak an unbound bundle
     // (see `agent_def_provision_and_bind_bundle`'s own doc comment).
-    wstore.agent_def_provision_and_bind_bundle(&mut def, now);
+    wstore.agent_def_provision_and_bind_bundle(&id_store, &mut def, now);
     // Create the stub first so that listeners handling agents:changed can
     // immediately find the new agent via ListRecentSessionsCommand. The
     // definition is already committed; a stub failure is non-fatal (log +

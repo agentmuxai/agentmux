@@ -338,8 +338,8 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
-        
-            memory_id: String::new(),}
+            memory_id: String::new(),
+        }
     }
 
     /// SPEC_PANE_CLOSE_REOPEN_CONTINUITY_GUARANTEE_2026_07_27.md §4.1: this

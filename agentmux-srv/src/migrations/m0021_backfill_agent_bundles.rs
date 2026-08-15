@@ -41,6 +41,18 @@
 //! every agent and can log which ones it had to skip, rather than silently
 //! processing only whatever happens to be in local SQLite.
 //!
+//! **The bundle itself, though, is NOT channel-local** — it's written into
+//! the effective identity/memory store (shared store when resolvable,
+//! same as `AppState.id_store` at runtime), never the channel's own
+//! `objects.db`. P1 fix (2026-08-15, Codex review on PR #2587): this used
+//! to write bundles straight into `wstore` (the channel store this
+//! migration already has open for the agent-definition side) — every real
+//! bundle-read path (`listmemories`/`getmemory`/the Armory editor/the
+//! bundle-summary panel) reads through `id_store` instead, so a
+//! channel-local bundle would be silently invisible everywhere else, the
+//! exact same bug the runtime provisioning-path fix
+//! (`agent_def_provision_and_bind_bundle`) addresses for new agents.
+//!
 //! Idempotent: re-running only ever touches definitions still at
 //! `memory_id=''`; already-backfilled or already-bound rows are untouched
 //! (both by the `agent_def_list()` filter here and by
@@ -48,7 +60,6 @@
 
 use std::sync::Arc;
 
-use crate::backend::providers::get_provider;
 use crate::backend::storage::store::{Memory, Store};
 use crate::registry::{resolve_shared_definitions_dir, DefinitionStore};
 
@@ -64,18 +75,39 @@ const FALLBACK_PROVIDER: &str = "claude";
 const FALLBACK_MODEL: &str = "anthropic";
 
 /// Same derivation `Store::bundle_provision_for_new_agent`
-/// (`backend/storage/agents.rs`) uses for brand-new agents — the
-/// provider's first declared `supported_vendors` entry, or the provider
-/// id itself if it's not in the registry. Falls back to
-/// `FALLBACK_PROVIDER`/`FALLBACK_MODEL` when `provider` is empty.
-fn resolve_backfill_provider_and_model(provider: &str) -> (String, String) {
+/// (`backend/storage/agents.rs`) uses for brand-new agents — delegates to
+/// `Store::resolve_effective_vendor` so both paths agree on the
+/// `model_vendor_base_url` → `"custom"` rule (P2 fix, Codex review on PR
+/// #2587) rather than maintaining two copies of the same logic. Falls
+/// back to `FALLBACK_PROVIDER`/`FALLBACK_MODEL` when `provider` is empty
+/// — the one case `resolve_effective_vendor` can't help with, since it
+/// still needs a real provider id to look up.
+fn resolve_backfill_provider_and_model(provider: &str, model_vendor_base_url: &str) -> (String, String) {
     if provider.is_empty() {
         return (FALLBACK_PROVIDER.to_string(), FALLBACK_MODEL.to_string());
     }
-    let vendor = get_provider(provider)
-        .and_then(|p| p.supported_vendors.first().copied())
-        .unwrap_or(provider);
-    (provider.to_string(), vendor.to_string())
+    let vendor = Store::resolve_effective_vendor(provider, model_vendor_base_url);
+    (provider.to_string(), vendor)
+}
+
+/// Resolve the store bundles must be written into — mirrors
+/// `AppState.id_store`'s own fallback (shared store when resolvable, else
+/// the channel store) so a migration-time bundle always lands exactly
+/// where the runtime RPC layer will look for it. Best-effort or degrade,
+/// never hard-fail: an unusable shared store means "not today," same
+/// posture the global-registry attach above already has.
+fn resolve_bundle_store(ctx: &MigrationContext, wstore: &Arc<Store>) -> Arc<Store> {
+    match Store::open_shared(&ctx.shared_store_path) {
+        Ok(shared) => Arc::new(shared),
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                path = %ctx.shared_store_path.display(),
+                "backfill_agent_bundles: shared store unavailable, falling back to channel store for bundle writes"
+            );
+            wstore.clone()
+        }
+    }
 }
 
 impl Migration for M0021BackfillAgentBundles {
@@ -108,6 +140,8 @@ impl Migration for M0021BackfillAgentBundles {
             tracing::warn!("backfill_agent_bundles: could not resolve global def registry dir, backfilling local-only");
         }
 
+        let bundle_store = resolve_bundle_store(ctx, &wstore);
+
         let defs = wstore
             .agent_def_list()
             .map_err(|e| MigrationError(format!("backfill_agent_bundles: list defs: {}", e)))?;
@@ -121,7 +155,7 @@ impl Migration for M0021BackfillAgentBundles {
                 continue;
             }
             let bundle_id = uuid::Uuid::new_v4().to_string();
-            let (provider, model) = resolve_backfill_provider_and_model(&def.provider);
+            let (provider, model) = resolve_backfill_provider_and_model(&def.provider, &def.model_vendor_base_url);
             let bundle = Memory {
                 id: bundle_id.clone(),
                 name: format!("{} — ABF", def.name),
@@ -139,7 +173,7 @@ impl Migration for M0021BackfillAgentBundles {
                 created_at: now,
                 updated_at: now,
             };
-            wstore
+            bundle_store
                 .bundle_memory_upsert(&bundle)
                 .map_err(|e| MigrationError(format!("backfill_agent_bundles: create bundle for {}: {}", def.id, e)))?;
 
@@ -193,12 +227,17 @@ mod tests {
         result
     }
 
-    fn ctx_for(path: &std::path::Path) -> MigrationContext {
+    // `shared_path` MUST be a fresh per-test tempfile, never a shared
+    // constant path — the migration now genuinely writes bundles there
+    // (P1 fix, Codex/ReAgent review on PR #2587), so a shared literal path
+    // across tests would leak real bundle rows between parallel test runs
+    // and across repeated `cargo test` invocations.
+    fn ctx_for(channel_path: &std::path::Path, shared_path: &std::path::Path) -> MigrationContext {
         MigrationContext {
             home: std::env::temp_dir(),
             data_dir: std::env::temp_dir(),
-            shared_store_path: std::env::temp_dir().join("unused-store.db"),
-            channel_store_path: path.to_path_buf(),
+            shared_store_path: shared_path.to_path_buf(),
+            channel_store_path: channel_path.to_path_buf(),
         }
     }
 
@@ -278,20 +317,52 @@ mod tests {
     fn backfills_a_definition_with_no_bundle() {
         with_isolated_home(|_home| {
             let tmp = tempfile::NamedTempFile::new().unwrap();
+            let shared_tmp = tempfile::NamedTempFile::new().unwrap();
             let wstore = Store::open(tmp.path()).unwrap();
             let id = insert_def(&wstore, "Plain Agent");
 
-            M0021BackfillAgentBundles.up(&ctx_for(tmp.path())).unwrap();
+            M0021BackfillAgentBundles.up(&ctx_for(tmp.path(), shared_tmp.path())).unwrap();
 
             let def = wstore.agent_def_get(&id).unwrap().unwrap();
             assert!(!def.memory_id.is_empty(), "expected memory_id to be backfilled");
-            let bundle = wstore.bundle_memory_get(&def.memory_id).unwrap().unwrap();
+            let shared = Store::open_shared(shared_tmp.path()).unwrap();
+            let bundle = shared.bundle_memory_get(&def.memory_id).unwrap().unwrap();
             // insert_def hardcodes provider="claude" — derived, not the
             // fallback path (see resolve_backfill_provider_and_model).
             assert_eq!(bundle.provider, "claude");
             assert_eq!(bundle.model, "anthropic");
             assert!(bundle.name.contains("Plain Agent"));
             assert!(!bundle.is_blank);
+        });
+    }
+
+    // P1 regression test (Codex + ReAgent review on PR #2587): the bundle
+    // must land in the EFFECTIVE identity/memory store (shared store,
+    // mirroring AppState.id_store), never the channel-local store the
+    // agent definition itself lives in — a channel-local bundle is
+    // invisible to bundle.list/bundle.get/the Armory editor.
+    #[test]
+    fn backfilled_bundle_lands_in_the_shared_store_not_the_channel_store() {
+        with_isolated_home(|_home| {
+            let tmp = tempfile::NamedTempFile::new().unwrap();
+            let shared_tmp = tempfile::NamedTempFile::new().unwrap();
+            let wstore = Store::open(tmp.path()).unwrap();
+            let id = insert_def(&wstore, "Shared Store Agent");
+
+            M0021BackfillAgentBundles.up(&ctx_for(tmp.path(), shared_tmp.path())).unwrap();
+
+            let def = wstore.agent_def_get(&id).unwrap().unwrap();
+            assert!(!def.memory_id.is_empty());
+
+            // Absent from the channel store — Store::open always seeds the
+            // "blank" singleton, so a fresh channel store already has 1
+            // bundle; the backfilled one must NOT also land here.
+            let channel_bundle_count = wstore.bundle_memory_list().unwrap().iter().filter(|b| !b.is_blank).count();
+            assert_eq!(channel_bundle_count, 0, "bundle must not be written into the channel store");
+
+            // Present in the shared store.
+            let shared = Store::open_shared(shared_tmp.path()).unwrap();
+            assert!(shared.bundle_memory_get(&def.memory_id).unwrap().is_some(), "bundle must be reachable via the shared store");
         });
     }
 
@@ -306,15 +377,44 @@ mod tests {
     fn backfill_derives_provider_and_model_from_the_definitions_own_provider_not_a_hardcoded_default() {
         with_isolated_home(|_home| {
             let tmp = tempfile::NamedTempFile::new().unwrap();
+            let shared_tmp = tempfile::NamedTempFile::new().unwrap();
             let wstore = Store::open(tmp.path()).unwrap();
             let id = insert_def_with_provider(&wstore, "Codex Agent", "codex");
 
-            M0021BackfillAgentBundles.up(&ctx_for(tmp.path())).unwrap();
+            M0021BackfillAgentBundles.up(&ctx_for(tmp.path(), shared_tmp.path())).unwrap();
 
             let def = wstore.agent_def_get(&id).unwrap().unwrap();
-            let bundle = wstore.bundle_memory_get(&def.memory_id).unwrap().unwrap();
+            let shared = Store::open_shared(shared_tmp.path()).unwrap();
+            let bundle = shared.bundle_memory_get(&def.memory_id).unwrap().unwrap();
             assert_eq!(bundle.provider, "codex", "must carry the agent's OWN provider, not claude");
             assert_eq!(bundle.model, "openai", "vendor derived from codex's supported_vendors[0]");
+        });
+    }
+
+    // P2 regression test (Codex review on PR #2587): a definition with a
+    // custom model_vendor_base_url override must backfill to model="custom",
+    // matching Store::resolve_effective_vendor / the frontend's
+    // resolveEffectiveVendor — not the provider's bare default vendor.
+    #[test]
+    fn backfill_uses_custom_vendor_when_the_definition_has_a_model_vendor_base_url_override() {
+        with_isolated_home(|_home| {
+            let tmp = tempfile::NamedTempFile::new().unwrap();
+            let shared_tmp = tempfile::NamedTempFile::new().unwrap();
+            let wstore = Store::open(tmp.path()).unwrap();
+            let id = insert_def_with_provider(&wstore, "Custom Vendor Agent", "claude");
+            {
+                let mut def = wstore.agent_def_get(&id).unwrap().unwrap();
+                def.model_vendor_base_url = "https://my-proxy.example.com".to_string();
+                wstore.agent_def_update(&mut def).unwrap();
+            }
+
+            M0021BackfillAgentBundles.up(&ctx_for(tmp.path(), shared_tmp.path())).unwrap();
+
+            let def = wstore.agent_def_get(&id).unwrap().unwrap();
+            let shared = Store::open_shared(shared_tmp.path()).unwrap();
+            let bundle = shared.bundle_memory_get(&def.memory_id).unwrap().unwrap();
+            assert_eq!(bundle.provider, "claude");
+            assert_eq!(bundle.model, "custom", "a vendor override must backfill to \"custom\", not the provider default");
         });
     }
 
@@ -322,13 +422,15 @@ mod tests {
     fn backfill_falls_back_to_claude_anthropic_only_when_the_definition_has_no_provider_at_all() {
         with_isolated_home(|_home| {
             let tmp = tempfile::NamedTempFile::new().unwrap();
+            let shared_tmp = tempfile::NamedTempFile::new().unwrap();
             let wstore = Store::open(tmp.path()).unwrap();
             let id = insert_def_with_provider(&wstore, "No Provider Agent", "");
 
-            M0021BackfillAgentBundles.up(&ctx_for(tmp.path())).unwrap();
+            M0021BackfillAgentBundles.up(&ctx_for(tmp.path(), shared_tmp.path())).unwrap();
 
             let def = wstore.agent_def_get(&id).unwrap().unwrap();
-            let bundle = wstore.bundle_memory_get(&def.memory_id).unwrap().unwrap();
+            let shared = Store::open_shared(shared_tmp.path()).unwrap();
+            let bundle = shared.bundle_memory_get(&def.memory_id).unwrap().unwrap();
             assert_eq!(bundle.provider, FALLBACK_PROVIDER);
             assert_eq!(bundle.model, FALLBACK_MODEL);
         });
@@ -338,11 +440,12 @@ mod tests {
     fn leaves_an_already_bound_definition_untouched() {
         with_isolated_home(|_home| {
             let tmp = tempfile::NamedTempFile::new().unwrap();
+            let shared_tmp = tempfile::NamedTempFile::new().unwrap();
             let wstore = Store::open(tmp.path()).unwrap();
             let id = insert_def(&wstore, "Already Bound");
             wstore.agent_def_set_memory_id_if_empty(&id, "pre-existing-bundle").unwrap();
 
-            M0021BackfillAgentBundles.up(&ctx_for(tmp.path())).unwrap();
+            M0021BackfillAgentBundles.up(&ctx_for(tmp.path(), shared_tmp.path())).unwrap();
 
             let def = wstore.agent_def_get(&id).unwrap().unwrap();
             assert_eq!(def.memory_id, "pre-existing-bundle", "must not overwrite an existing binding");
@@ -353,20 +456,23 @@ mod tests {
     fn rerun_is_idempotent_no_duplicate_bundles() {
         with_isolated_home(|_home| {
             let tmp = tempfile::NamedTempFile::new().unwrap();
+            let shared_tmp = tempfile::NamedTempFile::new().unwrap();
             let wstore = Store::open(tmp.path()).unwrap();
             let id = insert_def(&wstore, "Rerun Agent");
 
-            M0021BackfillAgentBundles.up(&ctx_for(tmp.path())).unwrap();
+            M0021BackfillAgentBundles.up(&ctx_for(tmp.path(), shared_tmp.path())).unwrap();
             let first_bundle_id = wstore.agent_def_get(&id).unwrap().unwrap().memory_id;
 
-            M0021BackfillAgentBundles.up(&ctx_for(tmp.path())).unwrap();
+            M0021BackfillAgentBundles.up(&ctx_for(tmp.path(), shared_tmp.path())).unwrap();
             let second_bundle_id = wstore.agent_def_get(&id).unwrap().unwrap().memory_id;
 
             assert_eq!(first_bundle_id, second_bundle_id, "rerun must not replace the bound bundle");
-            // Store::open always seeds the "blank" singleton (see
-            // memory_bundles.rs), so a fresh store already has 1 bundle
-            // before this migration ever runs — count non-blank bundles.
-            let non_blank_count = wstore
+            // Store::open_shared also seeds the "blank" singleton (see
+            // memory_bundles.rs), so a fresh shared store already has 1
+            // bundle before this migration ever runs — count non-blank
+            // bundles in the store bundles actually land in now.
+            let shared = Store::open_shared(shared_tmp.path()).unwrap();
+            let non_blank_count = shared
                 .bundle_memory_list()
                 .unwrap()
                 .iter()
@@ -380,11 +486,12 @@ mod tests {
     fn backfills_multiple_definitions_with_distinct_bundles() {
         with_isolated_home(|_home| {
             let tmp = tempfile::NamedTempFile::new().unwrap();
+            let shared_tmp = tempfile::NamedTempFile::new().unwrap();
             let wstore = Store::open(tmp.path()).unwrap();
             let a = insert_def(&wstore, "Agent A");
             let b = insert_def(&wstore, "Agent B");
 
-            M0021BackfillAgentBundles.up(&ctx_for(tmp.path())).unwrap();
+            M0021BackfillAgentBundles.up(&ctx_for(tmp.path(), shared_tmp.path())).unwrap();
 
             let bundle_a = wstore.agent_def_get(&a).unwrap().unwrap().memory_id;
             let bundle_b = wstore.agent_def_get(&b).unwrap().unwrap().memory_id;
@@ -397,8 +504,30 @@ mod tests {
     #[test]
     fn missing_channel_store_is_a_noop() {
         with_isolated_home(|_home| {
-            let ctx = ctx_for(std::path::Path::new("Z:/does/not/exist/objects.db"));
+            let shared_tmp = tempfile::NamedTempFile::new().unwrap();
+            let ctx = ctx_for(std::path::Path::new("Z:/does/not/exist/objects.db"), shared_tmp.path());
             M0021BackfillAgentBundles.up(&ctx).unwrap();
+        });
+    }
+
+    // Fallback regression test: when the shared store path itself is
+    // unusable (parent directory doesn't exist), the migration must still
+    // succeed by falling back to the channel store — mirroring
+    // AppState.id_store's own degrade-to-wstore behavior — rather than
+    // hard-failing the whole migration.
+    #[test]
+    fn falls_back_to_the_channel_store_when_the_shared_store_path_is_unusable() {
+        with_isolated_home(|_home| {
+            let tmp = tempfile::NamedTempFile::new().unwrap();
+            let wstore = Store::open(tmp.path()).unwrap();
+            let id = insert_def(&wstore, "Fallback Agent");
+            let bad_shared_path = std::path::Path::new("Z:/does/not/exist/shared-store.db");
+
+            M0021BackfillAgentBundles.up(&ctx_for(tmp.path(), bad_shared_path)).unwrap();
+
+            let def = wstore.agent_def_get(&id).unwrap().unwrap();
+            assert!(!def.memory_id.is_empty(), "must still backfill even when the shared store is unreachable");
+            assert!(wstore.bundle_memory_get(&def.memory_id).unwrap().is_some(), "falls back to writing the bundle in the channel store");
         });
     }
 }
