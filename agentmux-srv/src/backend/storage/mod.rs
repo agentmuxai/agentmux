@@ -8,6 +8,7 @@ pub mod agent_credentials;
 pub mod agent_jekt_keys;
 pub mod agent_lan_keys;
 pub mod agent_native_memory;
+pub mod lan_peer_pubkey_pins;
 pub mod agents;
 pub mod agents_consolidate;
 pub mod content;

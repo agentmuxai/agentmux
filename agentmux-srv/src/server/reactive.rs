@@ -249,19 +249,42 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
     let Some(claimed) = req.source_agent.clone().filter(|s| !s.is_empty()) else {
         return;
     };
-    let Some(public_key) = state
+    let Some(observed_key) = state
         .lan_discovery
         .find_agent_lan_pubkey(&claimed, &state.http_client)
         .await
     else {
         return; // no peer has a LAN public key on file for this claimed sender
     };
+
+    // Trust-on-first-use pin (reagentx P0 — mDNS peer discovery is
+    // unauthenticated, so "whichever peer answers first" is not a safe
+    // trust anchor on its own; see lan_peer_pubkey_pins.rs's module doc and
+    // docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.2). The first
+    // key ever observed for a claimed sender is pinned; a LATER lookup
+    // returning a DIFFERENT key is itself treated as an active red flag —
+    // someone is now claiming a different identity than what was already
+    // established — not silently trusted as an update.
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    let observed_key_b64 = BASE64.encode(&observed_key);
+    let Ok(pinned_key_b64) = state.wstore.lan_peer_pubkey_pin_get_or_set(&claimed, &observed_key_b64) else {
+        return;
+    };
+    if pinned_key_b64 != observed_key_b64 {
+        tracing::warn!(
+            agent_id = %claimed,
+            "LAN pubkey mismatch against pinned key — possible identity spoofing attempt"
+        );
+        req.lan_verified = Some(false);
+        return;
+    }
+
     let msgid = req.request_id.clone().unwrap_or_default();
     let ts = req.ts_secs.unwrap_or(0);
     let within_freshness_window = ts > 0 && (now_unix_secs() - ts).abs() <= LAN_SIG_MAX_AGE_SECS;
     let verified = within_freshness_window
         && agentmux_common::jekt_sign::verify_lan_jekt(
-            &public_key,
+            &observed_key,
             &msgid,
             &claimed,
             &req.target_agent,

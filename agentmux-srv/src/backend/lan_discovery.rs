@@ -568,6 +568,17 @@ pub struct LanDiscoveryController {
     /// X; verifying a message FROM agent Y needs `pubkey_cache`'s entry for
     /// Y — different agent_ids on the same inbound request).
     pubkey_cache: std::sync::RwLock<HashMap<String, LanPubkeyCacheEntry>>,
+    /// reagentx P1 on the LAN signing PR: `find_agent_lan_pubkey`'s negative
+    /// cache is keyed by agent_id, so a caller holding only the `lan_key`
+    /// can force a fresh multi-peer fan-out on every single request just by
+    /// sending a novel random `source_agent` each time — the cache never
+    /// hits, and this expensive walk runs (in `verify_lan_signature`)
+    /// BEFORE `Handler::inject_message`'s own rate limiter is ever reached.
+    /// A simple global token bucket on the fan-out ITSELF (not per-agent_id
+    /// — the abuse pattern is specifically about varying the id to dodge a
+    /// per-id cache) bounds the damage regardless of how many distinct
+    /// identities are probed.
+    pubkey_lookup_limiter: std::sync::Mutex<LookupRateLimiter>,
 }
 
 struct LanPubkeyCacheEntry {
@@ -576,6 +587,48 @@ struct LanPubkeyCacheEntry {
     public_key: Option<Vec<u8>>,
     expires: std::time::Instant,
 }
+
+/// Minimal token bucket, refilled once per second — same shape as
+/// `backend::reactive::handler::RateLimiter`, duplicated locally rather
+/// than widening that one's visibility across modules for a single caller.
+struct LookupRateLimiter {
+    tokens: u32,
+    max_tokens: u32,
+    last_refill: std::time::Instant,
+}
+
+impl LookupRateLimiter {
+    fn new(max_tokens: u32) -> Self {
+        Self {
+            tokens: max_tokens,
+            max_tokens,
+            last_refill: std::time::Instant::now(),
+        }
+    }
+
+    fn check(&mut self) -> bool {
+        let now = std::time::Instant::now();
+        if now.duration_since(self.last_refill) >= std::time::Duration::from_secs(1) {
+            self.tokens = self.max_tokens;
+            self.last_refill = now;
+        }
+        if self.tokens > 0 {
+            self.tokens -= 1;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// Fan-outs per second `find_agent_lan_pubkey` will perform before failing
+/// closed (returning `None` without querying any peer). Generous for
+/// legitimate traffic — LAN jekts to previously-unseen senders are rare
+/// once agents have been talking a while, and the 60s positive/negative
+/// cache absorbs repeat lookups for the SAME agent_id — while still
+/// bounding the worst case to a small, fixed number of outbound requests
+/// per second regardless of how many distinct agent_ids are probed.
+const LAN_PUBKEY_LOOKUP_RATE_LIMIT: u32 = 10;
 
 impl LanDiscoveryController {
     pub fn new(
@@ -596,6 +649,7 @@ impl LanDiscoveryController {
             event_bus,
             agent_cache: std::sync::RwLock::new(HashMap::new()),
             pubkey_cache: std::sync::RwLock::new(HashMap::new()),
+            pubkey_lookup_limiter: std::sync::Mutex::new(LookupRateLimiter::new(LAN_PUBKEY_LOOKUP_RATE_LIMIT)),
         }
     }
 
@@ -703,6 +757,22 @@ impl LanDiscoveryController {
                     return e.public_key.clone();
                 }
             }
+        }
+
+        // reagentx P1: fail closed (no fan-out) rather than let an
+        // attacker force unbounded outbound peer queries by varying
+        // agent_id on every request — see LAN_PUBKEY_LOOKUP_RATE_LIMIT's
+        // doc comment. A rate-limited-away lookup returns `None`, the exact
+        // same "nothing to check against" outcome as a genuine not-found —
+        // never treated as a verification failure on its own.
+        let allowed = self
+            .pubkey_lookup_limiter
+            .lock()
+            .map(|mut limiter| limiter.check())
+            .unwrap_or(true);
+        if !allowed {
+            tracing::debug!(agent_id, "LAN pubkey lookup rate-limited — skipping peer fan-out");
+            return None;
         }
 
         let peers = self.get_instances();
@@ -1131,5 +1201,32 @@ mod tests {
         assert_eq!(received["version"], "1.2.3");
         assert_eq!(received["port"], 9999);
         assert_eq!(received["auth_key"], "secret-key");
+    }
+}
+
+#[cfg(test)]
+mod lookup_rate_limiter_tests {
+    use super::LookupRateLimiter;
+
+    #[test]
+    fn allows_up_to_max_tokens_per_window() {
+        let mut limiter = LookupRateLimiter::new(3);
+        assert!(limiter.check());
+        assert!(limiter.check());
+        assert!(limiter.check());
+        assert!(!limiter.check(), "a 4th check within the same second must be denied");
+    }
+
+    #[test]
+    fn refills_after_the_window_elapses() {
+        let mut limiter = LookupRateLimiter::new(1);
+        assert!(limiter.check());
+        assert!(!limiter.check());
+        // Simulate the refill window having passed rather than sleeping in
+        // a test — same approach as the existing RATE_LIMIT_MAX tests use
+        // conceptually, just directly on the struct field since this type
+        // has no injectable clock.
+        limiter.last_refill -= std::time::Duration::from_secs(2);
+        assert!(limiter.check(), "must refill once a full second has elapsed");
     }
 }

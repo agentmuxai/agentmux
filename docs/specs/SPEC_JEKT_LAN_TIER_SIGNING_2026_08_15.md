@@ -116,6 +116,35 @@ already solves "how do I find which peer hosts agent X":
   itself) is simpler than trying to fit a growing set of keys into mDNS's
   TXT record size constraints.
 
+**Trust-on-first-use pinning (reagentx P0, revised after implementation
+review):** the discovery mechanism above answers "which peer currently
+claims to host agent X," but mDNS discovery is itself unauthenticated — any
+device on the LAN can advertise its own instance and locally register an
+agent under an EXISTING agent's name. Trusting "whichever peer answers the
+lookup first" without further anchoring lets an attacker's self-minted
+keypair be accepted as authoritative for a victim's `agent_id`, defeating
+per-agent signing's entire premise. `db_lan_peer_pubkey_pins` (schema v20,
+`storage/lan_peer_pubkey_pins.rs`) pins the FIRST key ever observed for a
+given claimed sender; `verify_lan_signature` (`server/reactive.rs`) treats a
+later, DIFFERENT key claiming the same `agent_id` as an active red flag
+(`lan_verified = Some(false)`, forcing `TIER=sensitive`) rather than
+silently trusting the newer answer — the standard SSH-host-key mitigation
+for "no PKI available." This narrows the attack to a race on the very
+first-ever lookup for a given `agent_id` (an accepted, well-understood TOFU
+residual risk), down from "always fully spoofable by anyone who answers
+first."
+
+**Fan-out rate limiting (reagentx P1):** `find_agent_lan_pubkey`'s negative
+cache is keyed by `agent_id`, so a caller holding only the `lan_key` could
+otherwise force a fresh multi-peer network fan-out on every single request
+just by varying `source_agent`, ahead of `Handler::inject_message`'s own
+rate limiter (which only runs after `verify_lan_signature` returns). A
+simple global token bucket (`LAN_PUBKEY_LOOKUP_RATE_LIMIT`, 10/sec) gates
+the fan-out itself — not per-`agent_id`, since the abuse pattern is
+specifically about varying the id to dodge a per-id cache — failing closed
+(same "nothing to check against" outcome as a genuine not-found, never a
+verification failure) when exceeded.
+
 ### 2.3 Signing (client side — `agentmux-mcp`)
 
 Mirror `sign_jekt`'s call site in `agentmux-mcp/src/main.rs` (the
