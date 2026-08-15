@@ -557,6 +557,24 @@ pub struct LanDiscoveryController {
     /// Short-lived cache mapping agent_id → (peer_url, auth_key). Entries expire
     /// after LAN_AGENT_CACHE_TTL_SECS to handle agent migration between peers.
     agent_cache: std::sync::RwLock<HashMap<String, LanCacheEntry>>,
+    /// Separate cache mapping agent_id → LAN Ed25519 public key bytes.
+    /// SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.2 — deliberately its own
+    /// map rather than folded into `agent_cache`: the two are keyed by the
+    /// same agent_id but answer different questions ("which peer currently
+    /// hosts this agent" churns on process restarts/migration; "what is
+    /// this agent's public key" is effectively static for the agent's
+    /// lifetime), and a lookup for one is not always paired with a lookup
+    /// for the other (a message TO agent X needs `agent_cache`'s entry for
+    /// X; verifying a message FROM agent Y needs `pubkey_cache`'s entry for
+    /// Y — different agent_ids on the same inbound request).
+    pubkey_cache: std::sync::RwLock<HashMap<String, LanPubkeyCacheEntry>>,
+}
+
+struct LanPubkeyCacheEntry {
+    /// `None` = negative cache entry: no peer has a LAN public key on file
+    /// for this agent_id (never minted one, or genuinely unknown).
+    public_key: Option<Vec<u8>>,
+    expires: std::time::Instant,
 }
 
 impl LanDiscoveryController {
@@ -577,6 +595,7 @@ impl LanDiscoveryController {
             auth_key,
             event_bus,
             agent_cache: std::sync::RwLock::new(HashMap::new()),
+            pubkey_cache: std::sync::RwLock::new(HashMap::new()),
         }
     }
 
@@ -655,6 +674,79 @@ impl LanDiscoveryController {
                 LanCacheEntry {
                     peer_url: None,
                     auth_key: String::new(),
+                    expires: std::time::Instant::now()
+                        + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
+                },
+            );
+        }
+        None
+    }
+
+    /// Look up a claimed LAN sender's Ed25519 public key by fanning out to
+    /// every discovered LAN peer, same query the target-agent lookup above
+    /// makes (`GET /agentmux/reactive/agent?id=<agent_id>`, now extended —
+    /// see `handle_reactive_agent` — to embed `lan_public_key` when the
+    /// responding peer has minted one). A SEPARATE lookup from `find_agent`
+    /// even though it hits the same endpoint: verifying an inbound message
+    /// FROM agent Y needs Y's key, which is almost never the same agent_id
+    /// as whatever THIS request's own target-agent lookup (if any) was for.
+    ///
+    /// Returns the raw decoded public key bytes, or `None` if no peer has
+    /// one on file for this agent_id (cached negatively, same as
+    /// `find_agent`'s "not found" case) — callers (`verify_lan_signature`)
+    /// treat that identically to "no signature attempted": nothing to check
+    /// against, not a red flag on its own.
+    pub async fn find_agent_lan_pubkey(&self, agent_id: &str, http: &reqwest::Client) -> Option<Vec<u8>> {
+        if let Ok(cache) = self.pubkey_cache.read() {
+            if let Some(e) = cache.get(agent_id) {
+                if e.expires > std::time::Instant::now() {
+                    return e.public_key.clone();
+                }
+            }
+        }
+
+        let peers = self.get_instances();
+        for peer in &peers {
+            if peer.address.is_empty() || peer.auth_key.is_empty() {
+                continue;
+            }
+            let peer_url = format!("http://{}:{}", peer.address, peer.port);
+            let result = http
+                .get(format!("{}/agentmux/reactive/agent", peer_url))
+                .query(&[("id", agent_id)])
+                .header("X-AuthKey", &peer.auth_key)
+                .timeout(std::time::Duration::from_secs(LAN_PEER_QUERY_TIMEOUT_SECS))
+                .send()
+                .await;
+            let Ok(resp) = result else { continue };
+            if !resp.status().is_success() {
+                continue;
+            }
+            let Ok(body) = resp.json::<serde_json::Value>().await else { continue };
+            let Some(pubkey_b64) = body.get("lan_public_key").and_then(|v| v.as_str()) else {
+                continue; // this peer has the agent but no LAN key minted for it yet
+            };
+            use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+            let Ok(pubkey_bytes) = BASE64.decode(pubkey_b64) else { continue };
+            tracing::debug!(agent_id, peer_url = %peer_url, "LAN agent pubkey found on peer");
+            if let Ok(mut cache) = self.pubkey_cache.write() {
+                cache.insert(
+                    agent_id.to_string(),
+                    LanPubkeyCacheEntry {
+                        public_key: Some(pubkey_bytes.clone()),
+                        expires: std::time::Instant::now()
+                            + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
+                    },
+                );
+            }
+            return Some(pubkey_bytes);
+        }
+
+        if let Ok(mut cache) = self.pubkey_cache.write() {
+            cache.insert(
+                agent_id.to_string(),
+                LanPubkeyCacheEntry {
+                    public_key: None,
                     expires: std::time::Instant::now()
                         + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
                 },

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use axum::{
-    extract::{Query, State},
+    extract::{Extension, Query, State},
     http::StatusCode,
     response::{IntoResponse, Json, Response},
 };
@@ -69,7 +69,10 @@ pub(super) fn echo_jekt_to_sender(
         delivery_tier,
         sig_verified,
         // Sender-echo is inherently host-tier (the sender only ever sees
-        // this in their own pane) — reagent signing is WAN-only.
+        // this in their own pane) — reagent signing is WAN-only and LAN
+        // signing is LAN-only, so both are meaningless here regardless of
+        // what the actual delivery_tier of the outgoing message was.
+        None,
         None,
         msgid,
         priority,
@@ -209,8 +212,69 @@ pub(super) fn verify_reagent_signature(req: &mut InjectionRequest, now: i64) {
     req.reagent_verified = Some(verified);
 }
 
+/// Anti-replay window for LAN `lan_sig` — reuses the WAN reasoning
+/// (`REAGENT_SIG_MAX_AGE_SECS`) rather than host-tier's tighter
+/// `JEKT_SIG_MAX_AGE_SECS`: LAN crosses an actual network hop (mDNS
+/// discovery + an HTTP round trip through a peer instance), not a
+/// same-process call, so it needs the wider real-network-delivery-latency
+/// margin WAN already established rather than host-tier's same-machine one.
+const LAN_SIG_MAX_AGE_SECS: i64 = REAGENT_SIG_MAX_AGE_SECS;
+
+/// LAN-tier per-agent Ed25519 signature verification —
+/// docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.4. Async, unlike
+/// `verify_jekt_signature`'s synchronous local-only key lookup: the claimed
+/// sender's public key lives on WHICHEVER peer instance actually hosts that
+/// agent, so finding it costs a LAN round trip
+/// (`LanDiscoveryController::find_agent_lan_pubkey`).
+///
+/// Only meaningful for `delivery_tier == "lan"` — by this point
+/// `req.delivery_tier` has already been through the server-side override in
+/// `handle_reactive_inject` (§3 of the spec), so this is never reachable
+/// off a genuinely `lan_key`-authenticated request.
+///
+/// No `lan_sig` at all, or a claimed sender whose public key no peer has on
+/// file → `lan_verified` stays `None` — "nothing to check against," not a
+/// red flag on its own, same semantics as `sig_verified`/`reagent_verified`'s
+/// `None` case. A `lan_sig` present with a public key found but the
+/// signature doesn't verify → `Some(false)`, forced `TIER=sensitive`
+/// unconditionally in `handler.rs` — an active attempt to forge a specific
+/// agent's identity.
+pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRequest) {
+    if req.delivery_tier.as_deref() != Some("lan") {
+        return;
+    }
+    let Some(sig) = req.lan_sig.as_deref() else {
+        return;
+    };
+    let Some(claimed) = req.source_agent.clone().filter(|s| !s.is_empty()) else {
+        return;
+    };
+    let Some(public_key) = state
+        .lan_discovery
+        .find_agent_lan_pubkey(&claimed, &state.http_client)
+        .await
+    else {
+        return; // no peer has a LAN public key on file for this claimed sender
+    };
+    let msgid = req.request_id.clone().unwrap_or_default();
+    let ts = req.ts_secs.unwrap_or(0);
+    let within_freshness_window = ts > 0 && (now_unix_secs() - ts).abs() <= LAN_SIG_MAX_AGE_SECS;
+    let verified = within_freshness_window
+        && agentmux_common::jekt_sign::verify_lan_jekt(
+            &public_key,
+            &msgid,
+            &claimed,
+            &req.target_agent,
+            ts,
+            &req.message,
+            sig,
+        );
+    req.lan_verified = Some(verified);
+}
+
 pub(super) async fn handle_reactive_inject(
     State(state): State<AppState>,
+    Extension(auth_via): Extension<super::ReactiveAuthVia>,
     Json(mut req): Json<InjectionRequest>,
 ) -> Json<serde_json::Value> {
     tracing::info!(
@@ -220,8 +284,29 @@ pub(super) async fn handle_reactive_inject(
         "reactive inject request received"
     );
 
+    // Server-derived delivery_tier, not the client's own claim —
+    // docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §3. A `lan_key`
+    // holder is the ONLY caller who could have legitimately crossed the LAN
+    // boundary, so that credential unconditionally means "lan," regardless
+    // of what the body says. The full `auth_key` covers everything
+    // self-originated from this same instance (a local MCP tool call, or
+    // the muxbus cloud subscriber relaying a WAN delivery) — the body's own
+    // claim is trusted for the host/wan distinction ONLY, never "lan":
+    // nothing authenticated via the full key could have genuinely crossed
+    // the LAN boundary, so a bogus `delivery_tier: "lan"` claim downgrades
+    // to "host" rather than being honored.
+    req.delivery_tier = Some(match auth_via {
+        super::ReactiveAuthVia::LanKey => "lan".to_string(),
+        super::ReactiveAuthVia::FullAuthKey => match req.delivery_tier.as_deref() {
+            Some("lan") => "host".to_string(),
+            Some(other) => other.to_string(),
+            None => "host".to_string(),
+        },
+    });
+
     verify_jekt_signature(&state, &mut req);
     verify_reagent_signature(&mut req, now_unix_secs());
+    verify_lan_signature(&state, &mut req).await;
 
     // 1. Try local ReactiveHandler first (fast path — same instance).
     let resp = state.reactive_handler.inject_message(req.clone());
@@ -512,7 +597,27 @@ pub(super) async fn handle_reactive_agent(
         }
     };
     match state.reactive_handler.get_agent(id) {
-        Some(agent) => Json(serde_json::to_value(&agent).unwrap_or_default()).into_response(),
+        Some(agent) => {
+            // Merged in, not part of AgentRegistration's own serialization —
+            // this is the LAN pubkey-lookup half of
+            // docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.2. The
+            // public half of an Ed25519 keypair is not secret; handing it to
+            // whichever peer already holds a valid lan_key (this whole route
+            // is gated by lan_or_full_auth_middleware) costs nothing and
+            // lets that peer verify this agent's future outgoing LAN
+            // signatures. `None` when the agent has no LAN key minted yet
+            // (never sent a LAN jekt since this shipped) — omitted from the
+            // JSON entirely rather than rendered `null`, so existing callers
+            // of this endpoint that don't know about this field see no
+            // change in shape.
+            let mut value = serde_json::to_value(&agent).unwrap_or_default();
+            if let Ok(Some(pubkey)) = state.wstore.agent_lan_public_key_load(id) {
+                if let Some(obj) = value.as_object_mut() {
+                    obj.insert("lan_public_key".to_string(), json!(pubkey));
+                }
+            }
+            Json(value).into_response()
+        }
         None => (
             StatusCode::NOT_FOUND,
             Json(json!({"error": "agent not found"})),
@@ -1167,5 +1272,75 @@ mod verify_reagent_signature_tests {
         req.reagent_ts_secs = None;
         verify_reagent_signature(&mut req, FIXTURE_TS_SECS);
         assert_eq!(req.reagent_verified, None);
+    }
+}
+
+#[cfg(test)]
+mod verify_lan_signature_tests {
+    use super::*;
+    use crate::server::tests::test_state;
+
+    // test_state() has no real LAN peers discovered, so
+    // find_agent_lan_pubkey always returns None here — these tests exercise
+    // the paths reachable without one (tier scoping, no-signature-attempted,
+    // no-pubkey-found). The actual verify_lan_jekt crypto — correct sig
+    // verifies, wrong sig fails, tampered content/sender fails — is
+    // exhaustively covered in agentmux-common/src/jekt_sign.rs; the tier
+    // escalation this feeds into (is_lan_sig_invalid forcing sensitive,
+    // TRUST=lan-verified rendering) is covered end-to-end via
+    // Handler::inject_message in backend/reactive/tests.rs, driven directly
+    // off req.lan_verified rather than through this HTTP-round-trip lookup.
+
+    fn now() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+    }
+
+    fn lan_req(source_agent: &str, target_agent: &str, message: &str) -> InjectionRequest {
+        InjectionRequest {
+            target_agent: target_agent.to_string(),
+            message: message.to_string(),
+            source_agent: Some(source_agent.to_string()),
+            delivery_tier: Some("lan".to_string()),
+            request_id: Some("req-lan-1".to_string()),
+            ts_secs: Some(now()),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn lan_signature_verification_is_skipped_off_the_lan_tier() {
+        let state = test_state();
+        let mut req = lan_req("agentx", "agenty", "hello");
+        req.delivery_tier = Some("host".to_string());
+        req.lan_sig = Some("anything".to_string());
+        verify_lan_signature(&state, &mut req).await;
+        assert_eq!(req.lan_verified, None, "lan signing only applies to the LAN tier");
+    }
+
+    #[tokio::test]
+    async fn no_lan_sig_attempted_leaves_lan_verified_unset() {
+        let state = test_state();
+        let mut req = lan_req("agentx", "agenty", "hello");
+        verify_lan_signature(&state, &mut req).await;
+        assert_eq!(req.lan_verified, None, "nothing to check when no signature was attempted");
+    }
+
+    #[tokio::test]
+    async fn a_claimed_sender_with_no_discoverable_pubkey_leaves_lan_verified_unset() {
+        // A lan_sig IS present, but with zero LAN peers discovered
+        // (test_state()'s default), find_agent_lan_pubkey can't find
+        // anyone's public key — "nothing to check against" must not be
+        // conflated with "the signature is invalid."
+        let state = test_state();
+        let mut req = lan_req("agentx", "agenty", "hello");
+        req.lan_sig = Some("some-signature".to_string());
+        verify_lan_signature(&state, &mut req).await;
+        assert_eq!(
+            req.lan_verified, None,
+            "an unfindable public key must not be conflated with a failed verification"
+        );
     }
 }

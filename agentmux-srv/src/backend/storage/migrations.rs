@@ -123,7 +123,15 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 7;
 ///        agent's env, so a signature can only be produced by the agent it
 ///        claims to be from. See
 ///        docs/specs/SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2.
-pub const OBJECT_SCHEMA_VERSION: i64 = 18;
+///   v19 — db_agent_lan_keys: per-agent Ed25519 keypair for LAN-tier jekt
+///        sender verification — mirrors v18, asymmetric instead of HMAC
+///        (LAN is multi-party: a receiving peer must verify without being
+///        able to forge, which a shared secret can't provide). public_key
+///        is distributed to LAN peers on demand (not secret); private_key
+///        is injected into that one agent's own MCP process env
+///        (AGENTMUX_LAN_KEY) at spawn, same never-over-RPC guarantee as
+///        v18. See docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.1.
+pub const OBJECT_SCHEMA_VERSION: i64 = 19;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -585,6 +593,19 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             agent_id   TEXT PRIMARY KEY,
             hmac_key   TEXT NOT NULL,
             created_at INTEGER NOT NULL DEFAULT 0
+        );
+
+        -- v19: per-agent Ed25519 keypair for LAN-tier jekt sender
+        -- verification (SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.1).
+        -- public_key is not secret (distributed to LAN peers on demand);
+        -- private_key is base64, 32-byte seed, minted on first use
+        -- (agent_lan_key_ensure) and never rotated automatically. Same
+        -- local-to-this-instance-only guarantee as db_agent_jekt_keys.
+        CREATE TABLE IF NOT EXISTS db_agent_lan_keys (
+            agent_id    TEXT PRIMARY KEY,
+            public_key  TEXT NOT NULL,
+            private_key TEXT NOT NULL,
+            created_at  INTEGER NOT NULL DEFAULT 0
         );",
     )?;
 

@@ -788,6 +788,42 @@ pub(super) fn write_agent_config_files(
         }
     }
 
+    // LAN-tier jekt sender signing key (SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md
+    // §2.1) — same injection pattern as AGENTMUX_JEKT_KEY immediately above,
+    // asymmetric instead of symmetric: only the PRIVATE half goes into this
+    // one agent's own process env; the public half is what LAN peers query
+    // for over `GET /agentmux/reactive/agent` (see
+    // `handle_reactive_agent`/`LanDiscoveryController::find_agent_lan_pubkey`).
+    // Same best-effort guarantee — a failure here must never block agent
+    // spawn, and until the next successful spawn this agent's LAN jekts
+    // simply carry no lan_sig (TRUST=network-claimed, not lan-verified,
+    // exactly as if this feature didn't exist).
+    if let Ok(keypair) = wstore.agent_lan_key_ensure(agent_slug) {
+        if let Some(pos) = config_files.iter().position(|f| f.filename == ".mcp.json") {
+            match serde_json::from_str::<serde_json::Value>(&config_files[pos].content) {
+                Ok(mut mcp_json) => {
+                    if let Some(env) = mcp_json
+                        .pointer_mut("/mcpServers/agentmux/env")
+                        .and_then(|v| v.as_object_mut())
+                    {
+                        env.insert("AGENTMUX_LAN_KEY".to_string(), serde_json::json!(keypair.private_key));
+                        if let Ok(rewritten) = serde_json::to_string_pretty(&mcp_json) {
+                            config_files[pos].content = rewritten;
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        agent_id = %agent.id,
+                        error = %e,
+                        "agent_open: .mcp.json failed to parse — AGENTMUX_LAN_KEY not injected, \
+                         this agent's LAN jekts will render TRUST=network-claimed instead of lan-verified"
+                    );
+                }
+            }
+        }
+    }
+
     // Expand ~ in work_dir
     let expanded_dir = if work_dir.starts_with("~/") || work_dir == "~" {
         if let Ok(home) = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {

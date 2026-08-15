@@ -1420,9 +1420,26 @@ async fn auth_middleware(
 /// of `/agentmux/service`, `/agentmux/file`, shell creation, credential/
 /// identity endpoints, etc. See `Config::lan_key`'s doc comment for why
 /// this exists (SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md LAN P0-1).
+/// Which of the two credentials `lan_or_full_auth_middleware` accepted
+/// authenticated this specific request. Inserted into the request's
+/// extensions so `handle_reactive_inject` can derive `delivery_tier`
+/// server-side instead of trusting whatever the JSON body claims — see
+/// docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §3. A `lan_key`
+/// holder is the ONLY caller who could have legitimately crossed the LAN
+/// boundary; the full `auth_key` covers everything self-originated from
+/// this same instance (a local MCP tool call, or the muxbus cloud
+/// subscriber relaying a WAN delivery into local injection) and is NOT
+/// sufficient on its own to distinguish which of those two the body's own
+/// `delivery_tier` claim should be trusted for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ReactiveAuthVia {
+    FullAuthKey,
+    LanKey,
+}
+
 async fn lan_or_full_auth_middleware(
     State(state): State<AppState>,
-    req: Request<Body>,
+    mut req: Request<Body>,
     next: Next,
 ) -> Response {
     if req.method() == Method::OPTIONS {
@@ -1435,7 +1452,14 @@ async fn lan_or_full_auth_middleware(
         .and_then(|v| v.to_str().ok());
 
     match auth_key {
-        Some(key) if key == state.auth_key || key == state.lan_key => next.run(req).await,
+        Some(key) if key == state.auth_key => {
+            req.extensions_mut().insert(ReactiveAuthVia::FullAuthKey);
+            next.run(req).await
+        }
+        Some(key) if key == state.lan_key => {
+            req.extensions_mut().insert(ReactiveAuthVia::LanKey);
+            next.run(req).await
+        }
         _ => (
             StatusCode::UNAUTHORIZED,
             Json(json!({"error": "unauthorized"})),
