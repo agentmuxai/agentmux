@@ -358,6 +358,7 @@ pub fn allocate_agent_workdir(desired: &str) -> Result<String, String> {
 
 pub(crate) async fn agent_define_core(
     wstore: Arc<Store>,
+    id_store: Arc<Store>,
     broker: Arc<crate::backend::wps::Broker>,
     cmd: CommandAgentDefineData,
 ) -> Result<AgentDefineResult, String> {
@@ -452,6 +453,7 @@ pub(crate) async fn agent_define_core(
         use_ambient_login: 0,
         model_vendor_base_url: cmd_model_vendor_base_url.clone(),
         auto_continue_enabled: 0,
+        memory_id: String::new(),
     };
 
     // Atomic check-then-insert.
@@ -577,6 +579,13 @@ pub(crate) async fn agent_define_core(
     }
 
     // Fresh insert — def.slug is now set by agent_def_find_or_insert.
+    // Every agent gets its own dedicated ABF bundle
+    // (ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.2). Done here,
+    // after the atomic find-or-insert has confirmed this is a genuinely
+    // NEW definition — not before, or every idempotent `if_exists=skip`/
+    // `update` call against an existing name would leak an unbound bundle
+    // (see `agent_def_provision_and_bind_bundle`'s own doc comment).
+    wstore.agent_def_provision_and_bind_bundle(&id_store, &mut def, now);
     // Create the stub first so that listeners handling agents:changed can
     // immediately find the new agent via ListRecentSessionsCommand. The
     // definition is already committed; a stub failure is non-fatal (log +
@@ -1981,6 +1990,7 @@ mod identity_self_accounts_tests {
             use_ambient_login: 0,
             model_vendor_base_url: String::new(),
             auto_continue_enabled: 0,
+            memory_id: String::new(),
         };
         state.wstore.agent_def_insert(&mut def).unwrap();
 
@@ -2054,6 +2064,7 @@ mod identity_self_accounts_tests {
             use_ambient_login: 0,
             model_vendor_base_url: String::new(),
             auto_continue_enabled: 0,
+            memory_id: String::new(),
         };
         state.wstore.agent_def_insert(&mut def).unwrap();
         state.wstore.identity_upsert(&sample_account("acct-good", "claude")).unwrap();

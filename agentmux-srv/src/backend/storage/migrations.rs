@@ -123,7 +123,19 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 7;
 ///        agent's env, so a signature can only be produced by the agent it
 ///        claims to be from. See
 ///        docs/specs/SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2.
-pub const OBJECT_SCHEMA_VERSION: i64 = 18;
+///   v19 — db_agent_definitions.memory_id: the agent's own dedicated ABF
+///        bundle, set once at creation and never updated thereafter
+///        (agent_def_update's SET clause deliberately omits it, same
+///        immutable-after-creation treatment as is_seeded/slug/parent_id).
+///        Distinct from db_agent_instances.memory_id (a specific launch's
+///        bundle, can still diverge on purpose) and NOT dual-written into
+///        db_agents (see dual_write.rs's module doc) — that column is
+///        instance-only by existing convention and this predates the
+///        Phase 3b reader flip that would need to decide how the two
+///        interact. Defaults to '' for existing rows; the m0021 migration
+///        backfills every unbound definition to a freshly-provisioned
+///        bundle. See ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.1.
+pub const OBJECT_SCHEMA_VERSION: i64 = 19;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -261,7 +273,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             container_name       TEXT NOT NULL DEFAULT '',
             use_ambient_login    INTEGER NOT NULL DEFAULT 0,
             model_vendor_base_url TEXT NOT NULL DEFAULT '',
-            auto_continue_enabled INTEGER NOT NULL DEFAULT 0
+            auto_continue_enabled INTEGER NOT NULL DEFAULT 0,
+            memory_id            TEXT NOT NULL DEFAULT ''
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_definitions_slug
             ON db_agent_definitions(slug);
@@ -450,7 +463,19 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
 
             -- Warden Supervisor auto-continue opt-in (schema v17) — see
             -- db_agent_definitions' column doc.
-            auto_continue_enabled INTEGER NOT NULL DEFAULT 0
+            auto_continue_enabled INTEGER NOT NULL DEFAULT 0,
+
+            -- The DEFINITION's own dedicated ABF bundle (schema v19) —
+            -- mirrors db_agent_definitions.memory_id. Deliberately a
+            -- DIFFERENT column from memory_id above: that one is
+            -- instance-scoped (only meaningful when is_template=0,
+            -- written exclusively by the instance dual-write helpers) and
+            -- this migration doesn't touch its semantics. default_memory_id
+            -- is what agent_def_list's db_agents-backed read actually
+            -- surfaces as AgentDefinition.memory_id (aliased in the SELECT
+            -- below) -- readers that already consult db_agents for listing
+            -- need this to see the definition-level binding at all.
+            default_memory_id    TEXT NOT NULL DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_agents_is_template
             ON db_agents(is_template);
@@ -660,6 +685,12 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         // ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
         "ALTER TABLE db_agent_definitions ADD COLUMN auto_continue_enabled INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE db_agents ADD COLUMN auto_continue_enabled INTEGER NOT NULL DEFAULT 0",
+        // v19: the agent's own dedicated ABF bundle, set once at creation.
+        // db_agents gets a SEPARATE default_memory_id column (not the
+        // existing instance-scoped memory_id) — see its own CREATE TABLE
+        // comment for why, and OBJECT_SCHEMA_VERSION's v19 entry.
+        "ALTER TABLE db_agent_definitions ADD COLUMN memory_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_agents ADD COLUMN default_memory_id TEXT NOT NULL DEFAULT ''",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();

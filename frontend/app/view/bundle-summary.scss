@@ -31,6 +31,33 @@
         color: var(--tertiary-text-color, rgba(255, 255, 255, 0.5));
     }
 
+    .bundle-summary-bound {
+        margin: 0 0 20px;
+        padding: 12px 14px;
+        border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+        background: var(--panel-bg-color, rgba(255, 255, 255, 0.03));
+    }
+
+    .bundle-summary-bound-label {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--tertiary-text-color, rgba(255, 255, 255, 0.5));
+        margin: 0 0 4px;
+    }
+
+    .bundle-summary-bound-name {
+        font-size: 15px;
+        font-weight: 600;
+        margin: 0 0 2px;
+    }
+
+    .bundle-summary-bound-provider {
+        font-size: 12px;
+        color: var(--secondary-text-color, rgba(255, 255, 255, 0.7));
+        margin: 0;
+    }
+
     .bundle-summary-btn {
         margin-top: 4px;
         padding: 7px 16px;

@@ -80,11 +80,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // createagent → insert new agent, broadcast agents:changed
     let wstore_cfa = state.wstore.clone();
+    let id_store_cfa = state.id_store.clone();
     let broker_cfa = state.broker.clone();
     engine.register_handler(
         COMMAND_CREATE_AGENT,
         Box::new(move |data, _ctx| {
             let wstore = wstore_cfa.clone();
+            let id_store = id_store_cfa.clone();
             let broker = broker_cfa.clone();
             Box::pin(async move {
                 let cmd: CommandCreateAgentDefinitionData = serde_json::from_value(data)
@@ -134,8 +136,16 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // use_ambient_login above. Toggled from the Warden
                     // Supervisor panel (not this RPC) once that ships.
                     auto_continue_enabled: 0,
+                    memory_id: String::new(),
                 };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("createagent: {e}"))?;
+                // Every agent gets its own dedicated ABF bundle
+                // (ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.2).
+                // Best-effort, same posture as the color assignment below.
+                // Bundle goes into id_store (the effective identity/memory
+                // store), not wstore — see agent_def_provision_and_bind_
+                // bundle's own doc comment for why they must differ.
+                wstore.agent_def_provision_and_bind_bundle(&id_store, &mut agent, now);
                 // Assign the agent its display color at creation
                 // (SPEC_AGENT_COLOR_2026_08_08.md). Best-effort: a failure
                 // here shouldn't fail the create — agent.open assigns a
@@ -248,6 +258,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // accounts). The Warden Supervisor panel sends Some(0|1)
                     // to flip it, same shape as use_ambient_login above.
                     auto_continue_enabled: cmd.auto_continue_enabled.unwrap_or(old.auto_continue_enabled),
+                    // Immutable post-insert, same as slug/parent_id/branch_label
+                    // above — agent_def_update's SET clause doesn't even
+                    // touch this column, but the in-memory struct still
+                    // needs the real value: it's what gets serialized back
+                    // to the frontend as the "updated" agent.
+                    memory_id: old.memory_id.clone(),
                 };
                 let found = wstore.agent_def_update(&mut agent).map_err(|e| format!("updateagent: {e}"))?;
                 if !found {
@@ -381,11 +397,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // importagentfromclaw → read claw workspace, create agent + content
     let wstore_ifc = state.wstore.clone();
+    let id_store_ifc = state.id_store.clone();
     let broker_ifc = state.broker.clone();
     engine.register_handler(
         COMMAND_IMPORT_AGENT_FROM_CLAW,
         Box::new(move |data, _ctx| {
             let wstore = wstore_ifc.clone();
+            let id_store = id_store_ifc.clone();
             let broker = broker_ifc.clone();
             Box::pin(async move {
                 let cmd: CommandImportAgentFromClawData = serde_json::from_value(data)
@@ -446,8 +464,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     use_ambient_login: 0,
                     model_vendor_base_url: String::new(),
                     auto_continue_enabled: 0,
+                    memory_id: String::new(),
                 };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("importagentfromclaw: {e}"))?;
+                wstore.agent_def_provision_and_bind_bundle(&id_store, &mut agent, now);
 
                 // Read CLAUDE.md → agentmd content
                 let claude_md_path = workspace_path.join("CLAUDE.md");
@@ -524,11 +544,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // importagents — bulk import from JSON export format
     let wstore_ifa = state.wstore.clone();
+    let id_store_ifa = state.id_store.clone();
     let broker_ifa = state.broker.clone();
     engine.register_handler(
         COMMAND_IMPORT_AGENTS,
         Box::new(move |data, _ctx| {
             let wstore = wstore_ifa.clone();
+            let id_store = id_store_ifa.clone();
             let broker = broker_ifa.clone();
             Box::pin(async move {
                 let cmd: CommandImportAgentDefinitionsData = serde_json::from_value(data)
@@ -584,12 +606,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         use_ambient_login: 0,
                         model_vendor_base_url: String::new(),
                         auto_continue_enabled: 0,
+                        memory_id: String::new(),
                     };
 
                     if let Err(e) = wstore.agent_def_insert(&mut agent) {
                         failed.push(format!("{}: {e}", agent_import.name));
                         continue;
                     }
+                    wstore.agent_def_provision_and_bind_bundle(&id_store, &mut agent, now);
 
                     // Insert content types
                     let mut content_ok = true;

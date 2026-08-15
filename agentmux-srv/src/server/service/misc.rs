@@ -242,7 +242,7 @@ pub(super) async fn handle_misc_service(state: &AppState, call: &WebCallType) ->
                     Ok(v) => v,
                     Err(e) => return WebReturnType::error(e),
                 };
-            match super::super::app_api::agent_define_core(state.wstore.clone(), state.broker.clone(), data).await {
+            match super::super::app_api::agent_define_core(state.wstore.clone(), state.id_store.clone(), state.broker.clone(), data).await {
                 Ok(result) => WebReturnType::success(serde_json::to_value(&result).unwrap_or_default()),
                 Err(e) => WebReturnType::error(e),
             }

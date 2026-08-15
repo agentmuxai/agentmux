@@ -417,6 +417,7 @@ mod recent_sessions_tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         let mut def_mut = def.clone();
         wstore.agent_def_insert(&mut def_mut).unwrap();
@@ -736,6 +737,7 @@ mod recent_sessions_tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         wstore.agent_def_insert(&mut tpl).unwrap();
 
@@ -768,6 +770,7 @@ mod recent_sessions_tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         wstore.agent_def_insert(&mut user_a).unwrap();
 
@@ -857,6 +860,105 @@ mod recent_sessions_tests {
         assert_eq!(new_def.provider_flags, "--model haiku");
         assert_eq!(new_def.parent_id, "tpl-claude");
     }
+
+    // ---- Mandatory ABF: definition-time bundle provisioning ----
+    //
+    // ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.2 — every
+    // freshly-created agent definition gets its own dedicated bundle
+    // (not a shared/inherited one), with provider/model derived from the
+    // agent's own harness. m0021 (agentmux-srv/src/migrations/
+    // m0021_backfill_agent_bundles.rs) covers the backfill half for
+    // agents that already existed before this shipped; these tests cover
+    // the forward-going creation paths.
+
+    #[tokio::test]
+    async fn create_from_template_provisions_its_own_bundle() {
+        let (state, engine, mut rx) = build_state_with_template_seed();
+        let resp: crate::backend::rpc_types::AgentDefCreateFromTemplateResult = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE,
+            serde_json::json!({
+                "template_id": "tpl-claude",
+                "name": "Asaf",
+            }),
+        )
+        .await;
+        let new_def = state
+            .wstore
+            .agent_def_get(&resp.definition_id)
+            .unwrap()
+            .expect("new definition should exist");
+        assert!(!new_def.memory_id.is_empty(), "new definition must have a bundle bound");
+        let bundle = state
+            .wstore
+            .bundle_memory_get(&new_def.memory_id)
+            .unwrap()
+            .expect("bound bundle should exist");
+        assert!(!bundle.is_blank, "must be a real bundle, not the shared blank singleton");
+        assert_eq!(bundle.provider, "claude", "provider carries from the agent's own harness");
+        assert_eq!(bundle.model, "anthropic", "vendor defaults from claude's supported_vendors[0]");
+        assert!(bundle.name.contains("Asaf"));
+
+        // "Own" bundle — not the template's own (empty, since tpl-claude
+        // was seeded directly via agent_def_insert, bypassing this path).
+        let tpl = state.wstore.agent_def_get("tpl-claude").unwrap().unwrap();
+        assert_ne!(new_def.memory_id, tpl.memory_id);
+    }
+
+    #[tokio::test]
+    async fn fork_agent_definition_provisions_its_own_bundle_distinct_from_source() {
+        let (state, engine, mut rx) = build_state_with_template_seed();
+        // forkagentdefinition returns the full new AgentDefinition directly.
+        let fork_resp: AgentDefinition = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_FORK_AGENT_DEFINITION,
+            serde_json::json!({ "source_id": "user-a", "branch_label": "" }),
+        )
+        .await;
+        let fork = state
+            .wstore
+            .agent_def_get(&fork_resp.id)
+            .unwrap()
+            .expect("fork should exist");
+        assert!(!fork.memory_id.is_empty(), "fork must have its own bundle bound");
+        assert_eq!(fork.memory_id, fork_resp.memory_id, "response should already reflect the bound bundle");
+
+        // "user-a" was seeded directly via agent_def_insert (empty memory_id),
+        // so this also proves the fork didn't just inherit a shared/parent id.
+        let source = state.wstore.agent_def_get("user-a").unwrap().unwrap();
+        assert_ne!(fork.memory_id, source.memory_id);
+    }
+
+    #[tokio::test]
+    async fn createagent_provisions_own_bundle_and_response_reflects_it() {
+        let (state, engine, mut rx) = build_state_with_template_seed();
+        let created: AgentDefinition = call_rpc(
+            &engine,
+            &mut rx,
+            crate::backend::rpc_types::COMMAND_CREATE_AGENT,
+            serde_json::json!({ "name": "Codex Agent", "provider": "codex" }),
+        )
+        .await;
+        // The RPC response itself must reflect the bound bundle, not the
+        // empty placeholder the struct started with — createagent
+        // serializes the same in-memory struct that
+        // agent_def_provision_and_bind_bundle mutates.
+        assert!(!created.memory_id.is_empty(), "response should already reflect the bound bundle");
+
+        let stored = state.wstore.agent_def_get(&created.id).unwrap().unwrap();
+        assert_eq!(stored.memory_id, created.memory_id);
+        let bundle = state.wstore.bundle_memory_get(&created.memory_id).unwrap().unwrap();
+        assert_eq!(bundle.provider, "codex");
+        assert_eq!(bundle.model, "openai", "vendor defaults from codex's supported_vendors[0]");
+    }
+
+    // agent.define's own provisioning coverage lives in
+    // server/app_api/agent_define.rs's test module (it calls
+    // agent_define_core directly — that RPC isn't wired onto this file's
+    // build_state_with_template_seed engine, which only registers
+    // register_agent_handlers, not app_api::register).
 
     async fn call_rpc_expect_error(
         engine: &Arc<WshRpcEngine>,

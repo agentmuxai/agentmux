@@ -9,11 +9,15 @@
 // Memory" manager (`BundleManagerModal`).
 //
 // This file no longer renders `MemoryManagerBody` — it renders the
-// context-free, CRUD-free `<BundleSummaryPanel/>`, which points the user
-// at the app-wide manager. The `MemoryViewModel` is still the registered
-// `viewComponent` ViewModel (BlockRegistry needs one), and the
-// context-free `MemoryManager` (used by the hamburger modal) is
-// untouched — only this agent-settings wrapper changed.
+// CRUD-free `<BundleSummaryPanel/>`, which points the user at the
+// app-wide manager. `agentId` (`MemoryViewModel.agentId`, mirroring
+// `IdentityPaneViewModel.agentId`) closes bundle-summary.tsx's own
+// documented DATA GAP: when this block was opened with `meta.agentId`
+// set, the panel resolves and shows that specific agent's own bound ABF
+// bundle instead of staying purely generic. The `MemoryViewModel` is
+// still the registered `viewComponent` ViewModel (BlockRegistry needs
+// one), and the context-free `MemoryManager` (used by the hamburger
+// modal) is untouched — only this agent-settings wrapper changed.
 
 import { type JSX } from "solid-js";
 
@@ -24,6 +28,6 @@ interface MemoryViewProps {
     model: MemoryViewModel;
 }
 
-export const MemoryView = (_props: MemoryViewProps): JSX.Element => {
-    return <BundleSummaryPanel kind="Bundle" />;
+export const MemoryView = (props: MemoryViewProps): JSX.Element => {
+    return <BundleSummaryPanel kind="Bundle" agentId={props.model.agentId()} />;
 };

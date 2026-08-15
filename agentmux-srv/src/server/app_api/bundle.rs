@@ -112,6 +112,103 @@ fn register_bundle_validate(engine: &Arc<WshRpcEngine>, _state: &AppState) {
     engine.register_handler(COMMAND_BUNDLE_VALIDATE, handler);
 }
 
+/// Reject a `bundle.upsert` write that would change `provider`/`model` on
+/// an existing bundle that already has them set —
+/// ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §7.4.2. These are
+/// readonly-once-set: an ABF's portability guarantee (it's self-describing
+/// about what it needs to run) depends on them never silently changing
+/// after creation, and the UI-only disabling in `memory-manager.tsx` is
+/// advisory, not a guarantee — this is the actual enforcement.
+///
+/// `existing = None` (fresh insert) or an existing row with `provider`/
+/// `model` still empty (legacy row awaiting backfill, or was raced to
+/// create without them) always allows the write — that's how a bundle's
+/// provider/model get set the FIRST time. Once non-empty, they're locked.
+///
+/// Pure — no I/O — directly unit-testable without spinning up an
+/// `AppState`, mirroring `agent_open.rs`'s `resolve_vendor_env_override`.
+fn check_provider_model_immutable(existing: Option<&Memory>, incoming: &Memory) -> Result<(), String> {
+    let Some(existing) = existing else { return Ok(()) };
+    if !existing.provider.is_empty() && existing.provider != incoming.provider {
+        return Err(format!(
+            "FORBIDDEN: bundle {} provider is readonly once set (has '{}', got '{}')",
+            existing.id, existing.provider, incoming.provider
+        ));
+    }
+    if !existing.model.is_empty() && existing.model != incoming.model {
+        return Err(format!(
+            "FORBIDDEN: bundle {} model is readonly once set (has '{}', got '{}')",
+            existing.id, existing.model, incoming.model
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod check_provider_model_immutable_tests {
+    use super::*;
+
+    fn memory(id: &str, provider: &str, model: &str) -> Memory {
+        Memory {
+            id: id.to_string(),
+            name: "T".to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: false,
+            provider: provider.to_string(),
+            model: model.to_string(),
+            instructions: String::new(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    #[test]
+    fn allows_a_fresh_insert_to_set_provider_and_model() {
+        let incoming = memory("b1", "claude", "anthropic");
+        assert!(check_provider_model_immutable(None, &incoming).is_ok());
+    }
+
+    #[test]
+    fn allows_setting_provider_and_model_the_first_time_on_an_existing_empty_row() {
+        // Legacy row awaiting backfill, or a bundle created before this
+        // field existed — first write that populates them must succeed.
+        let existing = memory("b1", "", "");
+        let incoming = memory("b1", "claude", "anthropic");
+        assert!(check_provider_model_immutable(Some(&existing), &incoming).is_ok());
+    }
+
+    #[test]
+    fn allows_an_unrelated_field_edit_that_resends_the_same_provider_and_model() {
+        let existing = memory("b1", "claude", "anthropic");
+        let incoming = memory("b1", "claude", "anthropic");
+        assert!(check_provider_model_immutable(Some(&existing), &incoming).is_ok());
+    }
+
+    #[test]
+    fn rejects_changing_provider_once_set() {
+        let existing = memory("b1", "claude", "anthropic");
+        let incoming = memory("b1", "codex", "anthropic");
+        let err = check_provider_model_immutable(Some(&existing), &incoming).unwrap_err();
+        assert!(err.contains("FORBIDDEN"));
+        assert!(err.contains("provider"));
+    }
+
+    #[test]
+    fn rejects_changing_model_once_set() {
+        let existing = memory("b1", "claude", "anthropic");
+        let incoming = memory("b1", "claude", "custom");
+        let err = check_provider_model_immutable(Some(&existing), &incoming).unwrap_err();
+        assert!(err.contains("FORBIDDEN"));
+        assert!(err.contains("model"));
+    }
+}
+
 fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let make = |state: &AppState| -> crate::backend::rpc::engine::CommandHandler {
         let id_store = state.id_store.clone();
@@ -138,6 +235,12 @@ fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         if existing.is_global {
                             return Err("FORBIDDEN: cannot mutate a global bundle".to_string());
                         }
+                        // provider/model are readonly once set — the actual
+                        // enforcement behind the portability guarantee (the
+                        // bundle editor's disabled-input UI is advisory
+                        // only). See check_provider_model_immutable's doc
+                        // comment.
+                        check_provider_model_immutable(Some(&existing), &memory)?;
                     }
                 }
                 if memory.id.is_empty() {
@@ -683,8 +786,8 @@ async fn bundle_import_for_agent_impl(
         description: parsed.description,
         is_blank: false,
         is_global: false,
-        provider: String::new(),
-        model: String::new(),
+        provider: parsed.provider,
+        model: parsed.model,
         instructions: parsed.instructions,
         instructions_by_provider: serde_json::to_string(&parsed.instructions_by_provider)
             .unwrap_or_else(|_| "{}".to_string()),
@@ -1073,8 +1176,8 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // silently start injecting into every agent's
                     // CLAUDE.md without explicit user action (spec §4.4).
                     is_global: false,
-                    provider: String::new(),
-                    model: String::new(),
+                    provider: parsed.provider,
+                    model: parsed.model,
                     instructions: parsed.instructions,
                     // ABF v0.2 §2.2: every variant is stored verbatim, no
                     // merge decision made at import time.
@@ -1675,8 +1778,13 @@ async fn bundle_import_commit_impl(
                     description: parsed.description,
                     is_blank: false,
                     is_global: false,
-                    provider: String::new(),
-                    model: String::new(),
+                    // Like `description` above (and unlike instructions/
+                    // context/mcp), provider/model are structural identity
+                    // fields, not opt-in components — there's no
+                    // include_provider toggle in the preview/commit UI, so
+                    // these always carry straight through when present.
+                    provider: parsed.provider,
+                    model: parsed.model,
                     instructions,
                     instructions_by_provider: serde_json::to_string(&instructions_by_provider)
                         .unwrap_or_else(|_| "{}".to_string()),
@@ -2852,5 +2960,72 @@ mod export_import_for_agent_tests {
             std::fs::read_to_string(memory_dir_b.join("MEMORY.md")).unwrap(),
             "Agent A's learned fact."
         );
+    }
+
+    // ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §7.4.3/§7.5 step 6:
+    // provider/model round-trip through export -> import, same as the
+    // memory-files round-trip above.
+    #[tokio::test]
+    async fn export_then_import_carries_provider_and_model_through() {
+        let state = test_state();
+        let config_a = tempfile::tempdir().unwrap();
+        let config_b = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-a", "/work/a", config_a.path());
+        make_agent(&state, "agent-b", "/work/b", config_b.path());
+        let mut bundle = make_bundle(&state, "bundle-src", "Shared instructions.");
+        bundle.provider = "claude".to_string();
+        bundle.model = "anthropic".to_string();
+        state.id_store.bundle_memory_upsert(&bundle).unwrap();
+
+        let exported = bundle_export_for_agent_impl(&state.id_store, &state.wstore, ExportForAgentReq {
+            bundle_id: "bundle-src".to_string(),
+            agent_id: "agent-a".to_string(),
+            format: String::new(),
+        }).await.unwrap();
+
+        let manifest_file = exported["files"].as_array().unwrap().iter()
+            .find(|f| f["path"] == "armory.json")
+            .expect("armory.json must be present");
+        let manifest: serde_json::Value = serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
+        assert_eq!(manifest["provider"], "claude");
+        assert_eq!(manifest["model"], "anthropic");
+
+        let files: Vec<FileEntry> = exported["files"].as_array().unwrap().iter()
+            .map(|f| FileEntry {
+                path: f["path"].as_str().unwrap().to_string(),
+                content: f["content"].as_str().unwrap().to_string(),
+            })
+            .collect();
+        let imported = bundle_import_for_agent_impl(&state.id_store, &state.wstore, ImportForAgentReq {
+            agent_id: "agent-b".to_string(),
+            file_path: None,
+            zip_base64: None,
+            files: Some(files),
+        }).await.unwrap();
+        let new_bundle_id = imported["bundle_id"].as_str().expect("import response must include bundle_id");
+        let new_bundle = state.id_store.bundle_memory_get(new_bundle_id).unwrap().unwrap();
+        assert_eq!(new_bundle.provider, "claude");
+        assert_eq!(new_bundle.model, "anthropic");
+    }
+
+    #[tokio::test]
+    async fn export_of_an_unbound_bundle_omits_provider_and_model_rather_than_exporting_empty_strings() {
+        let state = test_state();
+        let config_a = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-a", "/work/a", config_a.path());
+        make_bundle(&state, "bundle-unbound", "Shared instructions."); // provider/model left empty
+
+        let exported = bundle_export_for_agent_impl(&state.id_store, &state.wstore, ExportForAgentReq {
+            bundle_id: "bundle-unbound".to_string(),
+            agent_id: "agent-a".to_string(),
+            format: String::new(),
+        }).await.unwrap();
+
+        let manifest_file = exported["files"].as_array().unwrap().iter()
+            .find(|f| f["path"] == "armory.json")
+            .expect("armory.json must be present");
+        let manifest: serde_json::Value = serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
+        assert!(manifest["provider"].is_null(), "unset provider must not export as an empty string");
+        assert!(manifest["model"].is_null(), "unset model must not export as an empty string");
     }
 }
