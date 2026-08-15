@@ -116,10 +116,19 @@ mod tests {
     // 2. **Cross-test races.** `cargo test` runs tests as threads within
     //    ONE process, so the env var is genuinely shared: two tests each
     //    setting/using their own override concurrently can observe each
-    //    other's value mid-run and attach to the wrong registry. The mutex
-    //    below serializes every test in this module across the full
-    //    set→run→clear window.
-    static ENV_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    //    other's value mid-run and attach to the wrong registry. Uses the
+    //    CRATE-WIDE `test_support::ISOLATED_AUTH_ENV_LOCK` — see its own
+    //    doc comment — not a mutex local to this module; a per-file mutex
+    //    only serializes within that one file, and several OTHER files
+    //    (registry/paths.rs, server/app_api/mod.rs,
+    //    server/identity_auth_dirs.rs) already correctly use this same
+    //    shared lock for the identical class of env-var race. Confirmed
+    //    live, 2026-08-15: this module's tests raced
+    //    m0021_backfill_agent_bundles's before switching both to the
+    //    shared lock (an earlier fix that invented a second,
+    //    migrations-only mutex was itself insufficient for exactly this
+    //    reason).
+    use crate::test_support::ISOLATED_AUTH_ENV_LOCK as ENV_GUARD;
 
     /// Run `f` with `AGENTMUX_HOME_OVERRIDE` pointed at a fresh, empty temp
     /// dir — guarantees `resolve_shared_definitions_dir()` never resolves to

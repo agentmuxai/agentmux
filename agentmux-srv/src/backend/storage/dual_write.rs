@@ -67,7 +67,8 @@ impl Store {
                 slug, branch_label, working_directory,
                 created_at, updated_at, is_seeded, user_hidden,
                 container_image, container_volumes, container_name,
-                use_ambient_login, model_vendor_base_url, auto_continue_enabled
+                use_ambient_login, model_vendor_base_url, auto_continue_enabled,
+                default_memory_id
              ) VALUES (
                 ?1, ?2, ?3, ?4,
                 ?5, ?6,
@@ -77,7 +78,8 @@ impl Store {
                 ?17, ?18, ?19,
                 ?20, ?21, ?22, ?23,
                 ?24, ?25, ?26,
-                ?27, ?28, ?29
+                ?27, ?28, ?29,
+                ?30
              )
              ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
@@ -105,7 +107,8 @@ impl Store {
                 container_name = excluded.container_name,
                 use_ambient_login = excluded.use_ambient_login,
                 model_vendor_base_url = excluded.model_vendor_base_url,
-                auto_continue_enabled = excluded.auto_continue_enabled",
+                auto_continue_enabled = excluded.auto_continue_enabled,
+                default_memory_id = excluded.default_memory_id",
             params![
                 def.id,
                 def.name,
@@ -136,6 +139,7 @@ impl Store {
                 def.use_ambient_login,
                 def.model_vendor_base_url,
                 def.auto_continue_enabled,
+                def.memory_id,
             ],
         )?;
         Ok(())

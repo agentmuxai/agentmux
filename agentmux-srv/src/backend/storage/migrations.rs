@@ -463,7 +463,19 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
 
             -- Warden Supervisor auto-continue opt-in (schema v17) — see
             -- db_agent_definitions' column doc.
-            auto_continue_enabled INTEGER NOT NULL DEFAULT 0
+            auto_continue_enabled INTEGER NOT NULL DEFAULT 0,
+
+            -- The DEFINITION's own dedicated ABF bundle (schema v19) —
+            -- mirrors db_agent_definitions.memory_id. Deliberately a
+            -- DIFFERENT column from memory_id above: that one is
+            -- instance-scoped (only meaningful when is_template=0,
+            -- written exclusively by the instance dual-write helpers) and
+            -- this migration doesn't touch its semantics. default_memory_id
+            -- is what agent_def_list's db_agents-backed read actually
+            -- surfaces as AgentDefinition.memory_id (aliased in the SELECT
+            -- below) -- readers that already consult db_agents for listing
+            -- need this to see the definition-level binding at all.
+            default_memory_id    TEXT NOT NULL DEFAULT ''
         );
         CREATE INDEX IF NOT EXISTS idx_agents_is_template
             ON db_agents(is_template);
@@ -674,9 +686,11 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         "ALTER TABLE db_agent_definitions ADD COLUMN auto_continue_enabled INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE db_agents ADD COLUMN auto_continue_enabled INTEGER NOT NULL DEFAULT 0",
         // v19: the agent's own dedicated ABF bundle, set once at creation.
-        // db_agents deliberately NOT touched here — see the module doc at
-        // OBJECT_SCHEMA_VERSION's v19 entry.
+        // db_agents gets a SEPARATE default_memory_id column (not the
+        // existing instance-scoped memory_id) — see its own CREATE TABLE
+        // comment for why, and OBJECT_SCHEMA_VERSION's v19 entry.
         "ALTER TABLE db_agent_definitions ADD COLUMN memory_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE db_agents ADD COLUMN default_memory_id TEXT NOT NULL DEFAULT ''",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();

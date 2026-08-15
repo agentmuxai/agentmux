@@ -280,11 +280,30 @@ independently landable pieces (matches this repo's incremental-PR
 convention seen elsewhere, e.g. the ABF v0.2 spec's own phased rollout):
 
 1. Fix `bundle-summary.tsx`'s data gap (visibility prerequisite, no
-   behavior change, low risk, useful standalone).
-2. Backfill migration `m0021` for existing agents.
+   behavior change, low risk, useful standalone). NOT YET DONE.
+2. **DONE (2026-08-15).** Backfill migration `m0021` for existing agents.
+   Turned out to need a real schema addition first —
+   `db_agent_definitions.memory_id` didn't exist at all (only
+   instance-level bindings did); see §3.1's revision. Also required a
+   SECOND new column, `db_agents.default_memory_id` — discovered live that
+   `agent_def_list()` already reads from the consolidated `db_agents`
+   table (a partial Phase 3b flip nobody had documented against this
+   plan), so a definition-level field invisible to that table wouldn't be
+   backfillable at all; used a distinct column name rather than the
+   existing instance-scoped `db_agents.memory_id` to avoid a "which wins"
+   conflict. Along the way, found and fixed a genuinely pre-existing,
+   unrelated test flake: two migration test modules (`m0020`, and now
+   `m0021`) were each using their OWN local mutex to serialize
+   `AGENTMUX_HOME_OVERRIDE` env-var access instead of the crate-wide
+   `test_support::ISOLATED_AUTH_ENV_LOCK` every other consumer already
+   used — separate mutexes don't serialize against each other, so they
+   raced under parallel test execution. Both switched to the shared lock.
 3. Definition-time provisioning for new agents (`agent.define` +
-   template-clone path).
+   template-clone path). NOT YET DONE — `m0021` only backfills EXISTING
+   agents; nothing yet stops a newly-created agent from landing at
+   `memory_id=''` again.
 4. (If wanted) delete-cascade or orphan-handling for agent-owned bundles.
+   NOT YET DONE.
 
 ## 7. Extension: harness + model as readonly, portable ABF fields
 
