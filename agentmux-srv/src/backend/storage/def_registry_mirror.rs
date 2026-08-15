@@ -125,6 +125,12 @@ pub(super) fn record_to_agent_definition(rec: &DefinitionRecord) -> AgentDefinit
         // with the harness's default vendor. Known limitation, not a bug.
         model_vendor_base_url: String::new(),
         auto_continue_enabled: d.auto_continue_enabled,
+        // Same known limitation as model_vendor_base_url just above —
+        // DefinitionRecordV1 doesn't carry it yet, so a cross-channel
+        // reopen starts unbound. m0021's backfill only ever sees the LOCAL
+        // channel's SQLite for this reason; a genuinely global backfill
+        // needs this field added to the registry wire format first.
+        memory_id: String::new(),
     }
 }
 
@@ -350,6 +356,37 @@ mod tests {
         );
     }
 
+    // P0 regression test (ReAgent review on PR #2587 round 6): the
+    // IDENTICAL bug as the model_vendor_base_url test just above,
+    // for memory_id — DefinitionRecordV1 doesn't carry memory_id either
+    // (same documented gap), so record_to_agent_definition always
+    // returns "" for it, and the overlay used to overwrite the local
+    // row's real memory_id with that empty default on every read. Since
+    // every local write auto-mirrors into the global registry, this
+    // fired for virtually every agent whenever a shared store is
+    // configured — silently defeating agent_open.rs's spawn-time bundle
+    // resolution and m0021's memory_id-empty backfill filter.
+    #[test]
+    fn agent_def_list_preserves_local_memory_id_over_the_global_overlay() {
+        let store = Store::open_in_memory().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let def_store = Arc::new(DefinitionStore::open(tmp.path().join("definitions")).unwrap());
+
+        let mut def = local_def("agent-1", "Bundle Agent");
+        store.agent_def_insert(&mut def).unwrap();
+        store.agent_def_set_memory_id_if_empty("agent-1", "bundle-123").unwrap();
+        // Same id also present in the global store — the normal case.
+        def_store.upsert(&global_user_agent("agent-1", "Bundle Agent")).unwrap();
+        store.set_def_registry(def_store);
+
+        let list = store.agent_def_list().unwrap();
+        let found = list.iter().find(|d| d.id == "agent-1").expect("agent must be listed");
+        assert_eq!(
+            found.memory_id, "bundle-123",
+            "the global overlay must not wipe a same-channel agent's bundle binding"
+        );
+    }
+
     fn local_def(id: &str, name: &str) -> AgentDefinition {
         AgentDefinition {
             id: id.to_string(),
@@ -380,6 +417,7 @@ mod tests {
             use_ambient_login: 0,
             model_vendor_base_url: String::new(),
             auto_continue_enabled: 0,
+            memory_id: String::new(),
         }
     }
 

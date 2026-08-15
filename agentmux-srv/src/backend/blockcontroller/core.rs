@@ -338,6 +338,7 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         }
     }
 

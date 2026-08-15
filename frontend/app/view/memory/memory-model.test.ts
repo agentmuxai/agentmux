@@ -53,6 +53,67 @@ describe("instructions_by_provider round-trip", () => {
     });
 });
 
+// provider/model — ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §7.
+// Previously forced empty on every save (SPEC_MEMORY_IDENTITY_ARCH §4.1a:
+// "presets are provider-agnostic"). That decision is reversed: an ABF now
+// carries its own provider + model, readonly once set (backend-enforced in
+// bundle.upsert), so an exported ABF is self-describing about what it needs
+// to run. Same class of round-trip concern as instructions_by_provider
+// above — must not be silently dropped on an edit to an unrelated field.
+describe("provider/model round-trip", () => {
+    test("draftFromMemory preserves populated values", () => {
+        const draft = draftFromMemory({
+            id: "b1",
+            name: "Test",
+            provider: "claude",
+            model: "anthropic",
+            created_at: 0,
+            updated_at: 0,
+        } as Memory);
+        expect(draft.provider).toBe("claude");
+        expect(draft.model).toBe("anthropic");
+    });
+
+    test("draftFromMemory falls back to empty strings for an absent value", () => {
+        const draft = draftFromMemory({
+            id: "b1",
+            name: "Test",
+            created_at: 0,
+            updated_at: 0,
+        } as Memory);
+        expect(draft.provider).toBe("");
+        expect(draft.model).toBe("");
+    });
+
+    test("emptyDraft starts with empty provider/model (unset until creation)", () => {
+        expect(emptyDraft().provider).toBe("");
+        expect(emptyDraft().model).toBe("");
+    });
+
+    test("draftToWire sends the draft's provider/model through unchanged", () => {
+        const draft = { ...emptyDraft(), name: "Test", provider: "codex", model: "openai" };
+        const wire = draftToWire(draft);
+        expect(wire.provider).toBe("codex");
+        expect(wire.model).toBe("openai");
+    });
+
+    test("full round trip: an edit to an unrelated field does not drop provider/model", () => {
+        const stored = {
+            id: "b1",
+            name: "Original name",
+            provider: "claude",
+            model: "anthropic",
+            created_at: 0,
+            updated_at: 0,
+        } as Memory;
+        const draft = draftFromMemory(stored);
+        draft.description = "Added a description"; // simulates editing an unrelated field
+        const wire = draftToWire(draft);
+        expect(wire.provider).toBe("claude");
+        expect(wire.model).toBe("anthropic");
+    });
+});
+
 // validateDraft() (Armory Bundle Format (ABF) UI-alignment pass) — the
 // Armory bundle editor's "Validate" button. Mocks RpcApi entirely since
 // MemoryViewModel's constructor fires an unawaited ListMemoriesCommand

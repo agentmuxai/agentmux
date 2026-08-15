@@ -41,11 +41,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     //    `is_seeded = 0` row. Avoids collisions in the picker's
     //    "My Agents" list.
     let wstore_act = state.wstore.clone();
+    let id_store_act = state.id_store.clone();
     let broker_act = state.broker.clone();
     engine.register_handler(
         COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE,
         Box::new(move |data, _ctx| {
             let wstore = wstore_act.clone();
+            let id_store = id_store_act.clone();
             let broker = broker_act.clone();
             Box::pin(async move {
                 let cmd: CommandAgentDefCreateFromTemplateData = serde_json::from_value(data)
@@ -161,10 +163,15 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     use_ambient_login: 0,
                     model_vendor_base_url: chosen_model_vendor_base_url,
                     auto_continue_enabled: 0,
+                    memory_id: String::new(),
                 };
                 wstore
                     .agent_def_insert(&mut new_def)
                     .map_err(|e| format!("agentdefcreatefromtemplate: insert: {e}"))?;
+                // Own dedicated ABF bundle, not the template's — every
+                // agent has its own (ARCHITECTURE_MANDATORY_ABF_RETHINK_
+                // 2026_08_14.md §3.2, "strong reading").
+                wstore.agent_def_provision_and_bind_bundle(&id_store, &mut new_def, now);
 
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "agents:changed".to_string(),
@@ -294,11 +301,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // ---- Definition fork ----
 
     let wstore = state.wstore.clone();
+    let id_store = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_FORK_AGENT_DEFINITION,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
+            let id_store = id_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 let cmd: CommandForkAgentDefinitionData = serde_json::from_value(data)
@@ -371,10 +380,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     use_ambient_login: 0,
                     model_vendor_base_url: source.model_vendor_base_url.clone(),
                     auto_continue_enabled: 0,
+                    memory_id: String::new(),
                 };
                 wstore
                     .agent_def_insert(&mut fork)
                     .map_err(|e| format!("forkagentdefinition: {e}"))?;
+                // Own dedicated ABF bundle, not the source's — same "every
+                // agent has its own" rule as the template-clone path above.
+                wstore.agent_def_provision_and_bind_bundle(&id_store, &mut fork, now);
 
                 // Deep-copy content blobs + skills from source. Cascade foreign
                 // keys on the source are unaffected — we're copying out, not
