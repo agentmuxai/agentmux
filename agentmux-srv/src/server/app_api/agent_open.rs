@@ -199,8 +199,8 @@ mod resolve_vendor_env_override_tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: model_vendor_base_url.to_string(),
-        
-            memory_id: String::new(),}
+            memory_id: String::new(),
+        }
     }
 
     #[test]
@@ -1012,8 +1012,8 @@ mod write_agent_config_files_tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
-        
-            memory_id: String::new(),}
+            memory_id: String::new(),
+        }
     }
 
     fn make_skill(skill_type: &str) -> Skill {

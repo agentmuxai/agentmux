@@ -623,3 +623,92 @@ implementation order:
    current import path always creates) gets populated with. 2 new tests
    (export omits-vs-populates the fields correctly; full export ->
    import round trip preserves both onto the new bundle).
+
+## 8. PR #2587 review round 2 (2026-08-15): real store-mismatch bug
+
+Round 1's review (P0 hardcoded provider, doc drift, formatting — see the
+§6/§3.1 correction notes above) landed clean. A second automated pass, on
+the round-1 fix commit, caught a genuinely serious bug round 1 didn't
+introduce but also didn't catch: **every bundle provisioned by this whole
+feature — both the runtime creation-path provisioning (§6 step 4) and the
+`m0021` backfill (§6 step 2) — was being written into the wrong SQLite
+database.**
+
+**The bug:** `AppState` has two `Store` handles —
+`wstore` (the per-channel `objects.db`) and `id_store` (the *effective*
+identity/memory store: `shared_store` when a shared store is configured,
+else `wstore` — see `server/mod.rs:92-95`'s own doc comment: "Handlers
+capture this instead of `wstore` for any operation that must survive
+across version upgrades"). Every real bundle-read RPC
+(`listmemories`/`getmemory`/`upsertmemory`, `server/agent_handlers/
+memory.rs`) already reads/writes through `id_store`, not `wstore` — that
+convention predates this feature entirely. But
+`Store::bundle_provision_for_new_agent`/`agent_def_provision_and_bind_
+bundle` were called as `wstore.agent_def_provision_and_bind_bundle(...)`
+at all six creation sites, and `m0021` opened only `Store::open(&ctx.
+channel_store_path)` and wrote the bundle there too. In any normal
+install (shared store resolvable — the common case, not just CI), every
+newly-provisioned per-agent bundle landed in a SQLite file nothing else
+ever reads: invisible to Armory, to `bundle.get`, and to this same
+feature's own new bundle-summary panel (§6 step 1), which would show
+"couldn't be loaded" for virtually every freshly created or backfilled
+agent. A second, smaller finding on the same review pass: bundle
+provisioning ignored `AgentDefinition.model_vendor_base_url` entirely,
+so an agent created against a custom vendor endpoint got its bundle's
+`model` permanently locked to the provider's bare default instead of
+`"custom"` (`resolveEffectiveVendor`'s own rule, which nothing on the
+Rust side mirrored before this).
+
+**Fix:**
+- `Store::bundle_provision_for_new_agent` is now called explicitly on the
+  correct store at every site — never implicitly via `self`/`wstore`.
+  `agent_def_provision_and_bind_bundle`'s signature gained an explicit
+  `bundle_store: &Store` parameter, separate from `self` (still the
+  definition store): `self.agent_def_provision_and_bind_bundle(&id_store,
+  &mut agent, now)`. All six runtime creation sites
+  (`createagent`/`importagentfromclaw`/`importagents`/template-clone/
+  fork/`agent.define`) now thread `state.id_store` alongside `state.
+  wstore` into their RPC handler closures and pass it through —
+  `agent_define_core`'s signature grew an `id_store: Arc<Store>`
+  parameter for this, updated at its one real caller plus the HTTP
+  service dispatch path (`service/misc.rs`) and every test call site.
+- `m0021` now resolves a `bundle_store` via `Store::open_shared(&ctx.
+  shared_store_path)` (falling back to the channel store on failure,
+  mirroring `AppState.id_store`'s own degrade-to-`wstore` behavior) and
+  writes every backfilled bundle there instead of the channel store —
+  `agent_def_set_memory_id_if_empty`'s definition-binding write stays on
+  the channel store, unaffected; only the bundle's own row moved.
+- Added `Store::resolve_effective_vendor(provider, model_vendor_base_url)`
+  — the Rust-side twin of the frontend's `resolveEffectiveVendor`
+  (`"custom"` when a non-empty base-URL override is set, else the
+  provider's default vendor) — and wired it into both
+  `bundle_provision_for_new_agent` and `m0021`'s backfill, so the two
+  paths can't drift on this rule again.
+- New tests: a Store-level test proving `agent_def_provision_and_bind_
+  bundle` writes the bundle into the explicit `bundle_store` param and
+  NEVER into `self` (two genuinely separate in-memory stores); an
+  `m0021` test proving the backfilled bundle is absent from the channel
+  store and present in the shared store; an `m0021` fallback test
+  proving the migration still succeeds (writing to the channel store)
+  when the shared store path is unusable; `resolve_effective_vendor`
+  unit tests (default, override, whitespace-only override, unknown
+  provider); an `m0021` test for the custom-vendor-override backfill
+  case. Existing RPC-level tests (`agent_handlers/mod.rs`,
+  `agent_define.rs`) needed no assertion changes — their test harnesses
+  already set `id_store: wstore.clone()` (same underlying store), so
+  they couldn't have caught this class of bug in the first place; the
+  new Store-level and migration-level tests are what actually exercise
+  two genuinely distinct stores.
+- Formatting: the round-1 cleanup of the mechanical `memory_id`-field-
+  insertion script's stray-blank-line/glued-brace artifact only matched
+  the `let x = Struct { ... };` shape (trailing semicolon); missed eight
+  sites where the same struct literal was an implicit-return expression
+  or function argument (`Struct { ... }` with no semicolon) —
+  `agent_open.rs` (×2), `native_memory_handlers.rs`, `identities.rs`,
+  `blockcontroller/core.rs`, `m0017_ambient_login_grandfather.rs`,
+  `identity/resolver/inject.rs`, `storage/store/tests.rs`. Fixed with a
+  second pass handling both shapes; verified with a broader sweep for
+  any other field showing the same pattern (none found).
+- Added the missing `.changesets/` entry this feature PR should have had
+  from the start per CLAUDE.md's mandatory changesets workflow (new
+  schema column, new RPC behavior, new UI) — `minor` bump.

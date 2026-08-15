@@ -959,23 +959,51 @@ impl Store {
         Ok(rows > 0)
     }
 
+    /// The provider's default vendor, or `"custom"` when the agent has a
+    /// non-empty `model_vendor_base_url` override — same rule the
+    /// frontend's `resolveEffectiveVendor`
+    /// (`frontend/app/view/agent/providers/catalog.ts`) already uses for
+    /// the dual-icon vendor badge. Falls back to the provider id itself
+    /// if the provider isn't in the registry (e.g. a stale/custom
+    /// provider string), same fallback the frontend uses.
+    ///
+    /// P2 fix (2026-08-15, Codex review on PR #2587): `bundle_provision_
+    /// for_new_agent` used to ignore `model_vendor_base_url` entirely and
+    /// always pick the provider's bare default — a Claude agent pointed
+    /// at a custom endpoint got an immutable bundle claiming
+    /// `model="anthropic"`, permanently wrong once
+    /// `check_provider_model_immutable` locks it in.
+    pub(crate) fn resolve_effective_vendor(provider: &str, model_vendor_base_url: &str) -> String {
+        if !model_vendor_base_url.trim().is_empty() {
+            return "custom".to_string();
+        }
+        crate::backend::providers::get_provider(provider)
+            .and_then(|p| p.supported_vendors.first().copied())
+            .unwrap_or(provider)
+            .to_string()
+    }
+
     /// Provision a fresh, dedicated ABF bundle for a NEW agent definition —
     /// the definition-time half of
     /// `docs/specs/ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md` §3.2
     /// (m0021 is the backfill half, for agents that already existed before
     /// this shipped). Callers pass the not-yet-inserted `AgentDefinition`
     /// so its already-known `provider` (harness) carries straight onto the
-    /// bundle — unlike `m0021`'s backfill, which hardcodes `claude`/
-    /// `anthropic` because it can't know a legacy agent's real harness,
-    /// a brand-new agent's harness is already a required field at this
-    /// point, so there's no need to guess.
+    /// bundle — unlike `m0021`'s backfill, which can't just hardcode
+    /// `claude`/`anthropic` for a legacy agent's unknown-at-migration-time
+    /// harness, a brand-new agent's harness is already a required field at
+    /// this point, so there's no need to guess.
     ///
-    /// The bundle's `model` (vendor) defaults to the harness's first
-    /// declared `supported_vendors` entry (mirrors the frontend's
-    /// `resolveDefaultVendor`, `frontend/app/view/agent/providers/
-    /// catalog.ts`) — falls back to the provider id itself if the provider
-    /// isn't in the registry (e.g. a stale/custom provider string), same
-    /// fallback the frontend uses.
+    /// **Call this on the EFFECTIVE identity/memory store
+    /// (`AppState.id_store`), never on the per-channel `wstore` directly.**
+    /// Bundles live in the shared store when one is configured (the normal
+    /// case) — every real bundle-read path (`listmemories`/`getmemory`/
+    /// the Armory editor/the bundle-summary panel) reads through
+    /// `id_store`, so a bundle created via `wstore.bundle_memory_upsert`
+    /// directly would be written to a different SQLite file and be
+    /// invisible everywhere else (P1 finding, Codex review on PR #2587,
+    /// live in the shipped code this fixes: `agent_def_provision_and_
+    /// bind_bundle`'s callers all used to invoke this method ON `wstore`).
     ///
     /// Does NOT mutate `agent` or touch `db_agent_definitions` — returns
     /// the new bundle's id; callers set `agent.memory_id` themselves before
@@ -987,9 +1015,7 @@ impl Store {
         agent: &AgentDefinition,
         now: i64,
     ) -> Result<String, StoreError> {
-        let vendor = crate::backend::providers::get_provider(&agent.provider)
-            .and_then(|p| p.supported_vendors.first().copied())
-            .unwrap_or(agent.provider.as_str());
+        let vendor = Self::resolve_effective_vendor(&agent.provider, &agent.model_vendor_base_url);
         let bundle_id = uuid::Uuid::new_v4().to_string();
         let bundle = super::memory_bundles::Memory {
             id: bundle_id.clone(),
@@ -998,7 +1024,7 @@ impl Store {
             is_blank: false,
             is_global: false,
             provider: agent.provider.clone(),
-            model: vendor.to_string(),
+            model: vendor,
             instructions: String::new(),
             instructions_by_provider: "{}".to_string(),
             context_files: "[]".to_string(),
@@ -1038,8 +1064,21 @@ impl Store {
     /// handlers that serialize `agent` straight back to the caller (e.g.
     /// `createagent`, `importagentfromclaw`) return the real value instead
     /// of the empty string the struct held before this call.
-    pub fn agent_def_provision_and_bind_bundle(&self, agent: &mut AgentDefinition, now: i64) {
-        let bundle_id = match self.bundle_provision_for_new_agent(agent, now) {
+    ///
+    /// `self` (the definition store, i.e. `wstore`) and `bundle_store`
+    /// (the effective identity/memory store, i.e. `AppState.id_store`) are
+    /// deliberately two SEPARATE parameters, not the same store used for
+    /// both writes — see `bundle_provision_for_new_agent`'s own doc
+    /// comment for why (P1 fix, Codex review on PR #2587: they used to be
+    /// the same store, silently writing every provisioned bundle
+    /// somewhere the rest of the app can't see it).
+    pub fn agent_def_provision_and_bind_bundle(
+        &self,
+        bundle_store: &Store,
+        agent: &mut AgentDefinition,
+        now: i64,
+    ) {
+        let bundle_id = match bundle_store.bundle_provision_for_new_agent(agent, now) {
             Ok(id) => id,
             Err(e) => {
                 tracing::warn!(agent_id = %agent.id, error = %e, "agent_def_provision_and_bind_bundle: bundle create failed (non-fatal)");
@@ -2583,6 +2622,125 @@ mod tests {
         assert_eq!(
             local.updated_at, 42,
             "backfilled row must preserve the registry's real updated_at, not reset to created_at"
+        );
+    }
+}
+
+// P1/P2 fixes (Codex + ReAgent review on PR #2587):
+// - bundle_provision_for_new_agent/agent_def_provision_and_bind_bundle must
+//   write the bundle into an explicitly-passed store, never assume the
+//   caller's own definition store IS the bundle store — the two are
+//   different databases whenever a shared store is configured.
+// - resolve_effective_vendor must respect model_vendor_base_url ("custom"),
+//   not just the provider's bare default.
+#[cfg(test)]
+mod bundle_provisioning_store_separation_tests {
+    use super::*;
+
+    fn base_agent(id: &str, name: &str, provider: &str, model_vendor_base_url: &str) -> AgentDefinition {
+        AgentDefinition {
+            id: id.to_string(),
+            slug: id.to_string(),
+            name: name.to_string(),
+            icon: String::new(),
+            provider: provider.to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            model_vendor_base_url: model_vendor_base_url.to_string(),
+            auto_continue_enabled: 0,
+            memory_id: String::new(),
+        }
+    }
+
+    #[test]
+    fn resolve_effective_vendor_defaults_to_the_providers_first_supported_vendor() {
+        assert_eq!(Store::resolve_effective_vendor("claude", ""), "anthropic");
+        assert_eq!(Store::resolve_effective_vendor("codex", ""), "openai");
+    }
+
+    #[test]
+    fn resolve_effective_vendor_returns_custom_when_a_base_url_override_is_set() {
+        assert_eq!(
+            Store::resolve_effective_vendor("claude", "https://my-proxy.example.com"),
+            "custom",
+            "an agent with a vendor override must not claim the provider's default vendor"
+        );
+    }
+
+    #[test]
+    fn resolve_effective_vendor_ignores_a_whitespace_only_override() {
+        assert_eq!(Store::resolve_effective_vendor("claude", "   "), "anthropic");
+    }
+
+    #[test]
+    fn resolve_effective_vendor_falls_back_to_the_provider_id_for_an_unknown_provider() {
+        assert_eq!(Store::resolve_effective_vendor("not-a-real-provider", ""), "not-a-real-provider");
+    }
+
+    #[test]
+    fn bundle_provision_for_new_agent_writes_into_whichever_store_its_called_on() {
+        let bundle_store = Store::open_in_memory().unwrap();
+        let agent = base_agent("a1", "Agent One", "claude", "");
+        let bundle_id = bundle_store.bundle_provision_for_new_agent(&agent, 0).unwrap();
+        assert!(bundle_store.bundle_memory_get(&bundle_id).unwrap().is_some());
+    }
+
+    #[test]
+    fn bundle_provision_for_new_agent_respects_a_custom_vendor_override() {
+        let bundle_store = Store::open_in_memory().unwrap();
+        let agent = base_agent("a1", "Agent One", "claude", "https://my-proxy.example.com");
+        let bundle_id = bundle_store.bundle_provision_for_new_agent(&agent, 0).unwrap();
+        let bundle = bundle_store.bundle_memory_get(&bundle_id).unwrap().unwrap();
+        assert_eq!(bundle.provider, "claude");
+        assert_eq!(bundle.model, "custom");
+    }
+
+    // The core P1 regression test: definition_store (self) and bundle_store
+    // are two GENUINELY SEPARATE Store instances — proves
+    // agent_def_provision_and_bind_bundle writes the bundle into
+    // bundle_store specifically, never into whichever store the method
+    // happens to be called on for the definition side.
+    #[test]
+    fn agent_def_provision_and_bind_bundle_writes_the_bundle_into_the_explicit_bundle_store_not_self() {
+        let definition_store = Store::open_in_memory().unwrap();
+        let bundle_store = Store::open_in_memory().unwrap();
+        let mut agent = base_agent("a1", "Agent One", "claude", "");
+        definition_store.agent_def_insert(&mut agent).unwrap();
+
+        definition_store.agent_def_provision_and_bind_bundle(&bundle_store, &mut agent, 0);
+
+        assert!(!agent.memory_id.is_empty(), "caller's struct must reflect the bound bundle id");
+        let def = definition_store.agent_def_get(&agent.id).unwrap().unwrap();
+        assert_eq!(def.memory_id, agent.memory_id, "binding must land in the definition store (self)");
+
+        // The bundle itself must be absent from definition_store and
+        // present only in bundle_store.
+        assert!(
+            definition_store.bundle_memory_get(&agent.memory_id).unwrap().is_none(),
+            "bundle must NOT be written into the definition store"
+        );
+        assert!(
+            bundle_store.bundle_memory_get(&agent.memory_id).unwrap().is_some(),
+            "bundle must be reachable via the explicit bundle_store"
         );
     }
 }
