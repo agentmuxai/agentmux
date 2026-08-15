@@ -588,6 +588,31 @@ struct LanPubkeyCacheEntry {
     expires: std::time::Instant,
 }
 
+/// Outcome of `find_agent_lan_pubkey`. Three states, not two — reagentx P0
+/// follow-up on the LAN signing PR: collapsing "the lookup was skipped
+/// (rate-limited)" into the same `None`/"not found" outcome as "genuinely
+/// no peer has this key" let an attacker exhaust
+/// `LAN_PUBKEY_LOOKUP_RATE_LIMIT` with junk lookups, then slip a forged
+/// signature for a REAL agent's identity through as unverified (benign)
+/// instead of a verification failure (forced sensitive). By the time this
+/// function is ever called, `verify_lan_signature` has already confirmed a
+/// `lan_sig` was actually presented — so "we didn't check" must be
+/// distinguishable from "there was nothing to check."
+pub(crate) enum LanPubkeyLookup {
+    /// A peer has a public key on file for this agent_id.
+    Found(Vec<u8>),
+    /// No peer (that answered) has ever minted a LAN key for this agent_id
+    /// — genuinely unknown sender, not a red flag on its own (same
+    /// "unverified, not escalated" treatment self-declared senders already
+    /// get elsewhere in this system).
+    NotFound,
+    /// The lookup was skipped by the rate limiter — unknown, NOT the same
+    /// as `NotFound`. Callers verifying an actual signature attempt must
+    /// treat this conservatively (as a failure), never as "nothing to
+    /// check."
+    RateLimited,
+}
+
 /// Minimal token bucket, refilled once per second — same shape as
 /// `backend::reactive::handler::RateLimiter`, duplicated locally rather
 /// than widening that one's visibility across modules for a single caller.
@@ -750,21 +775,30 @@ impl LanDiscoveryController {
     /// `find_agent`'s "not found" case) — callers (`verify_lan_signature`)
     /// treat that identically to "no signature attempted": nothing to check
     /// against, not a red flag on its own.
-    pub async fn find_agent_lan_pubkey(&self, agent_id: &str, http: &reqwest::Client) -> Option<Vec<u8>> {
+    pub async fn find_agent_lan_pubkey(&self, agent_id: &str, http: &reqwest::Client) -> LanPubkeyLookup {
         if let Ok(cache) = self.pubkey_cache.read() {
             if let Some(e) = cache.get(agent_id) {
                 if e.expires > std::time::Instant::now() {
-                    return e.public_key.clone();
+                    return match &e.public_key {
+                        Some(k) => LanPubkeyLookup::Found(k.clone()),
+                        None => LanPubkeyLookup::NotFound,
+                    };
                 }
             }
         }
 
-        // reagentx P1: fail closed (no fan-out) rather than let an
-        // attacker force unbounded outbound peer queries by varying
-        // agent_id on every request — see LAN_PUBKEY_LOOKUP_RATE_LIMIT's
-        // doc comment. A rate-limited-away lookup returns `None`, the exact
-        // same "nothing to check against" outcome as a genuine not-found —
-        // never treated as a verification failure on its own.
+        // reagentx P1: fail closed on the FAN-OUT (no outbound peer
+        // queries) rather than let an attacker force unbounded network
+        // traffic by varying agent_id on every request — see
+        // LAN_PUBKEY_LOOKUP_RATE_LIMIT's doc comment. Returning
+        // `RateLimited` here (reagentx P0 follow-up, NOT the same as
+        // `NotFound`) is the point: by the time this function is called at
+        // all, `verify_lan_signature` has already confirmed a `lan_sig` WAS
+        // presented, so "we didn't check" must never collapse into the same
+        // outcome as "genuinely nothing to check" — a caller could
+        // otherwise exhaust this limiter with junk lookups, then slip a
+        // forged signature for a REAL agent's identity through unverified
+        // instead of forced-sensitive.
         let allowed = self
             .pubkey_lookup_limiter
             .lock()
@@ -772,7 +806,7 @@ impl LanDiscoveryController {
             .unwrap_or(true);
         if !allowed {
             tracing::debug!(agent_id, "LAN pubkey lookup rate-limited — skipping peer fan-out");
-            return None;
+            return LanPubkeyLookup::RateLimited;
         }
 
         let peers = self.get_instances();
@@ -809,7 +843,7 @@ impl LanDiscoveryController {
                     },
                 );
             }
-            return Some(pubkey_bytes);
+            return LanPubkeyLookup::Found(pubkey_bytes);
         }
 
         if let Ok(mut cache) = self.pubkey_cache.write() {
@@ -822,7 +856,7 @@ impl LanDiscoveryController {
                 },
             );
         }
-        None
+        LanPubkeyLookup::NotFound
     }
 
     /// Evict a stale cache entry (e.g. after a forward to that peer failed).

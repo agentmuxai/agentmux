@@ -249,12 +249,28 @@ pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRe
     let Some(claimed) = req.source_agent.clone().filter(|s| !s.is_empty()) else {
         return;
     };
-    let Some(observed_key) = state
-        .lan_discovery
-        .find_agent_lan_pubkey(&claimed, &state.http_client)
-        .await
-    else {
-        return; // no peer has a LAN public key on file for this claimed sender
+    let observed_key = match state.lan_discovery.find_agent_lan_pubkey(&claimed, &state.http_client).await {
+        crate::backend::lan_discovery::LanPubkeyLookup::Found(key) => key,
+        // Genuinely unknown sender — nothing to check against, not a red
+        // flag on its own (same treatment self-declared senders get
+        // elsewhere).
+        crate::backend::lan_discovery::LanPubkeyLookup::NotFound => return,
+        // reagentx P0 follow-up: the lookup was SKIPPED (rate-limited), not
+        // genuinely absent — a lan_sig WAS presented (checked above), so
+        // "we didn't check" must not collapse into the same benign outcome
+        // as "nothing to check." Treat conservatively as a failure, same as
+        // an active forgery attempt — the alternative lets an attacker
+        // exhaust the rate limiter to slip a forged identity claim through
+        // unverified instead of forced-sensitive.
+        crate::backend::lan_discovery::LanPubkeyLookup::RateLimited => {
+            tracing::warn!(
+                agent_id = %claimed,
+                "LAN pubkey lookup was rate-limited while verifying a signed jekt — \
+                 treating as unverified/failed rather than silently passing it through"
+            );
+            req.lan_verified = Some(false);
+            return;
+        }
     };
 
     // Trust-on-first-use pin (reagentx P0 — mDNS peer discovery is
@@ -1366,6 +1382,37 @@ mod verify_lan_signature_tests {
         let mut req = lan_req("agentx", "agenty", "hello");
         verify_lan_signature(&state, &mut req).await;
         assert_eq!(req.lan_verified, None, "nothing to check when no signature was attempted");
+    }
+
+    // reagentx P0 follow-up regression test: a rate-limited pubkey lookup
+    // must NOT be treated the same as "no key found." Without the fix, an
+    // attacker could exhaust the limiter with junk lookups, then slip a
+    // forged signature for a real agent's identity through as
+    // unverified/benign instead of forced-sensitive.
+    #[tokio::test]
+    async fn rate_limited_pubkey_lookup_forces_failed_not_unset() {
+        let state = test_state();
+        // Burn through the fan-out rate limiter with distinct agent_ids —
+        // each is a genuine cache miss (test_state() has zero real LAN
+        // peers, so every one of these negatively caches after consuming
+        // one token). LAN_PUBKEY_LOOKUP_RATE_LIMIT is 10/sec.
+        for i in 0..10 {
+            let _ = state
+                .lan_discovery
+                .find_agent_lan_pubkey(&format!("burn-{i}"), &state.http_client)
+                .await;
+        }
+        // The 11th distinct lookup this second must be rate-limited.
+        let mut req = lan_req("korp", "agenty", "hello");
+        req.lan_sig = Some("forged-or-real-doesnt-matter".to_string());
+        verify_lan_signature(&state, &mut req).await;
+        assert_eq!(
+            req.lan_verified,
+            Some(false),
+            "a rate-limited lookup for a claimed sender with a real signature attempt must be \
+             treated as a verification FAILURE, never silently left unset like a genuinely \
+             unknown/unsigned sender"
+        );
     }
 
     #[tokio::test]
