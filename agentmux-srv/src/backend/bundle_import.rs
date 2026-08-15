@@ -274,6 +274,15 @@ pub struct ImportedContextFile {
 pub struct ParsedBundleImport {
     pub name: String,
     pub description: String,
+    /// ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §7.4.3: harness +
+    /// vendor, carried through from the source bundle's `armory.json` when
+    /// present. Empty string when the manifest has no `provider`/`model`
+    /// field (older export predating this, or a bundle that was never
+    /// bound to an agent) — the RPC handler treats empty the same as "not
+    /// set yet," matching `check_provider_model_immutable`'s own
+    /// first-time-set-is-allowed semantics.
+    pub provider: String,
+    pub model: String,
     pub instructions: String,
     /// ABF v0.2 §2.2: `{provider_id: content}` — every non-"default"
     /// variant found in a v0.2 `components.instructions` object, stored
@@ -590,6 +599,11 @@ pub fn parse_bundle_import_with_budget(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+    // §7.4.3: both optional (older exports predate this) — `None`/
+    // non-string/absent all fall back to "not set," same as a fresh
+    // bundle that's never been bound to an agent.
+    let provider = manifest.get("provider").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let model = manifest.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
     // §4.3.2: schema/version are recorded (via warnings, since ParsedBundleImport
     // has no dedicated field for them yet — no schema registry exists to
@@ -898,6 +912,8 @@ pub fn parse_bundle_import_with_budget(
     Ok(ParsedBundleImport {
         name,
         description,
+        provider,
+        model,
         instructions,
         instructions_by_provider,
         context_files,

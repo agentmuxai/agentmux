@@ -548,5 +548,27 @@ implementation order:
    `agent.define update` with a changed provider on an already-bundled
    agent, which doesn't happen in current usage (§7.3). Flagging as a
    known gap for whoever picks this up next, not silently dropping it.
-6. Bundle export/import field addition (7.4.3) — smallest piece, land last
-   once the fields exist and are populated everywhere.
+6. **DONE (2026-08-15).** Bundle export/import field addition (7.4.3) —
+   as small as §7.4.3 predicted. `armory.json`'s manifest gained two
+   top-level fields, `provider`/`model`, sourced from the bundle's own
+   columns at export time (`bundle_export.rs`) — `null` rather than an
+   empty string when the source bundle has neither set yet, so an
+   older/still-unbound export doesn't come back as a misleadingly-present
+   empty value. `ParsedBundleImport` gained matching `provider`/`model`
+   fields (default `""` when the manifest predates this or omits them —
+   backward-compatible with every existing exported bundle).
+   All THREE places that build a fresh `Memory` from a parsed import
+   (`bundle.import_for_agent`, `bundle.import.preview`'s underlying
+   commit path, and `bundle.import.commit`) now carry `parsed.provider`/
+   `.model` through instead of the `String::new()` they'd been hardcoded
+   to — treated the same way `description` already is (always carried,
+   not gated behind an `include_*` toggle the preview/commit UI has for
+   instructions/context/mcp, since provider/model are structural agent
+   requirements, not optional content). The existing
+   `check_provider_model_immutable` guard (7.4.2) still applies on write,
+   so importing a provider/model pair into an ALREADY-bound existing
+   bundle id is still rejected if it would change either value — this
+   addition only affects what a FRESH bundle (a new uuid, which every
+   current import path always creates) gets populated with. 2 new tests
+   (export omits-vs-populates the fields correctly; full export ->
+   import round trip preserves both onto the new bundle).
