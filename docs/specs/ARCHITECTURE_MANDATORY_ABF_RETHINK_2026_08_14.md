@@ -279,8 +279,34 @@ Once the above is confirmed, the actual implementation likely splits into
 independently landable pieces (matches this repo's incremental-PR
 convention seen elsewhere, e.g. the ABF v0.2 spec's own phased rollout):
 
-1. Fix `bundle-summary.tsx`'s data gap (visibility prerequisite, no
-   behavior change, low risk, useful standalone). NOT YET DONE.
+1. **DONE (2026-08-15).** Fix `bundle-summary.tsx`'s data gap. Turned out
+   already half-closed: Armory Phase 5
+   (SPEC_ARMORY_PHASE5_CONSOLIDATION_AND_SKILL_SEEDING_2026_07_13.md §1.3)
+   had already fixed the `view: "identity"` side by threading
+   `meta.agentId` into `IdentityPaneViewModel` and rendering
+   `AgentIdentityLinksPanel` directly instead of this panel — the
+   `view: "memory"` side (`memory-view.tsx`) was the one spot still stuck
+   on the generic pointer-only form, and its own header comment was stale
+   (still describing the gap as unresolved). Fixed the identical way:
+   added an `agentId` accessor to `MemoryViewModel` reading `meta.agentId`
+   (mirrors `IdentityPaneViewModel.agentId` exactly), threaded it into
+   `<BundleSummaryPanel agentId={...}/>`, and gave that component an
+   optional `agentId` prop — when present, it resolves the agent's own
+   dedicated bundle via `AgentDefinition.memory_id` (the definition-level,
+   readonly-after-creation field from step 2/§3.1 above — cleaner than
+   the instance-level `AgentInstance.memory_id` the original DATA GAP note
+   was written against, since it doesn't depend on which specific launch
+   is active) and shows its name + provider inline, with a link into
+   Armory to edit it. Falls back to the original context-free form when
+   `agentId` is absent, unchanged for every other case. Confirmed via a
+   research pass that NEITHER `view: "identity"` nor `view: "memory"`
+   blocks are created by any live UI flow anymore — both were superseded
+   by the agent pane's "Stash" modal (`AgentStashModal.tsx`) — so this
+   fix only matters for pre-existing persisted layouts with one still
+   open; still worth doing correctly and cheaply given the established
+   pattern already existed. 5 new tests
+   (`frontend/app/view/bundle-summary.test.tsx`) covering the
+   agent-bound/unbound/failed-resolve/absent-agentId/wrong-agent cases.
 2. **DONE (2026-08-15).** Backfill migration `m0021` for existing agents.
    Turned out to need a real schema addition first —
    `db_agent_definitions.memory_id` didn't exist at all (only
