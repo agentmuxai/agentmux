@@ -322,6 +322,71 @@ fn dock_node_views(
         .collect()
 }
 
+#[derive(serde::Deserialize, Default)]
+pub struct MuxspectBackgroundTasksQuery {
+    /// Omit to list every still-running declared-background task across
+    /// every block on this instance (the Swarm/fleet-view case); pass to
+    /// scope to one block's own history (including terminal tasks, unlike
+    /// the global list).
+    #[serde(default)]
+    pub block_id: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+pub struct BackgroundTaskView {
+    pub id: String,
+    pub block_id: String,
+    pub label: String,
+    pub pid: Option<i64>,
+    pub started_at_ms: i64,
+    pub status: &'static str,
+    pub last_seen_ms: i64,
+    pub ended_at_ms: Option<i64>,
+}
+
+impl From<crate::backend::storage::background_tasks::BackgroundTask> for BackgroundTaskView {
+    fn from(t: crate::backend::storage::background_tasks::BackgroundTask) -> Self {
+        BackgroundTaskView {
+            id: t.id,
+            block_id: t.block_id,
+            label: t.label,
+            pid: t.pid,
+            started_at_ms: t.started_at_ms,
+            status: t.status.as_str(),
+            last_seen_ms: t.last_seen_ms,
+            ended_at_ms: t.ended_at_ms,
+        }
+    }
+}
+
+/// `GET /api/v1/muxspect/background-tasks[?block_id=X]` — the durable
+/// declared-background task registry (`db_background_tasks`), the source
+/// of truth `handle_muxspect_dock`'s ephemeral, 1-hour-evicted
+/// `DockSnapshotCache` deliberately isn't (see
+/// docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md). A
+/// task still shows up here after the dock cache has evicted it, and
+/// survives a pane reload — it's backed by SQLite, not an in-memory cache.
+pub async fn handle_muxspect_background_tasks(
+    State(state): State<AppState>,
+    Query(q): Query<MuxspectBackgroundTasksQuery>,
+) -> impl IntoResponse {
+    let result = match q.block_id.as_deref() {
+        Some(block_id) if !block_id.is_empty() => state.wstore.background_task_list_for_block(block_id),
+        _ => state.wstore.background_task_list_running(),
+    };
+    match result {
+        Ok(tasks) => {
+            let views: Vec<BackgroundTaskView> = tasks.into_iter().map(Into::into).collect();
+            Json(json!({ "tasks": views })).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response(),
+    }
+}
+
 #[derive(serde::Deserialize)]
 pub struct MuxspectDockClearRequest {
     pub block_id: String,
@@ -614,5 +679,65 @@ mod tests {
             !state.dock_snapshots.has_node("block-1", "n1"),
             "a cleared node must not still be reported by a subsequent `dock` read"
         );
+    }
+
+    async fn json_body(resp: axum::response::Response) -> serde_json::Value {
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        serde_json::from_slice(&body).unwrap()
+    }
+
+    #[tokio::test]
+    async fn handle_muxspect_background_tasks_scoped_to_block_includes_terminal_tasks() {
+        let state = crate::server::tests::test_state();
+        state.wstore.background_task_observe("t1", "block-1", "task dev", 0, 0).unwrap();
+        state.wstore.background_task_observe("t2", "block-1", "finished build", 0, 0).unwrap();
+        state
+            .wstore
+            .background_task_complete(
+                "t2",
+                crate::backend::storage::background_tasks::BackgroundTaskStatus::Done,
+                500,
+            )
+            .unwrap();
+        // Different block — must not leak into a block-scoped query.
+        state.wstore.background_task_observe("t3", "block-2", "other pane", 0, 0).unwrap();
+
+        let resp = handle_muxspect_background_tasks(
+            State(state),
+            Query(MuxspectBackgroundTasksQuery { block_id: Some("block-1".to_string()) }),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = json_body(resp).await;
+        let ids: Vec<&str> = body["tasks"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, vec!["t1", "t2"], "block-scoped query includes terminal tasks for that block");
+    }
+
+    #[tokio::test]
+    async fn handle_muxspect_background_tasks_without_block_id_lists_running_globally() {
+        let state = crate::server::tests::test_state();
+        state.wstore.background_task_observe("t1", "block-1", "still running", 0, 0).unwrap();
+        state.wstore.background_task_observe("t2", "block-2", "also running", 0, 0).unwrap();
+        state.wstore.background_task_observe("t3", "block-1", "finished", 0, 0).unwrap();
+        state
+            .wstore
+            .background_task_complete(
+                "t3",
+                crate::backend::storage::background_tasks::BackgroundTaskStatus::Done,
+                500,
+            )
+            .unwrap();
+
+        let resp = handle_muxspect_background_tasks(
+            State(state),
+            Query(MuxspectBackgroundTasksQuery { block_id: None }),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = json_body(resp).await;
+        let ids: Vec<&str> = body["tasks"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, vec!["t1", "t2"], "global query is running-only, across every block");
     }
 }

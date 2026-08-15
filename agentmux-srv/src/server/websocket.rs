@@ -1024,11 +1024,24 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // docknodestatus → fire-and-forget push of a ToolNode's latest status,
     // cached in-memory per block for `muxspect dock` to read. See
     // docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md §3.1.
+    //
+    // Also mirrors a declared-background task's liveness into the durable
+    // `db_background_tasks` registry (see
+    // docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md) —
+    // `DockSnapshotCache` above is intentionally ephemeral (never persisted,
+    // 1-hour eviction on read); the registry is the durable source of truth
+    // consumers that need to survive a cache eviction or a session
+    // reconnect (Swarm, #2492's teardown-survival) read from instead. Best-
+    // effort: a registry write failure never blocks the dock push it rides
+    // alongside — `dock_snapshots.push_delta` above already gives the user
+    // the live UI signal regardless.
     let dock_snapshots_dns = state.dock_snapshots.clone();
+    let wstore_dns = state.wstore.clone();
     engine.register_handler(
         COMMAND_DOCK_NODE_STATUS,
         Box::new(move |data, _ctx| {
             let dock_snapshots = dock_snapshots_dns.clone();
+            let wstore = wstore_dns.clone();
             Box::pin(async move {
                 let cmd: CommandDockNodeStatusData = serde_json::from_value(data)
                     .map_err(|e| format!("docknodestatus: {e}"))?;
@@ -1036,6 +1049,34 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_millis() as i64;
+
+                if cmd.run_in_background == Some(true) && cmd.status == "running" {
+                    if let Err(e) = wstore.background_task_observe(
+                        &cmd.node_id,
+                        &cmd.blockid,
+                        &cmd.tool_name,
+                        observed_at,
+                        observed_at,
+                    ) {
+                        tracing::warn!(
+                            target: "background_tasks",
+                            node_id = %cmd.node_id,
+                            error = %e,
+                            "failed to observe declared-background task in the durable registry",
+                        );
+                    }
+                } else if matches!(cmd.status.as_str(), "done" | "error" | "stopped") {
+                    let status = crate::backend::storage::background_tasks::BackgroundTaskStatus::from_str(&cmd.status);
+                    if let Err(e) = wstore.background_task_complete(&cmd.node_id, status, observed_at) {
+                        tracing::warn!(
+                            target: "background_tasks",
+                            node_id = %cmd.node_id,
+                            error = %e,
+                            "failed to mark background task terminal in the durable registry",
+                        );
+                    }
+                }
+
                 dock_snapshots.push_delta(
                     &cmd.blockid,
                     crate::backend::dock_snapshot::DockNodeSnapshot {
