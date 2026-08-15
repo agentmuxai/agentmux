@@ -625,6 +625,16 @@ pub fn export_bundle(bundle: &Memory, skills: &[Skill]) -> BundleExport {
         // expected to bump before actually publishing the bundle anywhere.
         "version": "0.1.0",
         "description": bundle.description,
+        // ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §7.4.3/§7.5 step
+        // 6: harness + vendor, readonly-once-set on the source bundle (see
+        // `check_provider_model_immutable` in `server/app_api/bundle.rs`) —
+        // carried through export so a re-imported ABF is self-describing
+        // about what it needs to run, not silently reset to unbound.
+        // Omitted (not just empty-stringed) when the source bundle itself
+        // has none set yet, so older/still-unbound bundles don't export a
+        // misleadingly-present-but-empty field.
+        "provider": if bundle.provider.is_empty() { Value::Null } else { json!(bundle.provider) },
+        "model": if bundle.model.is_empty() { Value::Null } else { json!(bundle.model) },
         "components": Value::Object(components),
         "metadata": {},
     });

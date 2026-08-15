@@ -786,8 +786,8 @@ async fn bundle_import_for_agent_impl(
         description: parsed.description,
         is_blank: false,
         is_global: false,
-        provider: String::new(),
-        model: String::new(),
+        provider: parsed.provider,
+        model: parsed.model,
         instructions: parsed.instructions,
         instructions_by_provider: serde_json::to_string(&parsed.instructions_by_provider)
             .unwrap_or_else(|_| "{}".to_string()),
@@ -1176,8 +1176,8 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // silently start injecting into every agent's
                     // CLAUDE.md without explicit user action (spec §4.4).
                     is_global: false,
-                    provider: String::new(),
-                    model: String::new(),
+                    provider: parsed.provider,
+                    model: parsed.model,
                     instructions: parsed.instructions,
                     // ABF v0.2 §2.2: every variant is stored verbatim, no
                     // merge decision made at import time.
@@ -1778,8 +1778,13 @@ async fn bundle_import_commit_impl(
                     description: parsed.description,
                     is_blank: false,
                     is_global: false,
-                    provider: String::new(),
-                    model: String::new(),
+                    // Like `description` above (and unlike instructions/
+                    // context/mcp), provider/model are structural identity
+                    // fields, not opt-in components — there's no
+                    // include_provider toggle in the preview/commit UI, so
+                    // these always carry straight through when present.
+                    provider: parsed.provider,
+                    model: parsed.model,
                     instructions,
                     instructions_by_provider: serde_json::to_string(&instructions_by_provider)
                         .unwrap_or_else(|_| "{}".to_string()),
@@ -2955,5 +2960,72 @@ mod export_import_for_agent_tests {
             std::fs::read_to_string(memory_dir_b.join("MEMORY.md")).unwrap(),
             "Agent A's learned fact."
         );
+    }
+
+    // ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §7.4.3/§7.5 step 6:
+    // provider/model round-trip through export -> import, same as the
+    // memory-files round-trip above.
+    #[tokio::test]
+    async fn export_then_import_carries_provider_and_model_through() {
+        let state = test_state();
+        let config_a = tempfile::tempdir().unwrap();
+        let config_b = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-a", "/work/a", config_a.path());
+        make_agent(&state, "agent-b", "/work/b", config_b.path());
+        let mut bundle = make_bundle(&state, "bundle-src", "Shared instructions.");
+        bundle.provider = "claude".to_string();
+        bundle.model = "anthropic".to_string();
+        state.id_store.bundle_memory_upsert(&bundle).unwrap();
+
+        let exported = bundle_export_for_agent_impl(&state.id_store, &state.wstore, ExportForAgentReq {
+            bundle_id: "bundle-src".to_string(),
+            agent_id: "agent-a".to_string(),
+            format: String::new(),
+        }).await.unwrap();
+
+        let manifest_file = exported["files"].as_array().unwrap().iter()
+            .find(|f| f["path"] == "armory.json")
+            .expect("armory.json must be present");
+        let manifest: serde_json::Value = serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
+        assert_eq!(manifest["provider"], "claude");
+        assert_eq!(manifest["model"], "anthropic");
+
+        let files: Vec<FileEntry> = exported["files"].as_array().unwrap().iter()
+            .map(|f| FileEntry {
+                path: f["path"].as_str().unwrap().to_string(),
+                content: f["content"].as_str().unwrap().to_string(),
+            })
+            .collect();
+        let imported = bundle_import_for_agent_impl(&state.id_store, &state.wstore, ImportForAgentReq {
+            agent_id: "agent-b".to_string(),
+            file_path: None,
+            zip_base64: None,
+            files: Some(files),
+        }).await.unwrap();
+        let new_bundle_id = imported["bundle_id"].as_str().expect("import response must include bundle_id");
+        let new_bundle = state.id_store.bundle_memory_get(new_bundle_id).unwrap().unwrap();
+        assert_eq!(new_bundle.provider, "claude");
+        assert_eq!(new_bundle.model, "anthropic");
+    }
+
+    #[tokio::test]
+    async fn export_of_an_unbound_bundle_omits_provider_and_model_rather_than_exporting_empty_strings() {
+        let state = test_state();
+        let config_a = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-a", "/work/a", config_a.path());
+        make_bundle(&state, "bundle-unbound", "Shared instructions."); // provider/model left empty
+
+        let exported = bundle_export_for_agent_impl(&state.id_store, &state.wstore, ExportForAgentReq {
+            bundle_id: "bundle-unbound".to_string(),
+            agent_id: "agent-a".to_string(),
+            format: String::new(),
+        }).await.unwrap();
+
+        let manifest_file = exported["files"].as_array().unwrap().iter()
+            .find(|f| f["path"] == "armory.json")
+            .expect("armory.json must be present");
+        let manifest: serde_json::Value = serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
+        assert!(manifest["provider"].is_null(), "unset provider must not export as an empty string");
+        assert!(manifest["model"].is_null(), "unset model must not export as an empty string");
     }
 }
