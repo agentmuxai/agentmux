@@ -252,6 +252,19 @@ pub fn is_sensitive_message(msg: &str) -> bool {
 /// escalates a verified reagent message just as it would any other —
 /// verification only removes the blanket network-tier forcing, not the
 /// content-based escalation rules layered on top of it.
+///
+/// `lan_verified` (SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md, §2.5) is the
+/// LAN analog, but folded into `TRUST` rather than a separate `SIG=` field:
+/// unlike WAN's reagent scheme (one pinned service key, so "did THIS
+/// message verify" is independent of "who is this from"), LAN verification
+/// is inherently per-claimed-sender — a verified LAN signature IS proof of
+/// exactly who sent it, the same kind of claim `TRUST=host-verified`
+/// already makes for host tier. `Some(true)` renders `TRUST=lan-verified`
+/// (overriding the usual `TRUST=network-claimed` LAN/WAN get); `Some(false)`
+/// or `None` leave `TRUST=network-claimed` unchanged — the LAN-signature-
+/// failed red flag itself lives in `TIER` (handler.rs's
+/// `is_lan_sig_invalid`), same as how `SIG=invalid` doesn't get its own
+/// `TRUST` value either.
 pub fn wrap_jekt_message(
     msg: &str,
     source_agent: Option<&str>,
@@ -260,6 +273,7 @@ pub fn wrap_jekt_message(
     delivery_tier: &str,
     sig_verified: Option<bool>,
     reagent_verified: Option<bool>,
+    lan_verified: Option<bool>,
     msg_id: &str,
     priority: &str,
 ) -> String {
@@ -270,7 +284,9 @@ pub fn wrap_jekt_message(
         .unwrap_or(0);
 
     let from = source_agent.unwrap_or("unknown");
-    let trust = if delivery_tier != "host" {
+    let trust = if delivery_tier == "lan" && lan_verified == Some(true) {
+        "lan-verified"
+    } else if delivery_tier != "host" {
         "network-claimed"
     } else {
         match sig_verified {

@@ -640,30 +640,53 @@ fn generate_jekt_msgid() -> String {
     format!("{}-{}-{}", now.as_millis(), std::process::id(), n)
 }
 
-/// Build the id/timestamp/signature triple for an outgoing jekt
-/// (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2). Reads this
-/// process's OWN `AGENTMUX_JEKT_KEY` — injected at spawn alongside
-/// `AGENTMUX_AGENT_ID`, into this agent's env only, never any other agent's
-/// — and signs over (msgid, source_agent, target_agent, ts_secs, message).
+/// Build the id/timestamp/host-signature/LAN-signature quadruple for an
+/// outgoing jekt (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2,
+/// SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.3). Reads this process's OWN
+/// `AGENTMUX_JEKT_KEY`/`AGENTMUX_LAN_KEY` — injected at spawn alongside
+/// `AGENTMUX_AGENT_ID`, into this agent's env only, never any other
+/// agent's — and signs over the same (msgid, source_agent, target_agent,
+/// ts_secs, message) material both schemes share.
 ///
-/// Returns `(request_id, ts_secs, jekt_sig)`. `jekt_sig` is `None` — not an
-/// error — when no key is available (an agent whose `.mcp.json` predates
-/// this feature, or `source_agent` itself unresolved): srv treats an absent
-/// signature as "unverified," never as a reason to fail delivery, so a
-/// missing key here must never block `SendMessage`/`Loop` from sending.
-fn sign_outgoing_jekt(source_agent: Option<&str>, target_agent: &str, message: &str) -> (String, i64, Option<String>) {
+/// Both signatures are computed unconditionally, regardless of which
+/// delivery tier the message actually ends up taking — this process has no
+/// reliable way to know that in advance (routing/forwarding is a
+/// server-side decision, see
+/// `docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md` §3). Sending a
+/// `lan_sig` alongside a message that's actually delivered host or WAN
+/// costs nothing — srv only ever consults `lan_sig` when it has
+/// independently determined `delivery_tier == "lan"` (never trusting the
+/// message body's own claim), so an irrelevant signature is simply ignored.
+///
+/// Returns `(request_id, ts_secs, jekt_sig, lan_sig)`. Either signature is
+/// `None` — not an error — when its key is unavailable (an agent whose
+/// `.mcp.json` predates this feature, or `source_agent` itself unresolved):
+/// srv treats an absent signature as "unverified," never as a reason to
+/// fail delivery, so a missing key here must never block
+/// `SendMessage`/`Loop` from sending.
+fn sign_outgoing_jekt(
+    source_agent: Option<&str>,
+    target_agent: &str,
+    message: &str,
+) -> (String, i64, Option<String>, Option<String>) {
     let msgid = generate_jekt_msgid();
     let ts_secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    let sig = (|| {
+    let jekt_sig = (|| {
         let key_b64 = std::env::var("AGENTMUX_JEKT_KEY").ok().filter(|s| !s.is_empty())?;
         let key = agentmux_common::jekt_sign::decode_key(&key_b64)?;
         let src = source_agent?;
         Some(agentmux_common::jekt_sign::sign_jekt(&key, &msgid, src, target_agent, ts_secs, message))
     })();
-    (msgid, ts_secs, sig)
+    let lan_sig = (|| {
+        let key_b64 = std::env::var("AGENTMUX_LAN_KEY").ok().filter(|s| !s.is_empty())?;
+        let key = agentmux_common::jekt_sign::decode_key(&key_b64)?;
+        let src = source_agent?;
+        agentmux_common::jekt_sign::sign_lan_jekt(&key, &msgid, src, target_agent, ts_secs, message)
+    })();
+    (msgid, ts_secs, jekt_sig, lan_sig)
 }
 
 async fn call_tool(
@@ -1055,7 +1078,7 @@ async fn call_tool(
                 .ok()
                 .filter(|s| !s.is_empty());
 
-            let (request_id, ts_secs, jekt_sig) =
+            let (request_id, ts_secs, jekt_sig, lan_sig) =
                 sign_outgoing_jekt(source_agent.as_deref(), to, message);
 
             let url = format!(
@@ -1069,6 +1092,7 @@ async fn call_tool(
                 request_id: Some(request_id),
                 ts_secs: Some(ts_secs),
                 jekt_sig,
+                lan_sig,
             };
 
             let resp = client
@@ -1551,7 +1575,7 @@ async fn call_tool(
                     tokio::time::sleep(interval).await;
                 }
                 loop {
-                    let (request_id, ts_secs, jekt_sig) =
+                    let (request_id, ts_secs, jekt_sig, lan_sig) =
                         sign_outgoing_jekt(task_source.as_deref(), &task_target, &task_prompt);
                     let req = InjectRequest {
                         target_agent: task_target.clone(),
@@ -1560,6 +1584,7 @@ async fn call_tool(
                         request_id: Some(request_id),
                         ts_secs: Some(ts_secs),
                         jekt_sig,
+                        lan_sig,
                     };
                     let _ = task_client
                         .post(&url)

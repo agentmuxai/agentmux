@@ -428,16 +428,23 @@ impl Handler {
         let delivery_tier = req.delivery_tier.as_deref().unwrap_or("host");
         let is_network_tier = delivery_tier == "wan" || delivery_tier == "lan";
         // A reagent_sig that was PRESENT but didn't verify — someone tried to
-        // forge it. Only WAN ever carries a signature attempt at all
-        // (`sync_agent_reactive`/`verify_reagent_signature` never compute
-        // `reagent_verified` off the WAN tier, so it's always `None` for
-        // LAN), so this is the narrowed rule 1's only trigger — absence of a
+        // forge it. `reagent_verified` is WAN-only by construction
+        // (`sync_agent_reactive`/`verify_reagent_signature` never compute it
+        // off the WAN tier, so it's always `None` for LAN — reagent is a
+        // WAN-only service sender, this never applied to LAN) — absence of a
         // signature attempt (`None`), or a signature that verified but only
         // under the known-exposed dev key, is NOT this case; both fall
         // through to rule 5 like any other self-declared sender.
         let is_network_tier_sig_invalid = is_network_tier && req.reagent_verified == Some(false);
+        // A lan_sig that was PRESENT, whose claimed sender's public key WAS
+        // found, but didn't cryptographically verify — a specific agent's
+        // identity was actively forged, not merely unproven. Scoped to LAN
+        // only, same reasoning as reagent's WAN scoping above — see
+        // docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.4/§2.5.
+        let is_lan_sig_invalid = delivery_tier == "lan" && req.lan_verified == Some(false);
         let is_unverified_sender = req.sig_verified == Some(false);
         let is_sensitive = is_network_tier_sig_invalid
+            || is_lan_sig_invalid
             || is_unverified_sender
             || matches!(declared_tier, Some(super::types::JektTier::Sensitive))
             || is_sensitive_message(&sanitized);
@@ -466,6 +473,7 @@ impl Handler {
             delivery_tier,
             req.sig_verified,
             req.reagent_verified,
+            req.lan_verified,
             &request_id,
             priority,
         );
