@@ -171,18 +171,23 @@ pub struct InjectionRequest {
     /// answers "who is this really from," not "did this cross a network
     /// boundary."
     ///
-    /// **DOES affect `TIER`, as of
-    /// docs/specs/SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14.md**
-    /// (superseding `SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md` §4's
-    /// original "what does NOT change" claim, true when written, no longer
-    /// true today): `handler.rs`'s tier-escalation block no longer forces
-    /// `TIER=sensitive` by delivery tier alone when this is `Some(true)` AND
-    /// the request's `reagent_key_id` passes
-    /// `agentmux_common::jekt_sign::is_reagent_trusted_signing_key` (i.e. is
-    /// the production key specifically, not the known-exposed dev
-    /// placeholder — `Some(true)` alone from a dev-key signature is NOT
-    /// sufficient, see that function's doc comment). Declared-sensitive and
-    /// keyword-match escalation still apply unconditionally on top.
+    /// **DOES affect `TIER`.** As of
+    /// `docs/specs/SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md`
+    /// (superseding `SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14.md`'s
+    /// narrower version of this same claim), `handler.rs`'s tier-escalation
+    /// block only forces `TIER=sensitive` by delivery tier when this is
+    /// `Some(false)` — a `reagent_sig` was present but did NOT
+    /// cryptographically verify, i.e. an active forgery attempt. `None` (no
+    /// signature attempted) and `Some(true)` under the known-exposed
+    /// `reagent-v1-dev` placeholder key are NOT this case — both fall
+    /// through to the declared tier (default `coord`), same as any other
+    /// self-declared sender; `agentmux_common::jekt_sign::is_reagent_trusted_signing_key`
+    /// is no longer consulted by the tier-escalation gate at all (see that
+    /// function's doc comment — it still matters for whether `Some(true)`
+    /// qualifies for the SIG=verified relaxation's rule 1b, just not for
+    /// whether failing to qualify forces sensitive). Declared-sensitive and
+    /// keyword-match escalation still apply unconditionally on top of all
+    /// of the above.
     #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
     pub reagent_verified: Option<bool>,
 }
