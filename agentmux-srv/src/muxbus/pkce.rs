@@ -3,20 +3,20 @@
 
 //! PKCE Authorization Code flow for Cognito desktop login.
 //!
-//! Flow:
+//! Flow (cloud-relayed callback — no loopback listener; see
+//! docs/specs/SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15.md):
 //!   1. Generate code_verifier + code_challenge (S256).
-//!   2. Bind fixed port 9379 for the redirect_uri (Cognito does exact-string
-//!      matching only — no wildcard port support despite RFC 8252 §8.3).
-//!   3. Open browser to Cognito hosted UI.
-//!   4. Await HTTP callback (code + state).
-//!   5. Exchange code for tokens via /oauth2/token.
+//!   2. Register the flow's state with the muxbus login relay.
+//!   3. Open browser to Cognito hosted UI; it redirects to the hosted
+//!      /desktop-callback page, which posts {state, code} to the relay.
+//!   4. Poll the relay for the code (single-read on the relay side).
+//!   5. Exchange code for tokens via /oauth2/token (PKCE verifier never
+//!      left this process).
 //!   6. Decode email from id_token claims (no re-verification needed —
 //!      we fetched the token directly from Cognito).
 
 use base64::Engine as _;
 use sha2::{Digest, Sha256};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpSocket;
 
 use crate::backend::storage::muxbus::MuxBusCredentials;
 use crate::util::open_browser;
@@ -28,10 +28,60 @@ pub struct PkceResult {
     pub credentials: MuxBusCredentials,
 }
 
+/// Base URL of the muxbus REST API hosting the login relay. The env override
+/// exists for tests and for running against a local muxbus server
+/// (`http://localhost:3100`, registered in the dev Cognito app client).
+fn relay_base_url() -> String {
+    std::env::var("AGENTMUX_MUXBUS_REST_URL")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| crate::muxbus::cloud_subscriber::MUXBUS_REST_URL.to_string())
+}
+
+// Only one login flow may exist per process. Two concurrent flows both bind
+// the fixed callback port, and (on Windows, where SO_REUSEADDR permits binding
+// a port another live socket already holds) the browser's redirect lands on
+// whichever listener the OS picks — a 400 state-mismatch coin flip. The newest
+// attempt is the one the user actually wants: abort the predecessor.
+static ACTIVE_LOGIN: std::sync::Mutex<Option<tokio::task::AbortHandle>> =
+    std::sync::Mutex::new(None);
+
 pub async fn run_pkce_login(
     cognito_domain: &str,
     client_id: &str,
     http_client: &reqwest::Client,
+) -> Result<PkceResult, String> {
+    // Abort-predecessor and register-successor must be one critical section:
+    // with separate lock acquisitions, two concurrent muxbus.login RPCs can
+    // both take() None and neither aborts the other (reagent P1 on this PR).
+    // tokio::spawn is synchronous and non-blocking, so holding the std mutex
+    // across it is fine — the guard never spans an await.
+    let task = {
+        let mut guard = ACTIVE_LOGIN.lock().unwrap();
+        if let Some(prev) = guard.take() {
+            prev.abort();
+        }
+        let task = tokio::spawn(run_pkce_login_inner(
+            cognito_domain.to_string(),
+            client_id.to_string(),
+            http_client.clone(),
+        ));
+        *guard = Some(task.abort_handle());
+        task
+    };
+    match task.await {
+        Ok(r) => r,
+        Err(e) if e.is_cancelled() => {
+            Err("this login attempt was superseded by a newer one".to_string())
+        }
+        Err(e) => Err(format!("login task failed: {e}")),
+    }
+}
+
+async fn run_pkce_login_inner(
+    cognito_domain: String,
+    client_id: String,
+    http_client: reqwest::Client,
 ) -> Result<PkceResult, String> {
     // 1. Generate code_verifier (43–128 chars of URL-safe chars)
     let v1 = uuid::Uuid::new_v4();
@@ -50,22 +100,25 @@ pub async fn run_pkce_login(
     // 3. State (CSRF)
     let state = uuid::Uuid::new_v4().to_string();
 
-    // 4. Bind fixed port 9379 — must match Cognito callbackUrls exactly.
-    //    SO_REUSEADDR allows immediate re-login after a cancelled attempt whose
-    //    socket is still in TIME_WAIT (would otherwise hit EADDRINUSE).
-    const CALLBACK_PORT: u16 = 9379;
-    let redirect_uri = format!("http://127.0.0.1:{CALLBACK_PORT}/callback");
-    let tcp_sock = TcpSocket::new_v4()
-        .map_err(|e| format!("failed to create callback socket: {e}"))?;
-    tcp_sock
-        .set_reuseaddr(true)
-        .map_err(|e| format!("failed to set SO_REUSEADDR: {e}"))?;
-    tcp_sock
-        .bind(format!("127.0.0.1:{CALLBACK_PORT}").parse().unwrap())
-        .map_err(|e| format!("failed to bind callback port {CALLBACK_PORT}: {e} — another process may be holding the port"))?;
-    let listener = tcp_sock
-        .listen(10)
-        .map_err(|e| format!("failed to listen on callback port {CALLBACK_PORT}: {e}"))?;
+    // 4. Register the flow with the cloud relay BEFORE opening the browser.
+    //    The hosted /desktop-callback page (agentmux-cloud, login-relay.ts)
+    //    posts {state, code} there; step 7 polls it back out. No loopback
+    //    listener: the browser never touches 127.0.0.1, and concurrent
+    //    instances can't collide — each flow polls its own state key.
+    //    See docs/specs/SPEC_MUXBUS_CLOUD_RELAYED_LOGIN_CALLBACK_2026_08_15.md.
+    let relay_base = relay_base_url();
+    let redirect_uri = format!("{relay_base}/desktop-callback");
+    let create_resp = http_client
+        .post(format!("{relay_base}/api/login-relay"))
+        .json(&serde_json::json!({ "state": state }))
+        .send()
+        .await
+        .map_err(|e| format!("could not reach the login relay: {e}"))?;
+    if !create_resp.status().is_success() {
+        let status = create_resp.status();
+        let body = create_resp.text().await.unwrap_or_default();
+        return Err(format!("login relay refused the flow ({status}): {body}"));
+    }
 
     // 5. Build auth URL
     let scopes = "openid+email+profile+https%3A%2F%2Fmuxbus.agentmux.ai%2Fread+https%3A%2F%2Fmuxbus.agentmux.ai%2Fwrite";
@@ -81,83 +134,62 @@ pub async fn run_pkce_login(
         redirect_uri_enc = percent_encode(&redirect_uri),
     );
 
-    // 6. Open browser
-    open_browser(&auth_url);
+    // 6. Open browser (suppressed under test — the supersede test drives
+    //    real flows that would otherwise launch real browser windows)
+    if !cfg!(test) {
+        open_browser(&auth_url);
+    }
 
     tracing::info!(
         cognito_domain = cognito_domain,
-        port = CALLBACK_PORT,
-        "muxbus: PKCE login started, awaiting browser callback"
+        relay = relay_base,
+        "muxbus: PKCE login started, awaiting relayed browser callback"
     );
 
-    // 7. Accept connections until the valid Cognito callback arrives (5-min overall timeout).
-    //    On a fixed well-known port, stray connections (browser prefetch, port probes) can
-    //    arrive before Cognito's redirect. Each accepted connection is spawned into a task
-    //    so slow/idle strays don't block accept() and delay the real callback.
-    let (result_tx, mut result_rx) = tokio::sync::mpsc::channel::<Result<String, String>>(1);
+    // 7. Poll the relay until the code arrives (5-min overall timeout, matching
+    //    the relay record's TTL). Transient relay/network errors are tolerated
+    //    and re-polled; a 404 is fatal — the flow expired or was already
+    //    consumed (single-read on the relay side).
     let code = tokio::time::timeout(
         std::time::Duration::from_secs(LOGIN_TIMEOUT_SECS),
-        async move {
+        async {
             loop {
-                tokio::select! {
-                    biased;
-                    result = result_rx.recv() => {
-                        return result.unwrap_or_else(|| Err("callback channel closed".to_string()));
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                let resp = match http_client
+                    .get(format!("{relay_base}/api/login-relay/{state}"))
+                    .send()
+                    .await
+                {
+                    Ok(r) => r,
+                    Err(_) => continue, // transient network problem — keep polling
+                };
+                if resp.status() == reqwest::StatusCode::NOT_FOUND {
+                    return Err(
+                        "login attempt expired or was completed elsewhere — please try again"
+                            .to_string(),
+                    );
+                }
+                if !resp.status().is_success() {
+                    continue; // transient server error — keep polling
+                }
+                let body: serde_json::Value = match resp.json().await {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+                match body["status"].as_str() {
+                    Some("ready") => match body["code"].as_str() {
+                        Some(c) => return Ok(c.to_string()),
+                        None => return Err("relay returned ready without a code".to_string()),
+                    },
+                    // Cognito denial forwarded by the hosted page — fail fast
+                    // rather than polling out the rest of the 5 minutes.
+                    Some("failed") => {
+                        let err = body["error"].as_str().unwrap_or("unknown");
+                        return Err(format!("Cognito returned error: {err}"));
                     }
-                    accept_res = listener.accept() => {
-                        let (mut stream, _) = accept_res
-                            .map_err(|e| format!("callback accept failed: {e}"))?;
-                        let state_val = state.clone();
-                        let tx = result_tx.clone();
-                        tokio::spawn(async move {
-                            let mut buf = [0u8; 4096];
-                            let n = match tokio::time::timeout(
-                                std::time::Duration::from_secs(2),
-                                stream.read(&mut buf),
-                            )
-                            .await
-                            {
-                                Ok(Ok(n)) => n,
-                                _ => return,
-                            };
-                            let request = std::str::from_utf8(&buf[..n]).unwrap_or("");
-                            let first_line = request.lines().next().unwrap_or("");
-                            let raw_path = first_line.split_whitespace().nth(1).unwrap_or("");
-                            let (path_only, query) =
-                                raw_path.split_once('?').unwrap_or((raw_path, ""));
-
-                            if path_only != "/callback" {
-                                let _ = stream.write_all(b"HTTP/1.1 404 Not Found\r\n\r\n").await;
-                                return;
-                            }
-
-                            let returned_state = query_param(query, "state").unwrap_or_default();
-                            if returned_state != state_val {
-                                let _ = stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n").await;
-                                return;
-                            }
-
-                            let html: &[u8] = if query_param(query, "code").is_some() {
-                                b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n\
-                                  <html><body><h2>Connected to AgentMux Cloud.</h2>\
-                                  <p>You can close this tab.</p></body></html>"
-                            } else {
-                                b"HTTP/1.1 400 Bad Request\r\nContent-Type: text/html\r\n\r\n\
-                                  <html><body><h2>Login failed.</h2><p>Please retry from AgentMux.</p></body></html>"
-                            };
-                            let _ = stream.write_all(html).await;
-
-                            let result = match query_param(query, "code") {
-                                Some(c) => Ok(c),
-                                None => {
-                                    let err = query_param(query, "error")
-                                        .unwrap_or_else(|| "unknown".to_string());
-                                    Err(format!("Cognito returned error: {err}"))
-                                }
-                            };
-                            let _ = tx.send(result).await;
-                        });
-                    }
+                    // "pending" or anything unrecognized — keep polling until
+                    // the overall timeout says otherwise.
+                    _ => continue,
                 }
             }
         },
@@ -169,7 +201,7 @@ pub async fn run_pkce_login(
     let token_url = format!("{cognito_domain}/oauth2/token");
     let params = [
         ("grant_type", "authorization_code"),
-        ("client_id", client_id),
+        ("client_id", client_id.as_str()),
         ("code", &code),
         ("redirect_uri", &redirect_uri),
         ("code_verifier", &code_verifier),
@@ -312,17 +344,6 @@ pub async fn refresh_token(
     })
 }
 
-fn query_param(query: &str, key: &str) -> Option<String> {
-    query.split('&').find_map(|pair| {
-        let (k, v) = pair.split_once('=')?;
-        if k == key {
-            Some(percent_decode(v))
-        } else {
-            None
-        }
-    })
-}
-
 fn percent_encode(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
     for b in s.bytes() {
@@ -338,31 +359,6 @@ fn percent_encode(s: &str) -> String {
     out
 }
 
-fn percent_decode(s: &str) -> String {
-    let mut out = Vec::with_capacity(s.len());
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(hex) = u8::from_str_radix(
-                std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""),
-                16,
-            ) {
-                out.push(hex);
-                i += 3;
-                continue;
-            }
-        } else if bytes[i] == b'+' {
-            out.push(b' ');
-            i += 1;
-            continue;
-        }
-        out.push(bytes[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
 fn extract_jwt_claims(token: &str) -> (String, String) {
     let payload = token.splitn(3, '.').nth(1).unwrap_or("");
     let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -376,3 +372,87 @@ fn extract_jwt_claims(token: &str) -> (String, String) {
     (email, sub)
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// Minimal fake login relay: 201 on POST /api/login-relay, an eternally
+    /// "pending" JSON body on GET polls. Keeps real flows parked at the
+    /// poll stage with zero external network dependency.
+    async fn spawn_fake_relay() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else { return };
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 2048];
+                    let Ok(n) = stream.read(&mut buf).await else { return };
+                    let req = std::str::from_utf8(&buf[..n]).unwrap_or("");
+                    let body = if req.starts_with("POST /api/login-relay") {
+                        r#"{"status":"pending","ttl_seconds":300}"#
+                    } else {
+                        r#"{"status":"pending"}"#
+                    };
+                    let resp = format!(
+                        "HTTP/1.1 {} 
+Content-Type: application/json
+Content-Length: {}
+Connection: close
+
+{}",
+                        if req.starts_with("POST") { "201 Created" } else { "200 OK" },
+                        body.len(),
+                        body
+                    );
+                    let _ = stream.write_all(resp.as_bytes()).await;
+                });
+            }
+        });
+        format!("http://{addr}")
+    }
+
+    // The superseded-login guarantee: starting flow B while flow A is pending
+    // must abort A rather than leaving two flows both polling (and both able
+    // to open browser tabs). Uses the real run_pkce_login entry so the
+    // abort-registry path itself is exercised; the fake relay keeps both
+    // flows parked at the poll stage.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn second_login_supersedes_first() {
+        let relay = spawn_fake_relay().await;
+        std::env::set_var("AGENTMUX_MUXBUS_REST_URL", &relay);
+
+        let http = reqwest::Client::new();
+        let flow_a = tokio::spawn({
+            let http = http.clone();
+            async move { run_pkce_login("http://127.0.0.1:1", "test-client", &http).await }
+        });
+        // Give A time to register + start polling before B supersedes it.
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+        let flow_b = tokio::spawn({
+            let http = http.clone();
+            async move { run_pkce_login("http://127.0.0.1:1", "test-client", &http).await }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+        let a = tokio::time::timeout(std::time::Duration::from_secs(2), flow_a)
+            .await
+            .expect("flow A should resolve promptly after being superseded")
+            .expect("flow A task must not panic");
+        assert!(
+            a.as_ref().is_err_and(|e| e.contains("superseded")),
+            "flow A should report being superseded, got: {a:?}"
+        );
+        assert!(!flow_b.is_finished(), "flow B should still be polling the relay");
+
+        // Cleanup: abort B's inner flow via the registry.
+        if let Some(h) = ACTIVE_LOGIN.lock().unwrap().take() {
+            h.abort();
+        }
+        flow_b.abort();
+        std::env::remove_var("AGENTMUX_MUXBUS_REST_URL");
+    }
+}
