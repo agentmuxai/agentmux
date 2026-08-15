@@ -172,8 +172,13 @@ pub fn is_reagent_trusted_signing_key(key_id: &str) -> bool {
 /// This function alone does NOT tell you whether the message is safe to
 /// treat as more trusted than an ordinary WAN jekt — see
 /// `is_reagent_trusted_signing_key`'s doc comment. A message signed under
-/// `reagent-v1-dev` verifies here (`true`) but must not be used to relax
-/// `TIER=sensitive`.
+/// `reagent-v1-dev` verifies here (`true`) exactly the same as one signed
+/// under the real production key; only `is_reagent_trusted_signing_key`
+/// tells the two apart, and (as of
+/// `docs/specs/SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md`) that
+/// distinction no longer feeds into whether `TIER=sensitive` is forced —
+/// it still matters for whatever future feature wants to lean on genuinely
+/// proven reagent identity, just not that decision.
 pub fn verify_reagent_jekt(
     key_id: &str,
     msgid: &str,
