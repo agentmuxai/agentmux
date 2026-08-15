@@ -83,7 +83,6 @@ export const TokenUsageIndicator = (): JSX.Element => {
                 aria-label="Token usage, click for breakdown"
                 data-tip="Total tokens this session"
             >
-                <span class="token-usage-indicator-icon" aria-hidden="true">🪙</span>
                 <span class="token-usage-indicator-counts">
                     <span class="token-usage-indicator-arrow">↑</span>
                     {formatCompactNumber(total().input)}

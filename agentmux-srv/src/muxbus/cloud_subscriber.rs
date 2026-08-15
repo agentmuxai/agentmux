@@ -895,9 +895,22 @@ async fn sync_agent_reactive(
         // signing fields is present — a partial set (e.g. a sig but no
         // key_id) is treated the same as "not signed," not "signed but
         // broken," since a legitimate sender always sends all four
-        // together. Never affects escalation (WAN stays unconditionally
-        // TRUST=network-claimed / sensitive-eligible) — only which SIG=
-        // marker field renders. See InjectionRequest::reagent_verified.
+        // together. TRUST is unaffected either way (WAN stays
+        // unconditionally TRUST=network-claimed). TIER is only FORCED to
+        // sensitive when `reagent_verified` is `Some(false)` — a signature
+        // present but which failed to cryptographically verify (see
+        // InjectionRequest::reagent_verified,
+        // SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md); as of that
+        // narrowing, `agentmux_common::jekt_sign::is_reagent_trusted_signing_key`
+        // is NOT consulted by the tier-escalation gate at all — `Some(true)`
+        // under the trusted production key and `Some(true)` under the
+        // known-exposed `reagent-v1-dev` placeholder now get identical tier
+        // treatment. `req.reagent_key_id` below must still be carried
+        // through from `inj` so the marker's `SIG=` label and the SIG=verified
+        // rule-1b exception render correctly (reagentx P0 on PR #2576 — it
+        // wasn't, so relaxation silently never activated for
+        // the desktop app's WS delivery path despite `reagent_verified`
+        // being computed correctly).
         //
         // Anti-replay (reagentx P1 on PR #2570): a captured, validly-signed
         // (reagent_sig, reagent_key_id, reagent_msg_id, reagent_ts_secs,
@@ -939,6 +952,7 @@ async fn sync_agent_reactive(
             delivery_tier: Some("wan".to_string()),
             forward_hops: 0,
             reagent_verified,
+            reagent_key_id: inj.reagent_key_id.clone(),
             ..Default::default()
         };
         let delivery = handler.inject_message(req);

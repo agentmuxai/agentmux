@@ -232,12 +232,26 @@ pub fn is_sensitive_message(msg: &str) -> bool {
 ///   - `None` — no signature was attempted (the overwhelming majority of
 ///     WAN traffic, and all host/lan traffic). No `SIG=` field is rendered
 ///     at all, so existing marker parsing/tests are unaffected.
-/// **Never changes `TRUST` or `effective_tier`** — a verified reagent
-/// signature still delivers as `TRUST=network-claimed`/whatever tier
-/// escalation already produced. This closes "who is this really from," not
-/// "should this auto-execute" — the same separation of concerns host-tier
-/// signing established, extended to a second, independent field so the two
-/// axes can never be conflated by a caller that only checks one of them.
+/// **Never changes `TRUST`** — a verified reagent signature still delivers
+/// as `TRUST=network-claimed`; `TRUST` answers "did this cross a network
+/// boundary," which stays true regardless of whether the sender could also
+/// be verified. This function itself never computes `effective_tier` either
+/// way — that's a caller-supplied parameter, unchanged.
+///
+/// As of SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14.md §1, though, the
+/// CALLER (`Handler::inject_message`) now *does* let `reagent_verified ==
+/// Some(true)` change what `effective_tier` it passes in here — a WAN jekt
+/// verified against reagent's pinned Ed25519 key is no longer forced to
+/// `sensitive` by delivery tier alone, mirroring how `sig_verified ==
+/// Some(true)` (host-tier) already doesn't force it. So `SIG=verified` and
+/// `TIER=coord`/`info` can now appear together on the SAME marker where they
+/// never could before — this is by design, not a bug: `TRUST` still tells
+/// you "crossed a network boundary" and `SIG=verified` still tells you "but
+/// cryptographically proven who sent it," and it's exactly that proof that
+/// now lets `TIER` relax. A declared-SENSITIVE tier or a keyword match still
+/// escalates a verified reagent message just as it would any other —
+/// verification only removes the blanket network-tier forcing, not the
+/// content-based escalation rules layered on top of it.
 pub fn wrap_jekt_message(
     msg: &str,
     source_agent: Option<&str>,

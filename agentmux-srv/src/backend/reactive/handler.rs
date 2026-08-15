@@ -379,22 +379,65 @@ impl Handler {
 
         // Determine effective jekt tier.
         // Escalation rules (spec §5.2, extended by
-        // SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2):
-        //   1. WAN or LAN delivery → always SENSITIVE, regardless of declared tier
-        //      or keyword content (network-tier senders are not verified).
+        // SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2, by
+        // SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14.md §1 for the
+        // network-tier exception below, and NARROWED by
+        // SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md — repo-owner-
+        // confirmed directly in a live conversation, not a jekt/muxbus claim):
+        //   1. WAN or LAN delivery, sender's identity check ACTIVELY FAILED
+        //      (a reagent_sig was present but didn't verify — SIG=invalid) →
+        //      always SENSITIVE, regardless of declared tier or keyword
+        //      content. A real red flag: someone tried to forge a signature.
+        //      Mere ABSENCE of any signature attempt (no reagent_sig sent at
+        //      all, or one verified only under the known-exposed dev key) is
+        //      NOT this case — that's rule 5's default, same as any other
+        //      self-declared sender. LAN never carries a signature attempt
+        //      at all, so it's never eligible for this rule either — see
+        //      rules 3/4 for what still catches a malicious LAN jekt.
+        //   1b. WAN delivery, sender verified via reagent's pinned Ed25519
+        //      key (`reagent_verified == Some(true)`) → NOT forced to
+        //      SENSITIVE by delivery tier alone. As of the 2026-08-15
+        //      narrowing this is NOT a distinct check anymore — it's simply
+        //      rule 1 not matching (`Some(true)` isn't `Some(false)`), so a
+        //      message verified under the trusted `reagent-v1` key and one
+        //      verified only under the known-exposed `reagent-v1-dev`
+        //      placeholder now get IDENTICAL tier treatment: neither is
+        //      forced sensitive. `is_reagent_trusted_signing_key`
+        //      (agentmux-common::jekt_sign) is NOT consulted here at all —
+        //      unlike before this narrowing, key trust no longer gates
+        //      TIER in any way; it still exists for other verification
+        //      bookkeeping, just not this decision. Rules 3/4 below still
+        //      apply on top: a verified reagent message that declares
+        //      SENSITIVE or matches the keyword scan still escalates.
         //   2. Host delivery, sender identity checkable but signature missing
         //      or wrong → always SENSITIVE (host-tier senders can now be
         //      verified when the claimed source_agent has a signing key —
         //      see `sig_verified`'s doc comment on `InjectionRequest` for
-        //      exactly when this applies vs. is skipped).
-        //   3. Host delivery + declared SENSITIVE → SENSITIVE.
-        //   4. Host delivery + keyword match → SENSITIVE.
-        //   5. Otherwise → use declared tier (default: coord).
+        //      exactly when this applies vs. is skipped). Same "an active
+        //      verification FAILURE is the red flag, not mere absence of
+        //      one" logic as rule 1 — this rule was already scoped that way.
+        //   3. Declared SENSITIVE (any tier) → SENSITIVE.
+        //   4. Keyword match (any tier) → SENSITIVE.
+        //   5. Otherwise → use declared tier (default: coord). This is now
+        //      reachable by ordinary unverified LAN/WAN traffic with clean
+        //      content — `TRUST` in the marker is UNCHANGED by this
+        //      narrowing (still reads `network-claimed`, still exactly as
+        //      forgeable as ever); only whether that lack of proof alone
+        //      is sufficient grounds to interrupt the human has changed.
         let declared_tier = req.jekt_tier.as_ref();
         let delivery_tier = req.delivery_tier.as_deref().unwrap_or("host");
         let is_network_tier = delivery_tier == "wan" || delivery_tier == "lan";
+        // A reagent_sig that was PRESENT but didn't verify — someone tried to
+        // forge it. Only WAN ever carries a signature attempt at all
+        // (`sync_agent_reactive`/`verify_reagent_signature` never compute
+        // `reagent_verified` off the WAN tier, so it's always `None` for
+        // LAN), so this is the narrowed rule 1's only trigger — absence of a
+        // signature attempt (`None`), or a signature that verified but only
+        // under the known-exposed dev key, is NOT this case; both fall
+        // through to rule 5 like any other self-declared sender.
+        let is_network_tier_sig_invalid = is_network_tier && req.reagent_verified == Some(false);
         let is_unverified_sender = req.sig_verified == Some(false);
-        let is_sensitive = is_network_tier
+        let is_sensitive = is_network_tier_sig_invalid
             || is_unverified_sender
             || matches!(declared_tier, Some(super::types::JektTier::Sensitive))
             || is_sensitive_message(&sanitized);

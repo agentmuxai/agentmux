@@ -16,6 +16,7 @@
  */
 
 import { atoms, getApi, isDev, openFloatingPaneEntriesAtom, openWindowEntriesAtom, type FloatingPaneEntry, type WindowEntry } from "@/store/global";
+import { useMuxBusStatus } from "@/app/view/accounts/AgentMuxConnectPanel";
 import { MaintenanceSection } from "./MaintenanceSection";
 import { reconcileKnownEntriesFromSnapshot } from "@/app/store/launcher-event-reducer";
 import { launcherEventsActive } from "@/util/launcher-events";
@@ -79,6 +80,18 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
     const floatingEntries = openFloatingPaneEntriesAtom;
     const [myLabel, setMyLabel] = createSignal<string | null>(null);
     getApi().getWindowLabel().then((l) => setMyLabel(l)).catch(() => setMyLabel(null));
+
+    // MuxBus connection status — refreshed on open (mirrors HostPopover's
+    // own `void muxbus.refresh()` on-open pattern). A missing/expired
+    // session fails WAN jekt delivery completely silently otherwise (no
+    // error, nothing — see this row's CSS comment for the incident that
+    // motivated surfacing it here).
+    const muxbus = useMuxBusStatus();
+    void muxbus.refresh();
+    const muxbusOk = () => {
+        const s = muxbus.status();
+        return !!s && s.connected && s.valid;
+    };
 
     // Refresh window-instance state ONLY when the launcher is silent
     // (`task dev` mode — no launcher process, no typed events). In
@@ -466,6 +479,20 @@ export const InstancePanel = (props: InstancePanelProps): JSX.Element => {
                         <span class="instance-panel-label">Runtime</span>
                         <span class="instance-panel-value instance-panel-mono">
                             {[about().platform, about().arch].filter(Boolean).join(" · ")}
+                        </span>
+                    </div>
+                </Show>
+                <Show when={muxbus.status() !== null && !muxbusOk()}>
+                    <div class="instance-panel-row instance-panel-row-meta">
+                        <span class="instance-panel-label">MuxBus</span>
+                        <span class="instance-panel-value">
+                            <span class="instance-panel-muxbus-icon">◈</span>
+                            <span
+                                class="instance-panel-muxbus-pill"
+                                title="This instance has no valid MuxBus session — cloud/WAN jekt delivery will not work until you sign in again."
+                            >
+                                Not connected
+                            </span>
                         </span>
                     </div>
                 </Show>

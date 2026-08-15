@@ -366,6 +366,12 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 denied: props.node.status === "denied",
             })}
             data-tool={props.node.tool.toLowerCase()}
+            // Raw provider tool name, distinct from `data-tool` above: `tool` is normalized to
+            // a coarse closed set (unrecognized names, e.g. "AskUserQuestion", collapse to
+            // "other" — see normalizeToolName in stream-parser.ts), which loses exactly the
+            // names CSS needs to target one specific open-ended tool without touching the
+            // shared "other" styling every other unrecognized tool also falls back to.
+            data-tool-name={props.node.toolName?.toLowerCase()}
             onMouseEnter={() => { if (props.pinned || autoExpanded()) setUserHolding(true); }}
             onMouseLeave={() => setUserHolding(false)}
         >

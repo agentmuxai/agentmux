@@ -27,7 +27,7 @@ import * as WOS from "@/app/store/wos";
 import { recordTurn } from "@/store/token-usage";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
-import type { TurnPhase } from "@/app/store/agent-pane-state/types";
+import { SUBMIT_TIMEOUT_MS, type TurnPhase } from "@/app/store/agent-pane-state/types";
 import type { SignalPair } from "../state";
 import type { DocumentNode, SessionStats } from "../types";
 import type { StreamFlushQueue } from "../stream-flush-queue";
@@ -226,6 +226,110 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
         }
     });
 
+    // Submit-ack fallback timer (issue #728 gap 2 / spec §8's
+    // `SubmitTimeoutElapsed` contract). `TurnStart` puts the phase in
+    // `Submitting` and the reducer emits `schedule-submit-timeout` on
+    // entry, but nothing ever consumed that event to arm a real timer —
+    // PR D (#994, 2026-05-23) shipped the reducer half only and
+    // explicitly deferred "dispatch-side setTimeout in useAgentStream /
+    // model layer" to a follow-up that never landed (confirmed via a
+    // repo-wide grep finding zero consumers outside reducer/types/tests,
+    // 2026-08-14). Without this, a turn whose backend ack is lost
+    // (dropped RPC, network blip, crash before first output) left the
+    // pane in `Submitting` — and therefore "Working…" — forever, with
+    // no recovery path at all. Mirrors `stopFallbackTimer` above exactly
+    // (reactive effect on `turnPhase.kind`, not an event-listener on
+    // `schedule-submit-timeout`, which sidesteps needing a second wiring
+    // mechanism entirely) but dispatches the reducer's own
+    // `SubmitTimeoutElapsed` command instead of calling `finalizeTurn`
+    // directly, so the transition goes through the documented,
+    // already-tested `Submitting → Done.errored` contract (reducer.ts's
+    // `SubmitTimeoutElapsed` arm no-ops if the phase already moved off
+    // Submitting by the time this fires — safe by construction, same
+    // guard `stopFallbackTimer` relies on). See
+    // docs/reports/REPORT_AGENTA_STUCK_WORKING_INVESTIGATION_2026_08_14.md §7.
+    //
+    // Deliberately scoped to "did the backend ever acknowledge receiving
+    // this message" — NOT "did the model produce its first token" (codex
+    // P1 on PR #2575): `usePendingMessageAcceptance.ts` intentionally
+    // leaves an idle send in `Submitting` after `AgentMessageAccepted`
+    // arrives (its own comment: re-dispatching TurnStart there would
+    // regress Streaming → Submitting and re-arm this exact timer
+    // unnecessarily), and a backend-accepted turn can legitimately take
+    // well over 30s to produce its first token (large context, a long
+    // agentic tool chain) — that window is already independently bounded
+    // server-side by `HealthMonitor`'s own Stalled(30s)/Dead(120s)
+    // silence detection once the backend marks the turn active, which
+    // surfaces as a real `AgentFailure` → `FailureObserved` → this same
+    // `Done.errored` transition through an already-tested, unrelated
+    // path. A blind 30s bound here would misfire on exactly that healthy
+    // case — and since neither `StreamFlushObserved` nor `bumpEvent`
+    // re-promote an `errored` `Done` phase, the eventual real response
+    // would arrive with the lifecycle stuck errored and the UI free to
+    // start an overlapping second turn. `acceptedUnsub` below clears the
+    // timer the instant the backend proves it's alive for this pane,
+    // narrowing this timeout to only the "message never reached the
+    // backend at all" case it exists to catch.
+    //
+    // reagentx P1 (round 2): a per-hook-lifetime `AgentMessageAccepted`
+    // listener (the original shape of this fix) carries no correlation to
+    // WHICH `Submitting` episode it's really for — a stale/late accepted
+    // event for an EARLIER message, delivered after that episode already
+    // timed out and a NEWER, still-genuinely-unacknowledged `TurnStart`
+    // began (e.g. the backend's own retried WPS push, or a reconnect
+    // backlog replay, landing well after the client already gave up and
+    // the user retried), would incorrectly disarm the NEWER episode's
+    // timer — silently reintroducing the exact stuck-Submitting bug this
+    // fix exists to close. `usePendingMessageAcceptance.ts` guards this by
+    // matching the event's `message_id` against its own pending-queue
+    // entry; that queue isn't available here, and `Submitting` carries no
+    // message_id to match against directly (a comparable timestamp-based
+    // guard was tried and rejected — it only tracks "whatever the latest
+    // armed episode is," which a stale event for ANY prior episode would
+    // still match against once a new one has armed, not an actual fix).
+    // Scoping BOTH the timer handle and the subscription to a fresh local
+    // closure per episode — armed inside the effect body, torn down via
+    // SolidJS's per-run `onCleanup` the instant the phase changes — is
+    // structurally correct instead: once episode A's run of this effect is
+    // cleaned up (the phase changed away from Submitting), A's listener is
+    // unsubscribed and A's timer handle is cleared, so a stale event for A
+    // literally has nothing left to disarm by the time episode B's own
+    // fresh timer/listener pair is live. Deliberately a per-run LOCAL
+    // variable, not one shared across the whole hook — if `waveEventSubscribe`
+    // ever delivered to an already-unsubscribed handler (a transport-level
+    // race this hook has no control over), that stale handler's closure
+    // would still only ever see episode A's own (already cleared or
+    // already-fired) timer handle, never episode B's, so it cannot affect a
+    // different episode's timer even in that adversarial case. No timestamp
+    // comparison, no message_id needed.
+    createEffect(() => {
+        const phase = getTurnPhase();
+        if (phase.kind !== "Submitting") return;
+        let timer: number | null = window.setTimeout(() => {
+            timer = null;
+            if (getTurnPhase().kind === "Submitting") {
+                opts.model.dispatchPane({ type: "SubmitTimeoutElapsed", at: Date.now() });
+            }
+        }, SUBMIT_TIMEOUT_MS);
+        const acceptedUnsub = waveEventSubscribe({
+            eventType: WpsEvent.AgentMessageAccepted,
+            scope: WOS.makeORef("block", opts.blockId),
+            handler: () => {
+                if (timer != null) {
+                    clearTimeout(timer);
+                    timer = null;
+                }
+            },
+        });
+        onCleanup(() => {
+            acceptedUnsub();
+            if (timer != null) {
+                clearTimeout(timer);
+                timer = null;
+            }
+        });
+    });
+
     // Stuck-stream watchdog (issue #728 gap 3). The reducer evaluates
     // each tick against `lastEventMs` and emits a `stream-stuck`
     // event when the gap exceeds `STUCK_THRESHOLD_MS`. The interval
@@ -237,6 +341,37 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
         });
     }, WATCHDOG_INTERVAL_MS);
     onCleanup(() => clearInterval(watchdogId));
+
+    // Visibility catch-up tick — belt-and-suspenders for the interval
+    // above. A confirmed live incident
+    // (docs/reports/REPORT_AGENTA_STUCK_WORKING_INVESTIGATION_2026_08_14.md
+    // §3-4) found a pane stuck `Streaming`/`toolsActive:0` for 29+
+    // minutes after a stray/late `StreamFlushObserved` re-promotion —
+    // the exact shape `StreamWatchdogTick`'s 180s unconditional recovery
+    // exists to catch — with zero evidence the interval above ever
+    // ticked during that window (component-unmount and a reducer-logic
+    // bug were both ruled out; the leading remaining explanation is
+    // renderer/window-level timer throttling for a backgrounded pane in
+    // this app's multi-window CEF architecture, not fully confirmed).
+    // `document.visibilitychange` fires reliably even for throttled
+    // content — it's the signal browsers use to drive that throttling
+    // in the first place — so firing one extra tick the instant
+    // visibility returns recovers a stuck pane the moment a human next
+    // looks at the app, without waiting on the interval to resume.
+    // Safe/cheap: `StreamWatchdogTick`'s recovery math is already
+    // wall-clock-based (`nowMs - lastEventMs`), not tick-counted, so an
+    // extra or redundant tick is a same-reference no-op for every pane
+    // that isn't actually stuck.
+    const onVisibilityChange = () => {
+        if (document.visibilityState === "visible") {
+            opts.model.dispatchPane({
+                type: "StreamWatchdogTick",
+                nowMs: Date.now(),
+            });
+        }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    onCleanup(() => document.removeEventListener("visibilitychange", onVisibilityChange));
 
     return { finalizeTurn };
 }

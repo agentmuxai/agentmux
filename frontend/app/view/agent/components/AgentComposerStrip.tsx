@@ -3,15 +3,22 @@
 
 /**
  * AgentComposerStrip — status row that sits directly above the textarea in
- * the agent pane composer region. Below the widest tier: left-justified,
- * wrapping onto additional lines (no hard cap — see _composer-strip.scss's
- * file header) rather than clipping when the pane narrows — see
- * docs/specs/SPEC_COMPOSER_STRIP_LEFT_JUSTIFIED_TIERED_WRAP_2026_08_03.md.
- * At the widest tier (≥482px, live-measured — the real 1-line/2-line wrap
- * point, not an estimate): controls left / stats zone true-centered / right
- * zone right — restored the same day after the left-justify-always behavior
- * above silently dropped the centered stats presentation as a side effect
- * (the narrow-tier wrap/no-clip fix itself is unchanged either way).
+ * the agent pane composer region. Deliberate tiered split points (not
+ * organic flex-wrap reflow), always edge-split — same left/center/right
+ * visual language as the widest tier, extended to fewer zones per line as
+ * the pane narrows, never a centered blob — see
+ * docs/specs/SPEC_COMPOSER_STRIP_CENTERED_SMART_SPLIT_2026_08_14.md
+ * (supersedes SPEC_COMPOSER_STRIP_LEFT_JUSTIFIED_TIERED_WRAP_2026_08_03.md's
+ * "always left-justify below the widest tier" design, reverted per direct
+ * user feedback; an intermediate "center everything as one group" revision
+ * was itself corrected same day per further feedback). <280px: controls /
+ * stats / right, each its own line, each keeping its identity (left /
+ * center / right) exactly as it would sit at the widest tier, just
+ * stacked. 280-481px: [controls left | stats right] on line 1, right
+ * alone (right-anchored) on line 2. >=482px (live-measured — the real
+ * 1-line/2-line wrap point, not an estimate): controls left / stats zone
+ * true-centered / right right — see _composer-strip.scss for the actual
+ * container queries.
  *
  * In flow order:
  *   1. AgentRuntimeDropup (single Mode · Model · Effort trigger)
@@ -211,15 +218,16 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 </Show>
             </span>
 
-            {/* Stats zone — token/elapsed stats. Below the widest tier:
-                left-justified in flow, sitting right after the controls
-                zone or wrapping onto its own line when there isn't room for
-                both. At the widest tier: true-centered between the controls
-                and right zones (see _composer-strip.scss). The wrapper span
-                always renders (even with no stats yet) so this zone's
-                presence in the flow order — and therefore where the right
-                zone wraps to — stays stable whether or not stats are
-                populated yet. */}
+            {/* Stats zone — token/elapsed stats. Always centered (this
+                zone's identity at every tier, matching its widest-tier
+                true-centered position) — forced alone onto its own line
+                below 280px, rejoins the controls line (pinned to its right
+                edge) at 280-481px, true-centered between the controls and
+                right zones at the widest tier (see _composer-strip.scss).
+                The wrapper span always renders (even with no stats yet) so
+                this zone's presence in the flow order — and therefore
+                where the right zone wraps to — stays stable whether or not
+                stats are populated yet. */}
             <span class="agent-composer-strip-stats-zone">
                 <Show when={rightText()}>
                     <span
@@ -233,10 +241,12 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
 
             {/* Right zone — process badge + context text + auth tag + the
                 HOST/SANDBOX tag paired with the Shell toggle (see
-                .agent-composer-strip-host-shell below), in that order. That
-                pair still lands rightmost on a wide pane (last in a
-                left-filling line); on a wrapped line it starts at that
-                line's left margin like everything else. */}
+                .agent-composer-strip-host-shell below), in that order.
+                Always right-anchored (this zone's identity at every tier,
+                matching its widest-tier `justify-content: flex-end` pin) —
+                forced alone onto its own full-width line below 482px, its
+                own flex-basis-0 half of the row at the widest tier (see
+                _composer-strip.scss). */}
             <span class="agent-composer-strip-right">
                 <Show when={(props.processCount ?? 0) > 0}>
                     <button
