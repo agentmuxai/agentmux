@@ -395,16 +395,20 @@ impl Handler {
         //      at all, so it's never eligible for this rule either — see
         //      rules 3/4 for what still catches a malicious LAN jekt.
         //   1b. WAN delivery, sender verified via reagent's pinned Ed25519
-        //      key (`reagent_verified == Some(true)` AND the key id is the
-        //      trusted production one) → NOT forced to SENSITIVE by delivery
-        //      tier alone. Mirrors how host-tier's TRUST=host-verified
-        //      already doesn't force it — a cryptographically proven
-        //      identity is a cryptographically proven identity regardless of
-        //      which tier carried it. Rules 3/4 below still apply on top of
-        //      this: a verified reagent message that declares SENSITIVE or
-        //      matches the keyword scan still escalates — verification
-        //      answers "who is this really from," not "should this
-        //      auto-execute."
+        //      key (`reagent_verified == Some(true)`) → NOT forced to
+        //      SENSITIVE by delivery tier alone. As of the 2026-08-15
+        //      narrowing this is NOT a distinct check anymore — it's simply
+        //      rule 1 not matching (`Some(true)` isn't `Some(false)`), so a
+        //      message verified under the trusted `reagent-v1` key and one
+        //      verified only under the known-exposed `reagent-v1-dev`
+        //      placeholder now get IDENTICAL tier treatment: neither is
+        //      forced sensitive. `is_reagent_trusted_signing_key`
+        //      (agentmux-common::jekt_sign) is NOT consulted here at all —
+        //      unlike before this narrowing, key trust no longer gates
+        //      TIER in any way; it still exists for other verification
+        //      bookkeeping, just not this decision. Rules 3/4 below still
+        //      apply on top: a verified reagent message that declares
+        //      SENSITIVE or matches the keyword scan still escalates.
         //   2. Host delivery, sender identity checkable but signature missing
         //      or wrong → always SENSITIVE (host-tier senders can now be
         //      verified when the claimed source_agent has a signing key —

@@ -528,14 +528,14 @@ unsigned.
 distinct pinned keys can produce it — the real production key AND a
 placeholder key (`reagent-v1-dev`) whose private half is documented as
 exposed since the moment it was generated, kept registered only so
-already-in-flight dev-signed messages still verify. The server-side code
-already accounts for this (`is_reagent_trusted_signing_key` gates tier
-relaxation on the specific key id, not just "some registered key verified")
-— so by the time you see the marker, `TIER` has already been computed
-correctly and this distinction is not something you need to re-check
-yourself. It's noted here only so this rule stays accurate relative to the
-implementation; don't take `SIG=verified` alone (independent of `TIER`) as
-proof of trust-worthiness in any other context. See
+already-in-flight dev-signed messages still verify. **As of the 2026-08-15
+narrowing, this distinction no longer affects `TIER` at all** —
+`is_reagent_trusted_signing_key` is not consulted by the tier-escalation
+gate anymore; a message verified under either key gets identical treatment
+(not forced sensitive, same declared-tier fallthrough as any other
+non-red-flag sender). It's noted here only so `SIG=verified` isn't
+mistaken for a blanket proof of trustworthiness in some OTHER context —
+don't take it alone as more than what `TIER` already reflects. See
 `SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14.md` for the full rationale
 and why this is scoped to reagent specifically, not WAN traffic in general.
 

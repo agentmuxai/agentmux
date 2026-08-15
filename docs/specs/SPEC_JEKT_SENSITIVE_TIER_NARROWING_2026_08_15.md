@@ -86,12 +86,21 @@ let is_sensitive = is_network_tier_sig_invalid
     || is_sensitive_message(&sanitized);
 ```
 
-`is_verified_network_sender` (the trusted-key check backing the
-`SIG=verified` relaxation) is unaffected and still gates whether `TIER` is
-allowed to read `coord`/`info` for `SIG=verified` reagent traffic vs. falling
-back to declared tier — this change only removes the *unconditional* forcing
-for the untrusted/unsigned cases, it doesn't grant them anything the
-`SIG=verified` path already has.
+`is_verified_network_sender` (the trusted-key check that used to distinguish
+`reagent-v1`-verified from `reagent-v1-dev`-verified for tier purposes) is
+**removed entirely**, not merely unaffected — after this change,
+`is_reagent_trusted_signing_key` is no longer consulted anywhere in the tier
+decision. A WAN jekt verified under the trusted production key and one
+verified only under the known-exposed dev key now receive **identical**
+tier treatment: neither is forced sensitive by trust alone (`Some(true)` is
+never `Some(false)`), and neither is granted anything beyond the same
+declared-tier fallthrough every other non-red-flag sender already gets.
+This is intentional, not an oversight: once "merely lacking proof" stops
+being forced-sensitive on its own (§3), the trusted/untrusted-key
+distinction has nothing left to gate for `TIER` specifically — it still
+matters for what the marker's `SIG=` label says, and remains available for
+any future feature that wants to lean on proven identity for something
+other than this escalation decision.
 
 ## 5. Test changes
 
