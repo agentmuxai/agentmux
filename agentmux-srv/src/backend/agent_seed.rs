@@ -198,8 +198,8 @@ pub fn seed_agents(wstore: &Arc<Store>) -> Result<SeedReport, StoreError> {
             use_ambient_login: 0,
             model_vendor_base_url: String::new(), // manifest doesn't declare this yet
             auto_continue_enabled: 0,
-        
-            memory_id: String::new(),};
+            memory_id: String::new(),
+        };
         wstore.agent_def_insert(&mut agent)?;
 
         // Insert content blobs
@@ -448,8 +448,8 @@ fn reseed_if_needed(
             use_ambient_login: 0,
             model_vendor_base_url: String::new(), // manifest doesn't declare this yet
             auto_continue_enabled: 0,
-        
-            memory_id: String::new(),};
+            memory_id: String::new(),
+        };
 
         if let Some(existing_agent) = existing_map.get(agent_def.id.as_str()) {
             // Preserve user-modified runtime config — only update identity
@@ -559,8 +559,8 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
-        
-            memory_id: String::new(),};
+            memory_id: String::new(),
+        };
         wstore.agent_def_insert(&mut def).unwrap();
     }
 

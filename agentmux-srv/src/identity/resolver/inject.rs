@@ -677,8 +677,8 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
-        
-            memory_id: String::new(),};
+            memory_id: String::new(),
+        };
         store.agent_def_insert(&mut def).unwrap();
 
         let claude = make_account(
@@ -753,8 +753,8 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
-        
-            memory_id: String::new(),};
+            memory_id: String::new(),
+        };
         store.agent_def_insert(&mut def).unwrap();
 
         let bad = make_account(
@@ -830,8 +830,8 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
-        
-            memory_id: String::new(),};
+            memory_id: String::new(),
+        };
         store.agent_def_insert(&mut def).unwrap();
 
         let claude = make_account(
@@ -1141,8 +1141,8 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
-        
-            memory_id: String::new(),};
+            memory_id: String::new(),
+        };
         store.agent_def_insert(&mut def).unwrap();
 
         // GitHub account (PlaintextDev for test simplicity).
@@ -1227,8 +1227,8 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
-        
-            memory_id: String::new(),};
+            memory_id: String::new(),
+        };
         store.agent_def_insert(&mut def).unwrap();
 
         let github = make_account(
@@ -1295,8 +1295,8 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
-        
-            memory_id: String::new(),};
+            memory_id: String::new(),
+        };
         store.agent_def_insert(&mut def).unwrap();
 
         let github = make_account(
@@ -1361,8 +1361,8 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
-        
-            memory_id: String::new(),};
+            memory_id: String::new(),
+        };
         store.agent_def_insert(&mut def).unwrap();
 
         let github = make_account(
@@ -1437,8 +1437,8 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
-        
-            memory_id: String::new(),};
+            memory_id: String::new(),
+        };
         store.agent_def_insert(&mut def).unwrap();
 
         // Working account.
@@ -1517,8 +1517,8 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
-        
-            memory_id: String::new(),};
+            memory_id: String::new(),
+        };
         store.agent_def_insert(&mut def).unwrap();
 
         let custom = make_account(
@@ -1609,8 +1609,8 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
-        
-            memory_id: String::new(),};
+            memory_id: String::new(),
+        };
         store.agent_def_insert(&mut def).unwrap();
 
         // Bundle dir intentionally empty — probe should report
@@ -1695,8 +1695,8 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
-        
-            memory_id: String::new(),};
+            memory_id: String::new(),
+        };
         store.agent_def_insert(&mut def).unwrap();
 
         let tmp = tempfile::tempdir().unwrap();
@@ -1773,8 +1773,8 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
-        
-            memory_id: String::new(),};
+            memory_id: String::new(),
+        };
         store.agent_def_insert(&mut def).unwrap();
 
         let tmp = tempfile::tempdir().unwrap();

@@ -134,8 +134,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // use_ambient_login above. Toggled from the Warden
                     // Supervisor panel (not this RPC) once that ships.
                     auto_continue_enabled: 0,
-                
-                    memory_id: String::new(),};
+                    memory_id: String::new(),
+                };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("createagent: {e}"))?;
                 // Every agent gets its own dedicated ABF bundle
                 // (ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.2).
@@ -457,8 +457,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     use_ambient_login: 0,
                     model_vendor_base_url: String::new(),
                     auto_continue_enabled: 0,
-                
-                    memory_id: String::new(),};
+                    memory_id: String::new(),
+                };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("importagentfromclaw: {e}"))?;
                 wstore.agent_def_provision_and_bind_bundle(&mut agent, now);
 
@@ -597,8 +597,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         use_ambient_login: 0,
                         model_vendor_base_url: String::new(),
                         auto_continue_enabled: 0,
-                    
-                        memory_id: String::new(),};
+                        memory_id: String::new(),
+                    };
 
                     if let Err(e) = wstore.agent_def_insert(&mut agent) {
                         failed.push(format!("{}: {e}", agent_import.name));
