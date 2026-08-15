@@ -179,6 +179,12 @@ export class MemoryViewModel implements ViewModel {
     }
 
     blockAtom: Accessor<Block | undefined>;
+    /** The specific agent this memory pane belongs to, if any
+     *  (`meta.agentId`, same field `IdentityPaneViewModel.agentId` /
+     *  `AgentViewModel` read) — closes the DATA GAP documented in
+     *  `bundle-summary.tsx`'s module comment. `undefined` when this block
+     *  was opened without agent context. */
+    agentId: Accessor<string | undefined>;
 
     private _memories = createSignal<Memory[]>([]);
     memoriesAtom: Accessor<Memory[]> = this._memories[0];
@@ -231,6 +237,10 @@ export class MemoryViewModel implements ViewModel {
         this.viewName = createMemo(() => {
             const block = this.blockAtom();
             return (block?.meta?.["frame:title"] as string) ?? "ABF";
+        });
+        this.agentId = createMemo(() => {
+            const block = this.blockAtom();
+            return block?.meta?.["agentId"] as string | undefined;
         });
         this.selectedAtom = createMemo(() => {
             const id = this.selectedIdAtom();
