@@ -181,6 +181,12 @@ async fn run_pkce_login_inner(
                         Some(c) => return Ok(c.to_string()),
                         None => return Err("relay returned ready without a code".to_string()),
                     },
+                    // Cognito denial forwarded by the hosted page — fail fast
+                    // rather than polling out the rest of the 5 minutes.
+                    Some("failed") => {
+                        let err = body["error"].as_str().unwrap_or("unknown");
+                        return Err(format!("Cognito returned error: {err}"));
+                    }
                     // "pending" or anything unrecognized — keep polling until
                     // the overall timeout says otherwise.
                     _ => continue,
