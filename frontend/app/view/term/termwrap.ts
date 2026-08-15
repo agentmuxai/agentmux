@@ -762,7 +762,7 @@ export class TermWrap {
 
     /**
      * `override`, when given, tells the backend PTY a size WITHOUT touching this
-     * terminal's own rendered grid — used by the PSReadLine thaw below to deliver a
+     * terminal's own rendered grid — used by the PSReadLine thaw above to deliver a
      * synthetic SIGWINCH pair with no visible resize (SPEC_AGENT_SHELL_PSREADLINE_THAW_VISIBLE_RESIZE_2026-08-14.md).
      * Every other call site omits it and keeps sending the terminal's actual current size.
      */
