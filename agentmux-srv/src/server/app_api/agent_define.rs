@@ -129,17 +129,19 @@ pub(super) fn persist_define_content(
 
 fn register_agent_define(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let id_store = state.id_store.clone();
     let broker = state.broker.clone();
 
     engine.register_handler(
         COMMAND_AGENT_DEFINE,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
+            let id_store = id_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 let cmd: CommandAgentDefineData = serde_json::from_value(data)
                     .map_err(|e| format!("agent.define: {e}"))?;
-                agent_define_core(wstore, broker, cmd).await
+                agent_define_core(wstore, id_store, broker, cmd).await
                     .map(|r| Some(serde_json::to_value(&r).unwrap()))
             })
         }),
@@ -198,7 +200,7 @@ mod agent_define_core_vendor_tests {
     async fn omitting_the_field_on_update_does_not_clear_a_previously_set_override() {
         let state = test_state();
 
-        let created = agent_define_core(state.wstore.clone(), state.broker.clone(), cmd(json!({
+        let created = agent_define_core(state.wstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(json!({
             "name": "vendor-test-agent",
             "provider": "claude",
             "model_vendor_base_url": "https://my-proxy.example.com",
@@ -207,7 +209,7 @@ mod agent_define_core_vendor_tests {
         assert_eq!(def.model_vendor_base_url, "https://my-proxy.example.com");
 
         // Update that touches an unrelated field and omits model_vendor_base_url.
-        agent_define_core(state.wstore.clone(), state.broker.clone(), cmd(json!({
+        agent_define_core(state.wstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(json!({
             "name": "vendor-test-agent",
             "if_exists": "update",
             "description": "just touching something else",
@@ -223,13 +225,13 @@ mod agent_define_core_vendor_tests {
     async fn explicit_empty_string_clears_a_previously_set_override() {
         let state = test_state();
 
-        let created = agent_define_core(state.wstore.clone(), state.broker.clone(), cmd(json!({
+        let created = agent_define_core(state.wstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(json!({
             "name": "vendor-clear-test",
             "provider": "claude",
             "model_vendor_base_url": "https://my-proxy.example.com",
         }))).await.unwrap();
 
-        agent_define_core(state.wstore.clone(), state.broker.clone(), cmd(json!({
+        agent_define_core(state.wstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(json!({
             "name": "vendor-clear-test",
             "if_exists": "update",
             "model_vendor_base_url": "",
@@ -242,7 +244,7 @@ mod agent_define_core_vendor_tests {
     async fn a_stale_override_left_by_a_provider_change_is_recoverable_not_a_permanent_block() {
         let state = test_state();
 
-        let created = agent_define_core(state.wstore.clone(), state.broker.clone(), cmd(json!({
+        let created = agent_define_core(state.wstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(json!({
             "name": "vendor-poison-test",
             "provider": "claude",
             "model_vendor_base_url": "https://my-proxy.example.com",
@@ -250,7 +252,7 @@ mod agent_define_core_vendor_tests {
 
         // Changing provider to one that doesn't support the override, without
         // clearing it, must fail validation rather than silently succeeding.
-        let err = agent_define_core(state.wstore.clone(), state.broker.clone(), cmd(json!({
+        let err = agent_define_core(state.wstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(json!({
             "name": "vendor-poison-test",
             "if_exists": "update",
             "provider": "codex",
@@ -259,7 +261,7 @@ mod agent_define_core_vendor_tests {
 
         // The agent must not be permanently stuck: clearing the override in
         // the SAME call that changes provider must succeed.
-        agent_define_core(state.wstore.clone(), state.broker.clone(), cmd(json!({
+        agent_define_core(state.wstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(json!({
             "name": "vendor-poison-test",
             "if_exists": "update",
             "provider": "codex",
@@ -268,5 +270,63 @@ mod agent_define_core_vendor_tests {
         let def = state.wstore.agent_def_get(&created.definition_id).unwrap().unwrap();
         assert_eq!(def.provider, "codex");
         assert_eq!(def.model_vendor_base_url, "");
+    }
+}
+
+// Mandatory ABF (ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.2):
+// a fresh `agent.define` call provisions its own dedicated bundle.
+#[cfg(test)]
+mod agent_define_core_bundle_provisioning_tests {
+    use super::*;
+    use crate::server::tests::test_state;
+
+    fn cmd(value: serde_json::Value) -> CommandAgentDefineData {
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[tokio::test]
+    async fn fresh_insert_provisions_its_own_bundle_from_the_agents_own_provider() {
+        let state = test_state();
+
+        let created = agent_define_core(state.wstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(json!({
+            "name": "define-bundle-test",
+            "provider": "gemini",
+        }))).await.unwrap();
+
+        let def = state.wstore.agent_def_get(&created.definition_id).unwrap().unwrap();
+        assert!(!def.memory_id.is_empty(), "fresh agent.define insert must bind a bundle");
+        let bundle = state.wstore.bundle_memory_get(&def.memory_id).unwrap().unwrap();
+        assert!(!bundle.is_blank);
+        assert_eq!(bundle.provider, "gemini");
+        assert_eq!(bundle.model, "google", "vendor defaults from gemini's supported_vendors[0]");
+    }
+
+    #[tokio::test]
+    async fn skip_of_an_existing_definition_does_not_leak_a_stray_bundle() {
+        let state = test_state();
+
+        let first = agent_define_core(state.wstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(json!({
+            "name": "skip-no-leak-test",
+            "provider": "claude",
+            "if_exists": "skip",
+        }))).await.unwrap();
+        assert_eq!(first.action, "created");
+        let bundles_after_first = state.wstore.bundle_memory_list().unwrap().len();
+
+        // Same name again, if_exists=skip — must resolve to the SAME
+        // definition without creating (and leaking) a second bundle. The
+        // bundle-provision step only runs on agent_define_core's
+        // genuinely-fresh-insert path, not the atomic find-or-insert's
+        // own lookup, precisely so idempotent callers don't leak one
+        // unbound bundle per repeated call.
+        let second = agent_define_core(state.wstore.clone(), state.id_store.clone(), state.broker.clone(), cmd(json!({
+            "name": "skip-no-leak-test",
+            "provider": "claude",
+            "if_exists": "skip",
+        }))).await.unwrap();
+        assert_eq!(second.action, "skipped");
+        assert_eq!(second.definition_id, first.definition_id);
+        let bundles_after_second = state.wstore.bundle_memory_list().unwrap().len();
+        assert_eq!(bundles_after_first, bundles_after_second, "skip path must not leak an extra bundle");
     }
 }

@@ -320,6 +320,7 @@
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut a1).unwrap();
         // "Agent X" → "agent-x"
@@ -389,6 +390,7 @@
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut a1).unwrap();
         assert_eq!(a1.slug, "explicit");
@@ -453,6 +455,7 @@
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         }
     }
 
@@ -2349,6 +2352,7 @@
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
         // db_agents row exists, projected as template.
@@ -2391,6 +2395,7 @@
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut tpl).unwrap();
         // User-cloned def has is_seeded=0 + parent_id pointing at template.
@@ -2439,6 +2444,7 @@
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
         def.name = "New Name".to_string();
@@ -2488,6 +2494,7 @@
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
         def.branch_label = "New Branch".to_string();
@@ -2534,6 +2541,7 @@
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
         assert_eq!(count_agents(&store, "id = 'tpl-del'"), 1);
@@ -2574,6 +2582,7 @@
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut tpl).unwrap();
 
@@ -2662,6 +2671,7 @@
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut tpl).unwrap();
 
@@ -2759,6 +2769,7 @@
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut tpl).unwrap();
         let inst = AgentInstance {
@@ -2818,6 +2829,7 @@
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut tpl).unwrap();
         let inst = AgentInstance {
@@ -2875,6 +2887,7 @@
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut tpl_a).unwrap();
         let mut tpl_b = tpl_a.clone();
@@ -2944,6 +2957,7 @@
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
             };
             store.agent_def_insert(&mut d).unwrap();
         }
@@ -2988,6 +3002,7 @@
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut tpl).unwrap();
         // User-clone DEF of that template (Phase 1 created this).
@@ -3064,6 +3079,7 @@
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut tpl).unwrap();
         let mut clone = AgentDefinition {
