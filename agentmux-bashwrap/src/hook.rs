@@ -84,12 +84,27 @@ pub fn build_response(stdin_payload: &str) -> Value {
     let effective_command =
         tee_redirect_rewrite(command).unwrap_or_else(|| command.to_string());
 
+    // Issue #2491: the CLI's own `run_in_background` declaration is already
+    // present in `tool_input` right alongside `command` — thread it through
+    // so `bash_wrap.rs::effective_idle_timeout` can exempt a declared
+    // long-runner from the idle-kill safety net instead of that signal
+    // being dropped here and rediscovered from scratch at every consuming
+    // layer (the same duplication trap `docs/retro/retro-stuck-background-
+    // dock-timer-2026-08-10.md` already documented for the frontend's own
+    // `isAcceptedBackgroundLaunch` classifier).
+    let declared_background = input
+        .tool_input
+        .get("run_in_background")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
     let b64 = URL_SAFE_NO_PAD.encode(effective_command.as_bytes());
     let wrapped = format!(
-        "{} exec --tool-id={} --b64-cmd={}",
+        "{} exec --tool-id={} --b64-cmd={}{}",
         WRAPPER_BINARY,
         shell_quote(&input.tool_use_id),
-        b64
+        b64,
+        if declared_background { " --declared-background" } else { "" }
     );
 
     json!({
@@ -632,6 +647,50 @@ line' && cat $HOME/.env"#;
             "expected empty b64-cmd argument, got: {}",
             cmd
         );
+    }
+
+    #[test]
+    fn threads_declared_background_flag_when_run_in_background_true() {
+        let payload = json!({
+            "tool_name": "Bash",
+            "tool_use_id": "toolu_bg",
+            "tool_input": { "command": "task dev", "run_in_background": true }
+        })
+        .to_string();
+        let resp = build_response(&payload);
+        let cmd = resp["hookSpecificOutput"]["updatedInput"]["command"]
+            .as_str()
+            .unwrap();
+        assert!(
+            cmd.ends_with(" --declared-background"),
+            "expected the wrapped command to carry --declared-background, got: {cmd}"
+        );
+    }
+
+    #[test]
+    fn omits_declared_background_flag_when_run_in_background_false_or_absent() {
+        let with_false = json!({
+            "tool_name": "Bash",
+            "tool_use_id": "toolu_fg",
+            "tool_input": { "command": "echo hi", "run_in_background": false }
+        })
+        .to_string();
+        let without_field = json!({
+            "tool_name": "Bash",
+            "tool_use_id": "toolu_fg2",
+            "tool_input": { "command": "echo hi" }
+        })
+        .to_string();
+        for payload in [with_false, without_field] {
+            let resp = build_response(&payload);
+            let cmd = resp["hookSpecificOutput"]["updatedInput"]["command"]
+                .as_str()
+                .unwrap();
+            assert!(
+                !cmd.contains("--declared-background"),
+                "expected no --declared-background flag, got: {cmd}"
+            );
+        }
     }
 
     #[test]
