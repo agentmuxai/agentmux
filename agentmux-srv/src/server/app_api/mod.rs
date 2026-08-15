@@ -452,7 +452,8 @@ pub(crate) async fn agent_define_core(
         use_ambient_login: 0,
         model_vendor_base_url: cmd_model_vendor_base_url.clone(),
         auto_continue_enabled: 0,
-    };
+    
+        memory_id: String::new(),};
 
     // Atomic check-then-insert.
     // Returns Some(existing) if a row matched by name/slug already exists;
@@ -1981,7 +1982,8 @@ mod identity_self_accounts_tests {
             use_ambient_login: 0,
             model_vendor_base_url: String::new(),
             auto_continue_enabled: 0,
-        };
+        
+            memory_id: String::new(),};
         state.wstore.agent_def_insert(&mut def).unwrap();
 
         state.wstore.identity_upsert(&sample_account("acct-good", "claude")).unwrap();
@@ -2054,7 +2056,8 @@ mod identity_self_accounts_tests {
             use_ambient_login: 0,
             model_vendor_base_url: String::new(),
             auto_continue_enabled: 0,
-        };
+        
+            memory_id: String::new(),};
         state.wstore.agent_def_insert(&mut def).unwrap();
         state.wstore.identity_upsert(&sample_account("acct-good", "claude")).unwrap();
         state.wstore.agent_identity_link(&def.id, "acct-good", "claude").unwrap();

@@ -345,6 +345,17 @@ declare global {
          * panel.
          */
         auto_continue_enabled?: number;
+        /**
+         * The agent's own dedicated ABF bundle (`Memory.id`). Set once —
+         * readonly after creation, same posture as `slug`/`parent_id`
+         * (`updateagent` preserves it from the existing row rather than
+         * accepting a client-supplied value). Empty string = not yet
+         * provisioned (legacy row predating this field). Distinct from an
+         * `AgentInstance`'s own `memory_id`, which can still point at a
+         * different bundle on purpose for one specific launch. Schema v19 —
+         * see ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.1.
+         */
+        memory_id?: string;
     };
 
     // ── v6: identity, instance, junction ────────────────────────────────────

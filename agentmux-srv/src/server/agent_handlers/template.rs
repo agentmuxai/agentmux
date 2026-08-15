@@ -161,7 +161,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     use_ambient_login: 0,
                     model_vendor_base_url: chosen_model_vendor_base_url,
                     auto_continue_enabled: 0,
-                };
+                
+                    memory_id: String::new(),};
                 wstore
                     .agent_def_insert(&mut new_def)
                     .map_err(|e| format!("agentdefcreatefromtemplate: insert: {e}"))?;
@@ -371,7 +372,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     use_ambient_login: 0,
                     model_vendor_base_url: source.model_vendor_base_url.clone(),
                     auto_continue_enabled: 0,
-                };
+                
+                    memory_id: String::new(),};
                 wstore
                     .agent_def_insert(&mut fork)
                     .map_err(|e| format!("forkagentdefinition: {e}"))?;

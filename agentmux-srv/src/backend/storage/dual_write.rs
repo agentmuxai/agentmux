@@ -633,7 +633,7 @@ impl Store {
                     agent_type, environment, agent_bus_id, is_seeded,
                     accounts, parent_id, branch_label, updated_at,
                     user_hidden, container_image, container_volumes, container_name,
-                    use_ambient_login, model_vendor_base_url, auto_continue_enabled
+                    use_ambient_login, model_vendor_base_url, auto_continue_enabled, memory_id
              FROM db_agent_definitions WHERE id = ?1",
         )?;
         let result = stmt.query_row(params![id], |row| {
@@ -666,6 +666,7 @@ impl Store {
                 use_ambient_login: row.get(25)?,
                 model_vendor_base_url: row.get(26)?,
                 auto_continue_enabled: row.get(27)?,
+                memory_id: row.get(28)?,
             })
         });
         match result {

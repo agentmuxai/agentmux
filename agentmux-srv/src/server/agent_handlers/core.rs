@@ -134,7 +134,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // use_ambient_login above. Toggled from the Warden
                     // Supervisor panel (not this RPC) once that ships.
                     auto_continue_enabled: 0,
-                };
+                
+                    memory_id: String::new(),};
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("createagent: {e}"))?;
                 // Assign the agent its display color at creation
                 // (SPEC_AGENT_COLOR_2026_08_08.md). Best-effort: a failure
@@ -248,6 +249,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // accounts). The Warden Supervisor panel sends Some(0|1)
                     // to flip it, same shape as use_ambient_login above.
                     auto_continue_enabled: cmd.auto_continue_enabled.unwrap_or(old.auto_continue_enabled),
+                    // Immutable post-insert, same as slug/parent_id/branch_label
+                    // above — agent_def_update's SET clause doesn't even
+                    // touch this column, but the in-memory struct still
+                    // needs the real value: it's what gets serialized back
+                    // to the frontend as the "updated" agent.
+                    memory_id: old.memory_id.clone(),
                 };
                 let found = wstore.agent_def_update(&mut agent).map_err(|e| format!("updateagent: {e}"))?;
                 if !found {
@@ -446,7 +453,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     use_ambient_login: 0,
                     model_vendor_base_url: String::new(),
                     auto_continue_enabled: 0,
-                };
+                
+                    memory_id: String::new(),};
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("importagentfromclaw: {e}"))?;
 
                 // Read CLAUDE.md → agentmd content
@@ -584,7 +592,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         use_ambient_login: 0,
                         model_vendor_base_url: String::new(),
                         auto_continue_enabled: 0,
-                    };
+                    
+                        memory_id: String::new(),};
 
                     if let Err(e) = wstore.agent_def_insert(&mut agent) {
                         failed.push(format!("{}: {e}", agent_import.name));

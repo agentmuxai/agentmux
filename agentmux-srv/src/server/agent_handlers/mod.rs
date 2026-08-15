@@ -417,7 +417,8 @@ mod recent_sessions_tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
-        };
+        
+            memory_id: String::new(),};
         let mut def_mut = def.clone();
         wstore.agent_def_insert(&mut def_mut).unwrap();
         // Identity display name resolves via the direct agent<->account
@@ -736,7 +737,8 @@ mod recent_sessions_tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
-        };
+        
+            memory_id: String::new(),};
         wstore.agent_def_insert(&mut tpl).unwrap();
 
         let mut user_a = AgentDefinition {
@@ -768,7 +770,8 @@ mod recent_sessions_tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
-        };
+        
+            memory_id: String::new(),};
         wstore.agent_def_insert(&mut user_a).unwrap();
 
         let (engine, rx) = WshRpcEngine::new();
