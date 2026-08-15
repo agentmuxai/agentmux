@@ -58,18 +58,24 @@ pub async fn run_pkce_login(
     client_id: &str,
     http_client: &reqwest::Client,
 ) -> Result<PkceResult, String> {
-    // Abort the predecessor BEFORE spawning, so its port-9379 listener is
-    // (about to be) released; the bind retry loop below absorbs the drop
-    // latency of the aborted task.
-    if let Some(prev) = ACTIVE_LOGIN.lock().unwrap().take() {
-        prev.abort();
-    }
-    let task = tokio::spawn(run_pkce_login_inner(
-        cognito_domain.to_string(),
-        client_id.to_string(),
-        http_client.clone(),
-    ));
-    *ACTIVE_LOGIN.lock().unwrap() = Some(task.abort_handle());
+    // Abort-predecessor and register-successor must be one critical section:
+    // with separate lock acquisitions, two concurrent muxbus.login RPCs can
+    // both take() None and neither aborts the other (reagent P1 on this PR).
+    // tokio::spawn is synchronous and non-blocking, so holding the std mutex
+    // across it is fine — the guard never spans an await.
+    let task = {
+        let mut guard = ACTIVE_LOGIN.lock().unwrap();
+        if let Some(prev) = guard.take() {
+            prev.abort();
+        }
+        let task = tokio::spawn(run_pkce_login_inner(
+            cognito_domain.to_string(),
+            client_id.to_string(),
+            http_client.clone(),
+        ));
+        *guard = Some(task.abort_handle());
+        task
+    };
     match task.await {
         Ok(r) => r,
         Err(e) if e.is_cancelled() => {
