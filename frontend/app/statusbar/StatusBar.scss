@@ -560,43 +560,20 @@
     }
 }
 
-// ── MuxBus disconnected chip (always-visible, red) ──────────────────────────
-// Companion to the Instance Panel pill (#2580): that pill only shows once the
-// panel is opened, which proved too quiet for a state that silently kills
-// WAN jekt delivery. This one sits directly in the status bar.
-.muxbus-status-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 0 6px;
-    height: 100%;
-    font-size: 11px;
-    font-family: inherit;
-    font-weight: 600;
-    color: var(--error-color);
-    background: transparent;
-    border: none;
-    border-radius: 0;
-    cursor: pointer;
-    white-space: nowrap;
-    line-height: 1;
+// ── MuxBus session dot (on the network pill, next to the LAN diamond) ──────
+// Red = no valid MuxBus session (WAN jekt delivery dead — click the pill and
+// sign in from the panel); green = connected. Deliberately quiet: a dot, not
+// a chip — but always visible, unlike the Instance Panel pill (#2580).
+.status-muxbus-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--error-color);
+    margin-left: 4px;
+    flex-shrink: 0;
 
-    &:hover:not(:disabled) {
-        background: color-mix(in srgb, var(--error-color) 12%, transparent);
-    }
-
-    &--busy,
-    &:disabled {
-        opacity: 0.5;
-        cursor: default;
-    }
-
-    .muxbus-status-chip-dot {
-        display: inline-block;
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background: var(--error-color);
-        flex-shrink: 0;
+    &--ok {
+        background: var(--success-color, #4caf50);
     }
 }

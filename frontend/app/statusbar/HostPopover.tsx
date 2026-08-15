@@ -5,7 +5,7 @@ import { getApi, lanInstancesAtom, lanDiscoveryErrorAtom, setLanDiscoveryErrorAt
 import { invokeCommand } from "@/app/platform/ipc";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { useMuxBusStatus } from "@/app/view/accounts/AgentMuxConnectPanel";
 import QRCode from "qrcode";
 
@@ -32,6 +32,20 @@ const HostPopover = (): JSX.Element => {
     const [hostInfo, setHostInfo] = createSignal<HostInfo | null>(null);
     let popoverRef!: HTMLDivElement;
     const muxbus = useMuxBusStatus();
+
+    // Keep the trigger's muxbus dot current without requiring the popover
+    // to ever be opened — a dead session must be visible at a glance (the
+    // popover-only Sign in state let the 0.55.8 rollout sit with WAN jekt
+    // delivery silently dead for hours).
+    onMount(() => {
+        void muxbus.refresh();
+        const timer = window.setInterval(() => void muxbus.refresh(), 60_000);
+        onCleanup(() => window.clearInterval(timer));
+    });
+    const muxbusOk = () => {
+        const s = muxbus.status();
+        return !!s && s.connected && s.valid;
+    };
 
     const lanInstances = lanInstancesAtom;
     const lanCount = () => lanInstances().length;
@@ -139,6 +153,14 @@ const HostPopover = (): JSX.Element => {
                     </span>
                     <Show when={lanCount() > 0}>
                         <span style={{ color: "var(--accent-color)", "margin-left": "4px" }}>{"◆"}</span>
+                    </Show>
+                    <Show when={muxbus.isConfigured() && muxbus.status() !== null}>
+                        <span
+                            class="status-muxbus-dot"
+                            classList={{ "status-muxbus-dot--ok": muxbusOk() }}
+                            data-tip={muxbusOk() ? "MuxBus connected" : "MuxBus not connected — click for details and sign in"}
+                            aria-label={muxbusOk() ? "MuxBus connected" : "MuxBus not connected"}
+                        />
                     </Show>
                 </div>
                 <Show when={popoverOpen()}>
