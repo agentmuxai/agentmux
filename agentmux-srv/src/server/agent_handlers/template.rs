@@ -107,6 +107,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 } else {
                     "local".to_string()
                 };
+                // Template's EFFECTIVE provider — resolved through its own
+                // bound bundle when it has one, not the possibly-drifted
+                // `db_agent_definitions.provider` column directly (#2594,
+                // same "gate vs. actual launch can disagree" risk class
+                // #2592 fixed). Used for both the vendor-base-url
+                // validation below and the clone's own `provider` field so
+                // the two can't disagree with each other.
+                let effective_provider = id_store.resolve_effective_provider_id(template);
                 // Model vendor base URL: `None` (omitted) inherits the
                 // template's own value (the only behavior before this
                 // field existed on this RPC); `Some(url)` overrides it,
@@ -116,7 +124,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // declares `base_url_env_var`.
                 let chosen_model_vendor_base_url = match &cmd.model_vendor_base_url {
                     Some(url) => {
-                        crate::server::app_api::validate_vendor_base_url(&template.provider, url)
+                        crate::server::app_api::validate_vendor_base_url(&effective_provider, url)
                             .map_err(|e| format!("agentdefcreatefromtemplate: {e}"))?;
                         url.clone()
                     }
@@ -129,7 +137,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     slug: String::new(),
                     name: name.clone(),
                     icon: template.icon.clone(),
-                    provider: template.provider.clone(),
+                    provider: effective_provider.clone(),
                     description: template.description.clone(),
                     // Force re-allocation of the per-agent working
                     // directory at first launch via the new slug —
@@ -348,13 +356,18 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     cmd.branch_label.clone()
                 };
                 let branch_slug_part = crate::backend::storage::store::derive_slug(&branch_label);
+                // Source's EFFECTIVE provider — resolved through its own
+                // bound bundle when it has one, not the possibly-drifted
+                // `db_agent_definitions.provider` column directly (#2594,
+                // same pattern as the create-from-template clone site).
+                let effective_provider = id_store.resolve_effective_provider_id(&source);
                 let mut fork = AgentDefinition {
                     id: uuid::Uuid::new_v4().to_string(),
                     // Empty slug → agent_def_insert derives + resolves collisions.
                     slug: format!("{}-{}", source.slug, branch_slug_part),
                     name: fork_name,
                     icon: source.icon.clone(),
-                    provider: source.provider.clone(),
+                    provider: effective_provider,
                     description: source.description.clone(),
                     working_directory: String::new(), // force re-resolve via agentmuxHome()
                     shell: source.shell.clone(),
@@ -529,4 +542,142 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::rpc_types::RpcMessage;
+    use crate::backend::storage::Memory;
+    use crate::server::tests::test_state;
+
+    fn seed_bundle(state: &AppState, id: &str, provider: &str) {
+        let bundle = Memory {
+            id: id.to_string(),
+            name: "Bundle".to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: false,
+            provider: provider.to_string(),
+            model: String::new(),
+            instructions: String::new(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+        };
+        state.id_store.bundle_memory_upsert(&bundle).unwrap();
+    }
+
+    // Template's own `.provider` column says "codex" (drifted/stale —
+    // simulates the same drift class #2592 fixed: some definition-time
+    // write path changed this column after the bundle was already
+    // provisioned/immutable), but its bound bundle's REAL provider is
+    // "claude". A correct clone/fork must carry "claude", not "codex".
+    fn seed_drifted_template(state: &AppState, def_id: &str, bundle_id: &str) {
+        let mut def = AgentDefinition {
+            id: def_id.to_string(),
+            slug: String::new(),
+            name: "Drifted Template".to_string(),
+            icon: String::new(),
+            provider: "codex".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 1,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            memory_id: bundle_id.to_string(),
+        };
+        state.wstore.agent_def_insert(&mut def).unwrap();
+    }
+
+    #[tokio::test]
+    async fn agentdefcreatefromtemplate_resolves_provider_through_the_templates_bundle() {
+        let state = test_state();
+        seed_bundle(&state, "bundle-claude", "claude");
+        seed_drifted_template(&state, "tpl-1", "bundle-claude");
+
+        let (engine, mut output_rx) = WshRpcEngine::new();
+        register(&engine, &state);
+
+        engine.handle_message(RpcMessage {
+            command: COMMAND_AGENT_DEF_CREATE_FROM_TEMPLATE.to_string(),
+            reqid: "req-1".to_string(),
+            data: Some(serde_json::json!({
+                "template_id": "tpl-1",
+                "name": "My Clone",
+            })),
+            ..Default::default()
+        });
+        let resp = tokio::time::timeout(std::time::Duration::from_secs(2), output_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
+        let result: AgentDefCreateFromTemplateResult =
+            serde_json::from_value(resp.data.expect("expected result data")).unwrap();
+
+        let cloned = state
+            .wstore
+            .agent_def_get(&result.definition_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            cloned.provider, "claude",
+            "clone must carry the template's REAL (bundle-resolved) provider, not the drifted `codex` column"
+        );
+    }
+
+    #[tokio::test]
+    async fn forkagentdefinition_resolves_provider_through_the_sources_bundle() {
+        let state = test_state();
+        seed_bundle(&state, "bundle-claude", "claude");
+        seed_drifted_template(&state, "src-1", "bundle-claude");
+
+        let (engine, mut output_rx) = WshRpcEngine::new();
+        register(&engine, &state);
+
+        engine.handle_message(RpcMessage {
+            command: COMMAND_FORK_AGENT_DEFINITION.to_string(),
+            reqid: "req-1".to_string(),
+            data: Some(serde_json::json!({
+                "source_id": "src-1",
+                "branch_label": "",
+            })),
+            ..Default::default()
+        });
+        let resp = tokio::time::timeout(std::time::Duration::from_secs(2), output_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
+        let fork: AgentDefinition =
+            serde_json::from_value(resp.data.expect("expected result data")).unwrap();
+
+        assert_eq!(
+            fork.provider, "claude",
+            "fork must carry the source's REAL (bundle-resolved) provider, not the drifted `codex` column"
+        );
+    }
 }
