@@ -42,6 +42,16 @@ export const BlockApi = {
         return client.rpcCall("docknodestatus", data, opts);
     },
 
+    // Fire-and-forget push of a declared-background task's real terminal
+    // outcome (parsed from its <task-notification> message), into the
+    // durable Background Task Registry. Deliberately separate from
+    // DockNodeStatusCommand above — see CommandBackgroundTaskCompletionData's
+    // doc comment in gotypes.d.ts for why. Spec:
+    // docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md.
+    BackgroundTaskCompletionCommand(client: RpcClient, data: CommandBackgroundTaskCompletionData, opts?: RpcOpts): Promise<void> {
+        return client.rpcCall("backgroundtaskcompletion", data, opts);
+    },
+
     // Deliver an AskUserQuestion answer to the running agent CLI as a
     // tool_result. Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
     AgentAnswerCommand(client: RpcClient, data: CommandAgentAnswerData, opts?: RpcOpts): Promise<void> {

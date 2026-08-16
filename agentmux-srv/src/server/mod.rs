@@ -414,6 +414,14 @@ pub fn build_router(state: AppState) -> Router {
         // comment for why).
         .route("/api/v1/muxspect/dock", get(muxspect_handlers::handle_muxspect_dock))
         .route("/api/v1/muxspect/dock/clear", post(muxspect_handlers::handle_muxspect_dock_clear))
+        // Durable declared-background task registry — see the handler's own
+        // doc comment for why this is a separate, SQLite-backed source of
+        // truth from `dock` above rather than another view over the same
+        // ephemeral cache.
+        .route(
+            "/api/v1/muxspect/background-tasks",
+            get(muxspect_handlers::handle_muxspect_background_tasks),
+        )
         // Agent App API — identity / preset / memory namespaces, the MCP-facing
         // slice of the app-API RPC surface (SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28).
         // The agent identity (`agent_id`) is supplied by agentmux-mcp from its

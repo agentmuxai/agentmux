@@ -16,7 +16,10 @@ import { createStreamFlushQueue } from "./stream-flush-queue";
 import type { DocumentNode, ToolNode } from "./types";
 
 vi.mock("@/app/store/rpc-api", () => ({
-    RpcApi: { DockNodeStatusCommand: vi.fn().mockResolvedValue(undefined) },
+    RpcApi: {
+        DockNodeStatusCommand: vi.fn().mockResolvedValue(undefined),
+        BackgroundTaskCompletionCommand: vi.fn().mockResolvedValue(undefined),
+    },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 
@@ -171,5 +174,62 @@ describe("StreamFlushQueue.flushNow", () => {
         const calls = vi.mocked(RpcApi.DockNodeStatusCommand).mock.calls;
         const call = calls.find(([, data]) => data.node_id === "toolu_fast");
         expect(call?.[1].run_in_background).toBeUndefined();
+    });
+
+    it("a <task-notification> user_message pushes BackgroundTaskCompletionCommand keyed on the originating tool-use-id, not the message's own id", () => {
+        const { model } = makeModel();
+        const q = createStreamFlushQueue(model);
+
+        const notification: DocumentNode = {
+            type: "user_message",
+            id: "msg-notif-1",
+            message:
+                "<task-notification><task-id>bdgc1</task-id><tool-use-id>toolu_bg</tool-use-id>" +
+                "<status>completed</status><summary>done</summary></task-notification>",
+            timestamp: 5000,
+        } as DocumentNode;
+        q.pushNewNode(notification);
+
+        const calls = vi.mocked(RpcApi.BackgroundTaskCompletionCommand).mock.calls;
+        const call = calls.find(([, data]) => data.node_id === "toolu_bg");
+        expect(call).toBeDefined();
+        expect(call?.[1]).toMatchObject({ blockid: "block-1", node_id: "toolu_bg", status: "done", timestamp: 5000 });
+        // Must never be pushed through DockNodeStatusCommand — that would
+        // blank the original tool node's run_in_background/tool_name via
+        // push_delta's full-overwrite semantics (the #2520 bug class).
+        const dockCalls = vi.mocked(RpcApi.DockNodeStatusCommand).mock.calls;
+        expect(dockCalls.find(([, data]) => data.node_id === "toolu_bg" && data.status === "done")).toBeUndefined();
+    });
+
+    it("maps <status>failed</status> to 'error' and an unrecognized/missing status to 'stopped'", () => {
+        const { model } = makeModel();
+        const q = createStreamFlushQueue(model);
+
+        q.pushNewNode({
+            type: "user_message",
+            id: "msg-notif-2",
+            message: "<task-notification><tool-use-id>toolu_failed</tool-use-id><status>failed</status></task-notification>",
+            timestamp: 1,
+        } as DocumentNode);
+        q.pushNewNode({
+            type: "user_message",
+            id: "msg-notif-3",
+            message: "<task-notification><tool-use-id>toolu_unknown</tool-use-id><status>weird</status></task-notification>",
+            timestamp: 1,
+        } as DocumentNode);
+
+        const calls = vi.mocked(RpcApi.BackgroundTaskCompletionCommand).mock.calls;
+        expect(calls.find(([, d]) => d.node_id === "toolu_failed")?.[1].status).toBe("error");
+        expect(calls.find(([, d]) => d.node_id === "toolu_unknown")?.[1].status).toBe("stopped");
+    });
+
+    it("an ordinary user_message with no <task-notification> pushes nothing", () => {
+        const { model } = makeModel();
+        const q = createStreamFlushQueue(model);
+
+        q.pushNewNode({ type: "user_message", id: "msg-plain", message: "just chatting", timestamp: 424_242 } as DocumentNode);
+
+        const calls = vi.mocked(RpcApi.BackgroundTaskCompletionCommand).mock.calls;
+        expect(calls.find(([, d]) => d.timestamp === 424_242)).toBeUndefined();
     });
 });

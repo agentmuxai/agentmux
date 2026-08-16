@@ -30,6 +30,7 @@ use crate::backend::rpc_types::{
     COMMAND_TOOL_DECISION, COMMAND_AGENT_ANSWER,
     CommandAgentAnswerData,
     COMMAND_DOCK_NODE_STATUS, CommandDockNodeStatusData,
+    COMMAND_BACKGROUND_TASK_COMPLETION, CommandBackgroundTaskCompletionData,
 };
 use crate::backend::base::normalize_working_dir;
 use crate::backend::obj::{Block, TermSize, WaveObjUpdate, wave_obj_to_value};
@@ -1024,11 +1025,34 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // docknodestatus → fire-and-forget push of a ToolNode's latest status,
     // cached in-memory per block for `muxspect dock` to read. See
     // docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md §3.1.
+    //
+    // Also mirrors a declared-background task's liveness into the durable
+    // `db_background_tasks` registry (see
+    // docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md) —
+    // `DockSnapshotCache` above is intentionally ephemeral (never persisted,
+    // 1-hour eviction on read); the registry is the durable source of truth
+    // consumers that need to survive a cache eviction or a session
+    // reconnect (Swarm, #2492's teardown-survival) read from instead.
+    //
+    // `run_in_background == Some(true)` is ONLY ever sent once
+    // `isAcceptedBackgroundLaunch()` holds client-side (`tool-adapter.ts`),
+    // which by its own definition requires `status == "success"` — checking
+    // `status == "running"` here (an earlier version of this handler did)
+    // made the observe call unreachable, since the flag and that status
+    // value are never sent together (reagentx P0 / codex P1 on PR #2590).
+    // Best-effort: a registry write failure never blocks the dock push it
+    // rides alongside — `dock_snapshots.push_delta` below already gives the
+    // user the live UI signal regardless. Completion is NOT detected here —
+    // see `COMMAND_BACKGROUND_TASK_COMPLETION` below for why this handler
+    // structurally can't see it (the originating ToolNode's status never
+    // changes again after acceptance).
     let dock_snapshots_dns = state.dock_snapshots.clone();
+    let wstore_dns = state.wstore.clone();
     engine.register_handler(
         COMMAND_DOCK_NODE_STATUS,
         Box::new(move |data, _ctx| {
             let dock_snapshots = dock_snapshots_dns.clone();
+            let wstore = wstore_dns.clone();
             Box::pin(async move {
                 let cmd: CommandDockNodeStatusData = serde_json::from_value(data)
                     .map_err(|e| format!("docknodestatus: {e}"))?;
@@ -1036,6 +1060,24 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_millis() as i64;
+
+                if cmd.run_in_background == Some(true) {
+                    if let Err(e) = wstore.background_task_observe(
+                        &cmd.node_id,
+                        &cmd.blockid,
+                        &cmd.tool_name,
+                        observed_at,
+                        observed_at,
+                    ) {
+                        tracing::warn!(
+                            target: "background_tasks",
+                            node_id = %cmd.node_id,
+                            error = %e,
+                            "failed to observe declared-background task in the durable registry",
+                        );
+                    }
+                }
+
                 dock_snapshots.push_delta(
                     &cmd.blockid,
                     crate::backend::dock_snapshot::DockNodeSnapshot {
@@ -1047,6 +1089,48 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                         run_in_background: cmd.run_in_background,
                     },
                 );
+                Ok(None)
+            })
+        }),
+    );
+
+    // backgroundtaskcompletion → fire-and-forget push of a declared-
+    // background task's REAL terminal outcome, parsed client-side from its
+    // `<task-notification>` message (`tool-adapter.ts`'s
+    // `parseTaskNotification`). This is a separate command from
+    // `docknodestatus` above on purpose: the originating ToolNode's own
+    // `status` field goes "success" at acceptance and never changes again
+    // (that's the raw tool_result's outcome, not the background task's) —
+    // there is no later `docknodestatus` push this handler could key off of
+    // to learn a background task actually finished (reagentx P0 / codex P1
+    // on PR #2590, corrected here). Routing this through `docknodestatus`
+    // instead of a dedicated command would also corrupt `DockSnapshotCache`:
+    // `push_delta` fully overwrites a node's snapshot, and this event has no
+    // `tool_name`/original `run_in_background` value to carry forward — the
+    // exact bug class #2520 already fixed once for a different call site.
+    let wstore_btc = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_BACKGROUND_TASK_COMPLETION,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_btc.clone();
+            Box::pin(async move {
+                let cmd: CommandBackgroundTaskCompletionData = serde_json::from_value(data)
+                    .map_err(|e| format!("backgroundtaskcompletion: {e}"))?;
+                let ended_at = cmd.timestamp.unwrap_or_else(|| {
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as i64
+                });
+                let status = crate::backend::storage::background_tasks::BackgroundTaskStatus::from_str(&cmd.status);
+                if let Err(e) = wstore.background_task_complete(&cmd.node_id, status, ended_at) {
+                    tracing::warn!(
+                        target: "background_tasks",
+                        node_id = %cmd.node_id,
+                        error = %e,
+                        "failed to mark background task terminal in the durable registry",
+                    );
+                }
                 Ok(None)
             })
         }),

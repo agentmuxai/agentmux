@@ -30,7 +30,7 @@ import { batch } from "solid-js";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { isAcceptedBackgroundLaunch } from "./activity/tool-adapter";
+import { isAcceptedBackgroundLaunch, parseTaskNotification } from "./activity/tool-adapter";
 import type { DocumentNode, ShellNode, ToolLogChunk } from "./types";
 
 /**
@@ -58,15 +58,38 @@ import type { DocumentNode, ShellNode, ToolLogChunk } from "./types";
  * case instead of a signal.
  */
 function pushDockNodeStatus(model: AgentPaneModel, node: DocumentNode) {
-    if (node.type !== "tool") return;
-    void RpcApi.DockNodeStatusCommand(TabRpcClient, {
-        blockid: model.blockId,
-        node_id: node.id,
-        tool_name: node.toolName ?? node.tool,
-        status: node.status,
-        timestamp: node.timestamp,
-        run_in_background: isAcceptedBackgroundLaunch(node) || undefined,
-    }).catch(() => {});
+    if (node.type === "tool") {
+        void RpcApi.DockNodeStatusCommand(TabRpcClient, {
+            blockid: model.blockId,
+            node_id: node.id,
+            tool_name: node.toolName ?? node.tool,
+            status: node.status,
+            timestamp: node.timestamp,
+            run_in_background: isAcceptedBackgroundLaunch(node) || undefined,
+        }).catch(() => {});
+        return;
+    }
+    // A declared-background task's real terminal outcome arrives as a
+    // `user_message` carrying a `<task-notification>` — not a change to any
+    // ToolNode's own status (that stays "success" forever, the raw
+    // tool_result's own outcome, once accepted). Mirror it into the durable
+    // Background Task Registry via a dedicated command rather than
+    // DockNodeStatusCommand above (see CommandBackgroundTaskCompletionData's
+    // doc comment for why reusing that one would be unsafe). `node_id` here
+    // is deliberately the notification's own toolUseId — the ORIGINATING
+    // call's id, not this user_message node's id — since that's the row
+    // `docknodestatus` created and the join key back to it.
+    if (node.type === "user_message") {
+        const completion = parseTaskNotification(node.message);
+        if (completion) {
+            void RpcApi.BackgroundTaskCompletionCommand(TabRpcClient, {
+                blockid: model.blockId,
+                node_id: completion.toolUseId,
+                status: completion.status,
+                timestamp: node.timestamp,
+            }).catch(() => {});
+        }
+    }
 }
 
 type PendingChunk = { toolId: string; chunk: ToolLogChunk };

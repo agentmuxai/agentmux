@@ -98,26 +98,45 @@ export function isAcceptedBackgroundLaunch(n: ToolNode): boolean {
 }
 
 /**
+ * Parses a single `<task-notification>` user message into the
+ * `tool_use_id` it belongs to and its terminal status. Exported so both
+ * `backgroundCompletions` (the dock's own display computation) and
+ * `stream-flush-queue.ts`'s `pushDockNodeStatus` (the srv-side push, issue
+ * #2492's Background Task Registry) parse this exact wire shape identically
+ * instead of two independently-drifting regexes — same "one classifier,
+ * every consumer reuses it" discipline `isAcceptedBackgroundLaunch` above
+ * already established after the #2518 incident.
+ *
+ * The harness reports a background task's ACTUAL completion as a plain
+ * user message whose whole payload is a `<task-notification>` block naming
+ * the `<tool-use-id>` it belongs to and a `<status>` — that message (not
+ * the instant tool_result) is the background task's real end-of-life
+ * signal. Parsed leniently: a notification without a recognizable status
+ * still ends the task (as "stopped") rather than leaving a finished
+ * process shown as running forever. Returns `null` for anything that
+ * isn't a task-notification, or is one with no parseable tool-use-id.
+ */
+export function parseTaskNotification(message: string): { toolUseId: string; status: ActivityStatus } | null {
+    if (!message.includes("<task-notification>")) return null;
+    const toolUseId = /<tool-use-id>([^<]+)<\/tool-use-id>/.exec(message)?.[1];
+    if (!toolUseId) return null;
+    const rawStatus = /<status>([^<]+)<\/status>/.exec(message)?.[1];
+    const status: ActivityStatus =
+        rawStatus === "completed" ? "done" : rawStatus === "failed" ? "error" : "stopped";
+    return { toolUseId, status };
+}
+
+/**
  * Terminal outcomes of backgrounded calls, keyed by originating
- * `tool_use_id`. The harness reports a background task's ACTUAL
- * completion as a plain user message whose whole payload is a
- * `<task-notification>` block naming the `<tool-use-id>` it belongs to
- * and a `<status>` — that message (not the instant tool_result) is the
- * background task's real end-of-life signal. Parsed leniently: a
- * notification without a recognizable status still ends the task
- * (as "stopped") rather than leaving a finished process shown as
- * running forever.
+ * `tool_use_id`. See `parseTaskNotification` above for the wire shape.
  */
 function backgroundCompletions(nodes: ReadonlyArray<DocumentNode>): Map<string, { status: ActivityStatus; endedAt?: number }> {
     const out = new Map<string, { status: ActivityStatus; endedAt?: number }>();
     for (const n of nodes) {
-        if (n.type !== "user_message" || !n.message.includes("<task-notification>")) continue;
-        const toolUseId = /<tool-use-id>([^<]+)<\/tool-use-id>/.exec(n.message)?.[1];
-        if (!toolUseId) continue;
-        const rawStatus = /<status>([^<]+)<\/status>/.exec(n.message)?.[1];
-        const status: ActivityStatus =
-            rawStatus === "completed" ? "done" : rawStatus === "failed" ? "error" : "stopped";
-        out.set(toolUseId, { status, endedAt: n.timestamp });
+        if (n.type !== "user_message") continue;
+        const parsed = parseTaskNotification(n.message);
+        if (!parsed) continue;
+        out.set(parsed.toolUseId, { status: parsed.status, endedAt: n.timestamp });
     }
     return out;
 }
