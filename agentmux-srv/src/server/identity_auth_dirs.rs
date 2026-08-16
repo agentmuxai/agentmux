@@ -11,8 +11,76 @@
 //! `identity_handlers::register_identity_handlers` don't need touching)
 //! and `compute_and_ensure_account_dir` (the live direct-account path).
 
-use crate::backend::providers::get_provider;
+use crate::backend::providers::{get_provider, ProviderConfig};
 use crate::backend::storage::store::Store;
+
+/// Best-effort: if `provider` has a linkable native history directory
+/// ([`ProviderConfig::history_native_subdir`], `None` for providers with
+/// no fixed on-disk history to redirect) and credential isolation is
+/// currently on, ensure `dir/<subdir>` is linked to the always-global
+/// history location for `entity_id` (a bundle id or account id — same
+/// namespace, see [`DataPaths::identity_dir`]). No-op when isolation is
+/// off (`dir` is already inside the global tree, so `dir/<subdir>`
+/// already IS the global location) or the provider has no linkable
+/// subdir. Never fails the caller — logs and continues, same philosophy
+/// as every other soft-fail in this module.
+///
+/// Three call sites need this identically: `compute_and_ensure_bundle_dir`
+/// and `compute_and_ensure_account_dir` below (both `auth.start`-time),
+/// and `inject::inject_identity_env_with_broker`'s OAuth branch (the
+/// ordinary spawn-time path, which reads a *previously stored*
+/// `OAuthConfigDir` and — before this shared helper existed — never
+/// re-verified the link at all; reagentx P1 on PR #2605: an account
+/// provisioned before this whole feature shipped, or since its last
+/// `auth.start`, never got linked until this fix). One function so they
+/// can't drift on the condition again.
+pub(crate) fn link_history_if_isolated(
+    paths: &agentmux_common::DataPaths,
+    dir: &std::path::Path,
+    provider: &ProviderConfig,
+    entity_id: &str,
+    log_ctx: &str,
+) {
+    let Some(subdir) = provider.history_native_subdir else {
+        return;
+    };
+    if !agentmux_common::isolated_auth_enabled() {
+        return;
+    }
+    // reagentx P2 / chatgpt-codex-connector on PR #2605: `identity_dir`'s
+    // safe-path-segment rejection (empty / `.` / `..` / a segment with
+    // `/`, `\`, a drive-letter colon, …) is validated HERE, once, for
+    // every caller — `identity_auth_dirs.rs`'s own two call sites happen
+    // to already validate `entity_id` earlier in their own function body
+    // (via this same check) before ever reaching this point, but
+    // `inject.rs`'s ordinary-spawn call site reads `entity_id` straight
+    // from a stored `binding.account_id` with no such upstream check.
+    // Rather than trust every current AND future caller to remember
+    // this, `identity_history_dir`'s own documented precondition is
+    // enforced right here instead.
+    if paths.identity_dir(entity_id).is_none() {
+        tracing::warn!(
+            target: "identity",
+            provider_id = provider.id,
+            entity_id,
+            "{log_ctx}: entity_id is not a safe path segment — skipping history link"
+        );
+        return;
+    }
+    if let Err(e) = agentmux_common::ensure_history_link(
+        &dir.join(subdir),
+        &paths.identity_history_dir(entity_id, provider.auth_dir_name, subdir),
+    ) {
+        tracing::warn!(
+            target: "identity",
+            provider_id = provider.id,
+            entity_id,
+            error = %e,
+            "{log_ctx}: failed to link conversation history to the global location — \
+             this history may not survive a channel/build change"
+        );
+    }
+}
 
 /// Compute the per-bundle OAuth config dir + ensure it exists +
 /// override the provider's `auth_config_dir_env_var` entry in `auth_env`.
@@ -113,6 +181,7 @@ pub(crate) fn compute_and_ensure_bundle_dir(
         );
         return None;
     }
+    link_history_if_isolated(&paths, &dir, provider, bundle_id, "auth.start");
     let dir_str = dir.to_string_lossy().to_string();
     // Override (or insert) the provider's config-dir env var. The
     // frontend may have computed the legacy ambient dir via
@@ -246,6 +315,7 @@ pub(crate) fn compute_and_ensure_account_dir(
         );
         return (account_id, None);
     }
+    link_history_if_isolated(&paths, &dir, provider, &account_id, "auth.start (direct-account)");
     let dir_str = dir.to_string_lossy().to_string();
     auth_env.insert(provider.auth_config_dir_env_var.to_string(), dir_str.clone());
     tracing::info!(
@@ -329,6 +399,92 @@ mod tests {
         assert_eq!(account_id, "acc-reconnect", "reconnect must reuse the supplied id, not mint a new one");
 
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        for (k, _) in paths.to_env_vars() {
+            std::env::remove_var(k);
+        }
+    }
+
+    // docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md
+    // §4.1: when the credential dir is per-channel isolated, its
+    // `projects/` subpath must become a link to the always-global
+    // history location, not a real (fresh, empty, orphan-prone)
+    // directory. This is the actual end-to-end wiring test — the
+    // `ensure_history_link` unit tests in `agentmux-common` only prove
+    // the linking primitive works in isolation, not that this call site
+    // actually invokes it with the right paths.
+    #[test]
+    fn compute_account_dir_links_projects_to_the_global_history_location_when_isolated() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        std::env::set_var("AGENTMUX_ISOLATED_AUTH", "1");
+        let paths = agentmux_common::DataPaths::resolve(
+            "0.0.0-test",
+            &agentmux_common::RuntimeMode::Installed,
+        )
+        .unwrap();
+        paths.ensure_dirs().unwrap();
+        for (k, v) in paths.to_env_vars() {
+            std::env::set_var(k, v);
+        }
+        assert!(agentmux_common::isolated_auth_enabled(), "precondition: this test needs isolation actually on");
+
+        let wstore = Store::open_in_memory().unwrap();
+        let mut env = std::collections::HashMap::new();
+        let (account_id, dir) = compute_and_ensure_account_dir(&wstore, "", "claude", &mut env);
+        let dir = std::path::PathBuf::from(dir.expect("oauth-class provider must yield a dir"));
+        assert!(
+            dir.starts_with(&paths.instance_dir),
+            "precondition: the credential dir must actually be the per-channel isolated one, not the global one, or this test isn't exercising the code path it claims to"
+        );
+
+        let global_history = paths.identity_history_dir(&account_id, "claude", "projects");
+        std::fs::write(global_history.join("real-session.jsonl"), b"a real session").unwrap();
+        let via_isolated_path = std::fs::read(dir.join("projects").join("real-session.jsonl"))
+            .expect("a file written at the global history location must be readable through the isolated credential dir's projects/ subpath");
+        assert_eq!(via_isolated_path, b"a real session");
+
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        for (k, _) in paths.to_env_vars() {
+            std::env::remove_var(k);
+        }
+    }
+
+    // reagentx P2 / chatgpt-codex-connector on PR #2605: link_history_if_isolated
+    // must reject an unsafe entity_id itself (defense in depth), not
+    // rely on every caller having already validated it upstream —
+    // inject.rs's spawn-path call site passes a stored account_id with
+    // no such upstream check.
+    #[test]
+    fn link_history_if_isolated_rejects_an_unsafe_entity_id() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        std::env::set_var("AGENTMUX_ISOLATED_AUTH", "1");
+        let paths = agentmux_common::DataPaths::resolve(
+            "0.0.0-test",
+            &agentmux_common::RuntimeMode::Installed,
+        )
+        .unwrap();
+        paths.ensure_dirs().unwrap();
+        for (k, v) in paths.to_env_vars() {
+            std::env::set_var(k, v);
+        }
+
+        let provider = get_provider("claude").unwrap();
+        let dir = tmp.path().join("some-credential-dir");
+        std::fs::create_dir_all(&dir).unwrap();
+        // Must not panic, must not create anything under
+        // shared/identities/../ — an unsafe segment is simply skipped.
+        link_history_if_isolated(&paths, &dir, provider, "../escape", "test");
+        assert!(
+            !paths.shared_dir.join("identities").parent().unwrap().join("escape").exists(),
+            "an unsafe entity_id must never be used to construct a real filesystem path"
+        );
+
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
         for (k, _) in paths.to_env_vars() {
             std::env::remove_var(k);
         }

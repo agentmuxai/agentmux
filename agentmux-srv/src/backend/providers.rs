@@ -61,6 +61,21 @@ pub struct ProviderConfig {
     /// instance-independent) and `shared/identities/<bundle>/<name>/` (per-identity)
     /// — see `DataPaths::provider_auth_dir` and `identity_dir`.
     pub auth_dir_name: &'static str,
+    /// Sub-directory (relative to this provider's config/auth dir) that
+    /// actually holds its native session/transcript history — e.g.
+    /// Claude's `"projects"`, Codex's `"sessions"`, Gemini's `"history"`.
+    /// `None` for providers with no simple directory-based history to
+    /// isolate/link (ACP providers — openclaw/pi/copilot — expose history
+    /// through the live protocol stream instead, not a fixed on-disk
+    /// path). Per-provider, filesystem-verified table:
+    /// `docs/specs/SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md` §2.1.
+    /// Used by `identity_auth_dirs.rs` to redirect an isolated identity's
+    /// history to the always-global
+    /// `DataPaths::identity_history_dir` — reagentx P1 on PR #2605 caught
+    /// that hardcoding `"projects"` there only worked for `claude`,
+    /// silently leaving every other OAuth-class provider's history
+    /// channel-local and unlinked.
+    pub history_native_subdir: Option<&'static str>,
     /// Extra environment variables required for auth isolation.
     /// Each entry is a `(key, value)` pair.
     pub auth_extra_env: &'static [(&'static str, &'static str)],
@@ -179,6 +194,7 @@ static CLAUDE: ProviderConfig = ProviderConfig {
     styled_output_format: "claude-stream-json",
     auth_config_dir_env_var: "CLAUDE_CONFIG_DIR",
     auth_dir_name: "claude",
+    history_native_subdir: Some("projects"),
     auth_extra_env: &[],
     unset_env: &["CLAUDECODE"],
     npm_package: "@anthropic-ai/claude-code",
@@ -212,6 +228,7 @@ static CODEX: ProviderConfig = ProviderConfig {
     styled_output_format: "codex-json",
     auth_config_dir_env_var: "CODEX_HOME",
     auth_dir_name: "codex",
+    history_native_subdir: Some("sessions"),
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "@openai/codex",
@@ -233,6 +250,7 @@ static GEMINI: ProviderConfig = ProviderConfig {
     styled_output_format: "gemini-json",
     auth_config_dir_env_var: "GEMINI_CLI_HOME",
     auth_dir_name: "gemini",
+    history_native_subdir: Some("history"),
     auth_extra_env: &[("GEMINI_FORCE_FILE_STORAGE", "true")],
     unset_env: &[],
     npm_package: "@google/gemini-cli",
@@ -263,6 +281,10 @@ static QWEN: ProviderConfig = ProviderConfig {
     // the Qwen analogue of GEMINI_CLI_HOME — gives per-agent auth isolation.
     auth_config_dir_env_var: "QWEN_HOME",
     auth_dir_name: "qwen",
+    // Not OAuth-class (provider_class() has no arm for "qwen") -- never
+    // reaches ensure_history_link regardless. None documents "not yet
+    // characterized" rather than asserting a specific layout.
+    history_native_subdir: None,
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "@qwen-code/qwen-code",
@@ -293,6 +315,8 @@ static KIMI: ProviderConfig = ProviderConfig {
     styled_output_format: "kimi-stream-json",
     auth_config_dir_env_var: "KIMI_SHARE_DIR",
     auth_dir_name: "kimi",
+    // API-key-class, not OAuth-class -- never reaches ensure_history_link.
+    history_native_subdir: None,
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "",
@@ -324,6 +348,10 @@ static OPENCLAW: ProviderConfig = ProviderConfig {
     styled_output_format: "acp",
     auth_config_dir_env_var: "OPENCLAW_HOME",
     auth_dir_name: "openclaw",
+    // ACP-native: exposes history through the live protocol stream, not
+    // a fixed on-disk directory -- nothing for ensure_history_link to
+    // redirect. Per SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md §4.2.
+    history_native_subdir: None,
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "openclaw",
@@ -343,6 +371,9 @@ static PI: ProviderConfig = ProviderConfig {
     styled_output_format: "acp",
     auth_config_dir_env_var: "PI_HOME",
     auth_dir_name: "pi",
+    // Not OAuth-class -- never reaches ensure_history_link. Also
+    // ACP-native (see the "openclaw" entry above) if that changes.
+    history_native_subdir: None,
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "@mariozechner/pi-coding-agent",
@@ -372,6 +403,8 @@ static MUX_CODE: ProviderConfig = ProviderConfig {
     styled_output_format: "claude-stream-json",
     auth_config_dir_env_var: "MUXCODE_CONFIG_DIR",
     auth_dir_name: "muxcode",
+    // Not OAuth-class -- never reaches ensure_history_link.
+    history_native_subdir: None,
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "@agentmuxai/muxcode",
@@ -395,6 +428,9 @@ static COPILOT: ProviderConfig = ProviderConfig {
     styled_output_format: "acp",
     auth_config_dir_env_var: "COPILOT_HOME",
     auth_dir_name: "copilot",
+    // ACP-native, same as "openclaw" above -- no fixed on-disk history
+    // directory to redirect.
+    history_native_subdir: None,
     auth_extra_env: &[],
     unset_env: &[],
     npm_package: "@github/copilot",
@@ -420,6 +456,10 @@ static ANTIGRAVITY: ProviderConfig = ProviderConfig {
     styled_output_format: "gemini-json",
     auth_config_dir_env_var: "ANTIGRAVITY_CONFIG_DIR",
     auth_dir_name: "antigravity",
+    // Not OAuth-class -- never reaches ensure_history_link. Not covered
+    // by SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md (added later);
+    // None until independently verified rather than guessed.
+    history_native_subdir: None,
     auth_extra_env: &[("ANTIGRAVITY_FORCE_FILE_STORAGE", "true")],
     unset_env: &[],
     npm_package: "@google/antigravity-cli",
