@@ -13,7 +13,7 @@
  * panel only. See docs/specs/launch-modal-rearchitecture-2026-05-01.md.
  */
 
-import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createResource, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 
 import { Button } from "@/element/button";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -120,13 +120,56 @@ interface LaunchFormState {
 }
 
 export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.Element => {
-    const catalog = createMemo(() => getCliCatalogEntry(props.agent.provider));
+    // Resolve the effective provider through the agent's bound ABF
+    // bundle, not `props.agent.provider` directly — same fix as
+    // `resolveEffectiveLaunchProvider` (agent-launch-env.ts), applied
+    // here because this modal independently gates which accounts are
+    // offered and drives the entire pre-launch auth flow
+    // (`PreLaunchAuthPanel`, below) from the provider it resolves, all
+    // BEFORE the launch RPC ever reaches the backend's already-correct
+    // resolution (PR #2592; see issue #2594 for the full remaining
+    // scope). `agent.provider` can drift post-creation via
+    // `agent.define`'s `if_exists=update` path while the bundle's own
+    // copy is backend-enforced immutable — without this, a user could
+    // be offered accounts for / walked through auth for the WRONG
+    // provider.
+    //
+    // `createResource` rather than an inline async fetch inside the
+    // memo below: memos must stay synchronous, so the fetch lives here.
+    const [boundBundle] = createResource(
+        () => props.agent.memory_id || undefined,
+        (memoryId) => RpcApi.GetMemoryCommand(TabRpcClient, { id: memoryId }).catch(() => undefined),
+    );
+    // While a BOUND agent's bundle fetch is still in flight, resolve to
+    // "" (empty/unknown) rather than falling back to `props.agent.provider`
+    // — P1 fix, ReAgent review on PR #2596: the account auto-pick
+    // `createEffect` below only picks when `accountId()` is still empty,
+    // and once it picks it never re-evaluates (Solid stops tracking
+    // `provider()` as a dependency the moment the effect returns early on
+    // `accountId()` being set). If the STALE `agent.provider` value was
+    // itself a real, recognized provider with its own account, the
+    // effect would auto-pick that WRONG account on the synchronous
+    // pre-resolution render and then never self-correct once the bundle
+    // resolves the real provider — silently defeating this whole fix for
+    // exactly the drift case it exists to close. Exposing "" (which
+    // resolves to no provider / no accounts) during the loading window
+    // instead means nothing gets auto-picked until the real value is
+    // known, so the auto-pick effect only ever fires once, against the
+    // correct resolved provider. `boundBundle.loading` is `false` for an
+    // unbound agent (the fetcher never runs when the resource's source is
+    // falsy), so this adds no delay for the common unbound case.
+    const effectiveProviderId = createMemo(() => {
+        if (props.agent.memory_id && boundBundle.loading) return "";
+        return boundBundle()?.provider || props.agent.provider;
+    });
+
+    const catalog = createMemo(() => getCliCatalogEntry(effectiveProviderId()));
     const displayName = () => catalog()?.displayName ?? props.agent.name;
     // Declared early — `createMemo`'s first run is synchronous (unlike
     // `createEffect`, which defers to after setup completes), so any
     // memo below that reads `provider()` needs the binding to already
     // exist at the point it's created.
-    const provider = createMemo(() => getProvider(props.agent.provider));
+    const provider = createMemo(() => getProvider(effectiveProviderId()));
 
     // Form + submit state live in the launch-flow-state reducer slice
     // (Stage 2b/2c of SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md).
