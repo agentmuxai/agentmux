@@ -54,220 +54,16 @@ fn resolve_vendor_env_override(
         .map(|var| (var, agent.model_vendor_base_url.clone()))
 }
 
-/// Resolve the effective harness/provider id for a spawn. The agent's
-/// bound ABF bundle is the readonly-once-set source of truth
-/// (`ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md` §7.4.1):
-/// `AgentDefinition.provider` can still drift after creation via
-/// `agent.define`'s `if_exists=update` path, while the bundle's own copy
-/// cannot (backend-enforced in `bundle.upsert`, see
-/// `check_provider_model_immutable` in `bundle.rs`). Falls back to
-/// `agent.provider` when there's no bundle to consult — an unbound
-/// legacy agent predating `m0021`, or a bundle row that's gone missing —
-/// so a spawn never hard-fails on this alone. Pure, so it's unit-testable
-/// without the full async spawn-time harness, same as
-/// `resolve_vendor_env_override` above.
-fn resolve_effective_provider_id(agent: &AgentDefinition, bundle: Option<&Memory>) -> String {
-    match bundle {
-        Some(b) if !b.provider.is_empty() => b.provider.clone(),
-        _ => agent.provider.clone(),
-    }
-}
-
-/// Look up an agent's bound ABF bundle for spawn-time provider resolution.
-/// `None` when unbound (`memory_id` empty) or the lookup fails/returns
-/// nothing.
-///
-/// Takes the store to look it up in as an EXPLICIT parameter rather than
-/// resolving it internally — `resolve_effective_provider_id` above only
-/// exists because `AgentDefinition.provider` can drift while the bundle's
-/// copy can't, but that guarantee only holds if this lookup actually
-/// finds the bundle. It has to run against `AppState.id_store` (the
-/// EFFECTIVE identity/memory store — shared store when configured, else
-/// `wstore`; same store every bundle-provisioning site now writes to),
-/// never `wstore` directly — a `wstore` lookup silently returns `None`
-/// whenever a shared store is configured, defeating the whole guarantee
-/// without erroring (ReAgent review on PR #2587, round 3: this exact
-/// mistake was made at this exact call site, in the same PR that fixed
-/// the analogous write-side bug everywhere else). Making the store an
-/// explicit parameter here, rather than an inline `app_state.id_store...`
-/// at the call site, makes that choice testable instead of a detail an
-/// inline expression can silently get wrong again later.
-fn resolve_bound_bundle(id_store: &Store, agent: &AgentDefinition) -> Option<Memory> {
-    if agent.memory_id.is_empty() {
-        return None;
-    }
-    id_store.bundle_memory_get(&agent.memory_id).ok().flatten()
-}
-
-#[cfg(test)]
-mod resolve_bound_bundle_tests {
-    use super::*;
-
-    fn agent_with_memory_id(memory_id: &str) -> AgentDefinition {
-        AgentDefinition {
-            id: "a1".to_string(),
-            slug: "a1".to_string(),
-            name: "T".to_string(),
-            icon: String::new(),
-            provider: "claude".to_string(),
-            description: String::new(),
-            working_directory: String::new(),
-            shell: String::new(),
-            provider_flags: String::new(),
-            auto_start: 0,
-            restart_on_crash: 0,
-            idle_timeout_minutes: 0,
-            created_at: 0,
-            agent_type: "host".to_string(),
-            environment: String::new(),
-            agent_bus_id: String::new(),
-            is_seeded: 0,
-            accounts: String::new(),
-            parent_id: String::new(),
-            branch_label: String::new(),
-            updated_at: 0,
-            user_hidden: 0,
-            container_image: String::new(),
-            container_volumes: "[]".to_string(),
-            container_name: String::new(),
-            use_ambient_login: 0,
-            model_vendor_base_url: String::new(),
-            auto_continue_enabled: 0,
-            memory_id: memory_id.to_string(),
-        }
-    }
-
-    #[test]
-    fn returns_none_when_unbound() {
-        let store = Store::open_in_memory().unwrap();
-        let agent = agent_with_memory_id("");
-        assert!(resolve_bound_bundle(&store, &agent).is_none());
-    }
-
-    // The core regression case: the bundle exists in ONE store but not
-    // the other — proves the lookup only finds it via the store it was
-    // actually passed, not via some other store the caller might have
-    // reached for instead (the exact mistake this function replaces).
-    #[test]
-    fn only_finds_the_bundle_via_the_store_it_was_actually_provisioned_into() {
-        let id_store = Store::open_in_memory().unwrap();
-        let wstore = Store::open_in_memory().unwrap();
-        let bundle = Memory {
-            id: "mem1".to_string(),
-            name: "Bundle".to_string(),
-            description: String::new(),
-            is_blank: false,
-            is_global: false,
-            provider: "claude".to_string(),
-            model: "anthropic".to_string(),
-            instructions: String::new(),
-            instructions_by_provider: "{}".to_string(),
-            context_files: "[]".to_string(),
-            mcp_servers: "[]".to_string(),
-            skills: "[]".to_string(),
-            sort_order: 0,
-            created_at: 0,
-            updated_at: 0,
-        };
-        id_store.bundle_memory_upsert(&bundle).unwrap();
-        let agent = agent_with_memory_id("mem1");
-
-        assert!(resolve_bound_bundle(&id_store, &agent).is_some(), "must find the bundle via id_store");
-        assert!(resolve_bound_bundle(&wstore, &agent).is_none(), "must NOT find it via an unrelated store");
-    }
-}
-
-#[cfg(test)]
-mod resolve_effective_provider_id_tests {
-    use super::*;
-
-    fn base_agent(provider: &str, memory_id: &str) -> AgentDefinition {
-        AgentDefinition {
-            id: "a1".to_string(),
-            slug: "a1".to_string(),
-            name: "T".to_string(),
-            icon: String::new(),
-            provider: provider.to_string(),
-            description: String::new(),
-            working_directory: String::new(),
-            shell: String::new(),
-            provider_flags: String::new(),
-            auto_start: 0,
-            restart_on_crash: 0,
-            idle_timeout_minutes: 0,
-            created_at: 0,
-            agent_type: "host".to_string(),
-            environment: String::new(),
-            agent_bus_id: String::new(),
-            is_seeded: 0,
-            accounts: String::new(),
-            parent_id: String::new(),
-            branch_label: String::new(),
-            updated_at: 0,
-            user_hidden: 0,
-            container_image: String::new(),
-            container_volumes: "[]".to_string(),
-            container_name: String::new(),
-            use_ambient_login: 0,
-            model_vendor_base_url: String::new(),
-            auto_continue_enabled: 0,
-            memory_id: memory_id.to_string(),
-        }
-    }
-
-    fn bundle_with_provider(provider: &str) -> Memory {
-        Memory {
-            id: "mem1".to_string(),
-            name: "Bundle".to_string(),
-            description: String::new(),
-            is_blank: false,
-            is_global: false,
-            provider: provider.to_string(),
-            model: "anthropic".to_string(),
-            instructions: String::new(),
-            instructions_by_provider: "{}".to_string(),
-            context_files: "[]".to_string(),
-            mcp_servers: "[]".to_string(),
-            skills: "[]".to_string(),
-            sort_order: 0,
-            created_at: 0,
-            updated_at: 0,
-        }
-    }
-
-    #[test]
-    fn prefers_the_bundles_provider_over_a_drifted_agent_column() {
-        // Simulates the exact drift this exists to correct: agent.define's
-        // if_exists=update path changed agent.provider after creation, but
-        // the bundle's own copy is backend-enforced immutable.
-        let agent = base_agent("codex", "mem1");
-        let bundle = bundle_with_provider("claude");
-        assert_eq!(resolve_effective_provider_id(&agent, Some(&bundle)), "claude");
-    }
-
-    #[test]
-    fn falls_back_to_agent_provider_when_unbound() {
-        let agent = base_agent("claude", "");
-        assert_eq!(resolve_effective_provider_id(&agent, None), "claude");
-    }
-
-    #[test]
-    fn falls_back_to_agent_provider_when_bundle_missing() {
-        // memory_id points somewhere, but the caller couldn't load a row
-        // for it (deleted, or a lookup error swallowed upstream).
-        let agent = base_agent("claude", "mem1");
-        assert_eq!(resolve_effective_provider_id(&agent, None), "claude");
-    }
-
-    #[test]
-    fn falls_back_to_agent_provider_when_bundle_provider_is_empty() {
-        // The shared "blank" singleton and pre-§7 bundles have an empty
-        // provider column — must not shadow a real value with "".
-        let agent = base_agent("claude", "mem1");
-        let bundle = bundle_with_provider("");
-        assert_eq!(resolve_effective_provider_id(&agent, Some(&bundle)), "claude");
-    }
-}
+// resolve_effective_provider_id (and its store-lookup helper) moved to
+// Store::resolve_effective_provider_id in backend/storage/agents.rs
+// (2026-08-15) — the identical resolution logic was independently
+// duplicated in identity/resolver/inject.rs's layer-3 credential gate,
+// found reading agent.provider directly (the same wstore-vs-id_store
+// class of bug this file's own version was fixed for in round 3 of PR
+// #2587's review). Consolidated so both call sites share one
+// implementation and can't drift on it separately again — see that
+// method's own doc comment for the full history and the tests that
+// moved with it.
 
 #[cfg(test)]
 mod resolve_vendor_env_override_tests {
@@ -372,13 +168,11 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
                 // Shadow `agent.provider` with the bound ABF bundle's copy,
                 // the readonly-once-set source of truth (see
-                // resolve_effective_provider_id's own doc comment) — one
-                // lookup here instead of rewriting every downstream
-                // `agent.provider` read in this handler. See
-                // resolve_bound_bundle's own doc comment for why this
-                // MUST be app_state.id_store, never wstore.
-                let bundle = resolve_bound_bundle(&app_state.id_store, &agent);
-                agent.provider = resolve_effective_provider_id(&agent, bundle.as_ref());
+                // Store::resolve_effective_provider_id's own doc comment
+                // in backend/storage/agents.rs) — one lookup here instead
+                // of rewriting every downstream `agent.provider` read in
+                // this handler. MUST be app_state.id_store, never wstore.
+                agent.provider = app_state.id_store.resolve_effective_provider_id(&agent);
 
                 // Serialize the rest of this handler per agent definition —
                 // held until the function returns (guard drops at every exit
