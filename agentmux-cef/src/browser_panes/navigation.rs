@@ -128,19 +128,37 @@ impl BrowserPaneManager {
     /// PR #2599). `Frame::copy/cut/paste` operate on whatever is currently
     /// selected/focused in that frame, exactly like CEF's own native menu
     /// commands would have.
+    ///
+    /// Uses `state.browser_pane_context_menu_frame`'s stashed frame — the
+    /// ACTUAL frame `client::context_menu::run_context_menu` saw the
+    /// right-click land on — instead of unconditionally
+    /// `b.main_frame()`. For a page with sub-frames/iframes (ads, embeds,
+    /// widgets), the selection/focus can live in a sub-frame; acting on
+    /// `main_frame()` there would silently no-op or paste into the wrong
+    /// place (reagentx P1, second finding on PR #2599). Falls back to
+    /// `main_frame()` only if nothing was stashed (e.g. this pane never had
+    /// its context menu invoked in this session).
+    fn edit_target_frame(&self, block_id: &str, state: &Arc<AppState>, browser: &mut Browser) -> Option<Frame> {
+        state
+            .browser_pane_context_menu_frame
+            .lock()
+            .get(block_id)
+            .cloned()
+            .or_else(|| browser.main_frame())
+    }
     pub fn copy(&self, block_id: &str, state: &Arc<AppState>) {
         if let Some(mut b) = self.live_browser(state, block_id) {
-            if let Some(frame) = b.main_frame() { frame.copy(); }
+            if let Some(frame) = self.edit_target_frame(block_id, state, &mut b) { frame.copy(); }
         }
     }
     pub fn cut(&self, block_id: &str, state: &Arc<AppState>) {
         if let Some(mut b) = self.live_browser(state, block_id) {
-            if let Some(frame) = b.main_frame() { frame.cut(); }
+            if let Some(frame) = self.edit_target_frame(block_id, state, &mut b) { frame.cut(); }
         }
     }
     pub fn paste(&self, block_id: &str, state: &Arc<AppState>) {
         if let Some(mut b) = self.live_browser(state, block_id) {
-            if let Some(frame) = b.main_frame() { frame.paste(); }
+            if let Some(frame) = self.edit_target_frame(block_id, state, &mut b) { frame.paste(); }
         }
     }
 }

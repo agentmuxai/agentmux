@@ -38,6 +38,7 @@ impl AgentMuxHandler {
     pub(crate) fn run_context_menu(
         &mut self,
         browser: Option<&mut Browser>,
+        frame: Option<&mut Frame>,
         params: Option<&mut ContextMenuParams>,
         callback: Option<&mut RunContextMenuCallback>,
     ) -> ::std::os::raw::c_int {
@@ -61,11 +62,28 @@ impl AgentMuxHandler {
             return 0;
         };
 
+        // Stash the ACTUAL frame that was right-clicked (not necessarily
+        // `browser.main_frame()` — a page with sub-frames/iframes, e.g. ads
+        // or embeds, can have the selection/focus live in one of those
+        // instead) so the Copy/Cut/Paste menu items act on the right frame
+        // when the user clicks one, rather than always the top-level frame
+        // regardless of where the right-click actually landed (reagentx P1
+        // on PR #2599). Print/View Source/Inspect/Reload/Back/Forward stay
+        // top-level-only — CEF's own equivalents for those are Browser-level
+        // (or, for View Source, an accepted simplification — see
+        // `browser_panes::navigation::view_source`'s doc comment).
+        if let Some(f) = frame.as_deref() {
+            self.state
+                .browser_pane_context_menu_frame
+                .lock()
+                .insert(block_id.clone(), f.clone());
+        }
+
         // Coordinates are relative to the PANE's own render view origin, not
         // the main window — the frontend translates them using the pane's
         // own DOM wrapper rect (`.block-<block_id>`), which the native
-        // overlay is always positioned to exactly match. See
-        // `browser-pane-context-menu-bridge.ts`.
+        // overlay is always positioned to exactly match. See the
+        // `browser-pane-context-menu` listener in `blockframe.tsx`.
         let x = p.xcoord();
         let y = p.ycoord();
         let link_url = CefString::from(&p.link_url()).to_string();

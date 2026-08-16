@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use parking_lot::Mutex;
 
-use cef::Browser;
+use cef::{Browser, Frame};
 
 mod drag;
 mod window_meta;
@@ -479,6 +479,20 @@ pub struct AppState {
     /// fresh navigation replaces the page's own DOM/style state.
     pub browser_pane_zoom: Mutex<std::collections::HashMap<String, f64>>,
 
+    /// The specific `Frame` right-clicked to open the unified browser-pane
+    /// context menu (SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md),
+    /// keyed by pane `block_id`. Populated by `client::context_menu`'s
+    /// `run_context_menu` from CEF's own `frame` callback param — that's the
+    /// actual frame that was right-clicked, which for a page containing
+    /// sub-frames/iframes (ads, embeds, widgets) is NOT always
+    /// `browser.main_frame()`. Consumed by the Copy/Cut/Paste menu items
+    /// (`browser_panes::navigation::copy/cut/paste`) so they operate on
+    /// whichever frame actually holds the selection/focus, instead of always
+    /// acting on the top-level frame regardless of where the user actually
+    /// right-clicked (reagentx P1 on PR #2599). Cleared on pane close
+    /// alongside `browser_pane_zoom` (see `browser_pane::callbacks::on_before_close_browser_pane`).
+    pub browser_pane_context_menu_frame: Mutex<std::collections::HashMap<String, Frame>>,
+
     /// Browser DOM API state — CDP target cache + future connection
     /// pool. See `crate::browser_api`.
     pub browser_api: crate::browser_api::BrowserApiState,
@@ -631,6 +645,7 @@ impl Default for AppState {
             // active_drag deleted (PR #5 H.3) — see HostState.active_drag.
             browser_panes: crate::browser_panes::BrowserPaneManager::new(),
             browser_pane_zoom: Mutex::new(std::collections::HashMap::new()),
+            browser_pane_context_menu_frame: Mutex::new(std::collections::HashMap::new()),
             browser_api: crate::browser_api::BrowserApiState::new(),
             debug_port: Mutex::new(0),
             cef_cache_dir: Mutex::new(None),

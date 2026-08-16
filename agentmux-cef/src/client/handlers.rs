@@ -631,13 +631,13 @@ wrap_context_menu_handler! {
         fn run_context_menu(
             &self,
             browser: Option<&mut Browser>,
-            _frame: Option<&mut Frame>,
+            frame: Option<&mut Frame>,
             params: Option<&mut ContextMenuParams>,
             _model: Option<&mut MenuModel>,
             callback: Option<&mut RunContextMenuCallback>,
         ) -> ::std::os::raw::c_int {
             let mut inner = self.inner.lock();
-            inner.run_context_menu(browser, params, callback)
+            inner.run_context_menu(browser, frame, params, callback)
         }
     }
 }
