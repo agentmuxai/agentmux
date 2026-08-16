@@ -458,11 +458,32 @@ pub unsafe fn install_browser_pane_focus_redirect(
                         "[browser-pane:diag][{}] emit-clicked",
                         block_id_short,
                     );
-                    crate::events::emit_event_from_state(
-                        &state,
-                        "browser-pane-clicked",
-                        &serde_json::json!({ "block_id": ctx.block_id }),
-                    );
+                    // Route to the pane's ACTUAL owning window, not "main" —
+                    // a pane torn off into its own floating window has its
+                    // own JS context; `emit_event_from_state`'s "main"/
+                    // first-available fallback delivered this to the wrong
+                    // window (or none) for floating panes, so neither pane
+                    // selection nor (later) the outside-click-dismiss bridge
+                    // built on this event worked there (reagentx P1 on PR
+                    // #2597). Same fix as `browser-pane-shortcut`
+                    // (handlers.rs) and `browser-pane-context-menu`
+                    // (context_menu.rs).
+                    match state.browser_pane_window_label(&ctx.block_id) {
+                        Some(window_label) => {
+                            crate::events::emit_event_to_window(
+                                &state,
+                                &window_label,
+                                "browser-pane-clicked",
+                                &serde_json::json!({ "block_id": ctx.block_id }),
+                            );
+                        }
+                        None => {
+                            tracing::warn!(
+                                "[pane-wndproc] WM_LBUTTONDOWN — no owning window label for block_id={}",
+                                ctx.block_id
+                            );
+                        }
+                    }
                 } else {
                     tracing::warn!("[pane-wndproc] WM_LBUTTONDOWN — state dropped, skipping emit");
                 }
