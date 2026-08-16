@@ -135,16 +135,33 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
     // provider.
     //
     // `createResource` rather than an inline async fetch inside the
-    // memo below: memos must stay synchronous, so the fetch lives here
-    // and downstream memos read `effectiveProviderId()`, which starts
-    // as `props.agent.provider` (safe default) and reactively updates
-    // once the bundle resolves — same fallback-on-anything-but-success
-    // semantics as `resolveEffectiveLaunchProvider`.
+    // memo below: memos must stay synchronous, so the fetch lives here.
     const [boundBundle] = createResource(
         () => props.agent.memory_id || undefined,
         (memoryId) => RpcApi.GetMemoryCommand(TabRpcClient, { id: memoryId }).catch(() => undefined),
     );
-    const effectiveProviderId = createMemo(() => boundBundle()?.provider || props.agent.provider);
+    // While a BOUND agent's bundle fetch is still in flight, resolve to
+    // "" (empty/unknown) rather than falling back to `props.agent.provider`
+    // — P1 fix, ReAgent review on PR #2596: the account auto-pick
+    // `createEffect` below only picks when `accountId()` is still empty,
+    // and once it picks it never re-evaluates (Solid stops tracking
+    // `provider()` as a dependency the moment the effect returns early on
+    // `accountId()` being set). If the STALE `agent.provider` value was
+    // itself a real, recognized provider with its own account, the
+    // effect would auto-pick that WRONG account on the synchronous
+    // pre-resolution render and then never self-correct once the bundle
+    // resolves the real provider — silently defeating this whole fix for
+    // exactly the drift case it exists to close. Exposing "" (which
+    // resolves to no provider / no accounts) during the loading window
+    // instead means nothing gets auto-picked until the real value is
+    // known, so the auto-pick effect only ever fires once, against the
+    // correct resolved provider. `boundBundle.loading` is `false` for an
+    // unbound agent (the fetcher never runs when the resource's source is
+    // falsy), so this adds no delay for the common unbound case.
+    const effectiveProviderId = createMemo(() => {
+        if (props.agent.memory_id && boundBundle.loading) return "";
+        return boundBundle()?.provider || props.agent.provider;
+    });
 
     const catalog = createMemo(() => getCliCatalogEntry(effectiveProviderId()));
     const displayName = () => catalog()?.displayName ?? props.agent.name;
