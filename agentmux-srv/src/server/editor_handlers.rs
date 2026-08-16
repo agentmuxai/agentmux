@@ -106,6 +106,7 @@ fn inject_global_bundles(claude_md: &str, id_store: &Arc<Store>) -> String {
 
 pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
+    let wstore = state.wstore.clone();
     let editor_file_watcher = state.editor_file_watcher.clone();
     let media_file_watcher = state.media_file_watcher.clone();
 
@@ -207,8 +208,9 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
         COMMAND_WRITE_AGENT_CONFIG,
         Box::new(move |data, _ctx| {
             let id_store = id_store.clone();
+            let wstore = wstore.clone();
             Box::pin(async move {
-                let cmd: CommandWriteAgentConfigData = serde_json::from_value(data)
+                let mut cmd: CommandWriteAgentConfigData = serde_json::from_value(data)
                     .map_err(|e| format!("writeagentconfig: {e}"))?;
                 tracing::info!(
                     working_dir = %cmd.working_dir,
@@ -216,6 +218,42 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     auto_allocate = cmd.auto_allocate,
                     "WriteAgentConfig"
                 );
+
+                // Host-tier + LAN-tier jekt sender signing keys — see
+                // `agent_config::inject_jekt_signing_keys_into_mcp_json`'s doc
+                // comment. This is the actual "click Launch" path (per this
+                // handler's own doc below); `agent.open`'s equivalent
+                // injection alone left every normally-launched agent's
+                // jekts rendering TRUST=self-declared, since the frontend's
+                // `agent-config-builder.ts` only ever sets AGENTMUX_AGENT_ID.
+                // Best-effort — a missing/unresolvable agent slug or a
+                // key-ensure failure just means this materialization goes
+                // out unsigned, same as any other spawn.
+                if let Some(pos) = cmd.files.iter().position(|f| f.path == ".mcp.json") {
+                    let agent_slug = serde_json::from_str::<serde_json::Value>(&cmd.files[pos].content)
+                        .ok()
+                        .and_then(|v| {
+                            v.pointer("/mcpServers/agentmux/env/AGENTMUX_AGENT_ID")
+                                .and_then(|s| s.as_str())
+                                .map(str::to_string)
+                        });
+                    if let Some(agent_slug) = agent_slug {
+                        if let Some(rewritten) = crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(
+                            &cmd.files[pos].content,
+                            &wstore,
+                            &agent_slug,
+                        ) {
+                            cmd.files[pos].content = rewritten;
+                        } else {
+                            tracing::warn!(
+                                agent_slug = %agent_slug,
+                                "WriteAgentConfig: jekt/LAN signing keys not injected into .mcp.json — \
+                                 this agent's jekts will render TRUST=self-declared / TRUST=network-claimed \
+                                 instead of verified"
+                            );
+                        }
+                    }
+                }
 
                 // Resolve to a final on-disk path. For auto-generated
                 // instance paths (`auto_allocate: true`), use the
@@ -1031,5 +1069,57 @@ mod tests {
             "stale .claude/skills/deploy/SKILL.md must be removed by the writeagentconfig path too"
         );
         assert!(base_path.join(".claude/commands/deploy.md").exists());
+    }
+
+    /// docs/specs/REPORT_JEKT_SIGNING_KEY_INJECTION_GAP_2026_08_16.md: before
+    /// this fix, `WriteAgentConfig` (the actual "click Launch" path) never
+    /// injected jekt/LAN signing keys at all -- only `agent.open` did, a
+    /// path most normal launches don't go through. This exercises the exact
+    /// slug-extraction-then-injection sequence the real handler runs,
+    /// against the real `rpc_types::AgentConfigFile{path, content}` shape
+    /// the frontend's `agent-config-builder.ts` actually produces (only
+    /// `AGENTMUX_AGENT_ID` set -- no jekt fields), the same
+    /// field-name-mismatch class of bug the test above this one guards
+    /// against for `managed_skill_file_paths`.
+    #[test]
+    fn writeagentconfig_extracts_slug_and_injects_signing_keys_into_the_real_mcp_json_shape() {
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let files = vec![AgentConfigFile {
+            path: ".mcp.json".to_string(),
+            content: serde_json::to_string(&serde_json::json!({
+                "mcpServers": {
+                    "agentmux": {
+                        "type": "stdio",
+                        "command": "agentmux-mcp",
+                        "args": [],
+                        "env": { "AGENTMUX_AGENT_ID": "aria" }
+                    }
+                }
+            }))
+            .unwrap(),
+        }];
+
+        let pos = files.iter().position(|f| f.path == ".mcp.json").unwrap();
+        let agent_slug = serde_json::from_str::<serde_json::Value>(&files[pos].content)
+            .ok()
+            .and_then(|v| {
+                v.pointer("/mcpServers/agentmux/env/AGENTMUX_AGENT_ID")
+                    .and_then(|s| s.as_str())
+                    .map(str::to_string)
+            })
+            .expect("must extract the agent slug from the real .mcp.json shape");
+        assert_eq!(agent_slug, "aria");
+
+        let rewritten = crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(
+            &files[pos].content,
+            &store,
+            &agent_slug,
+        )
+        .expect("keys must ensure successfully against a fresh in-memory store");
+        let parsed: serde_json::Value = serde_json::from_str(&rewritten).unwrap();
+        let env = &parsed["mcpServers"]["agentmux"]["env"];
+        assert_eq!(env["AGENTMUX_AGENT_ID"], "aria");
+        assert!(env["AGENTMUX_JEKT_KEY"].is_string() && !env["AGENTMUX_JEKT_KEY"].as_str().unwrap().is_empty());
+        assert!(env["AGENTMUX_LAN_KEY"].is_string() && !env["AGENTMUX_LAN_KEY"].as_str().unwrap().is_empty());
     }
 }
