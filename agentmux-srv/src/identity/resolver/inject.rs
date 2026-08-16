@@ -282,14 +282,32 @@ pub fn inject_identity_env_with_broker(
     // definition row reads as flag=false / no expected provider — the
     // per-binding gate still applies to whatever links exist.
     //
+    // Provider is resolved via `id_store.resolve_effective_provider_id`
+    // (`backend/storage/agents.rs`), NOT `d.provider` directly — the
+    // definition's own column can drift post-creation (`agent.define`'s
+    // `if_exists=update` path) while the agent's bound ABF bundle's copy
+    // is backend-enforced immutable, so the bundle is the one to trust
+    // for a security-relevant decision like this gate. Found during a
+    // follow-up scoping pass after `agent_open.rs`'s spawn path was fixed
+    // for the identical bug (ReAgent review, PR #2587 round 3) — the same
+    // resolution logic is now shared between both call sites specifically
+    // so they can't drift on it independently again.
+    //
     // Canonicalized via `resolve_provider_alias` (codex P1 on PR #2377): a
     // definition's own `provider` field predates this alias table in rare
     // cases, and this value is compared below against `injected_oauth` /
     // `bindings`' raw (possibly aliased) provider strings — comparing
     // uncanonicalized would let a genuinely-injected alias-only binding
-    // still trip the "no account bound" gate.
+    // still trip the "no account bound" gate. Applied to the bundle-
+    // resolved value, not the raw column, so an aliased definition whose
+    // bundle already carries the canonical id doesn't get re-aliased
+    // incorrectly (resolve_provider_alias is idempotent on an
+    // already-canonical id, so this is safe either way).
     let (use_ambient, def_provider) = match wstore.agent_def_get(&instance.definition_id) {
-        Ok(Some(d)) => (d.use_ambient_login != 0, Some(resolve_provider_alias(&d.provider).to_string())),
+        Ok(Some(d)) => {
+            let effective_provider = id_store.resolve_effective_provider_id(&d);
+            (d.use_ambient_login != 0, Some(resolve_provider_alias(&effective_provider).to_string()))
+        }
         Ok(None) => (false, None),
         Err(e) => {
             tracing::warn!(
@@ -573,7 +591,7 @@ mod tests {
     use super::*;
     use super::super::oauth_probe::oauth_status;
     use crate::backend::storage::store::{
-        AgentInstance, IdentityAccount, InstanceStatus, SecretRef,
+        AgentInstance, IdentityAccount, InstanceStatus, Memory, SecretRef,
     };
 
     fn make_store() -> Arc<Store> {
@@ -1815,5 +1833,122 @@ mod tests {
         // updated_at unchanged — the resolver only upserts when the
         // probed status differs from the stored value.
         assert_eq!(after.updated_at, 0);
+    }
+
+    // P0 regression test (found in a follow-up scoping pass after
+    // agent_open.rs's identical bug was fixed in PR #2587 round 3):
+    // the layer-3 gate must resolve the definition's provider through
+    // its bound ABF bundle (`id_store.resolve_effective_provider_id`),
+    // not `d.provider` directly. Uses two genuinely separate stores —
+    // wstore (definition, block, instance) and id_store (bundle,
+    // account, link) — so the test can't pass by accident the way it
+    // would if both roles were backed by the same `Arc<Store>`, which
+    // every OTHER test in this module does (matching production's
+    // AppState.wstore/id_store split, but meaning none of them could
+    // have caught this class of bug).
+    //
+    // Scenario: the definition's own `provider` column has drifted to
+    // "codex" (e.g. via a since-superseded agent.define update), but
+    // its bound bundle's copy — the backend-enforced-immutable one —
+    // still correctly says "claude", and the agent has a perfectly
+    // valid Claude OAuth account bound. Before the fix, the gate read
+    // `d.provider` directly, saw "codex", found no binding for codex
+    // (only claude), and WRONGLY BLOCKED a correctly-configured agent's
+    // spawn with "no account bound for the agent's provider" — even
+    // though a valid claude credential was right there. After the fix,
+    // it resolves "claude" via the bundle, the claude binding injects
+    // successfully, and the spawn proceeds.
+    #[test]
+    fn spawn_gate_resolves_provider_through_the_bound_bundle_not_the_drifted_definition_column() {
+        let wstore = make_store();
+        // Real shared-store schema, not open_in_memory's channel schema —
+        // db_agent_identity_links only has a `db_agent_definitions` FK in
+        // the channel schema (migrations.rs:334); the shared-store schema
+        // (migrations.rs:829) deliberately omits it, since agent
+        // definitions never live in the shared store. Using two
+        // open_in_memory() stores here would incorrectly enforce an FK
+        // that doesn't exist in production's real id_store.
+        let id_store_tmp = tempfile::NamedTempFile::new().unwrap();
+        let id_store = Arc::new(Store::open_shared(id_store_tmp.path()).unwrap());
+
+        let mut def = crate::backend::storage::store::AgentDefinition {
+            id: "def-1".to_string(),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: "✦".to_string(),
+            // Drifted: the definition's own column says codex...
+            provider: "codex".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            // ...but its bound bundle (below, in id_store) says claude.
+            memory_id: "bundle-1".to_string(),
+        };
+        wstore.agent_def_insert(&mut def).unwrap();
+
+        let bundle = Memory {
+            id: "bundle-1".to_string(),
+            name: "Drift Test Bundle".to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: false,
+            provider: "claude".to_string(),
+            model: "anthropic".to_string(),
+            instructions: String::new(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+        };
+        id_store.bundle_memory_upsert(&bundle).unwrap();
+
+        let claude = make_account(
+            "acct-drift",
+            "claude",
+            SecretRef::OAuthConfigDir {
+                dir: "/var/agentmux/identities/id-drift/claude".to_string(),
+            },
+        );
+        id_store.identity_upsert(&claude).unwrap();
+        id_store
+            .agent_identity_link("def-1", "acct-drift", "claude")
+            .unwrap();
+
+        insert_block_for_agent(&wstore, "block-drift", "def-1");
+        let inst = make_instance("block-drift", "id-drift");
+        wstore.instance_create(&inst).unwrap();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        let res = inject_identity_env(wstore, id_store, "block-drift", &mut env);
+
+        assert!(res.is_ok(), "a valid claude account must not be blocked by a stale codex column: {res:?}");
+        assert_eq!(
+            env.get("CLAUDE_CONFIG_DIR").map(String::as_str),
+            Some("/var/agentmux/identities/id-drift/claude"),
+            "the claude binding must actually inject, proving the gate expected claude (from the bundle), not codex (from the drifted column)"
+        );
     }
 }
