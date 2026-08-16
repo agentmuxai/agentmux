@@ -32,6 +32,7 @@ import { DiagPanel } from "./devtools/diag-panel";
 import { checkSeparatorParity, setupDprTracking } from "./init/dpr";
 import { NotificationBubbles } from "./notification/notificationbubbles";
 import { MemoryPressureBanner } from "./notification/memory-pressure-banner";
+import { BrowserPaneOutsideClickBridge } from "./window/browser-pane-outside-click-bridge";
 
 import "./app.scss";
 
@@ -339,6 +340,7 @@ const AppInner = () => {
                 <AppZoomHandler />
                 <AppFocusHandler />
                 <AppSettingsUpdater />
+                <BrowserPaneOutsideClickBridge />
                 <Show when={!IS_FLOATING_PANE}>
                     {/* Low-memory warning banners — app-wide, non-modal,
                         dismissible. Driven by the host's mem_pressure level.

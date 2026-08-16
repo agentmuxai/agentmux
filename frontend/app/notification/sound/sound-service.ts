@@ -73,8 +73,19 @@ export function installSoundService(): () => void {
     // Prime AudioContext on the first user gesture, exactly once.
     // After priming, hook the tool-tones chain into the same context +
     // master gain so a single OS volume slider controls both subsystems.
-    const onceOpts: AddEventListenerOptions = { capture: true, once: true };
-    const primeOnce = async () => {
+    //
+    // Deliberately NOT `{ once: true }`: the browser's autoplay policy
+    // requires a REAL user gesture to unlock an AudioContext, so a
+    // synthetic (non-trusted) event must be ignored rather than consumed --
+    // `{ once: true }` would remove the listener on ANY event regardless of
+    // what the handler does, permanently losing the ability to prime via
+    // that gesture type if the first one to arrive happened to be synthetic
+    // (e.g. window/browser-pane-outside-click-bridge.ts's own synthetic
+    // pointerdown -- reagentx P1 on PR #2597). Removal is manual instead,
+    // gated on isTrusted, so an untrusted event leaves both listeners armed
+    // for the next real one.
+    const primeOnce = async (e: Event) => {
+        if (!e.isTrusted) return;
         document.removeEventListener("pointerdown", primeOnce, true);
         document.removeEventListener("keydown", primeOnce, true);
         await player.prime();
@@ -88,8 +99,8 @@ export function installSoundService(): () => void {
             }
         }
     };
-    document.addEventListener("pointerdown", primeOnce, onceOpts);
-    document.addEventListener("keydown", primeOnce, onceOpts);
+    document.addEventListener("pointerdown", primeOnce, { capture: true });
+    document.addEventListener("keydown", primeOnce, { capture: true });
 
     // Reactively thread the master-volume + tool-tones-volume settings
     // into their respective gain nodes.
