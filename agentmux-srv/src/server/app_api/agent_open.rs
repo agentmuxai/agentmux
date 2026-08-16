@@ -768,78 +768,34 @@ pub(super) fn write_agent_config_files(
         }
     }
 
-    // Host-tier jekt sender signing key (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md
-    // §2.2) — inject AGENTMUX_JEKT_KEY into the agentmux MCP server's own env,
-    // right alongside AGENTMUX_AGENT_ID, so `SendMessage`/`Loop` can sign
-    // outgoing jekts as this agent. Ensured (minted on first use, reused after)
-    // via the same Store this function already has; never returned over any
-    // RPC, never written anywhere but this ONE agent's own process env and
-    // srv's own local table. Best-effort: a failure here must never block
-    // agent spawn — the agent still launches, just without a key, and its
-    // jekts render TRUST=self-declared instead of host-verified until the
-    // next successful spawn.
-    if let Ok(key) = wstore.agent_jekt_key_ensure(agent_slug) {
-        if let Some(pos) = config_files.iter().position(|f| f.filename == ".mcp.json") {
-            let key_b64 = {
-                use base64::Engine as _;
-                base64::engine::general_purpose::STANDARD.encode(&key)
-            };
-            match serde_json::from_str::<serde_json::Value>(&config_files[pos].content) {
-                Ok(mut mcp_json) => {
-                    if let Some(env) = mcp_json
-                        .pointer_mut("/mcpServers/agentmux/env")
-                        .and_then(|v| v.as_object_mut())
-                    {
-                        env.insert("AGENTMUX_JEKT_KEY".to_string(), serde_json::json!(key_b64));
-                        if let Ok(rewritten) = serde_json::to_string_pretty(&mcp_json) {
-                            config_files[pos].content = rewritten;
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        agent_id = %agent.id,
-                        error = %e,
-                        "agent_open: .mcp.json failed to parse — AGENTMUX_JEKT_KEY not injected, \
-                         this agent's jekts will render TRUST=self-declared instead of host-verified"
-                    );
-                }
-            }
-        }
-    }
-
-    // LAN-tier jekt sender signing key (SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md
-    // §2.1) — same injection pattern as AGENTMUX_JEKT_KEY immediately above,
-    // asymmetric instead of symmetric: only the PRIVATE half goes into this
-    // one agent's own process env; the public half is what LAN peers query
-    // for over `GET /agentmux/reactive/agent` (see
-    // `handle_reactive_agent`/`LanDiscoveryController::find_agent_lan_pubkey`).
-    // Same best-effort guarantee — a failure here must never block agent
-    // spawn, and until the next successful spawn this agent's LAN jekts
-    // simply carry no lan_sig (TRUST=network-claimed, not lan-verified,
-    // exactly as if this feature didn't exist).
-    if let Ok(keypair) = wstore.agent_lan_key_ensure(agent_slug) {
-        if let Some(pos) = config_files.iter().position(|f| f.filename == ".mcp.json") {
-            match serde_json::from_str::<serde_json::Value>(&config_files[pos].content) {
-                Ok(mut mcp_json) => {
-                    if let Some(env) = mcp_json
-                        .pointer_mut("/mcpServers/agentmux/env")
-                        .and_then(|v| v.as_object_mut())
-                    {
-                        env.insert("AGENTMUX_LAN_KEY".to_string(), serde_json::json!(keypair.private_key));
-                        if let Ok(rewritten) = serde_json::to_string_pretty(&mcp_json) {
-                            config_files[pos].content = rewritten;
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        agent_id = %agent.id,
-                        error = %e,
-                        "agent_open: .mcp.json failed to parse — AGENTMUX_LAN_KEY not injected, \
-                         this agent's LAN jekts will render TRUST=network-claimed instead of lan-verified"
-                    );
-                }
+    // Host-tier + LAN-tier jekt sender signing keys
+    // (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2,
+    // SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.1) — inject
+    // AGENTMUX_JEKT_KEY / AGENTMUX_LAN_KEY into the agentmux MCP server's
+    // own env, right alongside AGENTMUX_AGENT_ID, so `SendMessage`/`Loop`
+    // can sign outgoing jekts as this agent. Best-effort: a failure here
+    // must never block agent spawn — the agent still launches, just
+    // without a key, and its jekts render TRUST=self-declared /
+    // TRUST=network-claimed instead of verified until the next successful
+    // materialization. Shared with `WriteAgentConfig`
+    // (server/editor_handlers.rs, the "click Launch" path) via
+    // `agent_config::inject_jekt_signing_keys_into_mcp_json` — see that
+    // function's doc comment for why this must not be duplicated inline
+    // again.
+    if let Some(pos) = config_files.iter().position(|f| f.filename == ".mcp.json") {
+        match crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(
+            &config_files[pos].content,
+            &wstore,
+            agent_slug,
+        ) {
+            Some(rewritten) => config_files[pos].content = rewritten,
+            None => {
+                tracing::warn!(
+                    agent_id = %agent.id,
+                    "agent_open: jekt/LAN signing keys not injected into .mcp.json — \
+                     this agent's jekts will render TRUST=self-declared / TRUST=network-claimed \
+                     instead of verified"
+                );
             }
         }
     }
