@@ -47,6 +47,26 @@ pub(crate) fn link_history_if_isolated(
     if !agentmux_common::isolated_auth_enabled() {
         return;
     }
+    // reagentx P2 / chatgpt-codex-connector on PR #2605: `identity_dir`'s
+    // safe-path-segment rejection (empty / `.` / `..` / a segment with
+    // `/`, `\`, a drive-letter colon, …) is validated HERE, once, for
+    // every caller — `identity_auth_dirs.rs`'s own two call sites happen
+    // to already validate `entity_id` earlier in their own function body
+    // (via this same check) before ever reaching this point, but
+    // `inject.rs`'s ordinary-spawn call site reads `entity_id` straight
+    // from a stored `binding.account_id` with no such upstream check.
+    // Rather than trust every current AND future caller to remember
+    // this, `identity_history_dir`'s own documented precondition is
+    // enforced right here instead.
+    if paths.identity_dir(entity_id).is_none() {
+        tracing::warn!(
+            target: "identity",
+            provider_id = provider.id,
+            entity_id,
+            "{log_ctx}: entity_id is not a safe path segment — skipping history link"
+        );
+        return;
+    }
     if let Err(e) = agentmux_common::ensure_history_link(
         &dir.join(subdir),
         &paths.identity_history_dir(entity_id, provider.auth_dir_name, subdir),
@@ -423,6 +443,45 @@ mod tests {
         let via_isolated_path = std::fs::read(dir.join("projects").join("real-session.jsonl"))
             .expect("a file written at the global history location must be readable through the isolated credential dir's projects/ subpath");
         assert_eq!(via_isolated_path, b"a real session");
+
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        for (k, _) in paths.to_env_vars() {
+            std::env::remove_var(k);
+        }
+    }
+
+    // reagentx P2 / chatgpt-codex-connector on PR #2605: link_history_if_isolated
+    // must reject an unsafe entity_id itself (defense in depth), not
+    // rely on every caller having already validated it upstream —
+    // inject.rs's spawn-path call site passes a stored account_id with
+    // no such upstream check.
+    #[test]
+    fn link_history_if_isolated_rejects_an_unsafe_entity_id() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        std::env::set_var("AGENTMUX_ISOLATED_AUTH", "1");
+        let paths = agentmux_common::DataPaths::resolve(
+            "0.0.0-test",
+            &agentmux_common::RuntimeMode::Installed,
+        )
+        .unwrap();
+        paths.ensure_dirs().unwrap();
+        for (k, v) in paths.to_env_vars() {
+            std::env::set_var(k, v);
+        }
+
+        let provider = get_provider("claude").unwrap();
+        let dir = tmp.path().join("some-credential-dir");
+        std::fs::create_dir_all(&dir).unwrap();
+        // Must not panic, must not create anything under
+        // shared/identities/../ — an unsafe segment is simply skipped.
+        link_history_if_isolated(&paths, &dir, provider, "../escape", "test");
+        assert!(
+            !paths.shared_dir.join("identities").parent().unwrap().join("escape").exists(),
+            "an unsafe entity_id must never be used to construct a real filesystem path"
+        );
 
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
         std::env::remove_var("AGENTMUX_ISOLATED_AUTH");

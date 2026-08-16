@@ -1794,4 +1794,41 @@ mod tests {
             "the file must still exist, untouched, after the refused operation"
         );
     }
+
+    // chatgpt-codex-connector + reagentx both claimed on PR #2605 that
+    // `std::fs::symlink_metadata` reports a Windows junction as
+    // `is_dir()=true, is_symlink()=false` — which, if true, would mean
+    // `ensure_history_link`'s `meta.is_dir() && !meta.file_type().is_symlink()`
+    // migration-branch check incorrectly treats a stale junction as a
+    // real directory. Verified empirically (twice, independently) that
+    // this claim is FALSE for the actual Rust std + toolchain this crate
+    // builds with: a real junction reports `is_dir()=false,
+    // is_symlink()=true` via `symlink_metadata` — `is_dir()=true` only
+    // shows up via `fs::metadata` (which follows the link, as
+    // documented). Kept as a permanent test, not deleted after
+    // resolving the review thread, so a future "fix" for this
+    // non-existent bug doesn't silently reintroduce one by "fixing"
+    // something that was already correct.
+    #[cfg(windows)]
+    #[test]
+    fn windows_junction_is_reported_as_symlink_not_as_a_real_directory() {
+        let tmp = TempDir::new().expect("tempdir");
+        let link = tmp.path().join("isolated").join("linked");
+        let target = tmp.path().join("global");
+        ensure_history_link(&link, &target).unwrap();
+
+        assert!(junction::exists(&link).unwrap(), "sanity: this must actually be a junction");
+
+        let meta = std::fs::symlink_metadata(&link).unwrap();
+        assert!(
+            meta.file_type().is_symlink(),
+            "a Windows junction must report is_symlink()=true via symlink_metadata"
+        );
+        assert!(
+            !meta.is_dir(),
+            "a Windows junction must NOT report is_dir()=true via symlink_metadata (only via the \
+             link-following fs::metadata) — if this ever changes, ensure_history_link's migration \
+             branch needs the junction::exists() check the (currently incorrect) review claimed was missing"
+        );
+    }
 }
