@@ -56,6 +56,7 @@ mod display;
 pub(crate) mod navigation;
 mod crash_recovery;
 mod recovery_pages;
+mod context_menu;
 #[cfg(target_os = "windows")]
 mod wndproc;
 #[cfg(target_os = "windows")]

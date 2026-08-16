@@ -515,7 +515,20 @@ declare global {
         viewComponent: ViewComponent<any>;
         isBasicTerm?: () => boolean;
         getSettingsMenuItems?: () => ContextMenuItem[];
-        getBodyContextMenuItems?: () => ContextMenuItem[];
+        /** `browserCtx` is populated only for a browser pane's synthetic
+         *  context menu (its native overlay content has no real DOM
+         *  `contextmenu` event to carry this info — see
+         *  SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md). Every other
+         *  view type's implementation simply ignores the extra argument. */
+        getBodyContextMenuItems?: (browserCtx?: {
+            x?: number;
+            y?: number;
+            linkUrl?: string;
+            selectionText?: string;
+            isEditable?: boolean;
+            canGoBack?: boolean;
+            canGoForward?: boolean;
+        }) => ContextMenuItem[];
         giveFocus?: () => boolean;
         keyDownHandler?: (e: WaveKeyboardEvent) => boolean;
         dispose?: () => void;
