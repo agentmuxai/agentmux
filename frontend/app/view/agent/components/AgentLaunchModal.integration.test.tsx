@@ -16,7 +16,7 @@
  * AuthFlowController.
  */
 
-import { render, screen } from "@solidjs/testing-library";
+import { cleanup, render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -35,6 +35,12 @@ vi.mock("@/app/store/rpc-api", () => {
         // undefined, which the store treats as "unavailable"; fine as a
         // default for tests that don't care about Docker state.
         ContainerRuntimeAvailableCommand: vi.fn(),
+        // Backs `effectiveProviderId`'s bound-bundle resolution (PR
+        // following #2592/#2594) — resolves to `undefined` by default so
+        // existing tests (none of whose agent fixtures set `memory_id`)
+        // never even trigger the fetch; tests that DO exercise the
+        // resolution set their own `mockResolvedValue`.
+        GetMemoryCommand: vi.fn().mockResolvedValue(undefined),
     };
     return { RpcApi };
 });
@@ -115,6 +121,26 @@ const claudeAgent = {
     is_seeded: 0,
 } as AgentDefinition;
 
+// The same drift scenario PR #2592 fixed on the backend: the agent's own
+// `provider` column says "codex" (unrecognized by this file's
+// `getProvider` mock, which only knows "claude"), but it's bound to a
+// bundle whose provider correctly says "claude".
+const driftedProviderAgent = {
+    ...claudeAgent,
+    id: "agent-drift",
+    provider: "codex",
+    memory_id: "mem-bundle-1",
+} as AgentDefinition;
+
+const driftedAgentsBundle: Memory = {
+    id: "mem-bundle-1",
+    name: "Drift Test Bundle",
+    is_blank: false,
+    provider: "claude",
+    created_at: ts(),
+    updated_at: ts(),
+};
+
 const workAccount = {
     id: "acct-work",
     name: "Work",
@@ -159,6 +185,13 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+    // This file only ever had one test before; adding more exposed that
+    // it never unmounted between runs (no global afterEach(cleanup) in
+    // test/vitest-setup.ts, unlike files that call this explicitly).
+    // Without it, a still-live component from a prior test's render
+    // (including its still-reactive createResource calls) can pollute
+    // the next test's DOM queries.
+    cleanup();
     vi.restoreAllMocks();
 });
 
@@ -210,5 +243,43 @@ describe("AgentLaunchModal — memory change must not reset auth state (§6.10)"
         ).not.toBeInTheDocument();
         expect((identitySelect as HTMLSelectElement).value).toBe("acct-work");
         expect((memorySelect as HTMLSelectElement).value).toBe("mem-personal");
+    });
+});
+
+describe("AgentLaunchModal — provider resolution through the bound bundle", () => {
+    // The core regression case: if this modal resolved the drifted
+    // "codex" column instead of the bundle's "claude", accountsForProvider
+    // would find no matching account for "codex" (workAccount is
+    // claude-provider) and the Account selector would never auto-pick
+    // acct-work — offering the wrong provider's auth flow entirely (or
+    // none at all) for a perfectly valid, correctly-configured agent.
+    it("resolves the effective provider through the bound bundle, not a drifted agent.provider", async () => {
+        vi.mocked(RpcApi.GetMemoryCommand).mockResolvedValue(driftedAgentsBundle);
+
+        render(() => (
+            <AgentLaunchModalPanel
+                agent={driftedProviderAgent}
+                onSubmit={vi.fn()}
+                onCancel={vi.fn()}
+            />
+        ));
+
+        const identitySelect = await screen.findByLabelText("Account");
+        expect((identitySelect as HTMLSelectElement).value).toBe("acct-work");
+        expect(RpcApi.GetMemoryCommand).toHaveBeenCalledWith({}, { id: "mem-bundle-1" });
+    });
+
+    it("falls back to agent.provider when the agent has no bound bundle", async () => {
+        render(() => (
+            <AgentLaunchModalPanel
+                agent={claudeAgent}
+                onSubmit={vi.fn()}
+                onCancel={vi.fn()}
+            />
+        ));
+
+        const identitySelect = await screen.findByLabelText("Account");
+        expect((identitySelect as HTMLSelectElement).value).toBe("acct-work");
+        expect(RpcApi.GetMemoryCommand).not.toHaveBeenCalled();
     });
 });
