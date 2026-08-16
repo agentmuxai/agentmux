@@ -6,8 +6,17 @@
 //! the AgentMux-isolated homes that current agents actually write to:
 //!   - ~/.claude/projects/ and ~/.config/claude-*/projects/ (global / legacy)
 //!   - <AGENTMUX_SHARED_DIR>/providers/claude/projects/ (default isolated home)
-//!   - <AGENTMUX_SHARED_DIR>/identities/<bundle_id>/claude/projects/ (per-identity)
+//!   - <AGENTMUX_SHARED_DIR>/identities/<bundle_id>/claude/projects/ (per-identity, global)
+//!   - <home>/channels/*/identities/*/claude/projects/ and
+//!     <home>/dev/*/(*/)?identities/*/claude/projects/ (per-channel isolated —
+//!     Step 4 of docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md.
+//!     Step 3 links these forward to the global location, but history written
+//!     before that fix landed, or for a bundle whose link creation failed
+//!     (best-effort, can fail), still has real data only under these
+//!     per-channel paths — scanned here so it stays discoverable rather than
+//!     requiring a manual filesystem search.)
 
+use std::collections::HashSet;
 use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -16,20 +25,41 @@ use std::time::UNIX_EPOCH;
 use super::adapter::*;
 
 pub struct ClaudeHistoryAdapter {
-    /// All base directories to scan for project folders.
+    /// All base directories to scan for project folders. Deduplicated by
+    /// canonical (symlink/junction-resolved) path at construction time —
+    /// after Step 3 above, a per-channel isolated `projects/` dir may be a
+    /// junction pointing at the exact same physical location as one of the
+    /// global `<shared>/...` entries, and scanning both would surface every
+    /// session twice.
     base_dirs: Vec<PathBuf>,
 }
 
 impl ClaudeHistoryAdapter {
+    /// Push `path` onto `dirs` iff it's a real directory AND its
+    /// canonical (symlink/junction-resolved) form hasn't already been
+    /// pushed — the dedup key, not `path` itself, since two different
+    /// `base_dirs` entries can be different paths to the same physical
+    /// directory (a per-channel isolated `projects/` junction and the
+    /// global location it points at). Falls back to the literal path
+    /// when canonicalization fails (e.g. a dangling/broken link) rather
+    /// than silently dropping it.
+    fn push_deduped_dir(dirs: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>, path: PathBuf) {
+        if !path.is_dir() {
+            return;
+        }
+        let key = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+        if seen.insert(key) {
+            dirs.push(path);
+        }
+    }
+
     pub fn new() -> Self {
         let mut base_dirs = Vec::new();
+        let mut seen_canonical: HashSet<PathBuf> = HashSet::new();
 
         if let Some(home) = dirs::home_dir() {
             // User's personal (non-isolated) Claude sessions
-            let personal = home.join(".claude").join("projects");
-            if personal.is_dir() {
-                base_dirs.push(personal);
-            }
+            Self::push_deduped_dir(&mut base_dirs, &mut seen_canonical, home.join(".claude").join("projects"));
 
             // Legacy multi-account convention: ~/.config/claude-*/projects/
             let config_dir = home.join(".config");
@@ -39,10 +69,7 @@ impl ClaudeHistoryAdapter {
                         let name = entry.file_name();
                         let name_str = name.to_string_lossy();
                         if name_str.starts_with("claude-") {
-                            let projects = entry.path().join("projects");
-                            if projects.is_dir() {
-                                base_dirs.push(projects);
-                            }
+                            Self::push_deduped_dir(&mut base_dirs, &mut seen_canonical, entry.path().join("projects"));
                         }
                     }
                 }
@@ -54,28 +81,77 @@ impl ClaudeHistoryAdapter {
         // Without these, the history browse misses every AgentMux agent
         // conversation. See docs/specs/SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md.
         //   <shared>/providers/claude/projects/              (default, account-wide)
-        //   <shared>/identities/<bundle_id>/claude/projects/ (per-identity bundles)
+        //   <shared>/identities/<bundle_id>/claude/projects/ (per-identity bundles, global)
         // `AGENTMUX_SHARED_DIR` is exported by the launcher; fall back to
         // ~/.agentmux/shared so discovery still works in plain/test contexts.
         let shared_dir = std::env::var_os("AGENTMUX_SHARED_DIR")
             .map(PathBuf::from)
             .or_else(|| dirs::home_dir().map(|h| h.join(".agentmux").join("shared")));
-        if let Some(shared) = shared_dir {
-            let default_projects = shared.join("providers").join("claude").join("projects");
-            if default_projects.is_dir() {
-                base_dirs.push(default_projects);
-            }
+        if let Some(shared) = &shared_dir {
+            Self::push_deduped_dir(&mut base_dirs, &mut seen_canonical, shared.join("providers").join("claude").join("projects"));
             if let Ok(entries) = fs::read_dir(shared.join("identities")) {
                 for entry in entries.flatten() {
-                    let projects = entry.path().join("claude").join("projects");
-                    if projects.is_dir() {
-                        base_dirs.push(projects);
-                    }
+                    Self::push_deduped_dir(&mut base_dirs, &mut seen_canonical, entry.path().join("claude").join("projects"));
                 }
             }
         }
 
+        // Per-channel ISOLATED identity dirs (SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md
+        // §4.4) — `<home>/channels/*/identities/*/claude/projects` and
+        // `<home>/dev/*/identities/*/claude/projects` (or, when a dev clone
+        // id is in play, one level deeper: `<home>/dev/*/*/identities/*/...`).
+        // `home_dir` is re-derived the same way `DataPaths::from_env()`
+        // itself derives it (AGENTMUX_HOME_OVERRIDE or the OS home dir),
+        // not read from an env var AgentMux doesn't currently export for
+        // this purpose.
+        if let Some(paths) = agentmux_common::DataPaths::from_env() {
+            for root_name in ["channels", "dev"] {
+                Self::scan_isolated_identities_under(
+                    &paths.home_dir.join(root_name),
+                    &mut base_dirs,
+                    &mut seen_canonical,
+                    2,
+                );
+            }
+        }
+
         ClaudeHistoryAdapter { base_dirs }
+    }
+
+    /// Find every `identities/` directory up to `max_depth` levels under
+    /// `root`, and for each, every `<bundle_id>/claude/projects` that
+    /// exists. Bounded, not an unbounded recursive walk — channel/dev
+    /// directory layouts are shallow by construction
+    /// (`channels/<slug>/identities/`, `dev/<branch>/identities/` or
+    /// `dev/<branch>/<clone_id>/identities/`), so depth 2 covers every
+    /// known layout without risking an expensive filesystem walk if
+    /// something unexpected is nested underneath.
+    fn scan_isolated_identities_under(
+        root: &Path,
+        base_dirs: &mut Vec<PathBuf>,
+        seen: &mut HashSet<PathBuf>,
+        max_depth: u8,
+    ) {
+        let Ok(entries) = fs::read_dir(root) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let identities = path.join("identities");
+            if identities.is_dir() {
+                if let Ok(id_entries) = fs::read_dir(&identities) {
+                    for id_entry in id_entries.flatten() {
+                        Self::push_deduped_dir(base_dirs, seen, id_entry.path().join("claude").join("projects"));
+                    }
+                }
+            }
+            if max_depth > 1 {
+                Self::scan_isolated_identities_under(&path, base_dirs, seen, max_depth - 1);
+            }
+        }
     }
 
     /// Count subagent JSONL files in a session's subagents/ directory.
@@ -503,5 +579,125 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
         }
 
         Ok(Some(HistorySession { meta, messages }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn push_deduped_dir_skips_a_path_that_is_not_a_real_directory() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut dirs = Vec::new();
+        let mut seen = HashSet::new();
+        ClaudeHistoryAdapter::push_deduped_dir(&mut dirs, &mut seen, tmp.path().join("does-not-exist"));
+        assert!(dirs.is_empty());
+    }
+
+    #[test]
+    fn push_deduped_dir_pushes_a_real_directory_once() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = tmp.path().join("real");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut dirs = Vec::new();
+        let mut seen = HashSet::new();
+        ClaudeHistoryAdapter::push_deduped_dir(&mut dirs, &mut seen, dir.clone());
+        ClaudeHistoryAdapter::push_deduped_dir(&mut dirs, &mut seen, dir);
+        assert_eq!(dirs.len(), 1, "calling twice with the identical path must not duplicate it");
+    }
+
+    // The actual motivating case: after Step 3
+    // (SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md §4.1),
+    // an isolated bundle's projects/ is a junction pointing at the exact
+    // global path this adapter also scans directly — without dedup by
+    // canonical path, every session under it would appear twice.
+    #[cfg(windows)]
+    #[test]
+    fn push_deduped_dir_treats_a_junction_and_its_target_as_the_same_entry() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let target = tmp.path().join("global").join("projects");
+        let link = tmp.path().join("isolated").join("projects");
+        agentmux_common::ensure_history_link(&link, &target).unwrap();
+
+        let mut dirs = Vec::new();
+        let mut seen = HashSet::new();
+        ClaudeHistoryAdapter::push_deduped_dir(&mut dirs, &mut seen, target.clone());
+        ClaudeHistoryAdapter::push_deduped_dir(&mut dirs, &mut seen, link);
+        assert_eq!(
+            dirs.len(),
+            1,
+            "the junction and its target must be recognized as the same physical location, not scanned twice"
+        );
+    }
+
+    #[test]
+    fn scan_isolated_identities_finds_a_channel_scoped_projects_dir_at_depth_one() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let projects = tmp
+            .path()
+            .join("local-main-abc123")
+            .join("identities")
+            .join("bundle-1")
+            .join("claude")
+            .join("projects");
+        std::fs::create_dir_all(&projects).unwrap();
+
+        let mut dirs = Vec::new();
+        let mut seen = HashSet::new();
+        ClaudeHistoryAdapter::scan_isolated_identities_under(tmp.path(), &mut dirs, &mut seen, 2);
+        assert_eq!(dirs, vec![projects]);
+    }
+
+    #[test]
+    fn scan_isolated_identities_finds_a_dev_clone_scoped_projects_dir_at_depth_two() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let projects = tmp
+            .path()
+            .join("main")
+            .join("a1b2c3d4")
+            .join("identities")
+            .join("bundle-2")
+            .join("claude")
+            .join("projects");
+        std::fs::create_dir_all(&projects).unwrap();
+
+        let mut dirs = Vec::new();
+        let mut seen = HashSet::new();
+        ClaudeHistoryAdapter::scan_isolated_identities_under(tmp.path(), &mut dirs, &mut seen, 2);
+        assert_eq!(dirs, vec![projects]);
+    }
+
+    #[test]
+    fn scan_isolated_identities_does_not_descend_past_max_depth() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // Three levels deep -- depth 2 must not find this.
+        let projects = tmp
+            .path()
+            .join("main")
+            .join("a1b2c3d4")
+            .join("extra-nesting")
+            .join("identities")
+            .join("bundle-3")
+            .join("claude")
+            .join("projects");
+        std::fs::create_dir_all(&projects).unwrap();
+
+        let mut dirs = Vec::new();
+        let mut seen = HashSet::new();
+        ClaudeHistoryAdapter::scan_isolated_identities_under(tmp.path(), &mut dirs, &mut seen, 2);
+        assert!(dirs.is_empty(), "must not walk past the bounded depth");
+    }
+
+    #[test]
+    fn scan_isolated_identities_ignores_directories_with_no_identities_subdir() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("some-channel").join("data")).unwrap();
+
+        let mut dirs = Vec::new();
+        let mut seen = HashSet::new();
+        ClaudeHistoryAdapter::scan_isolated_identities_under(tmp.path(), &mut dirs, &mut seen, 2);
+        assert!(dirs.is_empty());
     }
 }
