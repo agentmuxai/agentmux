@@ -113,6 +113,23 @@ pub(crate) fn compute_and_ensure_bundle_dir(
         );
         return None;
     }
+    // See the identical block in compute_and_ensure_account_dir (the live
+    // sibling of this vestigial function) for why this exists.
+    if agentmux_common::isolated_auth_enabled() {
+        if let Err(e) = agentmux_common::ensure_history_link(
+            &dir.join("projects"),
+            &paths.identity_history_dir(bundle_id, provider.auth_dir_name),
+        ) {
+            tracing::warn!(
+                target: "identity",
+                provider_id,
+                bundle_id,
+                error = %e,
+                "auth.start: failed to link conversation history to the global location — \
+                 this bundle's history may not survive a channel/build change"
+            );
+        }
+    }
     let dir_str = dir.to_string_lossy().to_string();
     // Override (or insert) the provider's config-dir env var. The
     // frontend may have computed the legacy ambient dir via
@@ -246,6 +263,31 @@ pub(crate) fn compute_and_ensure_account_dir(
         );
         return (account_id, None);
     }
+    // Keep conversation-history transcripts (e.g. Claude Code's own
+    // `projects/` subdir) reachable at a stable, always-global location
+    // even when this credential dir is per-channel isolated — see
+    // docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md
+    // §4.1. Best-effort: never abort auth.start over this, same
+    // philosophy as every other soft-fail in this function. Only
+    // meaningful when isolated_auth_enabled() — when it's off, `dir` is
+    // already inside the global identities tree and `dir/projects`
+    // already IS the global location, so linking it to itself would be
+    // pointless.
+    if agentmux_common::isolated_auth_enabled() {
+        if let Err(e) = agentmux_common::ensure_history_link(
+            &dir.join("projects"),
+            &paths.identity_history_dir(&account_id, provider.auth_dir_name),
+        ) {
+            tracing::warn!(
+                target: "identity",
+                provider_id,
+                account_id,
+                error = %e,
+                "auth.start (direct-account): failed to link conversation history to the global \
+                 location — this account's history may not survive a channel/build change"
+            );
+        }
+    }
     let dir_str = dir.to_string_lossy().to_string();
     auth_env.insert(provider.auth_config_dir_env_var.to_string(), dir_str.clone());
     tracing::info!(
@@ -329,6 +371,53 @@ mod tests {
         assert_eq!(account_id, "acc-reconnect", "reconnect must reuse the supplied id, not mint a new one");
 
         std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        for (k, _) in paths.to_env_vars() {
+            std::env::remove_var(k);
+        }
+    }
+
+    // docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md
+    // §4.1: when the credential dir is per-channel isolated, its
+    // `projects/` subpath must become a link to the always-global
+    // history location, not a real (fresh, empty, orphan-prone)
+    // directory. This is the actual end-to-end wiring test — the
+    // `ensure_history_link` unit tests in `agentmux-common` only prove
+    // the linking primitive works in isolation, not that this call site
+    // actually invokes it with the right paths.
+    #[test]
+    fn compute_account_dir_links_projects_to_the_global_history_location_when_isolated() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        std::env::set_var("AGENTMUX_ISOLATED_AUTH", "1");
+        let paths = agentmux_common::DataPaths::resolve(
+            "0.0.0-test",
+            &agentmux_common::RuntimeMode::Installed,
+        )
+        .unwrap();
+        paths.ensure_dirs().unwrap();
+        for (k, v) in paths.to_env_vars() {
+            std::env::set_var(k, v);
+        }
+        assert!(agentmux_common::isolated_auth_enabled(), "precondition: this test needs isolation actually on");
+
+        let wstore = Store::open_in_memory().unwrap();
+        let mut env = std::collections::HashMap::new();
+        let (account_id, dir) = compute_and_ensure_account_dir(&wstore, "", "claude", &mut env);
+        let dir = std::path::PathBuf::from(dir.expect("oauth-class provider must yield a dir"));
+        assert!(
+            dir.starts_with(&paths.instance_dir),
+            "precondition: the credential dir must actually be the per-channel isolated one, not the global one, or this test isn't exercising the code path it claims to"
+        );
+
+        let global_history = paths.identity_history_dir(&account_id, "claude");
+        std::fs::write(global_history.join("real-session.jsonl"), b"a real session").unwrap();
+        let via_isolated_path = std::fs::read(dir.join("projects").join("real-session.jsonl"))
+            .expect("a file written at the global history location must be readable through the isolated credential dir's projects/ subpath");
+        assert_eq!(via_isolated_path, b"a real session");
+
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
         for (k, _) in paths.to_env_vars() {
             std::env::remove_var(k);
         }

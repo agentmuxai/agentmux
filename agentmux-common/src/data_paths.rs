@@ -351,9 +351,21 @@ impl DataPaths {
     ///
     /// When [`isolated_auth_enabled`] is set, this resolves to
     /// `instance_dir/identities/` instead — a channel-scoped credential
-    /// tree for destructive Armory testing (delete-account flows) that
-    /// can never touch the real global identity store other channels/
-    /// instances use. Opt-in only; default behavior above is unchanged.
+    /// tree, now the DEFAULT for every non-`"stable"` channel as of
+    /// `docs/specs/SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md`
+    /// (this doc comment previously said "opt-in only; default behavior
+    /// above is unchanged" — that was accurate before that spec, stale
+    /// since, corrected 2026-08-16). Originally scoped to destructive
+    /// Armory testing (delete-account flows) that must never touch the
+    /// real global identity store other channels/instances use.
+    ///
+    /// **Isolating this directory isolates a provider's conversation
+    /// transcripts too**, since e.g. Claude Code's `projects/` lives
+    /// inside the same per-bundle directory tree as its credentials —
+    /// see [`identity_history_dir`] for the always-global path those
+    /// transcripts are kept reachable at regardless of this flag, and
+    /// `docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`
+    /// §4.1 for why that split exists.
     /// See `docs/specs/SPEC_ISOLATED_AUTH_DEV_TESTING_2026_07_27.md`.
     pub fn identities_dir(&self) -> PathBuf {
         if isolated_auth_enabled() {
@@ -361,6 +373,32 @@ impl DataPaths {
         } else {
             self.shared_dir.join("identities")
         }
+    }
+
+    /// `~/.agentmux/shared/identities/<bundle_id>/<provider_dir>/projects/`
+    /// — ALWAYS this location, regardless of [`isolated_auth_enabled`].
+    /// Conversation transcripts must survive a channel/build change even
+    /// when the surrounding credential directory ([`identities_dir`]) is
+    /// isolated per-channel for Armory testing — history and credentials
+    /// are different data-persistence categories (CONVERSATION HISTORY
+    /// vs CREDENTIAL in
+    /// `docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`
+    /// P1) and must not share one isolation switch just because they
+    /// happen to live under the same directory as far as the provider
+    /// CLI is concerned. Callers that isolate credentials are expected
+    /// to redirect the isolated `<bundle_id>/<provider_dir>/projects`
+    /// subpath to this location via [`ensure_history_link`] rather than
+    /// letting the provider CLI write real session data there directly.
+    ///
+    /// `bundle_id`/`provider_dir` are not path-validated here — callers
+    /// must use [`sanitize_path_segment`]-checked values, same
+    /// requirement as [`identity_dir`].
+    pub fn identity_history_dir(&self, bundle_id: &str, provider_dir: &str) -> PathBuf {
+        self.shared_dir
+            .join("identities")
+            .join(bundle_id)
+            .join(provider_dir)
+            .join("projects")
     }
 
     /// `~/.agentmux/shared/identities/<bundle_id>/` — a specific
@@ -397,6 +435,126 @@ impl DataPaths {
     pub fn provider_auth_dir(&self, auth_dir_name: &str) -> PathBuf {
         self.shared_dir.join("providers").join(auth_dir_name)
     }
+}
+
+/// Best-effort: ensure `link_path` (a `projects/` subdirectory inside an
+/// [`isolated_auth_enabled`]-isolated provider credential dir) is a
+/// directory junction (Windows) / symlink (Unix) pointing at
+/// `target_dir` (the always-global [`DataPaths::identity_history_dir`]),
+/// so a provider's session transcripts stay reachable across a
+/// channel/build change even though the credential directory around them
+/// is per-channel isolated. See
+/// `docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`
+/// §4.1.
+///
+/// A Windows **junction** (not a symlink) is used deliberately —
+/// `std::os::windows::fs::symlink_dir` requires `SeCreateSymbolicLinkPrivilege`
+/// (admin, or Developer Mode enabled), which this app cannot assume every
+/// user has; junctions need no special privilege. Uses the `junction`
+/// crate (`FSCTL_SET_REPARSE_POINT` under the hood) rather than
+/// hand-rolled reparse-point FFI, for the same reason this codebase's own
+/// `bundle.rs` comment notes about Windows symlink privilege requirements
+/// — this is credential-adjacent storage, not a place to improvise
+/// low-level filesystem code.
+///
+/// Idempotent: a no-op if `link_path` is already a link pointing at
+/// `target_dir`. If a REAL directory already exists at `link_path` (data
+/// written before this function existed, or before `isolated_auth_enabled`
+/// applied to this bundle), its entries are moved into `target_dir` one
+/// by one via `rename` (atomic, same-volume — always true here, both
+/// live under the single `~/.agentmux` tree) before the now-empty
+/// directory is replaced with the link. **Never deletes or overwrites
+/// data**: an entry whose name already exists at the target is left
+/// exactly where it was, under the old per-channel path, rather than
+/// risking clobbering real history — it becomes reachable again once a
+/// human resolves the name collision, rather than silently lost. Any
+/// I/O error at any step is returned to the caller, who is expected to
+/// treat this as best-effort (log and continue spawning) per the same
+/// philosophy as the jekt-key injection in `agent_config.rs`.
+pub fn ensure_history_link(link_path: &std::path::Path, target_dir: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(target_dir)?;
+    // The `junction` crate creates the link via a plain `fs::create_dir`
+    // (not `create_dir_all`) on `link_path` itself, so its parent must
+    // already exist. Unix's `symlink` has the same requirement. Real
+    // production callers already have this (the isolated identity dir is
+    // created before this function runs), but this function must not
+    // depend on caller ordering to be correct/testable on its own.
+    if let Some(parent) = link_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    #[cfg(windows)]
+    let already_correct = junction::exists(link_path).unwrap_or(false)
+        && junction::get_target(link_path).ok().as_deref() == Some(target_dir);
+    #[cfg(unix)]
+    let already_correct = std::fs::symlink_metadata(link_path)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+        && std::fs::read_link(link_path).ok().as_deref() == Some(target_dir);
+    #[cfg(not(any(windows, unix)))]
+    let already_correct = false;
+
+    if already_correct {
+        return Ok(());
+    }
+
+    match std::fs::symlink_metadata(link_path) {
+        Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => {
+            // Pre-existing REAL directory: migrate its contents (never
+            // clobbering an existing target entry), then remove the
+            // now-empty directory so a link can take its place.
+            for entry in std::fs::read_dir(link_path)? {
+                let entry = entry?;
+                let dest = target_dir.join(entry.file_name());
+                if !dest.exists() {
+                    std::fs::rename(entry.path(), &dest)?;
+                }
+            }
+            // Only remove if migration left it empty (i.e. every entry
+            // moved, or there were none) — a leftover name collision
+            // means real, un-migrated data is still here, and this must
+            // not silently paper over that by leaving a directory where
+            // a link was expected. Surfacing the removal error is the
+            // signal to the caller that this bundle needs manual review.
+            std::fs::remove_dir(link_path)?;
+        }
+        Ok(_) => {
+            // A link pointing at something else (stale/wrong target from
+            // a prior version of this function), or a file. Best-effort:
+            // drop it so the correct link can be created — its target,
+            // if it was a link, is untouched, only this pointer is
+            // replaced.
+            #[cfg(windows)]
+            {
+                let _ = junction::delete(link_path);
+            }
+            #[cfg(unix)]
+            {
+                let _ = std::fs::remove_file(link_path);
+            }
+        }
+        Err(_) => {
+            // Nothing at link_path yet — normal first-time case.
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        junction::create(target_dir, link_path)?;
+    }
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(target_dir, link_path)?;
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "ensure_history_link: no directory-link mechanism on this platform",
+        ));
+    }
+
+    Ok(())
 }
 
 /// Isolated per-channel auth (identity accounts + OAuth credential dirs).
@@ -1495,6 +1653,96 @@ mod tests {
         assert_eq!(
             sanitize_channel_name("experiment_42"),
             Some("experiment_42".into())
+        );
+    }
+
+    // ensure_history_link — real filesystem operations (junction on
+    // Windows, symlink on Unix), not mocked, per
+    // docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md
+    // §4.1. This is credential-adjacent storage code; these tests
+    // actually create the link and read a file back THROUGH it, rather
+    // than only asserting the `Result` came back `Ok`.
+
+    #[test]
+    fn ensure_history_link_makes_files_written_at_target_visible_through_link() {
+        let tmp = TempDir::new().expect("tempdir");
+        let link_path = tmp.path().join("isolated").join("projects");
+        let target_dir = tmp.path().join("global").join("projects");
+
+        ensure_history_link(&link_path, &target_dir).expect("link creation must succeed");
+
+        std::fs::write(target_dir.join("session-1.jsonl"), b"hello").unwrap();
+        let via_link = std::fs::read(link_path.join("session-1.jsonl"))
+            .expect("a file written at the global target must be readable through the isolated link path");
+        assert_eq!(via_link, b"hello");
+    }
+
+    #[test]
+    fn ensure_history_link_is_idempotent() {
+        let tmp = TempDir::new().expect("tempdir");
+        let link_path = tmp.path().join("isolated").join("projects");
+        let target_dir = tmp.path().join("global").join("projects");
+
+        ensure_history_link(&link_path, &target_dir).unwrap();
+        std::fs::write(target_dir.join("session-1.jsonl"), b"hello").unwrap();
+
+        // A second call against the already-correct link must not touch
+        // (let alone lose) the file that's already there.
+        ensure_history_link(&link_path, &target_dir).expect("re-calling on an already-correct link must succeed");
+        assert!(link_path.join("session-1.jsonl").exists());
+    }
+
+    #[test]
+    fn ensure_history_link_migrates_pre_existing_real_directory_contents() {
+        let tmp = TempDir::new().expect("tempdir");
+        let link_path = tmp.path().join("isolated").join("projects");
+        let target_dir = tmp.path().join("global").join("projects");
+
+        // Simulate pre-fix state: link_path is a REAL directory with real
+        // session data already in it (written before this function
+        // existed / before isolation applied to this bundle).
+        std::fs::create_dir_all(&link_path).unwrap();
+        std::fs::write(link_path.join("old-session.jsonl"), b"pre-existing history").unwrap();
+
+        ensure_history_link(&link_path, &target_dir).expect("migration + link creation must succeed");
+
+        // The old file must now live at the global target, not be lost,
+        // and must still be reachable via the (now-linked) original path.
+        assert_eq!(
+            std::fs::read(target_dir.join("old-session.jsonl")).unwrap(),
+            b"pre-existing history",
+            "pre-existing history must be migrated to the global target, not lost"
+        );
+        assert_eq!(
+            std::fs::read(link_path.join("old-session.jsonl")).unwrap(),
+            b"pre-existing history",
+            "migrated history must still be reachable at the original (now-linked) path"
+        );
+    }
+
+    #[test]
+    fn ensure_history_link_never_overwrites_a_name_collision_at_the_target() {
+        let tmp = TempDir::new().expect("tempdir");
+        let link_path = tmp.path().join("isolated").join("projects");
+        let target_dir = tmp.path().join("global").join("projects");
+
+        std::fs::create_dir_all(&target_dir).unwrap();
+        std::fs::write(target_dir.join("session-1.jsonl"), b"global version").unwrap();
+        std::fs::create_dir_all(&link_path).unwrap();
+        std::fs::write(link_path.join("session-1.jsonl"), b"isolated version -- must not be lost").unwrap();
+
+        // The link can't be created while link_path is a non-empty real
+        // directory (the colliding entry blocks the migration's cleanup
+        // remove_dir) -- this must surface as an error, not silently
+        // clobber either copy.
+        let result = ensure_history_link(&link_path, &target_dir);
+        assert!(result.is_err(), "a name collision must surface as an error, not silently pick a winner");
+
+        // Neither copy was touched.
+        assert_eq!(std::fs::read(target_dir.join("session-1.jsonl")).unwrap(), b"global version");
+        assert_eq!(
+            std::fs::read(link_path.join("session-1.jsonl")).unwrap(),
+            b"isolated version -- must not be lost"
         );
     }
 }
