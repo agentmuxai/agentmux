@@ -580,22 +580,6 @@ impl AgentMuxHandler {
         let failed_url = failed_url.map(CefString::to_string).unwrap_or_default();
         let error_code_i32 = error_code_raw as i32;
 
-        // JSON-encode the URL so it is a safe JS string literal: a real URL can
-        // contain a single quote (e.g. `?q=can't`), which would otherwise break
-        // the interpolated JS in the Retry handler below.
-        let failed_url_js =
-            serde_json::to_string(&failed_url).unwrap_or_else(|_| "\"\"".to_string());
-        // Auto-retry ONLY for the dev frontend (the main window), which commonly
-        // races the Vite dev server on launch. Browser panes load arbitrary user
-        // URLs through this SAME handler — auto-retrying their failures (offline
-        // site, DNS error, refused service) would be an unbounded reload loop, so
-        // panes get a manual Retry only.
-        let auto_retry = if self.is_browser_pane {
-            String::new()
-        } else {
-            "setTimeout(__amxRetry, 1200);".to_string()
-        };
-
         tracing::error!(
             "Load error: url={} error={} ({})",
             failed_url,
@@ -603,12 +587,66 @@ impl AgentMuxHandler {
             error_code_i32
         );
 
-        // Show a user-friendly error page.
-        let html = format!(
-            r#"<!DOCTYPE html>
+        show_load_error_page(frame, &failed_url, error_code_i32, &error_text, self.is_browser_pane);
+    }
+}
+
+/// Build the load-error page HTML for a failed navigation. Always sets an
+/// explicit `<title>` — see `error_catalog`'s module doc for why that
+/// matters: without one, the window/tab title falls back to this page's own
+/// `data:text/html;base64,...` URI. The human title/heading/detail come from
+/// `error_catalog::describe`; CEF's own `error_text` (e.g.
+/// `ERR_CONNECTION_TIMED_OUT`) and the numeric code are kept as a secondary
+/// diagnostic line underneath, not the headline.
+///
+/// `is_browser_pane` controls two things: the heading copy (a pane failing to
+/// load an arbitrary external site must never claim "Failed to load AgentMux
+/// frontend" — that copy was previously hardcoded and wrong for panes) and
+/// whether the page auto-retries (dev frontend only, see `on_load_error`'s
+/// original comment, preserved below).
+pub(crate) fn render_load_error_html(
+    failed_url: &str,
+    error_code_i32: i32,
+    error_text: &str,
+    is_browser_pane: bool,
+) -> String {
+    use crate::client::error_catalog::describe;
+    use crate::client::helpers::{html_escape, js_string_literal};
+
+    let copy = describe(error_code_i32);
+    let failed_url_safe = html_escape(failed_url);
+    let error_text_safe = html_escape(error_text);
+    let title_safe = html_escape(copy.title);
+    let heading_safe = html_escape(copy.heading);
+    let detail_safe = html_escape(copy.detail);
+    // `js_string_literal`, not hand-rolled JSON: a real URL can contain a
+    // single quote (e.g. `?q=can't`), which would otherwise break the
+    // interpolated JS in the Retry handler below.
+    let failed_url_js = js_string_literal(failed_url);
+
+    // Auto-retry ONLY for the dev frontend (the main window), which commonly
+    // races the Vite dev server on launch. Browser panes load arbitrary user
+    // URLs through this SAME handler — auto-retrying their failures (offline
+    // site, DNS error, refused service) would be an unbounded reload loop, so
+    // panes get a manual Retry only.
+    let auto_retry = if is_browser_pane {
+        String::new()
+    } else {
+        "setTimeout(__amxRetry, 1200);".to_string()
+    };
+    let dev_hint = if is_browser_pane {
+        String::new()
+    } else {
+        "<p>Make sure the Vite dev server is running:<br><code>task dev</code> or <code>npx vite</code></p>"
+            .to_string()
+    };
+
+    format!(
+        r#"<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
+    <title>{title_safe}</title>
     <style>
         body {{
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -647,11 +685,11 @@ impl AgentMuxHandler {
 </head>
 <body>
     <div class="error-container">
-        <h1>Failed to load AgentMux frontend</h1>
-        <p>Could not connect to <code>{failed_url}</code></p>
-        <p>Error: {error_text} ({error_code_i32})</p>
-        <p>Make sure the Vite dev server is running:<br>
-           <code>task dev</code> or <code>npx vite</code></p>
+        <h1>{heading_safe}</h1>
+        <p>Could not load <code>{failed_url_safe}</code></p>
+        <p>{detail_safe}</p>
+        <p style="opacity:0.7;font-size:12px;">{error_text_safe} ({error_code_i32})</p>
+        {dev_hint}
         <button class="retry" onclick="__amxRetry()">Retry</button>
     <script>
         // This error page is itself a data: URI, so location.reload() would just
@@ -664,12 +702,28 @@ impl AgentMuxHandler {
     </div>
 </body>
 </html>"#
-        );
+    )
+}
 
-        let b64 = cef::base64_encode(Some(html.as_bytes()));
-        let b64_str = CefString::from(&b64).to_string();
-        let data_uri = format!("data:text/html;base64,{}", b64_str);
-        let uri = CefString::from(data_uri.as_str());
-        frame.load_url(Some(&uri));
-    }
+/// Render `render_load_error_html` and navigate `frame` to it as a base64
+/// `data:` URI — the same mechanism `on_load_error` has always used. Shared
+/// with `browser_pane::callbacks`'s navigation watchdog, which calls this
+/// with a synthetic `ERR_CONNECTION_TIMED_OUT` when a pane's top-level
+/// navigation is still loading past its watchdog deadline — see that module
+/// for why (Chromium's real connect-timeout ceiling is 4 minutes, shared
+/// verbatim with Chrome's own net stack, which is too long to leave a pane
+/// sitting blank).
+pub(crate) fn show_load_error_page(
+    frame: &mut Frame,
+    failed_url: &str,
+    error_code_i32: i32,
+    error_text: &str,
+    is_browser_pane: bool,
+) {
+    let html = render_load_error_html(failed_url, error_code_i32, error_text, is_browser_pane);
+    let b64 = cef::base64_encode(Some(html.as_bytes()));
+    let b64_str = CefString::from(&b64).to_string();
+    let data_uri = format!("data:text/html;base64,{}", b64_str);
+    let uri = CefString::from(data_uri.as_str());
+    frame.load_url(Some(&uri));
 }

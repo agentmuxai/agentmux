@@ -761,8 +761,8 @@ impl AgentMuxHandler {
     /// internal (devtools/app) navigation regresses.
     pub(crate) fn on_before_browse(
         &mut self,
-        _browser: Option<&mut Browser>,
-        _frame: Option<&mut Frame>,
+        browser: Option<&mut Browser>,
+        frame: Option<&mut Frame>,
         request: Option<&mut Request>,
         _user_gesture: ::std::os::raw::c_int,
         _is_redirect: ::std::os::raw::c_int,
@@ -780,6 +780,30 @@ impl AgentMuxHandler {
                 "on_before_browse: blocked browser-pane navigation to a non-web external scheme (OS-handoff / UAC guard)",
             );
             return 1; // cancel — do not let CEF hand this to the OS shell
+        }
+
+        // Arm the pane-load watchdog HERE, not from `on_loading_state_change`
+        // — `request.url()` is this navigation's own target, independent of
+        // whatever the frame's last COMMITTED document was. Using
+        // `Frame::url()` instead (an earlier version did) shows the pane's
+        // PREVIOUS page in the eventual timeout error page instead of the
+        // one actually being navigated to, because a frame that never
+        // committed this navigation still reports its old URL right up until
+        // the watchdog fires. See `browser_pane::callbacks::arm_pane_load_watchdog`.
+        let is_main_frame = frame.as_ref().map(|f| f.is_main() == 1).unwrap_or(false);
+        if is_main_frame {
+            if let Some(b) = browser.as_deref() {
+                if let Some(block_id) =
+                    crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, b)
+                {
+                    crate::browser_pane::callbacks::arm_pane_load_watchdog(
+                        &self.state,
+                        &block_id,
+                        b.clone(),
+                        url,
+                    );
+                }
+            }
         }
         0
     }

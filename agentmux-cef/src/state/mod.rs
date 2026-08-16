@@ -129,6 +129,34 @@ pub struct AppState {
     /// reason as `linux_paint_gate_pending` above.
     pub linux_first_paint_seen: Mutex<std::collections::HashSet<String>>,
 
+    /// Browser-pane top-level navigation watchdog. Chromium's underlying TCP
+    /// connect-timeout ceiling (`net::TransportConnectJob::ConnectionTimeout`)
+    /// is 4 minutes — the SAME ceiling real Chrome ships with, since it's the
+    /// same net-stack code — which is far too long for a floating pane to sit
+    /// on a blank "loading" state. Armed in
+    /// `client::lifecycle::on_before_browse` when a pane's main-frame
+    /// navigation is about to start, and disarmed in
+    /// `browser_pane::callbacks::on_loading_state_change_browser_pane` when it
+    /// ends (`is_loading == false`, whether the navigation committed or CEF's
+    /// own `on_load_error` already fired). If a navigation is still armed when
+    /// its delayed watchdog task runs, we cancel it ourselves and show a
+    /// synthetic `ERR_CONNECTION_TIMED_OUT` error page instead of waiting out
+    /// Chromium's full ceiling. Keyed by pane `block_id`; value is
+    /// `(armed_at, epoch, browser, url)` — `epoch` guards against a stale
+    /// timeout firing after a newer navigation re-armed the same pane (mirrors
+    /// `linux_paint_gate_pending`'s epoch pattern above); `browser` is the
+    /// cloned handle the delayed task navigates when it fires; `url` is the
+    /// navigation's OWN target URL, captured from CEF's `Request` at
+    /// `on_before_browse` time. Deliberately NOT re-derived from
+    /// `frame.main_frame().url()` at fire time — that getter reflects the
+    /// frame's last COMMITTED document, which for a navigation that never
+    /// committed (the exact case this watchdog exists for) is still the
+    /// PREVIOUS page. An earlier version did that and showed the pane's old
+    /// URL ("Could not connect to <previous page>") instead of the one the
+    /// user actually tried to reach.
+    pub browser_pane_load_watchdog:
+        Mutex<std::collections::HashMap<String, (std::time::Instant, u64, Browser, String)>>,
+
     /// Phase B.5e — host's projection of the launcher's
     /// authoritative `state.instance_registry`. Fed by
     /// `Event::WindowInstanceAssigned` /
@@ -584,6 +612,7 @@ impl Default for AppState {
             window_init_status: Mutex::new(String::new()),
             linux_paint_gate_pending: Mutex::new(std::collections::HashMap::new()),
             linux_first_paint_seen: Mutex::new(std::collections::HashSet::new()),
+            browser_pane_load_watchdog: Mutex::new(std::collections::HashMap::new()),
             shadow_backend_window_ids: Mutex::new(HashMap::new()),
             shadow_window_meta: Mutex::new(HashMap::new()),
             shadow_instance_registry: Mutex::new({
