@@ -11,8 +11,56 @@
 //! `identity_handlers::register_identity_handlers` don't need touching)
 //! and `compute_and_ensure_account_dir` (the live direct-account path).
 
-use crate::backend::providers::get_provider;
+use crate::backend::providers::{get_provider, ProviderConfig};
 use crate::backend::storage::store::Store;
+
+/// Best-effort: if `provider` has a linkable native history directory
+/// ([`ProviderConfig::history_native_subdir`], `None` for providers with
+/// no fixed on-disk history to redirect) and credential isolation is
+/// currently on, ensure `dir/<subdir>` is linked to the always-global
+/// history location for `entity_id` (a bundle id or account id — same
+/// namespace, see [`DataPaths::identity_dir`]). No-op when isolation is
+/// off (`dir` is already inside the global tree, so `dir/<subdir>`
+/// already IS the global location) or the provider has no linkable
+/// subdir. Never fails the caller — logs and continues, same philosophy
+/// as every other soft-fail in this module.
+///
+/// Three call sites need this identically: `compute_and_ensure_bundle_dir`
+/// and `compute_and_ensure_account_dir` below (both `auth.start`-time),
+/// and `inject::inject_identity_env_with_broker`'s OAuth branch (the
+/// ordinary spawn-time path, which reads a *previously stored*
+/// `OAuthConfigDir` and — before this shared helper existed — never
+/// re-verified the link at all; reagentx P1 on PR #2605: an account
+/// provisioned before this whole feature shipped, or since its last
+/// `auth.start`, never got linked until this fix). One function so they
+/// can't drift on the condition again.
+pub(crate) fn link_history_if_isolated(
+    paths: &agentmux_common::DataPaths,
+    dir: &std::path::Path,
+    provider: &ProviderConfig,
+    entity_id: &str,
+    log_ctx: &str,
+) {
+    let Some(subdir) = provider.history_native_subdir else {
+        return;
+    };
+    if !agentmux_common::isolated_auth_enabled() {
+        return;
+    }
+    if let Err(e) = agentmux_common::ensure_history_link(
+        &dir.join(subdir),
+        &paths.identity_history_dir(entity_id, provider.auth_dir_name, subdir),
+    ) {
+        tracing::warn!(
+            target: "identity",
+            provider_id = provider.id,
+            entity_id,
+            error = %e,
+            "{log_ctx}: failed to link conversation history to the global location — \
+             this history may not survive a channel/build change"
+        );
+    }
+}
 
 /// Compute the per-bundle OAuth config dir + ensure it exists +
 /// override the provider's `auth_config_dir_env_var` entry in `auth_env`.
@@ -113,23 +161,7 @@ pub(crate) fn compute_and_ensure_bundle_dir(
         );
         return None;
     }
-    // See the identical block in compute_and_ensure_account_dir (the live
-    // sibling of this vestigial function) for why this exists.
-    if agentmux_common::isolated_auth_enabled() {
-        if let Err(e) = agentmux_common::ensure_history_link(
-            &dir.join("projects"),
-            &paths.identity_history_dir(bundle_id, provider.auth_dir_name),
-        ) {
-            tracing::warn!(
-                target: "identity",
-                provider_id,
-                bundle_id,
-                error = %e,
-                "auth.start: failed to link conversation history to the global location — \
-                 this bundle's history may not survive a channel/build change"
-            );
-        }
-    }
+    link_history_if_isolated(&paths, &dir, provider, bundle_id, "auth.start");
     let dir_str = dir.to_string_lossy().to_string();
     // Override (or insert) the provider's config-dir env var. The
     // frontend may have computed the legacy ambient dir via
@@ -263,31 +295,7 @@ pub(crate) fn compute_and_ensure_account_dir(
         );
         return (account_id, None);
     }
-    // Keep conversation-history transcripts (e.g. Claude Code's own
-    // `projects/` subdir) reachable at a stable, always-global location
-    // even when this credential dir is per-channel isolated — see
-    // docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md
-    // §4.1. Best-effort: never abort auth.start over this, same
-    // philosophy as every other soft-fail in this function. Only
-    // meaningful when isolated_auth_enabled() — when it's off, `dir` is
-    // already inside the global identities tree and `dir/projects`
-    // already IS the global location, so linking it to itself would be
-    // pointless.
-    if agentmux_common::isolated_auth_enabled() {
-        if let Err(e) = agentmux_common::ensure_history_link(
-            &dir.join("projects"),
-            &paths.identity_history_dir(&account_id, provider.auth_dir_name),
-        ) {
-            tracing::warn!(
-                target: "identity",
-                provider_id,
-                account_id,
-                error = %e,
-                "auth.start (direct-account): failed to link conversation history to the global \
-                 location — this account's history may not survive a channel/build change"
-            );
-        }
-    }
+    link_history_if_isolated(&paths, &dir, provider, &account_id, "auth.start (direct-account)");
     let dir_str = dir.to_string_lossy().to_string();
     auth_env.insert(provider.auth_config_dir_env_var.to_string(), dir_str.clone());
     tracing::info!(
@@ -410,7 +418,7 @@ mod tests {
             "precondition: the credential dir must actually be the per-channel isolated one, not the global one, or this test isn't exercising the code path it claims to"
         );
 
-        let global_history = paths.identity_history_dir(&account_id, "claude");
+        let global_history = paths.identity_history_dir(&account_id, "claude", "projects");
         std::fs::write(global_history.join("real-session.jsonl"), b"a real session").unwrap();
         let via_isolated_path = std::fs::read(dir.join("projects").join("real-session.jsonl"))
             .expect("a file written at the global history location must be readable through the isolated credential dir's projects/ subpath");

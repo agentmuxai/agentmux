@@ -375,7 +375,7 @@ impl DataPaths {
         }
     }
 
-    /// `~/.agentmux/shared/identities/<bundle_id>/<provider_dir>/projects/`
+    /// `~/.agentmux/shared/identities/<bundle_id>/<provider_dir>/<history_subdir>/`
     /// — ALWAYS this location, regardless of [`isolated_auth_enabled`].
     /// Conversation transcripts must survive a channel/build change even
     /// when the surrounding credential directory ([`identities_dir`]) is
@@ -386,19 +386,28 @@ impl DataPaths {
     /// P1) and must not share one isolation switch just because they
     /// happen to live under the same directory as far as the provider
     /// CLI is concerned. Callers that isolate credentials are expected
-    /// to redirect the isolated `<bundle_id>/<provider_dir>/projects`
+    /// to redirect the isolated `<bundle_id>/<provider_dir>/<history_subdir>`
     /// subpath to this location via [`ensure_history_link`] rather than
     /// letting the provider CLI write real session data there directly.
+    ///
+    /// `history_subdir` is caller-supplied rather than hardcoded — it is
+    /// NOT the same directory name for every provider (reagentx P1 on PR
+    /// #2605: this used to hardcode `"projects"`, which is Claude-
+    /// specific; Codex uses `"sessions"`, Gemini uses `"history"`, per
+    /// `docs/specs/SPEC_UNIFIED_AGENT_HISTORY_STORE_2026-06-10.md` §2.1).
+    /// Callers should read this from
+    /// `ProviderConfig::history_native_subdir`, the single source of
+    /// truth for which providers have a linkable directory at all.
     ///
     /// `bundle_id`/`provider_dir` are not path-validated here — callers
     /// must use [`sanitize_path_segment`]-checked values, same
     /// requirement as [`identity_dir`].
-    pub fn identity_history_dir(&self, bundle_id: &str, provider_dir: &str) -> PathBuf {
+    pub fn identity_history_dir(&self, bundle_id: &str, provider_dir: &str, history_subdir: &str) -> PathBuf {
         self.shared_dir
             .join("identities")
             .join(bundle_id)
             .join(provider_dir)
-            .join("projects")
+            .join(history_subdir)
     }
 
     /// `~/.agentmux/shared/identities/<bundle_id>/` — a specific
