@@ -73,6 +73,18 @@ pub struct Args {
     /// omitted, chunks publish unscoped.
     #[arg(long)]
     pub block_id: Option<String>,
+
+    /// True when the CLI's own Bash tool call was made with
+    /// `run_in_background: true` (threaded through by
+    /// `hook.rs::build_response` from the PreToolUse payload's
+    /// `tool_input.run_in_background`). A declared-background task may
+    /// legitimately produce zero output forever (a GUI window, a dev
+    /// server once its logs go quiet) — the idle-kill heuristic exists for
+    /// commands that SHOULD exit and are stuck, not for this class. See
+    /// `effective_idle_timeout` below, issue #2491, and
+    /// docs/retro/RETRO_TASK_DEV_IDLE_KILL_FALSE_POSITIVE_2026_07_31.md.
+    #[arg(long, default_value_t = false)]
+    pub declared_background: bool,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -299,6 +311,20 @@ fn idle_kill_timeout() -> Duration {
         .and_then(|s| s.parse::<u64>().ok())
         .map(Duration::from_secs)
         .unwrap_or(DEFAULT_IDLE_KILL_TIMEOUT)
+}
+
+/// The idle-kill timeout to actually apply for this invocation. A
+/// declared-background call (`args.declared_background`, threaded from the
+/// CLI's own `run_in_background: true`) is exempt from the idle-kill safety
+/// net entirely — it may legitimately go silent forever (a GUI window, a dev
+/// server) without that being a stuck/pager-hung command. Everything else
+/// keeps the ordinary `idle_kill_timeout()`. See issue #2491.
+fn effective_idle_timeout(args: &Args) -> Duration {
+    if args.declared_background {
+        Duration::from_secs(u64::MAX)
+    } else {
+        idle_kill_timeout()
+    }
 }
 
 /// Kill `pid` AND every descendant it spawned, not just the one process.
@@ -960,8 +986,9 @@ async fn run_via_pty(
     let (tx, rx) = mpsc::channel::<LineEvent>(1024);
     let tx_reader = tx.clone();
     let (idle_tx, idle_rx) = oneshot::channel::<()>();
+    let pty_idle_timeout = effective_idle_timeout(args);
     tokio::task::spawn_blocking(move || {
-        pty_reader_loop(reader, tx_reader, idle_tx);
+        pty_reader_loop(reader, tx_reader, idle_tx, pty_idle_timeout);
     });
     drop(tx);
 
@@ -1162,7 +1189,7 @@ async fn run_via_pipes(
     let publisher_handle = spawn_publisher_loop(args, wps.cloned(), buffered.clone(), rx);
 
     let (idle_tx, idle_rx) = oneshot::channel::<()>();
-    let idle_timeout = idle_kill_timeout();
+    let idle_timeout = effective_idle_timeout(args);
     let watcher_activity = last_activity.clone();
     let idle_watcher = tokio::spawn(async move {
         let mut idle_tx = Some(idle_tx);
@@ -1298,6 +1325,7 @@ fn pty_reader_loop(
     reader: Box<dyn std::io::Read + Send>,
     tx: mpsc::Sender<LineEvent>,
     idle_tx: oneshot::Sender<()>,
+    idle_timeout: Duration,
 ) {
     use std::sync::mpsc as std_mpsc;
     // PTY collapses stdout + stderr onto one stream — the slave's
@@ -1365,8 +1393,10 @@ fn pty_reader_loop(
     // something). `idle_tx` fires exactly once, on the first quiet-window
     // timeout after `idle_kill_timeout()` has elapsed with zero activity.
     // See the constant's doc comment for why this is idle-based rather
-    // than a total-runtime cap.
-    let idle_timeout = idle_kill_timeout();
+    // than a total-runtime cap. `idle_timeout` is passed in by the caller
+    // (`effective_idle_timeout`) rather than read here, so a declared-
+    // background call's exemption applies without this loop needing its
+    // own copy of `Args`.
     let mut last_activity = std::time::Instant::now();
     let mut idle_tx = Some(idle_tx);
     loop {
@@ -2376,11 +2406,13 @@ mod tests {
             tool_id: "test-concurrent-a".to_string(),
             b64_cmd: String::new(),
             block_id: None,
+            declared_background: false,
         };
         let args_b = Args {
             tool_id: "test-concurrent-b".to_string(),
             b64_cmd: String::new(),
             block_id: None,
+            declared_background: false,
         };
         let cd_a = format!("cd \"{}\"", dir_a.display());
         let cd_b = format!("cd \"{}\"", dir_b.display());
@@ -2436,6 +2468,7 @@ mod tests {
             tool_id: "test-cwd-persist".to_string(),
             b64_cmd: String::new(),
             block_id: None,
+            declared_background: false,
         };
 
         // Call 1: cd into target_dir. Nothing about this process's own env
@@ -3030,6 +3063,7 @@ mod tests {
             tool_id: "test-idle-kill".to_string(),
             b64_cmd: String::new(),
             block_id: None,
+            declared_background: false,
         };
         // `Mutex` in this module scope resolves to `std::sync::Mutex`
         // (shadowed for `ENV_LOCK` above) — `run_via_pty` needs the async
@@ -3187,6 +3221,7 @@ mod tests {
                 tool_id: format!("test-fast-success-{i}"),
                 b64_cmd: String::new(),
                 block_id: None,
+                declared_background: false,
             };
             let buffered = Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new()));
 
@@ -3214,6 +3249,65 @@ mod tests {
                 "iteration {i}: expected the command's real output in the blob, got: {blob:?}"
             );
         }
+    }
+
+    /// Issue #2491: a declared-background call (`declared_background:
+    /// true`, threaded from the CLI's own `run_in_background: true`) must
+    /// be exempt from the idle-kill safety net — it may legitimately go
+    /// silent past the timeout window (a GUI window, a dev server) without
+    /// that meaning it's stuck. Uses a 1s idle timeout and a command silent
+    /// for 3s (3x the timeout) so a non-exempt call would provably be
+    /// killed well before this test's own bound — proves the exemption is
+    /// doing something, not merely that idle-kill didn't happen to fire.
+    #[tokio::test]
+    async fn run_via_pty_skips_idle_kill_when_declared_background() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _idle_timeout_guard = EnvVarGuard::set("AGENTMUX_BASHWRAP_IDLE_TIMEOUT_SECS", "1");
+
+        let bash = locate_bash().expect("locate_bash for test — same dependency the whole binary needs");
+        let pty_system = native_pty_system();
+        let pair = match pty_system.openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        }) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("skipping: PTY unavailable in this environment: {e}");
+                return;
+            }
+        };
+        let args = Args {
+            tool_id: "test-declared-background".to_string(),
+            b64_cmd: String::new(),
+            block_id: None,
+            declared_background: true,
+        };
+        let buffered = Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new()));
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(10),
+            run_via_pty(&args, "sleep 3 && echo done", None, buffered.clone(), &bash, pair),
+        )
+        .await
+        .expect("a declared-background call must not hang past the outer test timeout")
+        .expect("run_via_pty should return Ok");
+
+        assert_eq!(
+            result, 0,
+            "a declared-background command silent past the idle-timeout window must still run \
+             to completion, not get idle-killed — exit code was {result}"
+        );
+        let blob = String::from_utf8_lossy(&buffered.lock().await).into_owned();
+        assert!(
+            blob.contains("done"),
+            "expected the command's real output after surviving the idle window, got: {blob:?}"
+        );
+        assert!(
+            !blob.contains("terminated automatically"),
+            "declared-background call must never carry the idle-kill diagnostic — got: {blob:?}"
+        );
     }
 
     /// End-to-end proof of A1 against a REAL PTY + bash, reproducing the
@@ -3302,6 +3396,7 @@ mod tests {
                 tool_id: format!("test-a1-e2e-{attempt}"),
                 b64_cmd: String::new(),
                 block_id: None,
+                declared_background: false,
             };
             let buffered = Arc::new(tokio::sync::Mutex::new(Vec::<u8>::new()));
 
