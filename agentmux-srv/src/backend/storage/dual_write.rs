@@ -1,13 +1,23 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Phase 3a — `db_agents` dual-write helpers.
+//! `db_agents` dual-write helpers.
 //!
 //! Every mutation on `db_agent_definitions` / `db_agent_instances`
-//! mirrors into `db_agents` so a later read-migration PR (Phase 3b)
-//! can flip readers over with confidence. Dual-write failures LOG +
-//! CONTINUE — the old tables remain authoritative until Phase 3b.
-//! See `docs/specs/SPEC_AGENT_CONCEPT_CONSOLIDATION_2026_05_24.md`.
+//! mirrors into `db_agents`. Originally written as Phase 3a with the old
+//! tables authoritative and dual-write failures logged + continued until
+//! a later Phase 3b read-migration PR — that framing is now stale.
+//! `agent_def_list()` (`agents.rs`) already reads `db_agents` (an
+//! undocumented partial Phase 3b flip found 2026-08-15, see
+//! `ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md` §3.1), and
+//! `agents_dual_write_definition_upsert` below now hard-fails
+//! (`Result<(), StoreError>`, propagated with `?` at its call site) rather
+//! than logging and continuing. Other functions in this file may not have
+//! made the same transition — check each one's own doc comment rather
+//! than assuming a single global phase; see
+//! `docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`
+//! P4. See `docs/specs/SPEC_AGENT_CONCEPT_CONSOLIDATION_2026_05_24.md` for
+//! the original design.
 //!
 //! Extracted from `store.rs` in Phase R.5 of the storage
 //! modularization plan

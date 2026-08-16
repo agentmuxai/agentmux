@@ -7,8 +7,27 @@
 //! `instance_*` methods (per-launch instance rows, named-agent
 //! continuation, identity-bound active-for-block resolution), the
 //! `AgentDefinition` / `AgentInstance` structs, and the `InstanceStatus` enum.
-//! `db_agents` is the authoritative consolidated read table; `db_agent_definitions`
-//! and `db_agent_instances` remain the write targets with dual-write mirrors.
+//! `db_agent_definitions` and `db_agent_instances` remain the write targets
+//! with dual-write mirrors into `db_agents` (see `dual_write.rs`). The read
+//! side is **not** uniformly flipped to `db_agents` — it is decided per
+//! function, and the two states currently coexist on purpose:
+//!   - `agent_def_list()` reads the consolidated `db_agents` table (a
+//!     partial Phase 3b flip that landed undocumented alongside unrelated
+//!     work — see `ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md` §3.1's
+//!     2026-08-15 correction).
+//!   - `agent_def_get()` / `user_clone_defs_for_template()` deliberately
+//!     still read `db_agent_definitions` directly — `db_agents` surfaces
+//!     template-instance projection rows under the same shape as real
+//!     user-clone definitions, which these two callers must NOT see. See
+//!     each function's own doc comment.
+//!   - `instance_list()` / `instance_get()` and friends still read
+//!     `db_agent_instances` directly — Phase 3b has not touched the
+//!     instance side at all.
+//! Do not describe this as "Phase 3a" or "Phase 3b" as a single global
+//! state in a new comment; say which function you mean. See
+//! `docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`
+//! P4, and `agent_def_list_and_agent_def_get_read_different_tables_by_design`
+//! below for an executable check of the current split.
 
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
@@ -2710,6 +2729,108 @@ mod tests {
         assert_eq!(
             local.updated_at, 42,
             "backfilled row must preserve the registry's real updated_at, not reset to created_at"
+        );
+    }
+
+    fn bare_agent_def(id: &str, name: &str) -> AgentDefinition {
+        AgentDefinition {
+            id: id.to_string(),
+            slug: id.to_string(),
+            name: name.to_string(),
+            icon: String::new(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 1,
+            agent_type: "standalone".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 1,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
+            auto_continue_enabled: 0,
+            memory_id: String::new(),
+        }
+    }
+
+    /// Pins down the module doc's claimed read-side split (this file's
+    /// header comment, plus `OBJECT_SCHEMA_VERSION`'s v4 entry and
+    /// `dual_write.rs`'s module doc) as an executable check, per
+    /// `SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`
+    /// P4: migration-phase state must be verifiable, not just a comment
+    /// someone has to remember to update. Builds two rows that exist in
+    /// only ONE of the two tables each (bypassing the normal
+    /// `agent_def_insert` path, which always keeps both in sync) and
+    /// proves `agent_def_list()` and `agent_def_get()` disagree about
+    /// which table is authoritative, on purpose. If this test starts
+    /// failing, one of the two functions' read target changed — go
+    /// update the three comments this test is guarding, not just this
+    /// assertion.
+    #[test]
+    fn agent_def_list_and_agent_def_get_read_different_tables_by_design() {
+        let store = Store::open_in_memory().unwrap();
+
+        // Exists ONLY in the consolidated `db_agents` table (as if some
+        // write path populated it without touching the legacy table —
+        // agent_def_list()'s actual read target).
+        store
+            .agents_dual_write_definition_upsert(&bare_agent_def("only-in-db-agents", "OnlyConsolidated"))
+            .unwrap();
+
+        // Exists ONLY in the legacy `db_agent_definitions` table — a raw
+        // insert bypassing `agent_def_insert`'s automatic dual-write,
+        // standing in for agent_def_get()'s actual read target.
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_definitions (id, slug, name, icon, provider, description,
+                 working_directory, shell, provider_flags, auto_start, restart_on_crash,
+                 idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
+                 is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden,
+                 container_image, container_volumes, container_name, use_ambient_login,
+                 model_vendor_base_url, auto_continue_enabled, memory_id)
+                 VALUES ('only-in-legacy', 'only-in-legacy', 'OnlyLegacy', '', 'claude', '',
+                 '', '', '', 0, 0, 0, 1, 'standalone', '', '', 0, '', '', '', 1, 0, '', '[]', '',
+                 0, '', 0, '')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let listed = store.agent_def_list().unwrap();
+        assert!(
+            listed.iter().any(|d| d.id == "only-in-db-agents"),
+            "agent_def_list() must read db_agents"
+        );
+        assert!(
+            !listed.iter().any(|d| d.id == "only-in-legacy"),
+            "agent_def_list() must NOT see a db_agent_definitions-only row \
+             (documents the current partial-flip state — fails if this ever \
+             also starts overlaying the legacy table)"
+        );
+
+        assert!(
+            store.agent_def_get("only-in-legacy").unwrap().is_some(),
+            "agent_def_get() must still read db_agent_definitions directly"
+        );
+        assert!(
+            store.agent_def_get("only-in-db-agents").unwrap().is_none(),
+            "agent_def_get() must NOT see a db_agents-only row — it \
+             deliberately avoids the consolidated table's template-instance \
+             projection rows (see its own doc comment)"
         );
     }
 }

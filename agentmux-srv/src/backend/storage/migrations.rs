@@ -55,8 +55,21 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 7;
 ///   v2 — db_agent_definitions.updated_at
 ///   v3 — db_agent_definitions.user_hidden (Phase 2 hide templates,
 ///        SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md Q2 Decision Y)
-///   v4 — db_agents consolidation table (Phase 3a; dual-write only,
-///        reads still on db_agent_definitions / db_agent_instances)
+///   v4 — db_agents consolidation table (Phase 3a: every definition/
+///        instance write dual-writes here). Read-side migration (Phase
+///        3b) is NOT a single global flip: `agent_def_list()` already
+///        reads `db_agents` (an undocumented partial flip discovered
+///        2026-08-15, see ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md
+///        §3.1), `agent_def_get()`/`user_clone_defs_for_template()`
+///        deliberately still read `db_agent_definitions` directly (by
+///        design — see their own doc comments in agents.rs), and the
+///        instance side (`instance_list()` etc.) hasn't flipped at all.
+///        This entry previously claimed "reads still on
+///        db_agent_definitions / db_agent_instances" unconditionally,
+///        which `agent_def_list()` already contradicted — corrected
+///        2026-08-16, see
+///        docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md
+///        P4.
 ///   v5 — db_agents.last_block_id (Phase 3c; latest launch's block, so the
 ///        consolidated read can find the session snapshot without joining
 ///        db_agent_instances)
