@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use axum::{
-    extract::{Query, State},
+    extract::{Extension, Query, State},
     http::StatusCode,
     response::{IntoResponse, Json, Response},
 };
@@ -69,7 +69,10 @@ pub(super) fn echo_jekt_to_sender(
         delivery_tier,
         sig_verified,
         // Sender-echo is inherently host-tier (the sender only ever sees
-        // this in their own pane) — reagent signing is WAN-only.
+        // this in their own pane) — reagent signing is WAN-only and LAN
+        // signing is LAN-only, so both are meaningless here regardless of
+        // what the actual delivery_tier of the outgoing message was.
+        None,
         None,
         msgid,
         priority,
@@ -126,10 +129,25 @@ fn now_unix_secs() -> i64 {
 /// bypassing this entirely — those messages rendered `TRUST=self-declared`
 /// (unescalated) exactly as if this feature didn't exist. Both now call
 /// this too.
+///
+/// **Deliberately NOT gated on `delivery_tier == "host"`** (reagentx P0 on
+/// the LAN signing PR — this WAS gated that way originally, and it was the
+/// bug): `delivery_tier` is a value this instance largely trusts as
+/// self-declared by whoever authenticated with the full local `auth_key`
+/// (needed so legitimate same-host forwarding can carry an already-`"lan"`
+/// jekt through unmolested — see `resolve_delivery_tier`'s doc comment).
+/// That means a request claiming `delivery_tier: "lan"` (or `"wan"`) was
+/// otherwise a way to dodge THIS check entirely — impersonate a real,
+/// locally-known agent by simply not calling it "host," since
+/// `verify_lan_signature`/`verify_reagent_signature` only fire for their
+/// own tiers and leave an unsigned claim unforced by design. Running this
+/// check unconditionally closes that: it only ever does anything when
+/// `agent_jekt_key_load` finds a LOCAL key for the claimed `source_agent` —
+/// which is `None` for any genuinely-remote LAN/WAN sender this instance
+/// never spawned (no behavior change for real network traffic), but
+/// catches an unsigned/wrong-signature impersonation of an agent THIS
+/// instance actually knows, regardless of what tier the request claims.
 pub(super) fn verify_jekt_signature(state: &AppState, req: &mut InjectionRequest) {
-    if req.delivery_tier.as_deref().unwrap_or("host") != "host" {
-        return;
-    }
     let Some(claimed) = req.source_agent.clone().filter(|s| !s.is_empty()) else {
         return;
     };
@@ -209,8 +227,143 @@ pub(super) fn verify_reagent_signature(req: &mut InjectionRequest, now: i64) {
     req.reagent_verified = Some(verified);
 }
 
+/// Anti-replay window for LAN `lan_sig` — reuses the WAN reasoning
+/// (`REAGENT_SIG_MAX_AGE_SECS`) rather than host-tier's tighter
+/// `JEKT_SIG_MAX_AGE_SECS`: LAN crosses an actual network hop (mDNS
+/// discovery + an HTTP round trip through a peer instance), not a
+/// same-process call, so it needs the wider real-network-delivery-latency
+/// margin WAN already established rather than host-tier's same-machine one.
+const LAN_SIG_MAX_AGE_SECS: i64 = REAGENT_SIG_MAX_AGE_SECS;
+
+/// LAN-tier per-agent Ed25519 signature verification —
+/// docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.4. Async, unlike
+/// `verify_jekt_signature`'s synchronous local-only key lookup: the claimed
+/// sender's public key lives on WHICHEVER peer instance actually hosts that
+/// agent, so finding it costs a LAN round trip
+/// (`LanDiscoveryController::find_agent_lan_pubkey`).
+///
+/// Only meaningful for `delivery_tier == "lan"` — by this point
+/// `req.delivery_tier` has already been through the server-side override in
+/// `handle_reactive_inject` (§3 of the spec), so this is never reachable
+/// off a genuinely `lan_key`-authenticated request.
+///
+/// No `lan_sig` at all, or a claimed sender whose public key no peer has on
+/// file → `lan_verified` stays `None` — "nothing to check against," not a
+/// red flag on its own, same semantics as `sig_verified`/`reagent_verified`'s
+/// `None` case. A `lan_sig` present with a public key found but the
+/// signature doesn't verify → `Some(false)`, forced `TIER=sensitive`
+/// unconditionally in `handler.rs` — an active attempt to forge a specific
+/// agent's identity.
+pub(super) async fn verify_lan_signature(state: &AppState, req: &mut InjectionRequest) {
+    if req.delivery_tier.as_deref() != Some("lan") {
+        return;
+    }
+    let Some(sig) = req.lan_sig.as_deref() else {
+        return;
+    };
+    let Some(claimed) = req.source_agent.clone().filter(|s| !s.is_empty()) else {
+        return;
+    };
+    let observed_key = match state.lan_discovery.find_agent_lan_pubkey(&claimed, &state.http_client).await {
+        crate::backend::lan_discovery::LanPubkeyLookup::Found(key) => key,
+        // Genuinely unknown sender — nothing to check against, not a red
+        // flag on its own (same treatment self-declared senders get
+        // elsewhere).
+        crate::backend::lan_discovery::LanPubkeyLookup::NotFound => return,
+        // reagentx P0 follow-up: the lookup was SKIPPED (rate-limited), not
+        // genuinely absent — a lan_sig WAS presented (checked above), so
+        // "we didn't check" must not collapse into the same benign outcome
+        // as "nothing to check." Treat conservatively as a failure, same as
+        // an active forgery attempt — the alternative lets an attacker
+        // exhaust the rate limiter to slip a forged identity claim through
+        // unverified instead of forced-sensitive.
+        crate::backend::lan_discovery::LanPubkeyLookup::RateLimited => {
+            tracing::warn!(
+                agent_id = %claimed,
+                "LAN pubkey lookup was rate-limited while verifying a signed jekt — \
+                 treating as unverified/failed rather than silently passing it through"
+            );
+            req.lan_verified = Some(false);
+            return;
+        }
+    };
+
+    // Trust-on-first-use pin (reagentx P0 — mDNS peer discovery is
+    // unauthenticated, so "whichever peer answers first" is not a safe
+    // trust anchor on its own; see lan_peer_pubkey_pins.rs's module doc and
+    // docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.2). The first
+    // key ever observed for a claimed sender is pinned; a LATER lookup
+    // returning a DIFFERENT key is itself treated as an active red flag —
+    // someone is now claiming a different identity than what was already
+    // established — not silently trusted as an update.
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    let observed_key_b64 = BASE64.encode(&observed_key);
+    let Ok(pinned_key_b64) = state.wstore.lan_peer_pubkey_pin_get_or_set(&claimed, &observed_key_b64) else {
+        return;
+    };
+    if pinned_key_b64 != observed_key_b64 {
+        tracing::warn!(
+            agent_id = %claimed,
+            "LAN pubkey mismatch against pinned key — possible identity spoofing attempt"
+        );
+        req.lan_verified = Some(false);
+        return;
+    }
+
+    let msgid = req.request_id.clone().unwrap_or_default();
+    let ts = req.ts_secs.unwrap_or(0);
+    let within_freshness_window = ts > 0 && (now_unix_secs() - ts).abs() <= LAN_SIG_MAX_AGE_SECS;
+    let verified = within_freshness_window
+        && agentmux_common::jekt_sign::verify_lan_jekt(
+            &observed_key,
+            &msgid,
+            &claimed,
+            &req.target_agent,
+            ts,
+            &req.message,
+            sig,
+        );
+    req.lan_verified = Some(verified);
+}
+
+/// Server-derived `delivery_tier` for the LAN-key case only —
+/// docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §3, revised after
+/// reagentx P0 on the implementing PR: an earlier version of this override
+/// also force-downgraded a "lan" claim to "host" whenever auth was via the
+/// full `auth_key`, reasoning that "nothing authenticated via the full key
+/// could have genuinely crossed the LAN boundary." That's false once
+/// same-host forwarding (Tier 2a/2b below in `handle_reactive_inject`) is
+/// considered: a jekt legitimately authenticated via `lan_key` at its FIRST
+/// hop, then relayed to a sibling channel/instance on this same machine,
+/// authenticates that SECOND hop with the sibling's own full `auth_key`
+/// (not `lan_key` — that credential is peer-to-peer between distinct
+/// machines, never shared across same-host channels). Downgrading there
+/// silently discarded an already-detected LAN signature failure's
+/// forced-sensitive escalation (`lan_verified`/`reagent_verified` are
+/// `#[serde(skip_deserializing)]`, so they reset to `None` on every hop and
+/// must be free to re-derive from whatever `delivery_tier` the forward
+/// legitimately carries).
+///
+/// The actual gap this closes is narrower than "full auth_key can never
+/// claim lan": a `lan_key` holder is the ONLY credential that can FORCE
+/// `delivery_tier = "lan"` regardless of what the body says (closing the
+/// original bypass — claim "host" instead to dodge LAN scrutiny entirely).
+/// A full-`auth_key` caller's own claim (host/wan/lan) is otherwise trusted
+/// as-is: holding the full local key already grants complete control over
+/// this instance, so which tier it self-labels a request as grants nothing
+/// extra — at worst it triggers MORE verification
+/// (`verify_lan_signature` running), never less.
+fn resolve_delivery_tier(auth_via: super::ReactiveAuthVia, claimed: Option<&str>) -> String {
+    if auth_via == super::ReactiveAuthVia::LanKey {
+        "lan".to_string()
+    } else {
+        claimed.unwrap_or("host").to_string()
+    }
+}
+
 pub(super) async fn handle_reactive_inject(
     State(state): State<AppState>,
+    Extension(auth_via): Extension<super::ReactiveAuthVia>,
     Json(mut req): Json<InjectionRequest>,
 ) -> Json<serde_json::Value> {
     tracing::info!(
@@ -220,8 +373,11 @@ pub(super) async fn handle_reactive_inject(
         "reactive inject request received"
     );
 
+    req.delivery_tier = Some(resolve_delivery_tier(auth_via, req.delivery_tier.as_deref()));
+
     verify_jekt_signature(&state, &mut req);
     verify_reagent_signature(&mut req, now_unix_secs());
+    verify_lan_signature(&state, &mut req).await;
 
     // 1. Try local ReactiveHandler first (fast path — same instance).
     let resp = state.reactive_handler.inject_message(req.clone());
@@ -512,7 +668,27 @@ pub(super) async fn handle_reactive_agent(
         }
     };
     match state.reactive_handler.get_agent(id) {
-        Some(agent) => Json(serde_json::to_value(&agent).unwrap_or_default()).into_response(),
+        Some(agent) => {
+            // Merged in, not part of AgentRegistration's own serialization —
+            // this is the LAN pubkey-lookup half of
+            // docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.2. The
+            // public half of an Ed25519 keypair is not secret; handing it to
+            // whichever peer already holds a valid lan_key (this whole route
+            // is gated by lan_or_full_auth_middleware) costs nothing and
+            // lets that peer verify this agent's future outgoing LAN
+            // signatures. `None` when the agent has no LAN key minted yet
+            // (never sent a LAN jekt since this shipped) — omitted from the
+            // JSON entirely rather than rendered `null`, so existing callers
+            // of this endpoint that don't know about this field see no
+            // change in shape.
+            let mut value = serde_json::to_value(&agent).unwrap_or_default();
+            if let Ok(Some(pubkey)) = state.wstore.agent_lan_public_key_load(id) {
+                if let Some(obj) = value.as_object_mut() {
+                    obj.insert("lan_public_key".to_string(), json!(pubkey));
+                }
+            }
+            Json(value).into_response()
+        }
         None => (
             StatusCode::NOT_FOUND,
             Json(json!({"error": "agent not found"})),
@@ -994,14 +1170,45 @@ mod verify_jekt_signature_tests {
         );
     }
 
+    // Was named "network_tier_is_never_checked_regardless_of_signature" and
+    // asserted the OPPOSITE of what's below — reagentx P0 (round 2) on the
+    // LAN signing PR: that WAS the bypass. Gating this check on
+    // delivery_tier meant a request could claim "wan"/"lan" for a
+    // source_agent this instance actually has a local key for, skip host
+    // verification entirely, and land unescalated. Flipped, not deleted, to
+    // document the fix rather than silently change it — see
+    // docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §3's second
+    // revision.
     #[tokio::test]
-    async fn network_tier_is_never_checked_regardless_of_signature() {
+    async fn a_locally_known_sender_is_still_checked_even_under_a_claimed_network_tier() {
         let state = test_state();
         state.wstore.agent_jekt_key_ensure("agentx").unwrap();
         let mut req = base_req("agentx", "agenty", "hello");
         req.delivery_tier = Some("wan".to_string());
+        // req.jekt_sig deliberately left None — claiming "wan" must not be a
+        // way to dodge this check for an agent this instance actually knows.
         verify_jekt_signature(&state, &mut req);
-        assert_eq!(req.sig_verified, None, "wan/lan never run this check");
+        assert_eq!(
+            req.sig_verified,
+            Some(false),
+            "a locally-known agent's identity, unsigned, must still be flagged regardless of \
+             what delivery_tier the request claims — that claim is not a trust boundary"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_genuinely_unknown_remote_sender_is_unaffected_by_a_claimed_network_tier() {
+        let state = test_state();
+        // No agent_jekt_key_ensure call — this instance never spawned "korp,"
+        // exactly the shape of a real remote LAN/WAN agent.
+        let mut req = base_req("korp", "agenty", "hello");
+        req.delivery_tier = Some("lan".to_string());
+        verify_jekt_signature(&state, &mut req);
+        assert_eq!(
+            req.sig_verified, None,
+            "no local key for the claimed sender means nothing to check — running this \
+             unconditionally must not manufacture a finding for genuinely remote traffic"
+        );
     }
 
     /// Anti-replay (reagentx P1 on PR #2565): a signature that was valid
@@ -1167,5 +1374,137 @@ mod verify_reagent_signature_tests {
         req.reagent_ts_secs = None;
         verify_reagent_signature(&mut req, FIXTURE_TS_SECS);
         assert_eq!(req.reagent_verified, None);
+    }
+}
+
+#[cfg(test)]
+mod verify_lan_signature_tests {
+    use super::*;
+    use crate::server::tests::test_state;
+
+    // test_state() has no real LAN peers discovered, so
+    // find_agent_lan_pubkey always returns None here — these tests exercise
+    // the paths reachable without one (tier scoping, no-signature-attempted,
+    // no-pubkey-found). The actual verify_lan_jekt crypto — correct sig
+    // verifies, wrong sig fails, tampered content/sender fails — is
+    // exhaustively covered in agentmux-common/src/jekt_sign.rs; the tier
+    // escalation this feeds into (is_lan_sig_invalid forcing sensitive,
+    // TRUST=lan-verified rendering) is covered end-to-end via
+    // Handler::inject_message in backend/reactive/tests.rs, driven directly
+    // off req.lan_verified rather than through this HTTP-round-trip lookup.
+
+    fn now() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+    }
+
+    fn lan_req(source_agent: &str, target_agent: &str, message: &str) -> InjectionRequest {
+        InjectionRequest {
+            target_agent: target_agent.to_string(),
+            message: message.to_string(),
+            source_agent: Some(source_agent.to_string()),
+            delivery_tier: Some("lan".to_string()),
+            request_id: Some("req-lan-1".to_string()),
+            ts_secs: Some(now()),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn lan_signature_verification_is_skipped_off_the_lan_tier() {
+        let state = test_state();
+        let mut req = lan_req("agentx", "agenty", "hello");
+        req.delivery_tier = Some("host".to_string());
+        req.lan_sig = Some("anything".to_string());
+        verify_lan_signature(&state, &mut req).await;
+        assert_eq!(req.lan_verified, None, "lan signing only applies to the LAN tier");
+    }
+
+    #[tokio::test]
+    async fn no_lan_sig_attempted_leaves_lan_verified_unset() {
+        let state = test_state();
+        let mut req = lan_req("agentx", "agenty", "hello");
+        verify_lan_signature(&state, &mut req).await;
+        assert_eq!(req.lan_verified, None, "nothing to check when no signature was attempted");
+    }
+
+    // reagentx P0 follow-up regression test: a rate-limited pubkey lookup
+    // must NOT be treated the same as "no key found." Without the fix, an
+    // attacker could exhaust the limiter with junk lookups, then slip a
+    // forged signature for a real agent's identity through as
+    // unverified/benign instead of forced-sensitive.
+    #[tokio::test]
+    async fn rate_limited_pubkey_lookup_forces_failed_not_unset() {
+        let state = test_state();
+        // Burn through the fan-out rate limiter with distinct agent_ids —
+        // each is a genuine cache miss (test_state() has zero real LAN
+        // peers, so every one of these negatively caches after consuming
+        // one token). LAN_PUBKEY_LOOKUP_RATE_LIMIT is 10/sec.
+        for i in 0..10 {
+            let _ = state
+                .lan_discovery
+                .find_agent_lan_pubkey(&format!("burn-{i}"), &state.http_client)
+                .await;
+        }
+        // The 11th distinct lookup this second must be rate-limited.
+        let mut req = lan_req("korp", "agenty", "hello");
+        req.lan_sig = Some("forged-or-real-doesnt-matter".to_string());
+        verify_lan_signature(&state, &mut req).await;
+        assert_eq!(
+            req.lan_verified,
+            Some(false),
+            "a rate-limited lookup for a claimed sender with a real signature attempt must be \
+             treated as a verification FAILURE, never silently left unset like a genuinely \
+             unknown/unsigned sender"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_claimed_sender_with_no_discoverable_pubkey_leaves_lan_verified_unset() {
+        // A lan_sig IS present, but with zero LAN peers discovered
+        // (test_state()'s default), find_agent_lan_pubkey can't find
+        // anyone's public key — "nothing to check against" must not be
+        // conflated with "the signature is invalid."
+        let state = test_state();
+        let mut req = lan_req("agentx", "agenty", "hello");
+        req.lan_sig = Some("some-signature".to_string());
+        verify_lan_signature(&state, &mut req).await;
+        assert_eq!(
+            req.lan_verified, None,
+            "an unfindable public key must not be conflated with a failed verification"
+        );
+    }
+}
+
+#[cfg(test)]
+mod resolve_delivery_tier_tests {
+    use super::*;
+
+    #[test]
+    fn lan_key_forces_lan_regardless_of_claim() {
+        assert_eq!(resolve_delivery_tier(super::super::ReactiveAuthVia::LanKey, Some("host")), "lan");
+        assert_eq!(resolve_delivery_tier(super::super::ReactiveAuthVia::LanKey, Some("wan")), "lan");
+        assert_eq!(resolve_delivery_tier(super::super::ReactiveAuthVia::LanKey, None), "lan");
+    }
+
+    #[test]
+    fn full_auth_key_trusts_the_body_claim_including_lan() {
+        // reagentx P0 regression: same-host Tier 2a/2b forwarding
+        // re-authenticates an already-lan-tagged jekt with a sibling
+        // instance's own full auth_key. If this ever downgrades "lan" to
+        // "host" again, an already-detected LAN signature failure's
+        // forced-sensitive escalation silently disappears on the second
+        // hop (lan_verified resets to None, and verify_lan_signature only
+        // runs when delivery_tier == "lan").
+        assert_eq!(resolve_delivery_tier(super::super::ReactiveAuthVia::FullAuthKey, Some("lan")), "lan");
+        assert_eq!(resolve_delivery_tier(super::super::ReactiveAuthVia::FullAuthKey, Some("wan")), "wan");
+        assert_eq!(resolve_delivery_tier(super::super::ReactiveAuthVia::FullAuthKey, Some("host")), "host");
+    }
+
+    #[test]
+    fn full_auth_key_defaults_to_host_when_body_omits_the_field() {
+        assert_eq!(resolve_delivery_tier(super::super::ReactiveAuthVia::FullAuthKey, None), "host");
     }
 }

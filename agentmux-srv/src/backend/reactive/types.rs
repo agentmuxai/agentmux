@@ -190,6 +190,36 @@ pub struct InjectionRequest {
     /// of the above.
     #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
     pub reagent_verified: Option<bool>,
+    /// Base64 Ed25519 signature over the same signed material as `jekt_sig`/
+    /// `reagent_sig`, produced by the claimed `source_agent`'s own LAN
+    /// signing key (`AGENTMUX_LAN_KEY`, read client-side in `agentmux-mcp` —
+    /// see `agentmux_common::jekt_sign::sign_lan_jekt`). Meaningless off the
+    /// LAN tier, same scoping as `reagent_sig` being WAN-only. See
+    /// docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.3/§2.4.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lan_sig: Option<String>,
+    /// Server-computed verification outcome for `lan_sig` —
+    /// `#[serde(skip_deserializing)]` guarantee identical to `sig_verified`/
+    /// `reagent_verified`: no attacker-supplied JSON body can set this
+    /// directly. Set by `handle_reactive_inject` after looking up the
+    /// claimed `source_agent`'s LAN public key (a LAN round-trip via
+    /// `LanDiscovery::find_agent_lan_pubkey` — unlike host-tier's
+    /// synchronous local lookup, this one is async) and independently
+    /// verifying `lan_sig` against it.
+    ///
+    /// `None` — no `lan_sig` attempted, OR the claimed sender has no LAN
+    /// public key this instance could find (never minted one, or genuinely
+    /// unreachable on the LAN right now) — nothing to check against, same
+    /// "don't escalate a caller that was never capable of signing"
+    /// semantics `sig_verified`'s `None` case documents. `Some(true)` renders
+    /// `TRUST=lan-verified` in the marker; `Some(false)` (a `lan_sig` was
+    /// present, a public key WAS found, but it didn't verify — someone tried
+    /// to forge a specific agent's identity) is a real red flag, same
+    /// spirit as host-tier's `TRUST=unverified` and WAN's `SIG=invalid` —
+    /// forces `TIER=sensitive` unconditionally
+    /// (`docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md` §2.4/§2.5).
+    #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
+    pub lan_verified: Option<bool>,
 }
 
 /// Response from a message injection attempt.
