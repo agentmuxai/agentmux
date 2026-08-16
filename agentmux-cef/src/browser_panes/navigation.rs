@@ -94,7 +94,16 @@ impl BrowserPaneManager {
         if current_url.is_empty() {
             return;
         }
-        let src_url = format!("view-source:{current_url}");
+        // Already viewing source (e.g. the menu item was clicked again, or
+        // the pane's history is currently on a view-source: page) — reuse
+        // the URL as-is instead of stacking another prefix onto it
+        // (reagentx P2 on PR #2599: view-source:view-source:https://... is
+        // not a real page).
+        let src_url = if current_url.starts_with("view-source:") {
+            current_url
+        } else {
+            format!("view-source:{current_url}")
+        };
         frame.load_url(Some(&CefString::from(src_url.as_str())));
     }
 

@@ -19,14 +19,14 @@ use cef::*;
 use super::AgentMuxHandler;
 
 impl AgentMuxHandler {
-    /// Runs on CEF's `run_context_menu`. ALWAYS suppresses CEF's native menu
-    /// for a browser pane — returns 1 (handled) and calls `callback.cancel()`
-    /// unconditionally, including when `block_id`/`params` can't be resolved,
-    /// since falling through to Chromium's own Back/Forward/Print/View
-    /// Source/Inspect menu in that edge case would be a worse and more
-    /// confusing experience than the pane simply not showing a context menu
-    /// that one time (same posture as other block_id-resolution failures
-    /// elsewhere in this file, e.g. `on_loading_state_change_browser_pane`).
+    /// Runs on CEF's `run_context_menu`. Suppresses CEF's native menu for a
+    /// browser pane — returns 1 (handled) and calls `callback.cancel()` —
+    /// ONLY when `browser-pane-context-menu` was actually routed somewhere a
+    /// listener can hear it. When `block_id`/`params` can't be resolved, OR
+    /// the pane's owning window can't be determined, falls through to CEF's
+    /// own native menu (return 0) instead: suppressing unconditionally in
+    /// that case would show NO menu at all (reagentx P1 on PR #2599) — worse
+    /// than Chromium's native one.
     ///
     /// `cancel()`, never `cont()`: `cont()` tells CEF a specific native menu
     /// command was chosen (by id) and to execute it — we're not running any
@@ -42,18 +42,23 @@ impl AgentMuxHandler {
         callback: Option<&mut RunContextMenuCallback>,
     ) -> ::std::os::raw::c_int {
         let Some(cb) = callback else { return 0 };
-        let suppress = |cb: &mut RunContextMenuCallback| {
-            cb.cancel();
-            1
-        };
-        let Some(b) = browser.as_deref() else {
-            return suppress(cb);
-        };
+        let Some(b) = browser.as_deref() else { return 0 };
         let Some(block_id) = crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, b) else {
-            return suppress(cb);
+            return 0;
         };
-        let Some(p) = params else {
-            return suppress(cb);
+        let Some(p) = params else { return 0 };
+
+        // Route to the pane's ACTUAL owning window, not just "main" — a pane
+        // torn off into its own floating window has its own JS context, and
+        // `blockframe.tsx`'s listener there is what needs this event. Same
+        // fix already applied to `browser-pane-shortcut` (codex P2 on
+        // #2548) — see that call site for the identical pattern.
+        let Some(window_label) = self.state.browser_pane_window_label(&block_id) else {
+            tracing::warn!(
+                "[browser-pane-context-menu] no owning window label for block_id={}, falling back to CEF's native menu",
+                block_id
+            );
+            return 0;
         };
 
         // Coordinates are relative to the PANE's own render view origin, not
@@ -72,8 +77,9 @@ impl AgentMuxHandler {
         let can_go_back = b_owned.can_go_back() != 0;
         let can_go_forward = b_owned.can_go_forward() != 0;
 
-        crate::events::emit_event_from_state(
+        let delivered = crate::events::emit_event_to_window(
             &self.state,
+            &window_label,
             "browser-pane-context-menu",
             &serde_json::json!({
                 "block_id": block_id,
@@ -87,7 +93,11 @@ impl AgentMuxHandler {
                 "can_go_forward": can_go_forward,
             }),
         );
+        if !delivered {
+            return 0;
+        }
 
-        suppress(cb)
+        cb.cancel();
+        1
     }
 }
