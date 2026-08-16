@@ -33,6 +33,7 @@ ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 # Windows page-file volume tracking (pagefile.rs), shared by agentmux-srv
 # and agentmux-cef — see docs/specs/SPEC_RAM_PAGEFILE_PRESSURE_SPLIT_2026_08_07.md §4.
 [target.'cfg(windows)'.dependencies]
+junction = "2.0.0"
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_System_Registry",

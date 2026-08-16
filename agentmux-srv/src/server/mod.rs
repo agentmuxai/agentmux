@@ -6,7 +6,7 @@ mod files;
 pub(crate) mod app_api;
 mod agent_handlers;
 mod editor_handlers;
-mod identity_auth_dirs;
+pub(crate) mod identity_auth_dirs;
 mod identity_auth_persist;
 mod identity_auth_spawn;
 mod identity_handlers;

@@ -497,6 +497,29 @@ pub fn inject_identity_env_with_broker(
                     binding.account_id,
                 );
 
+                // reagentx P1 on PR #2605: `dir` above is read from this
+                // account's PREVIOUSLY STORED SecretRef::OAuthConfigDir —
+                // this is the ordinary spawn path, not `auth.start`, which
+                // is the only place that used to (re-)create the history
+                // link. An account provisioned before this whole feature
+                // shipped, or since its last `auth.start`, would otherwise
+                // never get linked at all. Re-verify/re-create it on every
+                // spawn instead, same best-effort, non-blocking guarantee
+                // as the rest of this function.
+                if let Some(paths) = agentmux_common::DataPaths::from_env() {
+                    if let Some(provider_cfg) =
+                        crate::backend::providers::get_provider(&resolve_provider_alias(&binding.provider))
+                    {
+                        crate::server::identity_auth_dirs::link_history_if_isolated(
+                            &paths,
+                            std::path::Path::new(&dir),
+                            provider_cfg,
+                            &binding.account_id,
+                            "inject_identity_env (spawn)",
+                        );
+                    }
+                }
+
                 // Per spec §4.4 — cheap on-disk expiry probe. Reads the
                 // CLI's token file inside the bundle dir and refines
                 // the IdentityAccount's `status` so the UI can show
@@ -729,6 +752,102 @@ mod tests {
         // And does NOT set the anthropic api-key env var — dispatch
         // is by provider class, not by token shape.
         assert!(env.get("ANTHROPIC_API_KEY").is_none());
+    }
+
+    // reagentx P1 on PR #2605: this is the ordinary spawn path (not
+    // `auth.start`) — it reads a PREVIOUSLY STORED OAuthConfigDir, which
+    // is exactly the case an account provisioned before the history-link
+    // feature existed (or since its last `auth.start`) is in. Proves the
+    // link now gets (re-)created here too, not only at auth.start.
+    #[cfg(debug_assertions)]
+    #[test]
+    fn inject_oauth_class_links_conversation_history_on_the_ordinary_spawn_path() {
+        let _lock = crate::test_support::ISOLATED_AUTH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        std::env::set_var("AGENTMUX_ISOLATED_AUTH", "1");
+        let paths = agentmux_common::DataPaths::resolve(
+            "0.0.0-test",
+            &agentmux_common::RuntimeMode::Installed,
+        )
+        .unwrap();
+        paths.ensure_dirs().unwrap();
+        for (k, v) in paths.to_env_vars() {
+            std::env::set_var(k, v);
+        }
+
+        // A credential dir that ALREADY exists on disk, under the isolated
+        // (per-channel) tree, with real pre-existing history in it — the
+        // account was provisioned (auth.start ran) before this test's
+        // spawn-time call, exactly like a real already-connected account.
+        let isolated_dir = paths.instance_dir.join("identities").join("acct-claude").join("claude");
+        std::fs::create_dir_all(isolated_dir.join("projects")).unwrap();
+        std::fs::write(
+            isolated_dir.join("projects").join("existing-session.jsonl"),
+            b"pre-existing history",
+        )
+        .unwrap();
+
+        let store = make_store();
+        let mut def = crate::backend::storage::store::AgentDefinition {
+            id: "def-1".to_string(),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            memory_id: String::new(),
+        };
+        store.agent_def_insert(&mut def).unwrap();
+
+        let claude = make_account(
+            "acct-claude",
+            "claude",
+            SecretRef::OAuthConfigDir { dir: isolated_dir.to_string_lossy().to_string() },
+        );
+        store.identity_upsert(&claude).unwrap();
+        store.agent_identity_link("def-1", "acct-claude", "claude").unwrap();
+        insert_block_for_agent(&store, "block-oauth-history", "def-1");
+        let inst = make_instance("block-oauth-history", "id-oauth");
+        store.instance_create(&inst).unwrap();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        inject_identity_env(store.clone(), store, "block-oauth-history", &mut env).unwrap();
+
+        let global_history = paths.identity_history_dir("acct-claude", "claude", "projects");
+        let via_link = std::fs::read(global_history.join("existing-session.jsonl"))
+            .expect("pre-existing history must have been migrated to the global location by the spawn-time link");
+        assert_eq!(via_link, b"pre-existing history");
+
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        for (k, _) in paths.to_env_vars() {
+            std::env::remove_var(k);
+        }
     }
 
     #[cfg(debug_assertions)]
