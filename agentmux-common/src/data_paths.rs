@@ -518,12 +518,11 @@ pub fn ensure_history_link(link_path: &std::path::Path, target_dir: &std::path::
             // signal to the caller that this bundle needs manual review.
             std::fs::remove_dir(link_path)?;
         }
-        Ok(_) => {
-            // A link pointing at something else (stale/wrong target from
-            // a prior version of this function), or a file. Best-effort:
-            // drop it so the correct link can be created — its target,
-            // if it was a link, is untouched, only this pointer is
-            // replaced.
+        Ok(meta) if meta.file_type().is_symlink() => {
+            // A link already exists but pointed at something else (stale/
+            // wrong target from a prior version of this function). Safe
+            // to drop: no data lives directly at a link path, only at
+            // whatever it points to, which this doesn't touch.
             #[cfg(windows)]
             {
                 let _ = junction::delete(link_path);
@@ -532,6 +531,25 @@ pub fn ensure_history_link(link_path: &std::path::Path, target_dir: &std::path::
             {
                 let _ = std::fs::remove_file(link_path);
             }
+        }
+        Ok(_) => {
+            // A plain file (or anything else that's neither a real
+            // directory nor a link) sits where a link needs to go.
+            // Nothing in this codebase is expected to ever put a file
+            // named "projects" here, but reagentx P2 on PR #2605 caught
+            // that the previous version of this match arm silently
+            // deleted it via remove_file/junction::delete with no
+            // migration — directly contradicting this function's own
+            // never-delete-data guarantee. Surface an error instead of
+            // guessing what to do with unexpected real data.
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                format!(
+                    "ensure_history_link: {} exists and is neither a directory nor a link; \
+                     refusing to delete it",
+                    link_path.display()
+                ),
+            ));
         }
         Err(_) => {
             // Nothing at link_path yet — normal first-time case.
@@ -1743,6 +1761,28 @@ mod tests {
         assert_eq!(
             std::fs::read(link_path.join("session-1.jsonl")).unwrap(),
             b"isolated version -- must not be lost"
+        );
+    }
+
+    // reagentx P2 on PR #2605: the previous version of this function's
+    // fallback match arm treated "a plain file at link_path" the same as
+    // "a stale link at link_path" and deleted it outright with no
+    // migration, contradicting the function's own doc comment.
+    #[test]
+    fn ensure_history_link_refuses_to_delete_a_plain_file_at_the_link_path() {
+        let tmp = TempDir::new().expect("tempdir");
+        let link_path = tmp.path().join("isolated").join("projects");
+        let target_dir = tmp.path().join("global").join("projects");
+
+        std::fs::create_dir_all(link_path.parent().unwrap()).unwrap();
+        std::fs::write(&link_path, b"unexpected real file, not a directory or a link").unwrap();
+
+        let result = ensure_history_link(&link_path, &target_dir);
+        assert!(result.is_err(), "a plain file at the link path must surface as an error, never be silently deleted");
+        assert_eq!(
+            std::fs::read(&link_path).unwrap(),
+            b"unexpected real file, not a directory or a link",
+            "the file must still exist, untouched, after the refused operation"
         );
     }
 }
