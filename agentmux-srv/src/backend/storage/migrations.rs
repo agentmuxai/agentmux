@@ -135,7 +135,29 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 7;
 ///        interact. Defaults to '' for existing rows; the m0021 migration
 ///        backfills every unbound definition to a freshly-provisioned
 ///        bundle. See ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.1.
-pub const OBJECT_SCHEMA_VERSION: i64 = 19;
+///   v20 — db_agent_lan_keys: per-agent Ed25519 keypair for LAN-tier jekt
+///        sender verification — mirrors v18, asymmetric instead of HMAC
+///        (LAN is multi-party: a receiving peer must verify without being
+///        able to forge, which a shared secret can't provide). public_key
+///        is distributed to LAN peers on demand (not secret); private_key
+///        is injected into that one agent's own MCP process env
+///        (AGENTMUX_LAN_KEY) at spawn, same never-over-RPC guarantee as
+///        v18. See docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.1.
+///   v21 — db_lan_peer_pubkey_pins: trust-on-first-use pin of a REMOTE
+///        agent_id's LAN public key, as first observed from mDNS-discovered
+///        peers. reagentx P0 on the LAN signing PR: peer discovery itself
+///        is unauthenticated (any device can broadcast an mDNS instance and
+///        register an agent under an existing agent's name), so trusting
+///        "whichever peer answers first" for a pubkey lookup lets an
+///        attacker's self-minted key be accepted as authoritative for a
+///        victim's agent_id. Pinning the first-seen key and rejecting any
+///        later mismatch (rather than silently accepting the newest
+///        answer) is the standard SSH-host-key mitigation for exactly this
+///        "no PKI available" situation — closes the always-spoofable case,
+///        narrows it to a race on the very first lookup ever performed for
+///        that agent_id. See
+///        docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.2.
+pub const OBJECT_SCHEMA_VERSION: i64 = 21;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -610,6 +632,33 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             agent_id   TEXT PRIMARY KEY,
             hmac_key   TEXT NOT NULL,
             created_at INTEGER NOT NULL DEFAULT 0
+        );
+
+        -- v20: per-agent Ed25519 keypair for LAN-tier jekt sender
+        -- verification (SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.1).
+        -- public_key is not secret (distributed to LAN peers on demand);
+        -- private_key is base64, 32-byte seed, minted on first use
+        -- (agent_lan_key_ensure) and never rotated automatically. Same
+        -- local-to-this-instance-only guarantee as db_agent_jekt_keys.
+        CREATE TABLE IF NOT EXISTS db_agent_lan_keys (
+            agent_id    TEXT PRIMARY KEY,
+            public_key  TEXT NOT NULL,
+            private_key TEXT NOT NULL,
+            created_at  INTEGER NOT NULL DEFAULT 0
+        );
+
+        -- v21: trust-on-first-use pin of a remote agent_id's LAN public key
+        -- (SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.2, reagentx P0).
+        -- Distinct from db_agent_lan_keys (this instance's OWN agents'
+        -- keypairs, private half included) — this table holds only public
+        -- keys OBSERVED from LAN peers for agent_ids this instance does not
+        -- itself host, pinned on first sight so a later, different key
+        -- claiming the same agent_id is treated as a mismatch rather than
+        -- silently trusted.
+        CREATE TABLE IF NOT EXISTS db_lan_peer_pubkey_pins (
+            agent_id     TEXT PRIMARY KEY,
+            public_key   TEXT NOT NULL,
+            first_seen_at INTEGER NOT NULL DEFAULT 0
         );",
     )?;
 
