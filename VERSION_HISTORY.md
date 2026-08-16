@@ -1,5 +1,13 @@
 # AgentMux Version History
 
+## 0.55.10 — 2026-08-16
+
+- fix(bashwrap): exempt declared-background tasks from the idle-kill timeout
+- feat(srv): durable Background Task Registry (db_background_tasks)
+- fix(identity): layer-3 credential gate resolves provider through the bound bundle, not the driftable agent column
+- fix(lan): stop mDNS re-resolutions with blank TXT records from clobbering known-good LAN peer metadata
+
+
 ## 0.55.9 — 2026-08-15
 
 - feat(instance-panel): show a red pill when this instance has no valid muxbus session
