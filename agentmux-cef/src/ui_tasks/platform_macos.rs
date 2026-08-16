@@ -390,11 +390,26 @@ pub(crate) extern "C" fn swizzled_nsapp_send_event(
                         .and_then(|m| m.get(&win_usize).cloned());
                     if let Some((_, block_id, weak_state)) = hit {
                         if let Some(state) = weak_state.upgrade() {
-                            crate::events::emit_event_from_state(
-                                &state,
-                                "browser-pane-clicked",
-                                &serde_json::json!({ "block_id": block_id }),
-                            );
+                            // Route to the pane's ACTUAL owning window, not
+                            // "main" — see the identical fix + rationale in
+                            // browser_pane::hwnd's WM_LBUTTONDOWN handler
+                            // (reagentx P1 on PR #2597).
+                            match state.browser_pane_window_label(&block_id) {
+                                Some(window_label) => {
+                                    crate::events::emit_event_to_window(
+                                        &state,
+                                        &window_label,
+                                        "browser-pane-clicked",
+                                        &serde_json::json!({ "block_id": block_id }),
+                                    );
+                                }
+                                None => {
+                                    tracing::warn!(
+                                        "[pane-swizzle] leftMouseDown — no owning window label for block_id={}",
+                                        block_id
+                                    );
+                                }
+                            }
                         }
                     }
                 }
