@@ -2459,6 +2459,54 @@ fn map_agent_definition_row(row: &rusqlite::Row) -> rusqlite::Result<AgentDefini
     })
 }
 
+/// Shared test fixture: an `AgentDefinition` with every field defaulted to
+/// an empty/zero value except the ones callers actually vary. Both
+/// `tests::bare_agent_def` and `bundle_provisioning_store_separation_tests
+/// ::base_agent` used to hardcode this 30-field struct literal
+/// independently (reagentx P2 on PR #2602) — kept as one definition here so
+/// a future field addition only needs updating once.
+#[cfg(test)]
+fn test_agent_def(
+    id: &str,
+    name: &str,
+    provider: &str,
+    agent_type: &str,
+    timestamp: i64,
+    model_vendor_base_url: &str,
+) -> AgentDefinition {
+    AgentDefinition {
+        id: id.to_string(),
+        slug: id.to_string(),
+        name: name.to_string(),
+        icon: String::new(),
+        provider: provider.to_string(),
+        description: String::new(),
+        working_directory: String::new(),
+        shell: String::new(),
+        provider_flags: String::new(),
+        auto_start: 0,
+        restart_on_crash: 0,
+        idle_timeout_minutes: 0,
+        created_at: timestamp,
+        agent_type: agent_type.to_string(),
+        environment: String::new(),
+        agent_bus_id: String::new(),
+        is_seeded: 0,
+        accounts: String::new(),
+        parent_id: String::new(),
+        branch_label: String::new(),
+        updated_at: timestamp,
+        user_hidden: 0,
+        container_image: String::new(),
+        container_volumes: "[]".to_string(),
+        container_name: String::new(),
+        use_ambient_login: 0,
+        model_vendor_base_url: model_vendor_base_url.to_string(),
+        auto_continue_enabled: 0,
+        memory_id: String::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2733,37 +2781,7 @@ mod tests {
     }
 
     fn bare_agent_def(id: &str, name: &str) -> AgentDefinition {
-        AgentDefinition {
-            id: id.to_string(),
-            slug: id.to_string(),
-            name: name.to_string(),
-            icon: String::new(),
-            provider: "claude".to_string(),
-            description: String::new(),
-            working_directory: String::new(),
-            shell: String::new(),
-            provider_flags: String::new(),
-            auto_start: 0,
-            restart_on_crash: 0,
-            idle_timeout_minutes: 0,
-            created_at: 1,
-            agent_type: "standalone".to_string(),
-            environment: String::new(),
-            agent_bus_id: String::new(),
-            is_seeded: 0,
-            accounts: String::new(),
-            parent_id: String::new(),
-            branch_label: String::new(),
-            updated_at: 1,
-            user_hidden: 0,
-            container_image: String::new(),
-            container_volumes: "[]".to_string(),
-            container_name: String::new(),
-            use_ambient_login: 0,
-            model_vendor_base_url: String::new(),
-            auto_continue_enabled: 0,
-            memory_id: String::new(),
-        }
+        super::test_agent_def(id, name, "claude", "standalone", 1, "")
     }
 
     /// Pins down the module doc's claimed read-side split (this file's
@@ -2847,37 +2865,7 @@ mod bundle_provisioning_store_separation_tests {
     use super::*;
 
     fn base_agent(id: &str, name: &str, provider: &str, model_vendor_base_url: &str) -> AgentDefinition {
-        AgentDefinition {
-            id: id.to_string(),
-            slug: id.to_string(),
-            name: name.to_string(),
-            icon: String::new(),
-            provider: provider.to_string(),
-            description: String::new(),
-            working_directory: String::new(),
-            shell: String::new(),
-            provider_flags: String::new(),
-            auto_start: 0,
-            restart_on_crash: 0,
-            idle_timeout_minutes: 0,
-            created_at: 0,
-            agent_type: "host".to_string(),
-            environment: String::new(),
-            agent_bus_id: String::new(),
-            is_seeded: 0,
-            accounts: String::new(),
-            parent_id: String::new(),
-            branch_label: String::new(),
-            updated_at: 0,
-            user_hidden: 0,
-            container_image: String::new(),
-            container_volumes: "[]".to_string(),
-            container_name: String::new(),
-            use_ambient_login: 0,
-            model_vendor_base_url: model_vendor_base_url.to_string(),
-            auto_continue_enabled: 0,
-            memory_id: String::new(),
-        }
+        super::test_agent_def(id, name, provider, "host", 0, model_vendor_base_url)
     }
 
     #[test]
