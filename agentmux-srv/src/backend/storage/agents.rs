@@ -2941,6 +2941,39 @@ mod bundle_provisioning_store_separation_tests {
         assert_eq!(store.resolve_effective_provider_id(&agent), "claude");
     }
 
+    // ReAgent review on PR #2592 round 3: dropped during the consolidation
+    // from agent_open.rs's former resolve_effective_provider_id_tests
+    // module despite the commit claiming a one-for-one move — restoring
+    // it here. The shared "blank" singleton and pre-§7 bundles have an
+    // empty `provider` column; must not shadow a real value with "".
+    #[test]
+    fn resolve_effective_provider_id_falls_back_when_bundle_provider_is_empty() {
+        let store = Store::open_in_memory().unwrap();
+        let mut agent = base_agent("a1", "Agent One", "claude", "");
+        // provider left empty ("") deliberately, unlike the other tests'
+        // bundle_provision_for_new_agent-built bundles.
+        let bundle = super::super::memory_bundles::Memory {
+            id: "bundle-empty-provider".to_string(),
+            name: "Empty Provider Bundle".to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: false,
+            provider: String::new(),
+            model: String::new(),
+            instructions: String::new(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+        };
+        store.bundle_memory_upsert(&bundle).unwrap();
+        agent.memory_id = "bundle-empty-provider".to_string();
+        assert_eq!(store.resolve_effective_provider_id(&agent), "claude");
+    }
+
     // The core store-separation regression case: the bundle exists in ONE
     // store but the method is called on a DIFFERENT one — proves the
     // lookup only succeeds via the store it's actually called on, so a
