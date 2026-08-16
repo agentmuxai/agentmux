@@ -322,9 +322,41 @@ export class AgentViewModel implements ViewModel {
         overrides?: LaunchOverrides,
         targetBlockId?: string,
     ): Promise<boolean> => {
-        const provider = PROVIDERS[agent.provider] ?? PROVIDERS[resolveProviderAlias(agent.provider)];
+        // Resolve the effective provider through the agent's bound ABF
+        // bundle when one exists — the bundle is the readonly-once-set
+        // source of truth (ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md
+        // §7.4.1); `agent.provider` can drift post-creation via
+        // `agent.define`'s `if_exists=update` path. The backend already
+        // resolves this way for both `agent.open`'s own spawn path
+        // (`agent_open.rs`) and the layer-3 credential gate
+        // (`identity/resolver/inject.rs`) — without this, the CLI binary
+        // this function actually launches (resolved client-side, below)
+        // could disagree with which provider's credentials the backend
+        // gate validates and injects: e.g. launching codex's binary while
+        // only claude's config-dir env var gets injected, because the
+        // gate correctly resolved "claude" from the bundle but nothing
+        // told codex about it (PR #2592 review — the gate fix alone
+        // wasn't sufficient without this). Falls back to `agent.provider`
+        // on any failure (unbound, fetch error, empty bundle provider) —
+        // this must never block a launch on its own.
+        let effectiveProvider = agent.provider;
+        if (agent.memory_id) {
+            try {
+                const bundle = await RpcApi.GetMemoryCommand(TabRpcClient, { id: agent.memory_id });
+                if (bundle?.provider) {
+                    effectiveProvider = bundle.provider;
+                }
+            } catch (e: any) {
+                Logger.warn("agent", "Failed to resolve agent's bound bundle for provider; falling back to agent.provider", {
+                    agentId: agent.id,
+                    error: String(e),
+                });
+            }
+        }
+
+        const provider = PROVIDERS[effectiveProvider] ?? PROVIDERS[resolveProviderAlias(effectiveProvider)];
         if (!provider) {
-            Logger.error("agent", "Unknown provider in agent definition", { agentId: agent.id, provider: agent.provider });
+            Logger.error("agent", "Unknown provider in agent definition", { agentId: agent.id, provider: effectiveProvider });
             return false;
         }
 
@@ -340,9 +372,9 @@ export class AgentViewModel implements ViewModel {
         const cliDir = resolveCliDir(version, provider.id);
         const cliBin = `${cliDir}/node_modules/.bin/${provider.cliCommand}`;
 
-        Logger.info("agent", `Launching agent definition ${agent.name} (${agent.provider})`, {
+        Logger.info("agent", `Launching agent definition ${agent.name} (${effectiveProvider})`, {
             agentId: agent.id,
-            provider: agent.provider,
+            provider: effectiveProvider,
         });
 
         // Load all content for this agent
@@ -625,7 +657,7 @@ export class AgentViewModel implements ViewModel {
 
             const meta: Record<string, unknown> = {
                 agentId: agent.id,
-                agentProvider: agent.provider,
+                agentProvider: effectiveProvider,
                 agentOutputFormat: provider.styledOutputFormat,
                 agentName: instanceName,
                 agentIcon: agent.icon,
@@ -744,7 +776,7 @@ export class AgentViewModel implements ViewModel {
                     await RpcApi.LinkAgentIdentityCommand(TabRpcClient, {
                         agent_id: agent.id,
                         account_id: accountId,
-                        provider: agent.provider,
+                        provider: effectiveProvider,
                     });
                 }
             } catch (e: any) {
