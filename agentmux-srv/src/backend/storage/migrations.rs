@@ -157,7 +157,18 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 7;
 ///        narrows it to a race on the very first lookup ever performed for
 ///        that agent_id. See
 ///        docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.2.
-pub const OBJECT_SCHEMA_VERSION: i64 = 21;
+///   v22 — db_background_tasks: durable record of a declared long-running
+///        (`run_in_background: true`) task attached to a block, so its
+///        liveness survives past `DockSnapshotCache`'s 1-hour eviction and
+///        a session reconnect/reload — the ephemeral client-transcript-
+///        derived signal chain had no durable source of truth at all. Per-
+///        channel (block ids are only meaningful within their own
+///        channel), not the shared store. Renumbered from an earlier v20
+///        to v22 when merged alongside the LAN-tier jekt signing PR, which
+///        independently claimed v20/v21 for an unrelated table pair — see
+///        docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md,
+///        issue #2492.
+pub const OBJECT_SCHEMA_VERSION: i64 = 22;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -659,7 +670,29 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             agent_id     TEXT PRIMARY KEY,
             public_key   TEXT NOT NULL,
             first_seen_at INTEGER NOT NULL DEFAULT 0
-        );",
+        );
+
+        -- v22: durable declared-long-running-task registry — see
+        -- OBJECT_SCHEMA_VERSION's v22 doc comment above. `id` mirrors the
+        -- frontend's dock node_id (usually the originating tool_use_id) so
+        -- rows join cleanly with DockSnapshotCache/ActivityDock data.
+        -- `status` is one of 'running' | 'done' | 'error' | 'stopped',
+        -- matching the vocabulary tool-adapter.ts already uses for a
+        -- background launch's terminal states.
+        CREATE TABLE IF NOT EXISTS db_background_tasks (
+            id            TEXT PRIMARY KEY,
+            block_id      TEXT NOT NULL,
+            label         TEXT NOT NULL,
+            pid           INTEGER,
+            started_at_ms INTEGER NOT NULL,
+            status        TEXT NOT NULL DEFAULT 'running',
+            last_seen_ms  INTEGER NOT NULL,
+            ended_at_ms   INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_background_tasks_block
+            ON db_background_tasks(block_id);
+        CREATE INDEX IF NOT EXISTS idx_background_tasks_status
+            ON db_background_tasks(status);",
     )?;
 
     // ---- Additive column migrations (schema v2+) ----

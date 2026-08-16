@@ -66,6 +66,15 @@ pub const COMMAND_TOOL_DECISION: &str = "tooldecision";
 /// No reply expected; the frontend does not await this call.
 pub const COMMAND_DOCK_NODE_STATUS: &str = "docknodestatus";
 
+/// Fire-and-forget push of a declared-background task's real terminal
+/// outcome, parsed client-side from its `<task-notification>` message.
+/// Mirrors into the durable `db_background_tasks` registry. Deliberately
+/// separate from `COMMAND_DOCK_NODE_STATUS` above — see
+/// `CommandBackgroundTaskCompletionData`'s doc comment for why reusing that
+/// one would corrupt `DockSnapshotCache`'s existing full-overwrite state.
+/// See docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md.
+pub const COMMAND_BACKGROUND_TASK_COMPLETION: &str = "backgroundtaskcompletion";
+
 // Subprocess agent commands
 pub const COMMAND_SUBPROCESS_SPAWN: &str = "subprocessspawn";
 pub const COMMAND_AGENT_INPUT: &str = "agentinput";
