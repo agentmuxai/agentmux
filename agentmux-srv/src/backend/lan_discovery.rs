@@ -396,15 +396,29 @@ impl LanDiscovery {
     fn handle_event(&self, event: ServiceEvent) {
         match event {
             ServiceEvent::ServiceResolved(info) => {
+                let fullname = info.get_fullname().to_string();
+
+                // Skip self. Compared by `fullname` (deterministic from
+                // `service_name`, set once at registration — see `start()`)
+                // rather than the TXT-record `instance_id` property: on this
+                // machine's own virtual/link-local interfaces (WSL/Hyper-V/
+                // VPN adapters), `enable_addr_auto()` re-fires
+                // `ServiceResolved` far more often than fresh TXT data
+                // arrives — most of those events resolve with an empty TXT
+                // record (confirmed via `LAN peer discovered` log: ~96% of
+                // events for this instance's own addresses logged
+                // `peer_id=""`). Comparing on `instance_id` alone meant a
+                // blank-TXT self-resolution was never recognized as self and
+                // was inserted as a phantom peer that could never self-heal
+                // (see the instance_id-preservation fix below for why).
+                if fullname == self.service_fullname {
+                    return;
+                }
+
                 let peer_id = info
                     .get_property_val_str("instance_id")
                     .unwrap_or_default()
                     .to_string();
-
-                // Skip self
-                if peer_id == self.instance_id {
-                    return;
-                }
 
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -432,7 +446,6 @@ impl LanDiscovery {
                     .unwrap_or_default()
                     .to_string();
 
-                let fullname = info.get_fullname().to_string();
                 let mut instances = self.instances.write();
                 let entry = instances.entry(fullname).or_insert_with(|| LanInstance {
                     instance_id: peer_id.clone(),
@@ -446,11 +459,28 @@ impl LanDiscovery {
                     last_seen: now,
                 });
                 entry.last_seen = now;
-                entry.hostname = hostname;
-                entry.version = version;
                 entry.address = address;
                 entry.port = info.get_port();
-                entry.auth_key = auth_key;
+                // TXT-derived fields only: `enable_addr_auto()` re-fires
+                // `ServiceResolved` on every interface/address change, and
+                // most of those re-fires resolve with an empty TXT record
+                // (see the self-skip comment above) — apply a value only
+                // when this event actually carried one, so a stale re-fire
+                // never erases previously-known-good peer identity. Address/
+                // port come from the SRV/A record, not TXT, and are always
+                // populated, so they're safe to overwrite unconditionally.
+                if !peer_id.is_empty() {
+                    entry.instance_id = peer_id.clone();
+                }
+                if !hostname.is_empty() {
+                    entry.hostname = hostname;
+                }
+                if !version.is_empty() {
+                    entry.version = version;
+                }
+                if !auth_key.is_empty() {
+                    entry.auth_key = auth_key;
+                }
                 drop(instances);
 
                 tracing::info!(
@@ -1235,6 +1265,179 @@ mod tests {
         assert_eq!(received["version"], "1.2.3");
         assert_eq!(received["port"], 9999);
         assert_eq!(received["auth_key"], "secret-key");
+    }
+}
+
+// -- `handle_event` self-skip + TXT-clobber regression tests --
+//
+// See docs/specs/SPEC_LAN_DISCOVERY_TXT_CLOBBER_FIX_2026_08_16.md. Root
+// cause: `enable_addr_auto()` makes mdns-sd re-fire `ServiceResolved` for
+// the SAME service far more often than fresh TXT data actually arrives —
+// live logs showed ~96% of resolution events for this instance's own
+// virtual/link-local addresses carrying an empty TXT record while
+// address/port were always populated. These tests exercise
+// `LanDiscovery::handle_event` directly against hand-built `ServiceInfo`
+// values (no real daemon register/browse — construction of a
+// `ServiceDaemon` is required only to satisfy the struct field, exactly
+// as the existing ignored round-trip test above already relies on being
+// safe) so they run fast and are not subject to that test's documented
+// multicast flakiness.
+#[cfg(test)]
+mod handle_event_tests {
+    use super::{LanDiscovery, LanInstance, SERVICE_TYPE};
+    use mdns_sd::{ServiceEvent, ServiceInfo};
+    use parking_lot::{Mutex, RwLock};
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    /// Build a `ServiceInfo` for `instance_id`, mirroring the exact
+    /// `service_name`/host-name shape `LanDiscovery::start()` registers
+    /// with, so `get_fullname()` matches what production code would
+    /// compute for the same `instance_id`.
+    fn test_service_info(instance_id: &str, port: u16, properties: &[(&str, &str)]) -> ServiceInfo {
+        let service_name = format!("agentmux-{instance_id}");
+        ServiceInfo::new(
+            SERVICE_TYPE,
+            &service_name,
+            "test-host.local.",
+            "127.0.0.1",
+            port,
+            properties,
+        )
+        .expect("ServiceInfo::new should succeed for a well-formed test fixture")
+    }
+
+    /// A `LanDiscovery` whose `service_fullname` is derived the same way
+    /// production's `start()` derives it (from a real `ServiceInfo` for
+    /// `self_instance_id`), so the self-skip comparison in `handle_event`
+    /// is exercised exactly as it runs in production — not asserted
+    /// against a hand-typed guess at mdns-sd's fullname format.
+    fn test_discovery(self_instance_id: &str) -> LanDiscovery {
+        let self_info = test_service_info(self_instance_id, 0, &[]);
+        LanDiscovery {
+            daemon: mdns_sd::ServiceDaemon::new().expect("daemon construction (no register/browse)"),
+            instances: Arc::new(RwLock::new(HashMap::new())),
+            instance_id: self_instance_id.to_string(),
+            event_bus: Arc::new(crate::backend::eventbus::EventBus::new()),
+            service_fullname: self_info.get_fullname().to_string(),
+            auth_key: String::new(),
+            hostname: String::new(),
+            version: String::new(),
+            port: 0,
+            udp_cancel: Mutex::new(None),
+        }
+    }
+
+    fn get(instances: &[LanInstance], instance_id: &str) -> Option<LanInstance> {
+        instances.iter().find(|i| i.instance_id == instance_id).cloned()
+    }
+
+    #[test]
+    fn self_resolution_with_blank_txt_is_never_inserted_as_a_peer() {
+        // This is the exact failure mode from the live logs: mdns-sd
+        // re-resolves this instance's own service on a virtual/link-local
+        // interface and the TXT record (instance_id/hostname/version/
+        // auth_key) comes back empty. Skipping by `fullname` (SRV-record
+        // derived, always present) rather than the TXT `instance_id`
+        // property must catch this even though the property itself is
+        // blank on this event.
+        let discovery = test_discovery("self-id");
+        let blank_self_event = test_service_info("self-id", 56023, &[]);
+
+        discovery.handle_event(ServiceEvent::ServiceResolved(blank_self_event));
+
+        assert!(
+            discovery.get_instances().is_empty(),
+            "a blank-TXT resolution of this instance's own service must never appear as a peer"
+        );
+    }
+
+    #[test]
+    fn self_resolution_with_full_txt_is_also_never_inserted_as_a_peer() {
+        // Sanity check that the fullname-based skip doesn't regress the
+        // straightforward case (this was already correct before the fix).
+        let discovery = test_discovery("self-id");
+        let full_self_event =
+            test_service_info("self-id", 56023, &[("instance_id", "self-id"), ("hostname", "myhost")]);
+
+        discovery.handle_event(ServiceEvent::ServiceResolved(full_self_event));
+
+        assert!(discovery.get_instances().is_empty());
+    }
+
+    #[test]
+    fn blank_txt_refire_does_not_clobber_previously_known_good_peer_fields() {
+        let discovery = test_discovery("self-id");
+
+        let full_event = test_service_info(
+            "peer-1",
+            9999,
+            &[
+                ("instance_id", "peer-1"),
+                ("hostname", "realhost"),
+                ("version", "1.2.3"),
+                ("auth_key", "secret"),
+            ],
+        );
+        discovery.handle_event(ServiceEvent::ServiceResolved(full_event));
+
+        let after_full = get(&discovery.get_instances(), "peer-1").expect("peer-1 should be discovered");
+        assert_eq!(after_full.hostname, "realhost");
+        assert_eq!(after_full.version, "1.2.3");
+        assert_eq!(after_full.auth_key, "secret");
+
+        // Same service (same fullname), a re-resolution with an empty TXT
+        // record — exactly what mdns-sd's `enable_addr_auto()` produces on
+        // most re-fires per the live-log evidence.
+        let blank_refire = test_service_info("peer-1", 9999, &[]);
+        discovery.handle_event(ServiceEvent::ServiceResolved(blank_refire));
+
+        let instances = discovery.get_instances();
+        assert_eq!(instances.len(), 1, "the blank re-fire must update the existing entry, not create a duplicate");
+        let after_blank = get(&instances, "peer-1").expect("peer-1 must still be present");
+        assert_eq!(after_blank.hostname, "realhost", "hostname must survive a blank-TXT re-fire");
+        assert_eq!(after_blank.version, "1.2.3", "version must survive a blank-TXT re-fire");
+        assert_eq!(after_blank.auth_key, "secret", "auth_key must survive a blank-TXT re-fire");
+        assert_eq!(after_blank.instance_id, "peer-1", "instance_id must survive a blank-TXT re-fire");
+    }
+
+    #[test]
+    fn address_and_port_still_update_unconditionally_on_a_blank_txt_refire() {
+        // address/port come from the SRV/A record, not TXT, and are always
+        // populated by mdns-sd — a genuine interface/address change must
+        // still be reflected even when the TXT-derived fields are absent
+        // on that same event.
+        let discovery = test_discovery("self-id");
+
+        let first = test_service_info("peer-1", 9999, &[("instance_id", "peer-1"), ("hostname", "realhost")]);
+        discovery.handle_event(ServiceEvent::ServiceResolved(first));
+        assert_eq!(get(&discovery.get_instances(), "peer-1").unwrap().port, 9999);
+
+        let moved = test_service_info("peer-1", 8888, &[]);
+        discovery.handle_event(ServiceEvent::ServiceResolved(moved));
+
+        let instances = discovery.get_instances();
+        let entry = get(&instances, "peer-1").expect("peer-1 must still be present");
+        assert_eq!(entry.port, 8888, "port must update even on a blank-TXT event");
+        assert_eq!(entry.hostname, "realhost", "hostname must still survive despite the address/port change");
+    }
+
+    #[test]
+    fn a_new_peer_first_seen_via_blank_txt_has_no_data_to_preserve() {
+        // Not a regression this fix is responsible for solving — merely
+        // documents the expected (acceptable) behavior for a genuinely
+        // first-seen blank-TXT event: nothing was ever known, so nothing
+        // can be preserved. hostname stays empty until a TXT-bearing event
+        // eventually arrives.
+        let discovery = test_discovery("self-id");
+        let blank_first = test_service_info("peer-2", 7777, &[]);
+
+        discovery.handle_event(ServiceEvent::ServiceResolved(blank_first));
+
+        let instances = discovery.get_instances();
+        assert_eq!(instances.len(), 1);
+        assert_eq!(instances[0].hostname, "");
+        assert_eq!(instances[0].instance_id, "");
     }
 }
 
