@@ -691,7 +691,11 @@ const PANE_ALLOWED_NAV_SCHEMES: &[&str] = &[
     // navigates via a `view-source:<url>` prefix. Like `chrome-devtools:`,
     // Chromium renders this internally (a read-only source view) — it is
     // never handed to the OS shell, so it carries none of the UAC/OS-handoff
-    // risk this allowlist exists to block.
+    // risk this allowlist exists to block. IMPORTANT: being in this list is
+    // NOT sufficient on its own for "view-source" — see
+    // `is_disallowed_pane_nav_scheme`'s nested-scheme check below. Membership
+    // here only says the OUTER `view-source:` prefix itself isn't handed to
+    // the OS shell; it says nothing about what comes after the colon.
     "view-source",
 ];
 
@@ -727,7 +731,32 @@ fn url_scheme(url: &str) -> Option<String> {
 pub fn is_disallowed_pane_nav_scheme(url: &str) -> bool {
     match url_scheme(url) {
         None => false, // relative / scheme-less — resolves against current origin
-        Some(scheme) => !PANE_ALLOWED_NAV_SCHEMES.contains(&scheme.as_str()),
+        Some(scheme) => {
+            if !PANE_ALLOWED_NAV_SCHEMES.contains(&scheme.as_str()) {
+                return true;
+            }
+            // `view-source:` wraps an arbitrary NESTED target URL that
+            // Chromium fetches and renders as source text — `url_scheme`
+            // above only inspects up to the FIRST colon, so
+            // `view-source:file:///etc/passwd` has outer scheme
+            // "view-source" (allowed) while the nested target
+            // (`file:///etc/passwd`) was never validated at all. A
+            // compromised/malicious page loaded in the pane can trigger this
+            // itself via `window.location`, letting it read and display
+            // local file contents in the pane — exactly what this allowlist
+            // exists to prevent (reagentx P0 on PR #2599). Restrict the
+            // nested target to http(s) specifically — narrower than the
+            // full `PANE_ALLOWED_NAV_SCHEMES` list, since that's the only
+            // thing `browser_panes::navigation::view_source()` itself ever
+            // generates (it always prepends `view-source:` to the pane's
+            // own already-http(s) `frame.url()`).
+            if scheme == "view-source" {
+                let nested = url.trim().splitn(2, ':').nth(1).unwrap_or("");
+                let nested_scheme = url_scheme(nested);
+                return !matches!(nested_scheme.as_deref(), Some("http") | Some("https"));
+            }
+            false
+        }
     }
 }
 
@@ -853,6 +882,36 @@ mod external_url_tests {
             "steam://run/1",
             "callto:foo",
             "custom-installer://elevate",
+        ] {
+            assert!(is_disallowed_pane_nav_scheme(u), "should block: {u}");
+        }
+    }
+
+    #[test]
+    fn view_source_of_http_https_is_allowed() {
+        for u in [
+            "view-source:https://example.com/page",
+            "view-source:http://127.0.0.1:5173/",
+        ] {
+            assert!(!is_disallowed_pane_nav_scheme(u), "should allow: {u}");
+        }
+    }
+
+    #[test]
+    fn view_source_of_non_http_nested_scheme_is_blocked() {
+        // reagentx P0 on PR #2599: view-source: wraps an arbitrary nested
+        // target that Chromium fetches and renders as source text.
+        // url_scheme() only inspects up to the FIRST colon, so a naive
+        // allowlist entry for "view-source" alone would let a page navigate
+        // itself to view-source:file:///... and have local file contents
+        // rendered in the pane.
+        for u in [
+            "view-source:file:///etc/passwd",
+            "view-source:file:///C:/Windows/System32/config/SAM",
+            "view-source:chrome://settings",
+            "view-source:vscode://file/x",
+            "view-source:",
+            "view-source:not-a-url",
         ] {
             assert!(is_disallowed_pane_nav_scheme(u), "should block: {u}");
         }

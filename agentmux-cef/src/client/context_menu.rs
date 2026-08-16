@@ -81,9 +81,12 @@ impl AgentMuxHandler {
 
         // Coordinates are relative to the PANE's own render view origin, not
         // the main window — the frontend translates them using the pane's
-        // own DOM wrapper rect (`.block-<block_id>`), which the native
-        // overlay is always positioned to exactly match. See the
-        // `browser-pane-context-menu` listener in `blockframe.tsx`.
+        // own `.browser-placeholder` rect (the inner content element the
+        // native overlay is positioned to exactly match — NOT the outer
+        // `.block-<block_id>` wrapper, which also contains the header/title
+        // bar/nav bar above it; using that offset the menu downward by the
+        // header chrome's height, reagentx P1 on an earlier PR #2599 pass).
+        // See the `browser-pane-context-menu` listener in `blockframe.tsx`.
         let x = p.xcoord();
         let y = p.ycoord();
         let link_url = CefString::from(&p.link_url()).to_string();
