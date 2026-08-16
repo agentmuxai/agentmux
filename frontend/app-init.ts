@@ -41,6 +41,7 @@ import {
     resolveWindowName,
 } from "@/util/window-title";
 import { loadFonts } from "@/util/fontutil";
+import { isFileDrag } from "@/util/dnd";
 import { primeAccountCache } from "@/app/view/identity/identity-model";
 import { setKeyUtilPlatform } from "@/util/keyutil";
 import { isWindows } from "@/util/platformutil";
@@ -573,6 +574,13 @@ async function initAppInner() {
     // Register context menu click handler now that window.api exists.
     ContextMenuModel.init();
 
+    // Install before anything else can race a drop in: an unhandled file
+    // drop anywhere outside a pane's own drop zone would otherwise navigate
+    // the whole window away and destroy the app (see the function's doc
+    // comment). No dependency on window.api / host state, so there's no
+    // reason to delay it.
+    installGlobalDropGuard();
+
     // Phase 3 voice input — surface permission errors via the existing
     // notification system. `useVoiceInput.ts` dispatches `voice-input-error`
     // on the only fatal SpeechRecognition error codes ("not-allowed" /
@@ -875,6 +883,38 @@ function installWindowTitleEffect(windowId: string): void {
         return disposeFn;
     });
     window.addEventListener("beforeunload", () => dispose(), { once: true });
+}
+
+/**
+ * Global safety net against an unhandled OS file drop navigating the whole
+ * window away. Terminal and Agent panes handle file drops themselves
+ * (term.tsx, useAgentDropAttach.ts) and call preventDefault() on their own
+ * dragover/drop listeners. But a drop landing outside any pane's content
+ * area — the tab strip, title bar, splitters/gaps between panes, or any
+ * pane type that never registered a handler — reaches no listener at all.
+ * Chromium's default action for an unhandled file drop is to navigate the
+ * top-level frame to the dropped file, which destroys this entire app
+ * (the window's own controls are part of this same page, not native OS
+ * chrome) with no way to recover short of killing the process. See
+ * docs/retro/retro-md-drop-window-hijack-and-55-6-relaunch-failure-2026-08-16.md.
+ *
+ * Only intervenes for file drags (`isFileDrag`) — text/URL drags are left
+ * alone, since e.g. dropping selected text into the agent composer relies
+ * on the browser's own default text-insertion behavior
+ * (SPEC_PANE_FILE_DROP_2026_05_30.md §7), which this must not suppress.
+ *
+ * Registered on `window` without `capture`, so it only runs in the bubble
+ * phase, after any nearer pane-level handler already had first chance to
+ * handle the event — this is a backstop, not a replacement for the
+ * pane-scoped handlers.
+ */
+function installGlobalDropGuard(): void {
+    window.addEventListener("dragover", (e) => {
+        if (isFileDrag(e)) e.preventDefault();
+    });
+    window.addEventListener("drop", (e) => {
+        if (isFileDrag(e)) e.preventDefault();
+    });
 }
 
 /**
