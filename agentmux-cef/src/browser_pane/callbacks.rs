@@ -146,9 +146,12 @@ pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str) {
 
     // Cross-platform: drop this pane's zoom-factor entry so
     // `browser_pane_zoom` doesn't grow unboundedly as panes are opened and
-    // closed over a session.
+    // closed over a session. Same for the stashed context-menu frame
+    // (SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md) — also holds a
+    // cloned `Frame` that must not outlive the closing browser.
     if let Some(block_id) = block_id {
         state.browser_pane_zoom.lock().remove(block_id);
+        state.browser_pane_context_menu_frame.lock().remove(block_id);
     }
 
     // Windows only:

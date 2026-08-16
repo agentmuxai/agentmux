@@ -7,6 +7,7 @@
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
+import { writeText as clipboardWriteText } from "@/util/clipboard";
 import {
     type BrowserPaneCommand,
     type BrowserPaneEvent,
@@ -543,6 +544,105 @@ export class BrowserViewModel implements ViewModel {
                 this._dispatch({ type: "Navigate", url }, "reload-restore");
             });
         }
+    }
+
+    /**
+     * Browser-pane-specific items for the unified pane context menu
+     * (SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md). `browserCtx` is
+     * only populated for the synthetic menu path (blockframe.tsx, driven by
+     * the backend's `browser-pane-context-menu` event) — a browser pane has
+     * no real DOM `contextmenu` event to call this without it.
+     */
+    getBodyContextMenuItems(browserCtx?: {
+        x?: number;
+        y?: number;
+        linkUrl?: string;
+        selectionText?: string;
+        isEditable?: boolean;
+        canGoBack?: boolean;
+        canGoForward?: boolean;
+    }): ContextMenuItem[] {
+        const items: ContextMenuItem[] = [
+            { label: "Back", enabled: browserCtx?.canGoBack ?? this.canGoBackAtom(), click: () => this.goBack() },
+            {
+                label: "Forward",
+                enabled: browserCtx?.canGoForward ?? this.canGoForwardAtom(),
+                click: () => this.goForward(),
+            },
+            {
+                label: "Reload",
+                // NOT this.reload() -- that method only does local reducer
+                // state tricks (UrlCleared + re-Navigate) and never touches
+                // the real native CEF browser view, so it's a no-op against
+                // the actual page (reagentx P1 on PR #2599). The toolbar
+                // Reload button (browser-nav-bar.tsx) has never called
+                // reload() either -- it invokes the backend command
+                // directly, which this now matches.
+                click: () => {
+                    invokeCommand("browser_pane_reload", { block_id: this.blockId }).catch(() => {});
+                },
+            },
+        ];
+        // Suppressing CEF's native menu also removed its built-in Cut/Copy/
+        // Paste for a text selection or an editable web form field, with
+        // nothing replacing them (reagentx P2 on PR #2599). `Frame::copy/
+        // cut/paste` on the host operate on whatever is currently selected/
+        // focused, same as the native commands would have.
+        if (browserCtx?.selectionText || browserCtx?.isEditable) {
+            const editItems: ContextMenuItem[] = [];
+            if (browserCtx.isEditable && browserCtx.selectionText) {
+                editItems.push({
+                    label: "Cut",
+                    click: () => { invokeCommand("browser_pane_cut", { block_id: this.blockId }).catch(() => {}); },
+                });
+            }
+            if (browserCtx.selectionText) {
+                editItems.push({
+                    label: "Copy",
+                    click: () => { invokeCommand("browser_pane_copy", { block_id: this.blockId }).catch(() => {}); },
+                });
+            }
+            if (browserCtx.isEditable) {
+                editItems.push({
+                    label: "Paste",
+                    click: () => { invokeCommand("browser_pane_paste", { block_id: this.blockId }).catch(() => {}); },
+                });
+            }
+            items.push({ type: "separator" }, ...editItems);
+        }
+        if (browserCtx?.linkUrl) {
+            items.push(
+                { type: "separator" },
+                {
+                    label: "Copy Link Address",
+                    click: () => { void clipboardWriteText(browserCtx.linkUrl!); },
+                },
+            );
+        }
+        items.push(
+            { type: "separator" },
+            {
+                label: "Print",
+                click: () => { invokeCommand("browser_pane_print", { block_id: this.blockId }).catch(() => {}); },
+            },
+            {
+                label: "View Page Source",
+                click: () => {
+                    invokeCommand("browser_pane_view_source", { block_id: this.blockId }).catch(() => {});
+                },
+            },
+            {
+                label: "Inspect Element",
+                click: () => {
+                    invokeCommand("browser_pane_inspect_element", {
+                        block_id: this.blockId,
+                        x: browserCtx?.x ?? 0,
+                        y: browserCtx?.y ?? 0,
+                    }).catch(() => {});
+                },
+            },
+        );
+        return items;
     }
 
     onError(msg: string): void {
