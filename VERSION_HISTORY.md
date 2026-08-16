@@ -1,5 +1,18 @@
 # AgentMux Version History
 
+## 0.55.9 — 2026-08-15
+
+- feat(instance-panel): show a red pill when this instance has no valid muxbus session
+- Stop the agent-pane shell drawer's Windows PSReadLine-resync thaw from visibly resizing the terminal canvas ~300ms after open
+- style(composer-strip): HOST tag yellow instead of red
+- feat(statusbar): always-visible red MuxBus chip when session is invalid
+- fix(muxbus): make PKCE login single-flight — a new attempt supersedes the pending one
+- feat(muxbus): cloud-relayed login callback — desktop no longer runs a loopback listener
+- fix(jekt): narrow TIER=sensitive to real red flags only
+- feat(armory): every agent gets its own dedicated, portable ABF bundle (mandatory per-agent binding, readonly harness/model, backfill, export/import)
+- feat(jekt): per-agent Ed25519 signing for LAN-tier jekts
+
+
 ## 0.55.8 — 2026-08-14
 
 - feat(window): restore last session's tabs/panes on relaunch

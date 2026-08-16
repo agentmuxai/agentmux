@@ -557,7 +557,103 @@ pub struct LanDiscoveryController {
     /// Short-lived cache mapping agent_id → (peer_url, auth_key). Entries expire
     /// after LAN_AGENT_CACHE_TTL_SECS to handle agent migration between peers.
     agent_cache: std::sync::RwLock<HashMap<String, LanCacheEntry>>,
+    /// Separate cache mapping agent_id → LAN Ed25519 public key bytes.
+    /// SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.2 — deliberately its own
+    /// map rather than folded into `agent_cache`: the two are keyed by the
+    /// same agent_id but answer different questions ("which peer currently
+    /// hosts this agent" churns on process restarts/migration; "what is
+    /// this agent's public key" is effectively static for the agent's
+    /// lifetime), and a lookup for one is not always paired with a lookup
+    /// for the other (a message TO agent X needs `agent_cache`'s entry for
+    /// X; verifying a message FROM agent Y needs `pubkey_cache`'s entry for
+    /// Y — different agent_ids on the same inbound request).
+    pubkey_cache: std::sync::RwLock<HashMap<String, LanPubkeyCacheEntry>>,
+    /// reagentx P1 on the LAN signing PR: `find_agent_lan_pubkey`'s negative
+    /// cache is keyed by agent_id, so a caller holding only the `lan_key`
+    /// can force a fresh multi-peer fan-out on every single request just by
+    /// sending a novel random `source_agent` each time — the cache never
+    /// hits, and this expensive walk runs (in `verify_lan_signature`)
+    /// BEFORE `Handler::inject_message`'s own rate limiter is ever reached.
+    /// A simple global token bucket on the fan-out ITSELF (not per-agent_id
+    /// — the abuse pattern is specifically about varying the id to dodge a
+    /// per-id cache) bounds the damage regardless of how many distinct
+    /// identities are probed.
+    pubkey_lookup_limiter: std::sync::Mutex<LookupRateLimiter>,
 }
+
+struct LanPubkeyCacheEntry {
+    /// `None` = negative cache entry: no peer has a LAN public key on file
+    /// for this agent_id (never minted one, or genuinely unknown).
+    public_key: Option<Vec<u8>>,
+    expires: std::time::Instant,
+}
+
+/// Outcome of `find_agent_lan_pubkey`. Three states, not two — reagentx P0
+/// follow-up on the LAN signing PR: collapsing "the lookup was skipped
+/// (rate-limited)" into the same `None`/"not found" outcome as "genuinely
+/// no peer has this key" let an attacker exhaust
+/// `LAN_PUBKEY_LOOKUP_RATE_LIMIT` with junk lookups, then slip a forged
+/// signature for a REAL agent's identity through as unverified (benign)
+/// instead of a verification failure (forced sensitive). By the time this
+/// function is ever called, `verify_lan_signature` has already confirmed a
+/// `lan_sig` was actually presented — so "we didn't check" must be
+/// distinguishable from "there was nothing to check."
+pub(crate) enum LanPubkeyLookup {
+    /// A peer has a public key on file for this agent_id.
+    Found(Vec<u8>),
+    /// No peer (that answered) has ever minted a LAN key for this agent_id
+    /// — genuinely unknown sender, not a red flag on its own (same
+    /// "unverified, not escalated" treatment self-declared senders already
+    /// get elsewhere in this system).
+    NotFound,
+    /// The lookup was skipped by the rate limiter — unknown, NOT the same
+    /// as `NotFound`. Callers verifying an actual signature attempt must
+    /// treat this conservatively (as a failure), never as "nothing to
+    /// check."
+    RateLimited,
+}
+
+/// Minimal token bucket, refilled once per second — same shape as
+/// `backend::reactive::handler::RateLimiter`, duplicated locally rather
+/// than widening that one's visibility across modules for a single caller.
+struct LookupRateLimiter {
+    tokens: u32,
+    max_tokens: u32,
+    last_refill: std::time::Instant,
+}
+
+impl LookupRateLimiter {
+    fn new(max_tokens: u32) -> Self {
+        Self {
+            tokens: max_tokens,
+            max_tokens,
+            last_refill: std::time::Instant::now(),
+        }
+    }
+
+    fn check(&mut self) -> bool {
+        let now = std::time::Instant::now();
+        if now.duration_since(self.last_refill) >= std::time::Duration::from_secs(1) {
+            self.tokens = self.max_tokens;
+            self.last_refill = now;
+        }
+        if self.tokens > 0 {
+            self.tokens -= 1;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+/// Fan-outs per second `find_agent_lan_pubkey` will perform before failing
+/// closed (returning `None` without querying any peer). Generous for
+/// legitimate traffic — LAN jekts to previously-unseen senders are rare
+/// once agents have been talking a while, and the 60s positive/negative
+/// cache absorbs repeat lookups for the SAME agent_id — while still
+/// bounding the worst case to a small, fixed number of outbound requests
+/// per second regardless of how many distinct agent_ids are probed.
+const LAN_PUBKEY_LOOKUP_RATE_LIMIT: u32 = 10;
 
 impl LanDiscoveryController {
     pub fn new(
@@ -577,6 +673,8 @@ impl LanDiscoveryController {
             auth_key,
             event_bus,
             agent_cache: std::sync::RwLock::new(HashMap::new()),
+            pubkey_cache: std::sync::RwLock::new(HashMap::new()),
+            pubkey_lookup_limiter: std::sync::Mutex::new(LookupRateLimiter::new(LAN_PUBKEY_LOOKUP_RATE_LIMIT)),
         }
     }
 
@@ -661,6 +759,104 @@ impl LanDiscoveryController {
             );
         }
         None
+    }
+
+    /// Look up a claimed LAN sender's Ed25519 public key by fanning out to
+    /// every discovered LAN peer, same query the target-agent lookup above
+    /// makes (`GET /agentmux/reactive/agent?id=<agent_id>`, now extended —
+    /// see `handle_reactive_agent` — to embed `lan_public_key` when the
+    /// responding peer has minted one). A SEPARATE lookup from `find_agent`
+    /// even though it hits the same endpoint: verifying an inbound message
+    /// FROM agent Y needs Y's key, which is almost never the same agent_id
+    /// as whatever THIS request's own target-agent lookup (if any) was for.
+    ///
+    /// Returns the raw decoded public key bytes, or `None` if no peer has
+    /// one on file for this agent_id (cached negatively, same as
+    /// `find_agent`'s "not found" case) — callers (`verify_lan_signature`)
+    /// treat that identically to "no signature attempted": nothing to check
+    /// against, not a red flag on its own.
+    pub async fn find_agent_lan_pubkey(&self, agent_id: &str, http: &reqwest::Client) -> LanPubkeyLookup {
+        if let Ok(cache) = self.pubkey_cache.read() {
+            if let Some(e) = cache.get(agent_id) {
+                if e.expires > std::time::Instant::now() {
+                    return match &e.public_key {
+                        Some(k) => LanPubkeyLookup::Found(k.clone()),
+                        None => LanPubkeyLookup::NotFound,
+                    };
+                }
+            }
+        }
+
+        // reagentx P1: fail closed on the FAN-OUT (no outbound peer
+        // queries) rather than let an attacker force unbounded network
+        // traffic by varying agent_id on every request — see
+        // LAN_PUBKEY_LOOKUP_RATE_LIMIT's doc comment. Returning
+        // `RateLimited` here (reagentx P0 follow-up, NOT the same as
+        // `NotFound`) is the point: by the time this function is called at
+        // all, `verify_lan_signature` has already confirmed a `lan_sig` WAS
+        // presented, so "we didn't check" must never collapse into the same
+        // outcome as "genuinely nothing to check" — a caller could
+        // otherwise exhaust this limiter with junk lookups, then slip a
+        // forged signature for a REAL agent's identity through unverified
+        // instead of forced-sensitive.
+        let allowed = self
+            .pubkey_lookup_limiter
+            .lock()
+            .map(|mut limiter| limiter.check())
+            .unwrap_or(true);
+        if !allowed {
+            tracing::debug!(agent_id, "LAN pubkey lookup rate-limited — skipping peer fan-out");
+            return LanPubkeyLookup::RateLimited;
+        }
+
+        let peers = self.get_instances();
+        for peer in &peers {
+            if peer.address.is_empty() || peer.auth_key.is_empty() {
+                continue;
+            }
+            let peer_url = format!("http://{}:{}", peer.address, peer.port);
+            let result = http
+                .get(format!("{}/agentmux/reactive/agent", peer_url))
+                .query(&[("id", agent_id)])
+                .header("X-AuthKey", &peer.auth_key)
+                .timeout(std::time::Duration::from_secs(LAN_PEER_QUERY_TIMEOUT_SECS))
+                .send()
+                .await;
+            let Ok(resp) = result else { continue };
+            if !resp.status().is_success() {
+                continue;
+            }
+            let Ok(body) = resp.json::<serde_json::Value>().await else { continue };
+            let Some(pubkey_b64) = body.get("lan_public_key").and_then(|v| v.as_str()) else {
+                continue; // this peer has the agent but no LAN key minted for it yet
+            };
+            use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+            let Ok(pubkey_bytes) = BASE64.decode(pubkey_b64) else { continue };
+            tracing::debug!(agent_id, peer_url = %peer_url, "LAN agent pubkey found on peer");
+            if let Ok(mut cache) = self.pubkey_cache.write() {
+                cache.insert(
+                    agent_id.to_string(),
+                    LanPubkeyCacheEntry {
+                        public_key: Some(pubkey_bytes.clone()),
+                        expires: std::time::Instant::now()
+                            + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
+                    },
+                );
+            }
+            return LanPubkeyLookup::Found(pubkey_bytes);
+        }
+
+        if let Ok(mut cache) = self.pubkey_cache.write() {
+            cache.insert(
+                agent_id.to_string(),
+                LanPubkeyCacheEntry {
+                    public_key: None,
+                    expires: std::time::Instant::now()
+                        + std::time::Duration::from_secs(LAN_AGENT_CACHE_TTL_SECS),
+                },
+            );
+        }
+        LanPubkeyLookup::NotFound
     }
 
     /// Evict a stale cache entry (e.g. after a forward to that peer failed).
@@ -1039,5 +1235,32 @@ mod tests {
         assert_eq!(received["version"], "1.2.3");
         assert_eq!(received["port"], 9999);
         assert_eq!(received["auth_key"], "secret-key");
+    }
+}
+
+#[cfg(test)]
+mod lookup_rate_limiter_tests {
+    use super::LookupRateLimiter;
+
+    #[test]
+    fn allows_up_to_max_tokens_per_window() {
+        let mut limiter = LookupRateLimiter::new(3);
+        assert!(limiter.check());
+        assert!(limiter.check());
+        assert!(limiter.check());
+        assert!(!limiter.check(), "a 4th check within the same second must be denied");
+    }
+
+    #[test]
+    fn refills_after_the_window_elapses() {
+        let mut limiter = LookupRateLimiter::new(1);
+        assert!(limiter.check());
+        assert!(!limiter.check());
+        // Simulate the refill window having passed rather than sleeping in
+        // a test — same approach as the existing RATE_LIMIT_MAX tests use
+        // conceptually, just directly on the struct field since this type
+        // has no injectable clock.
+        limiter.last_refill -= std::time::Duration::from_secs(2);
+        assert!(limiter.check(), "must refill once a full second has elapsed");
     }
 }
