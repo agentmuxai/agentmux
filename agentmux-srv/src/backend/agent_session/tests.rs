@@ -12,6 +12,7 @@ use super::zone_naming::{agent_archive_zone, validate_and_current};
 use crate::backend::obj::{Block, MetaMapType};
 use crate::backend::storage::filestore::{FileMeta, FileOpts, FileStore};
 use crate::backend::storage::store::Store;
+use crate::backend::storage::Memory;
 use std::path::Path;
 use std::sync::Arc;
 use tempfile::tempdir;
@@ -602,6 +603,57 @@ fn template_promote_clones_template_and_moves_zones() {
     // file compatibility — see the doc comment on
     // `TEMPLATE_PROMOTE_MARKER_V1`).
     assert!(!dir.path().join(TEMPLATE_PROMOTE_MARKER_V1).exists());
+}
+
+#[test]
+fn template_promote_resolves_provider_through_the_templates_bundle_not_the_drifted_column() {
+    // Template's own `.provider` column says "codex" (drifted/stale —
+    // simulates the same drift class #2592 fixed: some definition-time
+    // write path changed this column after the bundle was already
+    // provisioned/immutable), but its bound bundle's REAL provider is
+    // "claude". The promoted clone must carry "claude", not "codex"
+    // (#2594, same pattern as `agent_def_create_from_template`/
+    // `forkagentdefinition`).
+    let dir = tempdir().unwrap();
+    let wstore = open_temp_wstore(dir.path());
+    let filestore = fresh_filestore();
+
+    let bundle = Memory {
+        id: "bundle-claude".to_string(),
+        name: "Bundle".to_string(),
+        description: String::new(),
+        is_blank: false,
+        is_global: false,
+        provider: "claude".to_string(),
+        model: String::new(),
+        instructions: String::new(),
+        instructions_by_provider: "{}".to_string(),
+        context_files: "[]".to_string(),
+        mcp_servers: "[]".to_string(),
+        skills: "[]".to_string(),
+        sort_order: 0,
+        created_at: 0,
+        updated_at: 0,
+    };
+    wstore.bundle_memory_upsert(&bundle).unwrap();
+
+    let mut template = insert_template(&wstore, "tpl-drift", "Drifted", "codex");
+    template.memory_id = "bundle-claude".to_string();
+    wstore.agent_def_update(&mut template).unwrap();
+    write_session_state(&filestore, &template.id, br#"{"nodes":[]}"#).unwrap();
+
+    let stats = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+    assert_eq!(stats.templates_promoted, 1);
+    assert_eq!(stats.failures, 0);
+
+    let promoted = wstore
+        .agent_def_get("template-promote-v1-tpl-drift")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        promoted.provider, "claude",
+        "promoted clone must carry the template's REAL (bundle-resolved) provider, not the drifted `codex` column"
+    );
 }
 
 #[test]
