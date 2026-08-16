@@ -72,6 +72,45 @@ impl BrowserPaneManager {
     pub fn reload(&self, block_id: &str, state: &Arc<AppState>) {
         if let Some(mut b) = self.live_browser(state, block_id) { b.reload(); }
     }
+
+    /// "Print" from the unified browser-pane context menu
+    /// (SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md) — CEF's own
+    /// print UI for the pane's current page, same as `CefBrowserHost::Print`
+    /// used anywhere else in Chromium.
+    pub fn print(&self, block_id: &str, state: &Arc<AppState>) {
+        if let Some(mut b) = self.live_browser(state, block_id) {
+            if let Some(host) = b.host() { host.print(); }
+        }
+    }
+
+    /// "View Page Source" — navigates via CEF's built-in `view-source:`
+    /// scheme (added to `PANE_ALLOWED_NAV_SCHEMES` alongside this feature;
+    /// Chromium renders it internally, same as `chrome-devtools:`, so it
+    /// carries none of the OS-handoff risk that allowlist exists to block).
+    pub fn view_source(&self, block_id: &str, state: &Arc<AppState>) {
+        let Some(mut b) = self.live_browser(state, block_id) else { return };
+        let Some(frame) = b.main_frame() else { return };
+        let current_url = CefString::from(&ImplFrame::url(&frame)).to_string();
+        if current_url.is_empty() {
+            return;
+        }
+        let src_url = format!("view-source:{current_url}");
+        frame.load_url(Some(&CefString::from(src_url.as_str())));
+    }
+
+    /// "Inspect Element" — opens CEF's own DevTools window, jumping straight
+    /// to the element under the right-click point (mirrors Chrome's
+    /// behavior). `x`/`y` are view-local coordinates, the same ones CEF's
+    /// `ContextMenuParams::xcoord/ycoord` reported when the menu was
+    /// suppressed — see `client::context_menu`. `None` for
+    /// window_info/client/settings uses CEF's default popup DevTools window.
+    pub fn inspect_element(&self, block_id: &str, state: &Arc<AppState>, x: i32, y: i32) {
+        if let Some(mut b) = self.live_browser(state, block_id) {
+            if let Some(host) = b.host() {
+                host.show_dev_tools(None, None, None, Some(&Point { x, y }));
+            }
+        }
+    }
 }
 
 // `View::set_bounds` must run on the CEF UI thread; `resize()` is called from

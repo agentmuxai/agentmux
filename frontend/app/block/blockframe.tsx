@@ -22,7 +22,7 @@ import { IconButton, ToggleIconButton } from "@/element/iconbutton";
 import { BlockStatsBadge } from "@/element/blockstats";
 import { MenuButton } from "@/element/menubutton";
 import { MicButton } from "@/app/element/MicButton";
-import { invokeCommand } from "@/app/platform/ipc";
+import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import { NodeModel } from "@/layout/index";
 import * as util from "@/util/util";
 import { computeBgStyleFromMeta } from "@/util/waveutil";
@@ -862,13 +862,18 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
         <BlockFrame_Header {...props} connBtnRef={connBtnRef} changeConnModalAtom={changeConnModalAtom} viewModel={null} />
     );
 
-    // Body right-click handler
-    const onBodyContextMenu = (e: MouseEvent) => {
+    // Body right-click handler. `browserCtx` is only ever passed by the
+    // synthetic browser-pane path below (real DOM contextmenu events never
+    // carry it) — see getBodyContextMenuItems's doc comment in custom.d.ts.
+    const onBodyContextMenu = (
+        e: MouseEvent,
+        browserCtx?: Parameters<NonNullable<ViewModel["getBodyContextMenuItems"]>>[0]
+    ) => {
         if (!blockData() || props.preview) return;
         e.preventDefault();
         e.stopPropagation();
         const menu: ContextMenuItem[] = [];
-        const bodyItems = props.viewModel?.getBodyContextMenuItems?.();
+        const bodyItems = props.viewModel?.getBodyContextMenuItems?.(browserCtx);
 
         if (bodyItems && bodyItems.length > 0) {
             menu.push(...bodyItems, { type: "separator" });
@@ -881,6 +886,51 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
         }, props.viewModel));
         ContextMenuModel.showContextMenu(menu, e);
     };
+
+    // Browser panes: CEF's native context menu is suppressed at the host
+    // level (client::context_menu::run_context_menu) because a pane's
+    // content is a native overlay, not DOM — a real `contextmenu` DOM event
+    // never fires there, so `onBodyContextMenu` above is never reached by a
+    // right-click landing on the pane's actual content. The host instead
+    // emits `browser-pane-context-menu` with the click point in the PANE's
+    // own coordinate space; translate it into window-client coordinates
+    // using `frameEl`'s rect (the native overlay is always positioned to
+    // exactly match this wrapper) and drive the exact same `onBodyContextMenu`
+    // path via a synthetic event, so composition/ordering matches every
+    // other pane type exactly. See
+    // docs/specs/SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md.
+    onMount(() => {
+        const unsubPromise = listenEvent<{
+            block_id: string;
+            x: number;
+            y: number;
+            link_url: string;
+            selection_text: string;
+            is_editable: boolean;
+            can_go_back: boolean;
+            can_go_forward: boolean;
+        }>("browser-pane-context-menu", (payload) => {
+            if (payload.block_id !== nodeModel.blockId) return;
+            const rect = frameEl()?.getBoundingClientRect();
+            if (!rect) return;
+            const synthetic = {
+                clientX: rect.left + payload.x,
+                clientY: rect.top + payload.y,
+                preventDefault: () => {},
+                stopPropagation: () => {},
+            } as unknown as MouseEvent;
+            onBodyContextMenu(synthetic, {
+                x: payload.x,
+                y: payload.y,
+                linkUrl: payload.link_url || undefined,
+                selectionText: payload.selection_text || undefined,
+                isEditable: payload.is_editable,
+                canGoBack: payload.can_go_back,
+                canGoForward: payload.can_go_forward,
+            });
+        });
+        onCleanup(() => { void unsubPromise.then((unsub) => unsub()); });
+    });
 
     return (
         <div

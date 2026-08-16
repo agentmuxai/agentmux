@@ -687,6 +687,12 @@ pub fn url_host(url: &str) -> Option<String> {
 const PANE_ALLOWED_NAV_SCHEMES: &[&str] = &[
     "http", "https", "about", "data", "blob", "ws", "wss", "devtools",
     "chrome-devtools", "chrome",
+    // "View Page Source" (browser-pane context menu, SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md)
+    // navigates via a `view-source:<url>` prefix. Like `chrome-devtools:`,
+    // Chromium renders this internally (a read-only source view) — it is
+    // never handed to the OS shell, so it carries none of the UAC/OS-handoff
+    // risk this allowlist exists to block.
+    "view-source",
 ];
 
 /// The scheme of `url` (lowercased) if it has one — the run of
