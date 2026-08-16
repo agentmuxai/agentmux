@@ -547,6 +547,21 @@ async fn route_command(
             state.browser_panes.inspect_element(block_id, state, x, y);
             Ok(serde_json::json!(true))
         }
+        "browser_pane_copy" => {
+            let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+            state.browser_panes.copy(block_id, state);
+            Ok(serde_json::json!(true))
+        }
+        "browser_pane_cut" => {
+            let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+            state.browser_panes.cut(block_id, state);
+            Ok(serde_json::json!(true))
+        }
+        "browser_pane_paste" => {
+            let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+            state.browser_panes.paste(block_id, state);
+            Ok(serde_json::json!(true))
+        }
         "browser_pane_focus" => {
             let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
             tracing::info!("[ipc] browser_pane_focus block_id={}", block_id);

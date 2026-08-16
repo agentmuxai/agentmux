@@ -120,6 +120,29 @@ impl BrowserPaneManager {
             }
         }
     }
+
+    /// "Copy" / "Cut" / "Paste" from the unified browser-pane context menu.
+    /// Added because suppressing CEF's native menu (SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md)
+    /// also removed its built-in Cut/Copy/Paste for a text selection or an
+    /// editable web form field, with nothing replacing them (reagentx P2 on
+    /// PR #2599). `Frame::copy/cut/paste` operate on whatever is currently
+    /// selected/focused in that frame, exactly like CEF's own native menu
+    /// commands would have.
+    pub fn copy(&self, block_id: &str, state: &Arc<AppState>) {
+        if let Some(mut b) = self.live_browser(state, block_id) {
+            if let Some(frame) = b.main_frame() { frame.copy(); }
+        }
+    }
+    pub fn cut(&self, block_id: &str, state: &Arc<AppState>) {
+        if let Some(mut b) = self.live_browser(state, block_id) {
+            if let Some(frame) = b.main_frame() { frame.cut(); }
+        }
+    }
+    pub fn paste(&self, block_id: &str, state: &Arc<AppState>) {
+        if let Some(mut b) = self.live_browser(state, block_id) {
+            if let Some(frame) = b.main_frame() { frame.paste(); }
+        }
+    }
 }
 
 // `View::set_bounds` must run on the CEF UI thread; `resize()` is called from

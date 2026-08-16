@@ -569,8 +569,47 @@ export class BrowserViewModel implements ViewModel {
                 enabled: browserCtx?.canGoForward ?? this.canGoForwardAtom(),
                 click: () => this.goForward(),
             },
-            { label: "Reload", click: () => this.reload() },
+            {
+                label: "Reload",
+                // NOT this.reload() -- that method only does local reducer
+                // state tricks (UrlCleared + re-Navigate) and never touches
+                // the real native CEF browser view, so it's a no-op against
+                // the actual page (reagentx P1 on PR #2599). The toolbar
+                // Reload button (browser-nav-bar.tsx) has never called
+                // reload() either -- it invokes the backend command
+                // directly, which this now matches.
+                click: () => {
+                    invokeCommand("browser_pane_reload", { block_id: this.blockId }).catch(() => {});
+                },
+            },
         ];
+        // Suppressing CEF's native menu also removed its built-in Cut/Copy/
+        // Paste for a text selection or an editable web form field, with
+        // nothing replacing them (reagentx P2 on PR #2599). `Frame::copy/
+        // cut/paste` on the host operate on whatever is currently selected/
+        // focused, same as the native commands would have.
+        if (browserCtx?.selectionText || browserCtx?.isEditable) {
+            const editItems: ContextMenuItem[] = [];
+            if (browserCtx.isEditable && browserCtx.selectionText) {
+                editItems.push({
+                    label: "Cut",
+                    click: () => { invokeCommand("browser_pane_cut", { block_id: this.blockId }).catch(() => {}); },
+                });
+            }
+            if (browserCtx.selectionText) {
+                editItems.push({
+                    label: "Copy",
+                    click: () => { invokeCommand("browser_pane_copy", { block_id: this.blockId }).catch(() => {}); },
+                });
+            }
+            if (browserCtx.isEditable) {
+                editItems.push({
+                    label: "Paste",
+                    click: () => { invokeCommand("browser_pane_paste", { block_id: this.blockId }).catch(() => {}); },
+                });
+            }
+            items.push({ type: "separator" }, ...editItems);
+        }
         if (browserCtx?.linkUrl) {
             items.push(
                 { type: "separator" },

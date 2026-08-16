@@ -893,11 +893,9 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
     // never fires there, so `onBodyContextMenu` above is never reached by a
     // right-click landing on the pane's actual content. The host instead
     // emits `browser-pane-context-menu` with the click point in the PANE's
-    // own coordinate space; translate it into window-client coordinates
-    // using `frameEl`'s rect (the native overlay is always positioned to
-    // exactly match this wrapper) and drive the exact same `onBodyContextMenu`
-    // path via a synthetic event, so composition/ordering matches every
-    // other pane type exactly. See
+    // own coordinate space; translate it into window-client coordinates and
+    // drive the exact same `onBodyContextMenu` path via a synthetic event,
+    // so composition/ordering matches every other pane type exactly. See
     // docs/specs/SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md.
     onMount(() => {
         const unsubPromise = listenEvent<{
@@ -911,7 +909,15 @@ function BlockFrame_Default_Component(props: BlockFrameProps): JSX.Element {
             can_go_forward: boolean;
         }>("browser-pane-context-menu", (payload) => {
             if (payload.block_id !== nodeModel.blockId) return;
-            const rect = frameEl()?.getBoundingClientRect();
+            // CEF's xcoord/ycoord are relative to the browser render view,
+            // which browser-view.tsx positions against the INNER
+            // `.browser-placeholder` div — not `frameEl` (the outer wrapper,
+            // which also contains the header/title bar/nav bar above the
+            // content). Using frameEl's rect offset the menu downward by
+            // that header chrome's height (reagentx P1 on PR #2599).
+            const rect = frameEl()
+                ?.querySelector<HTMLElement>(".browser-placeholder")
+                ?.getBoundingClientRect();
             if (!rect) return;
             const synthetic = {
                 clientX: rect.left + payload.x,
