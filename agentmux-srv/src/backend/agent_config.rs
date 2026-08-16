@@ -877,6 +877,50 @@ pub fn write_managed_skill_file_manifest(
     }
 }
 
+/// Best-effort: mint-or-reuse `agent_slug`'s jekt/LAN signing keys
+/// (`SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md` §2.2,
+/// `SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md` §2.1) and patch them into a
+/// `.mcp.json` file's `mcpServers.agentmux.env` block. Returns `None` on
+/// any parse failure, missing `mcpServers.agentmux.env` object, or if
+/// neither key could be ensured — callers must keep the original content
+/// in that case; this must never block writing the agent's config.
+///
+/// Shared by `agent.open` (`server/app_api/agent_open.rs`) and the
+/// `WriteAgentConfig` "click Launch" path (`server/editor_handlers.rs`) —
+/// per this module's own doc comment, the two `.mcp.json`-materializing
+/// call sites that must not drift out of sync. Before this function
+/// existed, only `agent.open` injected these keys — `WriteAgentConfig`
+/// (the path a normal Launch-button click actually goes through) silently
+/// never did, so ordinarily-launched agents' jekts rendered
+/// `TRUST=self-declared` even on builds well past both features shipping.
+/// See `docs/specs/REPORT_JEKT_SIGNING_KEY_INJECTION_GAP_2026_08_16.md`.
+pub fn inject_jekt_signing_keys_into_mcp_json(
+    content: &str,
+    wstore: &crate::backend::storage::store::Store,
+    agent_slug: &str,
+) -> Option<String> {
+    let mut mcp_json: Value = serde_json::from_str(content).ok()?;
+    let env = mcp_json
+        .pointer_mut("/mcpServers/agentmux/env")
+        .and_then(|v| v.as_object_mut())?;
+
+    let mut patched = false;
+    if let Ok(key) = wstore.agent_jekt_key_ensure(agent_slug) {
+        use base64::Engine as _;
+        let key_b64 = base64::engine::general_purpose::STANDARD.encode(&key);
+        env.insert("AGENTMUX_JEKT_KEY".to_string(), json!(key_b64));
+        patched = true;
+    }
+    if let Ok(keypair) = wstore.agent_lan_key_ensure(agent_slug) {
+        env.insert("AGENTMUX_LAN_KEY".to_string(), json!(keypair.private_key));
+        patched = true;
+    }
+    if !patched {
+        return None;
+    }
+    serde_json::to_string_pretty(&mcp_json).ok()
+}
+
 // ============================================================
 // Tests
 // ============================================================
@@ -1372,5 +1416,55 @@ mod tests {
         );
         let claude_md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
         assert!(claude_md.content.contains("I am aria, working in /home/user/my-project."));
+    }
+
+    // docs/specs/REPORT_JEKT_SIGNING_KEY_INJECTION_GAP_2026_08_16.md: this
+    // function exists specifically so `agent.open` and `WriteAgentConfig`
+    // (the actual "click Launch" path) can't drift out of sync on jekt/LAN
+    // key injection the way they did before this fix.
+    #[test]
+    fn inject_jekt_signing_keys_into_mcp_json_patches_both_keys_into_the_env_block() {
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let content = serde_json::to_string(&json!({
+            "mcpServers": { "agentmux": { "type": "stdio", "command": "agentmux-mcp", "env": { "AGENTMUX_AGENT_ID": "aria" } } }
+        }))
+        .unwrap();
+
+        let rewritten = inject_jekt_signing_keys_into_mcp_json(&content, &store, "aria")
+            .expect("both keys should ensure successfully against a fresh in-memory store");
+        let parsed: Value = serde_json::from_str(&rewritten).unwrap();
+        let env = &parsed["mcpServers"]["agentmux"]["env"];
+        assert_eq!(env["AGENTMUX_AGENT_ID"], "aria", "existing fields must survive the patch");
+        assert!(env["AGENTMUX_JEKT_KEY"].is_string() && !env["AGENTMUX_JEKT_KEY"].as_str().unwrap().is_empty());
+        assert!(env["AGENTMUX_LAN_KEY"].is_string() && !env["AGENTMUX_LAN_KEY"].as_str().unwrap().is_empty());
+    }
+
+    #[test]
+    fn inject_jekt_signing_keys_into_mcp_json_reuses_the_same_key_on_a_second_call() {
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        let content = serde_json::to_string(&json!({
+            "mcpServers": { "agentmux": { "env": { "AGENTMUX_AGENT_ID": "aria" } } }
+        }))
+        .unwrap();
+
+        let first = inject_jekt_signing_keys_into_mcp_json(&content, &store, "aria").unwrap();
+        let second = inject_jekt_signing_keys_into_mcp_json(&content, &store, "aria").unwrap();
+        let first_key = serde_json::from_str::<Value>(&first).unwrap()["mcpServers"]["agentmux"]["env"]["AGENTMUX_JEKT_KEY"].clone();
+        let second_key = serde_json::from_str::<Value>(&second).unwrap()["mcpServers"]["agentmux"]["env"]["AGENTMUX_JEKT_KEY"].clone();
+        assert_eq!(first_key, second_key, "minted-on-first-use key must be reused, not re-minted, on every materialization");
+    }
+
+    #[test]
+    fn inject_jekt_signing_keys_into_mcp_json_returns_none_when_theres_no_env_object_to_patch() {
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        // No mcpServers.agentmux.env at all -- nothing to patch into.
+        let content = serde_json::to_string(&json!({"hello": "world"})).unwrap();
+        assert!(inject_jekt_signing_keys_into_mcp_json(&content, &store, "aria").is_none());
+    }
+
+    #[test]
+    fn inject_jekt_signing_keys_into_mcp_json_returns_none_on_malformed_json() {
+        let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
+        assert!(inject_jekt_signing_keys_into_mcp_json("not json", &store, "aria").is_none());
     }
 }
