@@ -17,9 +17,9 @@
 // for exactly this native-click gap (added for pane click-to-select, see
 // docs/specs/SPEC_BROWSER_PANE_CLICK_TO_SELECT_2026_07_07.md). Instead of
 // teaching every listener about it individually, this dispatches a
-// synthetic mousedown + pointerdown on `document` whenever it fires — every
-// existing listener treats that exactly like a real outside click, with no
-// changes needed on their end.
+// synthetic mousedown + pointerdown on `document.body` whenever it fires —
+// every existing listener treats that exactly like a real outside click,
+// with no changes needed on their end.
 
 import { listenEvent } from "@/app/platform/ipc";
 import { onCleanup, onMount } from "solid-js";
@@ -31,14 +31,23 @@ export const BrowserPaneOutsideClickBridge = () => {
             // every currently open dismissible menu, the same way clicking
             // anywhere else non-menu in the app already does.
             //
-            // Dispatched ON `document` (not `document.body`) so `e.target`
-            // is `document` itself: never `.contains()`-matched by any
-            // menu/button ref, and `instanceof Element` is false, so
-            // existing handlers' `el?.closest(".popover-menu")` fallback
-            // also safely no-ops instead of throwing. Both event types are
-            // dispatched because existing listeners are a mix of the two.
+            // Dispatched on `document.body`, NOT `document` itself
+            // (reagentx P1 on PR #2597): several existing listeners
+            // (useWindowDrag.*.ts's isInDragRegion) call DOM methods like
+            // `getAttribute` on `e.target`, which `Document` doesn't have —
+            // dispatching on `document` threw an uncaught TypeError on
+            // every browser-pane click. `document.body` is a real Element,
+            // so those calls are safe, while still reading as "outside" for
+            // every existing check: `.contains()` only matches descendants
+            // (body is never a descendant of a menu/popover), and
+            // `body.closest(".popover-menu")` walks ancestors, which body
+            // has none of, so it correctly returns null. Both event types
+            // are dispatched because existing listeners are a mix of the
+            // two — see sound-service.ts for why `pointerdown` alone needed
+            // a companion fix (isTrusted guard on its autoplay-prime
+            // listener) rather than being dropped here.
             for (const type of ["mousedown", "pointerdown"] as const) {
-                document.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true }));
+                document.body.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true }));
             }
         });
         onCleanup(() => {
