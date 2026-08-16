@@ -17,7 +17,7 @@ import { buildInstanceSlug } from "./defaults/instance-slug";
 import type { LaunchOverrides } from "./components/AgentLaunchModal";
 import { readActivitySummary } from "@/app/store/activitySummary";
 import { buildConfigFiles } from "./agent-config-builder";
-import { checkNodejsForProvider, agentmuxHome, resolveCliDir } from "./agent-launch-env";
+import { checkNodejsForProvider, agentmuxHome, resolveCliDir, resolveEffectiveLaunchProvider } from "./agent-launch-env";
 import { realAccountIdOrEmpty } from "./identity-carry-over";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { dimAgentColor, isValidAgentColor, pickAgentColor } from "./agent-color";
@@ -322,9 +322,15 @@ export class AgentViewModel implements ViewModel {
         overrides?: LaunchOverrides,
         targetBlockId?: string,
     ): Promise<boolean> => {
-        const provider = PROVIDERS[agent.provider] ?? PROVIDERS[resolveProviderAlias(agent.provider)];
+        // See resolveEffectiveLaunchProvider's own doc comment
+        // (agent-launch-env.ts) for why this must resolve through the
+        // agent's bound bundle rather than trusting `agent.provider`
+        // directly.
+        const effectiveProvider = await resolveEffectiveLaunchProvider(agent);
+
+        const provider = PROVIDERS[effectiveProvider] ?? PROVIDERS[resolveProviderAlias(effectiveProvider)];
         if (!provider) {
-            Logger.error("agent", "Unknown provider in agent definition", { agentId: agent.id, provider: agent.provider });
+            Logger.error("agent", "Unknown provider in agent definition", { agentId: agent.id, provider: effectiveProvider });
             return false;
         }
 
@@ -340,9 +346,9 @@ export class AgentViewModel implements ViewModel {
         const cliDir = resolveCliDir(version, provider.id);
         const cliBin = `${cliDir}/node_modules/.bin/${provider.cliCommand}`;
 
-        Logger.info("agent", `Launching agent definition ${agent.name} (${agent.provider})`, {
+        Logger.info("agent", `Launching agent definition ${agent.name} (${effectiveProvider})`, {
             agentId: agent.id,
-            provider: agent.provider,
+            provider: effectiveProvider,
         });
 
         // Load all content for this agent
@@ -625,7 +631,7 @@ export class AgentViewModel implements ViewModel {
 
             const meta: Record<string, unknown> = {
                 agentId: agent.id,
-                agentProvider: agent.provider,
+                agentProvider: effectiveProvider,
                 agentOutputFormat: provider.styledOutputFormat,
                 agentName: instanceName,
                 agentIcon: agent.icon,
@@ -744,7 +750,7 @@ export class AgentViewModel implements ViewModel {
                     await RpcApi.LinkAgentIdentityCommand(TabRpcClient, {
                         agent_id: agent.id,
                         account_id: accountId,
-                        provider: agent.provider,
+                        provider: effectiveProvider,
                     });
                 }
             } catch (e: any) {

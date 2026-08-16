@@ -1001,6 +1001,44 @@ impl Store {
             .to_string()
     }
 
+    /// Resolve the effective harness/provider id for `agent`, preferring
+    /// its bound ABF bundle's copy over the agent's own `provider`
+    /// column. The bundle is the readonly-once-set source of truth
+    /// (`ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md` §7.4.1):
+    /// `AgentDefinition.provider` can still drift after creation via
+    /// `agent.define`'s `if_exists=update` path, while the bundle's own
+    /// copy cannot (backend-enforced in `bundle.upsert`, see
+    /// `check_provider_model_immutable`). Falls back to `agent.provider`
+    /// when there's no bundle to consult (unbound legacy agent, missing
+    /// row, or an empty `provider` on the bundle itself) — a caller
+    /// never hard-fails on this alone.
+    ///
+    /// **Call this on the EFFECTIVE identity/memory store
+    /// (`AppState.id_store`), never on the per-channel `wstore` directly**
+    /// — the bundle lives in the shared store when one is configured (the
+    /// normal case), so a `wstore` lookup silently returns the fallback
+    /// every time in that configuration. See
+    /// `bundle_provision_for_new_agent`'s own doc comment for the write-
+    /// side half of this same rule.
+    ///
+    /// Consolidated here (2026-08-15) after the identical resolution
+    /// logic was independently duplicated in `agent_open.rs`'s spawn path
+    /// and found to have the exact same wstore-vs-id_store mistake twice
+    /// in review (rounds 3 and, for a second call site,
+    /// `identity/resolver/inject.rs`'s layer-3 credential gate, found in
+    /// a later scoping pass — not by an automated review this time). One
+    /// shared implementation both consumers call means they can't drift
+    /// on this resolution independently again.
+    pub fn resolve_effective_provider_id(&self, agent: &AgentDefinition) -> String {
+        if agent.memory_id.is_empty() {
+            return agent.provider.clone();
+        }
+        match self.bundle_memory_get(&agent.memory_id) {
+            Ok(Some(b)) if !b.provider.is_empty() => b.provider,
+            _ => agent.provider.clone(),
+        }
+    }
+
     /// Provision a fresh, dedicated ABF bundle for a NEW agent definition —
     /// the definition-time half of
     /// `docs/specs/ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md` §3.2
@@ -2860,5 +2898,96 @@ mod bundle_provisioning_store_separation_tests {
         assert!(!agent_a.memory_id.is_empty(), "first same-named agent must still get bound");
         assert!(!agent_b.memory_id.is_empty(), "second same-named agent must NOT be silently left unbound");
         assert_ne!(agent_a.memory_id, agent_b.memory_id, "each agent still gets its own distinct bundle");
+    }
+
+    // resolve_effective_provider_id — consolidated shared implementation
+    // (was previously duplicated between agent_open.rs's spawn path and
+    // identity/resolver/inject.rs's layer-3 credential gate; the latter
+    // was found reading agent.provider directly during a follow-up
+    // scoping pass, the same class of bug agent_open.rs already had
+    // fixed for itself). These mirror agent_open.rs's own former
+    // `resolve_effective_provider_id_tests` module one-for-one, plus the
+    // store-separation case matching this file's other bundle-resolution
+    // tests.
+
+    #[test]
+    fn resolve_effective_provider_id_prefers_the_bundles_provider_over_a_drifted_agent_column() {
+        let store = Store::open_in_memory().unwrap();
+        let mut agent = base_agent("a1", "Agent One", "codex", "");
+        store.agent_def_insert(&mut agent).unwrap();
+        let bundle_id = store.bundle_provision_for_new_agent(&base_agent("a1", "Agent One", "claude", ""), 0).unwrap();
+        store.agent_def_set_memory_id_if_empty(&agent.id, &bundle_id).unwrap();
+        agent.memory_id = bundle_id;
+
+        // Simulates the exact drift this exists to correct: agent.define's
+        // if_exists=update path changed agent.provider (still "codex" on
+        // this in-memory struct) after creation, but the bundle's own
+        // copy ("claude") is backend-enforced immutable.
+        assert_eq!(store.resolve_effective_provider_id(&agent), "claude");
+    }
+
+    #[test]
+    fn resolve_effective_provider_id_falls_back_to_agent_provider_when_unbound() {
+        let store = Store::open_in_memory().unwrap();
+        let agent = base_agent("a1", "Agent One", "claude", "");
+        assert_eq!(store.resolve_effective_provider_id(&agent), "claude");
+    }
+
+    #[test]
+    fn resolve_effective_provider_id_falls_back_when_bundle_row_is_missing() {
+        let store = Store::open_in_memory().unwrap();
+        let mut agent = base_agent("a1", "Agent One", "claude", "");
+        agent.memory_id = "no-such-bundle".to_string();
+        assert_eq!(store.resolve_effective_provider_id(&agent), "claude");
+    }
+
+    // ReAgent review on PR #2592 round 3: dropped during the consolidation
+    // from agent_open.rs's former resolve_effective_provider_id_tests
+    // module despite the commit claiming a one-for-one move — restoring
+    // it here. The shared "blank" singleton and pre-§7 bundles have an
+    // empty `provider` column; must not shadow a real value with "".
+    #[test]
+    fn resolve_effective_provider_id_falls_back_when_bundle_provider_is_empty() {
+        let store = Store::open_in_memory().unwrap();
+        let mut agent = base_agent("a1", "Agent One", "claude", "");
+        // provider left empty ("") deliberately, unlike the other tests'
+        // bundle_provision_for_new_agent-built bundles.
+        let bundle = super::super::memory_bundles::Memory {
+            id: "bundle-empty-provider".to_string(),
+            name: "Empty Provider Bundle".to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: false,
+            provider: String::new(),
+            model: String::new(),
+            instructions: String::new(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+        };
+        store.bundle_memory_upsert(&bundle).unwrap();
+        agent.memory_id = "bundle-empty-provider".to_string();
+        assert_eq!(store.resolve_effective_provider_id(&agent), "claude");
+    }
+
+    // The core store-separation regression case: the bundle exists in ONE
+    // store but the method is called on a DIFFERENT one — proves the
+    // lookup only succeeds via the store it's actually called on, so a
+    // caller that mistakenly passes wstore instead of id_store gets the
+    // safe fallback rather than a silent, unexplained "wrong" answer.
+    #[test]
+    fn resolve_effective_provider_id_falls_back_when_called_on_the_wrong_store() {
+        let id_store = Store::open_in_memory().unwrap();
+        let wstore = Store::open_in_memory().unwrap();
+        let mut agent = base_agent("a1", "Agent One", "claude", "");
+        let bundle_id = id_store.bundle_provision_for_new_agent(&base_agent("a1", "Agent One", "codex", ""), 0).unwrap();
+        agent.memory_id = bundle_id;
+
+        assert_eq!(id_store.resolve_effective_provider_id(&agent), "codex", "must find it via the store it was actually provisioned into");
+        assert_eq!(wstore.resolve_effective_provider_id(&agent), "claude", "an unrelated store must fall back to agent.provider, not silently succeed");
     }
 }
