@@ -55,9 +55,10 @@ wrap_task! {
     }}
 }
 
-/// Arm (or re-arm) the pane load watchdog for a main-frame browser-pane
-/// navigation that's about to start. Called from
-/// `client::lifecycle::on_before_browse`, NOT from the loading-state-change
+/// Arm a FRESH pane load watchdog — new epoch, new `PANE_LOAD_WATCHDOG_TIMEOUT_MS`
+/// deadline — for a main-frame browser-pane navigation that's about to
+/// start. Called from `client::lifecycle::on_before_browse` for a genuinely
+/// new navigation (`is_redirect == 0`), NOT from the loading-state-change
 /// handler — `on_before_browse` hands us the navigation's own target URL via
 /// CEF's `Request` object, which is the only reliable source for "what is
 /// this navigation actually trying to reach." (`Frame::url()` reflects the
@@ -65,6 +66,9 @@ wrap_task! {
 /// watchdog exists purely to handle the case where a navigation stays
 /// pending forever — that's still the PREVIOUS page.) `url` is stored
 /// alongside the arm so `fire_pane_load_watchdog` never has to re-derive it.
+///
+/// A redirect hop of an ALREADY-armed navigation must NOT call this — see
+/// `update_pane_load_watchdog_url` for why.
 pub(crate) fn arm_pane_load_watchdog(state: &Arc<AppState>, block_id: &str, browser: Browser, url: String) {
     let epoch = PANE_LOAD_WATCHDOG_NEXT_EPOCH.fetch_add(1, Ordering::Relaxed);
     state
@@ -73,6 +77,28 @@ pub(crate) fn arm_pane_load_watchdog(state: &Arc<AppState>, block_id: &str, brow
         .insert(block_id.to_string(), (Instant::now(), epoch, browser, url));
     let mut task = PaneLoadWatchdogTask::new(state.clone(), block_id.to_string(), epoch);
     post_delayed_task(ThreadId::UI, Some(&mut task), PANE_LOAD_WATCHDOG_TIMEOUT_MS);
+}
+
+/// Update the STORED target URL for an already-armed watchdog, without
+/// touching its epoch or deadline. Called from `on_before_browse` for
+/// REDIRECT hops (`is_redirect != 0`) of a navigation that's already armed.
+///
+/// Calling `arm_pane_load_watchdog` instead (an earlier version of this fix
+/// did) hands out a fresh `PANE_LOAD_WATCHDOG_TIMEOUT_MS` deadline on EVERY
+/// hop of a redirect chain, so a site that redirects a handful of times
+/// before its final hop hangs could push the actual wait arbitrarily far
+/// past the intended 20s bound before the watchdog ever fires — defeating
+/// its whole purpose (reagentx P1 on PR #2593). The error page should still
+/// report the LATEST hop being attempted if the watchdog does eventually
+/// fire, though, so the URL itself is still updated — just not the timer.
+///
+/// No-ops if nothing is currently armed for `block_id` — e.g. a redirect
+/// notification arriving after the watchdog already fired/disarmed. Whichever
+/// of those already ran owns the outcome; there's nothing to update.
+pub(crate) fn update_pane_load_watchdog_url(state: &Arc<AppState>, block_id: &str, url: String) {
+    if let Some(entry) = state.browser_pane_load_watchdog.lock().get_mut(block_id) {
+        entry.3 = url;
+    }
 }
 
 /// Runs on the CEF UI thread when a pane's load-watchdog deadline elapses.
@@ -242,6 +268,18 @@ pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str) {
     // closed over a session.
     if let Some(block_id) = block_id {
         state.browser_pane_zoom.lock().remove(block_id);
+
+        // If this pane closes mid-navigation, its load watchdog is still
+        // armed holding a cloned `Browser`. Without this removal,
+        // `fire_pane_load_watchdog` fires up to PANE_LOAD_WATCHDOG_TIMEOUT_MS
+        // later and calls `main_frame()`/`load_url()` on a browser that's
+        // already torn down (reagentx P1 on PR #2593).
+        if state.browser_pane_load_watchdog.lock().remove(block_id).is_some() {
+            tracing::debug!(
+                block_id = %block_id,
+                "[pane-load-watchdog] pane closed mid-navigation, watchdog disarmed"
+            );
+        }
     }
 
     // Windows only:

@@ -765,7 +765,7 @@ impl AgentMuxHandler {
         frame: Option<&mut Frame>,
         request: Option<&mut Request>,
         _user_gesture: ::std::os::raw::c_int,
-        _is_redirect: ::std::os::raw::c_int,
+        is_redirect: ::std::os::raw::c_int,
     ) -> ::std::os::raw::c_int {
         if !self.is_browser_pane {
             return 0; // main app client — never gated
@@ -782,7 +782,7 @@ impl AgentMuxHandler {
             return 1; // cancel — do not let CEF hand this to the OS shell
         }
 
-        // Arm the pane-load watchdog HERE, not from `on_loading_state_change`
+        // Track the pane-load watchdog HERE, not from `on_loading_state_change`
         // — `request.url()` is this navigation's own target, independent of
         // whatever the frame's last COMMITTED document was. Using
         // `Frame::url()` instead (an earlier version did) shows the pane's
@@ -790,18 +790,35 @@ impl AgentMuxHandler {
         // one actually being navigated to, because a frame that never
         // committed this navigation still reports its old URL right up until
         // the watchdog fires. See `browser_pane::callbacks::arm_pane_load_watchdog`.
+        //
+        // `is_redirect` gates WHICH update: a fresh navigation (0) gets a new
+        // epoch + a full new deadline; a redirect hop of an ALREADY-armed
+        // navigation (nonzero) only updates the reported URL, keeping the
+        // original deadline. Treating every hop as a fresh arm (an earlier
+        // version of this fix did) let a redirect chain reset the 20s timer
+        // on each hop, so the actual wait before a timeout page appeared
+        // could grow far past the intended bound (reagentx P1 on PR #2593).
+        // See `browser_pane::callbacks::update_pane_load_watchdog_url`.
         let is_main_frame = frame.as_ref().map(|f| f.is_main() == 1).unwrap_or(false);
         if is_main_frame {
             if let Some(b) = browser.as_deref() {
                 if let Some(block_id) =
                     crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, b)
                 {
-                    crate::browser_pane::callbacks::arm_pane_load_watchdog(
-                        &self.state,
-                        &block_id,
-                        b.clone(),
-                        url,
-                    );
+                    if is_redirect != 0 {
+                        crate::browser_pane::callbacks::update_pane_load_watchdog_url(
+                            &self.state,
+                            &block_id,
+                            url,
+                        );
+                    } else {
+                        crate::browser_pane::callbacks::arm_pane_load_watchdog(
+                            &self.state,
+                            &block_id,
+                            b.clone(),
+                            url,
+                        );
+                    }
                 }
             }
         }
