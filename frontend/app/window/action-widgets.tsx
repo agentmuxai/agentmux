@@ -148,15 +148,12 @@ const ActionWidgets = (): JSX.Element => {
 
     const registerParentHover = (key: string): SubmenuHoverController => {
         const hover = createSubmenuHover({
-            onOpen: () => {
-                // Same rationale as openMore() below — the pinned flyout and
-                // More dropdown can visually overlap, so opening one closes
-                // the other. setMoreOpen is declared further down in this
-                // same component scope; safe to reference here since this
-                // callback only ever runs later, in response to a real hover.
-                setMoreOpen(false);
-                setOpenParentKey(key);
-            },
+            // Closing any other open peer — including the More button's own
+            // controller, registered below under MORE_PEER_KEY — already
+            // happens via parentPeers.closeOthers(key) on mouseenter/click
+            // (immediately, not gated on this delayed onOpen), so this only
+            // needs to update this row's own state.
+            onOpen: () => setOpenParentKey(key),
             onClose: () => setOpenParentKey((cur) => (cur === key ? null : cur)),
         });
         parentHoverControllers.set(key, hover);
@@ -174,6 +171,10 @@ const ActionWidgets = (): JSX.Element => {
             closeParentFlyout(key);
             return;
         }
+        // closeOthers closes every other registered peer — every other
+        // pinned parent AND the More button's own controller (MORE_PEER_KEY,
+        // registered below) — symmetrically with how hovering/clicking More
+        // closes this row.
         parentPeers.closeOthers(key);
         // openNow() (not a direct setOpenParentKey) so the controller's own
         // isOpen flips true — otherwise (reagent P1 on this PR) the mouse is
@@ -181,8 +182,7 @@ const ActionWidgets = (): JSX.Element => {
         // ever arrives to resync isOpen, and the subsequent onMouseLeave's
         // `if (!isOpen) return` skips starting the close-intent timer
         // entirely — the flyout would stay open until an unrelated close
-        // path (outside click, Escape, re-click) fired. onOpen() (registered
-        // above) already handles setMoreOpen(false) + setOpenParentKey(key).
+        // path (outside click, Escape, re-click) fired.
         parentHoverControllers.get(key)?.openNow();
     };
 
@@ -212,18 +212,37 @@ const ActionWidgets = (): JSX.Element => {
     // More dropdown state
     const [moreOpen, setMoreOpen] = createSignal(false);
 
+    // The More button gets its own createSubmenuHover controller, registered
+    // as a peer in the SAME parentPeers registry pinned parents use — so
+    // hovering onto Messengers closes More and hovering onto More closes
+    // Messengers, symmetrically. Before this, More was click-only: hovering
+    // onto a pinned parent still force-closed it (via peer-close below), but
+    // hovering back onto More never reopened it, only an explicit click did.
+    const MORE_PEER_KEY = "__more__";
+    const moreHover = createSubmenuHover({
+        onOpen: () => setMoreOpen(true),
+        onClose: () => setMoreOpen(false),
+    });
+    const unregisterMoreHover = parentPeers.register(MORE_PEER_KEY, moreHover);
+    onCleanup(() => {
+        unregisterMoreHover();
+        moreHover.dispose();
+    });
+
     const openMore = (_e: MouseEvent) => {
-        const opening = !moreOpen();
-        if (opening) {
-            // The two floating panels sit right next to each other on the bar
-            // and can visually overlap — only one should be open at a time.
-            const openParent = openParentKey();
-            if (openParent !== null) closeParentFlyout(openParent);
+        if (moreOpen()) {
+            moreHover.close();
+            return;
         }
-        setMoreOpen(opening);
+        parentPeers.closeOthers(MORE_PEER_KEY);
+        // openNow(), not a direct setMoreOpen — same click-must-sync-
+        // controller-state rationale as handleParentSlotClick above (reagent
+        // P1 on this PR): without it, the next mouse-leave's `if (!isOpen)
+        // return` would skip starting the close-intent timer.
+        moreHover.openNow();
     };
 
-    const closeMore = () => setMoreOpen(false);
+    const closeMore = () => moreHover.close();
 
     // Item context menu — rendered independently so the More dropdown stays open
     // while the user interacts with pin/unpin. itemMenuState drives a PopoverMenu
@@ -303,7 +322,7 @@ const ActionWidgets = (): JSX.Element => {
             if (moreButtonRef?.contains(t) || moreDropdownRef?.contains(t)) return;
             const el = t instanceof Element ? t : (t as Node).parentElement;
             if (el?.closest(".popover-menu")) return;
-            setMoreOpen(false);
+            moreHover.close();
         };
         document.addEventListener("mousedown", handler, true);
         onCleanup(() => document.removeEventListener("mousedown", handler, true));
@@ -435,6 +454,11 @@ const ActionWidgets = (): JSX.Element => {
                         class="action-widget-more-btn"
                         classList={{ open: moreOpen() }}
                         onClick={openMore}
+                        onMouseEnter={() => {
+                            parentPeers.closeOthers(MORE_PEER_KEY);
+                            moreHover.onTriggerEnter();
+                        }}
+                        onMouseLeave={(e) => moreHover.onTriggerLeave(e)}
                     >
                         <i class="fa-solid fa-ellipsis" />
                         <Show when={showWidgetLabels()}>
@@ -503,6 +527,9 @@ const ActionWidgets = (): JSX.Element => {
                         settings={settings}
                         wmap={wmap}
                         ref={(el) => (moreDropdownRef = el)}
+                        onSubmenuEnter={() => moreHover.onSubmenuEnter()}
+                        onSubmenuLeave={(e) => moreHover.onSubmenuLeave(e)}
+                        setSubmenuEl={(el) => moreHover.setSubmenuEl(el)}
                     />
                 </Show>
             </Portal>

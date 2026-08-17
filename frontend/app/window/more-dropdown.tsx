@@ -27,6 +27,9 @@ const MoreDropdown = ({
     settings,
     wmap,
     ref,
+    onSubmenuEnter,
+    onSubmenuLeave,
+    setSubmenuEl,
 }: {
     widgets: () => { key: string; widget: WidgetConfigType }[];
     onClose: () => void;
@@ -35,6 +38,16 @@ const MoreDropdown = ({
     settings: () => Record<string, any>;
     wmap: () => Record<string, WidgetConfigType>;
     ref?: (el: HTMLDivElement) => void;
+    /**
+     * Optional hover-controller plumbing — present when the caller opens
+     * this dropdown via hover-intent (a createSubmenuHover on the "More"
+     * button itself) rather than click-only, so moving the cursor into this
+     * panel cancels the pending close the same way any other hover-opened
+     * flyout/submenu in the app does.
+     */
+    onSubmenuEnter?: () => void;
+    onSubmenuLeave?: (e: MouseEvent) => void;
+    setSubmenuEl?: (el: HTMLDivElement | null) => void;
 }): JSX.Element => {
     let overlayEl: HTMLDivElement | undefined;
     // Cut a transparent hole through any browser pane HWND behind this
@@ -56,6 +69,7 @@ const MoreDropdown = ({
     const registerFloating = (el: HTMLDivElement) => {
         overlayEl = el;
         ref?.(el);
+        setSubmenuEl?.(el);
         requestAnimationFrame(() => {
             const anchorEl = anchor();
             if (!(anchorEl instanceof Element) || !(el instanceof Element)) return;
@@ -81,7 +95,10 @@ const MoreDropdown = ({
         });
     };
 
-    onCleanup(() => cleanupAutoUpdate?.());
+    onCleanup(() => {
+        cleanupAutoUpdate?.();
+        setSubmenuEl?.(null);
+    });
 
     const handleItemClick = (widget: WidgetConfigType) => {
         handleWidgetSelect(widget);
@@ -119,6 +136,8 @@ const MoreDropdown = ({
             class="action-widget-more-dropdown"
             style={floatingStyle()}
             data-pane-overlay
+            onMouseEnter={() => onSubmenuEnter?.()}
+            onMouseLeave={(e) => onSubmenuLeave?.(e)}
         >
             <For each={widgets()}>
                 {({ key, widget }) => {
