@@ -33,6 +33,7 @@ use crate::backend::wps::Broker;
 /// the wire and the frontend treats that as "nothing to select").
 fn persist_oauth_direct_account(
     wstore: &Arc<Store>,
+    identity_store: &Arc<Store>,
     broker: &Arc<Broker>,
     account_id: &str,
     provider_id: &str,
@@ -69,7 +70,11 @@ fn persist_oauth_direct_account(
         created_at: now,
         updated_at: now,
     };
-    if let Err(e) = wstore.identity_upsert(&account) {
+    // identity_upsert_with_mirror — reagentx P0 review on PR #2632: this
+    // is THE primary OAuth account-creation path (auth.start), so without
+    // the mirror write every newly-OAuth'd account had no fallback entry
+    // and reproduced the reported bug on its own next channel switch.
+    if let Err(e) = wstore.identity_upsert_with_mirror(identity_store, &account) {
         tracing::warn!(
             target: "identity",
             account_id,
@@ -119,6 +124,7 @@ fn persist_oauth_direct_account(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn persist_oauth_success(
     wstore: &Arc<Store>,
+    identity_store: &Arc<Store>,
     broker: &Arc<Broker>,
     _direct_account: bool,
     account_id: &str,
@@ -130,7 +136,7 @@ pub(crate) fn persist_oauth_success(
     if account_id.is_empty() {
         return (String::new(), None);
     }
-    let persisted = persist_oauth_direct_account(wstore, broker, account_id, provider_id, dir, session_id);
+    let persisted = persist_oauth_direct_account(wstore, identity_store, broker, account_id, provider_id, dir, session_id);
     (String::new(), persisted)
 }
 
@@ -141,9 +147,11 @@ mod tests {
     #[test]
     fn persist_oauth_direct_account_round_trip() {
         let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let identity_store = Arc::new(Store::open_in_memory().unwrap());
         let broker = Arc::new(crate::backend::wps::Broker::new());
         let r = persist_oauth_direct_account(
             &wstore,
+            &identity_store,
             &broker,
             "acc-1",
             "claude",
@@ -165,8 +173,9 @@ mod tests {
     #[test]
     fn persist_oauth_direct_account_returns_none_when_dir_unresolved() {
         let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let identity_store = Arc::new(Store::open_in_memory().unwrap());
         let broker = Arc::new(crate::backend::wps::Broker::new());
-        let r = persist_oauth_direct_account(&wstore, &broker, "acc-1", "claude", None, "sess-z");
+        let r = persist_oauth_direct_account(&wstore, &identity_store, &broker, "acc-1", "claude", None, "sess-z");
         assert!(r.is_none());
         assert!(wstore.identity_get("acc-1").unwrap().is_none(), "nothing persisted when dir is unresolved");
     }
@@ -178,9 +187,11 @@ mod tests {
         // always persists a direct account now, regardless of the
         // (now-vestigial) direct_account/into_bundle_id parameters.
         let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let identity_store = Arc::new(Store::open_in_memory().unwrap());
         let broker = Arc::new(crate::backend::wps::Broker::new());
         let (bundle_id, account_id) = persist_oauth_success(
             &wstore,
+            &identity_store,
             &broker,
             true,
             "acc-1",
@@ -203,9 +214,11 @@ mod tests {
         // empty-id guard, persist_oauth_direct_account's identity_upsert
         // would silently write/overwrite a db_accounts row with id="".
         let wstore = Arc::new(Store::open_in_memory().unwrap());
+        let identity_store = Arc::new(Store::open_in_memory().unwrap());
         let broker = Arc::new(crate::backend::wps::Broker::new());
         let (bundle_id, account_id) = persist_oauth_success(
             &wstore,
+            &identity_store,
             &broker,
             false,
             "",

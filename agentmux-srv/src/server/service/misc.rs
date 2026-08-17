@@ -195,8 +195,12 @@ pub(super) async fn handle_misc_service(state: &AppState, call: &WebCallType) ->
             let limit: usize = service::get_arg(args, 2).unwrap_or(50);
             let sort_by: String = service::get_arg(args, 3).unwrap_or_else(|_| "modified_at".to_string());
             let sort_dir: String = service::get_arg(args, 4).unwrap_or_else(|_| "desc".to_string());
+            // identity_store, not id_store — agent-identity links now live
+            // in the permanently-global identity store
+            // (SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md); reagentx P1 review
+            // on PR #2632.
             let result = state.history_service.list_for_agent(
-                &state.id_store,
+                &state.identity_store,
                 &agent_id,
                 offset,
                 limit,

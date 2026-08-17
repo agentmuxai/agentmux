@@ -633,7 +633,7 @@ pub(crate) async fn identity_self_accounts_impl(
     // authenticate with — see resolve_agent_definition_id.
     let def_id = resolve_agent_definition_id(state, agent_id)
         .map_err(|e| format!("identity.self.accounts: {e}"))?;
-    let links = state.id_store.agent_identity_list_for_agent(&def_id)
+    let links = state.identity_store.agent_identity_list_for_agent(&def_id)
         .map_err(|e| format!("identity.self.accounts: {e}"))?;
     let mut accounts = Vec::new();
     for link in &links {
@@ -643,8 +643,13 @@ pub(crate) async fn identity_self_accounts_impl(
         // (ANALYSIS_ARMORY_STASH_CREDENTIAL_VISIBILITY_GAP_2026_08_04.md),
         // just reachable through this separate per-agent lookup too (reagent
         // P1 on PR #2419 review). Skip and log rather than `?`-propagate.
-        match state.id_store.identity_get(&link.account_id) {
-            Ok(Some(acct)) => {
+        // resolve_account, not plain id_store.identity_get — reagentx P1
+        // review on PR #2632: without the identity_store fallback, a
+        // migrated/continuing account (resolvable at spawn time) showed as
+        // "missing" here, inconsistent with the agent actually being able
+        // to spawn with it.
+        match crate::identity::resolver::resolve_account(&state.id_store, &state.identity_store, &link.account_id) {
+            Ok(Some((acct, _account_store))) => {
                 let masked_tail = acct.context.get("masked_tail")
                     .and_then(|v| v.as_str()).unwrap_or("").to_string();
                 accounts.push(json!({
@@ -682,12 +687,16 @@ pub(crate) async fn identity_account_validate_stored_impl(
     // resolution this ownership check always saw zero links and rejected.
     let def_id = resolve_agent_definition_id(state, agent_id)
         .map_err(|e| format!("identity.account.validate: {e}"))?;
-    let links = state.id_store.agent_identity_list_for_agent(&def_id)
+    let links = state.identity_store.agent_identity_list_for_agent(&def_id)
         .map_err(|e| format!("identity.account.validate: {e}"))?;
     if !links.iter().any(|l| l.account_id == account_id) {
         return Err("FORBIDDEN: account not linked to this agent".to_string());
     }
-    let acct = state.id_store.identity_get(account_id)
+    // resolve_account, not plain id_store.identity_get — same reagentx P1
+    // review as identity_self_accounts_impl above: a migrated/continuing
+    // account must validate successfully here too, consistently with the
+    // spawn path.
+    let (acct, _account_store) = crate::identity::resolver::resolve_account(&state.id_store, &state.identity_store, account_id)
         .map_err(|e| format!("identity.account.validate: {e}"))?
         .ok_or_else(|| format!("identity.account.validate: account {account_id} not found"))?;
     let aid = account_id.to_string();

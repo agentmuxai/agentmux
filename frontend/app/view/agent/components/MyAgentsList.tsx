@@ -36,6 +36,7 @@
  * new named session or switch focus to the existing pane.
  */
 
+import { useTick } from "@/app/hook/useTick";
 import {
     createEffect,
     createMemo,
@@ -47,21 +48,19 @@ import {
     type Accessor,
     type JSX,
 } from "solid-js";
-import { useTick } from "@/app/hook/useTick";
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { DualProviderLogo } from "@/element/DualProviderLogo";
-import { resolveEffectiveVendor } from "../providers/catalog";
-import { Logger } from "@/util/logger";
 import { formatTimeAgo } from "@/util/format-time";
+import { Logger } from "@/util/logger";
+import { resolveEffectiveVendor } from "../providers/catalog";
 import { RuntimeBadge } from "./RuntimeBadge";
 
 /** Empty-state copy varies based on whether an identity filter was
  * applied — surfaced so the integration test can match it. */
-export const EMPTY_GLOBAL =
-    "No agents yet — pick a template below to create your first one.";
+export const EMPTY_GLOBAL = "No agents yet — pick a template below to create your first one.";
 export const EMPTY_FILTERED = "No agents for this identity yet.";
 /** Shown when ListRecentSessionsCommand itself failed — distinct from
  * EMPTY_GLOBAL/EMPTY_FILTERED so a backend error never looks identical
@@ -69,8 +68,7 @@ export const EMPTY_FILTERED = "No agents for this identity yet.";
  * docs/retro/retro-my-agents-fresh-channel-regression-2026-07-27.md §4/§9
  * rec 2 — this exact ambiguity is what let a real regression, PR #2296,
  * go unnoticed as "expected empty state" the first time it happened). */
-export const FETCH_ERROR =
-    "Couldn't load your agents — check the connection and try again.";
+export const FETCH_ERROR = "Couldn't load your agents — check the connection and try again.";
 /** Copy for "the fetch succeeded, but the name filter matched nothing" —
  * distinct from EMPTY_GLOBAL/EMPTY_FILTERED (both mean "there is nothing
  * to filter"), so a user narrowing a real, non-empty list to zero visible
@@ -116,11 +114,24 @@ export interface MyAgentsListProps {
      * prompt. Receives the blockId of the already-open pane.
      */
     onSwitchToExisting?: (blockId: string) => void;
+    /**
+     * Called exactly once, the first time this component's own
+     * ListRecentSessionsCommand resource resolves (success OR failure —
+     * `rows()` transitions away from `undefined` either way). Lets a parent
+     * that also has its own async gate (AgentPicker's `agents()` list) hold
+     * a single combined loading overlay until BOTH are ready, instead of
+     * this component's own empty-`<ul>`-while-loading state flashing
+     * separately underneath. Never re-fires on background refetches
+     * (visibility regain, agents:changed) — those correctly keep showing
+     * the already-loaded list via Solid's stale-while-revalidate and have
+     * nothing to do with "first load."
+     */
+    onFirstLoad?: () => void;
 }
 
 type ForkState =
     | { kind: "idle" }
-    | { kind: "prompt" }           // showing "Open new session / Switch" buttons
+    | { kind: "prompt" } // showing "Open new session / Switch" buttons
     | { kind: "naming"; label: string; loading: boolean; error: string | null }; // name input expanded
 
 export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
@@ -200,11 +211,10 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                 // is left alone here — those rows still render, just with
                 // the existing "(missing account)"-style fallback text.
                 if (result.rows.length === 0 && result.degraded.length > 0) {
-                    Logger.error(
-                        "agent",
-                        "MyAgentsList: listrecentsessions reported degraded sources with zero rows",
-                        { degraded: result.degraded, identityId: id },
-                    );
+                    Logger.error("agent", "MyAgentsList: listrecentsessions reported degraded sources with zero rows", {
+                        degraded: result.degraded,
+                        identityId: id,
+                    });
                     if (myGeneration === fetchGeneration) setFetchError(true);
                     return [];
                 }
@@ -216,14 +226,16 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                 // made a real regression here look like expected empty state.
                 // `Error` objects serialize to `{}` via structured/JSON clone
                 // (message/stack aren't own-enumerable) — pull them out explicitly.
-                const errInfo = e instanceof Error
-                    ? { name: e.name, message: e.message, stack: e.stack }
-                    : { value: String(e) };
-                Logger.error("agent", "MyAgentsList: ListRecentSessionsCommand failed", { error: errInfo, identityId: id });
+                const errInfo =
+                    e instanceof Error ? { name: e.name, message: e.message, stack: e.stack } : { value: String(e) };
+                Logger.error("agent", "MyAgentsList: ListRecentSessionsCommand failed", {
+                    error: errInfo,
+                    identityId: id,
+                });
                 if (myGeneration === fetchGeneration) setFetchError(true);
                 return [];
             }
-        },
+        }
     );
 
     // Re-poll on visibility regain so a session that just ended in
@@ -250,8 +262,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     // Fork prompt state per row (keyed by definition_id)
     const [forkStates, setForkStates] = createSignal<Map<string, ForkState>>(new Map());
 
-    const getForkState = (definitionId: string): ForkState =>
-        forkStates().get(definitionId) ?? { kind: "idle" };
+    const getForkState = (definitionId: string): ForkState => forkStates().get(definitionId) ?? { kind: "idle" };
 
     const setForkState = (definitionId: string, state: ForkState): void => {
         setForkStates((prev) => {
@@ -349,6 +360,19 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     const isLoading = () => rows.loading;
     const isEmpty = () => !isLoading() && !fetchError() && (rows() ?? []).length === 0;
 
+    // Report the first resolution up to the parent (see onFirstLoad's own
+    // doc comment on MyAgentsListProps). `once` guards against a stale
+    // closure re-firing `props.onFirstLoad` if it ever changed identity —
+    // not expected from AgentPicker's call site today, but cheap insurance
+    // since this must only ever fire once regardless.
+    let firstLoadReported = false;
+    createEffect(() => {
+        if (rows() !== undefined && !firstLoadReported) {
+            firstLoadReported = true;
+            props.onFirstLoad?.();
+        }
+    });
+
     // Client-side name filter over the already-fetched page (bumped to
     // SEARCH_LIMIT while searching — see resourceKey/fetcher above).
     // Matches instance_name first, falling back to definition_name for
@@ -362,8 +386,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     });
     // Distinct from `isEmpty()`: the fetch found real rows, but the
     // filter narrowed them all away — not "you have no agents."
-    const isNoMatch = () =>
-        !isLoading() && !fetchError() && (rows() ?? []).length > 0 && filteredRows().length === 0;
+    const isNoMatch = () => !isLoading() && !fetchError() && (rows() ?? []).length > 0 && filteredRows().length === 0;
 
     return (
         <div class="agent-recent-sessions" data-testid="agent-my-agents-list">
@@ -396,27 +419,18 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                             <Show
                                 when={isNoMatch()}
                                 fallback={
-                                    <div
-                                        class="agent-recent-sessions-empty"
-                                        data-testid="agent-my-agents-empty"
-                                    >
+                                    <div class="agent-recent-sessions-empty" data-testid="agent-my-agents-empty">
                                         {filterId() ? EMPTY_FILTERED : EMPTY_GLOBAL}
                                     </div>
                                 }
                             >
-                                <div
-                                    class="agent-recent-sessions-empty"
-                                    data-testid="agent-my-agents-no-match"
-                                >
+                                <div class="agent-recent-sessions-empty" data-testid="agent-my-agents-no-match">
                                     {noMatchText(rawQuery())}
                                 </div>
                             </Show>
                         }
                     >
-                        <div
-                            class="agent-recent-sessions-error"
-                            data-testid="agent-my-agents-error"
-                        >
+                        <div class="agent-recent-sessions-error" data-testid="agent-my-agents-error">
                             <span class="agent-recent-sessions-error-msg">{FETCH_ERROR}</span>
                             <button
                                 type="button"
@@ -433,8 +447,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                 <ul class="agent-recent-sessions-list">
                     <For each={filteredRows()}>
                         {(row) => {
-                            const isActive = () =>
-                                (props.openDefinitions?.() ?? new Map()).has(row.definition_id);
+                            const isActive = () => (props.openDefinitions?.() ?? new Map()).has(row.definition_id);
                             const forkState = () => getForkState(row.definition_id);
 
                             return (
@@ -464,7 +477,9 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                         aria-label="Active"
                                                     />
                                                 </Show>
-                                                <Show when={row.agent_type === "host" || row.agent_type === "container"}>
+                                                <Show
+                                                    when={row.agent_type === "host" || row.agent_type === "container"}
+                                                >
                                                     {/* size="tag" — same HOST/SANDBOX wording + white/
                                                         yellow styling as AgentComposerStrip's runtime
                                                         tag, so the badge reads as one consistent
@@ -486,9 +501,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                     </span>
                                                 }
                                             >
-                                                <span class="agent-recent-sessions-preview">
-                                                    {row.preview}
-                                                </span>
+                                                <span class="agent-recent-sessions-preview">{row.preview}</span>
                                             </Show>
                                             <Show when={row.node_count > 0}>
                                                 <span class="agent-recent-sessions-line3">
@@ -515,7 +528,13 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                         </span>
                                                     </span>
                                                 </Show>
-                                                <Show when={row.has_snapshot && row.started_at > 0 && row.last_active_at > row.started_at}>
+                                                <Show
+                                                    when={
+                                                        row.has_snapshot &&
+                                                        row.started_at > 0 &&
+                                                        row.last_active_at > row.started_at
+                                                    }
+                                                >
                                                     <span class="agent-recent-sessions-ts">
                                                         <span class="agent-recent-sessions-ts-label">Last Active</span>
                                                         <span class="agent-recent-sessions-ts-value">
@@ -531,7 +550,8 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                     <Show when={forkState().kind !== "idle"}>
                                         <div class="agent-fork-prompt" data-testid="agent-fork-prompt">
                                             <span class="agent-fork-prompt-msg">
-                                                <strong>{row.instance_name || row.definition_name}</strong> is already open in another pane.
+                                                <strong>{row.instance_name || row.definition_name}</strong> is already
+                                                open in another pane.
                                             </span>
                                             <Show when={forkState().kind === "prompt"}>
                                                 <div class="agent-fork-prompt-actions">
@@ -561,7 +581,13 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                     </button>
                                                 </div>
                                             </Show>
-                                            <Show when={forkState().kind === "naming" ? (forkState() as Extract<ForkState, { kind: "naming" }>) : null}>
+                                            <Show
+                                                when={
+                                                    forkState().kind === "naming"
+                                                        ? (forkState() as Extract<ForkState, { kind: "naming" }>)
+                                                        : null
+                                                }
+                                            >
                                                 {(ns) => (
                                                     <div class="agent-fork-naming">
                                                         <label class="agent-fork-label">Name for new session:</label>
@@ -583,9 +609,14 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                                 }
                                                                 onKeyDown={(e) => {
                                                                     if (e.key === "Enter") void handleForkStart(row);
-                                                                    if (e.key === "Escape") handleForkCancel(row.definition_id);
+                                                                    if (e.key === "Escape")
+                                                                        handleForkCancel(row.definition_id);
                                                                 }}
-                                                                ref={(el) => { createEffect(() => { if (!ns().loading) el.focus(); }); }}
+                                                                ref={(el) => {
+                                                                    createEffect(() => {
+                                                                        if (!ns().loading) el.focus();
+                                                                    });
+                                                                }}
                                                             />
                                                             <button
                                                                 type="button"

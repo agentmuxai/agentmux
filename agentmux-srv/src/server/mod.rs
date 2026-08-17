@@ -92,7 +92,22 @@ pub struct AppState {
     /// Effective identity/memory/drone/muxbus store — `shared_store` when
     /// available, otherwise `wstore`. Handlers capture this instead of
     /// `wstore` for any operation that must survive across version upgrades.
+    ///
+    /// Deprecated for everything except `db_accounts` reads/writes as of
+    /// `docs/specs/SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md` — new call sites
+    /// for agent→account links, memory bundles, drone definitions, muxbus
+    /// creds, native memory, or cron jobs should use `identity_store`
+    /// instead, which (unlike this field) is never redirected by
+    /// `isolated_auth_enabled()`. `id_store` itself stays because
+    /// `db_accounts` still legitimately needs an isolatable path (Armory
+    /// testing) — see the spec's §3.2 for the account-specific split, not
+    /// yet implemented.
     pub id_store: Arc<Store>,
+    /// Permanently-global identity store — see `identity_store`'s own doc
+    /// comment on `bootstrap::Stores` for the full explanation. Never
+    /// `None`: falls back to `wstore` on the same best-effort terms as
+    /// `id_store` if the shared root can't be resolved.
+    pub identity_store: Arc<Store>,
     pub filestore: Arc<FileStore>,
     /// GLOBAL, channel-independent transcript store backing the
     /// `agent:<defId>:current` zone. `None` when the shared root can't be
