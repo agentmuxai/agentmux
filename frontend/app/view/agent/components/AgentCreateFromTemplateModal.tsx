@@ -29,6 +29,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { PROVIDERS } from "../providers/catalog";
+import { getProvider } from "../providers";
 import { isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
 import { refreshAccountCache, type Account } from "@/app/view/identity/identity-model";
 
@@ -90,11 +91,16 @@ export const AgentCreateFromTemplateModalPanel = (
     // ── Model (which model this harness runs) ────────────────────────
     // The template card you clicked already picked the HARNESS (the CLI
     // — "Claude Code", "Codex", etc.); this picks WHICH MODEL that
-    // harness runs, from its own model list (same list
-    // AgentRuntimeDropup's in-session picker reads via
-    // getProvider(id)?.models). Hidden entirely when the harness
-    // declares no models list — nothing to choose between.
-    const modelOptions = createMemo(() => PROVIDERS[props.template.provider]?.models ?? []);
+    // harness runs, from its own model list. Reads through getProvider()
+    // (not the raw PROVIDERS catalog) so this sees the same live,
+    // API-sourced label overlay AgentRuntimeDropup's in-session picker
+    // does (getProvider(id)?.models — setProviderModels folds in
+    // authoritative version labels at app-init, e.g. "Sonnet 4.6" →
+    // "Sonnet 5"). Reading the raw static catalog directly would show
+    // stale labels and never react to a later-landing overlay (ReAgent
+    // review on PR #2618). Hidden entirely when the harness declares no
+    // models list — nothing to choose between.
+    const modelOptions = createMemo(() => getProvider(props.template.provider)?.models ?? []);
     const [model, setModel] = createSignal(
         modelOptions().find((m) => m.default)?.value ?? modelOptions()[0]?.value ?? "",
     );
