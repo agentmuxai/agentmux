@@ -797,6 +797,12 @@ const AgentPresentationView = ({
     // an invisible-but-present pointer-events:none div forever.
     const [historyLoaded, setHistoryLoaded] = createSignal(false);
     const [showLoadingOverlay, setShowLoadingOverlay] = createSignal(true);
+    // Separate from `historyLoaded` below: this only means "the transcript
+    // has actually painted" — the effect after `status` is defined (further
+    // down) decides whether that's enough to start the fade, or whether the
+    // auth-panel pop-in flicker fix also needs to hold the overlay a bit
+    // longer.
+    const [historyPainted, setHistoryPainted] = createSignal(false);
     let cancelSettleWait: (() => void) | undefined;
     let loadingOverlayFadeTimeout: ReturnType<typeof setTimeout> | undefined;
     // Two extra rAFs between "settle detected" and actually starting the
@@ -844,8 +850,7 @@ const AgentPresentationView = ({
                 // queued as of the first one's frame has been painted.
                 settlePaintRaf1 = requestAnimationFrame(() => {
                     settlePaintRaf2 = requestAnimationFrame(() => {
-                        setHistoryLoaded(true);
-                        loadingOverlayFadeTimeout = setTimeout(() => setShowLoadingOverlay(false), 220);
+                        setHistoryPainted(true);
                     });
                 });
             });
@@ -1094,6 +1099,41 @@ const AgentPresentationView = ({
         onControllerStatus: (rts) => {
             reconcileTurnActive(!!rts.turn_active);
         },
+    });
+
+    // Brain-spinner loading overlay, part 2 (part 1 is the historyPainted/
+    // scheduleOnSettle chain above `status`'s own definition — this has to
+    // live down here since it reads `status.launchPhase()`). A fresh
+    // agent's mount-time launch-flow.ts runs Phase 1 (resolving-cli) then
+    // Phase 2 (checking-auth) before AgentAuthPanel's authUrl/authNotice can
+    // ever become non-null; when they do, that panel pops into normal flex
+    // flow between the scroll region and the composer strip/AgentFooter,
+    // pushing both down with no warning — often well after historyPainted
+    // already flipped true for a brand-new, empty-history agent (live-
+    // reported flicker, 2026-08-17: "bottom paints first, then gets pushed
+    // down"). Hold the fade until the launch flow has moved past the two
+    // phases that can still cause that pop-in, so it happens hidden behind
+    // the mask instead — same principle as the historyPainted rAF-pair fix
+    // above, just gating on a different async source. Bounded by a 3s
+    // safety timeout so a launch path that never calls setLaunchPhase (a
+    // future code path, a test double) can't leave the pane stuck behind
+    // the spinner forever — worse than the flicker this exists to fix.
+    const [authPhaseTimedOut, setAuthPhaseTimedOut] = createSignal(false);
+    let authPhaseSafetyTimeout: ReturnType<typeof setTimeout> | undefined;
+    onMount(() => {
+        authPhaseSafetyTimeout = setTimeout(() => setAuthPhaseTimedOut(true), 3000);
+    });
+    onCleanup(() => clearTimeout(authPhaseSafetyTimeout));
+    const authPhaseSettled = createMemo(() => {
+        if (authPhaseTimedOut()) return true;
+        const phase = status.launchPhase();
+        return phase !== null && phase.kind !== "resolving-cli" && phase.kind !== "checking-auth";
+    });
+    createEffect(() => {
+        if (historyPainted() && authPhaseSettled() && !historyLoaded()) {
+            setHistoryLoaded(true);
+            loadingOverlayFadeTimeout = setTimeout(() => setShowLoadingOverlay(false), 220);
+        }
     });
 
     // status.isLoading() is `flowRunning() || !agentReady()` — it never
