@@ -28,30 +28,16 @@ interface AnsweredQuestionMessageProps {
     node: ToolNode;
 }
 
-/**
- * Extracts the "⏱️ (Partly) Auto-answered (...)" prefix from the decorated
- * `summary` string `useAgentQuestions.ts`'s `handleAnswer` builds, so a 30s
- * timeout fallback isn't silently presented as something the user actually
- * typed. Returns null for a manually-answered question (no ⏱️ prefix).
- *
- * Uses `lastIndexOf`, not `indexOf`: the "partly auto-answered" format
- * embeds its own " — " inside the parenthetical (`(n/m — no response in
- * 30s)`), before the real note/answer separator. `indexOf` matches that
- * inner one first, truncating the note to "⏱️ Partly auto-answered (n/m"
- * — unclosed paren, missing "no response in 30s)". The real separator is
- * always the LAST " — " in the string. reagent P1 on PR #2630.
- */
-function timeoutNote(summary: string): string | null {
-    if (!summary.startsWith("⏱️")) return null;
-    const sepIndex = summary.lastIndexOf(" — ");
-    return sepIndex === -1 ? summary : summary.slice(0, sepIndex);
-}
-
 export const AnsweredQuestionMessage = (props: AnsweredQuestionMessageProps): JSX.Element => {
     return (
         <div class="agent-user-message agent-user-message--answered-question">
             <div class="agent-user-message-content agent-user-message-content--flow">
-                <Show when={timeoutNote(props.node.summary)}>
+                {/* node.timeoutNote is computed in useAgentQuestions.ts from
+                    AnswerOutcome's numeric counts, not parsed back out of a
+                    decorated string here — the free-text answer can legally
+                    contain " — ", which broke two prior string-split
+                    attempts (reagent P1 x2 on PR #2630). */}
+                <Show when={props.node.timeoutNote}>
                     {(note) => <div class="agent-user-message-timeout-note">{note()}</div>}
                 </Show>
                 <pre>

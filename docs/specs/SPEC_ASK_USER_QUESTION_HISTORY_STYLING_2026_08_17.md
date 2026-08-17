@@ -180,6 +180,11 @@ Add a field that survives the answer, holding the real (un-flattened) text:
  *  guard on presence, not just tool+status, and fall back to the
  *  generic collapsed-row rendering. */
 answerText?: string;
+/** Set alongside `answerText` when the answer came (fully or partly) from
+ *  the 30s auto-timeout rather than the user. Computed from AnswerOutcome's
+ *  numeric counts, NOT parsed out of `summary` — see the "Revised during
+ *  implementation" note below. Undefined for a manually-answered question. */
+timeoutNote?: string;
 ```
 
 `frontend/app/view/agent/hooks/useAgentQuestions.ts` (`handleAnswer`) — set it
@@ -219,9 +224,21 @@ For the auto-timeout cases (`outcome.autoFilledCount > 0`), prepend a single sma
 muted meta line above the `<pre>` (styled like `.agent-user-message-hint`) —
 `⏱️ auto-answered (no response in 30s)` or `⏱️ partly auto-answered (n/m)` — so the
 transcript doesn't silently misrepresent a timeout fallback as something the user
-actually typed. This is the one piece of the original decorated `summary` string
-worth preserving visually; the rest (icon, "Answered —" prefix) is redundant once
-the block itself unmistakably reads as user input.
+actually typed.
+
+**Revised during implementation (reagent P1 x2 on PR #2630):** this note is a
+**separate `ToolNode.timeoutNote?: string` field**, computed in
+`useAgentQuestions.ts`'s `handleAnswer` directly from `outcome.autoFilledCount` /
+`outcome.answers.length` (real numbers) — **not** parsed back out of the decorated
+`summary` string at render time, as originally specified. Two independent
+string-split attempts (`indexOf`, then `lastIndexOf`) both broke: the "partly
+auto-answered" format embeds its own `" — "` inside its parenthetical, and
+separately the free-text answer itself can legally contain `" — "` (unconstrained
+content per `AskUserQuestionAnswer.other`), which any split on the composed
+string is vulnerable to regardless of direction. Computing `timeoutNote` upstream,
+from the real counts, makes the whole class of bug structurally impossible — the
+component has no string to misparse. `AnsweredQuestionMessage` just renders
+`node.timeoutNote` verbatim when present.
 
 `status` values other than `success` (`denied`, `canceled`, `failed` —
 e.g. the pane closed before an answer arrived) keep the existing generic

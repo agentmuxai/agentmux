@@ -438,10 +438,10 @@ describe("ToolBlock — answered AskUserQuestion renders as a user message", () 
         expect(container.querySelector(".agent-user-message--answered-question")).not.toBeNull();
     });
 
-    it("shows a muted timeout note for an auto-answered question", () => {
+    it("shows the muted timeout note verbatim from node.timeoutNote — no parsing involved", () => {
         const autoAnswered: ToolNode = {
             ...answeredQuestion,
-            summary: "⏱️ Auto-answered (no response in 30s) — Yes",
+            timeoutNote: "⏱️ Auto-answered (no response in 30s)",
         };
         const { container } = render(() => (
             <ToolBlock node={autoAnswered} pinned={false} onTogglePin={() => {}} />
@@ -451,19 +451,26 @@ describe("ToolBlock — answered AskUserQuestion renders as a user message", () 
         );
     });
 
-    it("shows the full muted timeout note for a partly-auto-answered question (regression: embedded ' — ' in the parenthetical)", () => {
-        // reagent P1 on PR #2630: the parenthetical itself contains " — "
-        // (n/m — no response in 30s), before the real note/answer
-        // separator. A naive `indexOf` match truncates the note.
+    it("renders the correct note even when answerText contains its own ' — ' (regression: no longer parsed out of summary/answerText)", () => {
+        // reagent P1 x2 on PR #2630: both `indexOf` and `lastIndexOf` on a
+        // decorated string broke once free-text answer content could itself
+        // contain " — " — an em dash the user legally typed. timeoutNote is
+        // now a separate field computed from real counts upstream
+        // (useAgentQuestions.ts), so this component has no string to
+        // misparse regardless of what's in answerText.
         const partlyAutoAnswered: ToolNode = {
             ...answeredQuestion,
-            summary: "⏱️ Partly auto-answered (2/3 — no response in 30s) — Yes; No; Maybe",
+            timeoutNote: "⏱️ Partly auto-answered (2/3 — no response in 30s)",
+            answerText: "the answer — with its own em dash — right in the middle",
         };
         const { container } = render(() => (
             <ToolBlock node={partlyAutoAnswered} pinned={false} onTogglePin={() => {}} />
         ));
         expect(container.querySelector(".agent-user-message-timeout-note")?.textContent).toBe(
             "⏱️ Partly auto-answered (2/3 — no response in 30s)",
+        );
+        expect(container.querySelector(".agent-user-message-content pre")?.textContent).toBe(
+            "the answer — with its own em dash — right in the middle",
         );
     });
 

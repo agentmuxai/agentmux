@@ -280,6 +280,14 @@ export interface ToolNode {
      *  back to the generic collapsed-row rendering.
      *  See SPEC_ASK_USER_QUESTION_HISTORY_STYLING_2026_08_17.md. */
     answerText?: string;
+    /** Set alongside `answerText` when the answer came (fully or partly)
+     *  from the 30s auto-timeout rather than the user — e.g. "⏱️ Auto-
+     *  answered (no response in 30s)". Computed from `AnswerOutcome`'s
+     *  numeric counts in useAgentQuestions.ts, NOT parsed back out of
+     *  `summary` — the free-text answer itself can legally contain " — ",
+     *  which broke two prior string-split attempts (reagent P1 x2 on PR
+     *  #2630). Undefined for a manually-answered question. */
+    timeoutNote?: string;
 }
 
 /**

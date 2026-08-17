@@ -118,12 +118,23 @@ export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuest
         // questions, the timeout filled the rest" with "user never touched
         // anything," which matters for anyone auditing the transcript later.
         const flatText = outcome.answer_text.replace(/\n/g, "; ");
-        const summary =
+        // Computed from the real counts, not parsed back out of a decorated
+        // string later — reagent P1 x2 on PR #2630: both `indexOf` and
+        // `lastIndexOf` on `summary`'s " — " separator broke the moment the
+        // free-text answer itself could contain " — " (unconstrained user/
+        // agent-authored content per AskUserQuestionAnswer.other /
+        // AskUserQuestionOption.label). Deriving it here, from
+        // `outcome.autoFilledCount`/`outcome.answers.length` directly,
+        // makes that whole class of bug impossible — there's no string to
+        // misparse.
+        const timeoutNote =
             outcome.autoFilledCount === 0
-                ? `❓ Answered — ${flatText}`
+                ? undefined
                 : outcome.autoFilledCount === outcome.answers.length
-                  ? `⏱️ Auto-answered (no response in 30s) — ${flatText}`
-                  : `⏱️ Partly auto-answered (${outcome.autoFilledCount}/${outcome.answers.length} — no response in 30s) — ${flatText}`;
+                  ? "⏱️ Auto-answered (no response in 30s)"
+                  : `⏱️ Partly auto-answered (${outcome.autoFilledCount}/${outcome.answers.length} — no response in 30s)`;
+        const summary =
+            outcome.autoFilledCount === 0 ? `❓ Answered — ${flatText}` : `${timeoutNote} — ${flatText}`;
         const originals: ToolNode[] = [];
         const updated: ToolNode[] = [];
         for (const n of opts.getDocument()) {
@@ -140,6 +151,7 @@ export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuest
                 // which should read like a real typed message, not a log
                 // line. See SPEC_ASK_USER_QUESTION_HISTORY_STYLING_2026_08_17.md.
                 answerText: outcome.answer_text,
+                timeoutNote,
             });
         }
         const applyDoc = (nodes: ToolNode[]) => {

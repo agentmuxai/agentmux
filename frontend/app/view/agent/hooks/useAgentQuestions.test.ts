@@ -129,6 +129,57 @@ describe("useAgentQuestions — handleAnswer fallback", () => {
         const node = updatedNodeFromDispatch();
         expect(node?.answerText).toBe("Pick one: a\nPick two: b");
         expect(node?.summary).toBe("❓ Answered — Pick one: a; Pick two: b");
+        expect(node?.timeoutNote).toBeUndefined();
+        dispose();
+    });
+
+    // reagent P1 x2 on PR #2630: timeoutNote used to be parsed back out of
+    // the decorated `summary` string at render time, which broke twice —
+    // once because the "partly auto-answered" format embeds its own " — "
+    // in the parenthetical, and again because the free-text ANSWER itself
+    // can legally contain " — " too. Deriving it here, from the real
+    // numeric counts, makes both bugs structurally impossible.
+    it("sets timeoutNote from the real counts — unaffected by ' — ' inside the answer text", async () => {
+        hub.agentAnswer.mockResolvedValue(undefined);
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const { handleAnswer, dispose } = setup(sendMessage);
+
+        handleAnswer({
+            tool_use_id: TOOL_USE_ID,
+            answers: [
+                { header: "Pick one", selected: [], other: "the answer — with its own em dash" },
+                { header: "Pick two", selected: ["b"] },
+                { header: "Pick three", selected: ["c"] },
+            ],
+            answers_map: { "Pick one": "the answer — with its own em dash", "Pick two": "b", "Pick three": "c" },
+            answer_text: "the answer — with its own em dash\nb\nc",
+            autoFilledCount: 2,
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+
+        const node = updatedNodeFromDispatch();
+        expect(node?.timeoutNote).toBe("⏱️ Partly auto-answered (2/3 — no response in 30s)");
+        expect(node?.answerText).toBe("the answer — with its own em dash\nb\nc");
+        dispose();
+    });
+
+    it("sets timeoutNote for a fully auto-answered question", async () => {
+        hub.agentAnswer.mockResolvedValue(undefined);
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const { handleAnswer, dispose } = setup(sendMessage);
+
+        handleAnswer({
+            tool_use_id: TOOL_USE_ID,
+            answers: [{ header: "Pick one", selected: ["a"] }],
+            answers_map: { "Pick one": "a" },
+            answer_text: "a",
+            autoFilledCount: 1,
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(updatedNodeFromDispatch()?.timeoutNote).toBe("⏱️ Auto-answered (no response in 30s)");
         dispose();
     });
 
