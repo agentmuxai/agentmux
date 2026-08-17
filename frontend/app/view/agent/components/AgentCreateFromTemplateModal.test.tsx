@@ -344,4 +344,39 @@ describe("AgentCreateFromTemplateModalPanel", () => {
             expect(onSubmit.mock.calls[0][0].model).toBe("");
         });
     });
+
+    // ReAgent P1 on PR #2618: the model list must read through
+    // getProvider() (the live, API-sourced-overlay-aware accessor), not
+    // the raw static PROVIDERS catalog — otherwise a refreshed label
+    // (setProviderModels, folded in at app-init from the authoritative
+    // Models API) never reaches this modal. Exercises the REAL overlay
+    // mechanism (model-overlay.ts) rather than mocking it, since
+    // `modelOverlay` is module-level signal state shared across this
+    // whole test file — this must be the LAST test in the file so the
+    // overlay it sets can't leak into any test that runs after it.
+    // Preserves "sonnet"'s `value`/`default` (only the `label` changes),
+    // matching setProviderModels' own documented "label-only refresh"
+    // contract, so this can't itself corrupt any earlier test's
+    // `select.value` assertions either.
+    it("shows a live-overlaid model label, not the stale static catalog label (ReAgent P1 on #2618)", async () => {
+        const { setProviderModels } = await import("../providers");
+        setProviderModels("claude", [
+            { value: "claude-sonnet-5-5", label: "Claude Sonnet 5.5" },
+        ]);
+
+        render(() => (
+            <AgentCreateFromTemplateModalPanel
+                template={template}
+                onSubmit={vi.fn().mockResolvedValue(undefined)}
+                onCancel={vi.fn()}
+            />
+        ));
+        const select = screen.getByTestId(
+            "create-from-template-model-select",
+        ) as HTMLSelectElement;
+        const sonnetOption = Array.from(select.options).find((o) => o.value === "sonnet")!;
+        expect(sonnetOption.textContent).toBe("Sonnet 5.5");
+        // value/default untouched by the label refresh.
+        expect(select.value).toBe("sonnet");
+    });
 });
