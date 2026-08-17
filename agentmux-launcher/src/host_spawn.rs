@@ -47,6 +47,23 @@ pub(crate) fn spawn_host_supervised(
         .env("AGENTMUX_INSTANCE_ID", &srv.instance_id)
         .envs(host_env.iter().cloned())
         .env("AGENTMUX_LAUNCHER_PIPE", pipe_path)
+        // Explicit stdio instead of inheriting the launcher's own —
+        // `CreateProcess(..., CREATE_SUSPENDED, ...)` for this GUI-subsystem
+        // target fails outright with ERROR_NOT_SUPPORTED (os error 50) when
+        // it inherits stdio handles that trace back through an MSYS/Git-Bash
+        // process chain (e.g. this launcher itself spawned from an agent's
+        // own Bash tool call) — confirmed by direct experiment: the same
+        // binary starts cleanly when given real Win32 file handles instead
+        // of inherited MSYS ones. `Stdio::null()`, not `::piped()`: the host
+        // has no stdout/stderr protocol the launcher parses (contrast
+        // `srv_spawner`'s piped handles, which ARE consumed — the ESTART
+        // readiness signal and log forwarding) — piping without ever
+        // reading would risk a silent hang if the host wrote enough output
+        // to fill the pipe buffer. See docs/retro/retro-cef-host-spawn-
+        // fails-under-inherited-nonstandard-stdio-2026-08-17.md.
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .creation_flags(CREATE_SUSPENDED)
         .kill_on_drop(false); // J0 handles cleanup.
     if let Some(dir) = host_runtime_dir {
