@@ -360,6 +360,41 @@ impl Store {
         Ok(())
     }
 
+    /// `identity_upsert(self)` — the authoritative, primary write — followed
+    /// by a BEST-EFFORT mirror write into `identity_store`, so a link
+    /// resolved from the always-global identity store (§SPEC_IDENTITY_STORE_
+    /// SPLIT_2026_08_17.md) doesn't dead-end resolving the account it
+    /// points at on a fresh, per-channel-isolated `self` after a version/
+    /// channel switch — see `identity::resolver::inject::resolve_account`.
+    ///
+    /// Call this instead of plain `identity_upsert` at every LIVE account-
+    /// creation/update call site (reagentx P0 review on PR #2632 — the
+    /// original fix only backfilled the mirror once, via migration, so any
+    /// account created/updated AFTER the fix shipped still had no mirror
+    /// entry and reproduced the exact reported bug on its own next channel
+    /// switch).
+    ///
+    /// `self` is the primary (`id_store`) — its result is authoritative and
+    /// propagated to the caller. `mirror`'s (`identity_store`'s) result is
+    /// logged on failure and otherwise ignored: the mirror existing at all
+    /// is a durability nicety for THIS specific continuity scenario, not a
+    /// correctness requirement the primary write should ever be blocked or
+    /// failed by.
+    pub fn identity_upsert_with_mirror(&self, mirror: &Store, account: &IdentityAccount) -> Result<(), StoreError> {
+        self.identity_upsert(account)?;
+        if let Err(e) = mirror.identity_upsert(account) {
+            tracing::warn!(
+                target: "identity",
+                account_id = %account.id,
+                error = %e,
+                "identity_upsert_with_mirror: primary write succeeded but mirror write failed \
+                 (non-fatal — this account may not resolve after a future channel switch \
+                 until the mirror is repaired)"
+            );
+        }
+        Ok(())
+    }
+
     /// Migration-only repair pass (`m0019_repair_malformed_secret_ref`):
     /// scan every `db_accounts.secret_ref` for JSON that fails to parse and
     /// attempt to fix the one known corruption shape — a Windows path
@@ -1140,16 +1175,18 @@ mod tests {
 
     /// `db_agent_identity_links.account_id` must NOT carry a live FK to
     /// `db_accounts` in this store (unlike the per-channel `objects.db`
-    /// schema) — `db_accounts` deliberately isn't part of this schema yet
-    /// (SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md §3.1: accounts get their own
-    /// creation-time scope split in a follow-up). A hard FK to a
-    /// nonexistent table would make every link write fail outright.
+    /// schema) — even as of v2, `db_accounts` here is a read-through
+    /// FALLBACK MIRROR only (reagentx P0 review on PR #2632), not the
+    /// authoritative write path, and isn't guaranteed complete: a link can
+    /// legitimately resolve to an account that hasn't been mirrored yet.
+    /// A hard FK would make that (already-tolerated-elsewhere) case fail
+    /// the write outright instead of just missing on read.
     #[test]
     fn identity_store_link_write_does_not_require_a_matching_accounts_row() {
         let store = Store::open_identity_store(":memory:".as_ref()).unwrap();
-        // No db_accounts row for "acct-orphan-by-design" exists anywhere in
-        // this store (it has no db_accounts table at all) — the write must
-        // still succeed.
+        // No db_accounts row for "acct-orphan-by-design" exists in this
+        // store's (mirror-only) db_accounts table — the write must still
+        // succeed.
         store
             .agent_identity_link("agent-x", "acct-orphan-by-design", "claude")
             .unwrap();

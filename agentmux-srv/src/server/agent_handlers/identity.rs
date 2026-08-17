@@ -150,11 +150,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     let wstore = state.id_store.clone();
+    let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_UPSERT_IDENTITY_ACCOUNT,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
+            let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 // Accept the full IdentityAccount payload. Missing `id` → mint
@@ -173,8 +175,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     account.created_at = now;
                 }
                 account.updated_at = now;
+                // identity_upsert_with_mirror — reagentx P0 review on PR
+                // #2632.
                 wstore
-                    .identity_upsert(&account)
+                    .identity_upsert_with_mirror(&identity_store, &account)
                     .map_err(|e| format!("upsertidentityaccount: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "identityaccounts:changed".to_string(),
@@ -193,11 +197,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // SecretRef::Keychain pointer + masked tail + non-secret metadata.
     // See specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
     let wstore = state.id_store.clone();
+    let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_ACCOUNT_KEY_VERIFY,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
+            let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 // NB: `req.api_key` is a secret — never log `req`.
@@ -295,7 +301,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     created_at,
                     updated_at: now,
                 };
-                if let Err(e) = wstore.identity_upsert(&account) {
+                // identity_upsert_with_mirror — reagentx P0 review on PR #2632.
+                if let Err(e) = wstore.identity_upsert_with_mirror(&identity_store, &account) {
                     // DB write failed after the keychain write.
                     //  - New account: nothing references the secret yet, so
                     //    roll it back to avoid an orphan with no DB row.
@@ -344,10 +351,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // start: resolve config + client (gates on "not configured"), spawn the
     // flow, return session id + initial status. poll/cancel drive the rest.
     let oauth_wstore = state.id_store.clone();
+    let oauth_identity_store = state.identity_store.clone();
     engine.register_handler(
         COMMAND_ACCOUNT_OAUTH_START,
         Box::new(move |data, _ctx| {
             let wstore = oauth_wstore.clone();
+            let identity_store = oauth_identity_store.clone();
             Box::pin(async move {
                 let req: OAuthStartReq = serde_json::from_value(data)
                     .map_err(|e| format!("account.oauth.start: {e}"))?;
@@ -357,7 +366,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         client_secret: req.client_secret,
                     }
                 });
-                match crate::identity::oauth_client::start(&req.provider, req.name, byo, wstore) {
+                match crate::identity::oauth_client::start(&req.provider, req.name, byo, wstore, identity_store) {
                     Ok((session_id, status)) => Ok(Some(serde_json::json!({
                         "sessionId": session_id,
                         "status": oauth_status_wire(&status),
@@ -454,6 +463,20 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 affected_agents.extend(outcome.affected_agents);
                 affected_agents.sort();
                 affected_agents.dedup();
+                // Also remove the account's MIRROR row (identity_upsert_with_mirror's
+                // counterpart on delete) — without this, a stale copy of a
+                // deleted account survives in identity_store, and
+                // resolve_account's fallback would incorrectly resolve it
+                // again on the next spawn once id_store's own row is gone.
+                // Best-effort: a mirror cleanup failure must not block the
+                // real delete, which already succeeded above.
+                if let Err(e) = identity_store.identity_delete(&cmd.id) {
+                    tracing::warn!(
+                        account_id = %cmd.id,
+                        error = %e,
+                        "deleteidentityaccount: identity_store mirror row cleanup failed (non-fatal)"
+                    );
+                }
                 if links_cascaded > 0 {
                     // info!, not debug!: the production filter is
                     // "agentmuxsrv=info,info" (reagent P1, PR #2143).

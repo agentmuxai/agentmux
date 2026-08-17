@@ -143,7 +143,12 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
                 };
 
                 // Step 3 (upsert DB). Compensate on failure for new accounts.
-                if let Err(e) = id_store.identity_upsert(&account) {
+                // identity_upsert_with_mirror, not plain identity_upsert —
+                // reagentx P0 review on PR #2632: without the mirror write,
+                // an account created/updated after the fix shipped still had
+                // no fallback entry and reproduced the reported bug on its
+                // own next channel switch.
+                if let Err(e) = id_store.identity_upsert_with_mirror(&identity_store, &account) {
                     if is_new {
                         let aid = account_id.clone();
                         let _ = tokio::task::spawn_blocking(move || {

@@ -237,7 +237,7 @@ fn resolve_bindings_for_instance(
 /// still only exist in `id_store`, which is empty on a fresh, isolated
 /// channel — the reported continuity bug wasn't actually fixed end to end
 /// without this fallback.
-fn resolve_account(
+pub fn resolve_account(
     id_store: &Arc<Store>,
     identity_store: &Arc<Store>,
     account_id: &str,
@@ -880,6 +880,99 @@ mod tests {
         assert_eq!(
             env.get("CLAUDE_CONFIG_DIR").map(String::as_str),
             Some("/var/agentmux/identities/id-migrated/claude"),
+        );
+    }
+
+    /// Reagentx round-3 P0 on PR #2632: the fallback mirror above only
+    /// gets populated by the one-time migration backfill unless every live
+    /// account-write path also dual-writes via `identity_upsert_with_mirror`
+    /// — otherwise an account created (or updated) AFTER this PR shipped
+    /// would still dead-end on its own next channel switch, same as before
+    /// the fix. This test writes the account through
+    /// `identity_upsert_with_mirror` (the same call every live write path —
+    /// `identity.account.upsert`, OAuth persist, etc. — now uses) instead of
+    /// seeding `identity_store` directly, then simulates a channel switch
+    /// with a brand-new, empty `id_store` and confirms resolution still
+    /// succeeds via the mirror `identity_upsert_with_mirror` wrote.
+    #[cfg(debug_assertions)]
+    #[test]
+    fn inject_resolves_a_freshly_created_account_after_a_channel_switch_when_written_via_the_mirror_helper() {
+        let wstore = make_store();
+        let id_store = make_store();
+        let identity_store_tmp = tempfile::NamedTempFile::new().unwrap();
+        let identity_store = Arc::new(Store::open_identity_store(identity_store_tmp.path()).unwrap());
+
+        // `make_instance` below hardcodes `definition_id: "def-1"` — match it
+        // rather than parameterizing a helper shared with other tests.
+        let mut def = crate::backend::storage::store::AgentDefinition {
+            id: "def-1".to_string(),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            memory_id: String::new(),
+        };
+        wstore.agent_def_insert(&mut def).unwrap();
+
+        // "Before the channel switch": the account is created live, via the
+        // same helper `identity.account.upsert`/OAuth persist use — writing
+        // to id_store (the then-current, then-primary store) AND dual-
+        // writing the mirror into identity_store.
+        let claude = make_account(
+            "acct-fresh",
+            "claude",
+            SecretRef::OAuthConfigDir {
+                dir: "/var/agentmux/identities/id-fresh/claude".to_string(),
+            },
+        );
+        id_store.identity_upsert_with_mirror(&identity_store, &claude).unwrap();
+        identity_store
+            .agent_identity_link("def-1", "acct-fresh", "claude")
+            .unwrap();
+
+        insert_block_for_agent(&wstore, "block-fresh", "def-1");
+        let inst = make_instance("block-fresh", "id-fresh");
+        wstore.instance_create(&inst).unwrap();
+
+        // "After the channel switch": a brand-new, empty id_store — the
+        // account row created above must be unreachable here, exactly like
+        // a fresh per-channel-isolated store on a new channel.
+        let id_store_after_switch = make_store();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        let res = inject_identity_env(wstore, id_store_after_switch, identity_store, "block-fresh", &mut env);
+
+        assert!(
+            res.is_ok(),
+            "a freshly-created account (written via identity_upsert_with_mirror, not migration \
+             backfill) must still resolve after a channel switch: {res:?}"
+        );
+        assert_eq!(
+            env.get("CLAUDE_CONFIG_DIR").map(String::as_str),
+            Some("/var/agentmux/identities/id-fresh/claude"),
         );
     }
 
@@ -2187,7 +2280,7 @@ mod tests {
                 dir: "/var/agentmux/identities/id-drift/claude".to_string(),
             },
         );
-        id_store.identity_upsert(&claude).unwrap();
+        id_store.identity_upsert_with_mirror(&identity_store, &claude).unwrap();
         identity_store
             .agent_identity_link("def-1", "acct-drift", "claude")
             .unwrap();
