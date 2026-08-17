@@ -658,26 +658,36 @@ const MAX_HISTORY_SESSION_FILE_SIZE_BYTES: u64 = 200 * 1024 * 1024;
 /// never fails the whole export — same best-effort philosophy as the
 /// memory-splicing step above.
 ///
-/// reagentx P1 on PR #2613, both addressed:
+/// reagentx P1 on PR #2613, all addressed:
 /// - `sessions_for_agent(..., force_refresh: true)` — this export claims
 ///   completeness ("included N of N known sessions"), so it can't rely on
 ///   the interactive lazy-refresh-if-empty behavior; a session created
 ///   since the index was first populated (by ANY prior call) must not be
 ///   silently missing.
-/// - the actual file reads + zip + base64 encode run inside
+/// - `sessions_for_agent` itself runs inside its own `spawn_blocking` —
+///   `force_refresh: true` means it calls `SessionIndex::refresh()`,
+///   which synchronously walks and parses every session file for every
+///   provider on disk. A second review round caught that only the LATER
+///   file-read/zip/encode step (below) had been moved off the async
+///   worker thread; this earlier, more expensive full-index-rebuild step
+///   was still running inline on it. Takes `Arc<Store>`/
+///   `Arc<HistoryService>` (not bare refs) specifically so a clone can
+///   cross into this closure — `build_export_for_agent` above still
+///   receives them by reference (`Arc` derefs to `&Store` for free), no
+///   signature change needed there.
+/// - the actual file reads + zip + base64 encode run inside their own
 ///   `spawn_blocking` — synchronous, potentially slow I/O and CPU work
-///   that must not block the async RPC worker thread. Only the already-
-///   resolved, owned `export`/`sessions` data crosses into the blocking
-///   closure; the `Store`/`HistoryService` DB lookups above stay on the
-///   async side, unchanged.
+///   that must not block the async RPC worker thread either. Only the
+///   already-resolved, owned `export`/`sessions` data crosses into that
+///   closure.
 async fn bundle_export_for_agent_with_history_impl(
-    id_store: &crate::backend::storage::store::Store,
+    id_store: Arc<crate::backend::storage::store::Store>,
     wstore: &crate::backend::storage::store::Store,
-    history_service: &crate::backend::history::HistoryService,
+    history_service: Arc<crate::backend::history::HistoryService>,
     req: ExportForAgentWithHistoryReq,
 ) -> Result<serde_json::Value, String> {
     let (export, _agent, all_warnings, missing_skill_ids) = build_export_for_agent(
-        id_store,
+        &id_store,
         wstore,
         &req.bundle_id,
         &req.agent_id,
@@ -685,9 +695,17 @@ async fn bundle_export_for_agent_with_history_impl(
     )
     .await?;
 
-    let (sessions, session_count, _has_more) = history_service
-        .sessions_for_agent(id_store, &req.agent_id, 0, usize::MAX, "modified_at", "desc", true)
-        .map_err(|e| format!("bundle.export_for_agent_with_history: {e}"))?;
+    let agent_id = req.agent_id.clone();
+    let (sessions, session_count, _has_more) = {
+        let id_store = id_store.clone();
+        let history_service = history_service.clone();
+        tokio::task::spawn_blocking(move || {
+            history_service.sessions_for_agent(&id_store, &agent_id, 0, usize::MAX, "modified_at", "desc", true)
+        })
+        .await
+        .map_err(|e| format!("bundle.export_for_agent_with_history: blocking task panicked: {e}"))?
+        .map_err(|e| format!("bundle.export_for_agent_with_history: {e}"))?
+    };
 
     tokio::task::spawn_blocking(move || {
         let mut export = export;
@@ -774,7 +792,7 @@ fn register_bundle_export_for_agent_with_history(engine: &Arc<WshRpcEngine>, sta
             Box::pin(async move {
                 let req: ExportForAgentWithHistoryReq = serde_json::from_value(data)
                     .map_err(|e| format!("bundle.export_for_agent_with_history: {e}"))?;
-                bundle_export_for_agent_with_history_impl(&id_store, &wstore, &history_service, req)
+                bundle_export_for_agent_with_history_impl(id_store, &wstore, history_service, req)
                     .await
                     .map(Some)
             })
@@ -3290,9 +3308,9 @@ mod export_import_for_agent_tests {
             let history_service = HistoryService::from_index(index);
 
             let result = bundle_export_for_agent_with_history_impl(
-                &state.id_store,
+                state.id_store.clone(),
                 &state.wstore,
-                &history_service,
+                std::sync::Arc::new(history_service),
                 ExportForAgentWithHistoryReq { bundle_id: "bundle-1".to_string(), agent_id: "agent-1".to_string() },
             )
             .await
@@ -3315,9 +3333,9 @@ mod export_import_for_agent_tests {
             let history_service = HistoryService::from_index(SessionIndex::with_isolated_roots(vec![], vec![]));
 
             let result = bundle_export_for_agent_with_history_impl(
-                &state.id_store,
+                state.id_store.clone(),
                 &state.wstore,
-                &history_service,
+                std::sync::Arc::new(history_service),
                 ExportForAgentWithHistoryReq { bundle_id: "bundle-1".to_string(), agent_id: "agent-1".to_string() },
             )
             .await
@@ -3353,9 +3371,9 @@ mod export_import_for_agent_tests {
             let history_service = HistoryService::from_index(index);
 
             let result = bundle_export_for_agent_with_history_impl(
-                &state.id_store,
+                state.id_store.clone(),
                 &state.wstore,
-                &history_service,
+                std::sync::Arc::new(history_service),
                 ExportForAgentWithHistoryReq { bundle_id: "bundle-1".to_string(), agent_id: "agent-1".to_string() },
             )
             .await
@@ -3402,9 +3420,9 @@ mod export_import_for_agent_tests {
             let history_service = HistoryService::from_index(index);
 
             let result = bundle_export_for_agent_with_history_impl(
-                &state.id_store,
+                state.id_store.clone(),
                 &state.wstore,
-                &history_service,
+                std::sync::Arc::new(history_service),
                 ExportForAgentWithHistoryReq { bundle_id: "bundle-1".to_string(), agent_id: "agent-1".to_string() },
             )
             .await
