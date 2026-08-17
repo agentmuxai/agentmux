@@ -39,6 +39,12 @@ const MAX_FORWARD_HOPS: u8 = 3;
 /// No-op when the sender isn't a registered agent on this instance (cron,
 /// external callers) or is messaging itself (the incoming marker already
 /// lands in the same pane).
+///
+/// `reagent_verified`/`lan_verified` should be the SAME values the original
+/// delivery's `Handler::inject_message_inner` computed `effective_tier`/
+/// `requires_stop` from (not re-derived) — see the call site's own doc
+/// comment inline below for why passing anything else produces a
+/// self-contradictory echoed marker (reagentx P1 on PR #2623).
 pub(super) fn echo_jekt_to_sender(
     state: &AppState,
     source_agent: Option<&str>,
@@ -46,8 +52,11 @@ pub(super) fn echo_jekt_to_sender(
     message: &str,
     msgid: &str,
     effective_tier: Option<&str>,
+    requires_stop: Option<bool>,
     delivery_tier: &str,
     sig_verified: Option<bool>,
+    reagent_verified: Option<bool>,
+    lan_verified: Option<bool>,
     priority: &str,
 ) {
     let Some(src) = source_agent.filter(|s| !s.is_empty()) else {
@@ -68,12 +77,24 @@ pub(super) fn echo_jekt_to_sender(
         effective_tier.unwrap_or("coord"),
         delivery_tier,
         sig_verified,
-        // Sender-echo is inherently host-tier (the sender only ever sees
-        // this in their own pane) — reagent signing is WAN-only and LAN
-        // signing is LAN-only, so both are meaningless here regardless of
-        // what the actual delivery_tier of the outgoing message was.
-        None,
-        None,
+        // reagentx P1 on PR #2623: these used to be hardcoded `None, None`
+        // ("sender-echo is inherently host-tier, so WAN/LAN verification is
+        // meaningless here") — true for TRUST/SIG rendering alone, but as of
+        // SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17.md
+        // that assumption broke: `requires_stop` (just above) already
+        // reflects the REAL delivery's verification, so hardcoding these to
+        // `None` produced a self-contradictory echoed marker — `ESCALATE=none`
+        // (implying a verified sender) next to `TRUST=network-claimed` with
+        // no `SIG=` field (implying an unverified one). Passing the same
+        // verification signals the original decision was made from keeps
+        // the echoed marker internally consistent with its own `ESCALATE=`.
+        reagent_verified,
+        lan_verified,
+        // Defaults to `true` (STOP) when the caller couldn't tell us —
+        // matches `effective_tier` defaulting to the more-cautious "coord"
+        // rather than assuming "info" above; never silently downgrades a
+        // sensitive echo to tag-only just because this hop lost the signal.
+        requires_stop.unwrap_or(true),
         msgid,
         priority,
     );
@@ -389,8 +410,15 @@ pub(super) async fn handle_reactive_inject(
             &req.message,
             &resp.request_id,
             resp.effective_tier.as_deref(),
+            resp.requires_stop,
             req.delivery_tier.as_deref().unwrap_or("host"),
             req.sig_verified,
+            // Same `req` this call's own `effective_tier`/`requires_stop`
+            // were computed from (via `inject_message` just above) — not
+            // hardcoded, so the echoed marker's TRUST/SIG stays consistent
+            // with its own ESCALATE= (reagentx P1 on PR #2623).
+            req.reagent_verified,
+            req.lan_verified,
             req.priority.as_deref().unwrap_or("normal"),
         );
         return Json(serde_json::to_value(&resp).unwrap_or_default());
@@ -445,8 +473,11 @@ pub(super) async fn handle_reactive_inject(
                                     &req.message,
                                     body.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
                                     body.get("effective_tier").and_then(|v| v.as_str()),
+                                    body.get("requires_stop").and_then(|v| v.as_bool()),
                                     "host",
                                     req.sig_verified,
+                                    req.reagent_verified,
+                                    req.lan_verified,
                                     req.priority.as_deref().unwrap_or("normal"),
                                 );
                                 return Json(body);
@@ -530,8 +561,11 @@ pub(super) async fn handle_reactive_inject(
                                     &req.message,
                                     body.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
                                     body.get("effective_tier").and_then(|v| v.as_str()),
+                                    body.get("requires_stop").and_then(|v| v.as_bool()),
                                     "host",
                                     req.sig_verified,
+                                    req.reagent_verified,
+                                    req.lan_verified,
                                     req.priority.as_deref().unwrap_or("normal"),
                                 );
                                 return Json(body);
@@ -608,8 +642,11 @@ pub(super) async fn handle_reactive_inject(
                                 &req.message,
                                 body.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
                                 body.get("effective_tier").and_then(|v| v.as_str()),
+                                body.get("requires_stop").and_then(|v| v.as_bool()),
                                 "lan",
                                 None,
+                                None, // reagent signing is WAN-only, never applies on the LAN forward path
+                                req.lan_verified,
                                 req.priority.as_deref().unwrap_or("normal"),
                             );
                             return Json(body);
