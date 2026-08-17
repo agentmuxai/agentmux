@@ -1,0 +1,30 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Visual styling only — position/left/top come from computeMenuPosition's
+// inline style (floating-ui), which also handles keeping the balloon off
+// the window edges (replacing the old CSS's hand-rolled
+// .status-bar-left/.status-bar-right edge-anchor variants with flip/shift).
+// See StatusBarTip.tsx.
+.status-bar-tip-balloon {
+    padding: var(--space-1) var(--space-1-5);
+    background: var(--modal-bg-color);
+    color: var(--main-text-color);
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    font-size: 11px;
+    zoom: var(--zoomfactor);
+    // Size to content, but wrap (don't single-line overflow) once the tip
+    // exceeds max-width. `nowrap` + `max-width` contradicted: long tips
+    // (e.g. GFX's full GPU renderer string) spilled out of the balloon.
+    // `max-content` keeps short tips on one line; long ones wrap, and
+    // `overflow-wrap: anywhere` breaks unbreakable renderer strings
+    // instead of overflowing.
+    white-space: normal;
+    width: max-content;
+    max-width: 320px;
+    overflow-wrap: anywhere;
+    pointer-events: none;
+    z-index: calc(var(--zindex-modal-wrapper) + 10);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
