@@ -18,6 +18,43 @@ function borderAfter(result: Map<string, number>, ids: string[], index: number):
     return sum(sizesOf(result, ids.slice(0, index + 1)));
 }
 
+test("computeGroupResizeSizes - a block member already below minNodeSize is left untouched, never enlarged, when its block shrinks (regression: Codex review on PR #2624)", () => {
+    // Split/minimize-restore/window-shrink reflow don't enforce minNodeSize — only
+    // this interactive drag path does — so a pane can genuinely already be smaller
+    // than the floor when a Shift-drag starts. Shrinking a block containing one
+    // must not "fix" it by enlarging it up to the floor (that's growth, the
+    // opposite of what this helper does, and it broke total-size conservation).
+    // tiny and other share beforeBlock; driven grows, so beforeBlock is the one
+    // asked to shrink (this is where tiny's stale undersized state matters).
+    const minNodeSize = 128;
+    const siblings: ResizeNodeOperation[] = [
+        { nodeId: "tiny", size: 20 }, // already below the floor before the drag starts
+        { nodeId: "other", size: 200 },
+        { nodeId: "driven", size: 200 },
+    ];
+    // Modest growth request (driven -> 250, beforeBlock must give up 50) — other alone
+    // has plenty of headroom (72) to cover it without ever touching tiny.
+    const modest = computeGroupResizeSizes(siblings, "driven", 250, minNodeSize);
+    assert.equal(modest.get("tiny"), 20, "already-undersized sibling must be left exactly as-is, not enlarged");
+    assert.approximately(modest.get("other")!, 150, 1e-6);
+    assert.approximately(modest.get("driven")!, 250, 1e-6, "driven gets its full requested growth — plenty of real headroom exists in other");
+    assert.approximately(sum(sizesOf(modest, ["tiny", "other", "driven"])), 420, 1e-6, "total size must be conserved");
+
+    // Larger growth request that exceeds other's real headroom (72, down to its own
+    // floor) — must cap at that real headroom, not "find" extra room by enlarging tiny,
+    // and must never let the block's total size grow while it's being asked to shrink.
+    const large = computeGroupResizeSizes(siblings, "driven", 300, minNodeSize);
+    assert.equal(large.get("tiny"), 20, "still untouched even when the request would otherwise exceed available headroom");
+    assert.approximately(large.get("other")!, 128, 1e-6, "other capped at its own real floor headroom");
+    assert.approximately(large.get("driven")!, 272, 1e-6, "driven only grows by the real 72 of headroom that existed, not the full 100 requested");
+    assert.approximately(
+        sum(sizesOf(large, ["tiny", "other", "driven"])),
+        420,
+        1e-6,
+        "total size must be conserved — the block must never net-grow while being asked to shrink"
+    );
+});
+
 test("computeGroupResizeSizes - two siblings degenerates to a plain transfer (matches the baseline 2-node math)", () => {
     const siblings: ResizeNodeOperation[] = [
         { nodeId: "a", size: 50 },

@@ -57,7 +57,19 @@ function shrinkBlockBy(
     minNodeSize: number,
     result: Map<string, number>
 ): number {
-    let pool = block.map((s) => ({ id: s.nodeId, size: s.size }));
+    // A member already at/under the floor has zero shrink headroom to give up.
+    // Exclude it from the pool up front rather than discovering that inside the
+    // loop: `cur - minNodeSize` for such a member is <= 0, which would otherwise
+    // ENLARGE it up to minNodeSize (the opposite of "shrinking" this block) and
+    // feed a non-positive amount into `takenThisRound`, breaking conservation
+    // (the block could net *grow* instead of shrink, with the complementary
+    // block never told to compensate). Already-undersized panes are a real,
+    // reachable state here — split, minimize-restore, and window-shrink reflow
+    // don't enforce minNodeSize, only this interactive drag path does (see
+    // SPEC_SHIFT_DRAG_GROUP_RESIZE_DIRECTION_FIX_2026_08_17.md). Excluded
+    // members are simply left at their current (possibly already-undersized)
+    // size, never touched.
+    let pool = block.filter((s) => s.size > minNodeSize).map((s) => ({ id: s.nodeId, size: s.size }));
     let remaining = amount;
     while (remaining > 1e-6 && pool.length > 0) {
         const poolSum = pool.reduce((sum, p) => sum + result.get(p.id)!, 0);
