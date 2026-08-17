@@ -76,6 +76,17 @@ export interface LaunchOverrides {
      *  provider naturally falls back to "fork = fresh definition, fresh
      *  start" by simply not getting the flag. */
     forkSession?: boolean;
+    /** Initial model choice (a value from the effective provider's own
+     *  `models` list) — seeds the new block's `agent:runtime` meta at
+     *  launch, the same key `AgentRuntimeDropup`'s in-session model
+     *  picker writes to via `applyRuntimeChange`. When omitted,
+     *  `launchAgentDefinition` falls back to the provider's own
+     *  `default: true` model, or `DEFAULT_RUNTIME_CONFIG.model` if the
+     *  provider declares none. Callers that let the user pick a model at
+     *  creation time (e.g. AgentCreateFromTemplateModal) set this so the
+     *  first launch doesn't silently start on an unrelated provider's
+     *  default model. */
+    model?: string;
 }
 
 interface AgentLaunchModalPanelProps {

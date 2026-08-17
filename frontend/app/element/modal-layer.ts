@@ -233,6 +233,11 @@ export interface CreateFromTemplateRequest {
          *  uses this directly instead of re-reading the (template-
          *  derived) `agent_type`, so the choice actually takes effect. */
         agentType: "host" | "container",
+        /** Model the user picked in the modal (from the harness's own
+         *  models list) — seeds the new instance's first-launch
+         *  `agent:runtime` block meta via LaunchOverrides.model. Empty
+         *  string when the harness declares no models list. */
+        model: string,
     ) => Promise<void>;
 }
 
