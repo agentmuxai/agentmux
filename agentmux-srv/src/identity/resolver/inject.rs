@@ -21,7 +21,8 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::backend::providers::resolve_provider_alias;
-use crate::backend::storage::store::{SecretRef, Store};
+use crate::backend::storage::store::{IdentityAccount, SecretRef, Store};
+use crate::backend::storage::StoreError;
 use crate::backend::wps::{Broker, WaveEvent};
 
 use super::errors::SpawnGateError;
@@ -219,6 +220,37 @@ fn resolve_bindings_for_instance(
         .collect()
 }
 
+/// Resolve an account by id, checking `id_store` first — the
+/// authoritative, per-account-isolatable primary, which is what preserves
+/// Armory's disposable-test-account isolation guarantee — and falling
+/// back to `identity_store`'s read-through mirror
+/// (`IDENTITY_STORE_SCHEMA_VERSION` v2,
+/// `docs/specs/SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md` §3.1) only when the
+/// primary lookup misses. Returns the account alongside WHICH store it
+/// came from, so a caller that later writes a status update (the OAuth
+/// expiry probe below) writes it back to the SAME store instead of always
+/// assuming `id_store` — writing to the wrong store would silently create
+/// a second, never-read copy.
+///
+/// reagentx P0 review on PR #2632: before this, the link resolved via
+/// `identity_store` (always global) but the account it pointed at could
+/// still only exist in `id_store`, which is empty on a fresh, isolated
+/// channel — the reported continuity bug wasn't actually fixed end to end
+/// without this fallback.
+fn resolve_account(
+    id_store: &Arc<Store>,
+    identity_store: &Arc<Store>,
+    account_id: &str,
+) -> Result<Option<(IdentityAccount, Arc<Store>)>, StoreError> {
+    if let Some(a) = id_store.identity_get(account_id)? {
+        return Ok(Some((a, id_store.clone())));
+    }
+    if let Some(a) = identity_store.identity_get(account_id)? {
+        return Ok(Some((a, identity_store.clone())));
+    }
+    Ok(None)
+}
+
 /// **Before touching `gate_oauth_failure` / `inject_identity_env_with_broker`:**
 /// this module is where `SPEC_PROVIDER_ISOLATION_2026_06_20.md`'s INV-A
 /// ("never the user's global `~/.<P>` dir") is enforced — or, once already,
@@ -398,8 +430,8 @@ pub fn inject_identity_env_with_broker(
         };
         let is_oauth_class = matches!(class, ProviderClass::OAuth { .. });
 
-        let account = match id_store.identity_get(&binding.account_id) {
-            Ok(Some(a)) => a,
+        let (account, account_store) = match resolve_account(&id_store, &identity_store, &binding.account_id) {
+            Ok(Some(pair)) => pair,
             Ok(None) => {
                 // The post-delete case (analysis §2.3): the link survived
                 // (or was cascaded and re-created stale) but the account
@@ -546,7 +578,12 @@ pub fn inject_identity_env_with_broker(
                         let mut updated = account.clone();
                         updated.status = new_status.to_string();
                         updated.updated_at = now_ms;
-                        match id_store.identity_upsert(&updated) {
+                        // Write back to whichever store the account was
+                        // actually resolved from (resolve_account above) —
+                        // not always id_store, since a fallback-mirror hit
+                        // must update the mirror, not silently create a
+                        // second, never-read copy in id_store.
+                        match account_store.identity_upsert(&updated) {
                             Ok(()) => {
                                 tracing::info!(
                                     target: "identity",
@@ -755,6 +792,95 @@ mod tests {
         // And does NOT set the anthropic api-key env var — dispatch
         // is by provider class, not by token shape.
         assert!(env.get("ANTHROPIC_API_KEY").is_none());
+    }
+
+    /// The exact end-to-end scenario reagentx's P0 review on PR #2632
+    /// caught: after a version/channel switch, the LINK resolves via
+    /// `identity_store` (always global), but if the ACCOUNT row the link
+    /// points at only lives in `identity_store`'s fallback mirror — not
+    /// `id_store`, which is a fresh, empty, per-channel-isolated store on
+    /// the new channel — the spawn must still succeed by falling back to
+    /// the mirror. Before `resolve_account`'s fallback, this reproduced the
+    /// exact reported bug (spawn refused with "account row not found") even
+    /// though the link itself was already fixed.
+    #[cfg(debug_assertions)]
+    #[test]
+    fn inject_resolves_account_via_identity_store_fallback_when_id_store_lacks_it() {
+        let wstore = make_store();
+        // Deliberately EMPTY of the account and link — simulates a fresh,
+        // isolated per-channel id_store on a new channel/version.
+        let id_store = make_store();
+        // Real identity-store schema (no account_id/agent_id FK, matching
+        // production's Store::open_identity_store — NOT open_in_memory's
+        // channel schema, which still has both FKs and would reject this
+        // link since "def-1" only exists in wstore's own definitions
+        // table, a different physical store). Simulates the post-migration
+        // state: both the link AND the account mirror row live here,
+        // exactly what m0022_identity_store_links_backfill produces.
+        let identity_store_tmp = tempfile::NamedTempFile::new().unwrap();
+        let identity_store = Arc::new(Store::open_identity_store(identity_store_tmp.path()).unwrap());
+
+        let mut def = crate::backend::storage::store::AgentDefinition {
+            id: "def-1".to_string(),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            memory_id: String::new(),
+        };
+        wstore.agent_def_insert(&mut def).unwrap();
+
+        let claude = make_account(
+            "acct-migrated",
+            "claude",
+            SecretRef::OAuthConfigDir {
+                dir: "/var/agentmux/identities/id-migrated/claude".to_string(),
+            },
+        );
+        identity_store.identity_upsert(&claude).unwrap();
+        identity_store
+            .agent_identity_link("def-1", "acct-migrated", "claude")
+            .unwrap();
+
+        insert_block_for_agent(&wstore, "block-continuing", "def-1");
+        let inst = make_instance("block-continuing", "id-continuing");
+        wstore.instance_create(&inst).unwrap();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        let res = inject_identity_env(wstore, id_store, identity_store, "block-continuing", &mut env);
+
+        assert!(
+            res.is_ok(),
+            "spawn must succeed via the identity_store fallback mirror, not fail with \
+             'account row not found' — this is the exact reported continuity bug: {res:?}"
+        );
+        assert_eq!(
+            env.get("CLAUDE_CONFIG_DIR").map(String::as_str),
+            Some("/var/agentmux/identities/id-migrated/claude"),
+        );
     }
 
     // reagentx P1 on PR #2605: this is the ordinary spawn path (not

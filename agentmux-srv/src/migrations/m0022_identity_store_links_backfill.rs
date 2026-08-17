@@ -1,7 +1,11 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Backfill `db_agent_identity_links` from every reachable store into the new,
+//! Backfill `db_agent_identity_links`, plus a `db_accounts` fallback mirror
+//! (reagentx P0 review, added after this migration's first version — see
+//! `identity::resolver::inject::resolve_account`'s own doc comment for why
+//! the mirror is needed even though `db_accounts` itself stays on `id_store`
+//! as the authoritative store), from every reachable store into the new,
 //! permanently-global identity store — see
 //! `docs/specs/SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md`.
 //!
@@ -57,7 +61,7 @@ impl Migration for M0022IdentityStoreLinksBackfill {
     fn id(&self) -> &'static str { "0022_identity_store_links_backfill" }
     fn scope(&self) -> MigrationScope { MigrationScope::Global }
     fn description(&self) -> &'static str {
-        "Backfill agent<->account links into the permanently-global identity store"
+        "Backfill agent<->account links (and an account fallback mirror) into the permanently-global identity store"
     }
 
     fn up(&self, ctx: &MigrationContext) -> Result<(), MigrationError> {
@@ -73,7 +77,18 @@ impl Migration for M0022IdentityStoreLinksBackfill {
         // Idempotent re-run: once the destination has ANY link, later boots
         // skip the (relatively expensive) multi-source scan. A link written
         // normally after this migration first ran is not lost by skipping —
-        // it already went straight to `dest` via the live application code.
+        // it already goes straight to `dest` via the live application code.
+        // The account mirror is a one-time snapshot from THIS migration
+        // only — unlike links, nothing in the live application code writes
+        // new accounts into `dest` afterwards (identity::resolver::inject's
+        // resolve_account only READS the mirror as a fallback; the OAuth
+        // status-update write-back only reaches it for an account already
+        // found there). An account created entirely after this migration
+        // ran, on a channel that's isolated when the agent is later reopened
+        // on a DIFFERENT channel, is the one residual gap this PR
+        // explicitly discloses (see the PR description) — the full fix is
+        // the deferred per-account `disposable_test` scope split
+        // (SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md §3.2).
         let already_seeded = !dest.agent_identity_list_all().unwrap_or_default().is_empty();
         if already_seeded {
             return Ok(());
@@ -167,9 +182,31 @@ impl Migration for M0022IdentityStoreLinksBackfill {
                 }
             }
         }
+
+        // Account mirror (reagentx P0 review on this PR): without this, a
+        // link resolved via `dest` still dead-ends the very next step —
+        // resolving the ACCOUNT the link points at — whenever that account
+        // only ever existed in a per-channel-isolated store, which is the
+        // common case on a version/channel switch (see
+        // identity::resolver::inject::resolve_account). Same deterministic,
+        // first-seen-wins treatment as links, keyed by account id.
+        let mut seen_accounts: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut mirrored = 0usize;
+        for src in &sources {
+            for account in src.identity_list(None).unwrap_or_default() {
+                if !seen_accounts.insert(account.id.clone()) {
+                    continue;
+                }
+                if dest.identity_upsert(&account).is_ok() {
+                    mirrored += 1;
+                }
+            }
+        }
+
         tracing::info!(
             sources = sources.len(),
             links_written = linked,
+            accounts_mirrored = mirrored,
             "identity_store_links_backfill: complete"
         );
 
@@ -245,6 +282,49 @@ mod tests {
              hypothetical"
         );
         assert_eq!(links[0].account_id, "acct-real");
+        clear();
+    }
+
+    /// reagentx P0 review on PR #2632: a link alone isn't enough — the
+    /// account row it points at must also be reachable, or the spawn dead-
+    /// ends resolving it. This test seeds an account in the SAME sibling
+    /// isolated store the link test above uses, and confirms it's mirrored
+    /// into the destination's db_accounts fallback table.
+    #[test]
+    fn backfills_the_account_row_alongside_its_link() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        let (_tmp, ctx) = setup();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", &ctx.home);
+
+        // Seed the account in the same sibling isolated store setup()
+        // already links "agent-continuing" to.
+        let sibling_isolated_store = ctx.home.join("dev").join("other-branch").join("identity-store.db");
+        let sibling = Store::open_identity_store(&sibling_isolated_store).unwrap();
+        sibling.identity_upsert(&crate::backend::storage::store::IdentityAccount {
+            id: "acct-real".to_string(),
+            name: "Real Account".to_string(),
+            provider: "claude".to_string(),
+            kind: "oauth".to_string(),
+            display_name: String::new(),
+            secret_ref: crate::backend::storage::store::SecretRef::OAuthConfigDir { dir: "/tmp/acct-real".to_string() },
+            context: serde_json::json!({}),
+            status: "valid".to_string(),
+            created_at: 0,
+            updated_at: 0,
+        }).unwrap();
+        drop(sibling);
+
+        M0022IdentityStoreLinksBackfill.up(&ctx).unwrap();
+
+        let dest = Store::open_identity_store(&registry::resolve_identity_store_path().unwrap()).unwrap();
+        let account = dest.identity_get("acct-real").unwrap();
+        assert!(
+            account.is_some(),
+            "the account row must be mirrored into the destination, not just its link — \
+             a link with no resolvable account still fails the spawn"
+        );
+        assert_eq!(account.unwrap().provider, "claude");
         clear();
     }
 

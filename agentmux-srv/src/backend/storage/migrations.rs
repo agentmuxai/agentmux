@@ -1077,7 +1077,18 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
 ///        native memory mirror, cron jobs. Everything
 ///        `run_shared_store_schema` already held EXCEPT `db_accounts` —
 ///        see docs/specs/SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md §3.1.
-pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 1;
+///   v2 — db_accounts, as a FALLBACK MIRROR only (reagentx P0 review on
+///        PR #2632): the link resolves via this store now, but the
+///        account row it points to could still only exist in the
+///        per-channel-isolatable `id_store`, which is empty on a fresh
+///        channel — the reported bug wasn't actually fixed end to end
+///        without this. `id_store` remains the PRIMARY, authoritative,
+///        write path (so Armory's disposable-test-account isolation is
+///        unchanged); this copy is consulted only when `id_store` doesn't
+///        have the row. See `identity::resolver::inject`'s account
+///        resolution for the read-with-fallback + write-back-to-source-store
+///        logic this enables.
+pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 2;
 
 /// Initialize (or re-validate) the `~/.agentmux/shared/identity-store.db`
 /// schema — the permanently-global store introduced by
@@ -1085,20 +1096,28 @@ pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 1;
 /// conversation-continuity-across-a-version-switch
 /// (`docs/specs/REPORT_HISTORY_CONTINUITY_ACROSS_VERSION_UPGRADE_2026_08_17.md`).
 ///
-/// This is a **subset** of [`run_shared_store_schema`]'s tables — every
-/// one of them EXCEPT `db_accounts`, which stays out of this store
-/// deliberately: unlike agent→account links, memory bundles, drone
-/// definitions, muxbus credentials, and native memory, `db_accounts` has
-/// one genuine, intentional isolation need (Armory's disposable
-/// delete-account testing flow), so accounts get their own explicit
-/// creation-time scope split (SPEC §3.2, not yet implemented — accounts
-/// remain on the existing `id_store`/`resolve_shared_store_path()` path
-/// for now). `db_agent_identity_links.account_id` therefore has NO
-/// foreign key here (same reasoning `run_shared_store_schema` already
-/// uses to drop its FK to `db_agent_definitions`: the referenced table
-/// lives in a different physical file, and cross-database FK enforcement
-/// is impossible in SQLite — application code enforces referential
-/// integrity instead).
+/// This is a **near-superset** of [`run_shared_store_schema`]'s tables
+/// (v2): every one of them, INCLUDING `db_accounts` as of v2 — but
+/// `db_accounts` here is a read-through FALLBACK MIRROR only, not the
+/// authoritative write path. Unlike agent→account links, memory bundles,
+/// drone definitions, muxbus credentials, and native memory,
+/// `db_accounts` has one genuine, intentional isolation need (Armory's
+/// disposable delete-account testing flow): a real per-account
+/// creation-time scope split (SPEC §3.2) hasn't shipped yet, so
+/// `id_store`/`resolve_shared_store_path()` stays the primary read/write
+/// path for accounts, preserving Armory's isolation exactly as before.
+/// This store's copy exists ONLY so a link resolved here (always global)
+/// doesn't dead-end on an account row that's stuck in a fresh, per-
+/// channel-isolated `id_store` — see `identity::resolver::inject`'s
+/// account resolution (falls back to this store's `identity_get` only
+/// when `id_store`'s own lookup misses) and
+/// `migrations::m0022_identity_store_links_backfill` (backfills this
+/// mirror the same way it backfills links). `db_agent_identity_links.account_id`
+/// still has NO foreign key here (same reasoning `run_shared_store_schema`
+/// already uses to drop its FK to `db_agent_definitions`: cross-database
+/// FK enforcement is impossible in SQLite, and this table's `db_accounts`
+/// is itself just a mirror, not guaranteed complete — application code
+/// enforces referential integrity, tolerating a miss, instead).
 ///
 /// A dedicated store (not a subset of the existing shared store reached
 /// via a new always-global path) is deliberate, not just a naming choice:
@@ -1121,6 +1140,23 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
         );
         CREATE INDEX IF NOT EXISTS idx_ids_agent_identity_links_account
             ON db_agent_identity_links(account_id);
+
+        -- v2: fallback mirror only — see this function's own doc comment
+        -- above. id_store stays the authoritative read/write path.
+        CREATE TABLE IF NOT EXISTS db_accounts (
+            id           TEXT PRIMARY KEY,
+            name         TEXT NOT NULL,
+            provider     TEXT NOT NULL,
+            kind         TEXT NOT NULL,
+            display_name TEXT NOT NULL DEFAULT '',
+            secret_ref   TEXT NOT NULL,
+            context      TEXT NOT NULL DEFAULT '{}',
+            status       TEXT NOT NULL DEFAULT 'unknown',
+            created_at   INTEGER NOT NULL DEFAULT 0,
+            updated_at   INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_ids_accounts_provider
+            ON db_accounts(provider);
 
         CREATE TABLE IF NOT EXISTS db_bundles (
             id            TEXT PRIMARY KEY,
