@@ -1,5 +1,33 @@
 # AgentMux Version History
 
+## 0.55.11 — 2026-08-17
+
+- fix(browser-pane): faster connection-timeout watchdog and human-readable load-error pages
+- fix(agent): launch modal resolves provider through the bound bundle, not the driftable agent column
+- fix(browser-pane): clicking inside a pane now dismisses open menus/popovers
+- feat(browser-pane): unified context menu replaces Chromium's native right-click menu
+- fix(drop): stop an unhandled file drop from navigating the whole window away
+- fix(storage): correct stale db_agents migration-phase comments, pin the read-side split with a test
+- docs: add agent identity/history fragmentation report and canonical persistence protocol spec
+- fix(jekt): inject host/LAN signing keys on the normal launch path, not just agent.open
+- fix(identity): keep conversation history global when credential isolation is on
+- fix(history): ClaudeHistoryAdapter now scans per-channel isolated identity dirs too
+- fix(identity): resolve provider through the bound bundle at the three backend clone-sites
+- fix(identity): remove the post-creation model-vendor-base-url editor from AgentIdentityModal
+- fix(agent): AgentPicker resolves provider through the bound bundle for install-check, prereq-probe, and add-account
+- fix(agent): AgentInstallModal installs the bound bundle's provider, not a drifted agent.provider
+- feat(history): fast agent_id-keyed Conversation History lookup
+- fix(identity): bind-to-agent menu and Connect-Claude CTA resolve provider through the bound bundle
+- feat(armory): opt-in bundle.export_for_agent_with_history action
+- docs: add agent data scope-routing PR checklist
+- fix(identity): exportagents resolves provider through the bound bundle, not a drifted agent.provider
+- fix(deps): bump nanoid 3.3.16 -> 3.3.18 (GHSA, high severity DoS)
+- fix(agent): pane tab-strip no longer overlaps the new-agent picker's top content
+- feat(agent): harness-then-model creation flow — pick a model when creating from a template, explanatory copy for harness vs model
+- fix(agent): create-from-template model picker reads through getProvider, not the raw static catalog
+- docs: add muxbus free-account abuse hardening spec (agentmux-cloud PR #50)
+- fix(agent): resolve harness+model picker through bound bundle, gate model picker on --model launch support
+
 ## 0.55.10 — 2026-08-16
 
 - fix(bashwrap): exempt declared-background tasks from the idle-kill timeout
