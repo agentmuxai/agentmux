@@ -129,6 +129,25 @@ export function buildRuntimeArgs(
 }
 
 /**
+ * Whether `buildRuntimeArgs` actually applies `AgentRuntimeConfig.model`
+ * to this provider's launch args at all (via `--model`, through either
+ * the plain claude branch above or codex's own dedicated branch below).
+ * The single source of truth a model PICKER (AgentRuntimeDropup,
+ * AgentCreateFromTemplateModal) should gate on before offering a choice
+ * — otherwise a provider with a `models` list in the catalog (e.g.
+ * antigravity) but no `--model` wiring here lets the user pick a model
+ * that's silently discarded at launch (ReAgent P2 on PR #2618).
+ *
+ * Kept in this file specifically (not providers/catalog.ts) so it can
+ * never drift from the actual arg-building logic above — a provider
+ * added to one without the other is exactly the bug class this function
+ * exists to close.
+ */
+export function providerSupportsModelFlag(providerId: string | undefined): boolean {
+    return !providerId || providerId === "claude" || providerId === "codex";
+}
+
+/**
  * Read AgentRuntimeConfig from block metadata, falling back to defaults.
  */
 export function getRuntimeConfig(blockMeta: Record<string, any> | undefined): AgentRuntimeConfig {

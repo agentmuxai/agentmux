@@ -22,7 +22,7 @@
  * universal modal system per `feedback_use_universal_modal_system`.
  */
 
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 
 import { Button } from "@/element/button";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -30,6 +30,8 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { PROVIDERS } from "../providers/catalog";
 import { getProvider } from "../providers";
+import { resolveEffectiveLaunchProvider } from "../agent-launch-env";
+import { providerSupportsModelFlag } from "../buildRuntimeArgs";
 import { isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
 import { refreshAccountCache, type Account } from "@/app/view/identity/identity-model";
 
@@ -72,7 +74,7 @@ export const AgentCreateFromTemplateModalPanel = (
     const [name, setName] = createSignal(props.initialName ?? props.template.name);
     const [accountId, setAccountId] = createSignal("");
     const [memoryId, setMemoryId] = createSignal("");
-    const [accounts, setAccounts] = createSignal<Account[]>([]);
+    const [allAccounts, setAllAccounts] = createSignal<Account[]>([]);
     const [memories, setMemories] = createSignal<Memory[]>([]);
     const [submitting, setSubmitting] = createSignal(false);
     const [error, setError] = createSignal<string | null>(null);
@@ -80,12 +82,35 @@ export const AgentCreateFromTemplateModalPanel = (
         props.template.model_vendor_base_url ?? "",
     );
 
+    // Resolve through the template's bound bundle rather than its
+    // possibly-drifted `.provider` column directly — #2594-class drift
+    // (ReAgent P1 on PR #2618): `agentdefcreatefromtemplate` itself
+    // already resolves the clone's provider this way server-side
+    // (template.rs, #2607's fix) — a template whose column has drifted
+    // from its bundle would otherwise show this modal offering
+    // accounts/models/endpoint-support for the WRONG provider relative
+    // to what actually gets cloned. Falls back to `props.template.provider`
+    // while loading/on failure, same contract `resolveEffectiveLaunchProvider`
+    // itself documents — a brief stale flash here is cosmetic (form
+    // options), not a spawn/credential decision the way it would be in
+    // AgentLaunchModal.
+    const [resolvedTemplateProviderId] = createResource(
+        () => props.template,
+        resolveEffectiveLaunchProvider,
+    );
+    const effectiveProviderId = () => resolvedTemplateProviderId() ?? props.template.provider;
+
+    // Derived, not filtered-once-at-fetch-time — see the onMount comment
+    // below for why (reacts correctly regardless of fetch-vs-resolve
+    // ordering).
+    const accounts = createMemo(() => allAccounts().filter((a) => a.provider === effectiveProviderId()));
+
     // Only providers that declare `baseUrlEnvVar` (currently just claude)
     // can actually be redirected to a custom endpoint — see
     // agent_define::validate_vendor_base_url on the backend, which rejects
     // a non-empty override for any other provider.
     const supportsCustomEndpoint = createMemo(
-        () => !!PROVIDERS[props.template.provider]?.baseUrlEnvVar,
+        () => !!PROVIDERS[effectiveProviderId()]?.baseUrlEnvVar,
     );
 
     // ── Model (which model this harness runs) ────────────────────────
@@ -98,12 +123,34 @@ export const AgentCreateFromTemplateModalPanel = (
     // authoritative version labels at app-init, e.g. "Sonnet 4.6" →
     // "Sonnet 5"). Reading the raw static catalog directly would show
     // stale labels and never react to a later-landing overlay (ReAgent
-    // review on PR #2618). Hidden entirely when the harness declares no
-    // models list — nothing to choose between.
-    const modelOptions = createMemo(() => getProvider(props.template.provider)?.models ?? []);
-    const [model, setModel] = createSignal(
-        modelOptions().find((m) => m.default)?.value ?? modelOptions()[0]?.value ?? "",
+    // P1 on PR #2618). Gated on providerSupportsModelFlag (ReAgent P2 on
+    // the same PR) — a provider with a `models` list but no `--model`
+    // wiring in buildRuntimeArgs.ts (e.g. antigravity) would otherwise
+    // offer a choice that's silently discarded at launch. Hidden
+    // entirely when neither applies — nothing meaningful to choose.
+    const modelOptions = createMemo(() =>
+        providerSupportsModelFlag(effectiveProviderId()) ? getProvider(effectiveProviderId())?.models ?? [] : [],
     );
+    const [model, setModel] = createSignal("");
+    // Re-pick the default whenever modelOptions() changes — same
+    // "async-resolved dependency" race #2596 fixed for AgentLaunchModal's
+    // account auto-pick: modelOptions() starts computed from the
+    // synchronous fallback (props.template.provider) before
+    // resolvedTemplateProviderId's fetch lands, then flips once it does.
+    // A plain createSignal initializer only runs once at mount, so
+    // without this effect a value auto-picked from the stale pre-
+    // resolution list would never get re-picked once the real provider's
+    // list is known. Skipped once the user has made an explicit choice
+    // (modelTouched), mirroring runtimeTouched below.
+    let modelTouched = false;
+    createEffect(() => {
+        if (modelTouched) return;
+        setModel(modelOptions().find((m) => m.default)?.value ?? modelOptions()[0]?.value ?? "");
+    });
+    const pickModel = (v: string) => {
+        modelTouched = true;
+        setModel(v);
+    };
 
     // ── Runtime (host vs container) ────────────────────────────────
     // Runtime is decided HERE, when instantiating the template — it's
@@ -118,7 +165,7 @@ export const AgentCreateFromTemplateModalPanel = (
     let runtimeTouched = false;
 
     const containerSupported = createMemo(
-        () => getCliCatalogEntry(props.template.provider)?.containerSupported ?? true,
+        () => getCliCatalogEntry(effectiveProviderId())?.containerSupported ?? true,
     );
     // Reads the shared toolchain-capabilities store rather than probing
     // Docker itself — this is what guarantees this modal can never disagree
@@ -152,16 +199,23 @@ export const AgentCreateFromTemplateModalPanel = (
         setRuntime(v);
     };
 
-    // Load account + memory lists on mount. The account list is
-    // filtered to the template's own provider (accounts are provider-
-    // specific — issue #1624 PR-C Part B). Bindings are stored on the
-    // db_agent_instances row at launch time; the empty string sentinel
-    // means "ambient creds / vanilla CLI" so an empty selection is OK.
+    // Load account + memory lists on mount. `accounts` below derives the
+    // provider filter reactively (accounts are provider-specific — issue
+    // #1624 PR-C Part B) rather than filtering once here, so it reacts
+    // correctly regardless of whether the account fetch or
+    // resolvedTemplateProviderId's own fetch lands first — filtering
+    // once inline against effectiveProviderId() at this single point in
+    // time would silently freeze on whichever value (fallback or
+    // resolved) happened to be current at that instant, the same race
+    // #2596 fixed for AgentLaunchModal's account auto-pick. Bindings are
+    // stored on the db_agent_instances row at launch time; the empty
+    // string sentinel means "ambient creds / vanilla CLI" so an empty
+    // selection is OK.
     onMount(() => {
         void (async () => {
             try {
                 const list = await refreshAccountCache();
-                setAccounts(list.filter((a) => a.provider === props.template.provider));
+                setAllAccounts(list);
             } catch {
                 /* non-fatal; user can still create without binding */
             }
@@ -178,12 +232,28 @@ export const AgentCreateFromTemplateModalPanel = (
     // matching the launch modal's UX (saves a click for users with
     // existing accounts). `is_blank` rows are a bundle-only concept —
     // accounts have no such thing.
+    //
+    // Re-picks on every `accounts()` change rather than the more obvious
+    // "if (accountId()) return" early-out — `accounts()` now depends on
+    // `effectiveProviderId()` (see the memo above), which resolves
+    // asynchronously. The early-out shape stops Solid from tracking
+    // `accounts()` as a dependency at all once it fires once (the same
+    // race #2596 fixed for AgentLaunchModal's own account auto-pick): if
+    // the account fetch settles before the provider resolution, this
+    // effect would lock onto an account filtered against the STALE
+    // fallback provider and never reconsider once the real one lands.
+    // `accountTouched` (mirroring runtimeTouched/modelTouched above)
+    // stops the re-pick once the user has made an explicit choice.
     const realMemories = createMemo(() => memories().filter((m) => !m.is_blank));
+    let accountTouched = false;
     createEffect(() => {
-        if (accountId()) return;
-        const first = accounts()[0];
-        if (first) setAccountId(first.id);
+        if (accountTouched) return;
+        setAccountId(accounts()[0]?.id ?? "");
     });
+    const pickAccount = (v: string) => {
+        accountTouched = true;
+        setAccountId(v);
+    };
     createEffect(() => {
         if (memoryId()) return;
         const first = realMemories()[0];
@@ -294,7 +364,7 @@ export const AgentCreateFromTemplateModalPanel = (
                         <select
                             class="agent-new-bundle-modal-input"
                             value={model()}
-                            onChange={(e) => setModel(e.currentTarget.value)}
+                            onChange={(e) => pickModel(e.currentTarget.value)}
                             disabled={submitting()}
                             data-testid="create-from-template-model-select"
                         >
@@ -314,7 +384,7 @@ export const AgentCreateFromTemplateModalPanel = (
                         <input
                             type="text"
                             class="agent-new-bundle-modal-input"
-                            placeholder={`Default (${PROVIDERS[props.template.provider]?.baseUrlEnvVar})`}
+                            placeholder={`Default (${PROVIDERS[effectiveProviderId()]?.baseUrlEnvVar})`}
                             value={modelVendorBaseUrl()}
                             onInput={(e) => setModelVendorBaseUrl(e.currentTarget.value)}
                             onKeyDown={onKeyDown}
@@ -333,7 +403,7 @@ export const AgentCreateFromTemplateModalPanel = (
                     <select
                         class="agent-new-bundle-modal-input"
                         value={accountId()}
-                        onChange={(e) => setAccountId(e.currentTarget.value)}
+                        onChange={(e) => pickAccount(e.currentTarget.value)}
                         disabled={submitting()}
                         data-testid="create-from-template-identity-select"
                     >
