@@ -27,6 +27,14 @@ fn default_isolated_roots() -> Vec<PathBuf> {
 pub struct SessionIndex {
     /// session_id -> SessionMeta
     sessions: Mutex<HashMap<String, SessionMeta>>,
+    /// identity_id -> session_ids (only non-empty `SessionMeta::identity_id`
+    /// values are indexed here). Maintained alongside `sessions` so "this
+    /// identity's sessions" is an O(k) HashMap lookup + small per-identity
+    /// sort, not an O(total sessions) scan of everything on disk — see
+    /// `list_for_identity` and
+    /// `docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`
+    /// §4.4.
+    by_identity: Mutex<HashMap<String, Vec<String>>>,
     /// Adapters for all registered providers
     adapters: Vec<Box<dyn HistoryAdapter>>,
     /// Roots under which destructive ops (delete/clear) are allowed.
@@ -45,6 +53,7 @@ impl SessionIndex {
     ) -> Self {
         SessionIndex {
             sessions: Mutex::new(HashMap::new()),
+            by_identity: Mutex::new(HashMap::new()),
             adapters,
             isolated_roots,
         }
@@ -64,6 +73,7 @@ impl SessionIndex {
         let mut new_count: u32 = 0;
 
         let mut new_sessions: HashMap<String, SessionMeta> = HashMap::new();
+        let mut new_by_identity: HashMap<String, Vec<String>> = HashMap::new();
 
         for adapter in &self.adapters {
             let files = match adapter.discover_files() {
@@ -83,6 +93,12 @@ impl SessionIndex {
             for file in &files {
                 match adapter.extract_meta(&file.file_path) {
                     Ok(Some(meta)) => {
+                        if !meta.identity_id.is_empty() {
+                            new_by_identity
+                                .entry(meta.identity_id.clone())
+                                .or_default()
+                                .push(meta.session_id.clone());
+                        }
                         new_sessions.insert(meta.session_id.clone(), meta);
                     }
                     Ok(None) => {} // empty/invalid session
@@ -108,40 +124,46 @@ impl SessionIndex {
         }
 
         *sessions = new_sessions;
+        *self.by_identity.lock().unwrap() = new_by_identity;
 
         (discovered, updated, new_count)
     }
 
-    /// List sessions with pagination and optional filters.
-    pub fn list(
+    /// This identity's sessions, sorted/paginated the same way `list` is —
+    /// but via the `by_identity` index instead of scanning every session on
+    /// disk. `identity_id` is a bundle/account id (`SessionMeta::identity_id`
+    /// — see its own doc comment); resolving an `agent_id` to one is the
+    /// caller's job (`Store::agent_identity_list_for_agent`), not this
+    /// index's — a bundle is a filesystem fact, which agent(s) claim it is
+    /// a database fact, and this module has no Store access by design (it's
+    /// pure discovery/indexing over the filesystem).
+    pub fn list_for_identity(
         &self,
-        provider: Option<&str>,
-        project: Option<&str>,
+        identity_id: &str,
         offset: usize,
         limit: usize,
         sort_by: &str,
         sort_dir: &str,
     ) -> (Vec<SessionMeta>, u32, bool) {
+        let by_identity = self.by_identity.lock().unwrap();
+        let Some(session_ids) = by_identity.get(identity_id) else {
+            return (Vec::new(), 0, false);
+        };
         let sessions = self.sessions.lock().unwrap();
+        let mut filtered: Vec<&SessionMeta> =
+            session_ids.iter().filter_map(|id| sessions.get(id)).collect();
+        Self::sort_sessions(&mut filtered, sort_by, sort_dir);
 
-        let mut filtered: Vec<&SessionMeta> = sessions
-            .values()
-            .filter(|s| {
-                if let Some(p) = provider {
-                    if s.provider != p {
-                        return false;
-                    }
-                }
-                if let Some(proj) = project {
-                    if !s.working_directory.contains(proj) {
-                        return false;
-                    }
-                }
-                true
-            })
-            .collect();
+        let total = filtered.len() as u32;
+        let has_more = offset + limit < filtered.len();
+        let page: Vec<SessionMeta> = filtered.into_iter().skip(offset).take(limit).cloned().collect();
+        (page, total, has_more)
+    }
 
-        // Sort
+    /// Shared sort logic between `list` (scans everything) and
+    /// `list_for_identity` (scans one identity's sessions) — extracted so
+    /// the two can't silently diverge on sort semantics.
+    pub(crate) fn sort_sessions(filtered: &mut [&SessionMeta], sort_by: &str, sort_dir: &str) {
         let desc = sort_dir != "asc";
         match sort_by {
             "created_at" | "created" => {
@@ -182,6 +204,38 @@ impl SessionIndex {
                 });
             }
         }
+    }
+
+    /// List sessions with pagination and optional filters.
+    pub fn list(
+        &self,
+        provider: Option<&str>,
+        project: Option<&str>,
+        offset: usize,
+        limit: usize,
+        sort_by: &str,
+        sort_dir: &str,
+    ) -> (Vec<SessionMeta>, u32, bool) {
+        let sessions = self.sessions.lock().unwrap();
+
+        let mut filtered: Vec<&SessionMeta> = sessions
+            .values()
+            .filter(|s| {
+                if let Some(p) = provider {
+                    if s.provider != p {
+                        return false;
+                    }
+                }
+                if let Some(proj) = project {
+                    if !s.working_directory.contains(proj) {
+                        return false;
+                    }
+                }
+                true
+            })
+            .collect();
+
+        Self::sort_sessions(&mut filtered, sort_by, sort_dir);
 
         let total = filtered.len() as u32;
         let has_more = offset + limit < filtered.len();
@@ -302,6 +356,7 @@ mod tests {
         files: Vec<DiscoveredFile>,
         provider: String,
         working_directory: String,
+        identity_id: String,
     }
     impl HistoryAdapter for MockAdapter {
         fn provider(&self) -> &str {
@@ -334,6 +389,7 @@ mod tests {
                 git_branch: String::new(),
                 total_tokens: 0,
                 subagent_count: 0,
+                identity_id: self.identity_id.clone(),
             }))
         }
         fn parse_file(&self, _: &str) -> Result<Option<HistorySession>, HistoryError> {
@@ -361,6 +417,7 @@ mod tests {
                 files: vec![DiscoveredFile { file_path: fp.clone(), mtime_ms: 0 }],
                 provider: "mock".into(),
                 working_directory: "/proj".into(),
+                identity_id: String::new(),
             })],
             vec![dir.clone()],
         );
@@ -391,6 +448,7 @@ mod tests {
                 ],
                 provider: "mock".into(),
                 working_directory: "/proj".into(),
+                identity_id: String::new(),
             })],
             vec![dir.clone()],
         );
@@ -419,6 +477,7 @@ mod tests {
                 files: vec![DiscoveredFile { file_path: fp.clone(), mtime_ms: 0 }],
                 provider: "claude".into(),
                 working_directory: "/home/me/.claude".into(),
+                identity_id: String::new(),
             })],
             // isolated roots deliberately do NOT include `dir`.
             vec![std::env::temp_dir().join("amux-some-other-isolated-root")],
@@ -429,6 +488,137 @@ mod tests {
         assert!(std::path::Path::new(&fp).exists(), "file must be intact");
         assert_eq!(idx.clear(None, None), 0, "clear-all must skip it");
         assert!(std::path::Path::new(&fp).exists(), "still intact after clear");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md
+    // §4.4: list_for_identity is the actual "fast lookup" this whole step
+    // exists for — an O(sessions for this identity) HashMap-backed lookup
+    // instead of list()'s O(total sessions on disk) scan.
+
+    #[test]
+    fn list_for_identity_returns_only_that_identitys_sessions() {
+        let dir = std::env::temp_dir().join(format!("amux-hist-idx-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let a1 = write_session(&dir, "a1");
+        let a2 = write_session(&dir, "a2");
+        let b1 = write_session(&dir, "b1");
+        let unattributed = write_session(&dir, "unattributed");
+
+        let idx = SessionIndex::with_isolated_roots(
+            vec![
+                Box::new(MockAdapter {
+                    files: vec![
+                        DiscoveredFile { file_path: a1, mtime_ms: 1 },
+                        DiscoveredFile { file_path: a2, mtime_ms: 2 },
+                    ],
+                    provider: "mock".into(),
+                    working_directory: "/proj".into(),
+                    identity_id: "identity-a".into(),
+                }),
+                Box::new(MockAdapter {
+                    files: vec![DiscoveredFile { file_path: b1, mtime_ms: 1 }],
+                    provider: "mock".into(),
+                    working_directory: "/proj".into(),
+                    identity_id: "identity-b".into(),
+                }),
+                Box::new(MockAdapter {
+                    files: vec![DiscoveredFile { file_path: unattributed, mtime_ms: 1 }],
+                    provider: "mock".into(),
+                    working_directory: "/proj".into(),
+                    identity_id: String::new(),
+                }),
+            ],
+            vec![dir.clone()],
+        );
+        idx.refresh();
+
+        let (sessions_a, total_a, _) = idx.list_for_identity("identity-a", 0, 10, "created_at", "desc");
+        assert_eq!(total_a, 2);
+        let ids_a: std::collections::HashSet<_> = sessions_a.iter().map(|s| s.session_id.clone()).collect();
+        assert_eq!(ids_a, std::collections::HashSet::from(["a1".to_string(), "a2".to_string()]));
+
+        let (sessions_b, total_b, _) = idx.list_for_identity("identity-b", 0, 10, "created_at", "desc");
+        assert_eq!(total_b, 1);
+        assert_eq!(sessions_b[0].session_id, "b1");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn list_for_identity_returns_empty_for_an_unknown_identity() {
+        let idx = SessionIndex::with_isolated_roots(vec![], vec![]);
+        idx.refresh();
+        let (sessions, total, has_more) = idx.list_for_identity("no-such-identity", 0, 10, "created_at", "desc");
+        assert!(sessions.is_empty());
+        assert_eq!(total, 0);
+        assert!(!has_more);
+    }
+
+    #[test]
+    fn list_for_identity_paginates_and_respects_sort_direction() {
+        let dir = std::env::temp_dir().join(format!("amux-hist-idx-page-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let files: Vec<DiscoveredFile> = (0..3)
+            .map(|i| DiscoveredFile { file_path: write_session(&dir, &format!("s{i}")), mtime_ms: i })
+            .collect();
+
+        let idx = SessionIndex::with_isolated_roots(
+            vec![Box::new(MockAdapter {
+                files,
+                provider: "mock".into(),
+                working_directory: "/proj".into(),
+                identity_id: "identity-a".into(),
+            })],
+            vec![dir.clone()],
+        );
+        idx.refresh();
+
+        let (page1, total, has_more) = idx.list_for_identity("identity-a", 0, 2, "created_at", "desc");
+        assert_eq!(total, 3);
+        assert_eq!(page1.len(), 2);
+        assert!(has_more);
+        let (page2, _, has_more2) = idx.list_for_identity("identity-a", 2, 2, "created_at", "desc");
+        assert_eq!(page2.len(), 1);
+        assert!(!has_more2);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn refresh_rebuilds_the_identity_index_from_scratch_each_time() {
+        // A session that's re-discovered under a DIFFERENT identity on a
+        // second refresh (e.g. its bundle got re-linked) must not leave a
+        // stale entry under the old identity_id.
+        let dir = std::env::temp_dir().join(format!("amux-hist-idx-rebuild-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let fp = write_session(&dir, "moved");
+
+        let idx = SessionIndex::with_isolated_roots(
+            vec![Box::new(MockAdapter {
+                files: vec![DiscoveredFile { file_path: fp.clone(), mtime_ms: 1 }],
+                provider: "mock".into(),
+                working_directory: "/proj".into(),
+                identity_id: "identity-old".into(),
+            })],
+            vec![dir.clone()],
+        );
+        idx.refresh();
+        assert_eq!(idx.list_for_identity("identity-old", 0, 10, "created_at", "desc").1, 1);
+
+        let idx2 = SessionIndex::with_isolated_roots(
+            vec![Box::new(MockAdapter {
+                files: vec![DiscoveredFile { file_path: fp, mtime_ms: 1 }],
+                provider: "mock".into(),
+                working_directory: "/proj".into(),
+                identity_id: "identity-new".into(),
+            })],
+            vec![dir.clone()],
+        );
+        idx2.refresh();
+        assert_eq!(idx2.list_for_identity("identity-old", 0, 10, "created_at", "desc").1, 0, "stale identity must not linger");
+        assert_eq!(idx2.list_for_identity("identity-new", 0, 10, "created_at", "desc").1, 1);
 
         let _ = fs::remove_dir_all(&dir);
     }

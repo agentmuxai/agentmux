@@ -28,6 +28,14 @@ impl HistoryService {
         }
     }
 
+    /// Construct directly from a `SessionIndex` — used by tests that need
+    /// to inject a mock adapter instead of `ClaudeHistoryAdapter::new()`'s
+    /// real filesystem scan.
+    #[cfg(test)]
+    fn from_index(index: SessionIndex) -> Self {
+        HistoryService { index: Arc::new(index) }
+    }
+
     /// List sessions with pagination and filters.
     /// Lazy-initializes the index on first call.
     pub fn list(
@@ -49,6 +57,58 @@ impl HistoryService {
 
         serde_json::json!({
             "sessions": sessions,
+            "total": total,
+            "has_more": has_more,
+        })
+    }
+
+    /// This agent's own sessions — the actual "fast Conversation History
+    /// lookup" protocol §4.4 asks for, resolving `agent_id` to its bound
+    /// identity bundle(s) (`Store::agent_identity_list_for_agent`, the
+    /// same `db_agent_identity_links` table `identity_auth_dirs.rs`
+    /// already keys off) and querying `SessionIndex::list_for_identity`'s
+    /// O(sessions for this identity) HashMap-backed path instead of
+    /// `list()`'s O(total sessions on disk) scan. An agent normally has
+    /// at most one linked account per provider, but this merges across
+    /// however many exist rather than assuming exactly one.
+    pub fn list_for_agent(
+        &self,
+        store: &crate::backend::storage::store::Store,
+        agent_id: &str,
+        offset: usize,
+        limit: usize,
+        sort_by: &str,
+        sort_dir: &str,
+    ) -> serde_json::Value {
+        if self.index.is_empty() {
+            self.index.refresh();
+        }
+
+        let links = match store.agent_identity_list_for_agent(agent_id) {
+            Ok(l) => l,
+            Err(e) => {
+                return serde_json::json!({ "error": format!("failed to resolve agent's linked identities: {e}") });
+            }
+        };
+        if links.is_empty() {
+            return serde_json::json!({ "sessions": [], "total": 0, "has_more": false });
+        }
+
+        let mut merged: Vec<adapter::SessionMeta> = Vec::new();
+        for link in &links {
+            let (sessions, _total, _has_more) =
+                self.index.list_for_identity(&link.account_id, 0, usize::MAX, sort_by, sort_dir);
+            merged.extend(sessions);
+        }
+        let mut refs: Vec<&adapter::SessionMeta> = merged.iter().collect();
+        index::SessionIndex::sort_sessions(&mut refs, sort_by, sort_dir);
+
+        let total = refs.len() as u32;
+        let has_more = offset + limit < refs.len();
+        let page: Vec<adapter::SessionMeta> = refs.into_iter().skip(offset).take(limit).cloned().collect();
+
+        serde_json::json!({
+            "sessions": page,
             "total": total,
             "has_more": has_more,
         })
@@ -97,5 +157,150 @@ impl HistoryService {
         }
         let deleted = self.index.clear(provider, project);
         serde_json::json!({ "deleted": deleted })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::storage::store::Store;
+
+    /// Adapter that "discovers" caller-supplied files, tagging each with a
+    /// fixed identity_id -- just enough to exercise the agent_id ->
+    /// identity_id -> sessions chain end to end.
+    struct MockAdapter {
+        files: Vec<DiscoveredFile>,
+        identity_id: String,
+    }
+    impl HistoryAdapter for MockAdapter {
+        fn provider(&self) -> &str {
+            "mock"
+        }
+        fn discover_files(&self) -> Result<Vec<DiscoveredFile>, HistoryError> {
+            Ok(self.files.iter().map(|f| DiscoveredFile { file_path: f.file_path.clone(), mtime_ms: f.mtime_ms }).collect())
+        }
+        fn extract_meta(&self, file_path: &str) -> Result<Option<SessionMeta>, HistoryError> {
+            let id = std::path::Path::new(file_path)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            Ok(Some(SessionMeta {
+                session_id: id,
+                file_path: file_path.to_string(),
+                provider: "mock".to_string(),
+                model: String::new(),
+                slug: String::new(),
+                working_directory: "/proj".to_string(),
+                created_at: 0,
+                modified_at: 0,
+                message_count: 0,
+                first_user_message: String::new(),
+                file_size_bytes: 0,
+                git_branch: String::new(),
+                total_tokens: 0,
+                subagent_count: 0,
+                identity_id: self.identity_id.clone(),
+            }))
+        }
+        fn parse_file(&self, _: &str) -> Result<Option<HistorySession>, HistoryError> {
+            Ok(None)
+        }
+    }
+
+    fn write_session(dir: &std::path::Path, id: &str) -> String {
+        let f = dir.join(format!("{id}.jsonl"));
+        std::fs::write(&f, b"{}").unwrap();
+        f.to_string_lossy().into_owned()
+    }
+
+    // docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md
+    // §4.4: the actual end-to-end feature -- agent_id resolves through a
+    // real db_agent_identity_links row (not a mocked lookup) to the
+    // sessions found under that link's account_id.
+    #[test]
+    fn list_for_agent_resolves_through_a_real_identity_link_to_the_right_sessions() {
+        let dir = std::env::temp_dir().join(format!("amux-hist-svc-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mine = write_session(&dir, "mine");
+        let someone_elses = write_session(&dir, "someone-elses");
+
+        let index = SessionIndex::with_isolated_roots(
+            vec![
+                Box::new(MockAdapter {
+                    files: vec![DiscoveredFile { file_path: mine, mtime_ms: 1 }],
+                    identity_id: "acct-mine".to_string(),
+                }),
+                Box::new(MockAdapter {
+                    files: vec![DiscoveredFile { file_path: someone_elses, mtime_ms: 1 }],
+                    identity_id: "acct-someone-else".to_string(),
+                }),
+            ],
+            vec![dir.clone()],
+        );
+        let service = HistoryService::from_index(index);
+
+        let store = Store::open_in_memory().unwrap();
+        let mut def = crate::backend::storage::store::AgentDefinition {
+            id: "agent-1".to_string(),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: String::new(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            memory_id: String::new(),
+        };
+        store.agent_def_insert(&mut def).unwrap();
+        store
+            .identity_upsert(&crate::backend::storage::store::IdentityAccount {
+                id: "acct-mine".to_string(),
+                name: "claude-acct-mine".to_string(),
+                provider: "claude".to_string(),
+                kind: "pat".to_string(),
+                display_name: String::new(),
+                secret_ref: crate::backend::storage::store::SecretRef::OAuthConfigDir { dir: String::new() },
+                context: serde_json::json!({}),
+                status: "unknown".to_string(),
+                created_at: 0,
+                updated_at: 0,
+            })
+            .unwrap();
+        store.agent_identity_link("agent-1", "acct-mine", "claude").unwrap();
+
+        let result = service.list_for_agent(&store, "agent-1", 0, 10, "created_at", "desc");
+        assert_eq!(result["total"], 1);
+        assert_eq!(result["sessions"][0]["session_id"], "mine");
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn list_for_agent_returns_empty_for_an_agent_with_no_linked_identity() {
+        let service = HistoryService::from_index(SessionIndex::with_isolated_roots(vec![], vec![]));
+        let store = Store::open_in_memory().unwrap();
+        let result = service.list_for_agent(&store, "agent-with-no-links", 0, 10, "created_at", "desc");
+        assert_eq!(result["total"], 0);
+        assert_eq!(result["sessions"].as_array().unwrap().len(), 0);
     }
 }
