@@ -147,66 +147,12 @@
         margin-right: 1px;
     }
 
-    // Instant CSS-only tooltip. Native `title` has a browser-controlled
-    // delay (~500 ms on Windows); users want these to pop immediately.
-    // Any status-bar child carrying `data-tip="…"` gets a hover balloon
-    // above it with no entry animation. Keep native `title` off these
-    // elements (causes double tooltips); `aria-label` covers screen-
-    // reader a11y.
-    [data-tip] {
-        position: relative;
-
-        &:hover::after,
-        &:focus-visible::after {
-            content: attr(data-tip);
-            position: absolute;
-            bottom: calc(100% + 4px);
-            // Default centered. Edge-anchored variants below override
-            // the horizontal anchor for items inside .status-bar-left
-            // and .status-bar-right so tooltips don't overflow the
-            // window's left or right edge.
-            left: 50%;
-            transform: translateX(-50%);
-            padding: var(--space-1) var(--space-1-5);
-            background: var(--modal-bg-color);
-            color: var(--main-text-color);
-            border: 1px solid var(--border-color);
-            border-radius: 0;
-            font-size: 11px;
-            // Size to content, but wrap (don't single-line overflow) once the
-            // tip exceeds max-width. `nowrap` + `max-width` contradicted: long
-            // tips (e.g. GFX's full GPU renderer string) spilled out of the
-            // balloon. `max-content` keeps short tips on one line; long ones
-            // wrap, and `overflow-wrap: anywhere` breaks unbreakable renderer
-            // strings instead of overflowing.
-            white-space: normal;
-            width: max-content;
-            max-width: 320px;
-            overflow-wrap: anywhere;
-            pointer-events: none;
-            z-index: calc(var(--zindex-modal-wrapper) + 10);
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
-        }
-    }
-
-    // Items in the LEFT group anchor their tooltip to the item's left
-    // edge (tooltip extends rightward). Prevents overflow off the
-    // window's left side for the very first item.
-    .status-bar-left [data-tip]:hover::after,
-    .status-bar-left [data-tip]:focus-visible::after {
-        left: 0;
-        transform: none;
-    }
-
-    // Items in the RIGHT group anchor to the item's right edge
-    // (tooltip extends leftward). Prevents overflow off the window's
-    // right side for the version + last-widget items.
-    .status-bar-right [data-tip]:hover::after,
-    .status-bar-right [data-tip]:focus-visible::after {
-        left: auto;
-        right: 0;
-        transform: none;
-    }
+    // `data-tip="…"` tooltips are rendered by the `StatusBarTip` component
+    // (StatusBarTip.tsx/.scss) — a real, Portal'd, airspace-clip-aware DOM
+    // element, not a CSS pseudo-element (which could never paint over a
+    // native browser-pane HWND). Keep native `title` off status-bar
+    // elements carrying `data-tip` (causes double tooltips); `aria-label`
+    // covers screen-reader a11y.
 
     .stat-separator {
         opacity: 0.2;
@@ -284,9 +230,10 @@
 }
 
 .status-bar-popover {
-    position: absolute;
-    bottom: calc(100% + 4px);
-    left: 0;
+    // Positioning (position/left/top) comes from computeMenuPosition's
+    // inline style — floating-ui anchors this to the trigger and keeps it
+    // in the paintable area, mirroring TokenBreakdownPopover. See
+    // SPEC_STATUS_BAR_POPOVER_AIRSPACE_CLIP_2026_08_17.md.
     background: var(--modal-bg-color);
     border: 1px solid var(--border-color);
     border-radius: 0;
@@ -375,11 +322,6 @@
             }
         }
     }
-}
-
-.status-bar-popover.host-popover {
-    left: auto;
-    right: 0;
 }
 
 // ── QR fallback for mobile pairing (LAN-discovery reliability, Phase C) ────

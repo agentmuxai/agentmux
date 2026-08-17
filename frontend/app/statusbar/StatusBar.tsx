@@ -8,6 +8,7 @@ import { ConfigStatus } from "./ConfigStatus";
 import { GpuStatus } from "./GpuStatus";
 import { HostPopover } from "./HostPopover";
 import { InstancePanel } from "./InstancePanel";
+import { StatusBarTip } from "./StatusBarTip";
 import { SystemStats } from "./SystemStats";
 import { TokenUsageIndicator } from "./TokenUsageIndicator";
 import { UpdateStatus } from "./UpdateStatus";
@@ -116,6 +117,7 @@ const StatusBar = (): JSX.Element => {
             <Show when={panelOpen()}>
                 <InstancePanel anchorRect={anchorRect()} onClose={() => setPanelOpen(false)} />
             </Show>
+            <StatusBarTip />
         </div>
     );
 };
