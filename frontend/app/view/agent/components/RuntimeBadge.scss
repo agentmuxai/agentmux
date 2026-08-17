@@ -24,7 +24,14 @@
     // selector. No border/icon; yellow HOST / plain-white SANDBOX per explicit
     // design spec (overrides &--container/&--host below via the compound
     // selectors, which win on specificity regardless of source order).
+    // Explicit font-size/padding — unlike &--sm/&--md above, this had none of
+    // its own, so it silently inherited the composer strip's ambient text
+    // size (~10-11px) instead of reading as a small tag. One step down from
+    // &--sm's 10px, matching this file's existing sm(10px)/md(11px) scale.
     &--tag {
+        font-size: 9px;
+        padding: 1px 4px;
+        line-height: 1.4;
         font-weight: 600;
         letter-spacing: 0.02em;
         border: none;
