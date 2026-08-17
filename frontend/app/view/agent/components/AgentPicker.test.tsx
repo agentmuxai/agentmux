@@ -29,6 +29,12 @@ vi.mock("@/app/store/rpc-api", () => {
         ListNamedAgentsCommand: vi.fn().mockResolvedValue([]),
         InstallCheckCommand: vi.fn().mockResolvedValue({ installed: true }),
         ResolvePrereqsCommand: vi.fn().mockResolvedValue({ results: [] }),
+        // Backs `resolveEffectiveLaunchProvider`'s bound-bundle resolution
+        // (#2594) — resolves to `undefined` by default so existing tests
+        // (none of whose agent fixtures set `memory_id`) never even
+        // trigger the fetch; the drift-regression tests below set their
+        // own `.mockResolvedValue`.
+        GetMemoryCommand: vi.fn().mockResolvedValue(undefined),
         AgentSessionReadCommand: vi
             .fn()
             .mockResolvedValue({ content: null, modts: null }),
@@ -80,15 +86,29 @@ vi.mock("@/util/platformutil", () => ({
 }));
 
 vi.mock("../providers", () => ({
-    getProvider: (id: string) =>
-        id === "claude"
-            ? {
-                  id: "claude",
-                  npmPackage: null, // no install needed
-                  cliCommand: "claude",
-                  systemPrereqs: [],
-              }
-            : undefined,
+    getProvider: (id: string) => {
+        if (id === "claude") {
+            return {
+                id: "claude",
+                npmPackage: null, // no install needed
+                cliCommand: "claude",
+                systemPrereqs: [],
+            };
+        }
+        // Recognized and npm-installable (unlike "claude" above) — needed
+        // for the #2594 bundle-resolution regression tests below, where
+        // the REAL (bundle) provider must require an install check for
+        // the fix to be observable at all.
+        if (id === "codex") {
+            return {
+                id: "codex",
+                npmPackage: ["@openai/codex-cli"],
+                cliCommand: "codex",
+                systemPrereqs: [{ tool: "git", label: "Git", installUrls: {}, installLinkText: {} }],
+            };
+        }
+        return undefined;
+    },
 }));
 
 vi.mock("./AgentCard", () => ({
@@ -339,5 +359,96 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         expect(overrides.memoryId).toBe("mem-notes");
         expect(overrides.instanceName).toBe("Mary");
         expect(overrides.continueOfInstanceId).toBeUndefined();
+    });
+
+    // #2594 — AgentPicker's install-check/prereq-probe/cache-invalidation
+    // sites used to read `agent.provider` directly instead of resolving
+    // through the agent's bound bundle, the same "gate vs. actual launch
+    // can disagree" risk class #2592/#2596 fixed for the credential gate
+    // and AgentLaunchModal. These pin the fix at each remaining live site.
+    describe("resolves through the bound bundle, not a drifted agent.provider (#2594)", () => {
+        // Stale `.provider` column ("claude", not npm-installable) vs. the
+        // REAL bundle provider ("codex", npm-installable + has a system
+        // prereq) — chosen so the two providers behave differently enough
+        // that reading the wrong one is observable (no RPC call at all
+        // under the bug, vs. a real call with the fix).
+        const driftedTemplate = baseDef({
+            id: "tpl-drift",
+            slug: "drift",
+            name: "Drifted Template",
+            is_seeded: 1,
+            provider: "claude",
+            memory_id: "mem-drift",
+        });
+
+        beforeEach(() => {
+            vi.mocked(RpcApi.ListAgentDefinitionsCommand).mockResolvedValue([driftedTemplate]);
+            vi.mocked(RpcApi.GetMemoryCommand).mockResolvedValue({ provider: "codex" } as any);
+        });
+
+        it("checks install state against the bundle's provider, not the drifted column", async () => {
+            const model = makeMockModel();
+            render(() => <AgentPicker model={model as any} />);
+            const card = await screen.findByTestId("agent-card-tpl-drift");
+            fireEvent.click(card);
+
+            await waitFor(() => expect(RpcApi.InstallCheckCommand).toHaveBeenCalled());
+            const call = vi.mocked(RpcApi.InstallCheckCommand).mock.calls[0][1];
+            expect(call).toEqual({ providerId: "codex", cliCommand: "codex" });
+        });
+
+        it("probes system prereqs against the bundle's provider, not the drifted column", async () => {
+            vi.mocked(RpcApi.ResolvePrereqsCommand).mockResolvedValue({
+                results: [{ tool: "git", found: false }],
+            } as any);
+            const model = makeMockModel();
+            render(() => <AgentPicker model={model as any} />);
+            const card = await screen.findByTestId("agent-card-tpl-drift");
+            fireEvent.click(card);
+
+            await waitFor(() => expect(RpcApi.ResolvePrereqsCommand).toHaveBeenCalled());
+            const call = vi.mocked(RpcApi.ResolvePrereqsCommand).mock.calls[0][1];
+            expect(call).toEqual({ tools: ["git"] });
+        });
+
+        it("marks the just-installed (drifted) agent's own install cache via the resolved provider", async () => {
+            vi.mocked(RpcApi.InstallCheckCommand).mockResolvedValue({ installed: false });
+            // Explicit no-missing-prereqs default — `vi.clearAllMocks()`
+            // in the outer `beforeEach` clears call history but not a
+            // prior test's `.mockResolvedValue`, so this can't rely on
+            // the module-level default surviving test order.
+            vi.mocked(RpcApi.ResolvePrereqsCommand).mockResolvedValue({
+                results: [{ tool: "git", found: true }],
+            } as any);
+            const model = makeMockModel();
+            render(() => <AgentPicker model={model as any} />);
+            const card = await screen.findByTestId("agent-card-tpl-drift");
+            fireEvent.click(card);
+
+            // installed === false → the install-agent modal opens.
+            await waitFor(() => expect(modalLayerOpen).toHaveBeenCalled());
+            const installReq = modalLayerOpen.mock.calls[0][0];
+            expect(installReq.kind).toBe("install-agent");
+
+            // Simulate a successful install; onInstalled resolves the
+            // agent's bundle provider again to update the cache.
+            await installReq.onInstalled(true);
+
+            // Continuing to launch opens the create-from-template modal —
+            // a second `.open` call.
+            expect(modalLayerOpen).toHaveBeenCalledTimes(2);
+            expect(modalLayerOpen.mock.calls[1][0].kind).toBe("create-from-template");
+
+            // The real proof: clicking the SAME card again must not
+            // re-check install state — under the bug, `onInstalled`'s
+            // cache write compared the drifted `agent.provider` ("claude")
+            // against the resolved canonical ("codex") and never matched,
+            // so the agent's own cache entry stayed unset and every
+            // subsequent click re-triggered InstallCheckCommand.
+            vi.mocked(RpcApi.InstallCheckCommand).mockClear();
+            fireEvent.click(card);
+            await waitFor(() => expect(modalLayerOpen).toHaveBeenCalledTimes(3));
+            expect(RpcApi.InstallCheckCommand).not.toHaveBeenCalled();
+        });
     });
 });
