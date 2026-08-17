@@ -80,11 +80,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // createagent → insert new agent, broadcast agents:changed
     let wstore_cfa = state.wstore.clone();
+    let id_store_cfa = state.id_store.clone();
     let broker_cfa = state.broker.clone();
     engine.register_handler(
         COMMAND_CREATE_AGENT,
         Box::new(move |data, _ctx| {
             let wstore = wstore_cfa.clone();
+            let id_store = id_store_cfa.clone();
             let broker = broker_cfa.clone();
             Box::pin(async move {
                 let cmd: CommandCreateAgentDefinitionData = serde_json::from_value(data)
@@ -134,8 +136,16 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // use_ambient_login above. Toggled from the Warden
                     // Supervisor panel (not this RPC) once that ships.
                     auto_continue_enabled: 0,
+                    memory_id: String::new(),
                 };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("createagent: {e}"))?;
+                // Every agent gets its own dedicated ABF bundle
+                // (ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.2).
+                // Best-effort, same posture as the color assignment below.
+                // Bundle goes into id_store (the effective identity/memory
+                // store), not wstore — see agent_def_provision_and_bind_
+                // bundle's own doc comment for why they must differ.
+                wstore.agent_def_provision_and_bind_bundle(&id_store, &mut agent, now);
                 // Assign the agent its display color at creation
                 // (SPEC_AGENT_COLOR_2026_08_08.md). Best-effort: a failure
                 // here shouldn't fail the create — agent.open assigns a
@@ -248,6 +258,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // accounts). The Warden Supervisor panel sends Some(0|1)
                     // to flip it, same shape as use_ambient_login above.
                     auto_continue_enabled: cmd.auto_continue_enabled.unwrap_or(old.auto_continue_enabled),
+                    // Immutable post-insert, same as slug/parent_id/branch_label
+                    // above — agent_def_update's SET clause doesn't even
+                    // touch this column, but the in-memory struct still
+                    // needs the real value: it's what gets serialized back
+                    // to the frontend as the "updated" agent.
+                    memory_id: old.memory_id.clone(),
                 };
                 let found = wstore.agent_def_update(&mut agent).map_err(|e| format!("updateagent: {e}"))?;
                 if !found {
@@ -381,11 +397,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // importagentfromclaw → read claw workspace, create agent + content
     let wstore_ifc = state.wstore.clone();
+    let id_store_ifc = state.id_store.clone();
     let broker_ifc = state.broker.clone();
     engine.register_handler(
         COMMAND_IMPORT_AGENT_FROM_CLAW,
         Box::new(move |data, _ctx| {
             let wstore = wstore_ifc.clone();
+            let id_store = id_store_ifc.clone();
             let broker = broker_ifc.clone();
             Box::pin(async move {
                 let cmd: CommandImportAgentFromClawData = serde_json::from_value(data)
@@ -446,8 +464,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     use_ambient_login: 0,
                     model_vendor_base_url: String::new(),
                     auto_continue_enabled: 0,
+                    memory_id: String::new(),
                 };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("importagentfromclaw: {e}"))?;
+                wstore.agent_def_provision_and_bind_bundle(&id_store, &mut agent, now);
 
                 // Read CLAUDE.md → agentmd content
                 let claude_md_path = workspace_path.join("CLAUDE.md");
@@ -524,11 +544,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // importagents — bulk import from JSON export format
     let wstore_ifa = state.wstore.clone();
+    let id_store_ifa = state.id_store.clone();
     let broker_ifa = state.broker.clone();
     engine.register_handler(
         COMMAND_IMPORT_AGENTS,
         Box::new(move |data, _ctx| {
             let wstore = wstore_ifa.clone();
+            let id_store = id_store_ifa.clone();
             let broker = broker_ifa.clone();
             Box::pin(async move {
                 let cmd: CommandImportAgentDefinitionsData = serde_json::from_value(data)
@@ -584,12 +606,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         use_ambient_login: 0,
                         model_vendor_base_url: String::new(),
                         auto_continue_enabled: 0,
+                        memory_id: String::new(),
                     };
 
                     if let Err(e) = wstore.agent_def_insert(&mut agent) {
                         failed.push(format!("{}: {e}", agent_import.name));
                         continue;
                     }
+                    wstore.agent_def_provision_and_bind_bundle(&id_store, &mut agent, now);
 
                     // Insert content types
                     let mut content_ok = true;
@@ -648,10 +672,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // exportagents — export all agent definitions with content and skills
     let wstore_efa = state.wstore.clone();
+    let id_store_efa = state.id_store.clone();
     engine.register_handler(
         COMMAND_EXPORT_AGENTS,
         Box::new(move |_data, _ctx| {
             let wstore = wstore_efa.clone();
+            let id_store = id_store_efa.clone();
             Box::pin(async move {
                 let agents = wstore.agent_def_list()
                     .map_err(|e| format!("exportagents: list: {e}"))?;
@@ -677,12 +703,22 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         })
                         .collect::<Vec<_>>();
 
+                    // Resolve through the agent's bound bundle rather than
+                    // the possibly-drifted `agent.provider` column directly
+                    // — #2594, same "gate vs. actual launch can disagree"
+                    // risk class #2592/#2596/#2607/#2609/#2610/#2612 fixed.
+                    // `importagents` round-trips whatever this exports
+                    // straight into a NEW definition+bundle
+                    // (agent_def_provision_and_bind_bundle), so an already-
+                    // drifted export would seed the imported agent's bundle
+                    // with the WRONG provider from the start.
+                    let effective_provider = id_store.resolve_effective_provider_id(&agent);
                     agent_exports.push(AgentDefinitionExport {
                         id: agent.slug.clone(),
                         name: agent.name,
                         icon: agent.icon,
                         description: agent.description,
-                        provider: agent.provider,
+                        provider: effective_provider,
                         shell: agent.shell,
                         working_directory: agent.working_directory,
                         agent_bus_id: agent.agent_bus_id,
@@ -707,4 +743,110 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::rpc_types::RpcMessage;
+    use crate::backend::storage::Memory;
+    use crate::server::tests::test_state;
+
+    fn seed_bundle(state: &AppState, id: &str, provider: &str) {
+        let bundle = Memory {
+            id: id.to_string(),
+            name: "Bundle".to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: false,
+            provider: provider.to_string(),
+            model: String::new(),
+            instructions: String::new(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+        };
+        state.id_store.bundle_memory_upsert(&bundle).unwrap();
+    }
+
+    // Template's own `.provider` column says "codex" (drifted/stale —
+    // simulates the same drift class #2592 fixed: some definition-time
+    // write path changed this column after the bundle was already
+    // provisioned/immutable), but its bound bundle's REAL provider is
+    // "claude". A correct export must carry "claude", not "codex" —
+    // #2594: `importagents` round-trips whatever this exports straight
+    // into a new definition+bundle, so an already-drifted export would
+    // seed the imported agent's bundle with the wrong provider.
+    fn seed_drifted_agent(state: &AppState, def_id: &str, bundle_id: &str) {
+        let mut def = AgentDefinition {
+            id: def_id.to_string(),
+            slug: def_id.to_string(),
+            name: "Drifted Agent".to_string(),
+            icon: String::new(),
+            provider: "codex".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            memory_id: bundle_id.to_string(),
+        };
+        state.wstore.agent_def_insert(&mut def).unwrap();
+    }
+
+    #[tokio::test]
+    async fn exportagents_resolves_provider_through_the_agents_bundle_not_the_drifted_column() {
+        let state = test_state();
+        seed_bundle(&state, "bundle-claude", "claude");
+        seed_drifted_agent(&state, "agent-drift", "bundle-claude");
+
+        let (engine, mut output_rx) = WshRpcEngine::new();
+        register(&engine, &state);
+
+        engine.handle_message(RpcMessage {
+            command: COMMAND_EXPORT_AGENTS.to_string(),
+            reqid: "req-1".to_string(),
+            data: Some(serde_json::json!({})),
+            ..Default::default()
+        });
+        let resp = tokio::time::timeout(std::time::Duration::from_secs(2), output_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
+        let result: ExportAgentDefinitionsResult =
+            serde_json::from_value(resp.data.expect("expected result data")).unwrap();
+
+        let exported = result
+            .agents
+            .iter()
+            .find(|a| a.id == "agent-drift")
+            .expect("exported agent should be present");
+        assert_eq!(
+            exported.provider, "claude",
+            "export must carry the agent's REAL (bundle-resolved) provider, not the drifted `codex` column"
+        );
+    }
 }

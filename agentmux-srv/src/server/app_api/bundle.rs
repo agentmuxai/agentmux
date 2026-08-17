@@ -29,6 +29,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_bundle_import_preview(engine, state);
     register_bundle_import_commit(engine, state);
     register_bundle_export_for_agent(engine, state);
+    register_bundle_export_for_agent_with_history(engine, state);
     register_bundle_import_for_agent(engine, state);
     register_bundle_validate(engine, state);
 }
@@ -112,6 +113,103 @@ fn register_bundle_validate(engine: &Arc<WshRpcEngine>, _state: &AppState) {
     engine.register_handler(COMMAND_BUNDLE_VALIDATE, handler);
 }
 
+/// Reject a `bundle.upsert` write that would change `provider`/`model` on
+/// an existing bundle that already has them set —
+/// ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §7.4.2. These are
+/// readonly-once-set: an ABF's portability guarantee (it's self-describing
+/// about what it needs to run) depends on them never silently changing
+/// after creation, and the UI-only disabling in `memory-manager.tsx` is
+/// advisory, not a guarantee — this is the actual enforcement.
+///
+/// `existing = None` (fresh insert) or an existing row with `provider`/
+/// `model` still empty (legacy row awaiting backfill, or was raced to
+/// create without them) always allows the write — that's how a bundle's
+/// provider/model get set the FIRST time. Once non-empty, they're locked.
+///
+/// Pure — no I/O — directly unit-testable without spinning up an
+/// `AppState`, mirroring `agent_open.rs`'s `resolve_vendor_env_override`.
+fn check_provider_model_immutable(existing: Option<&Memory>, incoming: &Memory) -> Result<(), String> {
+    let Some(existing) = existing else { return Ok(()) };
+    if !existing.provider.is_empty() && existing.provider != incoming.provider {
+        return Err(format!(
+            "FORBIDDEN: bundle {} provider is readonly once set (has '{}', got '{}')",
+            existing.id, existing.provider, incoming.provider
+        ));
+    }
+    if !existing.model.is_empty() && existing.model != incoming.model {
+        return Err(format!(
+            "FORBIDDEN: bundle {} model is readonly once set (has '{}', got '{}')",
+            existing.id, existing.model, incoming.model
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod check_provider_model_immutable_tests {
+    use super::*;
+
+    fn memory(id: &str, provider: &str, model: &str) -> Memory {
+        Memory {
+            id: id.to_string(),
+            name: "T".to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: false,
+            provider: provider.to_string(),
+            model: model.to_string(),
+            instructions: String::new(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    #[test]
+    fn allows_a_fresh_insert_to_set_provider_and_model() {
+        let incoming = memory("b1", "claude", "anthropic");
+        assert!(check_provider_model_immutable(None, &incoming).is_ok());
+    }
+
+    #[test]
+    fn allows_setting_provider_and_model_the_first_time_on_an_existing_empty_row() {
+        // Legacy row awaiting backfill, or a bundle created before this
+        // field existed — first write that populates them must succeed.
+        let existing = memory("b1", "", "");
+        let incoming = memory("b1", "claude", "anthropic");
+        assert!(check_provider_model_immutable(Some(&existing), &incoming).is_ok());
+    }
+
+    #[test]
+    fn allows_an_unrelated_field_edit_that_resends_the_same_provider_and_model() {
+        let existing = memory("b1", "claude", "anthropic");
+        let incoming = memory("b1", "claude", "anthropic");
+        assert!(check_provider_model_immutable(Some(&existing), &incoming).is_ok());
+    }
+
+    #[test]
+    fn rejects_changing_provider_once_set() {
+        let existing = memory("b1", "claude", "anthropic");
+        let incoming = memory("b1", "codex", "anthropic");
+        let err = check_provider_model_immutable(Some(&existing), &incoming).unwrap_err();
+        assert!(err.contains("FORBIDDEN"));
+        assert!(err.contains("provider"));
+    }
+
+    #[test]
+    fn rejects_changing_model_once_set() {
+        let existing = memory("b1", "claude", "anthropic");
+        let incoming = memory("b1", "claude", "custom");
+        let err = check_provider_model_immutable(Some(&existing), &incoming).unwrap_err();
+        assert!(err.contains("FORBIDDEN"));
+        assert!(err.contains("model"));
+    }
+}
+
 fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let make = |state: &AppState| -> crate::backend::rpc::engine::CommandHandler {
         let id_store = state.id_store.clone();
@@ -138,6 +236,12 @@ fn register_bundle_upsert(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         if existing.is_global {
                             return Err("FORBIDDEN: cannot mutate a global bundle".to_string());
                         }
+                        // provider/model are readonly once set — the actual
+                        // enforcement behind the portability guarantee (the
+                        // bundle editor's disabled-input UI is advisory
+                        // only). See check_provider_model_immutable's doc
+                        // comment.
+                        check_provider_model_immutable(Some(&existing), &memory)?;
                     }
                 }
                 if memory.id.is_empty() {
@@ -396,19 +500,32 @@ struct ExportForAgentReq {
 /// happens to be attached" guess. Extracted from the RPC closure into a
 /// directly-callable, directly-testable function, matching
 /// `bundle_import_preview_impl`'s pattern.
-async fn bundle_export_for_agent_impl(
+/// Shared by `bundle_export_for_agent_impl` and
+/// `bundle_export_for_agent_with_history_impl`: resolve the bundle + agent,
+/// build the base `BundleExport`, splice in native memory. Returns the
+/// export, the resolved agent (the history variant needs its id), combined
+/// warnings, and missing skill ids. Everything after this point (whether to
+/// zip, whether to also append history files) is caller-specific.
+async fn build_export_for_agent(
     id_store: &crate::backend::storage::store::Store,
     wstore: &crate::backend::storage::store::Store,
-    req: ExportForAgentReq,
-) -> Result<serde_json::Value, String> {
+    bundle_id: &str,
+    agent_id: &str,
+    err_prefix: &str,
+) -> Result<(
+    crate::backend::bundle_export::BundleExport,
+    crate::backend::storage::store::AgentDefinition,
+    Vec<String>,
+    Vec<String>,
+), String> {
     let bundle = id_store
-        .bundle_memory_get(&req.bundle_id)
-        .map_err(|e| format!("bundle.export_for_agent: {e}"))?
-        .ok_or_else(|| format!("bundle.export_for_agent: no bundle with id {}", req.bundle_id))?;
+        .bundle_memory_get(bundle_id)
+        .map_err(|e| format!("{err_prefix}: {e}"))?
+        .ok_or_else(|| format!("{err_prefix}: no bundle with id {bundle_id}"))?;
     let agent = wstore
-        .agent_def_get(&req.agent_id)
-        .map_err(|e| format!("bundle.export_for_agent: {e}"))?
-        .ok_or_else(|| format!("bundle.export_for_agent: no agent with id {}", req.agent_id))?;
+        .agent_def_get(agent_id)
+        .map_err(|e| format!("{err_prefix}: {e}"))?
+        .ok_or_else(|| format!("{err_prefix}: no agent with id {agent_id}"))?;
 
     let mut handler_warnings: Vec<String> = Vec::new();
     let skill_ids: Vec<String> = crate::backend::bundle_export::parse_json_field_or_warn(
@@ -423,7 +540,7 @@ async fn bundle_export_for_agent_impl(
             Ok(Some(skill)) => skills.push(skill),
             Ok(None) => missing_skill_ids.push(id.clone()),
             Err(e) => {
-                return Err(format!("bundle.export_for_agent: failed to look up skill {id}: {e}"));
+                return Err(format!("{err_prefix}: failed to look up skill {id}: {e}"));
             }
         }
     }
@@ -469,11 +586,21 @@ async fn bundle_export_for_agent_impl(
         }
         Err(e) => handler_warnings.push(format!("native memory: failed to list: {e}")),
     }
-    splice_memory_component(&mut export, &memory_files)
-        .map_err(|e| format!("bundle.export_for_agent: {e}"))?;
+    splice_memory_component(&mut export, &memory_files).map_err(|e| format!("{err_prefix}: {e}"))?;
 
     let mut all_warnings = export.warnings.clone();
     all_warnings.append(&mut handler_warnings);
+
+    Ok((export, agent, all_warnings, missing_skill_ids))
+}
+
+async fn bundle_export_for_agent_impl(
+    id_store: &crate::backend::storage::store::Store,
+    wstore: &crate::backend::storage::store::Store,
+    req: ExportForAgentReq,
+) -> Result<serde_json::Value, String> {
+    let (export, _agent, all_warnings, missing_skill_ids) =
+        build_export_for_agent(id_store, wstore, &req.bundle_id, &req.agent_id, "bundle.export_for_agent").await?;
 
     if req.format == "zip" {
         let zip_bytes = crate::backend::bundle_export::zip_bundle_export(&export)
@@ -497,6 +624,199 @@ async fn bundle_export_for_agent_impl(
     Ok(result)
 }
 
+#[derive(serde::Deserialize)]
+struct ExportForAgentWithHistoryReq {
+    bundle_id: String,
+    agent_id: String,
+}
+
+/// Per-transcript size ceiling for `bundle.export_for_agent_with_history`.
+/// reagentx P1 on PR #2613: reading every session fully into a `String`
+/// with no bound could exhaust server memory for the multi-GB histories
+/// this feature exists to migrate. Unlike `MAX_ABF_FILE_SIZE_BYTES`
+/// (context files, truncated with a warning when oversized — fine, since
+/// a partial context file is still useful), a transcript is skipped
+/// ENTIRELY rather than truncated: JSONL requires whole lines, and a
+/// truncated mid-record file could fail to parse (or silently misparse)
+/// on the receiving end, which is worse than the session being visibly
+/// absent with a warning explaining why.
+const MAX_HISTORY_SESSION_FILE_SIZE_BYTES: u64 = 200 * 1024 * 1024;
+
+/// Aggregate ceiling across every session included in one
+/// `bundle.export_for_agent_with_history` call. reagentx P1, third review
+/// round: a per-file cap alone doesn't bound an agent with many sessions
+/// each just under it — this is the analogous total cap the sibling
+/// import path already enforces (`MAX_TOTAL_UNCOMPRESSED_BYTES`,
+/// `bundle_import.rs`), sized larger since export's job is specifically
+/// to carry as much real history as reasonably fits, not to validate a
+/// small hand-authored bundle. Sessions are processed in
+/// `sessions_for_agent`'s existing `modified_at desc` order, so hitting
+/// this cap keeps the most recent conversations and cuts off the oldest
+/// — the same priority a human moving "my history" to a new machine would
+/// want. Unlike import's reject-the-whole-thing-on-overflow behavior,
+/// export keeps its existing best-effort philosophy: stop including
+/// further sessions and say so in a warning, never fail the call outright.
+const MAX_TOTAL_HISTORY_BYTES: u64 = 500 * 1024 * 1024;
+
+/// Given per-session sizes already in priority order (most-recent-first,
+/// matching `sessions_for_agent`'s `modified_at desc` sort), decide how
+/// many fit within `total_cap`. Returns `(count_included, stopped_at_cap)`.
+/// Pure — no I/O — deliberately extracted so this decision is testable
+/// with tiny numbers instead of needing real `MAX_TOTAL_HISTORY_BYTES`-
+/// scale files on disk.
+fn sessions_within_total_budget(sizes: &[u64], total_cap: u64) -> (usize, bool) {
+    let mut total = 0u64;
+    for (i, &size) in sizes.iter().enumerate() {
+        if total + size > total_cap {
+            return (i, true);
+        }
+        total += size;
+    }
+    (sizes.len(), false)
+}
+
+/// `bundle.export_for_agent_with_history` —
+/// `docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`
+/// §3.3. Deliberately a SEPARATE, explicit, opt-in action from
+/// `bundle.export_for_agent` — see `COMMAND_BUNDLE_EXPORT_FOR_AGENT_WITH_HISTORY`'s
+/// doc comment for why conversation transcripts must never ride along in
+/// the default (shareable, reusable-across-agents) bundle export. Builds
+/// the identical base export, then appends every session
+/// `HistoryService::sessions_for_agent` finds for this agent under
+/// `history/<provider>/<session_id>.jsonl`. Always returns a zip — a
+/// multi-file, potentially large archive has no sensible inline-JSON
+/// shape, unlike the plain export's optional format. A transcript that
+/// fails to read (deleted, permission issue, or over
+/// `MAX_HISTORY_SESSION_FILE_SIZE_BYTES`) is warned about and skipped,
+/// never fails the whole export — same best-effort philosophy as the
+/// memory-splicing step above.
+///
+/// reagentx P1 on PR #2613, all addressed:
+/// - `sessions_for_agent(..., force_refresh: true)` — this export claims
+///   completeness ("included N of N known sessions"), so it can't rely on
+///   the interactive lazy-refresh-if-empty behavior; a session created
+///   since the index was first populated (by ANY prior call) must not be
+///   silently missing.
+/// - `sessions_for_agent` itself runs inside its own `spawn_blocking` —
+///   `force_refresh: true` means it calls `SessionIndex::refresh()`,
+///   which synchronously walks and parses every session file for every
+///   provider on disk. A second review round caught that only the LATER
+///   file-read/zip/encode step (below) had been moved off the async
+///   worker thread; this earlier, more expensive full-index-rebuild step
+///   was still running inline on it. Takes `Arc<Store>`/
+///   `Arc<HistoryService>` (not bare refs) specifically so a clone can
+///   cross into this closure — `build_export_for_agent` above still
+///   receives them by reference (`Arc` derefs to `&Store` for free), no
+///   signature change needed there.
+/// - the actual file reads + zip + base64 encode run inside their own
+///   `spawn_blocking` — synchronous, potentially slow I/O and CPU work
+///   that must not block the async RPC worker thread either. Only the
+///   already-resolved, owned `export`/`sessions` data crosses into that
+///   closure.
+/// - `MAX_TOTAL_HISTORY_BYTES` — a third review round caught that the
+///   per-session cap alone doesn't bound an agent with MANY sessions each
+///   just under it; the sibling import path enforces an analogous total
+///   cap (`MAX_TOTAL_UNCOMPRESSED_BYTES`). See `sessions_within_total_budget`.
+async fn bundle_export_for_agent_with_history_impl(
+    id_store: Arc<crate::backend::storage::store::Store>,
+    wstore: &crate::backend::storage::store::Store,
+    history_service: Arc<crate::backend::history::HistoryService>,
+    req: ExportForAgentWithHistoryReq,
+) -> Result<serde_json::Value, String> {
+    let (export, _agent, all_warnings, missing_skill_ids) = build_export_for_agent(
+        &id_store,
+        wstore,
+        &req.bundle_id,
+        &req.agent_id,
+        "bundle.export_for_agent_with_history",
+    )
+    .await?;
+
+    let agent_id = req.agent_id.clone();
+    let (sessions, session_count, _has_more) = {
+        let id_store = id_store.clone();
+        let history_service = history_service.clone();
+        tokio::task::spawn_blocking(move || {
+            history_service.sessions_for_agent(&id_store, &agent_id, 0, usize::MAX, "modified_at", "desc", true)
+        })
+        .await
+        .map_err(|e| format!("bundle.export_for_agent_with_history: blocking task panicked: {e}"))?
+        .map_err(|e| format!("bundle.export_for_agent_with_history: {e}"))?
+    };
+
+    tokio::task::spawn_blocking(move || {
+        let mut export = export;
+        let mut all_warnings = all_warnings;
+
+        // Pass 1: stat every session, drop per-file-oversized ones. No
+        // reads yet — just sizes, so the pure budget decision below (pass
+        // 2) can be tested with tiny numbers instead of real files.
+        let mut sized: Vec<(&crate::backend::history::adapter::SessionMeta, u64)> = Vec::new();
+        for session in &sessions {
+            match std::fs::metadata(&session.file_path) {
+                Ok(meta) if meta.len() > MAX_HISTORY_SESSION_FILE_SIZE_BYTES => {
+                    all_warnings.push(format!(
+                        "history: skipped session {} ({}) — {} bytes exceeds the {} byte per-session limit",
+                        session.session_id, session.file_path, meta.len(), MAX_HISTORY_SESSION_FILE_SIZE_BYTES
+                    ));
+                }
+                Ok(meta) => sized.push((session, meta.len())),
+                Err(e) => all_warnings.push(format!(
+                    "history: failed to read session {} ({}): {e}",
+                    session.session_id, session.file_path
+                )),
+            }
+        }
+
+        // Pass 2: how many of the (already most-recent-first-ordered)
+        // remaining sessions fit within the aggregate cap.
+        let sizes: Vec<u64> = sized.iter().map(|(_, size)| *size).collect();
+        let sized_count = sized.len();
+        let (fit_count, stopped_at_total_cap) = sessions_within_total_budget(&sizes, MAX_TOTAL_HISTORY_BYTES);
+        if stopped_at_total_cap {
+            let total: u64 = sizes[..fit_count].iter().sum();
+            all_warnings.push(format!(
+                "history: stopped after {total} bytes (limit {MAX_TOTAL_HISTORY_BYTES}) — {} additional session(s) omitted, oldest first",
+                sized_count - fit_count
+            ));
+        }
+
+        // Pass 3: actually read + include only what fit.
+        let mut included = 0u32;
+        for (session, _size) in sized.into_iter().take(fit_count) {
+            match std::fs::read_to_string(&session.file_path) {
+                Ok(content) => {
+                    export.files.push(crate::backend::bundle_export::BundleExportFile {
+                        path: format!("history/{}/{}.jsonl", session.provider, session.session_id),
+                        content,
+                    });
+                    included += 1;
+                }
+                Err(e) => all_warnings.push(format!(
+                    "history: failed to read session {} ({}): {e}",
+                    session.session_id, session.file_path
+                )),
+            }
+        }
+        all_warnings.push(format!("history: included {included} of {session_count} known session(s)"));
+
+        let zip_bytes = crate::backend::bundle_export::zip_bundle_export(&export)
+            .map_err(|e| format!("bundle.export_for_agent_with_history: {e}"))?;
+        use base64::Engine as _;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&zip_bytes);
+        Ok(json!({
+            "root_slug": export.root_slug,
+            "skipped_skills": export.skipped_skills,
+            "warnings": all_warnings,
+            "missing_skill_ids": missing_skill_ids,
+            "history_session_count": included,
+            "zip_base64": encoded,
+        }))
+    })
+    .await
+    .map_err(|e| format!("bundle.export_for_agent_with_history: blocking task panicked: {e}"))?
+}
+
 fn register_bundle_export_for_agent(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
     let wstore = state.wstore.clone();
@@ -509,6 +829,27 @@ fn register_bundle_export_for_agent(engine: &Arc<WshRpcEngine>, state: &AppState
                 let req: ExportForAgentReq = serde_json::from_value(data)
                     .map_err(|e| format!("bundle.export_for_agent: {e}"))?;
                 bundle_export_for_agent_impl(&id_store, &wstore, req).await.map(Some)
+            })
+        }),
+    );
+}
+
+fn register_bundle_export_for_agent_with_history(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let id_store = state.id_store.clone();
+    let wstore = state.wstore.clone();
+    let history_service = state.history_service.clone();
+    engine.register_handler(
+        COMMAND_BUNDLE_EXPORT_FOR_AGENT_WITH_HISTORY,
+        Box::new(move |data, _ctx| {
+            let id_store = id_store.clone();
+            let wstore = wstore.clone();
+            let history_service = history_service.clone();
+            Box::pin(async move {
+                let req: ExportForAgentWithHistoryReq = serde_json::from_value(data)
+                    .map_err(|e| format!("bundle.export_for_agent_with_history: {e}"))?;
+                bundle_export_for_agent_with_history_impl(id_store, &wstore, history_service, req)
+                    .await
+                    .map(Some)
             })
         }),
     );
@@ -683,8 +1024,8 @@ async fn bundle_import_for_agent_impl(
         description: parsed.description,
         is_blank: false,
         is_global: false,
-        provider: String::new(),
-        model: String::new(),
+        provider: parsed.provider,
+        model: parsed.model,
         instructions: parsed.instructions,
         instructions_by_provider: serde_json::to_string(&parsed.instructions_by_provider)
             .unwrap_or_else(|_| "{}".to_string()),
@@ -1073,8 +1414,8 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // silently start injecting into every agent's
                     // CLAUDE.md without explicit user action (spec §4.4).
                     is_global: false,
-                    provider: String::new(),
-                    model: String::new(),
+                    provider: parsed.provider,
+                    model: parsed.model,
                     instructions: parsed.instructions,
                     // ABF v0.2 §2.2: every variant is stored verbatim, no
                     // merge decision made at import time.
@@ -1675,8 +2016,13 @@ async fn bundle_import_commit_impl(
                     description: parsed.description,
                     is_blank: false,
                     is_global: false,
-                    provider: String::new(),
-                    model: String::new(),
+                    // Like `description` above (and unlike instructions/
+                    // context/mcp), provider/model are structural identity
+                    // fields, not opt-in components — there's no
+                    // include_provider toggle in the preview/commit UI, so
+                    // these always carry straight through when present.
+                    provider: parsed.provider,
+                    model: parsed.model,
                     instructions,
                     instructions_by_provider: serde_json::to_string(&instructions_by_provider)
                         .unwrap_or_else(|_| "{}".to_string()),
@@ -2852,5 +3198,345 @@ mod export_import_for_agent_tests {
             std::fs::read_to_string(memory_dir_b.join("MEMORY.md")).unwrap(),
             "Agent A's learned fact."
         );
+    }
+
+    // ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §7.4.3/§7.5 step 6:
+    // provider/model round-trip through export -> import, same as the
+    // memory-files round-trip above.
+    #[tokio::test]
+    async fn export_then_import_carries_provider_and_model_through() {
+        let state = test_state();
+        let config_a = tempfile::tempdir().unwrap();
+        let config_b = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-a", "/work/a", config_a.path());
+        make_agent(&state, "agent-b", "/work/b", config_b.path());
+        let mut bundle = make_bundle(&state, "bundle-src", "Shared instructions.");
+        bundle.provider = "claude".to_string();
+        bundle.model = "anthropic".to_string();
+        state.id_store.bundle_memory_upsert(&bundle).unwrap();
+
+        let exported = bundle_export_for_agent_impl(&state.id_store, &state.wstore, ExportForAgentReq {
+            bundle_id: "bundle-src".to_string(),
+            agent_id: "agent-a".to_string(),
+            format: String::new(),
+        }).await.unwrap();
+
+        let manifest_file = exported["files"].as_array().unwrap().iter()
+            .find(|f| f["path"] == "armory.json")
+            .expect("armory.json must be present");
+        let manifest: serde_json::Value = serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
+        assert_eq!(manifest["provider"], "claude");
+        assert_eq!(manifest["model"], "anthropic");
+
+        let files: Vec<FileEntry> = exported["files"].as_array().unwrap().iter()
+            .map(|f| FileEntry {
+                path: f["path"].as_str().unwrap().to_string(),
+                content: f["content"].as_str().unwrap().to_string(),
+            })
+            .collect();
+        let imported = bundle_import_for_agent_impl(&state.id_store, &state.wstore, ImportForAgentReq {
+            agent_id: "agent-b".to_string(),
+            file_path: None,
+            zip_base64: None,
+            files: Some(files),
+        }).await.unwrap();
+        let new_bundle_id = imported["bundle_id"].as_str().expect("import response must include bundle_id");
+        let new_bundle = state.id_store.bundle_memory_get(new_bundle_id).unwrap().unwrap();
+        assert_eq!(new_bundle.provider, "claude");
+        assert_eq!(new_bundle.model, "anthropic");
+    }
+
+    #[tokio::test]
+    async fn export_of_an_unbound_bundle_omits_provider_and_model_rather_than_exporting_empty_strings() {
+        let state = test_state();
+        let config_a = tempfile::tempdir().unwrap();
+        make_agent(&state, "agent-a", "/work/a", config_a.path());
+        make_bundle(&state, "bundle-unbound", "Shared instructions."); // provider/model left empty
+
+        let exported = bundle_export_for_agent_impl(&state.id_store, &state.wstore, ExportForAgentReq {
+            bundle_id: "bundle-unbound".to_string(),
+            agent_id: "agent-a".to_string(),
+            format: String::new(),
+        }).await.unwrap();
+
+        let manifest_file = exported["files"].as_array().unwrap().iter()
+            .find(|f| f["path"] == "armory.json")
+            .expect("armory.json must be present");
+        let manifest: serde_json::Value = serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
+        assert!(manifest["provider"].is_null(), "unset provider must not export as an empty string");
+        assert!(manifest["model"].is_null(), "unset model must not export as an empty string");
+    }
+
+    // docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md
+    // §3.3 — bundle.export_for_agent_with_history.
+
+    mod with_history_tests {
+        use super::*;
+        use crate::backend::history::adapter::{DiscoveredFile, HistoryAdapter, HistoryError, HistorySession, SessionMeta};
+        use crate::backend::history::index::SessionIndex;
+        use crate::backend::history::HistoryService;
+
+        /// Tags every discovered file with a fixed identity_id -- enough to
+        /// exercise the agent_id -> identity_id -> sessions chain without a
+        /// real filesystem scan.
+        struct MockAdapter {
+            files: Vec<DiscoveredFile>,
+            identity_id: String,
+        }
+        impl HistoryAdapter for MockAdapter {
+            fn provider(&self) -> &str {
+                "mock"
+            }
+            fn discover_files(&self) -> Result<Vec<DiscoveredFile>, HistoryError> {
+                Ok(self.files.iter().map(|f| DiscoveredFile { file_path: f.file_path.clone(), mtime_ms: f.mtime_ms }).collect())
+            }
+            fn extract_meta(&self, file_path: &str) -> Result<Option<SessionMeta>, HistoryError> {
+                let id = std::path::Path::new(file_path).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                Ok(Some(SessionMeta {
+                    session_id: id,
+                    file_path: file_path.to_string(),
+                    provider: "mock".to_string(),
+                    model: String::new(),
+                    slug: String::new(),
+                    working_directory: "/proj".to_string(),
+                    created_at: 0,
+                    modified_at: 0,
+                    message_count: 0,
+                    first_user_message: String::new(),
+                    file_size_bytes: 0,
+                    git_branch: String::new(),
+                    total_tokens: 0,
+                    subagent_count: 0,
+                    identity_id: self.identity_id.clone(),
+                }))
+            }
+            fn parse_file(&self, _: &str) -> Result<Option<HistorySession>, HistoryError> {
+                Ok(None)
+            }
+        }
+
+        fn link_agent_to_identity(state: &AppState, agent_id: &str, account_id: &str) {
+            state
+                .id_store
+                .identity_upsert(&crate::backend::storage::store::IdentityAccount {
+                    id: account_id.to_string(),
+                    name: format!("claude-{account_id}"),
+                    provider: "claude".to_string(),
+                    kind: "pat".to_string(),
+                    display_name: String::new(),
+                    secret_ref: crate::backend::storage::store::SecretRef::OAuthConfigDir { dir: String::new() },
+                    context: serde_json::json!({}),
+                    status: "unknown".to_string(),
+                    created_at: 0,
+                    updated_at: 0,
+                })
+                .unwrap();
+            state.id_store.agent_identity_link(agent_id, account_id, "claude").unwrap();
+        }
+
+        fn unzip_paths(zip_base64: &str) -> Vec<String> {
+            use base64::Engine as _;
+            let bytes = base64::engine::general_purpose::STANDARD.decode(zip_base64).unwrap();
+            let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+            (0..archive.len()).map(|i| archive.by_index(i).unwrap().name().to_string()).collect()
+        }
+
+        #[tokio::test]
+        async fn includes_the_agents_sessions_alongside_the_normal_bundle_files() {
+            let state = test_state();
+            let config_dir = tempfile::tempdir().unwrap();
+            make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+            make_bundle(&state, "bundle-1", "Be helpful.");
+            link_agent_to_identity(&state, "agent-1", "acct-mine");
+
+            let session_dir = tempfile::tempdir().unwrap();
+            let session_path = session_dir.path().join("sess-1.jsonl");
+            std::fs::write(&session_path, "{\"role\":\"user\"}\n").unwrap();
+
+            let index = SessionIndex::with_isolated_roots(
+                vec![Box::new(MockAdapter {
+                    files: vec![DiscoveredFile { file_path: session_path.to_string_lossy().into_owned(), mtime_ms: 1 }],
+                    identity_id: "acct-mine".to_string(),
+                })],
+                vec![session_dir.path().to_path_buf()],
+            );
+            let history_service = HistoryService::from_index(index);
+
+            let result = bundle_export_for_agent_with_history_impl(
+                state.id_store.clone(),
+                &state.wstore,
+                std::sync::Arc::new(history_service),
+                ExportForAgentWithHistoryReq { bundle_id: "bundle-1".to_string(), agent_id: "agent-1".to_string() },
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(result["history_session_count"], 1);
+            let paths = unzip_paths(result["zip_base64"].as_str().unwrap());
+            assert!(paths.iter().any(|p| p.ends_with("instructions/AGENTS.md")), "base bundle files must still be present: {paths:?}");
+            assert!(paths.iter().any(|p| p.ends_with("history/mock/sess-1.jsonl")), "session must be included under history/: {paths:?}");
+        }
+
+        #[tokio::test]
+        async fn succeeds_with_zero_sessions_when_the_agent_has_no_linked_identity() {
+            let state = test_state();
+            let config_dir = tempfile::tempdir().unwrap();
+            make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+            make_bundle(&state, "bundle-1", "Be helpful.");
+            // No link_agent_to_identity call -- agent has no bound account.
+
+            let history_service = HistoryService::from_index(SessionIndex::with_isolated_roots(vec![], vec![]));
+
+            let result = bundle_export_for_agent_with_history_impl(
+                state.id_store.clone(),
+                &state.wstore,
+                std::sync::Arc::new(history_service),
+                ExportForAgentWithHistoryReq { bundle_id: "bundle-1".to_string(), agent_id: "agent-1".to_string() },
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(result["history_session_count"], 0);
+            let paths = unzip_paths(result["zip_base64"].as_str().unwrap());
+            assert!(!paths.iter().any(|p| p.contains("history/")), "no history/ entries when nothing is linked: {paths:?}");
+        }
+
+        #[tokio::test]
+        async fn warns_and_continues_when_a_transcript_file_cannot_be_read() {
+            let state = test_state();
+            let config_dir = tempfile::tempdir().unwrap();
+            make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+            make_bundle(&state, "bundle-1", "Be helpful.");
+            link_agent_to_identity(&state, "agent-1", "acct-mine");
+
+            // Points at a file that will never exist on disk.
+            let missing_path = std::env::temp_dir().join("amx-nonexistent-session-xyz.jsonl");
+            let index = SessionIndex::with_isolated_roots(
+                vec![Box::new(MockAdapter {
+                    files: vec![DiscoveredFile { file_path: missing_path.to_string_lossy().into_owned(), mtime_ms: 1 }],
+                    identity_id: "acct-mine".to_string(),
+                })],
+                vec![],
+            );
+            // Note: refresh() would normally skip a file it can't stat via
+            // discover_files' own is_dir/exists checks in the real adapter,
+            // but MockAdapter unconditionally reports it as discovered so
+            // extract_meta -- and therefore the export's own read -- is what
+            // actually exercises the missing-file path here.
+            let history_service = HistoryService::from_index(index);
+
+            let result = bundle_export_for_agent_with_history_impl(
+                state.id_store.clone(),
+                &state.wstore,
+                std::sync::Arc::new(history_service),
+                ExportForAgentWithHistoryReq { bundle_id: "bundle-1".to_string(), agent_id: "agent-1".to_string() },
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(result["history_session_count"], 0, "unreadable session must not count as included");
+            let warnings = result["warnings"].as_array().unwrap();
+            assert!(
+                warnings.iter().any(|w| w.as_str().unwrap_or("").contains("failed to read session")),
+                "must warn about the unreadable session: {warnings:?}"
+            );
+        }
+
+        // reagentx P1 on PR #2613: an oversized transcript must be skipped
+        // (never truncated -- a partial JSONL file can fail or misparse on
+        // the receiving end) and warned about, not silently included or
+        // read into memory unbounded.
+        #[tokio::test]
+        async fn skips_and_warns_on_a_transcript_over_the_size_limit() {
+            let state = test_state();
+            let config_dir = tempfile::tempdir().unwrap();
+            make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+            make_bundle(&state, "bundle-1", "Be helpful.");
+            link_agent_to_identity(&state, "agent-1", "acct-mine");
+
+            let session_dir = tempfile::tempdir().unwrap();
+            let oversized_path = session_dir.path().join("sess-huge.jsonl");
+            {
+                // Sparse file -- claims MAX_HISTORY_SESSION_FILE_SIZE_BYTES + 1
+                // bytes via metadata without actually writing/allocating
+                // that much, matching read_abf_file_path's own sparse-file
+                // test technique above.
+                let file = std::fs::File::create(&oversized_path).unwrap();
+                file.set_len(MAX_HISTORY_SESSION_FILE_SIZE_BYTES + 1).unwrap();
+            }
+
+            let index = SessionIndex::with_isolated_roots(
+                vec![Box::new(MockAdapter {
+                    files: vec![DiscoveredFile { file_path: oversized_path.to_string_lossy().into_owned(), mtime_ms: 1 }],
+                    identity_id: "acct-mine".to_string(),
+                })],
+                vec![session_dir.path().to_path_buf()],
+            );
+            let history_service = HistoryService::from_index(index);
+
+            let result = bundle_export_for_agent_with_history_impl(
+                state.id_store.clone(),
+                &state.wstore,
+                std::sync::Arc::new(history_service),
+                ExportForAgentWithHistoryReq { bundle_id: "bundle-1".to_string(), agent_id: "agent-1".to_string() },
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(result["history_session_count"], 0, "oversized session must not count as included");
+            let paths = unzip_paths(result["zip_base64"].as_str().unwrap());
+            assert!(!paths.iter().any(|p| p.contains("sess-huge")), "oversized session must not be in the zip: {paths:?}");
+            let warnings = result["warnings"].as_array().unwrap();
+            assert!(
+                warnings.iter().any(|w| w.as_str().unwrap_or("").contains("exceeds") && w.as_str().unwrap_or("").contains("sess-huge")),
+                "must warn about the size limit: {warnings:?}"
+            );
+        }
+
+        // reagentx P1, third review round: a per-session cap alone doesn't
+        // bound an agent with many sessions each just under it. These
+        // exercise the pure sessions_within_total_budget decision directly
+        // with tiny numbers -- MAX_TOTAL_HISTORY_BYTES is 500 MiB, real
+        // enough files to trigger it would make this test slow and wasteful
+        // for no extra confidence over testing the same logic with small
+        // inputs.
+        #[test]
+        fn total_budget_includes_everything_when_under_the_cap() {
+            let (count, stopped) = sessions_within_total_budget(&[10, 10, 10], 100);
+            assert_eq!(count, 3);
+            assert!(!stopped);
+        }
+
+        #[test]
+        fn total_budget_stops_at_the_first_session_that_would_exceed_the_cap() {
+            // Most-recent-first order: [10, 10, 10] with cap 25 -- the
+            // third one (cumulative 30) doesn't fit, so only the first two
+            // (most recent) are included.
+            let (count, stopped) = sessions_within_total_budget(&[10, 10, 10], 25);
+            assert_eq!(count, 2, "must include the two most-recent sessions, not just any two that individually fit");
+            assert!(stopped);
+        }
+
+        #[test]
+        fn total_budget_includes_nothing_when_the_first_session_alone_exceeds_the_cap() {
+            let (count, stopped) = sessions_within_total_budget(&[50, 10], 25);
+            assert_eq!(count, 0);
+            assert!(stopped);
+        }
+
+        #[test]
+        fn total_budget_handles_an_empty_list() {
+            let (count, stopped) = sessions_within_total_budget(&[], 100);
+            assert_eq!(count, 0);
+            assert!(!stopped);
+        }
+
+        #[test]
+        fn total_budget_includes_a_session_that_exactly_fills_the_remaining_cap() {
+            // 10 + 15 == 25 exactly -- must NOT be treated as exceeding.
+            let (count, stopped) = sessions_within_total_budget(&[10, 15], 25);
+            assert_eq!(count, 2);
+            assert!(!stopped);
+        }
     }
 }

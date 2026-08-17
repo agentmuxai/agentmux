@@ -17,7 +17,7 @@
  * xterm renders npm's output (ANSI colors preserved).
  */
 
-import { Show, createEffect, createSignal, onCleanup, onMount, type JSX } from "solid-js";
+import { Show, createEffect, createResource, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 
@@ -33,6 +33,7 @@ import { writeText as clipboardWriteText } from "@/util/clipboard";
 
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { getProvider } from "../providers";
+import { resolveEffectiveLaunchProvider } from "../agent-launch-env";
 // Use the project's customized xterm.css copy (same one term.tsx
 // imports) rather than the raw package stylesheet. The package CSS
 // loads later in the bundle and would override our project-wide
@@ -53,8 +54,24 @@ interface AgentInstallModalPanelProps {
 }
 
 export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.Element => {
-    const catalog = () => getCliCatalogEntry(props.agent.provider);
-    const provider = () => getProvider(props.agent.provider);
+    // Resolve through the agent's bound bundle rather than the possibly-
+    // drifted `agent.provider` column directly — #2594, same "gate vs.
+    // actual launch can disagree" risk class #2592/#2596/#2607/#2609
+    // fixed. This modal determines which CLI package literally gets
+    // installed (`startInstall` below); disagreeing with what
+    // AgentPicker's checkInstalled (already fixed) decided needed
+    // installing would install the wrong provider's CLI.
+    //
+    // Used only for the cosmetic header (icon/displayName/version) —
+    // `startInstall` re-resolves directly rather than reading this
+    // resource, so a click that races the resource's own in-flight
+    // fetch still installs the correct provider (see its own comment).
+    // Falls back to `props.agent.provider` while loading/on failure,
+    // same as `resolveEffectiveLaunchProvider` itself.
+    const [resolvedProviderId] = createResource(() => props.agent, resolveEffectiveLaunchProvider);
+    const displayProviderId = () => resolvedProviderId() ?? props.agent.provider;
+    const catalog = () => getCliCatalogEntry(displayProviderId());
+    const provider = () => getProvider(displayProviderId());
     const displayName = () => catalog()?.displayName ?? props.agent.name;
     const version = () => provider()?.pinnedVersion;
 
@@ -96,9 +113,20 @@ export const AgentInstallModalPanel = (props: AgentInstallModalPanelProps): JSX.
     };
 
     const startInstall = async () => {
-        const prov = provider();
+        // Re-resolve directly rather than reading the `provider()`
+        // memo above — that memo backs the resource's current
+        // (possibly still-loading, or subsequently-stale if the
+        // component has been open a while) snapshot, whereas a fresh
+        // resolve here guarantees whatever actually gets installed
+        // matches the agent's bundle at the moment the user clicked,
+        // not whatever the header happened to be showing.
+        // resolveEffectiveLaunchProvider is a cheap, idempotent single
+        // RPC round-trip — no reason to trust a possibly-stale cache
+        // for the one call that determines what gets installed.
+        const resolvedId = await resolveEffectiveLaunchProvider(props.agent);
+        const prov = getProvider(resolvedId);
         if (!prov) {
-            setError(`unknown provider ${props.agent.provider}`);
+            setError(`unknown provider ${resolvedId}`);
             setPhase("failed");
             return;
         }

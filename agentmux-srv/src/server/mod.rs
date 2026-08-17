@@ -6,7 +6,7 @@ mod files;
 pub(crate) mod app_api;
 mod agent_handlers;
 mod editor_handlers;
-mod identity_auth_dirs;
+pub(crate) mod identity_auth_dirs;
 mod identity_auth_persist;
 mod identity_auth_spawn;
 mod identity_handlers;
@@ -414,6 +414,14 @@ pub fn build_router(state: AppState) -> Router {
         // comment for why).
         .route("/api/v1/muxspect/dock", get(muxspect_handlers::handle_muxspect_dock))
         .route("/api/v1/muxspect/dock/clear", post(muxspect_handlers::handle_muxspect_dock_clear))
+        // Durable declared-background task registry — see the handler's own
+        // doc comment for why this is a separate, SQLite-backed source of
+        // truth from `dock` above rather than another view over the same
+        // ephemeral cache.
+        .route(
+            "/api/v1/muxspect/background-tasks",
+            get(muxspect_handlers::handle_muxspect_background_tasks),
+        )
         // Agent App API — identity / preset / memory namespaces, the MCP-facing
         // slice of the app-API RPC surface (SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28).
         // The agent identity (`agent_id`) is supplied by agentmux-mcp from its
@@ -1420,9 +1428,29 @@ async fn auth_middleware(
 /// of `/agentmux/service`, `/agentmux/file`, shell creation, credential/
 /// identity endpoints, etc. See `Config::lan_key`'s doc comment for why
 /// this exists (SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md LAN P0-1).
+/// Which of the two credentials `lan_or_full_auth_middleware` accepted
+/// authenticated this specific request. Inserted into the request's
+/// extensions so `handle_reactive_inject` can force `delivery_tier = "lan"`
+/// whenever `LanKey` authenticated the request, regardless of what the JSON
+/// body itself claims — closing the bypass where a `lan_key`-only holder
+/// could otherwise just self-label a request "host" to dodge LAN's stricter
+/// verification entirely. See
+/// docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §3 for the full
+/// rationale, including why the reverse (downgrading a "lan" claim seen
+/// under `FullAuthKey`) is deliberately NOT done — reagentx P0 found that
+/// same-host forwarding (Tier 2a/2b in `reactive.rs`) legitimately
+/// re-authenticates an already-LAN-originated jekt with a sibling
+/// instance's own full `auth_key`, so downgrading there silently discarded
+/// an already-detected signature failure's forced-sensitive escalation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ReactiveAuthVia {
+    FullAuthKey,
+    LanKey,
+}
+
 async fn lan_or_full_auth_middleware(
     State(state): State<AppState>,
-    req: Request<Body>,
+    mut req: Request<Body>,
     next: Next,
 ) -> Response {
     if req.method() == Method::OPTIONS {
@@ -1435,7 +1463,14 @@ async fn lan_or_full_auth_middleware(
         .and_then(|v| v.to_str().ok());
 
     match auth_key {
-        Some(key) if key == state.auth_key || key == state.lan_key => next.run(req).await,
+        Some(key) if key == state.auth_key => {
+            req.extensions_mut().insert(ReactiveAuthVia::FullAuthKey);
+            next.run(req).await
+        }
+        Some(key) if key == state.lan_key => {
+            req.extensions_mut().insert(ReactiveAuthVia::LanKey);
+            next.run(req).await
+        }
         _ => (
             StatusCode::UNAUTHORIZED,
             Json(json!({"error": "unauthorized"})),

@@ -81,3 +81,9 @@ export function baseName(p: string): string {
     const m = p.match(/[^\\/]+$/);
     return m ? m[0] : p;
 }
+
+/** True if the drag event carries at least one native OS file (not just text/URL). */
+export function isFileDrag(e: DragEvent): boolean {
+    const types = e.dataTransfer?.types;
+    return !!types && Array.from(types).includes("Files");
+}

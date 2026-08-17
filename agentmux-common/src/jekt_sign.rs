@@ -1,20 +1,33 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-//! Host-tier jekt sender signing/verification (HMAC-SHA256).
+//! Jekt sender signing/verification — three schemes, one signed-material
+//! format:
+//!   - Host-tier: HMAC-SHA256, one shared key per agent (`sign_jekt`/
+//!     `verify_jekt`). A 1:1 sender-to-local-srv relationship, so a
+//!     symmetric key is fine — the srv instance is the sole verifier.
+//!   - WAN, reagent only: Ed25519 against one pinned service keypair
+//!     (`verify_reagent_jekt`). Multi-party (any receiving instance must
+//!     verify without being able to forge), hence asymmetric.
+//!   - LAN, any agent: Ed25519, one keypair per agent
+//!     (`sign_lan_jekt`/`verify_lan_jekt`). Same multi-party reasoning as
+//!     WAN, but per-sender instead of one pinned key — see
+//!     docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md.
 //!
 //! Shared between `agentmux-mcp` (the `SendMessage` tool signs an outgoing
-//! jekt with the calling agent's own key, read from its `AGENTMUX_JEKT_KEY`
-//! process env var) and `agentmux-srv` (the reactive handler verifies an
-//! incoming jekt's claimed signature against the claimed sender's key,
-//! looked up server-side by agent_id — see
-//! `agentmux-srv/src/backend/storage/agent_jekt_keys.rs`). Living here, not
-//! in either binary, is what guarantees the two can never independently
-//! drift on the signed-material format.
+//! jekt with the calling agent's own key, read from its `AGENTMUX_JEKT_KEY`/
+//! `AGENTMUX_LAN_KEY` process env vars) and `agentmux-srv` (the reactive
+//! handler verifies an incoming jekt's claimed signature against the
+//! claimed sender's key, looked up server-side by agent_id — see
+//! `agentmux-srv/src/backend/storage/agent_jekt_keys.rs` and
+//! `agent_lan_keys.rs`). Living here, not in either binary, is what
+//! guarantees the two can never independently drift on the signed-material
+//! format.
 //!
-//! See docs/specs/SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2 and
+//! See docs/specs/SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2,
 //! `docs/specs/SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md` §5.3 (the
-//! original spec's never-built "Phase 5" this module implements).
+//! original spec's never-built "Phase 5" this module implements), and
+//! `docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md`.
 //!
 //! The signed material binds sender, target, message id, and timestamp
 //! together (not just msgid+payload) so a valid signature can't be replayed
@@ -190,6 +203,78 @@ pub fn verify_reagent_jekt(
 ) -> bool {
     let Some(pubkey_bytes) = reagent_public_key(key_id) else { return false };
     let Ok(verifying_key) = VerifyingKey::from_bytes(&pubkey_bytes) else { return false };
+    let Ok(sig_bytes) = BASE64.decode(sig_b64) else { return false };
+    let Ok(sig_arr) = <[u8; 64]>::try_from(sig_bytes.as_slice()) else { return false };
+    let signature = Signature::from_bytes(&sig_arr);
+    let material = signed_material(msgid, source_agent, target_agent, ts_secs, message);
+    verifying_key.verify(material.as_bytes(), &signature).is_ok()
+}
+
+// ── LAN-tier per-agent Ed25519 signing (SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md) ──
+//
+// Asymmetric, not HMAC like host-tier: LAN is multi-party (any receiving
+// instance must be able to verify without being able to forge — the same
+// reason reagent's WAN signing above is asymmetric, just per-agent instead
+// of one pinned service key). Signed material is the exact same
+// `signed_material` host-tier and reagent both already use — one format,
+// three signature schemes layered on top depending on tier.
+
+/// Generate a fresh Ed25519 keypair for a newly-registered agent's LAN
+/// signing key. Returns `(public_key_bytes, private_key_seed_bytes)`, both
+/// 32 bytes raw — callers base64-encode for storage/transport (mirrors
+/// `agent_jekt_keys.rs`'s `random_key_bytes` + `BASE64.encode` split).
+///
+/// No RNG dependency needed beyond what's already used for HMAC key
+/// generation: `SigningKey::from_bytes` accepts any 32 bytes of randomness
+/// as a valid seed (deterministic key derivation from the seed, not a
+/// call into an RNG itself) — reusing the two-v4-UUIDs CSPRNG source
+/// `agent_jekt_keys.rs::random_key_bytes` already established avoids
+/// adding a `rand`/`getrandom` dependency here too.
+pub fn generate_lan_keypair(seed: [u8; 32]) -> ([u8; 32], [u8; 32]) {
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
+    (signing_key.verifying_key().to_bytes(), seed)
+}
+
+/// Sign a jekt with the sending agent's own LAN private key (read from its
+/// `AGENTMUX_LAN_KEY` process env var, mirroring `sign_jekt`'s
+/// `AGENTMUX_JEKT_KEY` — called client-side, inside `agentmux-mcp`, never
+/// server-side). `private_key` must be exactly 32 bytes (the seed
+/// `generate_lan_keypair` produced) — returns `None` on any other length
+/// rather than panicking, same "missing/malformed key must never block
+/// sending" policy `sign_jekt`'s callers already rely on.
+pub fn sign_lan_jekt(
+    private_key: &[u8],
+    msgid: &str,
+    source_agent: &str,
+    target_agent: &str,
+    ts_secs: i64,
+    message: &str,
+) -> Option<String> {
+    let seed: [u8; 32] = private_key.try_into().ok()?;
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
+    let material = signed_material(msgid, source_agent, target_agent, ts_secs, message);
+    let signature = ed25519_dalek::Signer::sign(&signing_key, material.as_bytes());
+    Some(BASE64.encode(signature.to_bytes()))
+}
+
+/// Verify a claimed LAN signature against the claimed sender's public key
+/// (looked up server-side by `source_agent`, over the LAN peer-lookup RPC —
+/// see `LanDiscovery::find_agent_lan_pubkey`). Returns `false` (never
+/// panics) for a malformed public key, malformed base64, a
+/// malformed/wrong-length signature, or a signature that simply doesn't
+/// verify — same "treat all of these identically as not verified" policy
+/// `verify_reagent_jekt` already documents.
+pub fn verify_lan_jekt(
+    public_key: &[u8],
+    msgid: &str,
+    source_agent: &str,
+    target_agent: &str,
+    ts_secs: i64,
+    message: &str,
+    sig_b64: &str,
+) -> bool {
+    let Ok(pubkey_arr) = <[u8; 32]>::try_from(public_key) else { return false };
+    let Ok(verifying_key) = VerifyingKey::from_bytes(&pubkey_arr) else { return false };
     let Ok(sig_bytes) = BASE64.decode(sig_b64) else { return false };
     let Ok(sig_arr) = <[u8; 64]>::try_from(sig_bytes.as_slice()) else { return false };
     let signature = Signature::from_bytes(&sig_arr);
@@ -488,5 +573,117 @@ mod tests {
             "hello",
             "",
         ));
+    }
+
+    // ---- LAN-tier Ed25519 signing ----
+
+    fn lan_seed(byte: u8) -> [u8; 32] {
+        [byte; 32]
+    }
+
+    #[test]
+    fn lan_keypair_is_deterministic_from_seed_and_public_differs_from_private() {
+        let (pub1, priv1) = generate_lan_keypair(lan_seed(3));
+        let (pub2, priv2) = generate_lan_keypair(lan_seed(3));
+        assert_eq!(pub1, pub2, "same seed must derive the same keypair");
+        assert_eq!(priv1, priv2);
+        assert_ne!(pub1, priv1, "public and private halves must differ");
+    }
+
+    #[test]
+    fn different_seeds_give_different_keypairs() {
+        let (pub_a, _) = generate_lan_keypair(lan_seed(1));
+        let (pub_b, _) = generate_lan_keypair(lan_seed(2));
+        assert_ne!(pub_a, pub_b);
+    }
+
+    #[test]
+    fn a_correctly_signed_lan_message_verifies() {
+        let (public_key, private_key) = generate_lan_keypair(lan_seed(5));
+        let sig = sign_lan_jekt(&private_key, "msg-1", "agentx", "agenty", 1_000, "hello").unwrap();
+        assert!(verify_lan_jekt(&public_key, "msg-1", "agentx", "agenty", 1_000, "hello", &sig));
+    }
+
+    #[test]
+    fn lan_wrong_key_fails_verification() {
+        let (_, private_key) = generate_lan_keypair(lan_seed(5));
+        let sig = sign_lan_jekt(&private_key, "msg-1", "agentx", "agenty", 1_000, "hello").unwrap();
+        let (other_public, _) = generate_lan_keypair(lan_seed(9));
+        assert!(!verify_lan_jekt(&other_public, "msg-1", "agentx", "agenty", 1_000, "hello", &sig));
+    }
+
+    #[test]
+    fn lan_tampered_message_fails_verification() {
+        let (public_key, private_key) = generate_lan_keypair(lan_seed(5));
+        let sig = sign_lan_jekt(&private_key, "msg-1", "agentx", "agenty", 1_000, "hello").unwrap();
+        assert!(!verify_lan_jekt(&public_key, "msg-1", "agentx", "agenty", 1_000, "goodbye", &sig));
+    }
+
+    #[test]
+    fn lan_tampered_claimed_sender_fails_verification() {
+        // Same signature, different claimed source_agent — binding sender
+        // into the signed material means a captured signature can't be
+        // reattributed to a different identity.
+        let (public_key, private_key) = generate_lan_keypair(lan_seed(5));
+        let sig = sign_lan_jekt(&private_key, "msg-1", "agentx", "agenty", 1_000, "hello").unwrap();
+        assert!(!verify_lan_jekt(&public_key, "msg-1", "someoneelse", "agenty", 1_000, "hello", &sig));
+    }
+
+    #[test]
+    fn lan_signing_with_wrong_length_key_returns_none_not_panics() {
+        assert!(sign_lan_jekt(&[1u8; 16], "msg-1", "agentx", "agenty", 1_000, "hello").is_none());
+        assert!(sign_lan_jekt(&[], "msg-1", "agentx", "agenty", 1_000, "hello").is_none());
+    }
+
+    #[test]
+    fn lan_verify_with_wrong_length_public_key_fails_not_panics() {
+        let (_, private_key) = generate_lan_keypair(lan_seed(5));
+        let sig = sign_lan_jekt(&private_key, "msg-1", "agentx", "agenty", 1_000, "hello").unwrap();
+        assert!(!verify_lan_jekt(&[1u8; 16], "msg-1", "agentx", "agenty", 1_000, "hello", &sig));
+    }
+
+    #[test]
+    fn lan_verify_with_malformed_base64_signature_fails_not_panics() {
+        let (public_key, _) = generate_lan_keypair(lan_seed(5));
+        assert!(!verify_lan_jekt(
+            &public_key,
+            "msg-1",
+            "agentx",
+            "agenty",
+            1_000,
+            "hello",
+            "not-valid-base64!!",
+        ));
+    }
+
+    #[test]
+    fn lan_verify_with_wrong_length_signature_fails_not_panics() {
+        let (public_key, _) = generate_lan_keypair(lan_seed(5));
+        assert!(!verify_lan_jekt(
+            &public_key,
+            "msg-1",
+            "agentx",
+            "agenty",
+            1_000,
+            "hello",
+            "dG9vc2hvcnQ=", // "tooshort" base64 — decodes fine, wrong length
+        ));
+    }
+
+    #[test]
+    fn lan_verify_with_empty_signature_fails_not_panics() {
+        let (public_key, _) = generate_lan_keypair(lan_seed(5));
+        assert!(!verify_lan_jekt(&public_key, "msg-1", "agentx", "agenty", 1_000, "hello", ""));
+    }
+
+    #[test]
+    fn a_lan_signature_does_not_verify_against_reagent_or_host_schemes() {
+        // Cross-scheme confusion check: a LAN Ed25519 signature must not be
+        // mistakable for anything the HMAC verifier would accept (different
+        // algorithm entirely, so this is really just documenting the type
+        // boundary — verify_jekt takes a raw HMAC key, not an Ed25519 one).
+        let (_, private_key) = generate_lan_keypair(lan_seed(5));
+        let sig = sign_lan_jekt(&private_key, "msg-1", "agentx", "agenty", 1_000, "hello").unwrap();
+        assert!(!verify_jekt(&private_key, "msg-1", "agentx", "agenty", 1_000, "hello", &sig));
     }
 }

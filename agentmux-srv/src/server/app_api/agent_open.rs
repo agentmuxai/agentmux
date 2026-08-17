@@ -54,6 +54,17 @@ fn resolve_vendor_env_override(
         .map(|var| (var, agent.model_vendor_base_url.clone()))
 }
 
+// resolve_effective_provider_id (and its store-lookup helper) moved to
+// Store::resolve_effective_provider_id in backend/storage/agents.rs
+// (2026-08-15) — the identical resolution logic was independently
+// duplicated in identity/resolver/inject.rs's layer-3 credential gate,
+// found reading agent.provider directly (the same wstore-vs-id_store
+// class of bug this file's own version was fixed for in round 3 of PR
+// #2587's review). Consolidated so both call sites share one
+// implementation and can't drift on it separately again — see that
+// method's own doc comment for the full history and the tests that
+// moved with it.
+
 #[cfg(test)]
 mod resolve_vendor_env_override_tests {
     use super::*;
@@ -88,6 +99,7 @@ mod resolve_vendor_env_override_tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: model_vendor_base_url.to_string(),
+            memory_id: String::new(),
         }
     }
 
@@ -149,10 +161,18 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // 1. Load the agent definition (by id or name)
                 let agents = wstore.agent_def_list()
                     .map_err(|e| format!("agent.open: {e}"))?;
-                let agent = agents.iter()
+                let mut agent = agents.iter()
                     .find(|a| a.id == cmd.agent_id || a.name.eq_ignore_ascii_case(&cmd.agent_id))
                     .ok_or_else(|| format!("AGENT_NOT_FOUND: no agent definition with id '{}'", cmd.agent_id))?
                     .clone();
+
+                // Shadow `agent.provider` with the bound ABF bundle's copy,
+                // the readonly-once-set source of truth (see
+                // Store::resolve_effective_provider_id's own doc comment
+                // in backend/storage/agents.rs) — one lookup here instead
+                // of rewriting every downstream `agent.provider` read in
+                // this handler. MUST be app_state.id_store, never wstore.
+                agent.provider = app_state.id_store.resolve_effective_provider_id(&agent);
 
                 // Serialize the rest of this handler per agent definition —
                 // held until the function returns (guard drops at every exit
@@ -748,42 +768,34 @@ pub(super) fn write_agent_config_files(
         }
     }
 
-    // Host-tier jekt sender signing key (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md
-    // §2.2) — inject AGENTMUX_JEKT_KEY into the agentmux MCP server's own env,
-    // right alongside AGENTMUX_AGENT_ID, so `SendMessage`/`Loop` can sign
-    // outgoing jekts as this agent. Ensured (minted on first use, reused after)
-    // via the same Store this function already has; never returned over any
-    // RPC, never written anywhere but this ONE agent's own process env and
-    // srv's own local table. Best-effort: a failure here must never block
-    // agent spawn — the agent still launches, just without a key, and its
-    // jekts render TRUST=self-declared instead of host-verified until the
-    // next successful spawn.
-    if let Ok(key) = wstore.agent_jekt_key_ensure(agent_slug) {
-        if let Some(pos) = config_files.iter().position(|f| f.filename == ".mcp.json") {
-            let key_b64 = {
-                use base64::Engine as _;
-                base64::engine::general_purpose::STANDARD.encode(&key)
-            };
-            match serde_json::from_str::<serde_json::Value>(&config_files[pos].content) {
-                Ok(mut mcp_json) => {
-                    if let Some(env) = mcp_json
-                        .pointer_mut("/mcpServers/agentmux/env")
-                        .and_then(|v| v.as_object_mut())
-                    {
-                        env.insert("AGENTMUX_JEKT_KEY".to_string(), serde_json::json!(key_b64));
-                        if let Ok(rewritten) = serde_json::to_string_pretty(&mcp_json) {
-                            config_files[pos].content = rewritten;
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        agent_id = %agent.id,
-                        error = %e,
-                        "agent_open: .mcp.json failed to parse — AGENTMUX_JEKT_KEY not injected, \
-                         this agent's jekts will render TRUST=self-declared instead of host-verified"
-                    );
-                }
+    // Host-tier + LAN-tier jekt sender signing keys
+    // (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2,
+    // SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.1) — inject
+    // AGENTMUX_JEKT_KEY / AGENTMUX_LAN_KEY into the agentmux MCP server's
+    // own env, right alongside AGENTMUX_AGENT_ID, so `SendMessage`/`Loop`
+    // can sign outgoing jekts as this agent. Best-effort: a failure here
+    // must never block agent spawn — the agent still launches, just
+    // without a key, and its jekts render TRUST=self-declared /
+    // TRUST=network-claimed instead of verified until the next successful
+    // materialization. Shared with `WriteAgentConfig`
+    // (server/editor_handlers.rs, the "click Launch" path) via
+    // `agent_config::inject_jekt_signing_keys_into_mcp_json` — see that
+    // function's doc comment for why this must not be duplicated inline
+    // again.
+    if let Some(pos) = config_files.iter().position(|f| f.filename == ".mcp.json") {
+        match crate::backend::agent_config::inject_jekt_signing_keys_into_mcp_json(
+            &config_files[pos].content,
+            &wstore,
+            agent_slug,
+        ) {
+            Some(rewritten) => config_files[pos].content = rewritten,
+            None => {
+                tracing::warn!(
+                    agent_id = %agent.id,
+                    "agent_open: jekt/LAN signing keys not injected into .mcp.json — \
+                     this agent's jekts will render TRUST=self-declared / TRUST=network-claimed \
+                     instead of verified"
+                );
             }
         }
     }
@@ -888,6 +900,7 @@ mod write_agent_config_files_tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         }
     }
 

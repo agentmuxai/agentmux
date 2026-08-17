@@ -7,8 +7,27 @@
 //! `instance_*` methods (per-launch instance rows, named-agent
 //! continuation, identity-bound active-for-block resolution), the
 //! `AgentDefinition` / `AgentInstance` structs, and the `InstanceStatus` enum.
-//! `db_agents` is the authoritative consolidated read table; `db_agent_definitions`
-//! and `db_agent_instances` remain the write targets with dual-write mirrors.
+//! `db_agent_definitions` and `db_agent_instances` remain the write targets
+//! with dual-write mirrors into `db_agents` (see `dual_write.rs`). The read
+//! side is **not** uniformly flipped to `db_agents` — it is decided per
+//! function, and the two states currently coexist on purpose:
+//!   - `agent_def_list()` reads the consolidated `db_agents` table (a
+//!     partial Phase 3b flip that landed undocumented alongside unrelated
+//!     work — see `ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md` §3.1's
+//!     2026-08-15 correction).
+//!   - `agent_def_get()` / `user_clone_defs_for_template()` deliberately
+//!     still read `db_agent_definitions` directly — `db_agents` surfaces
+//!     template-instance projection rows under the same shape as real
+//!     user-clone definitions, which these two callers must NOT see. See
+//!     each function's own doc comment.
+//!   - `instance_list()` / `instance_get()` and friends still read
+//!     `db_agent_instances` directly — Phase 3b has not touched the
+//!     instance side at all.
+//! Do not describe this as "Phase 3a" or "Phase 3b" as a single global
+//! state in a new comment; say which function you mean. See
+//! `docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`
+//! P4, and `agent_def_list_and_agent_def_get_read_different_tables_by_design`
+//! below for an executable check of the current split.
 
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
@@ -137,6 +156,19 @@ pub struct AgentDefinition {
     /// docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md.
     #[serde(default)]
     pub auto_continue_enabled: i64,
+    /// The agent's own dedicated ABF bundle (`db_bundles.id`). Distinct from
+    /// `AgentInstance.memory_id` (a specific *launch*'s bundle, which can
+    /// still be pointed at a different bundle on purpose — this is just the
+    /// default a launch inherits when it doesn't override). Empty string =
+    /// not yet provisioned (legacy row predating this field, or a definition
+    /// awaiting `m0021`'s backfill). Deliberately NOT dual-written into
+    /// `db_agents` (see `dual_write.rs`'s module doc and
+    /// ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.1) — that table's
+    /// own `memory_id` column is instance-only by existing convention, and
+    /// this field predates Phase 3b (the reader flip that would need a
+    /// decision about how the two interact). Schema v19.
+    #[serde(default)]
+    pub memory_id: String,
 }
 
 /// Derive a filesystem-safe slug from a display name. Lowercase,
@@ -319,7 +351,7 @@ impl Store {
                     agent_type, environment, agent_bus_id, is_seeded,
                     accounts, parent_id, branch_label, updated_at,
                     user_hidden, container_image, container_volumes, container_name,
-                    use_ambient_login, model_vendor_base_url, auto_continue_enabled
+                    use_ambient_login, model_vendor_base_url, auto_continue_enabled, memory_id
              FROM db_agent_definitions
              WHERE is_seeded = 0 AND parent_id = ?1
              ORDER BY updated_at DESC, created_at DESC",
@@ -380,7 +412,7 @@ impl Store {
                     agent_type, environment, agent_bus_id, is_seeded,
                     accounts, parent_id, branch_label, updated_at,
                     user_hidden, container_image, container_volumes, container_name,
-                    use_ambient_login, model_vendor_base_url, auto_continue_enabled
+                    use_ambient_login, model_vendor_base_url, auto_continue_enabled, memory_id
              FROM db_agent_definitions
              WHERE id = ?1",
         )?;
@@ -402,7 +434,8 @@ impl Store {
                         agent_type, environment, agent_bus_id, is_seeded,
                         accounts, parent_template_id, branch_label, updated_at,
                         user_hidden, container_image, container_volumes, container_name,
-                        use_ambient_login, model_vendor_base_url, auto_continue_enabled
+                        use_ambient_login, model_vendor_base_url, auto_continue_enabled,
+                        default_memory_id
                  FROM db_agents
                  ORDER BY updated_at DESC, created_at ASC",
             )?;
@@ -443,8 +476,26 @@ impl Store {
             // documented for. Preserve the local row's value when one
             // exists; only a truly cross-channel agent (no local row) sees
             // the empty default. (reagent P0 on PR #2505.)
+            //
+            // memory_id needs the IDENTICAL treatment, for the identical
+            // reason (P0 fix, ReAgent review on PR #2587 round 6):
+            // DefinitionRecordV1 doesn't carry memory_id either (same
+            // documented gap, def_registry_mirror.rs), so
+            // record_to_agent_definition always returns "" for it too.
+            // Every local write auto-mirrors into the global registry
+            // (agent_def_insert -> registry_def_upsert), so this overlay
+            // fires for virtually every agent whenever a shared store is
+            // configured — the "normal case," not an edge case. Without
+            // this fix, agent_def_list() would silently zero memory_id on
+            // every read, defeating agent_open.rs's spawn-time bundle
+            // resolution (falls back to the driftable agent.provider
+            // instead of the immutable bundle) and m0021's own
+            // memory_id-empty backfill filter (which would re-process
+            // every already-bound agent on every migration run, since it
+            // reads through this same function).
             if let Some(existing) = by_id.get(&def.id) {
                 def.model_vendor_base_url = existing.model_vendor_base_url.clone();
+                def.memory_id = existing.memory_id.clone();
             }
             by_id.insert(def.id.clone(), def);
         }
@@ -582,9 +633,9 @@ impl Store {
              idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
              is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden,
              container_image, container_volumes, container_name, use_ambient_login,
-             model_vendor_base_url, auto_continue_enabled)
+             model_vendor_base_url, auto_continue_enabled, memory_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
+                     ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
             params![
                 agent.id,
                 agent.slug,
@@ -623,6 +674,7 @@ impl Store {
                 agent.use_ambient_login,
                 agent.model_vendor_base_url,
                 agent.auto_continue_enabled,
+                agent.memory_id,
             ],
         )?;
         // Persist the stamped updated_at before we leave the lock so the
@@ -748,7 +800,7 @@ impl Store {
                         agent_type, environment, agent_bus_id, is_seeded,
                         accounts, parent_id, branch_label, updated_at,
                         user_hidden, container_image, container_volumes, container_name,
-                        use_ambient_login, model_vendor_base_url, auto_continue_enabled
+                        use_ambient_login, model_vendor_base_url, auto_continue_enabled, memory_id
                  FROM db_agent_definitions
                  WHERE (lower(trim(name)) = ?1 OR slug = ?2)
                    AND is_seeded = 0
@@ -798,10 +850,10 @@ impl Store {
                     idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
                     is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden,
                     container_image, container_volumes, container_name, use_ambient_login,
-                    model_vendor_base_url, auto_continue_enabled)
+                    model_vendor_base_url, auto_continue_enabled, memory_id)
                  VALUES
                    (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
+                    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
                 params![
                     agent.id, agent.slug, agent.name, agent.icon, agent.provider,
                     agent.description, agent.working_directory, agent.shell,
@@ -815,6 +867,7 @@ impl Store {
                     agent.use_ambient_login,
                     agent.model_vendor_base_url,
                     agent.auto_continue_enabled,
+                    agent.memory_id,
                 ],
             )?;
             agent.created_at
@@ -890,6 +943,262 @@ impl Store {
             }
         }
         Ok(rows > 0)
+    }
+
+    /// Set `memory_id` on a LOCAL agent definition — but only if it's
+    /// currently empty. Exists because `agent_def_update`'s SET clause
+    /// deliberately never touches this column (readonly-after-creation, see
+    /// its own field doc comment) — this is the one narrow, explicit path
+    /// allowed to set it, and only the FIRST time, for `m0021`'s backfill
+    /// and definition-time provisioning to use. Returns `Ok(true)` if the
+    /// row existed and had an empty `memory_id` (write applied), `Ok(false)`
+    /// if the row doesn't exist locally OR already has a non-empty value
+    /// (no-op, not an error — matches the "set once" semantic silently
+    /// rather than requiring every caller to pre-check).
+    ///
+    /// LOCAL ONLY, deliberately — a cross-channel (global-registry-only)
+    /// definition can't be reached this way today because
+    /// `DefinitionRecordV1` doesn't carry `memory_id` yet (same accepted gap
+    /// as `model_vendor_base_url`, see `def_registry_mirror.rs`). Callers
+    /// backfilling across the whole agent population must check
+    /// `agent_def_get_local_only` first and skip (with a log) anything that
+    /// only resolves via the global registry.
+    pub fn agent_def_set_memory_id_if_empty(
+        &self,
+        id: &str,
+        memory_id: &str,
+    ) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "UPDATE db_agent_definitions SET memory_id = ?1 WHERE id = ?2 AND memory_id = ''",
+            params![memory_id, id],
+        )?;
+        if rows > 0 {
+            // Mirror into db_agents' SEPARATE default_memory_id column (see
+            // its own CREATE TABLE comment) so agent_def_list — which reads
+            // from db_agents, not db_agent_definitions — sees the binding
+            // too. Same secondary-mirror pattern as agent_def_set_hidden
+            // just above. Best-effort: a mirror failure here would leave
+            // db_agents transiently stale, same posture as that function's
+            // own error handling (log + continue, not fail the caller).
+            if let Err(e) = conn.execute(
+                "UPDATE db_agents SET default_memory_id = ?1 WHERE id = ?2",
+                params![memory_id, id],
+            ) {
+                tracing::error!(
+                    id = %id,
+                    memory_id = %memory_id,
+                    error = %e,
+                    "db_agents dual-write: default_memory_id mirror failed",
+                );
+            }
+        }
+        Ok(rows > 0)
+    }
+
+    /// The provider's default vendor, or `"custom"` when the agent has a
+    /// non-empty `model_vendor_base_url` override — same rule the
+    /// frontend's `resolveEffectiveVendor`
+    /// (`frontend/app/view/agent/providers/catalog.ts`) already uses for
+    /// the dual-icon vendor badge. Falls back to the provider id itself
+    /// if the provider isn't in the registry (e.g. a stale/custom
+    /// provider string), same fallback the frontend uses.
+    ///
+    /// P2 fix (2026-08-15, Codex review on PR #2587): `bundle_provision_
+    /// for_new_agent` used to ignore `model_vendor_base_url` entirely and
+    /// always pick the provider's bare default — a Claude agent pointed
+    /// at a custom endpoint got an immutable bundle claiming
+    /// `model="anthropic"`, permanently wrong once
+    /// `check_provider_model_immutable` locks it in.
+    pub(crate) fn resolve_effective_vendor(provider: &str, model_vendor_base_url: &str) -> String {
+        if !model_vendor_base_url.trim().is_empty() {
+            return "custom".to_string();
+        }
+        crate::backend::providers::get_provider(provider)
+            .and_then(|p| p.supported_vendors.first().copied())
+            .unwrap_or(provider)
+            .to_string()
+    }
+
+    /// Resolve the effective harness/provider id for `agent`, preferring
+    /// its bound ABF bundle's copy over the agent's own `provider`
+    /// column. The bundle is the readonly-once-set source of truth
+    /// (`ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md` §7.4.1):
+    /// `AgentDefinition.provider` can still drift after creation via
+    /// `agent.define`'s `if_exists=update` path, while the bundle's own
+    /// copy cannot (backend-enforced in `bundle.upsert`, see
+    /// `check_provider_model_immutable`). Falls back to `agent.provider`
+    /// when there's no bundle to consult (unbound legacy agent, missing
+    /// row, or an empty `provider` on the bundle itself) — a caller
+    /// never hard-fails on this alone.
+    ///
+    /// **Call this on the EFFECTIVE identity/memory store
+    /// (`AppState.id_store`), never on the per-channel `wstore` directly**
+    /// — the bundle lives in the shared store when one is configured (the
+    /// normal case), so a `wstore` lookup silently returns the fallback
+    /// every time in that configuration. See
+    /// `bundle_provision_for_new_agent`'s own doc comment for the write-
+    /// side half of this same rule.
+    ///
+    /// Consolidated here (2026-08-15) after the identical resolution
+    /// logic was independently duplicated in `agent_open.rs`'s spawn path
+    /// and found to have the exact same wstore-vs-id_store mistake twice
+    /// in review (rounds 3 and, for a second call site,
+    /// `identity/resolver/inject.rs`'s layer-3 credential gate, found in
+    /// a later scoping pass — not by an automated review this time). One
+    /// shared implementation both consumers call means they can't drift
+    /// on this resolution independently again.
+    pub fn resolve_effective_provider_id(&self, agent: &AgentDefinition) -> String {
+        if agent.memory_id.is_empty() {
+            return agent.provider.clone();
+        }
+        match self.bundle_memory_get(&agent.memory_id) {
+            Ok(Some(b)) if !b.provider.is_empty() => b.provider,
+            _ => agent.provider.clone(),
+        }
+    }
+
+    /// Provision a fresh, dedicated ABF bundle for a NEW agent definition —
+    /// the definition-time half of
+    /// `docs/specs/ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md` §3.2
+    /// (m0021 is the backfill half, for agents that already existed before
+    /// this shipped). Callers pass the not-yet-inserted `AgentDefinition`
+    /// so its already-known `provider` (harness) carries straight onto the
+    /// bundle — unlike `m0021`'s backfill, which can't just hardcode
+    /// `claude`/`anthropic` for a legacy agent's unknown-at-migration-time
+    /// harness, a brand-new agent's harness is already a required field at
+    /// this point, so there's no need to guess.
+    ///
+    /// **Call this on the EFFECTIVE identity/memory store
+    /// (`AppState.id_store`), never on the per-channel `wstore` directly.**
+    /// Bundles live in the shared store when one is configured (the normal
+    /// case) — every real bundle-read path (`listmemories`/`getmemory`/
+    /// the Armory editor/the bundle-summary panel) reads through
+    /// `id_store`, so a bundle created via `wstore.bundle_memory_upsert`
+    /// directly would be written to a different SQLite file and be
+    /// invisible everywhere else (P1 finding, Codex review on PR #2587,
+    /// live in the shipped code this fixes: `agent_def_provision_and_
+    /// bind_bundle`'s callers all used to invoke this method ON `wstore`).
+    ///
+    /// Does NOT mutate `agent` or touch `db_agent_definitions` — returns
+    /// the new bundle's id; callers set `agent.memory_id` themselves before
+    /// their own insert (so the existing `agent_def_insert*` INSERT
+    /// statements, which already include `memory_id`, pick it up with no
+    /// separate write).
+    pub fn bundle_provision_for_new_agent(
+        &self,
+        agent: &AgentDefinition,
+        now: i64,
+    ) -> Result<String, StoreError> {
+        let vendor = Self::resolve_effective_vendor(&agent.provider, &agent.model_vendor_base_url);
+        let bundle_id = uuid::Uuid::new_v4().to_string();
+        let name = self.resolve_unique_bundle_name(&format!("{} — ABF", agent.name))?;
+        let bundle = super::memory_bundles::Memory {
+            id: bundle_id.clone(),
+            name,
+            description: String::new(),
+            is_blank: false,
+            is_global: false,
+            provider: agent.provider.clone(),
+            model: vendor,
+            instructions: String::new(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: now,
+            updated_at: now,
+        };
+        self.bundle_memory_upsert(&bundle)?;
+        Ok(bundle_id)
+    }
+
+    /// Resolve a `db_bundles.name` guaranteed not to collide with an
+    /// existing row — that column is `TEXT NOT NULL UNIQUE`, but only
+    /// `AgentDefinition.slug` is guaranteed unique, not the display
+    /// `name`, so a naive `"{agent.name} — ABF"` collides whenever two
+    /// agents share a display name. Appends a numeric suffix on
+    /// collision, same shape `agent_def_insert_local_only` already uses
+    /// for slug collisions.
+    ///
+    /// P1 fix (2026-08-15, ReAgent review on PR #2587 round 4): before
+    /// this, a collision here silently left a runtime-provisioned agent
+    /// unbound (the caller's best-effort error handling swallowed it) and
+    /// — worse — unconditionally ABORTED `m0021`'s entire backfill loop
+    /// via `?` on the very first collision, permanently stalling backfill
+    /// for every agent processed after it, on every subsequent boot,
+    /// until the underlying name collision was manually resolved.
+    pub(crate) fn resolve_unique_bundle_name(&self, base_name: &str) -> Result<String, StoreError> {
+        let existing_names: std::collections::HashSet<String> =
+            self.bundle_memory_list()?.into_iter().map(|b| b.name).collect();
+        if !existing_names.contains(base_name) {
+            return Ok(base_name.to_string());
+        }
+        let mut n: u32 = 2;
+        loop {
+            let candidate = format!("{base_name} ({n})");
+            if !existing_names.contains(&candidate) {
+                return Ok(candidate);
+            }
+            n += 1;
+        }
+    }
+
+    /// Provision + bind a fresh bundle to an ALREADY-INSERTED agent
+    /// definition — the two-step, post-insert counterpart to
+    /// `bundle_provision_for_new_agent` above. Deliberately separate from
+    /// the insert itself (rather than setting `memory_id` on the struct
+    /// before calling `agent_def_insert*`/`agent_def_find_or_insert`):
+    /// `agent_def_find_or_insert` in particular uses its `AgentDefinition`
+    /// argument as BOTH the lookup key and the conditional-insert payload,
+    /// so a bundle built up-front would go to waste (leaked, unbound) on
+    /// every `if_exists=skip`/`update` call against an already-existing
+    /// name — and `agent.define` is meant to be called repeatedly/
+    /// idempotently. Binding after the fact, only once the caller has
+    /// confirmed a row was genuinely freshly inserted, avoids that leak.
+    ///
+    /// Best-effort by design (matches `createagent`'s own color-assignment
+    /// comment: a failure here shouldn't fail agent creation) — logs and
+    /// returns on either step's failure rather than propagating, since the
+    /// agent row itself is already durably committed by the time this
+    /// runs, and a still-unbound agent is exactly the pre-existing
+    /// `memory_id=''` state `m0021` already knows how to backfill later.
+    ///
+    /// Takes `&mut AgentDefinition` and writes the new bundle id back into
+    /// `agent.memory_id` on success — same "caller's struct reflects what
+    /// landed" convention `agent_def_update` documents just below — so RPC
+    /// handlers that serialize `agent` straight back to the caller (e.g.
+    /// `createagent`, `importagentfromclaw`) return the real value instead
+    /// of the empty string the struct held before this call.
+    ///
+    /// `self` (the definition store, i.e. `wstore`) and `bundle_store`
+    /// (the effective identity/memory store, i.e. `AppState.id_store`) are
+    /// deliberately two SEPARATE parameters, not the same store used for
+    /// both writes — see `bundle_provision_for_new_agent`'s own doc
+    /// comment for why (P1 fix, Codex review on PR #2587: they used to be
+    /// the same store, silently writing every provisioned bundle
+    /// somewhere the rest of the app can't see it).
+    pub fn agent_def_provision_and_bind_bundle(
+        &self,
+        bundle_store: &Store,
+        agent: &mut AgentDefinition,
+        now: i64,
+    ) {
+        let bundle_id = match bundle_store.bundle_provision_for_new_agent(agent, now) {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::warn!(agent_id = %agent.id, error = %e, "agent_def_provision_and_bind_bundle: bundle create failed (non-fatal)");
+                return;
+            }
+        };
+        match self.agent_def_set_memory_id_if_empty(&agent.id, &bundle_id) {
+            Ok(true) => agent.memory_id = bundle_id,
+            Ok(false) => {}
+            Err(e) => {
+                tracing::warn!(agent_id = %agent.id, bundle_id = %bundle_id, error = %e, "agent_def_provision_and_bind_bundle: bind failed (non-fatal)");
+            }
+        }
     }
 
     /// Update an existing agent definition (all fields except id, created_at, is_seeded, `parent_id`).
@@ -2146,7 +2455,56 @@ fn map_agent_definition_row(row: &rusqlite::Row) -> rusqlite::Result<AgentDefini
         use_ambient_login: row.get(25)?,
         model_vendor_base_url: row.get(26)?,
         auto_continue_enabled: row.get(27)?,
+        memory_id: row.get(28)?,
     })
+}
+
+/// Shared test fixture: an `AgentDefinition` with every field defaulted to
+/// an empty/zero value except the ones callers actually vary. Both
+/// `tests::bare_agent_def` and `bundle_provisioning_store_separation_tests
+/// ::base_agent` used to hardcode this 30-field struct literal
+/// independently (reagentx P2 on PR #2602) — kept as one definition here so
+/// a future field addition only needs updating once.
+#[cfg(test)]
+fn test_agent_def(
+    id: &str,
+    name: &str,
+    provider: &str,
+    agent_type: &str,
+    timestamp: i64,
+    model_vendor_base_url: &str,
+) -> AgentDefinition {
+    AgentDefinition {
+        id: id.to_string(),
+        slug: id.to_string(),
+        name: name.to_string(),
+        icon: String::new(),
+        provider: provider.to_string(),
+        description: String::new(),
+        working_directory: String::new(),
+        shell: String::new(),
+        provider_flags: String::new(),
+        auto_start: 0,
+        restart_on_crash: 0,
+        idle_timeout_minutes: 0,
+        created_at: timestamp,
+        agent_type: agent_type.to_string(),
+        environment: String::new(),
+        agent_bus_id: String::new(),
+        is_seeded: 0,
+        accounts: String::new(),
+        parent_id: String::new(),
+        branch_label: String::new(),
+        updated_at: timestamp,
+        user_hidden: 0,
+        container_image: String::new(),
+        container_volumes: "[]".to_string(),
+        container_name: String::new(),
+        use_ambient_login: 0,
+        model_vendor_base_url: model_vendor_base_url.to_string(),
+        auto_continue_enabled: 0,
+        memory_id: String::new(),
+    }
 }
 
 #[cfg(test)]
@@ -2420,5 +2778,325 @@ mod tests {
             local.updated_at, 42,
             "backfilled row must preserve the registry's real updated_at, not reset to created_at"
         );
+    }
+
+    fn bare_agent_def(id: &str, name: &str) -> AgentDefinition {
+        super::test_agent_def(id, name, "claude", "standalone", 1, "")
+    }
+
+    /// Pins down the module doc's claimed read-side split (this file's
+    /// header comment, plus `OBJECT_SCHEMA_VERSION`'s v4 entry and
+    /// `dual_write.rs`'s module doc) as an executable check, per
+    /// `SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`
+    /// P4: migration-phase state must be verifiable, not just a comment
+    /// someone has to remember to update. Builds two rows that exist in
+    /// only ONE of the two tables each (bypassing the normal
+    /// `agent_def_insert` path, which always keeps both in sync) and
+    /// proves `agent_def_list()` and `agent_def_get()` disagree about
+    /// which table is authoritative, on purpose. If this test starts
+    /// failing, one of the two functions' read target changed — go
+    /// update the three comments this test is guarding, not just this
+    /// assertion.
+    #[test]
+    fn agent_def_list_and_agent_def_get_read_different_tables_by_design() {
+        let store = Store::open_in_memory().unwrap();
+
+        // Exists ONLY in the consolidated `db_agents` table (as if some
+        // write path populated it without touching the legacy table —
+        // agent_def_list()'s actual read target).
+        store
+            .agents_dual_write_definition_upsert(&bare_agent_def("only-in-db-agents", "OnlyConsolidated"))
+            .unwrap();
+
+        // Exists ONLY in the legacy `db_agent_definitions` table — a raw
+        // insert bypassing `agent_def_insert`'s automatic dual-write,
+        // standing in for agent_def_get()'s actual read target.
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "INSERT INTO db_agent_definitions (id, slug, name, icon, provider, description,
+                 working_directory, shell, provider_flags, auto_start, restart_on_crash,
+                 idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
+                 is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden,
+                 container_image, container_volumes, container_name, use_ambient_login,
+                 model_vendor_base_url, auto_continue_enabled, memory_id)
+                 VALUES ('only-in-legacy', 'only-in-legacy', 'OnlyLegacy', '', 'claude', '',
+                 '', '', '', 0, 0, 0, 1, 'standalone', '', '', 0, '', '', '', 1, 0, '', '[]', '',
+                 0, '', 0, '')",
+                [],
+            )
+            .unwrap();
+        }
+
+        let listed = store.agent_def_list().unwrap();
+        assert!(
+            listed.iter().any(|d| d.id == "only-in-db-agents"),
+            "agent_def_list() must read db_agents"
+        );
+        assert!(
+            !listed.iter().any(|d| d.id == "only-in-legacy"),
+            "agent_def_list() must NOT see a db_agent_definitions-only row \
+             (documents the current partial-flip state — fails if this ever \
+             also starts overlaying the legacy table)"
+        );
+
+        assert!(
+            store.agent_def_get("only-in-legacy").unwrap().is_some(),
+            "agent_def_get() must still read db_agent_definitions directly"
+        );
+        assert!(
+            store.agent_def_get("only-in-db-agents").unwrap().is_none(),
+            "agent_def_get() must NOT see a db_agents-only row — it \
+             deliberately avoids the consolidated table's template-instance \
+             projection rows (see its own doc comment)"
+        );
+    }
+}
+
+// P1/P2 fixes (Codex + ReAgent review on PR #2587):
+// - bundle_provision_for_new_agent/agent_def_provision_and_bind_bundle must
+//   write the bundle into an explicitly-passed store, never assume the
+//   caller's own definition store IS the bundle store — the two are
+//   different databases whenever a shared store is configured.
+// - resolve_effective_vendor must respect model_vendor_base_url ("custom"),
+//   not just the provider's bare default.
+#[cfg(test)]
+mod bundle_provisioning_store_separation_tests {
+    use super::*;
+
+    fn base_agent(id: &str, name: &str, provider: &str, model_vendor_base_url: &str) -> AgentDefinition {
+        super::test_agent_def(id, name, provider, "host", 0, model_vendor_base_url)
+    }
+
+    #[test]
+    fn resolve_effective_vendor_defaults_to_the_providers_first_supported_vendor() {
+        assert_eq!(Store::resolve_effective_vendor("claude", ""), "anthropic");
+        assert_eq!(Store::resolve_effective_vendor("codex", ""), "openai");
+    }
+
+    #[test]
+    fn resolve_effective_vendor_returns_custom_when_a_base_url_override_is_set() {
+        assert_eq!(
+            Store::resolve_effective_vendor("claude", "https://my-proxy.example.com"),
+            "custom",
+            "an agent with a vendor override must not claim the provider's default vendor"
+        );
+    }
+
+    #[test]
+    fn resolve_effective_vendor_ignores_a_whitespace_only_override() {
+        assert_eq!(Store::resolve_effective_vendor("claude", "   "), "anthropic");
+    }
+
+    #[test]
+    fn resolve_effective_vendor_falls_back_to_the_provider_id_for_an_unknown_provider() {
+        assert_eq!(Store::resolve_effective_vendor("not-a-real-provider", ""), "not-a-real-provider");
+    }
+
+    #[test]
+    fn bundle_provision_for_new_agent_writes_into_whichever_store_its_called_on() {
+        let bundle_store = Store::open_in_memory().unwrap();
+        let agent = base_agent("a1", "Agent One", "claude", "");
+        let bundle_id = bundle_store.bundle_provision_for_new_agent(&agent, 0).unwrap();
+        assert!(bundle_store.bundle_memory_get(&bundle_id).unwrap().is_some());
+    }
+
+    #[test]
+    fn bundle_provision_for_new_agent_respects_a_custom_vendor_override() {
+        let bundle_store = Store::open_in_memory().unwrap();
+        let agent = base_agent("a1", "Agent One", "claude", "https://my-proxy.example.com");
+        let bundle_id = bundle_store.bundle_provision_for_new_agent(&agent, 0).unwrap();
+        let bundle = bundle_store.bundle_memory_get(&bundle_id).unwrap().unwrap();
+        assert_eq!(bundle.provider, "claude");
+        assert_eq!(bundle.model, "custom");
+    }
+
+    // The core P1 regression test: definition_store (self) and bundle_store
+    // are two GENUINELY SEPARATE Store instances — proves
+    // agent_def_provision_and_bind_bundle writes the bundle into
+    // bundle_store specifically, never into whichever store the method
+    // happens to be called on for the definition side.
+    #[test]
+    fn agent_def_provision_and_bind_bundle_writes_the_bundle_into_the_explicit_bundle_store_not_self() {
+        let definition_store = Store::open_in_memory().unwrap();
+        let bundle_store = Store::open_in_memory().unwrap();
+        let mut agent = base_agent("a1", "Agent One", "claude", "");
+        definition_store.agent_def_insert(&mut agent).unwrap();
+
+        definition_store.agent_def_provision_and_bind_bundle(&bundle_store, &mut agent, 0);
+
+        assert!(!agent.memory_id.is_empty(), "caller's struct must reflect the bound bundle id");
+        let def = definition_store.agent_def_get(&agent.id).unwrap().unwrap();
+        assert_eq!(def.memory_id, agent.memory_id, "binding must land in the definition store (self)");
+
+        // The bundle itself must be absent from definition_store and
+        // present only in bundle_store.
+        assert!(
+            definition_store.bundle_memory_get(&agent.memory_id).unwrap().is_none(),
+            "bundle must NOT be written into the definition store"
+        );
+        assert!(
+            bundle_store.bundle_memory_get(&agent.memory_id).unwrap().is_some(),
+            "bundle must be reachable via the explicit bundle_store"
+        );
+    }
+
+    // P1 regression tests (ReAgent review on PR #2587 round 4):
+    // db_bundles.name is UNIQUE but only AgentDefinition.slug is
+    // guaranteed unique, not the display name two agents can share — a
+    // naive "{name} — ABF" used to collide, silently leaving a
+    // runtime-provisioned agent unbound and unconditionally aborting
+    // m0021's entire backfill loop on the first collision.
+
+    #[test]
+    fn resolve_unique_bundle_name_returns_the_base_name_when_no_collision() {
+        let store = Store::open_in_memory().unwrap();
+        assert_eq!(store.resolve_unique_bundle_name("Agent One — ABF").unwrap(), "Agent One — ABF");
+    }
+
+    #[test]
+    fn resolve_unique_bundle_name_disambiguates_on_collision() {
+        let store = Store::open_in_memory().unwrap();
+        let agent_a = base_agent("a1", "Same Name", "claude", "");
+        store.bundle_provision_for_new_agent(&agent_a, 0).unwrap();
+
+        let unique = store.resolve_unique_bundle_name("Same Name — ABF").unwrap();
+        assert_eq!(unique, "Same Name — ABF (2)");
+    }
+
+    #[test]
+    fn resolve_unique_bundle_name_walks_past_multiple_collisions() {
+        let store = Store::open_in_memory().unwrap();
+        store.bundle_provision_for_new_agent(&base_agent("a1", "Dup", "claude", ""), 0).unwrap();
+        // Directly seed the "(2)" slot too, so the resolver must walk to "(3)".
+        let taken = super::super::memory_bundles::Memory {
+            id: "taken-2".to_string(),
+            name: "Dup — ABF (2)".to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: false,
+            provider: String::new(),
+            model: String::new(),
+            instructions: String::new(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+        };
+        store.bundle_memory_upsert(&taken).unwrap();
+
+        let unique = store.resolve_unique_bundle_name("Dup — ABF").unwrap();
+        assert_eq!(unique, "Dup — ABF (3)");
+    }
+
+    #[test]
+    fn two_agents_with_the_same_display_name_both_get_bound_not_left_unbound_on_collision() {
+        let definition_store = Store::open_in_memory().unwrap();
+        let bundle_store = Store::open_in_memory().unwrap();
+        let mut agent_a = base_agent("a1", "Twin", "claude", "");
+        let mut agent_b = base_agent("a2", "Twin", "claude", "");
+        definition_store.agent_def_insert(&mut agent_a).unwrap();
+        definition_store.agent_def_insert(&mut agent_b).unwrap();
+
+        definition_store.agent_def_provision_and_bind_bundle(&bundle_store, &mut agent_a, 0);
+        definition_store.agent_def_provision_and_bind_bundle(&bundle_store, &mut agent_b, 0);
+
+        assert!(!agent_a.memory_id.is_empty(), "first same-named agent must still get bound");
+        assert!(!agent_b.memory_id.is_empty(), "second same-named agent must NOT be silently left unbound");
+        assert_ne!(agent_a.memory_id, agent_b.memory_id, "each agent still gets its own distinct bundle");
+    }
+
+    // resolve_effective_provider_id — consolidated shared implementation
+    // (was previously duplicated between agent_open.rs's spawn path and
+    // identity/resolver/inject.rs's layer-3 credential gate; the latter
+    // was found reading agent.provider directly during a follow-up
+    // scoping pass, the same class of bug agent_open.rs already had
+    // fixed for itself). These mirror agent_open.rs's own former
+    // `resolve_effective_provider_id_tests` module one-for-one, plus the
+    // store-separation case matching this file's other bundle-resolution
+    // tests.
+
+    #[test]
+    fn resolve_effective_provider_id_prefers_the_bundles_provider_over_a_drifted_agent_column() {
+        let store = Store::open_in_memory().unwrap();
+        let mut agent = base_agent("a1", "Agent One", "codex", "");
+        store.agent_def_insert(&mut agent).unwrap();
+        let bundle_id = store.bundle_provision_for_new_agent(&base_agent("a1", "Agent One", "claude", ""), 0).unwrap();
+        store.agent_def_set_memory_id_if_empty(&agent.id, &bundle_id).unwrap();
+        agent.memory_id = bundle_id;
+
+        // Simulates the exact drift this exists to correct: agent.define's
+        // if_exists=update path changed agent.provider (still "codex" on
+        // this in-memory struct) after creation, but the bundle's own
+        // copy ("claude") is backend-enforced immutable.
+        assert_eq!(store.resolve_effective_provider_id(&agent), "claude");
+    }
+
+    #[test]
+    fn resolve_effective_provider_id_falls_back_to_agent_provider_when_unbound() {
+        let store = Store::open_in_memory().unwrap();
+        let agent = base_agent("a1", "Agent One", "claude", "");
+        assert_eq!(store.resolve_effective_provider_id(&agent), "claude");
+    }
+
+    #[test]
+    fn resolve_effective_provider_id_falls_back_when_bundle_row_is_missing() {
+        let store = Store::open_in_memory().unwrap();
+        let mut agent = base_agent("a1", "Agent One", "claude", "");
+        agent.memory_id = "no-such-bundle".to_string();
+        assert_eq!(store.resolve_effective_provider_id(&agent), "claude");
+    }
+
+    // ReAgent review on PR #2592 round 3: dropped during the consolidation
+    // from agent_open.rs's former resolve_effective_provider_id_tests
+    // module despite the commit claiming a one-for-one move — restoring
+    // it here. The shared "blank" singleton and pre-§7 bundles have an
+    // empty `provider` column; must not shadow a real value with "".
+    #[test]
+    fn resolve_effective_provider_id_falls_back_when_bundle_provider_is_empty() {
+        let store = Store::open_in_memory().unwrap();
+        let mut agent = base_agent("a1", "Agent One", "claude", "");
+        // provider left empty ("") deliberately, unlike the other tests'
+        // bundle_provision_for_new_agent-built bundles.
+        let bundle = super::super::memory_bundles::Memory {
+            id: "bundle-empty-provider".to_string(),
+            name: "Empty Provider Bundle".to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: false,
+            provider: String::new(),
+            model: String::new(),
+            instructions: String::new(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+        };
+        store.bundle_memory_upsert(&bundle).unwrap();
+        agent.memory_id = "bundle-empty-provider".to_string();
+        assert_eq!(store.resolve_effective_provider_id(&agent), "claude");
+    }
+
+    // The core store-separation regression case: the bundle exists in ONE
+    // store but the method is called on a DIFFERENT one — proves the
+    // lookup only succeeds via the store it's actually called on, so a
+    // caller that mistakenly passes wstore instead of id_store gets the
+    // safe fallback rather than a silent, unexplained "wrong" answer.
+    #[test]
+    fn resolve_effective_provider_id_falls_back_when_called_on_the_wrong_store() {
+        let id_store = Store::open_in_memory().unwrap();
+        let wstore = Store::open_in_memory().unwrap();
+        let mut agent = base_agent("a1", "Agent One", "claude", "");
+        let bundle_id = id_store.bundle_provision_for_new_agent(&base_agent("a1", "Agent One", "codex", ""), 0).unwrap();
+        agent.memory_id = bundle_id;
+
+        assert_eq!(id_store.resolve_effective_provider_id(&agent), "codex", "must find it via the store it was actually provisioned into");
+        assert_eq!(wstore.resolve_effective_provider_id(&agent), "claude", "an unrelated store must fall back to agent.provider, not silently succeed");
     }
 }

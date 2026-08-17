@@ -257,12 +257,21 @@ pub fn migrate_promote_template_sessions_v1(
             // at the deterministic id. Field copies mirror
             // `agent_def_create_from_template`.
             let now = now_ms() as i64;
+            // Resolve through the template's own bound bundle when it has
+            // one, not the possibly-drifted `db_agent_definitions.provider`
+            // column directly (#2594, same pattern as
+            // `agent_def_create_from_template`/`forkagentdefinition`). Only
+            // `wstore` is available in this migration (no id_store/shared
+            // store handoff at this point in the boot sequence) — falls
+            // back to `template.provider` when the bundle isn't found via
+            // this store, same as it did before this fix.
+            let effective_provider = wstore.resolve_effective_provider_id(template);
             let mut new_def = crate::backend::storage::store::AgentDefinition {
                 id: promote_target_id.clone(),
                 slug: String::new(),
                 name: new_name.clone(),
                 icon: template.icon.clone(),
-                provider: template.provider.clone(),
+                provider: effective_provider,
                 description: template.description.clone(),
                 working_directory: String::new(),
                 shell: template.shell.clone(),
@@ -286,6 +295,7 @@ pub fn migrate_promote_template_sessions_v1(
                 use_ambient_login: 0,
                 model_vendor_base_url: template.model_vendor_base_url.clone(),
                 auto_continue_enabled: 0,
+                memory_id: String::new(),
             };
             if let Err(e) = wstore.agent_def_insert(&mut new_def) {
                 tracing::warn!(

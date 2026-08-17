@@ -42,6 +42,17 @@ wrap_client! {
             Some(AgentMuxRequestHandler::new(self.inner.clone()))
         }
 
+        fn context_menu_handler(&self) -> Option<ContextMenuHandler> {
+            // Browser panes only — see SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md.
+            // The main app client's own right-click menu is DOM-level
+            // (app.tsx's onContextMenu={showTextInputContextMenu}) and needs
+            // no CEF-level override.
+            if !self.is_browser_pane {
+                return None;
+            }
+            Some(AgentMuxContextMenuHandler::new(self.inner.clone()))
+        }
+
         fn drag_handler(&self) -> Option<DragHandler> {
             if self.is_browser_pane {
                 return None;
@@ -606,6 +617,37 @@ wrap_request_handler! {
             inner.on_auth_credentials(
                 browser, origin_url, is_proxy, host, port, realm, scheme, callback,
             )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ContextMenuHandler — browser panes only: suppress CEF's native menu
+// ---------------------------------------------------------------------------
+//
+// See client::context_menu::AgentMuxHandler::run_context_menu and
+// docs/specs/SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md. Only
+// `run_context_menu` is overridden; `on_before_context_menu` /
+// `on_context_menu_command` / `on_context_menu_dismissed` keep their default
+// (no-op) implementations — nothing to do there since we never let CEF's
+// menu model get used at all.
+
+wrap_context_menu_handler! {
+    struct AgentMuxContextMenuHandler {
+        inner: Arc<Mutex<AgentMuxHandler>>,
+    }
+
+    impl ContextMenuHandler {
+        fn run_context_menu(
+            &self,
+            browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            params: Option<&mut ContextMenuParams>,
+            _model: Option<&mut MenuModel>,
+            callback: Option<&mut RunContextMenuCallback>,
+        ) -> ::std::os::raw::c_int {
+            let mut inner = self.inner.lock();
+            inner.run_context_menu(browser, frame, params, callback)
         }
     }
 }

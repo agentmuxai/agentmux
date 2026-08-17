@@ -66,6 +66,15 @@ pub const COMMAND_TOOL_DECISION: &str = "tooldecision";
 /// No reply expected; the frontend does not await this call.
 pub const COMMAND_DOCK_NODE_STATUS: &str = "docknodestatus";
 
+/// Fire-and-forget push of a declared-background task's real terminal
+/// outcome, parsed client-side from its `<task-notification>` message.
+/// Mirrors into the durable `db_background_tasks` registry. Deliberately
+/// separate from `COMMAND_DOCK_NODE_STATUS` above — see
+/// `CommandBackgroundTaskCompletionData`'s doc comment for why reusing that
+/// one would corrupt `DockSnapshotCache`'s existing full-overwrite state.
+/// See docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md.
+pub const COMMAND_BACKGROUND_TASK_COMPLETION: &str = "backgroundtaskcompletion";
+
 // Subprocess agent commands
 pub const COMMAND_SUBPROCESS_SPAWN: &str = "subprocessspawn";
 pub const COMMAND_AGENT_INPUT: &str = "agentinput";
@@ -338,6 +347,14 @@ pub const COMMAND_BUNDLE_IMPORT_COMMIT: &str = "bundle.import.commit";
 // entry points that touch db_agent_native_memory.
 pub const COMMAND_BUNDLE_EXPORT_FOR_AGENT: &str = "bundle.export_for_agent";
 pub const COMMAND_BUNDLE_IMPORT_FOR_AGENT: &str = "bundle.import_for_agent";
+// SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md §3.3 —
+// deliberately separate from bundle.export_for_agent: a bundle is meant to
+// be shared/reused across agents and machines, while conversation history
+// is private, potentially large, and belongs to exactly one agent. This
+// is the explicit, opt-in action for the narrower case of actually moving
+// one agent's full record to another machine — never bundled into the
+// default export by default.
+pub const COMMAND_BUNDLE_EXPORT_FOR_AGENT_WITH_HISTORY: &str = "bundle.export_for_agent_with_history";
 // Structural ABF validator — Armory Bundle Format (ABF) UI-alignment pass.
 // Read-only: fetches the bundle and runs the pure bundle_validate module
 // against it, no Store writes.

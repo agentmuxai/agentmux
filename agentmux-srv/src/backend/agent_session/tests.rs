@@ -12,6 +12,7 @@ use super::zone_naming::{agent_archive_zone, validate_and_current};
 use crate::backend::obj::{Block, MetaMapType};
 use crate::backend::storage::filestore::{FileMeta, FileOpts, FileStore};
 use crate::backend::storage::store::Store;
+use crate::backend::storage::Memory;
 use std::path::Path;
 use std::sync::Arc;
 use tempfile::tempdir;
@@ -493,6 +494,7 @@ fn insert_template(
         use_ambient_login: 0,
         auto_continue_enabled: 0,
         model_vendor_base_url: String::new(),
+        memory_id: String::new(),
     };
     wstore.agent_def_insert(&mut def).unwrap();
     def
@@ -601,6 +603,57 @@ fn template_promote_clones_template_and_moves_zones() {
     // file compatibility — see the doc comment on
     // `TEMPLATE_PROMOTE_MARKER_V1`).
     assert!(!dir.path().join(TEMPLATE_PROMOTE_MARKER_V1).exists());
+}
+
+#[test]
+fn template_promote_resolves_provider_through_the_templates_bundle_not_the_drifted_column() {
+    // Template's own `.provider` column says "codex" (drifted/stale —
+    // simulates the same drift class #2592 fixed: some definition-time
+    // write path changed this column after the bundle was already
+    // provisioned/immutable), but its bound bundle's REAL provider is
+    // "claude". The promoted clone must carry "claude", not "codex"
+    // (#2594, same pattern as `agent_def_create_from_template`/
+    // `forkagentdefinition`).
+    let dir = tempdir().unwrap();
+    let wstore = open_temp_wstore(dir.path());
+    let filestore = fresh_filestore();
+
+    let bundle = Memory {
+        id: "bundle-claude".to_string(),
+        name: "Bundle".to_string(),
+        description: String::new(),
+        is_blank: false,
+        is_global: false,
+        provider: "claude".to_string(),
+        model: String::new(),
+        instructions: String::new(),
+        instructions_by_provider: "{}".to_string(),
+        context_files: "[]".to_string(),
+        mcp_servers: "[]".to_string(),
+        skills: "[]".to_string(),
+        sort_order: 0,
+        created_at: 0,
+        updated_at: 0,
+    };
+    wstore.bundle_memory_upsert(&bundle).unwrap();
+
+    let mut template = insert_template(&wstore, "tpl-drift", "Drifted", "codex");
+    template.memory_id = "bundle-claude".to_string();
+    wstore.agent_def_update(&mut template).unwrap();
+    write_session_state(&filestore, &template.id, br#"{"nodes":[]}"#).unwrap();
+
+    let stats = migrate_promote_template_sessions_v1(&wstore, &filestore, dir.path());
+    assert_eq!(stats.templates_promoted, 1);
+    assert_eq!(stats.failures, 0);
+
+    let promoted = wstore
+        .agent_def_get("template-promote-v1-tpl-drift")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        promoted.provider, "claude",
+        "promoted clone must carry the template's REAL (bundle-resolved) provider, not the drifted `codex` column"
+    );
 }
 
 #[test]
@@ -728,6 +781,7 @@ fn template_promote_does_not_reuse_clone_with_active_zone() {
         use_ambient_login: 0,
         auto_continue_enabled: 0,
         model_vendor_base_url: String::new(),
+        memory_id: String::new(),
     };
     wstore.agent_def_insert(&mut user_clone).unwrap();
     // The user's clone has its OWN active conversation.
@@ -837,6 +891,7 @@ fn template_promote_preserves_user_continuation_on_clone() {
         use_ambient_login: 0,
         auto_continue_enabled: 0,
         model_vendor_base_url: String::new(),
+        memory_id: String::new(),
     };
     wstore.agent_def_insert(&mut prior_target).unwrap();
     // Seeded `:current` has the OLDER stale snapshot the prior
@@ -938,6 +993,7 @@ fn template_promote_recovers_partial_copy_at_zone() {
         use_ambient_login: 0,
         auto_continue_enabled: 0,
         model_vendor_base_url: String::new(),
+        memory_id: String::new(),
     };
     wstore.agent_def_insert(&mut prior_target).unwrap();
 
@@ -1041,6 +1097,7 @@ fn template_promote_promotes_newer_source_over_stale_destination() {
         use_ambient_login: 0,
         auto_continue_enabled: 0,
         model_vendor_base_url: String::new(),
+        memory_id: String::new(),
     };
     wstore.agent_def_insert(&mut prior_target).unwrap();
 
@@ -1163,6 +1220,7 @@ fn template_promote_idempotent_under_partial_failure_at_archive_move() {
         use_ambient_login: 0,
         auto_continue_enabled: 0,
         model_vendor_base_url: String::new(),
+        memory_id: String::new(),
     };
     wstore.agent_def_insert(&mut prior_target).unwrap();
     // Realistic partial-failure shape: run 1 copied :current
@@ -1302,6 +1360,7 @@ fn template_promote_skips_already_user_owned_definitions() {
         use_ambient_login: 0,
         auto_continue_enabled: 0,
         model_vendor_base_url: String::new(),
+        memory_id: String::new(),
     };
     wstore.agent_def_insert(&mut user_def).unwrap();
     write_session_state(&filestore, &user_def.id, br#"{"nodes":[]}"#).unwrap();

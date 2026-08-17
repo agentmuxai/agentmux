@@ -16,64 +16,10 @@
 // The ambient-login opt-in row that used to live here was removed (reagent
 // P1 on #2262 — see AgentIdentityModal.tsx's doc comment): the layer-3
 // spawn gate no longer honors use_ambient_login at all, so the toggle was
-// dead UI promising a fallback that no longer existed.
-
-.agent-identity-vendor-section {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1-5);
-    padding: var(--space-3) var(--space-5);
-    border-top: 1px solid var(--border-color);
-}
-
-.agent-identity-vendor-label {
-    font-size: var(--text-sm);
-    font-weight: var(--font-weight-medium);
-    opacity: 0.75;
-}
-
-.agent-identity-vendor-row {
-    display: flex;
-    gap: var(--space-2);
-}
-
-.agent-identity-vendor-input {
-    flex: 1;
-    padding: var(--space-1-5) var(--space-2);
-    font-size: var(--text-sm);
-    background: var(--main-bg-color);
-    color: var(--main-text-color);
-    border: 1px solid var(--border-color);
-    border-radius: 0;
-}
-
-.agent-identity-vendor-save-btn {
-    padding: var(--space-1-5) var(--space-3);
-    font-size: var(--text-sm);
-    color: var(--button-text-color);
-    background: var(--accent-color);
-    border: none;
-    border-radius: 0;
-    cursor: default;
-
-    &:disabled {
-        opacity: 0.5;
-    }
-
-    &:hover:not(:disabled) {
-        background: color-mix(in srgb, var(--accent-color) 85%, var(--main-text-color));
-    }
-}
-
-.agent-identity-vendor-hint {
-    font-size: 0.8em;
-    opacity: 0.6;
-}
-
-.agent-identity-vendor-error {
-    font-size: 0.85em;
-    color: var(--warning-color, #d97706);
-}
+// dead UI promising a fallback that no longer existed. The model-vendor /
+// custom-endpoint editor that used to live below it was removed for the
+// same "dead/misleading UI" reason (issue #2594) — see
+// AgentIdentityModal.tsx's doc comment.
 
 .agent-modal-footer {
     display: flex;

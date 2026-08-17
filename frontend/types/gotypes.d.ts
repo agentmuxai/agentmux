@@ -205,6 +205,27 @@ declare global {
         run_in_background?: boolean;
     };
 
+    // wshrpc.CommandBackgroundTaskCompletionData — fire-and-forget push of a
+    // declared-background task's real terminal outcome, parsed client-side
+    // from its `<task-notification>` message (see
+    // `parseTaskNotification` in tool-adapter.ts). Deliberately a separate
+    // command from `docknodestatus` above rather than overloading it: this
+    // fires for a `user_message` node, which has no `tool_name`/raw
+    // `ToolNode.status` of its own, and `docknodestatus`'s `push_delta` is a
+    // full per-node overwrite — sending a partial payload through it would
+    // blank the original tool node's `run_in_background`/`tool_name`
+    // (the exact bug class #2520 already fixed once for a different call
+    // site). `node_id` here is the ORIGINATING tool call's node_id/
+    // tool_use_id, not this notification message's own id — it's the join
+    // key back to the `db_background_tasks` row `docknodestatus` created.
+    // See docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md.
+    type CommandBackgroundTaskCompletionData = {
+        blockid: string;
+        node_id: string;
+        status: string;
+        timestamp?: number;
+    };
+
     // CommandAgentAnswerData — AskUserQuestion answer, delivered to the running
     // agent CLI via the Agent SDK control protocol (a control_response carrying
     // updatedInput.answers). Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
@@ -345,6 +366,17 @@ declare global {
          * panel.
          */
         auto_continue_enabled?: number;
+        /**
+         * The agent's own dedicated ABF bundle (`Memory.id`). Set once —
+         * readonly after creation, same posture as `slug`/`parent_id`
+         * (`updateagent` preserves it from the existing row rather than
+         * accepting a client-supplied value). Empty string = not yet
+         * provisioned (legacy row predating this field). Distinct from an
+         * `AgentInstance`'s own `memory_id`, which can still point at a
+         * different bundle on purpose for one specific launch. Schema v19 —
+         * see ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.1.
+         */
+        memory_id?: string;
     };
 
     // ── v6: identity, instance, junction ────────────────────────────────────

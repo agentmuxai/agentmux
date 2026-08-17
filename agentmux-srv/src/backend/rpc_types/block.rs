@@ -157,6 +157,32 @@ pub struct CommandDockNodeStatusData {
     pub run_in_background: Option<bool>,
 }
 
+/// Data for `COMMAND_BACKGROUND_TASK_COMPLETION` — a declared-background
+/// task's real terminal outcome, parsed client-side from its
+/// `<task-notification>` message (not any change to the originating
+/// `ToolNode.status`, which stays `"success"` forever once the launch is
+/// accepted — that's the raw tool_result's own outcome, not the background
+/// task's). Deliberately a separate command from `CommandDockNodeStatusData`
+/// above: this fires for a `user_message` node, which has no `tool_name`/
+/// raw `ToolNode.status` of its own, and `DockSnapshotCache::push_delta` is
+/// a full per-node overwrite — routing a partial payload through it would
+/// blank the original tool node's `run_in_background`/`tool_name` (the
+/// exact bug class #2520 already fixed once for a different call site).
+/// `node_id` is the ORIGINATING tool call's node_id/tool_use_id (the join
+/// key back to the `db_background_tasks` row `docknodestatus` created), not
+/// this notification message's own id.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CommandBackgroundTaskCompletionData {
+    pub blockid: String,
+    pub node_id: String,
+    /// One of "done" | "error" | "stopped" — the same `ActivityStatus`
+    /// vocabulary `tool-adapter.ts`'s `parseTaskNotification` already maps
+    /// `<status>completed|failed|*</status>` onto client-side.
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<i64>,
+}
+
 /// Data for AgentAnswerCommand — an AskUserQuestion answer delivered back to
 /// the running agent CLI via the Agent SDK control protocol (a `control_response`
 /// carrying `updatedInput.answers`). Spec:

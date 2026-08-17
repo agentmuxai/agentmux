@@ -282,14 +282,32 @@ pub fn inject_identity_env_with_broker(
     // definition row reads as flag=false / no expected provider — the
     // per-binding gate still applies to whatever links exist.
     //
+    // Provider is resolved via `id_store.resolve_effective_provider_id`
+    // (`backend/storage/agents.rs`), NOT `d.provider` directly — the
+    // definition's own column can drift post-creation (`agent.define`'s
+    // `if_exists=update` path) while the agent's bound ABF bundle's copy
+    // is backend-enforced immutable, so the bundle is the one to trust
+    // for a security-relevant decision like this gate. Found during a
+    // follow-up scoping pass after `agent_open.rs`'s spawn path was fixed
+    // for the identical bug (ReAgent review, PR #2587 round 3) — the same
+    // resolution logic is now shared between both call sites specifically
+    // so they can't drift on it independently again.
+    //
     // Canonicalized via `resolve_provider_alias` (codex P1 on PR #2377): a
     // definition's own `provider` field predates this alias table in rare
     // cases, and this value is compared below against `injected_oauth` /
     // `bindings`' raw (possibly aliased) provider strings — comparing
     // uncanonicalized would let a genuinely-injected alias-only binding
-    // still trip the "no account bound" gate.
+    // still trip the "no account bound" gate. Applied to the bundle-
+    // resolved value, not the raw column, so an aliased definition whose
+    // bundle already carries the canonical id doesn't get re-aliased
+    // incorrectly (resolve_provider_alias is idempotent on an
+    // already-canonical id, so this is safe either way).
     let (use_ambient, def_provider) = match wstore.agent_def_get(&instance.definition_id) {
-        Ok(Some(d)) => (d.use_ambient_login != 0, Some(resolve_provider_alias(&d.provider).to_string())),
+        Ok(Some(d)) => {
+            let effective_provider = id_store.resolve_effective_provider_id(&d);
+            (d.use_ambient_login != 0, Some(resolve_provider_alias(&effective_provider).to_string()))
+        }
         Ok(None) => (false, None),
         Err(e) => {
             tracing::warn!(
@@ -479,6 +497,29 @@ pub fn inject_identity_env_with_broker(
                     binding.account_id,
                 );
 
+                // reagentx P1 on PR #2605: `dir` above is read from this
+                // account's PREVIOUSLY STORED SecretRef::OAuthConfigDir —
+                // this is the ordinary spawn path, not `auth.start`, which
+                // is the only place that used to (re-)create the history
+                // link. An account provisioned before this whole feature
+                // shipped, or since its last `auth.start`, would otherwise
+                // never get linked at all. Re-verify/re-create it on every
+                // spawn instead, same best-effort, non-blocking guarantee
+                // as the rest of this function.
+                if let Some(paths) = agentmux_common::DataPaths::from_env() {
+                    if let Some(provider_cfg) =
+                        crate::backend::providers::get_provider(&resolve_provider_alias(&binding.provider))
+                    {
+                        crate::server::identity_auth_dirs::link_history_if_isolated(
+                            &paths,
+                            std::path::Path::new(&dir),
+                            provider_cfg,
+                            &binding.account_id,
+                            "inject_identity_env (spawn)",
+                        );
+                    }
+                }
+
                 // Per spec §4.4 — cheap on-disk expiry probe. Reads the
                 // CLI's token file inside the bundle dir and refines
                 // the IdentityAccount's `status` so the UI can show
@@ -573,7 +614,7 @@ mod tests {
     use super::*;
     use super::super::oauth_probe::oauth_status;
     use crate::backend::storage::store::{
-        AgentInstance, IdentityAccount, InstanceStatus, SecretRef,
+        AgentInstance, IdentityAccount, InstanceStatus, Memory, SecretRef,
     };
 
     fn make_store() -> Arc<Store> {
@@ -677,6 +718,7 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -710,6 +752,102 @@ mod tests {
         // And does NOT set the anthropic api-key env var — dispatch
         // is by provider class, not by token shape.
         assert!(env.get("ANTHROPIC_API_KEY").is_none());
+    }
+
+    // reagentx P1 on PR #2605: this is the ordinary spawn path (not
+    // `auth.start`) — it reads a PREVIOUSLY STORED OAuthConfigDir, which
+    // is exactly the case an account provisioned before the history-link
+    // feature existed (or since its last `auth.start`) is in. Proves the
+    // link now gets (re-)created here too, not only at auth.start.
+    #[cfg(debug_assertions)]
+    #[test]
+    fn inject_oauth_class_links_conversation_history_on_the_ordinary_spawn_path() {
+        let _lock = crate::test_support::ISOLATED_AUTH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        std::env::set_var("AGENTMUX_ISOLATED_AUTH", "1");
+        let paths = agentmux_common::DataPaths::resolve(
+            "0.0.0-test",
+            &agentmux_common::RuntimeMode::Installed,
+        )
+        .unwrap();
+        paths.ensure_dirs().unwrap();
+        for (k, v) in paths.to_env_vars() {
+            std::env::set_var(k, v);
+        }
+
+        // A credential dir that ALREADY exists on disk, under the isolated
+        // (per-channel) tree, with real pre-existing history in it — the
+        // account was provisioned (auth.start ran) before this test's
+        // spawn-time call, exactly like a real already-connected account.
+        let isolated_dir = paths.instance_dir.join("identities").join("acct-claude").join("claude");
+        std::fs::create_dir_all(isolated_dir.join("projects")).unwrap();
+        std::fs::write(
+            isolated_dir.join("projects").join("existing-session.jsonl"),
+            b"pre-existing history",
+        )
+        .unwrap();
+
+        let store = make_store();
+        let mut def = crate::backend::storage::store::AgentDefinition {
+            id: "def-1".to_string(),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            memory_id: String::new(),
+        };
+        store.agent_def_insert(&mut def).unwrap();
+
+        let claude = make_account(
+            "acct-claude",
+            "claude",
+            SecretRef::OAuthConfigDir { dir: isolated_dir.to_string_lossy().to_string() },
+        );
+        store.identity_upsert(&claude).unwrap();
+        store.agent_identity_link("def-1", "acct-claude", "claude").unwrap();
+        insert_block_for_agent(&store, "block-oauth-history", "def-1");
+        let inst = make_instance("block-oauth-history", "id-oauth");
+        store.instance_create(&inst).unwrap();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        inject_identity_env(store.clone(), store, "block-oauth-history", &mut env).unwrap();
+
+        let global_history = paths.identity_history_dir("acct-claude", "claude", "projects");
+        let via_link = std::fs::read(global_history.join("existing-session.jsonl"))
+            .expect("pre-existing history must have been migrated to the global location by the spawn-time link");
+        assert_eq!(via_link, b"pre-existing history");
+
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        for (k, _) in paths.to_env_vars() {
+            std::env::remove_var(k);
+        }
     }
 
     #[cfg(debug_assertions)]
@@ -752,6 +890,7 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -828,6 +967,7 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -893,6 +1033,7 @@ mod tests {
             use_ambient_login,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         }
     }
 
@@ -1137,6 +1278,7 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1222,6 +1364,7 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1289,6 +1432,7 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1354,6 +1498,7 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1429,6 +1574,7 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1508,6 +1654,7 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1599,6 +1746,7 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1684,6 +1832,7 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1761,6 +1910,7 @@ mod tests {
             use_ambient_login: 0,
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
+            memory_id: String::new(),
         };
         store.agent_def_insert(&mut def).unwrap();
 
@@ -1802,5 +1952,122 @@ mod tests {
         // updated_at unchanged — the resolver only upserts when the
         // probed status differs from the stored value.
         assert_eq!(after.updated_at, 0);
+    }
+
+    // P0 regression test (found in a follow-up scoping pass after
+    // agent_open.rs's identical bug was fixed in PR #2587 round 3):
+    // the layer-3 gate must resolve the definition's provider through
+    // its bound ABF bundle (`id_store.resolve_effective_provider_id`),
+    // not `d.provider` directly. Uses two genuinely separate stores —
+    // wstore (definition, block, instance) and id_store (bundle,
+    // account, link) — so the test can't pass by accident the way it
+    // would if both roles were backed by the same `Arc<Store>`, which
+    // every OTHER test in this module does (matching production's
+    // AppState.wstore/id_store split, but meaning none of them could
+    // have caught this class of bug).
+    //
+    // Scenario: the definition's own `provider` column has drifted to
+    // "codex" (e.g. via a since-superseded agent.define update), but
+    // its bound bundle's copy — the backend-enforced-immutable one —
+    // still correctly says "claude", and the agent has a perfectly
+    // valid Claude OAuth account bound. Before the fix, the gate read
+    // `d.provider` directly, saw "codex", found no binding for codex
+    // (only claude), and WRONGLY BLOCKED a correctly-configured agent's
+    // spawn with "no account bound for the agent's provider" — even
+    // though a valid claude credential was right there. After the fix,
+    // it resolves "claude" via the bundle, the claude binding injects
+    // successfully, and the spawn proceeds.
+    #[test]
+    fn spawn_gate_resolves_provider_through_the_bound_bundle_not_the_drifted_definition_column() {
+        let wstore = make_store();
+        // Real shared-store schema, not open_in_memory's channel schema —
+        // db_agent_identity_links only has a `db_agent_definitions` FK in
+        // the channel schema (migrations.rs:334); the shared-store schema
+        // (migrations.rs:829) deliberately omits it, since agent
+        // definitions never live in the shared store. Using two
+        // open_in_memory() stores here would incorrectly enforce an FK
+        // that doesn't exist in production's real id_store.
+        let id_store_tmp = tempfile::NamedTempFile::new().unwrap();
+        let id_store = Arc::new(Store::open_shared(id_store_tmp.path()).unwrap());
+
+        let mut def = crate::backend::storage::store::AgentDefinition {
+            id: "def-1".to_string(),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: "✦".to_string(),
+            // Drifted: the definition's own column says codex...
+            provider: "codex".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            // ...but its bound bundle (below, in id_store) says claude.
+            memory_id: "bundle-1".to_string(),
+        };
+        wstore.agent_def_insert(&mut def).unwrap();
+
+        let bundle = Memory {
+            id: "bundle-1".to_string(),
+            name: "Drift Test Bundle".to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: false,
+            provider: "claude".to_string(),
+            model: "anthropic".to_string(),
+            instructions: String::new(),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+        };
+        id_store.bundle_memory_upsert(&bundle).unwrap();
+
+        let claude = make_account(
+            "acct-drift",
+            "claude",
+            SecretRef::OAuthConfigDir {
+                dir: "/var/agentmux/identities/id-drift/claude".to_string(),
+            },
+        );
+        id_store.identity_upsert(&claude).unwrap();
+        id_store
+            .agent_identity_link("def-1", "acct-drift", "claude")
+            .unwrap();
+
+        insert_block_for_agent(&wstore, "block-drift", "def-1");
+        let inst = make_instance("block-drift", "id-drift");
+        wstore.instance_create(&inst).unwrap();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        let res = inject_identity_env(wstore, id_store, "block-drift", &mut env);
+
+        assert!(res.is_ok(), "a valid claude account must not be blocked by a stale codex column: {res:?}");
+        assert_eq!(
+            env.get("CLAUDE_CONFIG_DIR").map(String::as_str),
+            Some("/var/agentmux/identities/id-drift/claude"),
+            "the claude binding must actually inject, proving the gate expected claude (from the bundle), not codex (from the drifted column)"
+        );
     }
 }
