@@ -24,6 +24,12 @@ vi.mock("@/app/store/rpc-api", () => ({
         // Mount-time daemon probe (drives the host/container dropdown).
         // Default → no reachable runtime → host-only.
         ContainerRuntimeAvailableCommand: vi.fn(),
+        // Backs `resolveEffectiveLaunchProvider`'s bound-bundle resolution
+        // (#2594) — resolves to `undefined` by default so the base
+        // `template` fixture (no memory_id) never even triggers a fetch;
+        // the drift regression tests below set their own
+        // `.mockResolvedValue`.
+        GetMemoryCommand: vi.fn().mockResolvedValue(undefined),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -343,6 +349,133 @@ describe("AgentCreateFromTemplateModalPanel", () => {
             await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
             expect(onSubmit.mock.calls[0][0].model).toBe("");
         });
+    });
+
+    // ReAgent P1 on PR #2618 (round 2): every provider-dependent decision
+    // in this modal (model list, account filter, container support,
+    // vendor-endpoint field) must resolve through the template's BOUND
+    // BUNDLE, not its possibly-drifted `.provider` column directly —
+    // `agentdefcreatefromtemplate` itself already resolves the clone's
+    // provider this way server-side (template.rs, #2607).
+    describe("resolves through the template's bound bundle, not a drifted provider column (ReAgent P1 on #2618)", () => {
+        it("shows the resolved (bundle) provider's models, not the drifted column's", async () => {
+            const drifted = { ...template, provider: "codex", memory_id: "mem-1" } as AgentDefinition;
+            vi.mocked(RpcApi.GetMemoryCommand).mockResolvedValue({ provider: "claude" } as any);
+
+            render(() => (
+                <AgentCreateFromTemplateModalPanel
+                    template={drifted}
+                    onSubmit={vi.fn().mockResolvedValue(undefined)}
+                    onCancel={vi.fn()}
+                />
+            ));
+            await flush();
+            await flush();
+            await flush();
+
+            const select = (await screen.findByTestId(
+                "create-from-template-model-select",
+            )) as HTMLSelectElement;
+            const options = Array.from(select.options).map((o) => o.value);
+            // claude's models, not codex's (gpt-5.x family).
+            expect(options).toContain("opus");
+            expect(options).not.toContain("gpt-5.5");
+        });
+
+        it("filters accounts by the resolved (bundle) provider, not the drifted column's", async () => {
+            const drifted = { ...template, provider: "codex", memory_id: "mem-1" } as AgentDefinition;
+            vi.mocked(RpcApi.GetMemoryCommand).mockResolvedValue({ provider: "claude" } as any);
+            vi.mocked(refreshAccountCache).mockResolvedValue([
+                { id: "acct-claude", name: "Claude Work", provider: "claude" } as any,
+                { id: "acct-codex", name: "Codex Work", provider: "codex" } as any,
+            ]);
+
+            render(() => (
+                <AgentCreateFromTemplateModalPanel
+                    template={drifted}
+                    onSubmit={vi.fn().mockResolvedValue(undefined)}
+                    onCancel={vi.fn()}
+                />
+            ));
+            await flush();
+            await flush();
+            await flush();
+
+            const select = screen.getByTestId(
+                "create-from-template-identity-select",
+            ) as HTMLSelectElement;
+            const optionIds = Array.from(select.options).map((o) => o.value);
+            expect(optionIds).toContain("acct-claude");
+            expect(optionIds).not.toContain("acct-codex");
+        });
+
+        it("does not auto-pick an account filtered against the stale fallback provider before the bundle resolves", async () => {
+            // Deliberately let accounts resolve BEFORE the bundle so the
+            // auto-pick effect gets a chance to fire against the stale
+            // fallback provider ("claude") first — this is what makes
+            // the race actually reproducible.
+            const drifted = { ...template, provider: "claude", memory_id: "mem-1" } as AgentDefinition;
+            vi.mocked(refreshAccountCache).mockResolvedValue([
+                { id: "acct-claude", name: "Claude Work", provider: "claude" } as any,
+                { id: "acct-codex", name: "Codex Work", provider: "codex" } as any,
+            ]);
+            let resolveBundle!: (v: any) => void;
+            vi.mocked(RpcApi.GetMemoryCommand).mockReturnValue(
+                new Promise((resolve) => {
+                    resolveBundle = resolve;
+                }),
+            );
+
+            render(() => (
+                <AgentCreateFromTemplateModalPanel
+                    template={drifted}
+                    onSubmit={vi.fn().mockResolvedValue(undefined)}
+                    onCancel={vi.fn()}
+                />
+            ));
+            // Let the already-resolved accounts fetch fully settle,
+            // including the auto-pick effect's own commit, before the
+            // bundle resolves.
+            await flush();
+            await flush();
+
+            resolveBundle({ provider: "codex" });
+            await flush();
+            await flush();
+            await flush();
+
+            const select = screen.getByTestId(
+                "create-from-template-identity-select",
+            ) as HTMLSelectElement;
+            expect(select.value).toBe("acct-codex");
+        });
+    });
+
+    // ReAgent P2 on PR #2618: a provider can declare a `models` list in
+    // the catalog without buildRuntimeArgs.ts actually wiring `--model`
+    // for it (antigravity: providers/catalog.ts, 4-entry models list, no
+    // --model branch) — offering a picker there would let the user pick
+    // a model that's silently discarded at launch.
+    it("hides the model picker for a provider whose models list has no --model wiring at launch (antigravity)", async () => {
+        const antigravityTemplate = { ...template, provider: "antigravity" } as AgentDefinition;
+        const onSubmit = vi.fn().mockResolvedValue(undefined);
+        render(() => (
+            <AgentCreateFromTemplateModalPanel
+                template={antigravityTemplate}
+                onSubmit={onSubmit}
+                onCancel={vi.fn()}
+            />
+        ));
+        await flush();
+        await flush();
+        await flush();
+
+        expect(screen.queryByTestId("create-from-template-model-select")).toBeNull();
+
+        const submit = screen.getByTestId("create-from-template-submit");
+        fireEvent.click(submit);
+        await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+        expect(onSubmit.mock.calls[0][0].model).toBe("");
     });
 
     // ReAgent P1 on PR #2618: the model list must read through
