@@ -1,7 +1,7 @@
 # SPEC: muxbus free-account abuse hardening — closing the sign-up/messaging backdoors
 
 **Date:** 2026-08-17
-**Status:** Partially implemented — see §10. Gaps 2 (partial) and 3 shipped; gap 1's fix and gap 2's enforcement flip deliberately deferred pending real evidence.
+**Status:** Partially implemented — see §10. Gaps 2 and 3 both partial (the write-path check/rate-limit shipped for each; gap 2's enforcement flip and gap 3's actual bulk-signup defense — CAPTCHA/pre-sign-up gating — remain open); gap 1's fix deliberately deferred pending real evidence.
 **Author:** AgentX
 **Repos touched:** `agentmux-cloud` (all implementation), `agentmux` (this doc; status-bar network panel UI is unaffected — no changes needed there)
 **Related:** `SPEC_MUXBUS_OWNER_GATE_AND_COST_CAP_2026_08_11.md` (the quota system this spec builds on — §6 of that doc already flagged gap #1 below as its own explicit prerequisite, never closed), `SPEC_FREE_TIER_PRICING_2026_06_21.md` (free-tier limits, implemented), `SPEC_MUXBUS_MULTI_TENANT_SECURITY_2026_07_06.md` (Phase 1, partially landed), `PLAN_PER_AGENT_CREDENTIAL_BINDING_2026_07_06.md` (documents gap #2 below as never-deployed), `SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md` §5.1 (the account-scoped M2M client *design* — that spec's own status header still marks this "proposed/not implemented" as of 2026-08-13/14; §2 below cites the actual running code directly rather than relying on that header, since the two disagree — see §2's footnote)
@@ -62,7 +62,7 @@ design would get them wrong:
   built on top of that model, and — strongest signal — live CloudWatch
   logs for `/aws/lambda/muxbus-server` show `isAgentOwnedByAccount()`
   actively querying real production traffic against this exact table
-  right now (see §10's account `4478f488-...` trace).
+  right now (see §10's trace).
 - **`billingTier` is a server-derived JWT claim, never client input.** The
   Pre-Token Generation Lambda (`cognito/pre-token.ts:59-102`) compares
   Cognito's own verified `email` against a single hardcoded owner email
@@ -306,12 +306,16 @@ goal — real production evidence overrode the plan:**
 - **`ENFORCE_AGENT_BINDING=true`** — not set, and this isn't a "no
   evidence yet" gap like the one above, it's a **positive, confirmed
   reason not to**: `CloudWatch` logs for `/aws/lambda/muxbus-server`
-  show one real account (`4478f488-2031-70d3-f5d6-e162ce562efe`)
-  actively polling `GET /reactive/pending` for three agent IDs
-  (`clare`, `agento`, `masty`) with no ownership row, hundreds of times
-  over several hours, at the exact moment this spec was being
-  implemented — not a one-off blip. Flipping enforcement right now
-  would immediately 403 that account's real, currently-working traffic.
+  show one real, currently-active account (identifier deliberately
+  redacted here — a specific Cognito UUID plus its actual agent names
+  and live traffic pattern doesn't need to be correlatable to real
+  customer telemetry in a public repo for this argument to hold; see
+  the PR history for the unredacted trace if needed for internal
+  follow-up) actively polling `GET /reactive/pending` for three
+  distinct agent IDs with no ownership row, hundreds of times over
+  several hours, at the exact moment this spec was being implemented —
+  not a one-off blip. Flipping enforcement right now would immediately
+  403 that account's real, currently-working traffic.
   Root cause, traced through `agent_credentials.rs`: per-agent
   credential provisioning (`ensure_agent_credential` → `POST
   /agents/provision`, which is what populates the ownership table) is
