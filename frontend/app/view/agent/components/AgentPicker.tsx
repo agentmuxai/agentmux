@@ -42,6 +42,7 @@ import { getOpenDefinitionMap } from "@/app/store/agent-pane-state-store";
 import { subscribeToPaneLifecycle } from "@/app/store/agent-pane-registration";
 import type { AgentViewModel } from "../agent-model";
 import { getProvider } from "../providers";
+import { resolveEffectiveLaunchProvider } from "../agent-launch-env";
 import { realAccountIdOrEmpty } from "../identity-carry-over";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { AgentCard } from "./AgentCard";
@@ -140,7 +141,15 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // there scoped to that tier's data source — not here.
 
     const checkInstalled = async (agent: AgentDefinition) => {
-        const prov = getProvider(agent.provider);
+        // Resolve through the agent's bound bundle rather than reading
+        // the possibly-drifted `agent.provider` column directly — #2594,
+        // same "gate vs. actual launch can disagree" risk class #2592/
+        // #2596 fixed. Without this, a drifted agent could get its CLI
+        // never checked/installed (wrong provider's npmPackage/cliCommand
+        // resolved here) while the actual launch (agent-model.ts, already
+        // resolved this way) spawns the real, uninstalled provider.
+        const providerId = await resolveEffectiveLaunchProvider(agent);
+        const prov = getProvider(providerId);
         // Non-npm providers (kimi via pip, system-PATH CLIs) don't go
         // through the install modal — never show the ribbon.
         if (!prov?.npmPackage || prov.npmPackage.length === 0) {
@@ -196,14 +205,19 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         // #1624 PR-C Part B) — it starts directly from the launch
         // modal's auth panel. This now only fires for the "+ Add
         // account" (manual/API-key) button.
-        onRequestAddAccount: (current: LaunchFormStateWire) => {
+        onRequestAddAccount: async (current: LaunchFormStateWire) => {
+            // Resolve through the bound bundle (#2594) — offering an
+            // "add account" flow for the drifted `agent.provider` instead
+            // of the bundle's real provider would create an account the
+            // agent can never actually use at launch.
+            const providerId = await resolveEffectiveLaunchProvider(agent);
             // Thread the user's whole live form snapshot through the
             // add-account round-trip so name/runtime/image/memory
             // survive alongside the freshly-created account id.
             modalLayer.replace({
                 kind: "add-account" as const,
                 originBlockId: props.model.blockId,
-                provider: agent.provider,
+                provider: providerId,
                 onCreated: (id: string) => {
                     modalLayer.replace(
                         buildLaunchRequest(agent, {
@@ -335,31 +349,12 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         refocusNode(blockId);
     };
 
-    // Extracted from the install branch of handleSelect so the
-    // prereq modal's "Launch anyway" path can route to install when
-    // needed. Same shape as the existing inline install request.
-    const buildInstallRequest = (agent: AgentDefinition) => ({
-        kind: "install-agent" as const,
-        agent,
-        originBlockId: props.model.blockId,
-        onInstalled: (continueToLaunch: boolean) => {
-            const canonical = getProvider(agent.provider)?.id ?? agent.provider;
-            setInstallState((s) => {
-                const next = { ...s };
-                for (const a of agents()) {
-                    if ((getProvider(a.provider)?.id ?? a.provider) === canonical) {
-                        next[a.id] = true;
-                    }
-                }
-                return next;
-            });
-            if (continueToLaunch) {
-                modalLayer.replace(buildLaunchRequest(agent));
-            } else {
-                modalLayer.close();
-            }
-        },
-    });
+    // (`buildInstallRequest` — the generic, pre-two-tier install
+    // request builder — was removed 2026-08-16 as dead code: the
+    // Phase 1 rewrite left `handleSelect`, its only caller, deleted
+    // (see the `handleSelect` removal note below), and nothing else
+    // ever called it. `buildTemplateInstallRequest` below is the only
+    // live install-request builder now.)
 
     // Clicking the card opens either the install or launch modal in
     // the tab-scoped layer, depending on whether the agent's CLI is
@@ -388,7 +383,12 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         }
     };
     const probeMissingPrereqs = async (agent: AgentDefinition) => {
-        const prov = getProvider(agent.provider);
+        // Resolve through the bound bundle (#2594) — probing prereqs for
+        // the drifted `agent.provider` instead of the bundle's real
+        // provider could pass a launch through with the ACTUAL provider's
+        // system prereqs never checked.
+        const providerId = await resolveEffectiveLaunchProvider(agent);
+        const prov = getProvider(providerId);
         const reqs = prov?.systemPrereqs ?? [];
         if (reqs.length === 0) return [];
         const uncached = reqs.filter((r) => !prereqCache.has(r.tool));
@@ -577,12 +577,15 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
 
             let installed = installState()[agent.id];
             if (installed === undefined) {
-                const prov = getProvider(agent.provider);
-                const isNpmInstallable = !!prov?.npmPackage && prov.npmPackage.length > 0;
-                if (isNpmInstallable) {
-                    await checkInstalled(agent);
-                    installed = installState()[agent.id];
-                }
+                // `checkInstalled` already resolves through the bundle
+                // and itself no-ops (leaving `installed` as `undefined`)
+                // for a non-npm-installable provider — no need to
+                // duplicate that check here with a second, un-resolved
+                // `agent.provider` read (#2594: two places deciding "does
+                // this need installing" from two different provider
+                // values is exactly the drift class #2592/#2596 fixed).
+                await checkInstalled(agent);
+                installed = installState()[agent.id];
             }
 
             const missing = await probeMissingPrereqs(agent);
@@ -651,12 +654,26 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         kind: "install-agent" as const,
         agent,
         originBlockId: props.model.blockId,
-        onInstalled: (continueToLaunch: boolean) => {
-            const canonical = getProvider(agent.provider)?.id ?? agent.provider;
+        onInstalled: async (continueToLaunch: boolean) => {
+            // Resolve THIS agent's effective (bundle) provider — #2594.
+            // Reading `agent.provider` directly here would compare the
+            // just-installed CLI's canonical id against `agent`'s own
+            // possibly-drifted column, missing the exact row this cache
+            // update exists to set (the agent the user just installed
+            // for). Other agents in the bulk-invalidation loop below are
+            // still compared via their own `.provider` column as a
+            // cache-priming heuristic only — any of THEM that has also
+            // drifted just misses this shortcut and gets a correct,
+            // resolved answer next time it hits `checkInstalled` itself
+            // (now fixed too), never a wrong CLI/credential outcome.
+            const canonicalId = await resolveEffectiveLaunchProvider(agent);
+            const canonical = getProvider(canonicalId)?.id ?? canonicalId;
             setInstallState((s) => {
                 const next = { ...s };
                 for (const a of agents()) {
-                    if ((getProvider(a.provider)?.id ?? a.provider) === canonical) {
+                    const aProviderId =
+                        a.id === agent.id ? canonical : (getProvider(a.provider)?.id ?? a.provider);
+                    if (aProviderId === canonical) {
                         next[a.id] = true;
                     }
                 }
