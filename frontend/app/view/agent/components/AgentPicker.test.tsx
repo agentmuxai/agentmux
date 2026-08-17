@@ -228,6 +228,15 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         expect(header).toHaveTextContent("New from template");
     });
 
+    // #2594 follow-up: harness-vs-model explanation in the new-agent pane.
+    it("renders the harness-vs-model explanatory hint under the templates header", async () => {
+        const model = makeMockModel();
+        render(() => <AgentPicker model={model as any} />);
+        const hint = await screen.findByTestId("agent-templates-hint");
+        expect(hint).toHaveTextContent("harness");
+        expect(hint).toHaveTextContent("model");
+    });
+
     it("clicks on a template open the create-from-template modal", async () => {
         const model = makeMockModel();
         render(() => <AgentPicker model={model as any} />);
@@ -333,16 +342,18 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         await waitFor(() => expect(modalLayerOpen).toHaveBeenCalled());
 
         const req = modalLayerOpen.mock.calls[0][0];
-        // Pass an explicit runtime (5th arg) — the modal always supplies
-        // it; exercise the threading so the stub + override carry the
-        // user's pick rather than silently falling back (reagent P2 on
-        // #1576).
+        // Pass an explicit runtime (5th arg) and model (6th arg) — the
+        // modal always supplies both; exercise the threading so the stub
+        // + override carry the user's picks rather than silently falling
+        // back (reagent P2 on #1576; model threading added #2594 follow-
+        // up work).
         await req.onCreatedAndLaunch(
             "new-def-id",
             "id-work",
             "mem-notes",
             "Mary",
             "container",
+            "opus",
         );
         expect(model.launchAgentDefinition).toHaveBeenCalledTimes(1);
         const [stubAgent, overrides] = model.launchAgentDefinition.mock.calls[0];
@@ -359,6 +370,20 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         expect(overrides.memoryId).toBe("mem-notes");
         expect(overrides.instanceName).toBe("Mary");
         expect(overrides.continueOfInstanceId).toBeUndefined();
+        expect(overrides.model).toBe("opus");
+    });
+
+    it("modal onCreatedAndLaunch omits the model override when the modal supplied none (harness has no models list)", async () => {
+        const model = makeMockModel();
+        render(() => <AgentPicker model={model as any} />);
+        const card = await screen.findByTestId("agent-card-tpl-claude");
+        fireEvent.click(card);
+        await waitFor(() => expect(modalLayerOpen).toHaveBeenCalled());
+
+        const req = modalLayerOpen.mock.calls[0][0];
+        await req.onCreatedAndLaunch("new-def-id", "id-work", "mem-notes", "Mary", "host", "");
+        const [, overrides] = model.launchAgentDefinition.mock.calls[0];
+        expect(overrides.model).toBeUndefined();
     });
 
     // #2594 — AgentPicker's install-check/prereq-probe/cache-invalidation

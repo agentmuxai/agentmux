@@ -15,6 +15,17 @@
         flex-direction: column;
         height: 100%;
         padding: var(--space-4);
+        // Reserves the pane tab strip's rendered height so the picker's own
+        // top row (the "My Agents"/"+ New from template" header + first
+        // cards) never renders behind it — same overlay problem, same fix,
+        // as .agent-document's padding-top in _document.scss (the strip
+        // renders for a blank/picker tab too, agent-view.tsx: "the strip
+        // stays visible whether the active member is a launched
+        // conversation OR a blank/picker tab"). Unconditional (not gated on
+        // whether the strip actually has >1 tab to show) — same tradeoff
+        // _document.scss makes: a little extra top whitespace when the
+        // strip is empty beats the content staying hidden when it isn't.
+        padding-top: calc(var(--space-4) + var(--pane-tab-strip-height, 28px));
         gap: var(--space-3);
         overflow-y: auto;
         // Min tile width for the My Agents / Templates grids. The grids
@@ -37,6 +48,17 @@
         text-transform: uppercase;
         letter-spacing: 0.04em;
         margin-top: var(--space-3);
+    }
+
+    // Harness-vs-model explanation (#2594 follow-up) — a quiet subtitle
+    // under the section header, not another heading of its own. Muted +
+    // no letter-spacing/uppercase so it reads as clarifying prose, not a
+    // second label competing with the header above it.
+    .agent-picker-templates-hint {
+        width: 100%;
+        font-size: var(--text-xs, 0.75rem);
+        color: color-mix(in srgb, var(--main-text-color) 55%, transparent);
+        margin: 0;
     }
 
     // Templates tier — a responsive tile grid that fills the pane width

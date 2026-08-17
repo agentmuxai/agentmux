@@ -17,7 +17,7 @@ import { buildInstanceSlug } from "./defaults/instance-slug";
 import type { LaunchOverrides } from "./components/AgentLaunchModal";
 import { readActivitySummary } from "@/app/store/activitySummary";
 import { buildConfigFiles } from "./agent-config-builder";
-import { checkNodejsForProvider, agentmuxHome, resolveCliDir, resolveEffectiveLaunchProvider } from "./agent-launch-env";
+import { checkNodejsForProvider, agentmuxHome, resolveCliDir, resolveEffectiveLaunchProvider, resolveInitialRuntimeConfig } from "./agent-launch-env";
 import { realAccountIdOrEmpty } from "./identity-carry-over";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { dimAgentColor, isValidAgentColor, pickAgentColor } from "./agent-color";
@@ -629,6 +629,11 @@ export class AgentViewModel implements ViewModel {
                 });
             }
 
+            // Seed the initial runtime config (permission mode / model /
+            // effort — see resolveInitialRuntimeConfig's own doc comment
+            // for why launchAgentDefinition never set this key at all
+            // before now).
+            const runtimeConfig = resolveInitialRuntimeConfig(overrides?.model, provider.models);
             const meta: Record<string, unknown> = {
                 agentId: agent.id,
                 agentProvider: effectiveProvider,
@@ -646,6 +651,7 @@ export class AgentViewModel implements ViewModel {
                 "agent:resume_strategy": provider.resumeStrategy ?? (provider.resumeFlag ? "flag" : "none"),
                 "agent:session_id_field": provider.sessionIdField,
                 "agent:sessionid": continueSid,
+                "agent:runtime": runtimeConfig,
                 ...zoomMeta,
                 "frame:activebordercolor": agentColor,
                 "frame:bordercolor": dimAgentColor(agentColor),

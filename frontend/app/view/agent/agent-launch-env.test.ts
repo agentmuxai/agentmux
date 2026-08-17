@@ -28,10 +28,16 @@ vi.mock("@/util/logger", () => ({
     Logger: { warn: (...args: unknown[]) => loggerWarn(...args) },
 }));
 
-import { resolveEffectiveLaunchProvider } from "./agent-launch-env";
+import { resolveEffectiveLaunchProvider, resolveInitialRuntimeConfig } from "./agent-launch-env";
+import { DEFAULT_RUNTIME_CONFIG } from "./types";
+import type { ProviderModel } from "./providers/types";
 
 function agentWith(provider: string, memory_id: string): AgentDefinition {
     return { id: "a1", provider, memory_id } as AgentDefinition;
+}
+
+function models(...specs: Array<{ value: string; default?: boolean }>): ProviderModel[] {
+    return specs.map((s) => ({ value: s.value, label: s.value, default: s.default }));
 }
 
 describe("resolveEffectiveLaunchProvider", () => {
@@ -76,5 +82,41 @@ describe("resolveEffectiveLaunchProvider", () => {
         const agent = agentWith("claude", "mem1");
         const result = await resolveEffectiveLaunchProvider(agent);
         expect(result).toBe("claude");
+    });
+});
+
+describe("resolveInitialRuntimeConfig", () => {
+    // Fixes the latent bug this function exists to close: launchAgentDefinition
+    // never set "agent:runtime" meta at all on a fresh launch, so
+    // getRuntimeConfig's fallback (DEFAULT_RUNTIME_CONFIG, hardcoded to
+    // Claude's "sonnet") silently applied to every launch regardless of
+    // harness.
+    it("uses an explicit override model when given, even if the provider has its own default", () => {
+        const result = resolveInitialRuntimeConfig("gpt-5.5", models({ value: "gpt-5-mini", default: true }));
+        expect(result.model).toBe("gpt-5.5");
+    });
+
+    it("falls back to the provider's own default model when no override is given", () => {
+        const result = resolveInitialRuntimeConfig(
+            undefined,
+            models({ value: "gpt-5-mini" }, { value: "gpt-5.5", default: true }),
+        );
+        expect(result.model).toBe("gpt-5.5");
+    });
+
+    it("falls back to DEFAULT_RUNTIME_CONFIG.model when the provider declares no models at all", () => {
+        const result = resolveInitialRuntimeConfig(undefined, undefined);
+        expect(result.model).toBe(DEFAULT_RUNTIME_CONFIG.model);
+    });
+
+    it("falls back to DEFAULT_RUNTIME_CONFIG.model when the provider's model list has no default entry", () => {
+        const result = resolveInitialRuntimeConfig(undefined, models({ value: "gpt-5-mini" }, { value: "gpt-5.5" }));
+        expect(result.model).toBe(DEFAULT_RUNTIME_CONFIG.model);
+    });
+
+    it("carries permissionMode and effort from DEFAULT_RUNTIME_CONFIG unchanged", () => {
+        const result = resolveInitialRuntimeConfig("gpt-5.5", undefined);
+        expect(result.permissionMode).toBe(DEFAULT_RUNTIME_CONFIG.permissionMode);
+        expect(result.effort).toBe(DEFAULT_RUNTIME_CONFIG.effort);
     });
 });
