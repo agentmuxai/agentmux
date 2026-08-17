@@ -28,6 +28,7 @@ import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
 import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import {
+    getGroupedChildKeys,
     getMoreWidgets,
     getPinnedKeys,
     getPinnedWidgets,
@@ -175,9 +176,15 @@ const ActionWidgets = (): JSX.Element => {
             return;
         }
         parentPeers.closeOthers(key);
-        parentHoverControllers.get(key)?.close();
-        setMoreOpen(false);
-        setOpenParentKey(key);
+        // openNow() (not a direct setOpenParentKey) so the controller's own
+        // isOpen flips true — otherwise (reagent P1 on this PR) the mouse is
+        // already over the row when a click happens, no later onMouseEnter
+        // ever arrives to resync isOpen, and the subsequent onMouseLeave's
+        // `if (!isOpen) return` skips starting the close-intent timer
+        // entirely — the flyout would stay open until an unrelated close
+        // path (outside click, Escape, re-click) fired. onOpen() (registered
+        // above) already handles setMoreOpen(false) + setOpenParentKey(key).
+        parentHoverControllers.get(key)?.openNow();
     };
 
     // Close on outside click / Escape — mirrors the More dropdown's own
@@ -249,7 +256,7 @@ const ActionWidgets = (): JSX.Element => {
         }
         const blockMeta = widgetDef?.blockdef?.meta as Record<string, unknown> | undefined;
         const view = (blockMeta?.["view"] as string) ?? null;
-        return [
+        const items: PopoverMenuItem[] = [
             {
                 label: "Open in New Window",
                 click: () => {
@@ -268,11 +275,25 @@ const ActionWidgets = (): JSX.Element => {
                     );
                 },
             },
-            { type: "separator" } as PopoverMenuItem,
-            getPinnedKeys(settings(), wmap()).includes(shortName)
-                ? { label: "Unpin from bar", click: () => { unpinWidget(shortName, settings(), wmap()); } }
-                : { label: "Pin to bar", click: () => { pinWidget(shortName, settings(), wmap()); } },
         ];
+        // A grouped child (e.g. right-clicking "Discord" inside the
+        // Messengers flyout) isn't individually pinnable — promoting one out
+        // of its parent group onto the bar isn't supported yet (spec §2/§6
+        // open question). Omit the action entirely here rather than show a
+        // "Pin to bar" that's a silent no-op: getPinnedKeys() unconditionally
+        // strips grouped children (reagent P2 on this PR), so pinWidget()
+        // would write the short-name into widget:pinned and it'd be filtered
+        // straight back out on every read — never actually pinning, never
+        // flipping the label to "Unpin".
+        if (!getGroupedChildKeys(wmap()).has(shortName)) {
+            items.push({ type: "separator" } as PopoverMenuItem);
+            items.push(
+                getPinnedKeys(settings(), wmap()).includes(shortName)
+                    ? { label: "Unpin from bar", click: () => { unpinWidget(shortName, settings(), wmap()); } }
+                    : { label: "Pin to bar", click: () => { pinWidget(shortName, settings(), wmap()); } }
+            );
+        }
+        return items;
     };
 
     // Close on outside click — ignore clicks inside button, dropdown, or any

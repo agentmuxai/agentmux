@@ -55,6 +55,18 @@ export interface SubmenuHoverController {
      * reusable for a future onTriggerEnter (unlike dispose()).
      */
     close(): void;
+    /**
+     * Force-open now, bypassing the open delay — the click-to-open
+     * counterpart to close(). Without this, a caller that opens by setting
+     * its own external state directly (rather than through onTriggerEnter)
+     * leaves `isOpen` internally false; the next onTriggerLeave then no-ops
+     * (`if (!isOpen) return`) since nothing ever recorded the open, so the
+     * safe-triangle close-intent never starts and the submenu is stuck open
+     * until an unrelated close path (outside click, Escape, re-click) fires.
+     * Calling this instead keeps internal state truthful, so a later mouse
+     * leave closes normally like any hover-opened submenu.
+     */
+    openNow(): void;
     /** Tear down all timers/listeners. Call on unmount / menu close. */
     dispose(): void;
 }
@@ -200,6 +212,14 @@ export function createSubmenuHover(opts: SubmenuHoverOptions): SubmenuHoverContr
         close() {
             clearOpenTimer();
             doClose();
+        },
+
+        openNow() {
+            clearOpenTimer();
+            cancelPendingClose();
+            if (isOpen) return;
+            isOpen = true;
+            opts.onOpen();
         },
 
         // Same as close() — if this was open, onClose() MUST fire so the

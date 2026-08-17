@@ -210,6 +210,44 @@ describe("createSubmenuHover", () => {
         });
     });
 
+    describe("openNow", () => {
+        it("opens immediately, bypassing the open delay", () => {
+            controller.openNow();
+            expect(onOpen).toHaveBeenCalledOnce();
+        });
+
+        it("cancels a pending delayed open first (no double onOpen)", () => {
+            controller.onTriggerEnter();
+            vi.advanceTimersByTime(50); // mid-delay, not yet open
+            controller.openNow();
+            expect(onOpen).toHaveBeenCalledOnce();
+            vi.advanceTimersByTime(100); // the original delayed open, if still pending, would fire here
+            expect(onOpen).toHaveBeenCalledOnce();
+        });
+
+        it("is a no-op when already open (no double onOpen)", () => {
+            controller.openNow();
+            controller.openNow();
+            expect(onOpen).toHaveBeenCalledOnce();
+        });
+
+        // The actual bug this exists to fix (reagent P1, PR #2633): a
+        // click-driven open must leave the controller's state truthful so a
+        // later mouse-leave still starts the normal close-intent window,
+        // instead of onTriggerLeave's `if (!isOpen) return` silently
+        // skipping it forever.
+        it("a later onTriggerLeave starts the normal close-intent window (unlike opening via external state alone)", () => {
+            controller.setSubmenuEl({ getBoundingClientRect: () => SUBMENU_RECT });
+            controller.openNow();
+            expect(onOpen).toHaveBeenCalledOnce();
+
+            controller.onTriggerLeave({ clientX: 250, clientY: 200 });
+            moveTo(250, 0); // straight away from the submenu — outside the safe triangle
+            vi.advanceTimersByTime(10);
+            expect(onClose).toHaveBeenCalledOnce();
+        });
+    });
+
     describe("dispose", () => {
         it("closes an open submenu immediately, same as close()", () => {
             controller.setSubmenuEl({ getBoundingClientRect: () => SUBMENU_RECT });
