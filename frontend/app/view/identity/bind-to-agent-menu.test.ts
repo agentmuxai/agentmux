@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const rpcCalls: Array<{ cmd: string; data: unknown }> = [];
 const listAgentIdentitiesMock = vi.fn(async (): Promise<AgentDefinitionIdentity[]> => []);
+const getMemoryMock = vi.fn(async (_c: unknown, data: { id: string }) => undefined as any);
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         ListAgentIdentitiesCommand: (_c: unknown, data: { agent_id: string }) => {
@@ -20,13 +21,25 @@ vi.mock("@/app/store/rpc-api", () => ({
         LinkAgentIdentityCommand: async (_c: unknown, data: unknown) => {
             rpcCalls.push({ cmd: "link", data });
         },
+        ListAllAgentIdentitiesCommand: vi.fn(async (): Promise<AgentDefinitionIdentity[]> => []),
+        // Backs `resolveEffectiveLaunchProvider`'s bound-bundle resolution
+        // (#2594) — resolves to `undefined` by default so agents without
+        // `memory_id` never even trigger a fetch; the drift regression
+        // tests below set their own `.mockResolvedValue`.
+        GetMemoryCommand: (c: unknown, data: { id: string }) => getMemoryMock(c, data),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
 vi.mock("@/app/store/global", () => ({ WOS: {}, workspace: () => null }));
 vi.mock("@/app/store/agent-pane-state-store", () => ({ getOpenDefinitionMap: () => new Map() }));
 
-import { computeBindCandidates, candidateSublabel, bindAccountToAgent } from "./bind-to-agent-menu";
+import {
+    computeBindCandidates,
+    candidateSublabel,
+    bindAccountToAgent,
+    buildAccountRowMenu,
+} from "./bind-to-agent-menu";
+import { RpcApi } from "@/app/store/rpc-api";
 import type { Account } from "./identity-model";
 
 function mkAccount(over: Partial<Account> = {}): Account {
@@ -139,6 +152,79 @@ describe("computeBindCandidates", () => {
         const out = computeBindCandidates(mkAccount(), agents, NO_LINKS, open, NO_NAMES);
         expect(out.map((c) => c.agentName)).toEqual(["RunningOne", "Alpha", "Zeta"]);
         expect(out[0].runningBlockId).toBe("block-r");
+    });
+
+    // #2594 — the optional resolver param lets a caller offer/filter by
+    // an agent's EFFECTIVE (bundle-resolved) provider instead of the
+    // possibly-drifted `agent.provider` column, without breaking every
+    // test above (which all rely on the default `(a) => a.provider`).
+    it("with an explicit resolver, filters by the resolved provider rather than the raw column", () => {
+        // Drifted: column says "codex", but the resolver (standing in
+        // for a bundle lookup) says "claude" — a claude CLI-OAuth
+        // account must offer this agent.
+        const drifted = mkAgent({ id: "drift", name: "Drifted", provider: "codex" });
+        const out = computeBindCandidates(
+            mkAccount(), // claude, cliOauth
+            [drifted],
+            NO_LINKS,
+            NO_OPEN,
+            NO_NAMES,
+            () => "claude",
+        );
+        expect(out.map((c) => c.agentName)).toEqual(["Drifted"]);
+    });
+
+    it("with an explicit resolver, hides an agent whose resolved provider doesn't match even though the raw column would", () => {
+        // Inverse drift: column says "claude" (would pass the default
+        // reader) but the resolver says "codex" — must NOT be offered
+        // for a claude CLI-OAuth account.
+        const drifted = mkAgent({ id: "drift", name: "Drifted", provider: "claude" });
+        const out = computeBindCandidates(
+            mkAccount(), // claude, cliOauth
+            [drifted],
+            NO_LINKS,
+            NO_OPEN,
+            NO_NAMES,
+            () => "codex",
+        );
+        expect(out).toHaveLength(0);
+    });
+});
+
+describe("buildAccountRowMenu — batch-resolves through the bound bundle (#2594)", () => {
+    beforeEach(() => {
+        rpcCalls.length = 0;
+        getMemoryMock.mockReset();
+        getMemoryMock.mockResolvedValue(undefined);
+        vi.mocked(RpcApi.ListAllAgentIdentitiesCommand).mockReset();
+        vi.mocked(RpcApi.ListAllAgentIdentitiesCommand).mockResolvedValue([]);
+    });
+
+    it("offers a drifted agent whose bound bundle resolves to the account's real provider", async () => {
+        // Column says "codex" (would be excluded by the default reader),
+        // but the bundle it's actually bound to says "claude".
+        const drifted = mkAgent({ id: "drift", name: "Drifted", provider: "codex", memory_id: "mem-1" });
+        getMemoryMock.mockImplementation(async (_c: unknown, data: { id: string }) =>
+            data.id === "mem-1" ? ({ provider: "claude" } as any) : undefined,
+        );
+
+        const menu = await buildAccountRowMenu(mkAccount(), [drifted], []);
+        const bindItem = menu.find((m) => m.label === "Bind to Agent");
+        expect(bindItem?.type).toBe("submenu");
+        expect((bindItem as any).submenu.map((s: any) => s.label)).toEqual(["Drifted"]);
+    });
+
+    it("hides an agent whose bound bundle resolves AWAY from the account's provider despite a matching raw column", async () => {
+        // Column says "claude" (would be offered by the default reader),
+        // but the bundle it's actually bound to says "codex".
+        const drifted = mkAgent({ id: "drift", name: "Drifted", provider: "claude", memory_id: "mem-1" });
+        getMemoryMock.mockImplementation(async (_c: unknown, data: { id: string }) =>
+            data.id === "mem-1" ? ({ provider: "codex" } as any) : undefined,
+        );
+
+        const menu = await buildAccountRowMenu(mkAccount(), [drifted], []);
+        const bindItem = menu.find((m) => m.label === "Bind to Agent");
+        expect(bindItem?.enabled).toBe(false);
     });
 });
 

@@ -14,6 +14,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { WOS, workspace } from "@/app/store/global";
 import { getOpenDefinitionMap } from "@/app/store/agent-pane-state-store";
 import { getProvider, resolveProviderAlias } from "@/app/view/agent/providers";
+import { resolveEffectiveLaunchProvider } from "@/app/view/agent/agent-launch-env";
 import { Logger } from "@/util/logger";
 import type { Account } from "./identity-model";
 
@@ -46,6 +47,18 @@ export function computeBindCandidates(
     allLinks: AgentDefinitionIdentity[],
     openDefinitions: Map<string, string>,
     accountNameById: Map<string, string>,
+    /**
+     * Resolves an agent's EFFECTIVE provider — through its bound bundle
+     * when it has one, not the possibly-drifted `agent.provider` column
+     * directly (#2594, same "gate vs. actual launch can disagree" risk
+     * class #2592/#2596/#2607/#2609/#2610 fixed). Defaults to reading
+     * `.provider` directly so this stays a pure, sync, DOM/RPC-mock-free
+     * function for callers (tests) that don't care about drift;
+     * `buildAccountRowMenu` passes a real resolver backed by a batch
+     * bundle-resolution pass, since resolving N agents' bundles is
+     * inherently async and this core must stay sync/pure.
+     */
+    resolveAgentProviderId: (agent: AgentDefinition) => string = (a) => a.provider,
 ): BindCandidate[] {
     const acctProvider = resolveProviderAlias(account.provider);
     // Spec §3's discriminator: CLI-OAuth accounts carry an oauth_config_dir
@@ -56,7 +69,7 @@ export function computeBindCandidates(
     const candidates: BindCandidate[] = [];
     for (const agent of agents) {
         if (agent.is_seeded !== 0) continue;
-        if (cliOauth && resolveProviderAlias(agent.provider) !== acctProvider) continue;
+        if (cliOauth && resolveProviderAlias(resolveAgentProviderId(agent)) !== acctProvider) continue;
 
         // This agent's current link for the account's provider (canonical
         // comparison — links can be stored under a legacy alias).
@@ -232,6 +245,18 @@ export async function buildAccountRowMenu(
         // Best-effort: without links the submenu still binds correctly —
         // it just can't annotate current bindings.
     }
+    // Batch-resolve every agent's EFFECTIVE provider through its bound
+    // bundle (#2594) — a drifted `.provider` column could otherwise
+    // offer (or wrongly hide) an agent whose real launch provider
+    // doesn't actually match this account. `resolveEffectiveLaunchProvider`
+    // is a no-op (no RPC) for an unbound agent, so this only costs a
+    // round-trip per agent that actually has a bundle.
+    const effectiveProviderById = new Map<string, string>();
+    await Promise.all(
+        agents.map(async (a) => {
+            effectiveProviderById.set(a.id, await resolveEffectiveLaunchProvider(a));
+        }),
+    );
     const accountNameById = new Map(accounts.map((a) => [a.id, a.name] as const));
     const candidates = computeBindCandidates(
         account,
@@ -239,6 +264,7 @@ export async function buildAccountRowMenu(
         allLinks,
         getOpenDefinitionMap(),
         accountNameById,
+        (a) => effectiveProviderById.get(a.id) ?? a.provider,
     );
 
     const bindItem: ContextMenuItem =

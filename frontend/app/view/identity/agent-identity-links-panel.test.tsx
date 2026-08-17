@@ -14,10 +14,16 @@ import { cleanup, render, screen, waitFor, within } from "@solidjs/testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const listAllAgentIdentities = vi.fn();
+const getMemoryCommand = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         ListAllAgentIdentitiesCommand: (...args: unknown[]) => listAllAgentIdentities(...args),
+        // Backs `resolveEffectiveLaunchProvider`'s bound-bundle resolution
+        // (#2594) — resolves to `undefined` by default so agents without
+        // `memory_id` never even trigger a fetch; the drift regression
+        // tests below set their own `.mockResolvedValue`.
+        GetMemoryCommand: (...args: unknown[]) => getMemoryCommand(...args),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -29,6 +35,9 @@ vi.mock("@/app/view/agent/components/AgentPicker", () => ({
         { id: "agent-1", name: "Agent One", provider: "claude" },
         { id: "agent-2", name: "Agent Two", provider: "claude" },
         { id: "agent-3", name: "Agent Three (codex)", provider: "codex" },
+        // #2594 drift fixtures — column vs. bound bundle disagree.
+        { id: "agent-4", name: "Agent Four (drifted to claude)", provider: "codex", memory_id: "mem-4" },
+        { id: "agent-5", name: "Agent Five (drifted away from claude)", provider: "claude", memory_id: "mem-5" },
     ],
 }));
 vi.mock("./identity-model", () => ({
@@ -89,6 +98,8 @@ describe("AgentIdentityLinksPanel", () => {
     beforeEach(() => {
         listAllAgentIdentities.mockReset();
         claudeLoginPanel.mockReset();
+        getMemoryCommand.mockReset();
+        getMemoryCommand.mockResolvedValue(undefined);
     });
 
     afterEach(() => {
@@ -286,6 +297,36 @@ describe("AgentIdentityLinksPanel", () => {
             listAllAgentIdentities.mockResolvedValue([]);
 
             render(() => <AgentIdentityLinksPanel agentId="agent-3" />);
+
+            await waitFor(() => {
+                expect(screen.getByText(/no linked accounts yet/i)).toBeInTheDocument();
+            });
+            expect(screen.queryByRole("button", { name: "Connect Claude account" })).not.toBeInTheDocument();
+        });
+
+        // #2594 — the CTA gate must resolve through the agent's bound
+        // bundle, not the possibly-drifted `agent.provider` column
+        // directly (same "gate vs. actual launch can disagree" risk
+        // class #2592/#2596/#2607/#2609/#2610 fixed).
+        it("#2594: offers 'Connect Claude account' when the drifted column says non-claude but the bound bundle resolves to claude", async () => {
+            listAllAgentIdentities.mockResolvedValue([]);
+            getMemoryCommand.mockImplementation(async (_c: unknown, data: { id: string }) =>
+                data.id === "mem-4" ? { provider: "claude" } : undefined,
+            );
+
+            render(() => <AgentIdentityLinksPanel agentId="agent-4" />);
+
+            const button = await screen.findByRole("button", { name: "Connect Claude account" });
+            expect(button).toBeInTheDocument();
+        });
+
+        it("#2594: does NOT offer 'Connect Claude account' when the drifted column says claude but the bound bundle resolves away from it", async () => {
+            listAllAgentIdentities.mockResolvedValue([]);
+            getMemoryCommand.mockImplementation(async (_c: unknown, data: { id: string }) =>
+                data.id === "mem-5" ? { provider: "codex" } : undefined,
+            );
+
+            render(() => <AgentIdentityLinksPanel agentId="agent-5" />);
 
             await waitFor(() => {
                 expect(screen.getByText(/no linked accounts yet/i)).toBeInTheDocument();

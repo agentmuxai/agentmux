@@ -24,9 +24,10 @@
 // scope — created from the agent-launch flow directly, per
 // docs/specs/SPEC_IDENTITY_DIRECT_LINKS_PHASE3_PRC_2026_07_10.md.
 
-import { createEffect, createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createResource, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 
 import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
+import { resolveEffectiveLaunchProvider } from "@/app/view/agent/agent-launch-env";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
@@ -118,6 +119,19 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
         if (!id) return null;
         return agents().find((a) => a.id === id) ?? null;
     });
+
+    // Resolve through the agent's bound bundle rather than the possibly-
+    // drifted `agent.provider` column directly — #2594, same "gate vs.
+    // actual launch can disagree" risk class #2592/#2596/#2607/#2609/
+    // #2610 fixed. Gates the "Connect Claude account" CTA below; falls
+    // back to `agent()?.provider` while loading/unbound/on failure, same
+    // fallback contract `resolveEffectiveLaunchProvider` itself documents
+    // — a brief stale flash here is cosmetic (button visibility only),
+    // not a spawn/credential decision.
+    const [resolvedAgentProviderId] = createResource(agent, (a) =>
+        a ? resolveEffectiveLaunchProvider(a) : Promise.resolve(""),
+    );
+    const effectiveAgentProviderId = () => resolvedAgentProviderId() || (agent()?.provider ?? "");
 
     const rows = createMemo(() => {
         const id = props.agentId;
@@ -268,7 +282,7 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
                                 linksLoaded() &&
                                 !error() &&
                                 !hasClaudeLink() &&
-                                canonicalProviderId(agent()?.provider ?? "") === "claude"
+                                canonicalProviderId(effectiveAgentProviderId()) === "claude"
                             }
                         >
                             <div class="identity-pane-empty-hint">
