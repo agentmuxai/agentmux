@@ -30,9 +30,12 @@ impl HistoryService {
 
     /// Construct directly from a `SessionIndex` — used by tests that need
     /// to inject a mock adapter instead of `ClaudeHistoryAdapter::new()`'s
-    /// real filesystem scan.
+    /// real filesystem scan. `pub(crate)` (not private) so tests in other
+    /// modules (e.g. `app_api::bundle`'s `bundle.export_for_agent_with_history`
+    /// tests) can build an isolated `HistoryService` too, instead of
+    /// depending on `AppState::history_service`'s real filesystem scan.
     #[cfg(test)]
-    fn from_index(index: SessionIndex) -> Self {
+    pub(crate) fn from_index(index: SessionIndex) -> Self {
         HistoryService { index: Arc::new(index) }
     }
 
@@ -62,6 +65,46 @@ impl HistoryService {
         })
     }
 
+    /// Typed core of `list_for_agent` — the JSON-returning method wraps
+    /// this. Exists as its own function so other backend code (e.g.
+    /// `bundle.rs`'s `bundle.export_for_agent_with_history`) can get this
+    /// agent's `SessionMeta` list directly, without a JSON
+    /// serialize/deserialize round-trip through the RPC-facing shape.
+    pub fn sessions_for_agent(
+        &self,
+        store: &crate::backend::storage::store::Store,
+        agent_id: &str,
+        offset: usize,
+        limit: usize,
+        sort_by: &str,
+        sort_dir: &str,
+    ) -> Result<(Vec<SessionMeta>, u32, bool), String> {
+        if self.index.is_empty() {
+            self.index.refresh();
+        }
+
+        let links = store
+            .agent_identity_list_for_agent(agent_id)
+            .map_err(|e| format!("failed to resolve agent's linked identities: {e}"))?;
+        if links.is_empty() {
+            return Ok((Vec::new(), 0, false));
+        }
+
+        let mut merged: Vec<SessionMeta> = Vec::new();
+        for link in &links {
+            let (sessions, _total, _has_more) =
+                self.index.list_for_identity(&link.account_id, 0, usize::MAX, sort_by, sort_dir);
+            merged.extend(sessions);
+        }
+        let mut refs: Vec<&SessionMeta> = merged.iter().collect();
+        index::SessionIndex::sort_sessions(&mut refs, sort_by, sort_dir);
+
+        let total = refs.len() as u32;
+        let has_more = offset + limit < refs.len();
+        let page: Vec<SessionMeta> = refs.into_iter().skip(offset).take(limit).cloned().collect();
+        Ok((page, total, has_more))
+    }
+
     /// This agent's own sessions — the actual "fast Conversation History
     /// lookup" protocol §4.4 asks for, resolving `agent_id` to its bound
     /// identity bundle(s) (`Store::agent_identity_list_for_agent`, the
@@ -80,32 +123,10 @@ impl HistoryService {
         sort_by: &str,
         sort_dir: &str,
     ) -> serde_json::Value {
-        if self.index.is_empty() {
-            self.index.refresh();
-        }
-
-        let links = match store.agent_identity_list_for_agent(agent_id) {
-            Ok(l) => l,
-            Err(e) => {
-                return serde_json::json!({ "error": format!("failed to resolve agent's linked identities: {e}") });
-            }
+        let (page, total, has_more) = match self.sessions_for_agent(store, agent_id, offset, limit, sort_by, sort_dir) {
+            Ok(r) => r,
+            Err(e) => return serde_json::json!({ "error": e }),
         };
-        if links.is_empty() {
-            return serde_json::json!({ "sessions": [], "total": 0, "has_more": false });
-        }
-
-        let mut merged: Vec<adapter::SessionMeta> = Vec::new();
-        for link in &links {
-            let (sessions, _total, _has_more) =
-                self.index.list_for_identity(&link.account_id, 0, usize::MAX, sort_by, sort_dir);
-            merged.extend(sessions);
-        }
-        let mut refs: Vec<&adapter::SessionMeta> = merged.iter().collect();
-        index::SessionIndex::sort_sessions(&mut refs, sort_by, sort_dir);
-
-        let total = refs.len() as u32;
-        let has_more = offset + limit < refs.len();
-        let page: Vec<adapter::SessionMeta> = refs.into_iter().skip(offset).take(limit).cloned().collect();
 
         serde_json::json!({
             "sessions": page,

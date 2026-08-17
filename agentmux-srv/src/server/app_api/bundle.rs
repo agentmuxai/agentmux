@@ -29,6 +29,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_bundle_import_preview(engine, state);
     register_bundle_import_commit(engine, state);
     register_bundle_export_for_agent(engine, state);
+    register_bundle_export_for_agent_with_history(engine, state);
     register_bundle_import_for_agent(engine, state);
     register_bundle_validate(engine, state);
 }
@@ -499,19 +500,32 @@ struct ExportForAgentReq {
 /// happens to be attached" guess. Extracted from the RPC closure into a
 /// directly-callable, directly-testable function, matching
 /// `bundle_import_preview_impl`'s pattern.
-async fn bundle_export_for_agent_impl(
+/// Shared by `bundle_export_for_agent_impl` and
+/// `bundle_export_for_agent_with_history_impl`: resolve the bundle + agent,
+/// build the base `BundleExport`, splice in native memory. Returns the
+/// export, the resolved agent (the history variant needs its id), combined
+/// warnings, and missing skill ids. Everything after this point (whether to
+/// zip, whether to also append history files) is caller-specific.
+async fn build_export_for_agent(
     id_store: &crate::backend::storage::store::Store,
     wstore: &crate::backend::storage::store::Store,
-    req: ExportForAgentReq,
-) -> Result<serde_json::Value, String> {
+    bundle_id: &str,
+    agent_id: &str,
+    err_prefix: &str,
+) -> Result<(
+    crate::backend::bundle_export::BundleExport,
+    crate::backend::storage::store::AgentDefinition,
+    Vec<String>,
+    Vec<String>,
+), String> {
     let bundle = id_store
-        .bundle_memory_get(&req.bundle_id)
-        .map_err(|e| format!("bundle.export_for_agent: {e}"))?
-        .ok_or_else(|| format!("bundle.export_for_agent: no bundle with id {}", req.bundle_id))?;
+        .bundle_memory_get(bundle_id)
+        .map_err(|e| format!("{err_prefix}: {e}"))?
+        .ok_or_else(|| format!("{err_prefix}: no bundle with id {bundle_id}"))?;
     let agent = wstore
-        .agent_def_get(&req.agent_id)
-        .map_err(|e| format!("bundle.export_for_agent: {e}"))?
-        .ok_or_else(|| format!("bundle.export_for_agent: no agent with id {}", req.agent_id))?;
+        .agent_def_get(agent_id)
+        .map_err(|e| format!("{err_prefix}: {e}"))?
+        .ok_or_else(|| format!("{err_prefix}: no agent with id {agent_id}"))?;
 
     let mut handler_warnings: Vec<String> = Vec::new();
     let skill_ids: Vec<String> = crate::backend::bundle_export::parse_json_field_or_warn(
@@ -526,7 +540,7 @@ async fn bundle_export_for_agent_impl(
             Ok(Some(skill)) => skills.push(skill),
             Ok(None) => missing_skill_ids.push(id.clone()),
             Err(e) => {
-                return Err(format!("bundle.export_for_agent: failed to look up skill {id}: {e}"));
+                return Err(format!("{err_prefix}: failed to look up skill {id}: {e}"));
             }
         }
     }
@@ -572,11 +586,21 @@ async fn bundle_export_for_agent_impl(
         }
         Err(e) => handler_warnings.push(format!("native memory: failed to list: {e}")),
     }
-    splice_memory_component(&mut export, &memory_files)
-        .map_err(|e| format!("bundle.export_for_agent: {e}"))?;
+    splice_memory_component(&mut export, &memory_files).map_err(|e| format!("{err_prefix}: {e}"))?;
 
     let mut all_warnings = export.warnings.clone();
     all_warnings.append(&mut handler_warnings);
+
+    Ok((export, agent, all_warnings, missing_skill_ids))
+}
+
+async fn bundle_export_for_agent_impl(
+    id_store: &crate::backend::storage::store::Store,
+    wstore: &crate::backend::storage::store::Store,
+    req: ExportForAgentReq,
+) -> Result<serde_json::Value, String> {
+    let (export, _agent, all_warnings, missing_skill_ids) =
+        build_export_for_agent(id_store, wstore, &req.bundle_id, &req.agent_id, "bundle.export_for_agent").await?;
 
     if req.format == "zip" {
         let zip_bytes = crate::backend::bundle_export::zip_bundle_export(&export)
@@ -600,6 +624,77 @@ async fn bundle_export_for_agent_impl(
     Ok(result)
 }
 
+#[derive(serde::Deserialize)]
+struct ExportForAgentWithHistoryReq {
+    bundle_id: String,
+    agent_id: String,
+}
+
+/// `bundle.export_for_agent_with_history` —
+/// `docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`
+/// §3.3. Deliberately a SEPARATE, explicit, opt-in action from
+/// `bundle.export_for_agent` — see `COMMAND_BUNDLE_EXPORT_FOR_AGENT_WITH_HISTORY`'s
+/// doc comment for why conversation transcripts must never ride along in
+/// the default (shareable, reusable-across-agents) bundle export. Builds
+/// the identical base export, then appends every session
+/// `HistoryService::sessions_for_agent` finds for this agent under
+/// `history/<provider>/<session_id>.jsonl`. Always returns a zip — a
+/// multi-file, potentially large archive has no sensible inline-JSON
+/// shape, unlike the plain export's optional format. A transcript that
+/// fails to read (deleted, permission issue) is warned about and skipped,
+/// never fails the whole export — same best-effort philosophy as the
+/// memory-splicing step above.
+async fn bundle_export_for_agent_with_history_impl(
+    id_store: &crate::backend::storage::store::Store,
+    wstore: &crate::backend::storage::store::Store,
+    history_service: &crate::backend::history::HistoryService,
+    req: ExportForAgentWithHistoryReq,
+) -> Result<serde_json::Value, String> {
+    let (mut export, _agent, mut all_warnings, missing_skill_ids) = build_export_for_agent(
+        id_store,
+        wstore,
+        &req.bundle_id,
+        &req.agent_id,
+        "bundle.export_for_agent_with_history",
+    )
+    .await?;
+
+    let (sessions, session_count, _has_more) = history_service
+        .sessions_for_agent(id_store, &req.agent_id, 0, usize::MAX, "modified_at", "desc")
+        .map_err(|e| format!("bundle.export_for_agent_with_history: {e}"))?;
+
+    let mut included = 0u32;
+    for session in &sessions {
+        match std::fs::read_to_string(&session.file_path) {
+            Ok(content) => {
+                export.files.push(crate::backend::bundle_export::BundleExportFile {
+                    path: format!("history/{}/{}.jsonl", session.provider, session.session_id),
+                    content,
+                });
+                included += 1;
+            }
+            Err(e) => all_warnings.push(format!(
+                "history: failed to read session {} ({}): {e}",
+                session.session_id, session.file_path
+            )),
+        }
+    }
+    all_warnings.push(format!("history: included {included} of {session_count} known session(s)"));
+
+    let zip_bytes = crate::backend::bundle_export::zip_bundle_export(&export)
+        .map_err(|e| format!("bundle.export_for_agent_with_history: {e}"))?;
+    use base64::Engine as _;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&zip_bytes);
+    Ok(json!({
+        "root_slug": export.root_slug,
+        "skipped_skills": export.skipped_skills,
+        "warnings": all_warnings,
+        "missing_skill_ids": missing_skill_ids,
+        "history_session_count": included,
+        "zip_base64": encoded,
+    }))
+}
+
 fn register_bundle_export_for_agent(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
     let wstore = state.wstore.clone();
@@ -612,6 +707,27 @@ fn register_bundle_export_for_agent(engine: &Arc<WshRpcEngine>, state: &AppState
                 let req: ExportForAgentReq = serde_json::from_value(data)
                     .map_err(|e| format!("bundle.export_for_agent: {e}"))?;
                 bundle_export_for_agent_impl(&id_store, &wstore, req).await.map(Some)
+            })
+        }),
+    );
+}
+
+fn register_bundle_export_for_agent_with_history(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let id_store = state.id_store.clone();
+    let wstore = state.wstore.clone();
+    let history_service = state.history_service.clone();
+    engine.register_handler(
+        COMMAND_BUNDLE_EXPORT_FOR_AGENT_WITH_HISTORY,
+        Box::new(move |data, _ctx| {
+            let id_store = id_store.clone();
+            let wstore = wstore.clone();
+            let history_service = history_service.clone();
+            Box::pin(async move {
+                let req: ExportForAgentWithHistoryReq = serde_json::from_value(data)
+                    .map_err(|e| format!("bundle.export_for_agent_with_history: {e}"))?;
+                bundle_export_for_agent_with_history_impl(&id_store, &wstore, &history_service, req)
+                    .await
+                    .map(Some)
             })
         }),
     );
@@ -3027,5 +3143,181 @@ mod export_import_for_agent_tests {
         let manifest: serde_json::Value = serde_json::from_str(manifest_file["content"].as_str().unwrap()).unwrap();
         assert!(manifest["provider"].is_null(), "unset provider must not export as an empty string");
         assert!(manifest["model"].is_null(), "unset model must not export as an empty string");
+    }
+
+    // docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md
+    // §3.3 — bundle.export_for_agent_with_history.
+
+    mod with_history_tests {
+        use super::*;
+        use crate::backend::history::adapter::{DiscoveredFile, HistoryAdapter, HistoryError, HistorySession, SessionMeta};
+        use crate::backend::history::index::SessionIndex;
+        use crate::backend::history::HistoryService;
+
+        /// Tags every discovered file with a fixed identity_id -- enough to
+        /// exercise the agent_id -> identity_id -> sessions chain without a
+        /// real filesystem scan.
+        struct MockAdapter {
+            files: Vec<DiscoveredFile>,
+            identity_id: String,
+        }
+        impl HistoryAdapter for MockAdapter {
+            fn provider(&self) -> &str {
+                "mock"
+            }
+            fn discover_files(&self) -> Result<Vec<DiscoveredFile>, HistoryError> {
+                Ok(self.files.iter().map(|f| DiscoveredFile { file_path: f.file_path.clone(), mtime_ms: f.mtime_ms }).collect())
+            }
+            fn extract_meta(&self, file_path: &str) -> Result<Option<SessionMeta>, HistoryError> {
+                let id = std::path::Path::new(file_path).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+                Ok(Some(SessionMeta {
+                    session_id: id,
+                    file_path: file_path.to_string(),
+                    provider: "mock".to_string(),
+                    model: String::new(),
+                    slug: String::new(),
+                    working_directory: "/proj".to_string(),
+                    created_at: 0,
+                    modified_at: 0,
+                    message_count: 0,
+                    first_user_message: String::new(),
+                    file_size_bytes: 0,
+                    git_branch: String::new(),
+                    total_tokens: 0,
+                    subagent_count: 0,
+                    identity_id: self.identity_id.clone(),
+                }))
+            }
+            fn parse_file(&self, _: &str) -> Result<Option<HistorySession>, HistoryError> {
+                Ok(None)
+            }
+        }
+
+        fn link_agent_to_identity(state: &AppState, agent_id: &str, account_id: &str) {
+            state
+                .id_store
+                .identity_upsert(&crate::backend::storage::store::IdentityAccount {
+                    id: account_id.to_string(),
+                    name: format!("claude-{account_id}"),
+                    provider: "claude".to_string(),
+                    kind: "pat".to_string(),
+                    display_name: String::new(),
+                    secret_ref: crate::backend::storage::store::SecretRef::OAuthConfigDir { dir: String::new() },
+                    context: serde_json::json!({}),
+                    status: "unknown".to_string(),
+                    created_at: 0,
+                    updated_at: 0,
+                })
+                .unwrap();
+            state.id_store.agent_identity_link(agent_id, account_id, "claude").unwrap();
+        }
+
+        fn unzip_paths(zip_base64: &str) -> Vec<String> {
+            use base64::Engine as _;
+            let bytes = base64::engine::general_purpose::STANDARD.decode(zip_base64).unwrap();
+            let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+            (0..archive.len()).map(|i| archive.by_index(i).unwrap().name().to_string()).collect()
+        }
+
+        #[tokio::test]
+        async fn includes_the_agents_sessions_alongside_the_normal_bundle_files() {
+            let state = test_state();
+            let config_dir = tempfile::tempdir().unwrap();
+            make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+            make_bundle(&state, "bundle-1", "Be helpful.");
+            link_agent_to_identity(&state, "agent-1", "acct-mine");
+
+            let session_dir = tempfile::tempdir().unwrap();
+            let session_path = session_dir.path().join("sess-1.jsonl");
+            std::fs::write(&session_path, "{\"role\":\"user\"}\n").unwrap();
+
+            let index = SessionIndex::with_isolated_roots(
+                vec![Box::new(MockAdapter {
+                    files: vec![DiscoveredFile { file_path: session_path.to_string_lossy().into_owned(), mtime_ms: 1 }],
+                    identity_id: "acct-mine".to_string(),
+                })],
+                vec![session_dir.path().to_path_buf()],
+            );
+            let history_service = HistoryService::from_index(index);
+
+            let result = bundle_export_for_agent_with_history_impl(
+                &state.id_store,
+                &state.wstore,
+                &history_service,
+                ExportForAgentWithHistoryReq { bundle_id: "bundle-1".to_string(), agent_id: "agent-1".to_string() },
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(result["history_session_count"], 1);
+            let paths = unzip_paths(result["zip_base64"].as_str().unwrap());
+            assert!(paths.iter().any(|p| p.ends_with("instructions/AGENTS.md")), "base bundle files must still be present: {paths:?}");
+            assert!(paths.iter().any(|p| p.ends_with("history/mock/sess-1.jsonl")), "session must be included under history/: {paths:?}");
+        }
+
+        #[tokio::test]
+        async fn succeeds_with_zero_sessions_when_the_agent_has_no_linked_identity() {
+            let state = test_state();
+            let config_dir = tempfile::tempdir().unwrap();
+            make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+            make_bundle(&state, "bundle-1", "Be helpful.");
+            // No link_agent_to_identity call -- agent has no bound account.
+
+            let history_service = HistoryService::from_index(SessionIndex::with_isolated_roots(vec![], vec![]));
+
+            let result = bundle_export_for_agent_with_history_impl(
+                &state.id_store,
+                &state.wstore,
+                &history_service,
+                ExportForAgentWithHistoryReq { bundle_id: "bundle-1".to_string(), agent_id: "agent-1".to_string() },
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(result["history_session_count"], 0);
+            let paths = unzip_paths(result["zip_base64"].as_str().unwrap());
+            assert!(!paths.iter().any(|p| p.contains("history/")), "no history/ entries when nothing is linked: {paths:?}");
+        }
+
+        #[tokio::test]
+        async fn warns_and_continues_when_a_transcript_file_cannot_be_read() {
+            let state = test_state();
+            let config_dir = tempfile::tempdir().unwrap();
+            make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+            make_bundle(&state, "bundle-1", "Be helpful.");
+            link_agent_to_identity(&state, "agent-1", "acct-mine");
+
+            // Points at a file that will never exist on disk.
+            let missing_path = std::env::temp_dir().join("amx-nonexistent-session-xyz.jsonl");
+            let index = SessionIndex::with_isolated_roots(
+                vec![Box::new(MockAdapter {
+                    files: vec![DiscoveredFile { file_path: missing_path.to_string_lossy().into_owned(), mtime_ms: 1 }],
+                    identity_id: "acct-mine".to_string(),
+                })],
+                vec![],
+            );
+            // Note: refresh() would normally skip a file it can't stat via
+            // discover_files' own is_dir/exists checks in the real adapter,
+            // but MockAdapter unconditionally reports it as discovered so
+            // extract_meta -- and therefore the export's own read -- is what
+            // actually exercises the missing-file path here.
+            let history_service = HistoryService::from_index(index);
+
+            let result = bundle_export_for_agent_with_history_impl(
+                &state.id_store,
+                &state.wstore,
+                &history_service,
+                ExportForAgentWithHistoryReq { bundle_id: "bundle-1".to_string(), agent_id: "agent-1".to_string() },
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(result["history_session_count"], 0, "unreadable session must not count as included");
+            let warnings = result["warnings"].as_array().unwrap();
+            assert!(
+                warnings.iter().any(|w| w.as_str().unwrap_or("").contains("failed to read session")),
+                "must warn about the unreadable session: {warnings:?}"
+            );
+        }
     }
 }
