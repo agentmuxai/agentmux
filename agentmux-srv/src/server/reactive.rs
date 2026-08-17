@@ -851,6 +851,44 @@ pub(super) async fn handle_reactive_register(
 }
 
 #[derive(serde::Deserialize)]
+pub(super) struct EnsureSigningKeyRequest {
+    agent_id: String,
+}
+
+/// Mint-or-reuse `agent_id`'s host-tier jekt signing key and return it,
+/// base64-encoded — the same value `agent_config::inject_jekt_signing_keys_into_mcp_json`
+/// writes into a real agent's `.mcp.json` at spawn time, exposed directly
+/// here instead of only reachable through `agent.open`'s WebSocket
+/// (`WshRpcEngine`) path. That path also spawns a real provider session,
+/// which makes it unusable for anything that just wants to exercise
+/// host-tier jekt signing/verification (tests, external harnesses) without
+/// the cost and side effects of a live LLM session.
+///
+/// Gated by the same `X-AuthKey` full-auth boundary as every other
+/// `/agentmux/reactive/*` route in this group (`register`/`unregister`
+/// already let an authenticated caller mint arbitrary agent_id→block_id
+/// bindings — this is the same trust level, not a new category of risk).
+/// Idempotent: `agent_jekt_key_ensure` returns the existing key unchanged
+/// if one was already minted for this `agent_id` (host or otherwise).
+pub(super) async fn handle_reactive_ensure_signing_key(
+    State(state): State<AppState>,
+    Json(req): Json<EnsureSigningKeyRequest>,
+) -> Response {
+    match state.wstore.agent_jekt_key_ensure(&req.agent_id) {
+        Ok(key) => {
+            use base64::Engine as _;
+            let key_b64 = base64::engine::general_purpose::STANDARD.encode(&key);
+            Json(json!({ "agent_id": req.agent_id, "jekt_key_b64": key_b64 })).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
 pub(super) struct UnregisterRequest {
     agent_id: String,
 }

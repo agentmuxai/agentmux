@@ -305,6 +305,10 @@ pub fn build_router(state: AppState) -> Router {
             post(reactive::handle_reactive_unregister),
         )
         .route(
+            "/agentmux/reactive/ensure-signing-key",
+            post(reactive::handle_reactive_ensure_signing_key),
+        )
+        .route(
             "/agentmux/reactive/poller/stats",
             get(reactive::handle_reactive_poller_stats),
         )
