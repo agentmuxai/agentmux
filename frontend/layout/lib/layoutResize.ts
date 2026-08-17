@@ -36,7 +36,10 @@ export interface ResizeContext {
 }
 
 export const DefaultGapSizePx = 3;
-const MinNodeSizePx = 40;
+// 128px minimum in both directions — this same constant floors both Row (width)
+// and Column (height) drags, since minNodeSize is derived generically from
+// whichever parent's pixelToSizeRatio is active (see onResizeMove below).
+const MinNodeSizePx = 128;
 
 /**
  * Shrinks `block` by `amount` in total, distributed proportionally to each
