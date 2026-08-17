@@ -1,8 +1,9 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+    buildPaneWidgetMenuItems,
     getChildWidgets,
     getGroupedChildKeys,
     getMoreWidgets,
@@ -110,5 +111,61 @@ describe("grouped children excluded from pinned/more (widget:pinned override)", 
         const settings = { "widget:pinned": ["agent", "slack"] };
         expect(getPinnedKeys(settings, wmap)).toEqual(["agent"]);
         expect(getMoreWidgets(settings, wmap).map((m) => m.key)).not.toContain("defwidget@slack");
+    });
+});
+
+describe("buildPaneWidgetMenuItems", () => {
+    // Replace With... / empty-tab menu — grouped children must not show up
+    // individually, but must still be reachable via a nested submenu under
+    // their parent's own label.
+    function paneWmap(): Record<string, WidgetConfigType> {
+        return {
+            ...messengersWmap(),
+            "defwidget@devtools": widget({ label: "DevTools", blockdef: { meta: { view: "devtools" } } }),
+            "defwidget@editor": widget({ "display:order": 6, label: "Editor", blockdef: { meta: { view: "editor" } } }),
+        };
+    }
+
+    it("excludes grouped children as flat top-level entries", () => {
+        const items = buildPaneWidgetMenuItems(paneWmap(), vi.fn());
+        expect(items.map((i) => i.label)).not.toContain("Discord");
+        expect(items.map((i) => i.label)).not.toContain("Slack");
+    });
+
+    it("nests a parent's children under its own label as a native submenu", () => {
+        const items = buildPaneWidgetMenuItems(paneWmap(), vi.fn());
+        const messengers = items.find((i) => i.label === "Messengers");
+        expect(messengers?.type).toBe("submenu");
+        expect(messengers?.submenu?.map((c) => c.label)).toEqual(["Discord", "Slack"]);
+    });
+
+    it("excludes non-pane views (devtools) everywhere, including inside a submenu", () => {
+        const items = buildPaneWidgetMenuItems(paneWmap(), vi.fn());
+        expect(items.map((i) => i.label)).not.toContain("DevTools");
+    });
+
+    it("excludes the current view via opts.excludeView (leaf) and from inside a submenu", () => {
+        const wmap = paneWmap();
+        wmap["defwidget@discord"].blockdef = { meta: { view: "editor" } };
+        const items = buildPaneWidgetMenuItems(wmap, vi.fn(), { excludeView: "editor" });
+        expect(items.map((i) => i.label)).not.toContain("Editor");
+        const messengers = items.find((i) => i.label === "Messengers");
+        expect(messengers?.submenu?.map((c) => c.label)).toEqual(["Slack"]);
+    });
+
+    it("omits a parent entirely once every child is filtered out", () => {
+        const wmap = paneWmap();
+        wmap["defwidget@discord"].blockdef = { meta: { view: "devtools" } };
+        wmap["defwidget@slack"].blockdef = { meta: { view: "devtools" } };
+        const items = buildPaneWidgetMenuItems(wmap, vi.fn());
+        expect(items.map((i) => i.label)).not.toContain("Messengers");
+    });
+
+    it("invokes onSelect with the chosen widget's blockdef", () => {
+        const onSelect = vi.fn();
+        const items = buildPaneWidgetMenuItems(paneWmap(), onSelect);
+        const editor = items.find((i) => i.label === "Editor")!;
+        editor.click?.();
+        expect(onSelect).toHaveBeenCalledWith(paneWmap()["defwidget@editor"].blockdef);
     });
 });

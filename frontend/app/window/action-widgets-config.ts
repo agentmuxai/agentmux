@@ -103,6 +103,73 @@ export function getMoreWidgets(
         .map(([key, widget]) => ({ key, widget }));
 }
 
+// ── Pane-widget pickers (Replace With..., empty-tab menu) ──────────────────────
+
+/** Non-pane widget views excluded from any pane-widget picker (Replace With, empty-tab menu). */
+const NON_PANE_WIDGET_VIEWS = new Set(["devtools"]);
+
+function paneWidgetSortKey(w: WidgetConfigType): [number, string] {
+    return [w["display:order"] ?? 0, w.label ?? ""];
+}
+
+function comparePaneWidgets(a: WidgetConfigType, b: WidgetConfigType): number {
+    const [orderA, labelA] = paneWidgetSortKey(a);
+    const [orderB, labelB] = paneWidgetSortKey(b);
+    if (orderA !== orderB) return orderA - orderB;
+    return labelA.localeCompare(labelB);
+}
+
+/**
+ * Build the menu items for a "pick a pane widget to open here" surface —
+ * shared by the "Replace With..." pane context-menu submenu
+ * (`pane-actions.ts`) and the empty-tab right-click menu (`tabcontent.tsx`).
+ * Both used to hand-roll near-identical flat `Object.values(wmap)` logic
+ * that (pre SPEC_WIDGET_BAR_PARENT_SUBMENUS_2026_08_12.md) never knew about
+ * grouped children, so "Discord"/"Slack"/etc. showed up individually here
+ * even once hidden from the widget bar. Grouped children are now excluded
+ * as flat entries and instead reachable through a native nested submenu
+ * under their parent's own label (`type: "submenu"`, same OS-native submenu
+ * support `ContextMenuModel.showContextMenu()` already renders) — so the
+ * group stays reachable everywhere a leaf widget would have been, without
+ * the top-level list showing every child individually.
+ */
+export function buildPaneWidgetMenuItems(
+    wmap: Record<string, WidgetConfigType>,
+    onSelect: (blockdef: BlockDef) => void,
+    opts: { excludeView?: string } = {}
+): ContextMenuItem[] {
+    const toLeafItem = (widget: WidgetConfigType): ContextMenuItem | null => {
+        const view = widget.blockdef?.meta?.["view"] as string | undefined;
+        if (!view || NON_PANE_WIDGET_VIEWS.has(view)) return null;
+        if (opts.excludeView && view === opts.excludeView) return null;
+        return { label: widget.label ?? "Unnamed", click: () => onSelect(widget.blockdef) };
+    };
+
+    const grouped = getGroupedChildKeys(wmap);
+    const topLevel = Object.entries(wmap)
+        .filter(([key]) => !grouped.has(key.replace("defwidget@", "")))
+        .map(([, widget]) => widget)
+        .sort(comparePaneWidgets);
+
+    const items: ContextMenuItem[] = [];
+    for (const widget of topLevel) {
+        if ((widget.children?.length ?? 0) > 0) {
+            const submenu = getChildWidgets(widget, wmap)
+                .map(({ widget: child }) => child)
+                .sort(comparePaneWidgets)
+                .map(toLeafItem)
+                .filter((item): item is ContextMenuItem => item != null);
+            if (submenu.length > 0) {
+                items.push({ label: widget.label ?? "Unnamed", type: "submenu", submenu });
+            }
+            continue;
+        }
+        const item = toLeafItem(widget);
+        if (item) items.push(item);
+    }
+    return items;
+}
+
 // ── Widget actions ────────────────────────────────────────────────────────────
 
 export async function handleWidgetSelect(widget: WidgetConfigType) {

@@ -148,7 +148,15 @@ const ActionWidgets = (): JSX.Element => {
 
     const registerParentHover = (key: string): SubmenuHoverController => {
         const hover = createSubmenuHover({
-            onOpen: () => setOpenParentKey(key),
+            onOpen: () => {
+                // Same rationale as openMore() below — the pinned flyout and
+                // More dropdown can visually overlap, so opening one closes
+                // the other. setMoreOpen is declared further down in this
+                // same component scope; safe to reference here since this
+                // callback only ever runs later, in response to a real hover.
+                setMoreOpen(false);
+                setOpenParentKey(key);
+            },
             onClose: () => setOpenParentKey((cur) => (cur === key ? null : cur)),
         });
         parentHoverControllers.set(key, hover);
@@ -168,6 +176,7 @@ const ActionWidgets = (): JSX.Element => {
         }
         parentPeers.closeOthers(key);
         parentHoverControllers.get(key)?.close();
+        setMoreOpen(false);
         setOpenParentKey(key);
     };
 
@@ -198,7 +207,14 @@ const ActionWidgets = (): JSX.Element => {
     const [moreOpen, setMoreOpen] = createSignal(false);
 
     const openMore = (_e: MouseEvent) => {
-        setMoreOpen(!moreOpen());
+        const opening = !moreOpen();
+        if (opening) {
+            // The two floating panels sit right next to each other on the bar
+            // and can visually overlap — only one should be open at a time.
+            const openParent = openParentKey();
+            if (openParent !== null) closeParentFlyout(openParent);
+        }
+        setMoreOpen(opening);
     };
 
     const closeMore = () => setMoreOpen(false);
@@ -474,19 +490,31 @@ const ActionWidgets = (): JSX.Element => {
 
             <Portal>
                 <Show when={openParentKey()}>
-                    {(key) => (
-                        <PinnedWidgetFlyout
-                            widget={wmap()[key()]}
-                            wmap={wmap}
-                            onClose={() => closeParentFlyout(key())}
-                            onItemContextMenu={handleItemContextMenu}
-                            anchor={() => parentSlotRefs.get(key()) ?? null}
-                            onSubmenuEnter={() => parentHoverControllers.get(key())?.onSubmenuEnter()}
-                            onSubmenuLeave={(e) => parentHoverControllers.get(key())?.onSubmenuLeave(e)}
-                            setSubmenuEl={(el) => parentHoverControllers.get(key())?.setSubmenuEl(el)}
-                            ref={(el) => (pinnedFlyoutRef = el)}
-                        />
-                    )}
+                    {(keyAccessor) => {
+                        // Capture a plain string once instead of re-invoking
+                        // the Show's accessor from these callbacks — several
+                        // of them (onClose, and PinnedWidgetFlyout's own
+                        // onCleanup calling setSubmenuEl(null)) can still fire
+                        // during/after this <Show> branch unmounts, and
+                        // calling a stale keyed-Show accessor post-unmount
+                        // throws ("Attempting to access a stale value from
+                        // <Show>") — reproduced live via muxlog while testing
+                        // this PR's own click-to-close path.
+                        const key = keyAccessor();
+                        return (
+                            <PinnedWidgetFlyout
+                                widget={wmap()[key]}
+                                wmap={wmap}
+                                onClose={() => closeParentFlyout(key)}
+                                onItemContextMenu={handleItemContextMenu}
+                                anchor={() => parentSlotRefs.get(key) ?? null}
+                                onSubmenuEnter={() => parentHoverControllers.get(key)?.onSubmenuEnter()}
+                                onSubmenuLeave={(e) => parentHoverControllers.get(key)?.onSubmenuLeave(e)}
+                                setSubmenuEl={(el) => parentHoverControllers.get(key)?.setSubmenuEl(el)}
+                                ref={(el) => (pinnedFlyoutRef = el)}
+                            />
+                        );
+                    }}
                 </Show>
             </Portal>
 

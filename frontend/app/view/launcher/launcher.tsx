@@ -3,6 +3,7 @@
 
 import logoUrl from "@/app/asset/logo.svg?url";
 import { atoms, replaceBlock } from "@/app/store/global";
+import { getChildWidgets } from "@/app/window/action-widgets-config";
 import { checkKeyPressed, keydownWrapper } from "@/util/keyutil";
 import { isBlank, makeIconClass, createSignalAtom } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
@@ -29,6 +30,16 @@ export class LauncherViewModel implements ViewModel {
     searchTerm: SignalAtom<string>;
     selectedIndex: SignalAtom<number>;
     containerSize: SignalAtom<{ width: number; height: number }>;
+    /**
+     * A parent widget (e.g. "Messengers") the grid has drilled into — its
+     * children replace the top-level grid until Escape/Back pops back out.
+     * SPEC_WIDGET_BAR_PARENT_SUBMENUS_2026_08_12.md doesn't cover this
+     * surface directly, but a parent has no blockdef of its own to launch,
+     * so clicking/Entering one has to do *something* other than try to open
+     * an empty pane — drill-down mirrors how every other picker in the app
+     * now reaches a group's children (nested submenu / flyout).
+     */
+    activeParent: SignalAtom<WidgetConfigType | null>;
     gridLayout: GridLayoutType = null;
     inputRef: { current: HTMLInputElement | null } = { current: null };
 
@@ -40,16 +51,38 @@ export class LauncherViewModel implements ViewModel {
         this.searchTerm = createSignalAtom("");
         this.selectedIndex = createSignalAtom(0);
         this.containerSize = createSignalAtom({ width: 0, height: 0 });
+        this.activeParent = createSignalAtom<WidgetConfigType | null>(null);
     }
 
     filteredWidgets(): WidgetConfigType[] {
         const searchTerm = this.searchTerm();
-        const widgets = sortByDisplayOrder(atoms.fullConfigAtom()?.widgets || {});
-        return widgets.filter(
-            (widget) =>
-                !widget["display:hidden"] &&
-                (!searchTerm || widget.label?.toLowerCase().includes(searchTerm.toLowerCase()))
+        const wmap = atoms.fullConfigAtom()?.widgets || {};
+        const parent = this.activeParent();
+
+        const source = parent
+            ? getChildWidgets(parent, wmap).map((c) => c.widget)
+            : sortByDisplayOrder(wmap).filter((widget) => !widget["display:hidden"]);
+
+        return source.filter(
+            (widget) => !searchTerm || widget.label?.toLowerCase().includes(searchTerm.toLowerCase())
         );
+    }
+
+    /** True when a tile click/Enter should drill down instead of opening a pane. */
+    isParentWidget(widget: WidgetConfigType): boolean {
+        return (widget.children?.length ?? 0) > 0;
+    }
+
+    drillInto(widget: WidgetConfigType): void {
+        this.activeParent._set(widget);
+        this.searchTerm._set("");
+        this.selectedIndex._set(0);
+    }
+
+    goBack(): void {
+        this.activeParent._set(null);
+        this.searchTerm._set("");
+        this.selectedIndex._set(0);
     }
 
     giveFocus(): boolean {
@@ -103,14 +136,26 @@ export class LauncherViewModel implements ViewModel {
             return true;
         }
         if (checkKeyPressed(e, "Escape")) {
-            this.searchTerm._set("");
-            this.selectedIndex._set(0);
+            // Two-stage: clear an in-progress search first; only pop back out
+            // of a drilled-into group once the search box is already empty,
+            // so "Escape, Escape" from a filtered child list doesn't skip
+            // straight past the group's own child list.
+            if (this.searchTerm() === "" && this.activeParent() !== null) {
+                this.goBack();
+            } else {
+                this.searchTerm._set("");
+                this.selectedIndex._set(0);
+            }
             return true;
         }
         return false;
     }
 
     async handleWidgetSelect(widget: WidgetConfigType) {
+        if (this.isParentWidget(widget)) {
+            this.drillInto(widget);
+            return;
+        }
         try {
             await replaceBlock(this.blockId, widget.blockdef, true);
         } catch (error) {
@@ -222,6 +267,21 @@ function LauncherView(props: ViewComponentProps<LauncherViewModel>): JSX.Element
                 </div>
             </Show>
 
+            {/* Breadcrumb — shown only once drilled into a parent widget
+                (e.g. "Messengers"). Escape does the same thing; this is the
+                mouse-driven equivalent for discoverability. */}
+            <Show when={model.activeParent()}>
+                {(parent) => (
+                    <div
+                        class="mb-2 flex items-center gap-1 text-secondary text-xs cursor-pointer hover:text-white"
+                        onClick={() => model.goBack()}
+                    >
+                        <i class="fa-sharp fa-solid fa-chevron-left" />
+                        <span>{parent().label}</span>
+                    </div>
+                )}
+            </Show>
+
             {/* Grid of widgets */}
             <div
                 class="grid gap-4 justify-center"
@@ -241,8 +301,11 @@ function LauncherView(props: ViewComponentProps<LauncherViewModel>): JSX.Element
                             )}
                             style={{ width: `${finalTileWidth()}px`, height: `${finalTileHeight()}px` }}
                         >
-                            <div style={{ color: widget.color }}>
+                            <div class="relative" style={{ color: widget.color }}>
                                 <i class={makeIconClass(widget.icon, true, { defaultIcon: "browser" })} />
+                                <Show when={model.isParentWidget(widget)}>
+                                    <i class="fa-sharp fa-solid fa-chevron-right absolute -right-2.5 top-1/2 -translate-y-1/2 text-[8px] opacity-60" />
+                                </Show>
                             </div>
                             <Show when={gridLayout().showLabel && !isBlank(widget.label)}>
                                 <div class="mt-1 w-full text-[11px] leading-4 overflow-hidden text-ellipsis whitespace-nowrap">

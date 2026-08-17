@@ -7,19 +7,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { createTab, getApi } from "@/store/global";
 import { fireAndForget } from "@/util/util";
 import { createSignal, type JSX } from "solid-js";
-
-function getPinnedKeys(settings: Record<string, any>, widgets: Record<string, any>): string[] {
-    const pinned: string[] | undefined = settings["widget:pinned"];
-    if (pinned !== undefined) {
-        // Filter out stale keys that no longer exist in the widget map to avoid
-        // writing ghost entries back to the server on each toggle.
-        return pinned.filter((shortName) => widgets[`defwidget@${shortName}`] != null);
-    }
-    return Object.entries(widgets)
-        .filter(([, w]: any) => w["display:pinned"])
-        .sort(([, a]: any, [, b]: any) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0))
-        .map(([key]) => key.replace("defwidget@", ""));
-}
+import { getGroupedChildKeys, getPinnedKeys } from "./action-widgets-config";
 
 interface TitleBarContextMenuProps {
     pos: { x: number; y: number };
@@ -83,8 +71,14 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
             },
         });
 
+        // Grouped children (e.g. Messengers' Discord/Slack/etc.) are only
+        // pinnable as their parent group — pinning/unpinning a child
+        // individually isn't a supported action (SPEC_WIDGET_BAR_PARENT_
+        // SUBMENUS_2026_08_12.md §2 non-goals), so they're excluded here the
+        // same way they're excluded from the bar's own pinned/More lists.
+        const grouped = getGroupedChildKeys(widgets());
         const widgetEntries = Object.entries(widgets())
-            .filter(([key]) => key.startsWith("defwidget@"))
+            .filter(([key]) => key.startsWith("defwidget@") && !grouped.has(key.replace("defwidget@", "")))
             .sort(([, a]: any, [, b]: any) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0));
 
         if (widgetEntries.length > 0) {
