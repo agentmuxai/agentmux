@@ -245,12 +245,17 @@ e.g. the pane closed before an answer arrived) keep the existing generic
   the AgentQuestionPanel's own colors and layout are untouched (multi-select
   checkboxes, countdown chip, etc.) — this spec only changes what happens *after*
   an answer is recorded.
-- **Link/URL contrast on the inverted surface.** `LinkifiedText` colors links via
-  `--link-color` (e.g. `#60a5fa`), unaffected by this change. Worth a visual check
-  during implementation on at least one dark theme (link color on the new
-  near-white background) and one light theme (link color on the new near-black
-  background) — flagged here rather than pre-solved, since the color itself isn't
-  changing, only what's behind it.
+- **Link/URL contrast on the inverted surface.** Resolved during implementation
+  (reagent P1 on PR #2630): `LinkifiedText`'s links were still colored via the
+  ambient `--link-color`, which is tuned for contrast against the *normal*
+  background and isn't guaranteed to read once inverted (e.g. dracula's light
+  cyan link on the new near-white `.agent-user-message` background, or
+  high-contrast's bright cyan on white). Fixed by setting
+  `a.linkified-url { color: currentColor; }` scoped to `.agent-user-message-content`
+  (and its Portal-rendered peek-overlay copy) — `currentColor` resolves to the
+  block's own `--block-bg-solid-color` text color, which is guaranteed to
+  contrast against `--main-text-color` per theme, the same guarantee the base
+  surface inversion already relies on. No new per-theme token needed.
 
 ---
 

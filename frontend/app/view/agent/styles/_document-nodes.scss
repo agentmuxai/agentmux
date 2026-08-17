@@ -1017,6 +1017,27 @@
                 white-space: pre;
                 overflow-x: auto;
                 overflow-y: hidden;
+
+                // Linkified URLs must contrast against THIS block's own
+                // inverted surface, not the ambient --link-color further
+                // down this file — that token is tuned for contrast
+                // against the NORMAL (non-inverted) background and isn't
+                // guaranteed to read once inverted (e.g. dracula's light
+                // cyan link on the new near-white user-message bg, or
+                // high-contrast's bright cyan on white). currentColor
+                // resolves to this block's own text color
+                // (--block-bg-solid-color, set above), which is guaranteed
+                // to contrast against --main-text-color per theme — same
+                // guarantee the base surface inversion already relies on.
+                // reagent P1 on PR #2630.
+                a.linkified-url {
+                    color: currentColor;
+                    text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+
+                    &:hover {
+                        text-decoration-color: currentColor;
+                    }
+                }
             }
         }
 
@@ -2036,6 +2057,19 @@
         white-space: pre;
         overflow-x: auto;
         overflow-y: hidden;
+
+        // Same contrast fix as the in-flow `.agent-user-message` rule
+        // above — currentColor resolves to this wrapper's own
+        // --block-bg-solid-color text color, guaranteed to contrast
+        // against its --main-text-color background. reagent P1 on PR #2630.
+        a.linkified-url {
+            color: currentColor;
+            text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+
+            &:hover {
+                text-decoration-color: currentColor;
+            }
+        }
     }
 
     .agent-user-message-pin,
