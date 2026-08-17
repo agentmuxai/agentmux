@@ -214,3 +214,39 @@ export function createSubmenuHover(opts: SubmenuHoverOptions): SubmenuHoverContr
         },
     };
 }
+
+export interface PeerRegistry {
+    /**
+     * Register a peer's hover controller. Returns an unregister function —
+     * callers own their own cleanup (e.g. Solid's `onCleanup(unregister)`)
+     * since this module stays framework-agnostic.
+     */
+    register(key: string, hover: SubmenuHoverController): () => void;
+    /** Force-close every registered peer except `key`. */
+    closeOthers(key: string): void;
+}
+
+/**
+ * Tracks the hover controllers of peer (same-level) menu items/slots so
+ * entering one can force-close any other peer's still-open submenu
+ * immediately — matching how a native/VS-Code-style menu behaves for an
+ * explicit new selection, on top of (not instead of) the safe-triangle
+ * grace period each controller gives its OWN trigger-to-submenu approach.
+ * Scoped to whatever the caller considers one "level" — one per MenuBody,
+ * one per SubMenu, one per pinned-widget-bar row of parent slots. Peers
+ * never reach across levels/scopes a caller doesn't register together.
+ */
+export function createPeerRegistry(): PeerRegistry {
+    const peers = new Map<string, SubmenuHoverController>();
+    return {
+        register(key, hover) {
+            peers.set(key, hover);
+            return () => peers.delete(key);
+        },
+        closeOthers(key) {
+            for (const [k, h] of peers) {
+                if (k !== key) h.close();
+            }
+        },
+    };
+}

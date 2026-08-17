@@ -12,10 +12,12 @@ import {
     assertMenuInPaintableArea,
     computeMenuPosition,
 } from "@/app/util/menu-position";
+import { createPeerRegistry, createSubmenuHover } from "@/app/util/submenu-hover";
 import { makeIconClass } from "@/util/util";
 import { autoUpdate } from "@floating-ui/dom";
-import { createSignal, For, onCleanup, type JSX } from "solid-js";
+import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { handleWidgetSelect } from "./action-widgets-config";
+import { PinnedWidgetFlyout } from "./pinned-widget-flyout";
 
 const MoreDropdown = ({
     widgets,
@@ -95,6 +97,22 @@ const MoreDropdown = ({
         onItemContextMenu({ x: e.clientX, y: e.clientY }, key);
     };
 
+    // ── Parent rows (Case B, SPEC_WIDGET_BAR_PARENT_SUBMENUS_2026_08_12.md §3.4) ──
+    // A row whose widget has `children` expands a nested PinnedWidgetFlyout
+    // (placement="right-start") instead of opening a pane — structurally the
+    // same hover-intent + peer-close shape as flyoutmenu.tsx's own SubMenu,
+    // scoped to this one dropdown instance.
+    const parentPeers = createPeerRegistry();
+    const [visibleParentSubMenus, setVisibleParentSubMenus] = createSignal<Record<string, boolean>>({});
+    const openParentSub = (key: string) => setVisibleParentSubMenus((prev) => ({ ...prev, [key]: true }));
+    const closeParentSub = (key: string) =>
+        setVisibleParentSubMenus((prev) => {
+            if (!(key in prev)) return prev;
+            const next = { ...prev };
+            delete next[key];
+            return next;
+        });
+
     return (
         <div
             ref={registerFloating}
@@ -103,18 +121,73 @@ const MoreDropdown = ({
             data-pane-overlay
         >
             <For each={widgets()}>
-                {({ key, widget }) => (
-                    <div
-                        class="action-widget-more-item"
-                        onClick={() => handleItemClick(widget)}
-                        onContextMenu={(e) => handleItemContextMenu(e, key)}
-                    >
-                        <span class="action-widget-more-item-icon widget-icon">
-                            <i class={makeIconClass(widget.icon, true, { defaultIcon: "browser" })}></i>
-                        </span>
-                        <span class="action-widget-more-item-label">{widget.label}</span>
-                    </div>
-                )}
+                {({ key, widget }) => {
+                    const isParent = (widget.children?.length ?? 0) > 0;
+                    if (!isParent) {
+                        return (
+                            <div
+                                class="action-widget-more-item"
+                                onClick={() => handleItemClick(widget)}
+                                onContextMenu={(e) => handleItemContextMenu(e, key)}
+                            >
+                                <span class="action-widget-more-item-icon widget-icon">
+                                    <i class={makeIconClass(widget.icon, true, { defaultIcon: "browser" })}></i>
+                                </span>
+                                <span class="action-widget-more-item-label">{widget.label}</span>
+                            </div>
+                        );
+                    }
+
+                    let rowEl: HTMLDivElement | undefined;
+                    const hover = createSubmenuHover({
+                        onOpen: () => openParentSub(key),
+                        onClose: () => closeParentSub(key),
+                    });
+                    const unregister = parentPeers.register(key, hover);
+                    onCleanup(() => {
+                        unregister();
+                        hover.dispose();
+                    });
+
+                    return (
+                        <>
+                            <div
+                                ref={(el) => (rowEl = el)}
+                                class="action-widget-more-item"
+                                onMouseEnter={() => {
+                                    parentPeers.closeOthers(key);
+                                    hover.onTriggerEnter();
+                                }}
+                                onMouseLeave={(e) => hover.onTriggerLeave(e)}
+                                onContextMenu={(e) => handleItemContextMenu(e, key)}
+                            >
+                                <span class="action-widget-more-item-icon widget-icon">
+                                    <i class={makeIconClass(widget.icon, true, { defaultIcon: "browser" })}></i>
+                                </span>
+                                <span class="action-widget-more-item-label">{widget.label}</span>
+                                <i class="fa-sharp fa-solid fa-chevron-right action-widget-more-item-chevron" />
+                            </div>
+                            <Show when={visibleParentSubMenus()[key]}>
+                                <PinnedWidgetFlyout
+                                    widget={widget}
+                                    wmap={wmap}
+                                    onClose={() => {
+                                        closeParentSub(key);
+                                        hover.close();
+                                        onClose();
+                                    }}
+                                    onItemContextMenu={onItemContextMenu}
+                                    anchor={() => rowEl ?? null}
+                                    placement="right-start"
+                                    gutter={8}
+                                    onSubmenuEnter={() => hover.onSubmenuEnter()}
+                                    onSubmenuLeave={(e) => hover.onSubmenuLeave(e)}
+                                    setSubmenuEl={(el) => hover.setSubmenuEl(el)}
+                                />
+                            </Show>
+                        </>
+                    );
+                }}
             </For>
         </div>
     );

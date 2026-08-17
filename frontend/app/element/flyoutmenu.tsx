@@ -15,7 +15,7 @@ import {
     computeMenuPosition,
     type MenuPositionResult,
 } from "@/app/util/menu-position";
-import { createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
+import { createPeerRegistry, createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
 
 import "./flyoutmenu.scss";
 
@@ -43,30 +43,13 @@ function styleToString(pos: MenuPositionResult): string {
     );
 }
 
-/**
- * Tracks the hover controllers of peer (same-level) menu items so entering
- * one can force-close any other peer's still-open submenu immediately —
- * matching how a native/VS-Code-style menu behaves for an explicit new
- * selection, on top of (not instead of) the safe-triangle grace period each
- * controller gives its OWN trigger-to-submenu approach. Scoped one per menu
- * level (one per MenuBody, one per SubMenu) — peers never reach across
- * levels, so a still-open descendant closes naturally via Solid unmounting
- * it when its own ancestor's <Show> flips off, not through this registry.
- */
-function createPeerRegistry() {
-    const peers = new Map<string, SubmenuHoverController>();
-    return {
-        register(key: string, hover: SubmenuHoverController) {
-            peers.set(key, hover);
-            onCleanup(() => peers.delete(key));
-        },
-        closeOthers(key: string) {
-            for (const [k, h] of peers) {
-                if (k !== key) h.close();
-            }
-        },
-    };
-}
+// createPeerRegistry moved to @/app/util/submenu-hover (hoisted so
+// action-widgets.tsx's pinned-parent flyouts (Case A, SPEC_WIDGET_BAR_
+// PARENT_SUBMENUS_2026_08_12.md §3.3) can share the same "close my
+// siblings" behavior outside of FlyoutMenu). Scoped one per menu level
+// (one per MenuBody, one per SubMenu) here — peers never reach across
+// levels, so a still-open descendant closes naturally via Solid unmounting
+// it when its own ancestor's <Show> flips off, not through this registry.
 
 type MenuProps = {
     items: MenuItem[];
@@ -327,7 +310,7 @@ const MenuBody = (props: MenuBodyProps): JSX.Element => {
                               onClose: () => props.closeSubMenu(key),
                           })
                         : null;
-                    if (hover) peers.register(key, hover);
+                    if (hover) onCleanup(peers.register(key, hover));
                     onCleanup(() => hover?.dispose());
 
                     const menuItemProps = {
@@ -522,7 +505,7 @@ const SubMenu = (props: SubMenuProps): JSX.Element => {
                               onClose: () => props.closeSubMenu(newKey),
                           })
                         : null;
-                    if (hover) peers.register(newKey, hover);
+                    if (hover) onCleanup(peers.register(newKey, hover));
                     onCleanup(() => hover?.dispose());
 
                     const menuItemProps = {
