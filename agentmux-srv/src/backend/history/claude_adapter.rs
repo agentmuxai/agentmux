@@ -188,6 +188,30 @@ impl ClaudeHistoryAdapter {
         result = result.replace('-', "/");
         result
     }
+
+    /// Parse the identity bundle id a session's absolute file path was
+    /// discovered under, if any: `.../identities/<bundle_id>/claude/...`
+    /// (both the always-global `<shared>/identities/...` location and the
+    /// per-channel isolated `<home>/channels/*/identities/...` /
+    /// `<home>/dev/*/(*/)?identities/...` locations share this same
+    /// `identities/<bundle_id>/claude/` shape — see `new()`'s scan roots).
+    /// Empty string for any other base_dir (personal `~/.claude`, the
+    /// default `<shared>/providers/claude/projects`, legacy
+    /// `~/.config/claude-*`) — those have no bundle to attribute to.
+    fn identity_id_from_path(path: &Path) -> String {
+        let components: Vec<String> = path
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        for (i, comp) in components.iter().enumerate() {
+            if comp == "identities" && components.get(i + 2).map(String::as_str) == Some("claude") {
+                if let Some(bundle_id) = components.get(i + 1) {
+                    return bundle_id.clone();
+                }
+            }
+        }
+        String::new()
+    }
 }
 
 impl HistoryAdapter for ClaudeHistoryAdapter {
@@ -447,6 +471,7 @@ impl HistoryAdapter for ClaudeHistoryAdapter {
             git_branch,
             total_tokens,
             subagent_count,
+            identity_id: Self::identity_id_from_path(path),
         }))
     }
 
