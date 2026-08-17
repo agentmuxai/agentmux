@@ -12,6 +12,8 @@ import { getApi } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Logger } from "@/util/logger";
+import { DEFAULT_RUNTIME_CONFIG, type AgentRuntimeConfig } from "./types";
+import type { ProviderModel } from "./providers/types";
 
 /**
  * Check if Node.js is available. Required for npm-based providers (Codex, Gemini).
@@ -100,4 +102,31 @@ export async function resolveEffectiveLaunchProvider(agent: AgentDefinition): Pr
         });
         return agent.provider;
     }
+}
+
+/**
+ * Resolve the initial `agent:runtime` block-meta value (AgentRuntimeConfig)
+ * for a fresh launch. Extracted as its own pure function — same reasoning
+ * as `resolveEffectiveLaunchProvider` above — so it's unit-testable without
+ * `launchAgentDefinition`'s much larger RPC/side-effect surface.
+ *
+ * `launchAgentDefinition` previously never set `agent:runtime` on a fresh
+ * launch at all, so `getRuntimeConfig`'s fallback (`DEFAULT_RUNTIME_CONFIG`,
+ * hardcoded to Claude's `"sonnet"`) silently applied regardless of harness —
+ * harmless for Claude agents, but a non-Claude agent's very first turn
+ * could carry a model string its own provider doesn't even recognize until
+ * the user opened the model picker and chose a real one.
+ *
+ * Precedence: an explicit `overrides.model` (e.g. a choice made in
+ * AgentCreateFromTemplateModal) wins; otherwise the effective provider's
+ * own `default: true` model; otherwise `DEFAULT_RUNTIME_CONFIG.model` as
+ * the last-resort fallback (a provider that declares no `models` list at
+ * all — e.g. one still on the raw-passthrough output format).
+ */
+export function resolveInitialRuntimeConfig(
+    overridesModel: string | undefined,
+    providerModels: ProviderModel[] | undefined,
+): AgentRuntimeConfig {
+    const model = overridesModel || providerModels?.find((m) => m.default)?.value || DEFAULT_RUNTIME_CONFIG.model;
+    return { ...DEFAULT_RUNTIME_CONFIG, model };
 }

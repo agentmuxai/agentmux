@@ -500,7 +500,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             kind: "create-from-template" as const,
             template,
             originBlockId: props.model.blockId,
-            onCreatedAndLaunch: async (newDefId, accountIdSel, memoryIdSel, name, agentType) => {
+            onCreatedAndLaunch: async (newDefId, accountIdSel, memoryIdSel, name, agentType, modelSel) => {
                 // The new definition is user-owned and carries the
                 // template's provider + cmd config. Build an
                 // AgentDefinition stub good enough for the launch flow
@@ -542,6 +542,12 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                         // No `continueOfInstanceId` — the new definition
                         // has no prior session; its agent-anchored zone
                         // is empty and the pane will start fresh.
+                        // Model the user picked in the modal (empty when
+                        // the harness declares no models list) — seeds
+                        // the first launch's agent:runtime block meta.
+                        // See resolveInitialRuntimeConfig's own doc
+                        // comment for the fallback when this is empty.
+                        model: modelSel || undefined,
                     });
                     if (props.model.nodejsError) {
                         setNodejsError(props.model.nodejsError);
@@ -811,6 +817,11 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                         <div class="agent-picker-templates-header" data-testid="agent-templates-header">
                             <span>+ New from template</span>
                         </div>
+                        <p class="agent-picker-templates-hint" data-testid="agent-templates-hint">
+                            Each card is a <strong>harness</strong> (the CLI that runs the agent,
+                            e.g. Claude Code, Codex) — you'll pick which <strong>model</strong>
+                            it uses next.
+                        </p>
                         <div class="agent-picker-list" data-testid="agent-templates-list">
                             <For each={templates()}>
                                 {(agent, index) => (

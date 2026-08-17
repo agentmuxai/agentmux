@@ -213,7 +213,7 @@ export function renderRequest(
                         // (spec note on CreateFromTemplateRequest) so
                         // `submitting()` covers both RPC steps and ESC
                         // / backdrop dismiss stay blocked end-to-end.
-                        onSubmit={async ({ name, accountId, memoryId, agentType, modelVendorBaseUrl }) => {
+                        onSubmit={async ({ name, accountId, memoryId, agentType, modelVendorBaseUrl, model }) => {
                             setSubmitting(true);
                             try {
                                 const resp = await RpcApi.AgentDefCreateFromTemplateCommand(
@@ -242,6 +242,7 @@ export function renderRequest(
                                     resp.memory_id,
                                     name,
                                     agentType,
+                                    model,
                                 );
                                 setSubmitting(false);
                                 api.close();
