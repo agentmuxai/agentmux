@@ -28,7 +28,6 @@
 - docs: add muxbus free-account abuse hardening spec (agentmux-cloud PR #50)
 - fix(agent): resolve harness+model picker through bound bundle, gate model picker on --model launch support
 
-
 ## 0.55.10 — 2026-08-16
 
 - fix(bashwrap): exempt declared-background tasks from the idle-kill timeout
