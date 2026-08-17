@@ -28,7 +28,6 @@ import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
 import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import {
-    getGroupedChildKeys,
     getMoreWidgets,
     getPinnedKeys,
     getPinnedWidgets,
@@ -276,23 +275,22 @@ const ActionWidgets = (): JSX.Element => {
                 },
             },
         ];
-        // A grouped child (e.g. right-clicking "Discord" inside the
-        // Messengers flyout) isn't individually pinnable — promoting one out
-        // of its parent group onto the bar isn't supported yet (spec §2/§6
-        // open question). Omit the action entirely here rather than show a
-        // "Pin to bar" that's a silent no-op: getPinnedKeys() unconditionally
-        // strips grouped children (reagent P2 on this PR), so pinWidget()
-        // would write the short-name into widget:pinned and it'd be filtered
-        // straight back out on every read — never actually pinning, never
-        // flipping the label to "Unpin".
-        if (!getGroupedChildKeys(wmap()).has(shortName)) {
-            items.push({ type: "separator" } as PopoverMenuItem);
-            items.push(
-                getPinnedKeys(settings(), wmap()).includes(shortName)
-                    ? { label: "Unpin from bar", click: () => { unpinWidget(shortName, settings(), wmap()); } }
-                    : { label: "Pin to bar", click: () => { pinWidget(shortName, settings(), wmap()); } }
-            );
-        }
+        // Pin/Unpin here works for a grouped child too — e.g. right-clicking
+        // "Discord" inside the Messengers flyout and choosing "Pin to bar"
+        // PROMOTES it out of the group onto the bar as a standalone widget;
+        // "Unpin from bar" reverses that, and it goes back to living only
+        // inside Messengers (see getEffectiveGroupedChildKeys). This used to
+        // be a silent no-op (reagent P2 on this PR) because getPinnedKeys()
+        // unconditionally stripped grouped children regardless of
+        // widget:pinned — fixed at the source, so the ordinary Pin/Unpin
+        // item below is correct for a child exactly as it is for any other
+        // widget, no special-casing needed here.
+        items.push({ type: "separator" } as PopoverMenuItem);
+        items.push(
+            getPinnedKeys(settings(), wmap()).includes(shortName)
+                ? { label: "Unpin from bar", click: () => { unpinWidget(shortName, settings(), wmap()); } }
+                : { label: "Pin to bar", click: () => { pinWidget(shortName, settings(), wmap()); } }
+        );
         return items;
     };
 
@@ -526,6 +524,7 @@ const ActionWidgets = (): JSX.Element => {
                             <PinnedWidgetFlyout
                                 widget={wmap()[key]}
                                 wmap={wmap}
+                                settings={settings}
                                 onClose={() => closeParentFlyout(key)}
                                 onItemContextMenu={handleItemContextMenu}
                                 anchor={() => parentSlotRefs.get(key) ?? null}

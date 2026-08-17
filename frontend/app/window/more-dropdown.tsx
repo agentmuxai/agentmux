@@ -171,6 +171,7 @@ const MoreDropdown = ({
                                 <PinnedWidgetFlyout
                                     widget={widget}
                                     wmap={wmap}
+                                    settings={settings}
                                     onClose={() => {
                                         closeParentSub(key);
                                         hover.close();

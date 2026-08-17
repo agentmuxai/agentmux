@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
     buildPaneWidgetMenuItems,
     getChildWidgets,
+    getEffectiveGroupedChildKeys,
     getGroupedChildKeys,
     getMoreWidgets,
     getPinnedKeys,
@@ -53,6 +54,33 @@ describe("getGroupedChildKeys", () => {
     it("tolerates a missing/undefined wmap", () => {
         expect(getGroupedChildKeys(undefined as unknown as Record<string, WidgetConfigType>).size).toBe(0);
     });
+
+    it("is unaffected by pin state — purely structural", () => {
+        const wmap = messengersWmap();
+        const settings = { "widget:pinned": ["slack"] };
+        expect(getGroupedChildKeys(wmap)).toEqual(new Set(["discord", "slack"]));
+        void settings; // getGroupedChildKeys doesn't take settings at all
+    });
+});
+
+describe("getEffectiveGroupedChildKeys", () => {
+    it("matches getGroupedChildKeys when nothing is individually pinned", () => {
+        const wmap = messengersWmap();
+        expect(getEffectiveGroupedChildKeys(wmap, {})).toEqual(new Set(["discord", "slack"]));
+    });
+
+    it("drops a child that's individually pinned via widget:pinned — it's been promoted out", () => {
+        const wmap = messengersWmap();
+        const settings = { "widget:pinned": ["agent", "slack"] };
+        expect(getEffectiveGroupedChildKeys(wmap, settings)).toEqual(new Set(["discord"]));
+    });
+
+    it("re-includes a child once it's removed from widget:pinned (unpinned)", () => {
+        const wmap = messengersWmap();
+        expect(getEffectiveGroupedChildKeys(wmap, { "widget:pinned": ["agent"] })).toEqual(
+            new Set(["discord", "slack"])
+        );
+    });
 });
 
 describe("getChildWidgets", () => {
@@ -71,6 +99,19 @@ describe("getChildWidgets", () => {
 
     it("returns an empty array for a leaf widget (no children)", () => {
         expect(getChildWidgets(widget(), {})).toEqual([]);
+    });
+
+    it("without settings, includes every declared child regardless of pin state", () => {
+        const wmap = messengersWmap();
+        const resolved = getChildWidgets(wmap["defwidget@messengers"], wmap);
+        expect(resolved.map((c) => c.key)).toEqual(["defwidget@discord", "defwidget@slack"]);
+    });
+
+    it("with settings, excludes a child that's been individually pinned (promoted out)", () => {
+        const wmap = messengersWmap();
+        const settings = { "widget:pinned": ["slack"] };
+        const resolved = getChildWidgets(wmap["defwidget@messengers"], wmap, settings);
+        expect(resolved.map((c) => c.key)).toEqual(["defwidget@discord"]);
     });
 });
 
@@ -102,15 +143,50 @@ describe("grouped children excluded from pinned/more (display:pinned defaults)",
     });
 });
 
-describe("grouped children excluded from pinned/more (widget:pinned override)", () => {
-    it("a stale bare child short-name in widget:pinned is still excluded", () => {
-        // A user's `widget:pinned` predating the grouping still lists "slack"
-        // directly — getPinnedKeys must not let it through even though it's
-        // present in the settings array (SPEC §5 open question 3).
+describe("individually pinning a grouped child (promote out of the group)", () => {
+    it("a child explicitly listed in widget:pinned is honored — it shows as a standalone pinned widget", () => {
+        // This is the actual feature: right-clicking "Slack" inside the
+        // Messengers flyout and choosing "Pin to bar" writes "slack" into
+        // widget:pinned exactly like pinning any other widget. It must NOT
+        // be stripped back out.
         const wmap = messengersWmap();
         const settings = { "widget:pinned": ["agent", "slack"] };
-        expect(getPinnedKeys(settings, wmap)).toEqual(["agent"]);
+        expect(getPinnedKeys(settings, wmap)).toEqual(["agent", "slack"]);
+        expect(getPinnedWidgets(settings, wmap).map((p) => p.key)).toContain("defwidget@slack");
+    });
+
+    it("a promoted child never also appears in getMoreWidgets", () => {
+        const wmap = messengersWmap();
+        const settings = { "widget:pinned": ["slack"] };
         expect(getMoreWidgets(settings, wmap).map((m) => m.key)).not.toContain("defwidget@slack");
+    });
+
+    it("a promoted child is dropped from its parent's own resolved children (getChildWidgets + settings)", () => {
+        const wmap = messengersWmap();
+        const settings = { "widget:pinned": ["slack"] };
+        const resolved = getChildWidgets(wmap["defwidget@messengers"], wmap, settings);
+        expect(resolved.map((c) => c.key)).toEqual(["defwidget@discord"]);
+    });
+
+    it("a non-promoted sibling stays reachable only through the group", () => {
+        const wmap = messengersWmap();
+        const settings = { "widget:pinned": ["slack"] };
+        expect(getPinnedKeys(settings, wmap)).not.toContain("discord");
+        expect(getMoreWidgets(settings, wmap).map((m) => m.key)).not.toContain("defwidget@discord");
+    });
+
+    it("unpinning reverts the child to living only inside its parent group, regardless of the parent's own pin state", () => {
+        const wmap = messengersWmap();
+        // Slack was pinned, now it's unpinned (removed from widget:pinned) —
+        // "goes back into Messengers" — this holds whether Messengers itself
+        // is pinned or not.
+        for (const settings of [{ "widget:pinned": [] as string[] }, { "widget:pinned": ["messengers"] }]) {
+            expect(getPinnedKeys(settings, wmap)).not.toContain("slack");
+            expect(getMoreWidgets(settings, wmap).map((m) => m.key)).not.toContain("defwidget@slack");
+            expect(getChildWidgets(wmap["defwidget@messengers"], wmap, settings).map((c) => c.key)).toContain(
+                "defwidget@slack"
+            );
+        }
     });
 });
 
@@ -127,27 +203,27 @@ describe("buildPaneWidgetMenuItems", () => {
     }
 
     it("excludes grouped children as flat top-level entries", () => {
-        const items = buildPaneWidgetMenuItems(paneWmap(), vi.fn());
+        const items = buildPaneWidgetMenuItems(paneWmap(), {}, vi.fn());
         expect(items.map((i) => i.label)).not.toContain("Discord");
         expect(items.map((i) => i.label)).not.toContain("Slack");
     });
 
     it("nests a parent's children under its own label as a native submenu", () => {
-        const items = buildPaneWidgetMenuItems(paneWmap(), vi.fn());
+        const items = buildPaneWidgetMenuItems(paneWmap(), {}, vi.fn());
         const messengers = items.find((i) => i.label === "Messengers");
         expect(messengers?.type).toBe("submenu");
         expect(messengers?.submenu?.map((c) => c.label)).toEqual(["Discord", "Slack"]);
     });
 
     it("excludes non-pane views (devtools) everywhere, including inside a submenu", () => {
-        const items = buildPaneWidgetMenuItems(paneWmap(), vi.fn());
+        const items = buildPaneWidgetMenuItems(paneWmap(), {}, vi.fn());
         expect(items.map((i) => i.label)).not.toContain("DevTools");
     });
 
     it("excludes the current view via opts.excludeView (leaf) and from inside a submenu", () => {
         const wmap = paneWmap();
         wmap["defwidget@discord"].blockdef = { meta: { view: "editor" } };
-        const items = buildPaneWidgetMenuItems(wmap, vi.fn(), { excludeView: "editor" });
+        const items = buildPaneWidgetMenuItems(wmap, {}, vi.fn(), { excludeView: "editor" });
         expect(items.map((i) => i.label)).not.toContain("Editor");
         const messengers = items.find((i) => i.label === "Messengers");
         expect(messengers?.submenu?.map((c) => c.label)).toEqual(["Slack"]);
@@ -157,15 +233,23 @@ describe("buildPaneWidgetMenuItems", () => {
         const wmap = paneWmap();
         wmap["defwidget@discord"].blockdef = { meta: { view: "devtools" } };
         wmap["defwidget@slack"].blockdef = { meta: { view: "devtools" } };
-        const items = buildPaneWidgetMenuItems(wmap, vi.fn());
+        const items = buildPaneWidgetMenuItems(wmap, {}, vi.fn());
         expect(items.map((i) => i.label)).not.toContain("Messengers");
     });
 
     it("invokes onSelect with the chosen widget's blockdef", () => {
         const onSelect = vi.fn();
-        const items = buildPaneWidgetMenuItems(paneWmap(), onSelect);
+        const items = buildPaneWidgetMenuItems(paneWmap(), {}, onSelect);
         const editor = items.find((i) => i.label === "Editor")!;
         editor.click?.();
         expect(onSelect).toHaveBeenCalledWith(paneWmap()["defwidget@editor"].blockdef);
+    });
+
+    it("a promoted child shows as a flat entry instead of nested under its parent", () => {
+        const settings = { "widget:pinned": ["slack"] };
+        const items = buildPaneWidgetMenuItems(paneWmap(), settings, vi.fn());
+        expect(items.map((i) => i.label)).toContain("Slack");
+        const messengers = items.find((i) => i.label === "Messengers");
+        expect(messengers?.submenu?.map((c) => c.label)).toEqual(["Discord"]);
     });
 });

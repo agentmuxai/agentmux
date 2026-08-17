@@ -32,6 +32,13 @@ import { getChildWidgets, handleWidgetSelect } from "./action-widgets-config";
 const PinnedWidgetFlyout = (props: {
     widget: WidgetConfigType;
     wmap: () => Record<string, WidgetConfigType>;
+    /**
+     * Needed so a child that gets individually pinned (promoted out of this
+     * group — see getEffectiveGroupedChildKeys) drops out of this list
+     * immediately, reactively, instead of still showing here alongside its
+     * new standalone bar/More entry.
+     */
+    settings: () => Record<string, any>;
     onClose: () => void;
     onItemContextMenu: (pos: { x: number; y: number }, key: string) => void;
     anchor: () => HTMLElement | null;
@@ -44,7 +51,7 @@ const PinnedWidgetFlyout = (props: {
     setSubmenuEl?: (el: HTMLDivElement | null) => void;
     ref?: (el: HTMLDivElement) => void;
 }): JSX.Element => {
-    const children = () => getChildWidgets(props.widget, props.wmap());
+    const children = () => getChildWidgets(props.widget, props.wmap(), props.settings());
 
     let overlayEl: HTMLDivElement | undefined;
     // Cut a transparent hole through any browser pane HWND behind this

@@ -22,8 +22,10 @@ import type { JSX } from "solid-js";
  * buildPaneWidgetMenuItems.
  */
 function buildEmptyTabMenu(): ContextMenuItem[] {
-    const wmap = atoms.fullConfigAtom()?.widgets ?? {};
-    return buildPaneWidgetMenuItems(wmap, (blockdef) => void createBlock(blockdef));
+    const fullConfig = atoms.fullConfigAtom();
+    const wmap = fullConfig?.widgets ?? {};
+    const settings = fullConfig?.settings ?? {};
+    return buildPaneWidgetMenuItems(wmap, settings, (blockdef) => void createBlock(blockdef));
 }
 
 function TabContent(props: { tabId: string }): JSX.Element {

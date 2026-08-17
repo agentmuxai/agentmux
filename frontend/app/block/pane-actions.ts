@@ -110,9 +110,12 @@ async function handleSplitPane(blockData: Block, direction: SplitDirection): Pro
  * available.
  */
 function buildReplaceSubmenu(blockData: Block): ContextMenuItem[] {
-    const wmap = atoms.fullConfigAtom()?.widgets ?? {};
+    const fullConfig = atoms.fullConfigAtom();
+    const wmap = fullConfig?.widgets ?? {};
+    const settings = fullConfig?.settings ?? {};
     const items = buildPaneWidgetMenuItems(
         wmap,
+        settings,
         (blockdef) => void replaceBlock(blockData.oid, blockdef, true),
         { excludeView: blockData?.meta?.view }
     );

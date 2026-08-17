@@ -3,7 +3,7 @@
 
 import logoUrl from "@/app/asset/logo.svg?url";
 import { atoms, replaceBlock } from "@/app/store/global";
-import { getChildWidgets } from "@/app/window/action-widgets-config";
+import { getChildWidgets, getPinnedKeys } from "@/app/window/action-widgets-config";
 import { checkKeyPressed, keydownWrapper } from "@/util/keyutil";
 import { isBlank, makeIconClass, createSignalAtom } from "@/util/util";
 import type { SignalAtom } from "@/util/util";
@@ -11,11 +11,13 @@ import clsx from "clsx";
 import { createEffect, createMemo, createSignal, For, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
 
-function sortByDisplayOrder(wmap: { [key: string]: WidgetConfigType } | null | undefined): WidgetConfigType[] {
+function sortByDisplayOrder(
+    wmap: { [key: string]: WidgetConfigType } | null | undefined
+): [string, WidgetConfigType][] {
     if (!wmap) return [];
-    const wlist = Object.values(wmap);
-    wlist.sort((a, b) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0));
-    return wlist;
+    const entries = Object.entries(wmap);
+    entries.sort(([, a], [, b]) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0));
+    return entries;
 }
 
 type GridLayoutType = { columns: number; tileWidth: number; tileHeight: number; showLabel: boolean };
@@ -56,12 +58,28 @@ export class LauncherViewModel implements ViewModel {
 
     filteredWidgets(): WidgetConfigType[] {
         const searchTerm = this.searchTerm();
-        const wmap = atoms.fullConfigAtom()?.widgets || {};
+        const fullConfig = atoms.fullConfigAtom();
+        const wmap = fullConfig?.widgets || {};
+        const settings = fullConfig?.settings || {};
         const parent = this.activeParent();
 
-        const source = parent
-            ? getChildWidgets(parent, wmap).map((c) => c.widget)
-            : sortByDisplayOrder(wmap).filter((widget) => !widget["display:hidden"]);
+        let source: WidgetConfigType[];
+        if (parent) {
+            // Drilled into a group — a child that's since been individually
+            // pinned (promoted out via its own "Pin to bar") is excluded
+            // here; it now shows at the top level instead, not doubled up.
+            source = getChildWidgets(parent, wmap, settings).map((c) => c.widget);
+        } else {
+            // display:hidden normally keeps a grouped child out of this
+            // top-level grid — but an individually pinned child (promoted
+            // out of its group) overrides that, same as it overrides the
+            // group-hiding default everywhere else (see
+            // getEffectiveGroupedChildKeys).
+            const pinnedSet = new Set(getPinnedKeys(settings, wmap));
+            source = sortByDisplayOrder(wmap).filter(
+                ([key, widget]) => !widget["display:hidden"] || pinnedSet.has(key.replace("defwidget@", ""))
+            ).map(([, widget]) => widget);
+        }
 
         return source.filter(
             (widget) => !searchTerm || widget.label?.toLowerCase().includes(searchTerm.toLowerCase())

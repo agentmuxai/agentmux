@@ -7,7 +7,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { createTab, getApi } from "@/store/global";
 import { fireAndForget } from "@/util/util";
 import { createSignal, type JSX } from "solid-js";
-import { getGroupedChildKeys, getPinnedKeys } from "./action-widgets-config";
+import { getEffectiveGroupedChildKeys, getPinnedKeys } from "./action-widgets-config";
 
 interface TitleBarContextMenuProps {
     pos: { x: number; y: number };
@@ -71,12 +71,13 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
             },
         });
 
-        // Grouped children (e.g. Messengers' Discord/Slack/etc.) are only
-        // pinnable as their parent group — pinning/unpinning a child
-        // individually isn't a supported action (SPEC_WIDGET_BAR_PARENT_
-        // SUBMENUS_2026_08_12.md §2 non-goals), so they're excluded here the
-        // same way they're excluded from the bar's own pinned/More lists.
-        const grouped = getGroupedChildKeys(widgets());
+        // A grouped child not currently individually pinned (e.g.
+        // Messengers' Discord/Slack/etc.) is excluded here the same way
+        // it's excluded from the bar's own pinned/More lists — only
+        // reachable by expanding its parent's flyout. Once a user promotes
+        // one out via that flyout's own right-click "Pin to bar", it shows
+        // up here too, checked, like any other pinned widget.
+        const grouped = getEffectiveGroupedChildKeys(widgets(), settings());
         const widgetEntries = Object.entries(widgets())
             .filter(([key]) => key.startsWith("defwidget@") && !grouped.has(key.replace("defwidget@", "")))
             .sort(([, a]: any, [, b]: any) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0));
