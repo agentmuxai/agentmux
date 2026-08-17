@@ -236,6 +236,18 @@ pub struct InjectionResponse {
     /// Consumed by the sender-echo path so it doesn't re-derive escalation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_tier: Option<String>,
+    /// Whether `effective_tier == "sensitive"` should actually STOP the
+    /// receiver (vs. tag-only for a cryptographically verified sender) —
+    /// see `Handler::inject_message_inner`'s `requires_stop` doc comment
+    /// (SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17.md).
+    /// Meaningless when `effective_tier` isn't `"sensitive"`. Threaded
+    /// through so the sender-echo path (including forwarded cross-instance
+    /// hops, which only see this struct's serialized JSON, not the
+    /// original `Handler` call) renders the same STOP-or-tag-only marker
+    /// the receiver got, instead of re-deriving it from a narrower set of
+    /// fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requires_stop: Option<bool>,
 }
 
 /// Agent registration record.

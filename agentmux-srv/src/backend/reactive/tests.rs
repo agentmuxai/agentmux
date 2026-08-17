@@ -438,6 +438,11 @@ async fn test_handler_inject_wan_reagent_verified_relaxes_tier_but_trust_label_u
 // A verified reagent signature relaxes the BLANKET network-tier forcing
 // only — content-based escalation (declared SENSITIVE, keyword match) still
 // applies on top of it, same as it does for host-tier's TRUST=host-verified.
+// As of SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17.md
+// (repo-owner-confirmed live), TIER still escalates to sensitive here — the
+// tag is retained for visibility — but `requires_stop` is now false: reagent's
+// identity is cryptographically proven for this exact message, so the STOP
+// rule (which exists to guard against an UNPROVEN sender) no longer applies.
 #[tokio::test]
 async fn test_handler_inject_wan_reagent_verified_still_escalates_on_declared_sensitive() {
     let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
@@ -467,6 +472,20 @@ async fn test_handler_inject_wan_reagent_verified_still_escalates_on_declared_se
 
     assert!(resp.success);
     assert_eq!(resp.effective_tier.as_deref(), Some("sensitive"));
+    assert_eq!(
+        resp.requires_stop,
+        Some(false),
+        "self-declared sensitive from a cryptographically verified sender tags but doesn't stop"
+    );
+
+    let calls = sent.lock().unwrap();
+    let payload = String::from_utf8_lossy(&calls[1].1);
+    assert!(payload.contains("TIER=sensitive"), "tag is retained: {payload}");
+    assert!(payload.contains("ESCALATE=none"), "marker must render ESCALATE=none: {payload}");
+    assert!(
+        !payload.contains("pause and ask the human operator"),
+        "the STOP instruction must not render for a verified sender: {payload}"
+    );
 }
 
 #[tokio::test]
@@ -501,6 +520,11 @@ async fn test_handler_inject_wan_reagent_verified_still_escalates_on_keyword_mat
         resp.effective_tier.as_deref(),
         Some("sensitive"),
         "a credential keyword still escalates even a verified reagent message"
+    );
+    assert_eq!(
+        resp.requires_stop,
+        Some(false),
+        "a keyword match on genuinely-signed content (e.g. a review discussing tokens) tags but doesn't stop"
     );
 }
 
@@ -589,9 +613,18 @@ async fn test_handler_inject_wan_reagent_invalid_signature_renders_sig_invalid()
 
     assert!(resp.success);
     assert_eq!(resp.effective_tier.as_deref(), Some("sensitive"));
+    assert_eq!(
+        resp.requires_stop,
+        Some(true),
+        "an ACTIVE forgery signal (signature present but wrong) must always still require a stop, \
+         even under the 2026-08-17 verified-sender relaxation — this is exactly the attack that \
+         relaxation is scoped to NOT cover"
+    );
     let calls = sent.lock().unwrap();
     let payload = String::from_utf8_lossy(&calls[1].1);
     assert!(payload.contains("SIG=invalid"), "a present-but-wrong signature renders SIG=invalid: {payload}");
+    assert!(payload.contains("ESCALATE=required"), "marker must render ESCALATE=required: {payload}");
+    assert!(payload.contains("pause and ask the human operator"), "{payload}");
 }
 
 #[tokio::test]
@@ -717,6 +750,12 @@ async fn test_handler_inject_lan_credential_keyword_still_forced_sensitive() {
         Some("sensitive"),
         "credential keyword match forces sensitive regardless of trust tier — unaffected by the narrowing"
     );
+    assert_eq!(
+        resp.requires_stop,
+        Some(true),
+        "an unproven LAN sender (no lan_verified signal) is NOT covered by the \
+         2026-08-17 verified-sender relaxation — a keyword match here still requires a stop"
+    );
 }
 
 // ---- LAN-tier Ed25519 signing (SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md) ----
@@ -835,12 +874,19 @@ async fn test_handler_inject_lan_invalid_signature_forces_sensitive() {
         "a failed LAN signature verification (someone forged korp's identity) forces sensitive \
          unconditionally, even with completely clean content"
     );
+    assert_eq!(
+        resp.requires_stop,
+        Some(true),
+        "an ACTIVE forgery signal (LAN signature present but wrong) must always still require a \
+         stop, even under the 2026-08-17 verified-sender relaxation"
+    );
     let calls = sent.lock().unwrap();
     let payload = String::from_utf8_lossy(&calls[1].1);
     assert!(
         payload.contains("TRUST=network-claimed"),
         "a FAILED verification doesn't get TRUST=lan-verified — only a successful one does: {payload}"
     );
+    assert!(payload.contains("ESCALATE=required"), "{payload}");
 }
 
 #[tokio::test]
@@ -867,7 +913,13 @@ async fn test_handler_inject_lan_verified_still_escalates_on_declared_sensitive(
     assert_eq!(
         resp.effective_tier.as_deref(),
         Some("sensitive"),
-        "proof of identity doesn't bypass a self-declared sensitive tier"
+        "proof of identity doesn't bypass a self-declared sensitive tier — the tag is retained"
+    );
+    assert_eq!(
+        resp.requires_stop,
+        Some(false),
+        "but a verified LAN sender (2026-08-17 relaxation) doesn't need to STOP for its own \
+         self-declared sensitive tag — same as WAN's SIG=verified case"
     );
 }
 
@@ -895,7 +947,13 @@ async fn test_handler_inject_lan_verified_still_escalates_on_keyword_match() {
     assert_eq!(
         resp.effective_tier.as_deref(),
         Some("sensitive"),
-        "proof of identity doesn't bypass the credential-keyword scan"
+        "proof of identity doesn't bypass the credential-keyword scan — the tag is retained"
+    );
+    assert_eq!(
+        resp.requires_stop,
+        Some(false),
+        "but a verified LAN sender (2026-08-17 relaxation) doesn't need to STOP for a keyword \
+         match on content it's genuinely allowed to discuss"
     );
 }
 
@@ -1563,6 +1621,7 @@ fn test_injection_response_serde() {
         error: None,
         timestamp: 1700000000000,
         effective_tier: Some("coord".to_string()),
+        requires_stop: Some(false),
     };
 
     let json = serde_json::to_string(&resp).unwrap();
@@ -1707,14 +1766,79 @@ async fn test_handler_inject_sig_verified_false_forces_sensitive_and_unverified_
         "an unverified sender (key exists, signature didn't match) must force SENSITIVE \
          even though nothing else about this message would have"
     );
+    assert_eq!(
+        resp.requires_stop,
+        Some(true),
+        "an ACTIVE forgery signal (host signature present but wrong) must always still require \
+         a stop, even under the 2026-08-17 verified-sender relaxation"
+    );
 
     let calls = sent.lock().unwrap();
     let payload = String::from_utf8_lossy(&calls[1].1);
     assert!(payload.contains("TRUST=unverified"), "marker must render TRUST=unverified, got: {payload}");
     assert!(payload.contains("TIER=sensitive"), "marker must render TIER=sensitive, got: {payload}");
+    assert!(payload.contains("ESCALATE=required"), "marker must render ESCALATE=required: {payload}");
     assert!(
         payload.contains("SENSITIVE JEKT"),
         "the human-visible warning banner must appear for a forced-sensitive jekt"
+    );
+}
+
+// SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17.md — a
+// genuinely host-verified sender (key on file, signature matched) whose
+// content trips the keyword scan is the host-tier analog of the WAN/LAN
+// "still escalates but doesn't stop" tests above.
+#[tokio::test]
+async fn test_handler_inject_sig_verified_true_keyword_match_tags_but_does_not_stop() {
+    let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let sent_clone = sent.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        sent_clone.lock().unwrap().push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "reminder: rotate the deploy token next week".to_string(),
+        source_agent: Some("agent2".to_string()),
+        request_id: Some("req-host-verified-kw".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: None, // host
+        forward_hops: 0,
+        sig_verified: Some(true), // signature actually verified
+        ..Default::default()
+    });
+
+    assert!(resp.success);
+    assert_eq!(
+        resp.effective_tier.as_deref(),
+        Some("sensitive"),
+        "the keyword scan still tags this — visibility is retained"
+    );
+    assert_eq!(
+        resp.requires_stop,
+        Some(false),
+        "but a cryptographically verified host sender doesn't need to STOP for content it's \
+         genuinely allowed to discuss"
+    );
+
+    let calls = sent.lock().unwrap();
+    let payload = String::from_utf8_lossy(&calls[1].1);
+    assert!(payload.contains("TRUST=host-verified"), "{payload}");
+    assert!(payload.contains("TIER=sensitive"), "{payload}");
+    assert!(payload.contains("ESCALATE=none"), "{payload}");
+    assert!(
+        !payload.contains("pause and ask the human operator"),
+        "the STOP instruction must not render for a verified sender: {payload}"
+    );
+    assert!(
+        payload.contains("verified sender"),
+        "an informational tag should still be visible in the body: {payload}"
     );
 }
 

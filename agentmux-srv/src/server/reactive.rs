@@ -46,6 +46,7 @@ pub(super) fn echo_jekt_to_sender(
     message: &str,
     msgid: &str,
     effective_tier: Option<&str>,
+    requires_stop: Option<bool>,
     delivery_tier: &str,
     sig_verified: Option<bool>,
     priority: &str,
@@ -74,6 +75,11 @@ pub(super) fn echo_jekt_to_sender(
         // what the actual delivery_tier of the outgoing message was.
         None,
         None,
+        // Defaults to `true` (STOP) when the caller couldn't tell us —
+        // matches `effective_tier` defaulting to the more-cautious "coord"
+        // rather than assuming "info" above; never silently downgrades a
+        // sensitive echo to tag-only just because this hop lost the signal.
+        requires_stop.unwrap_or(true),
         msgid,
         priority,
     );
@@ -389,6 +395,7 @@ pub(super) async fn handle_reactive_inject(
             &req.message,
             &resp.request_id,
             resp.effective_tier.as_deref(),
+            resp.requires_stop,
             req.delivery_tier.as_deref().unwrap_or("host"),
             req.sig_verified,
             req.priority.as_deref().unwrap_or("normal"),
@@ -445,6 +452,7 @@ pub(super) async fn handle_reactive_inject(
                                     &req.message,
                                     body.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
                                     body.get("effective_tier").and_then(|v| v.as_str()),
+                                    body.get("requires_stop").and_then(|v| v.as_bool()),
                                     "host",
                                     req.sig_verified,
                                     req.priority.as_deref().unwrap_or("normal"),
@@ -530,6 +538,7 @@ pub(super) async fn handle_reactive_inject(
                                     &req.message,
                                     body.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
                                     body.get("effective_tier").and_then(|v| v.as_str()),
+                                    body.get("requires_stop").and_then(|v| v.as_bool()),
                                     "host",
                                     req.sig_verified,
                                     req.priority.as_deref().unwrap_or("normal"),
@@ -608,6 +617,7 @@ pub(super) async fn handle_reactive_inject(
                                 &req.message,
                                 body.get("request_id").and_then(|v| v.as_str()).unwrap_or(""),
                                 body.get("effective_tier").and_then(|v| v.as_str()),
+                                body.get("requires_stop").and_then(|v| v.as_bool()),
                                 "lan",
                                 None,
                                 req.priority.as_deref().unwrap_or("normal"),
