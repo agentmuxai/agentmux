@@ -448,6 +448,10 @@ async fn handle_incoming_text(
                             resp.requires_stop,
                             "host",
                             None,
+                            // Always host-tier here (this is the pane's own outbound
+                            // send) — reagent/lan verification never applies.
+                            None,
+                            None,
                             incoming.priority.as_deref().unwrap_or("normal"),
                         );
                         let ack = json!({ "type": "bus:injected", "via": "pty", "block_id": resp.block_id });
@@ -489,6 +493,8 @@ async fn handle_incoming_text(
                                 None,
                                 None,
                                 "host",
+                                None,
+                                None,
                                 None,
                                 incoming.priority.as_deref().unwrap_or("normal"),
                             );
