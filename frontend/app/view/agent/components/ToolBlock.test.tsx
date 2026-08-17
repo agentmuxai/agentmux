@@ -444,6 +444,22 @@ describe("ToolBlock — answered AskUserQuestion renders as a user message", () 
         );
     });
 
+    it("shows the full muted timeout note for a partly-auto-answered question (regression: embedded ' — ' in the parenthetical)", () => {
+        // reagent P1 on PR #2630: the parenthetical itself contains " — "
+        // (n/m — no response in 30s), before the real note/answer
+        // separator. A naive `indexOf` match truncates the note.
+        const partlyAutoAnswered: ToolNode = {
+            ...answeredQuestion,
+            summary: "⏱️ Partly auto-answered (2/3 — no response in 30s) — Yes; No; Maybe",
+        };
+        const { container } = render(() => (
+            <ToolBlock node={partlyAutoAnswered} pinned={false} onTogglePin={() => {}} />
+        ));
+        expect(container.querySelector(".agent-user-message-timeout-note")?.textContent).toBe(
+            "⏱️ Partly auto-answered (2/3 — no response in 30s)",
+        );
+    });
+
     it("does not show a timeout note for a manually-answered question", () => {
         const { container } = render(() => (
             <ToolBlock node={answeredQuestion} pinned={false} onTogglePin={() => {}} />

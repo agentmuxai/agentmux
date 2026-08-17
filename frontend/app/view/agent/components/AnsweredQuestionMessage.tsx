@@ -33,10 +33,17 @@ interface AnsweredQuestionMessageProps {
  * `summary` string `useAgentQuestions.ts`'s `handleAnswer` builds, so a 30s
  * timeout fallback isn't silently presented as something the user actually
  * typed. Returns null for a manually-answered question (no ⏱️ prefix).
+ *
+ * Uses `lastIndexOf`, not `indexOf`: the "partly auto-answered" format
+ * embeds its own " — " inside the parenthetical (`(n/m — no response in
+ * 30s)`), before the real note/answer separator. `indexOf` matches that
+ * inner one first, truncating the note to "⏱️ Partly auto-answered (n/m"
+ * — unclosed paren, missing "no response in 30s)". The real separator is
+ * always the LAST " — " in the string. reagent P1 on PR #2630.
  */
 function timeoutNote(summary: string): string | null {
     if (!summary.startsWith("⏱️")) return null;
-    const sepIndex = summary.indexOf(" — ");
+    const sepIndex = summary.lastIndexOf(" — ");
     return sepIndex === -1 ? summary : summary.slice(0, sepIndex);
 }
 
