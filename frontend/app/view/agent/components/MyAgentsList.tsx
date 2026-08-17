@@ -71,6 +71,16 @@ export const EMPTY_FILTERED = "No agents for this identity yet.";
  * go unnoticed as "expected empty state" the first time it happened). */
 export const FETCH_ERROR =
     "Couldn't load your agents — check the connection and try again.";
+/** Copy for "the fetch succeeded, but the name filter matched nothing" —
+ * distinct from EMPTY_GLOBAL/EMPTY_FILTERED (both mean "there is nothing
+ * to filter"), so a user narrowing a real, non-empty list to zero visible
+ * rows isn't told they have no agents at all.
+ * SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md. */
+export const noMatchText = (query: string): string => `No agents match "${query}".`;
+/** Backend hard cap (`CommandListRecentSessionsData`, instance.rs) — the
+ * limit MyAgentsList requests once a name filter is active, so filtering
+ * covers the full available set instead of just the default first page. */
+const SEARCH_LIMIT = 100;
 
 export interface MyAgentsListProps {
     /** Optional reactive accessor for the identity filter. `null` /
@@ -78,6 +88,13 @@ export interface MyAgentsListProps {
     identityId?: Accessor<string | null | undefined>;
     /** Visible cap. Backend caps at 100; default is 20. */
     limit?: number;
+    /** Optional reactive accessor for a name filter (matched against
+     *  `instance_name || definition_name`, case-insensitive substring).
+     *  `null` / undefined / empty string = no filter (show every row).
+     *  When non-empty, the fetch limit is bumped to `SEARCH_LIMIT` so the
+     *  filter searches the full backend-capped set, not just the default
+     *  page — see SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md. */
+    nameFilter?: Accessor<string | null | undefined>;
     /** Called when the user clicks an entry that is NOT currently open
      *  in another pane. The parent (AgentPicker) hands this to
      *  `AgentViewModel.launchAgentDefinition` with the continuation
@@ -113,6 +130,26 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
         return String(raw).trim();
     });
 
+    // Trimmed query, kept in its original case for display (the no-match
+    // message echoes back what the user typed). `nameQuery` below is the
+    // lowercased form used for matching.
+    const rawQuery = createMemo(() => {
+        const raw = props.nameFilter?.();
+        if (raw === null || raw === undefined) return "";
+        return String(raw).trim();
+    });
+    const nameQuery = createMemo(() => rawQuery().toLowerCase());
+    const isSearching = createMemo(() => nameQuery().length > 0);
+
+    // Compound resource key: a plain string so Solid's resource-source
+    // memoization (value equality) only triggers a refetch when the
+    // identity filter changes OR searching flips on/off — NOT on every
+    // keystroke while already searching. An object key would defeat this
+    // (a fresh object each recomputation is never `Object.is`-equal to the
+    // last one), so the two parts are joined into one primitive instead of
+    // passed as `{ id, searching }`.
+    const resourceKey = createMemo(() => `${filterId()} ${isSearching() ? "1" : "0"}`);
+
     // Separate from the resource's own value: `rows()` still resolves to
     // `[]` on a failed fetch (see the catch below) so nothing here needs
     // to special-case Solid's throw-on-read error-state accessor — this
@@ -133,14 +170,22 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     let fetchGeneration = 0;
 
     const [rows, { refetch }] = createResource<RecentSessionRow[], string>(
-        // Key the resource on the filter so changes refetch.
-        filterId,
-        async (id) => {
+        // Key the resource on identity + whether a name search is active
+        // (see resourceKey's own comment) so changes to either refetch.
+        resourceKey,
+        async () => {
+            // Read the current values directly rather than parsing
+            // `resourceKey`'s string — the key's only job is to give
+            // Solid's resource-source memoization a primitive to dedupe
+            // on (see resourceKey's own comment); by the time this
+            // fetcher runs, `filterId()`/`isSearching()` already reflect
+            // whatever change just triggered it.
+            const id = filterId();
             const myGeneration = ++fetchGeneration;
             setFetchError(false);
             try {
                 const result = await RpcApi.ListRecentSessionsCommand(TabRpcClient, {
-                    limit: props.limit ?? 20,
+                    limit: isSearching() ? SEARCH_LIMIT : (props.limit ?? 20),
                     // Backend treats "" as "no filter" — see
                     // CommandListRecentSessionsData docs.
                     identity_id: id,
@@ -304,6 +349,22 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     const isLoading = () => rows.loading;
     const isEmpty = () => !isLoading() && !fetchError() && (rows() ?? []).length === 0;
 
+    // Client-side name filter over the already-fetched page (bumped to
+    // SEARCH_LIMIT while searching — see resourceKey/fetcher above).
+    // Matches instance_name first, falling back to definition_name for
+    // rows without a custom instance name (e.g. freshly-created agents).
+    // SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md.
+    const filteredRows = createMemo(() => {
+        const q = nameQuery();
+        const all = rows() ?? [];
+        if (!q) return all;
+        return all.filter((r) => (r.instance_name || r.definition_name).toLowerCase().includes(q));
+    });
+    // Distinct from `isEmpty()`: the fetch found real rows, but the
+    // filter narrowed them all away — not "you have no agents."
+    const isNoMatch = () =>
+        !isLoading() && !fetchError() && (rows() ?? []).length > 0 && filteredRows().length === 0;
+
     return (
         <div class="agent-recent-sessions" data-testid="agent-my-agents-list">
             <div class="agent-recent-sessions-header">
@@ -320,24 +381,36 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                     stale-while-revalidate means `rows()` keeps showing the
                     last real count during a background refetch anyway —
                     exactly what should render. */}
-                <Show when={(rows() ?? []).length > 0}>
+                <Show when={filteredRows().length > 0}>
                     <span class="agent-recent-sessions-count" data-testid="agent-my-agents-count">
-                        {(rows() ?? []).length}
+                        {filteredRows().length}
                     </span>
                 </Show>
             </div>
             <Show
-                when={!isEmpty() && !fetchError()}
+                when={!isEmpty() && !fetchError() && !isNoMatch()}
                 fallback={
                     <Show
                         when={fetchError()}
                         fallback={
-                            <div
-                                class="agent-recent-sessions-empty"
-                                data-testid="agent-my-agents-empty"
+                            <Show
+                                when={isNoMatch()}
+                                fallback={
+                                    <div
+                                        class="agent-recent-sessions-empty"
+                                        data-testid="agent-my-agents-empty"
+                                    >
+                                        {filterId() ? EMPTY_FILTERED : EMPTY_GLOBAL}
+                                    </div>
+                                }
                             >
-                                {filterId() ? EMPTY_FILTERED : EMPTY_GLOBAL}
-                            </div>
+                                <div
+                                    class="agent-recent-sessions-empty"
+                                    data-testid="agent-my-agents-no-match"
+                                >
+                                    {noMatchText(rawQuery())}
+                                </div>
+                            </Show>
                         }
                     >
                         <div
@@ -358,7 +431,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                 }
             >
                 <ul class="agent-recent-sessions-list">
-                    <For each={rows() ?? []}>
+                    <For each={filteredRows()}>
                         {(row) => {
                             const isActive = () =>
                                 (props.openDefinitions?.() ?? new Map()).has(row.definition_id);
@@ -392,7 +465,12 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                     />
                                                 </Show>
                                                 <Show when={row.agent_type === "host" || row.agent_type === "container"}>
-                                                    <RuntimeBadge runtime={row.agent_type} size="sm" />
+                                                    {/* size="tag" — same HOST/SANDBOX wording + white/
+                                                        yellow styling as AgentComposerStrip's runtime
+                                                        tag, so the badge reads as one consistent
+                                                        vocabulary instead of two ("Container" here vs.
+                                                        "SANDBOX" in the pane the row launches into). */}
+                                                    <RuntimeBadge runtime={row.agent_type} size="tag" />
                                                 </Show>
                                                 <span class="agent-recent-sessions-meta">
                                                     {row.identity_name || "(ambient creds)"}

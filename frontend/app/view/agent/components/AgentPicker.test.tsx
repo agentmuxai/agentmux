@@ -138,7 +138,12 @@ vi.mock("./AgentActionBar", () => ({
 }));
 
 vi.mock("./MyAgentsList", () => ({
-    MyAgentsList: () => null,
+    MyAgentsList: (props: any) => (
+        <div
+            data-testid="my-agents-list-mock"
+            data-name-filter={props.nameFilter?.() ?? ""}
+        />
+    ),
 }));
 
 import { AgentPicker } from "./AgentPicker";
@@ -475,5 +480,60 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
             await waitFor(() => expect(modalLayerOpen).toHaveBeenCalledTimes(3));
             expect(RpcApi.InstallCheckCommand).not.toHaveBeenCalled();
         });
+    });
+});
+
+// SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md
+describe("AgentPicker — filter bar", () => {
+    it("renders the filter bar above MyAgentsList", async () => {
+        const model = makeMockModel();
+        render(() => <AgentPicker model={model as any} />);
+        const bar = await screen.findByTestId("agent-picker-filter-bar");
+        const myAgents = await screen.findByTestId("my-agents-list-mock");
+        expect(
+            bar.compareDocumentPosition(myAgents) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBeTruthy();
+    });
+
+    it("threads typed text into MyAgentsList's nameFilter prop", async () => {
+        const model = makeMockModel();
+        render(() => <AgentPicker model={model as any} />);
+        const input = await screen.findByTestId("agent-picker-filter-input");
+        fireEvent.input(input, { target: { value: "mak" } });
+        const myAgents = await screen.findByTestId("my-agents-list-mock");
+        await waitFor(() => expect(myAgents.getAttribute("data-name-filter")).toBe("mak"));
+    });
+
+    it("clear button resets the query and hides itself", async () => {
+        const model = makeMockModel();
+        render(() => <AgentPicker model={model as any} />);
+        const input = await screen.findByTestId("agent-picker-filter-input");
+        fireEvent.input(input, { target: { value: "mak" } });
+        const clearBtn = await screen.findByTestId("agent-picker-filter-clear");
+        fireEvent.click(clearBtn);
+
+        const myAgents = await screen.findByTestId("my-agents-list-mock");
+        await waitFor(() => expect(myAgents.getAttribute("data-name-filter")).toBe(""));
+        expect(screen.queryByTestId("agent-picker-filter-clear")).toBeNull();
+    });
+
+    it("does not narrow the template card grid — My Agents only (Q1)", async () => {
+        const model = makeMockModel();
+        render(() => <AgentPicker model={model as any} />);
+        const input = await screen.findByTestId("agent-picker-filter-input");
+        fireEvent.input(input, { target: { value: "zzz-matches-nothing" } });
+        // The template card is unrelated to the query and must still render
+        // — the filter is scoped to MyAgentsList only, per the spec's Q1
+        // recommendation (confirmed by the human operator).
+        await waitFor(() => {
+            expect(screen.queryByTestId("agent-card-tpl-claude")).not.toBeNull();
+        });
+    });
+
+    it("does not autofocus the filter input on mount (Q2)", async () => {
+        const model = makeMockModel();
+        render(() => <AgentPicker model={model as any} />);
+        const input = await screen.findByTestId("agent-picker-filter-input");
+        expect(document.activeElement).not.toBe(input);
     });
 });
