@@ -864,16 +864,38 @@ pub(super) struct EnsureSigningKeyRequest {
 /// host-tier jekt signing/verification (tests, external harnesses) without
 /// the cost and side effects of a live LLM session.
 ///
-/// Gated by the same `X-AuthKey` full-auth boundary as every other
-/// `/agentmux/reactive/*` route in this group (`register`/`unregister`
-/// already let an authenticated caller mint arbitrary agent_id→block_id
-/// bindings — this is the same trust level, not a new category of risk).
-/// Idempotent: `agent_jekt_key_ensure` returns the existing key unchanged
-/// if one was already minted for this `agent_id` (host or otherwise).
+/// reagentx P0 on this PR's first pass: gating this behind the same
+/// `X-AuthKey` as `register`/`unregister` is NOT the same trust level as
+/// those routes — `X-AuthKey`/`AGENTMUX_AUTH_KEY` is injected into every
+/// spawned agent's own subprocess env for its bashwrap/MCP tool calls
+/// (`agent_handlers/input.rs`), so any agent already holds it. Returning
+/// another agent's raw signing key to any caller with that shared key is
+/// secret-key exfiltration enabling cryptographic impersonation — it
+/// directly breaks the invariant `agent_jekt_keys.rs` documents ("never
+/// returned over any RPC ... only the agent it claims to be from ever held
+/// the key") and the entire premise `TRUST=host-verified` depends on.
+///
+/// There is no way to additionally verify "the HTTP caller genuinely IS
+/// `agent_id`" from this request alone — that's the exact problem host-tier
+/// signing exists to solve, so this endpoint can't lean on it without being
+/// circular. Instead: **disabled unless `AGENTMUX_ENABLE_TEST_ENDPOINTS=1`
+/// was set in the srv process's own environment before it started** — set
+/// by whoever launches the instance, not settable by a running agent's tool
+/// calls (unlike `X-AuthKey`, which every spawned agent already holds
+/// regardless of what's set here). Off by default, so no real user's real
+/// instance with real agents ever exposes it; on only for a deliberately
+/// isolated test/verification instance where every "agent" is synthetic.
 pub(super) async fn handle_reactive_ensure_signing_key(
     State(state): State<AppState>,
     Json(req): Json<EnsureSigningKeyRequest>,
 ) -> Response {
+    if std::env::var("AGENTMUX_ENABLE_TEST_ENDPOINTS").as_deref() != Ok("1") {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "not found"})),
+        )
+            .into_response();
+    }
     match state.wstore.agent_jekt_key_ensure(&req.agent_id) {
         Ok(key) => {
             use base64::Engine as _;
