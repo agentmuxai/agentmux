@@ -30,39 +30,54 @@
  * and docs/specs/SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md (current).
  */
 
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { BrainSpinner } from "@/app/element/BrainSpinner";
+import { subscribeToPaneLifecycle } from "@/app/store/agent-pane-registration";
+import { getOpenDefinitionMap } from "@/app/store/agent-pane-state-store";
+import { ContextMenuModel } from "@/app/store/contextmenu";
+import { atoms, refocusNode } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { ContextMenuModel } from "@/app/store/contextmenu";
 import { waveEventSubscribe } from "@/app/store/wps";
+import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { useModalLayer, type LaunchFormStateWire } from "@/element/modal-layer";
 import { getPlatform } from "@/util/platformutil";
-import { refocusNode } from "@/app/store/global";
-import { getOpenDefinitionMap } from "@/app/store/agent-pane-state-store";
-import { subscribeToPaneLifecycle } from "@/app/store/agent-pane-registration";
-import type { AgentViewModel } from "../agent-model";
-import { getProvider } from "../providers";
+import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
 import { resolveEffectiveLaunchProvider } from "../agent-launch-env";
+import type { AgentViewModel } from "../agent-model";
 import { realAccountIdOrEmpty } from "../identity-carry-over";
-import { refreshAccountCache } from "@/app/view/identity/identity-model";
-import { AgentCard } from "./AgentCard";
+import { getProvider } from "../providers";
 import { AgentActionBar } from "./AgentActionBar";
+import { AgentCard } from "./AgentCard";
+import type { LaunchOverrides } from "./AgentLaunchModal";
 import { AgentPickerFilterBar } from "./AgentPickerFilterBar";
 import { HiddenTemplatesSection } from "./HiddenTemplatesSection";
-import type { LaunchOverrides } from "./AgentLaunchModal";
 import { MyAgentsList } from "./MyAgentsList";
 
 // ── useAgentDefinitions hook ───────────────────────────────────────────────────────
 
 /**
- * Reactive accessor for the current agent-definition list. Subscribes to
- * `agents:changed` and refetches when that event fires.
+ * Reactive accessor for the current agent-definition list, plus whether the
+ * FIRST fetch is still in flight. Subscribes to `agents:changed` and
+ * refetches when that event fires.
+ *
+ * Returns a tuple `[agents, loading]` (matching `useOpenDefinitionMap`'s own
+ * convention below) rather than just the list accessor — `agents` starts as
+ * `[]` and stays indistinguishable from "genuinely zero definitions" without
+ * a separate loading flag, which is exactly what let AgentPicker's `<Show
+ * when={agents().length > 0}>` gate flash its "No definitions configured"
+ * empty state on every single mount for users who actually have agents,
+ * before the first `ListAgentDefinitionsCommand` response ever arrived (see
+ * AgentPicker's own render for the fix). `loading` only ever reflects the
+ * FIRST fetch — `agents:changed` refetches don't flip it back to true, so a
+ * background refresh never re-triggers whatever a caller gates on it.
  */
-export function useAgentDefinitions(): () => AgentDefinition[] {
+export function useAgentDefinitions(): [() => AgentDefinition[], () => boolean] {
     const [agents, setAgents] = createSignal<AgentDefinition[]>([]);
+    const [loading, setLoading] = createSignal(true);
 
     onMount(() => {
         let cancelled = false;
+        let firstLoad = true;
 
         async function load() {
             try {
@@ -70,6 +85,11 @@ export function useAgentDefinitions(): () => AgentDefinition[] {
                 if (!cancelled) setAgents(result ?? []);
             } catch {
                 // silently ignore
+            } finally {
+                if (!cancelled && firstLoad) {
+                    firstLoad = false;
+                    setLoading(false);
+                }
             }
         }
 
@@ -86,7 +106,7 @@ export function useAgentDefinitions(): () => AgentDefinition[] {
         });
     });
 
-    return agents;
+    return [agents, loading];
 }
 
 /**
@@ -126,8 +146,48 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // an *existing agent*, and a shared query risks the template grid
     // silently shrinking for an unrelated reason right next to it.
     const [filterQuery, setFilterQuery] = createSignal("");
-    const agents = useAgentDefinitions();
+    const [agents, definitionsLoading] = useAgentDefinitions();
     const modalLayer = useModalLayer();
+
+    // Combined "picker content is ready to reveal" gate — true once BOTH
+    // independent async sources feeding this view have resolved their
+    // FIRST load: the definitions list (definitionsLoading above) and
+    // MyAgentsList's own ListRecentSessionsCommand resource (reported back
+    // via onFirstLoad below, since MyAgentsList owns that resource
+    // internally). Neither alone was sufficient — gating only on
+    // definitionsLoading still let MyAgentsList's own empty `<ul>` flash
+    // before its rows arrived; gating only on MyAgentsList's load left the
+    // OUTER `<Show when={agents().length > 0}>` free to flash the "No
+    // definitions configured" empty state first for users who actually
+    // have agents, simply because `agents()` starts at `[]` and is
+    // indistinguishable from "genuinely zero" without definitionsLoading.
+    // One overlay, held until both are done, replaces two independent
+    // partial-content flashes with a single reveal — same principle as
+    // agent-view.tsx's pane-level loading overlay (one gate, one reveal),
+    // applied here across two sibling data sources instead of one.
+    const [myAgentsLoaded, setMyAgentsLoaded] = createSignal(false);
+    // A genuinely-empty definitions list never mounts MyAgentsList at all (it
+    // lives inside the `agents().length > 0` branch below) — so `loaded`
+    // must not wait on `myAgentsLoaded` in that case, or the overlay would
+    // spin forever for a user with zero agent definitions.
+    const pickerReady = createMemo(() => {
+        if (definitionsLoading()) return false;
+        if (agents().length === 0) return true;
+        return myAgentsLoaded();
+    });
+
+    // Hold-then-fade, same mechanics as agent-view.tsx's pane-level loading
+    // overlay (docs/specs/REPORT_AGENT_PANE_BLANK_LOAD_BRAIN_INDICATOR_2026_07_04.md):
+    // `pickerReady()` flips once, `showPickerOverlay` stays true for one
+    // more CSS fade duration so the overlay's own removal is never a pop.
+    const [showPickerOverlay, setShowPickerOverlay] = createSignal(true);
+    let pickerOverlayFadeTimeout: ReturnType<typeof setTimeout> | undefined;
+    onCleanup(() => clearTimeout(pickerOverlayFadeTimeout));
+    createEffect(() => {
+        if (pickerReady() && showPickerOverlay()) {
+            pickerOverlayFadeTimeout = setTimeout(() => setShowPickerOverlay(false), 220);
+        }
+    });
 
     // Reactive map of definition_id → blockId for panes currently open.
     const [openDefinitions, refreshOpenDefinitions] = useOpenDefinitionMap();
@@ -185,10 +245,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // SPEC_LAUNCH_MODAL_PROFILE_SECTION_2026_05_18.md; codex P2 on
     // round 7 expanded preservation from identity+memory only to the
     // full form.
-    const buildLaunchRequest = (
-        agent: AgentDefinition,
-        initialFormState?: Partial<LaunchFormStateWire>,
-    ) => ({
+    const buildLaunchRequest = (agent: AgentDefinition, initialFormState?: Partial<LaunchFormStateWire>) => ({
         kind: "launch-agent" as const,
         agent,
         originBlockId: props.model.blockId,
@@ -230,7 +287,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                         buildLaunchRequest(agent, {
                             ...current,
                             accountId: id,
-                        }),
+                        })
                     );
                 },
                 onCancel: () => {
@@ -251,7 +308,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                         buildLaunchRequest(agent, {
                             ...current,
                             memoryId: id,
-                        }),
+                        })
                     );
                 },
                 onCancel: () => {
@@ -286,9 +343,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             // a UX polish follow-up; for the cascade-recovery flow,
             // not crashing the picker is the priority.
             // eslint-disable-next-line no-console
-            console.warn(
-                `recent-session reattach: definition ${row.definition_id} not found`,
-            );
+            console.warn(`recent-session reattach: definition ${row.definition_id} not found`);
             return;
         }
         setLaunching(def.id);
@@ -310,7 +365,10 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 // non-UUID ("blank", "seed-*" — memory_bundles.rs/bundle.rs)
                 // rather than legacy garbage, so filtering it would silently
                 // drop a real carry-over (reagent P2 on this PR).
-                accountId: realAccountIdOrEmpty(row.identity_id, (await refreshAccountCache()).map((a) => a.id)),
+                accountId: realAccountIdOrEmpty(
+                    row.identity_id,
+                    (await refreshAccountCache()).map((a) => a.id)
+                ),
                 memoryId: row.memory_id,
                 continueOfInstanceId: row.instance_id,
                 workDirOverride: row.working_directory,
@@ -344,7 +402,10 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 environment: forkedDef.agent_type === "container" ? "docker" : "local",
                 // #2463 Finding 1 — see handleReattach's comment above.
                 // memoryId intentionally unfiltered — same reasoning.
-                accountId: realAccountIdOrEmpty(row.identity_id, (await refreshAccountCache()).map((a) => a.id)),
+                accountId: realAccountIdOrEmpty(
+                    row.identity_id,
+                    (await refreshAccountCache()).map((a) => a.id)
+                ),
                 memoryId: row.memory_id,
             });
         } finally {
@@ -384,9 +445,12 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         // rather than the deprecated `window.navigator.platform` —
         // reagent P2 on PR #908.
         switch (getPlatform()) {
-            case "win32": return "windows";
-            case "darwin": return "macos";
-            default: return "linux";
+            case "win32":
+                return "windows";
+            case "darwin":
+                return "macos";
+            default:
+                return "linux";
         }
     };
     const probeMissingPrereqs = async (agent: AgentDefinition) => {
@@ -420,8 +484,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                 tool: r.tool,
                 label: r.label ?? r.tool,
                 installUrl: r.installUrls[platform],
-                installLinkText:
-                    r.installLinkText?.[platform] ?? `Install ${r.label ?? r.tool}`,
+                installLinkText: r.installLinkText?.[platform] ?? `Install ${r.label ?? r.tool}`,
             }));
     };
 
@@ -446,12 +509,11 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             let accountId = "";
             let memoryId = "";
             try {
-                const rows = await RpcApi.ListNamedAgentsCommand(TabRpcClient, {
-                    definition_id: agent.id,
-                }) ?? [];
-                const mostRecent = [...rows].sort(
-                    (a, b) => (b.started_at ?? 0) - (a.started_at ?? 0),
-                )[0];
+                const rows =
+                    (await RpcApi.ListNamedAgentsCommand(TabRpcClient, {
+                        definition_id: agent.id,
+                    })) ?? [];
+                const mostRecent = [...rows].sort((a, b) => (b.started_at ?? 0) - (a.started_at ?? 0))[0];
                 if (mostRecent) {
                     // See identity-carry-over.ts's realAccountIdOrEmpty —
                     // cross-checks against a fresh account fetch (not the
@@ -465,7 +527,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     // handleReattach's comment above.
                     accountId = realAccountIdOrEmpty(
                         mostRecent.identity_id,
-                        (await refreshAccountCache()).map((a) => a.id),
+                        (await refreshAccountCache()).map((a) => a.id)
                     );
                     memoryId = mostRecent.memory_id;
                 }
@@ -579,10 +641,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // templates carry no session zone post-migration. On success it
     // hands off to `openCreateFromTemplateModal` instead of
     // `openLaunchModal`.
-    const handleTemplateSelect = async (
-        agent: AgentDefinition,
-        _evt?: MouseEvent | KeyboardEvent,
-    ) => {
+    const handleTemplateSelect = async (agent: AgentDefinition, _evt?: MouseEvent | KeyboardEvent) => {
         if (pendingSelect.has(agent.id)) return;
         pendingSelect.add(agent.id);
         try {
@@ -617,10 +676,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                         openCreateFromTemplateModal(agent);
                     }
                 };
-                const openPrereqModal = (
-                    currentMissing: typeof missing,
-                    op: "open" | "replace",
-                ): void => {
+                const openPrereqModal = (currentMissing: typeof missing, op: "open" | "replace"): void => {
                     const refresh = async () => {
                         for (const m of currentMissing) prereqCache.delete(m.tool);
                         const fresh = await probeMissingPrereqs(agent);
@@ -684,8 +740,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
             setInstallState((s) => {
                 const next = { ...s };
                 for (const a of agents()) {
-                    const aProviderId =
-                        a.id === agent.id ? canonical : (getProvider(a.provider)?.id ?? a.provider);
+                    const aProviderId = a.id === agent.id ? canonical : (getProvider(a.provider)?.id ?? a.provider);
                     if (aProviderId === canonical) {
                         next[a.id] = true;
                     }
@@ -718,10 +773,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // Only seeded templates get this context menu — user-owned rows
     // belong to `MyAgentsList`, which has its own affordances and
     // never funnels through this handler.
-    const handleTemplateContextMenu = (
-        agent: AgentDefinition,
-        evt: MouseEvent,
-    ) => {
+    const handleTemplateContextMenu = (agent: AgentDefinition, evt: MouseEvent) => {
         evt.preventDefault();
         const caption = agent.name || agent.slug || agent.id;
         ContextMenuModel.showContextMenu(
@@ -740,16 +792,13 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                                 // unreachable from this menu, but log
                                 // to muxlog if it ever fires.
                                 // eslint-disable-next-line no-console
-                                console.warn(
-                                    `agentdefhide failed for ${agent.id}:`,
-                                    err,
-                                );
+                                console.warn(`agentdefhide failed for ${agent.id}:`, err);
                             }
                         })();
                     },
                 },
             ],
-            evt,
+            evt
         );
     };
 
@@ -760,9 +809,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // implicitly handled by `MyAgentsList` (user-owned, surfaced as
     // recent sessions via `ListRecentSessionsCommand`). The card grid
     // below the My Agents list renders only the templates tier.
-    const templates = createMemo(() =>
-        agents().filter((a) => a.is_seeded === 1),
-    );
+    const templates = createMemo(() => agents().filter((a) => a.is_seeded === 1));
 
     // Refresh install state whenever the agent list changes.
     // Session-zone probes were removed in the Phase 1 cleanup
@@ -789,20 +836,42 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
         return Math.max(0.5, Math.min(2.0, z));
     });
 
+    // Shared between both branches below (fallback and real-content) — see
+    // pickerReady/showPickerOverlay's own comments above for why a single
+    // combined overlay replaced each branch's previous independent partial
+    // reflow. Not a separate component (no reactive scope of its own
+    // needed) — just a render-time helper so the markup isn't duplicated.
+    const pickerOverlay = () => (
+        <Show when={showPickerOverlay()}>
+            <div
+                class="agent-pane-loading-overlay"
+                classList={{
+                    "is-fading": pickerReady(),
+                    "is-reduced-motion": atoms.prefersReducedMotionAtom(),
+                }}
+            >
+                <BrainSpinner fading={pickerReady()} />
+            </div>
+        </Show>
+    );
+
     return (
         <>
             <Show
                 when={agents().length > 0}
                 fallback={
                     <div class="agent-view" style={{ zoom: zoomFactor() }}>
-                        <div class="agent-picker-empty">
-                            <div class="agent-picker-empty-icon">{"\u2726"}</div>
-                            <div class="agent-picker-empty-title">No definitions configured</div>
-                            <div class="agent-picker-empty-desc">
-                                Use the ⚙ Agent settings to add your first definition.
+                        <Show when={!definitionsLoading()}>
+                            <div class="agent-picker-empty">
+                                <div class="agent-picker-empty-icon">{"\u2726"}</div>
+                                <div class="agent-picker-empty-title">No definitions configured</div>
+                                <div class="agent-picker-empty-desc">
+                                    Use the ⚙ Agent settings to add your first definition.
+                                </div>
                             </div>
-                        </div>
+                        </Show>
                         <AgentActionBar />
+                        {pickerOverlay()}
                     </div>
                 }
             >
@@ -826,13 +895,14 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             openDefinitions={openDefinitions}
                             onFork={handleFork}
                             onSwitchToExisting={handleSwitchToExisting}
+                            onFirstLoad={() => setMyAgentsLoaded(true)}
                         />
                         <div class="agent-picker-templates-header" data-testid="agent-templates-header">
                             <span>+ New from template</span>
                         </div>
                         <p class="agent-picker-templates-hint" data-testid="agent-templates-hint">
-                            Each card is a <strong>harness</strong> (the CLI that runs the agent,
-                            e.g. Claude Code, Codex) — you'll pick which <strong>model</strong>
+                            Each card is a <strong>harness</strong> (the CLI that runs the agent, e.g. Claude Code,
+                            Codex) — you'll pick which <strong>model</strong>
                             it uses next.
                         </p>
                         <div class="agent-picker-list" data-testid="agent-templates-list">
@@ -889,6 +959,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                         </Show>
                     </div>
                     <AgentActionBar />
+                    {pickerOverlay()}
                 </div>
             </Show>
         </>

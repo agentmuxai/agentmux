@@ -31,13 +31,16 @@ vi.mock("@/app/store/wps", () => ({
     waveEventSubscribe: vi.fn(() => () => {}),
 }));
 vi.mock("@/app/view/agent/components/AgentPicker", () => ({
-    useAgentDefinitions: () => () => [
-        { id: "agent-1", name: "Agent One", provider: "claude" },
-        { id: "agent-2", name: "Agent Two", provider: "claude" },
-        { id: "agent-3", name: "Agent Three (codex)", provider: "codex" },
-        // #2594 drift fixtures — column vs. bound bundle disagree.
-        { id: "agent-4", name: "Agent Four (drifted to claude)", provider: "codex", memory_id: "mem-4" },
-        { id: "agent-5", name: "Agent Five (drifted away from claude)", provider: "claude", memory_id: "mem-5" },
+    useAgentDefinitions: () => [
+        () => [
+            { id: "agent-1", name: "Agent One", provider: "claude" },
+            { id: "agent-2", name: "Agent Two", provider: "claude" },
+            { id: "agent-3", name: "Agent Three (codex)", provider: "codex" },
+            // #2594 drift fixtures — column vs. bound bundle disagree.
+            { id: "agent-4", name: "Agent Four (drifted to claude)", provider: "codex", memory_id: "mem-4" },
+            { id: "agent-5", name: "Agent Five (drifted away from claude)", provider: "claude", memory_id: "mem-5" },
+        ],
+        () => false,
     ],
 }));
 vi.mock("./identity-model", () => ({

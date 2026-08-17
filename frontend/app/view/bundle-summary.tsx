@@ -59,7 +59,7 @@ interface BundleSummaryPanelProps {
 }
 
 export const BundleSummaryPanel = (props: BundleSummaryPanelProps): JSX.Element => {
-    const agents = useAgentDefinitions();
+    const [agents] = useAgentDefinitions();
     const boundBundleId = createMemo(() => {
         const id = props.agentId;
         if (!id) return undefined;

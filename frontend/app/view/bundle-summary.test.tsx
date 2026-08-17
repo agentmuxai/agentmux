@@ -26,7 +26,7 @@ vi.mock("@/app/store/global", () => ({
     openOrFocusPaneByView: vi.fn(),
 }));
 vi.mock("@/app/view/agent/components/AgentPicker", () => ({
-    useAgentDefinitions: () => () => agentsList,
+    useAgentDefinitions: () => [() => agentsList, () => false],
 }));
 
 import { BundleSummaryPanel } from "./bundle-summary";
