@@ -404,3 +404,103 @@ describe("ToolBlock — panel mode", () => {
         });
     });
 });
+
+// SPEC_ASK_USER_QUESTION_HISTORY_STYLING_2026_08_17.md: a resolved
+// AskUserQuestion renders as a user message (`.agent-user-message`), not the
+// generic collapsed tool row, so it reads as user input once it scrolls
+// into history.
+describe("ToolBlock — answered AskUserQuestion renders as a user message", () => {
+    const answeredQuestion: ToolNode = {
+        type: "tool",
+        id: "q-1",
+        tool: "Other",
+        toolName: "AskUserQuestion",
+        params: {},
+        status: "success",
+        collapsed: true,
+        summary: "❓ Answered — Yes",
+        answerText: "Yes",
+    };
+
+    it("renders `.agent-user-message` with the raw answer text, not `.agent-tool-summary`", () => {
+        const { container } = render(() => (
+            <ToolBlock node={answeredQuestion} pinned={false} onTogglePin={() => {}} />
+        ));
+        expect(container.querySelector(".agent-user-message")).not.toBeNull();
+        expect(container.querySelector(".agent-tool-summary")).toBeNull();
+        expect(container.querySelector(".agent-user-message-content pre")?.textContent).toBe("Yes");
+    });
+
+    it("gets the `--answered-question` modifier class (drives the larger-text treatment)", () => {
+        const { container } = render(() => (
+            <ToolBlock node={answeredQuestion} pinned={false} onTogglePin={() => {}} />
+        ));
+        expect(container.querySelector(".agent-user-message--answered-question")).not.toBeNull();
+    });
+
+    it("shows the muted timeout note verbatim from node.timeoutNote — no parsing involved", () => {
+        const autoAnswered: ToolNode = {
+            ...answeredQuestion,
+            timeoutNote: "⏱️ Auto-answered (no response in 30s)",
+        };
+        const { container } = render(() => (
+            <ToolBlock node={autoAnswered} pinned={false} onTogglePin={() => {}} />
+        ));
+        expect(container.querySelector(".agent-user-message-timeout-note")?.textContent).toBe(
+            "⏱️ Auto-answered (no response in 30s)",
+        );
+    });
+
+    it("renders the correct note even when answerText contains its own ' — ' (regression: no longer parsed out of summary/answerText)", () => {
+        // reagent P1 x2 on PR #2630: both `indexOf` and `lastIndexOf` on a
+        // decorated string broke once free-text answer content could itself
+        // contain " — " — an em dash the user legally typed. timeoutNote is
+        // now a separate field computed from real counts upstream
+        // (useAgentQuestions.ts), so this component has no string to
+        // misparse regardless of what's in answerText.
+        const partlyAutoAnswered: ToolNode = {
+            ...answeredQuestion,
+            timeoutNote: "⏱️ Partly auto-answered (2/3 — no response in 30s)",
+            answerText: "the answer — with its own em dash — right in the middle",
+        };
+        const { container } = render(() => (
+            <ToolBlock node={partlyAutoAnswered} pinned={false} onTogglePin={() => {}} />
+        ));
+        expect(container.querySelector(".agent-user-message-timeout-note")?.textContent).toBe(
+            "⏱️ Partly auto-answered (2/3 — no response in 30s)",
+        );
+        expect(container.querySelector(".agent-user-message-content pre")?.textContent).toBe(
+            "the answer — with its own em dash — right in the middle",
+        );
+    });
+
+    it("does not show a timeout note for a manually-answered question", () => {
+        const { container } = render(() => (
+            <ToolBlock node={answeredQuestion} pinned={false} onTogglePin={() => {}} />
+        ));
+        expect(container.querySelector(".agent-user-message-timeout-note")).toBeNull();
+    });
+
+    it("falls back to the generic collapsed row when answerText is missing (legacy transcript)", () => {
+        const legacy: ToolNode = { ...answeredQuestion, answerText: undefined };
+        const { container } = render(() => (
+            <ToolBlock node={legacy} pinned={false} onTogglePin={() => {}} />
+        ));
+        expect(container.querySelector(".agent-tool-summary")).not.toBeNull();
+        expect(container.querySelector(".agent-user-message")).toBeNull();
+    });
+
+    it("does not apply the user-message treatment to a non-question tool, even with matching status", () => {
+        const bash: ToolNode = {
+            type: "tool",
+            id: "b-1",
+            tool: "Bash",
+            params: { command: "ls" },
+            status: "success",
+            collapsed: true,
+            summary: "Bash ls",
+        };
+        const { container } = render(() => <ToolBlock node={bash} pinned={false} onTogglePin={() => {}} />);
+        expect(container.querySelector(".agent-user-message")).toBeNull();
+    });
+});
