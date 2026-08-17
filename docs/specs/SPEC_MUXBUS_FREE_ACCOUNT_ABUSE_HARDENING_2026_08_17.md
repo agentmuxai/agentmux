@@ -4,7 +4,7 @@
 **Status:** Partially implemented — see §10. Gaps 2 (partial) and 3 shipped; gap 1's fix and gap 2's enforcement flip deliberately deferred pending real evidence.
 **Author:** AgentX
 **Repos touched:** `agentmux-cloud` (all implementation), `agentmux` (this doc; status-bar network panel UI is unaffected — no changes needed there)
-**Related:** `SPEC_MUXBUS_OWNER_GATE_AND_COST_CAP_2026_08_11.md` (the quota system this spec builds on — §6 of that doc already flagged gap #1 below as its own explicit prerequisite, never closed), `SPEC_FREE_TIER_PRICING_2026_06_21.md` (free-tier limits, implemented), `SPEC_MUXBUS_MULTI_TENANT_SECURITY_2026_07_06.md` (Phase 1, partially landed), `PLAN_PER_AGENT_CREDENTIAL_BINDING_2026_07_06.md` (documents gap #2 below as never-deployed), `SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md` §5.1 (account-scoped M2M clients — the one signup-abuse vector already closed)
+**Related:** `SPEC_MUXBUS_OWNER_GATE_AND_COST_CAP_2026_08_11.md` (the quota system this spec builds on — §6 of that doc already flagged gap #1 below as its own explicit prerequisite, never closed), `SPEC_FREE_TIER_PRICING_2026_06_21.md` (free-tier limits, implemented), `SPEC_MUXBUS_MULTI_TENANT_SECURITY_2026_07_06.md` (Phase 1, partially landed), `PLAN_PER_AGENT_CREDENTIAL_BINDING_2026_07_06.md` (documents gap #2 below as never-deployed), `SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md` §5.1 (the account-scoped M2M client *design* — that spec's own status header still marks this "proposed/not implemented" as of 2026-08-13/14; §2 below cites the actual running code directly rather than relying on that header, since the two disagree — see §2's footnote)
 
 ---
 
@@ -48,9 +48,21 @@ design would get them wrong:
 - **Keyed on the human account, not the agent client or API key.**
   `auth.ts:111-122` resolves `accountUserId` from the Cognito account that
   *owns* the M2M client, specifically so one signup can't multiply its
-  free tier by provisioning more agent identities. `SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md`
-  §5.1 already consolidated to one Cognito M2M client per **account**
-  (not per agent) for this exact reason.
+  free tier by provisioning more agent identities. This reflects the
+  account-scoped Cognito M2M client design `SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md`
+  §5.1 proposed — confirmed live in the actual running code (not the
+  cited spec's own status label, which as of that doc's last edit still
+  read "proposed/not implemented" for this specific item; the code has
+  since caught up without the doc being updated, the same stale-header
+  pattern noted for `SPEC_MUXBUS_OWNER_GATE_AND_COST_CAP_2026_08_11.md`
+  above). Direct evidence: `agent-ownership.ts`'s own module doc comment
+  states the redesign in the present tense ("one Cognito M2M client now
+  covers every agent_id an account runs"), the whole ownership-table
+  mechanism (`agent-ownership.ts`, `agent-binding.ts`) only makes sense
+  built on top of that model, and — strongest signal — live CloudWatch
+  logs for `/aws/lambda/muxbus-server` show `isAgentOwnedByAccount()`
+  actively querying real production traffic against this exact table
+  right now (see §10's account `4478f488-...` trace).
 - **`billingTier` is a server-derived JWT claim, never client input.** The
   Pre-Token Generation Lambda (`cognito/pre-token.ts:59-102`) compares
   Cognito's own verified `email` against a single hardcoded owner email
