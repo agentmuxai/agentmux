@@ -656,7 +656,18 @@ pub(crate) fn render_load_error_html(
     let failed_url_safe = html_escape(failed_url);
     let error_text_safe = html_escape(error_text);
     let title_safe = html_escape(copy.title);
-    let heading_safe = html_escape(copy.heading);
+    // The dev frontend (main window, !is_browser_pane) keeps its own
+    // specific heading — restored per reagentx P2 on PR #2593 (this file's
+    // own copy silently dropped it when the error page was unified with
+    // error_catalog::describe). A browser pane still uses the generic
+    // per-error-code heading: that's the actual fix this unification made
+    // (see this function's own doc comment) — a pane loading an arbitrary
+    // external site must never claim "Failed to load AgentMux frontend".
+    let heading_safe = html_escape(if is_browser_pane {
+        copy.heading
+    } else {
+        "Failed to load AgentMux frontend"
+    });
     let detail_safe = html_escape(copy.detail);
     // `js_string_literal`, not hand-rolled JSON: a real URL can contain a
     // single quote (e.g. `?q=can't`), which would otherwise break the
