@@ -8,7 +8,7 @@
  * after the rename.
  */
 
-import { cleanup, render, screen } from "@solidjs/testing-library";
+import { cleanup, render, screen, waitFor } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +17,7 @@ import {
     EMPTY_FILTERED,
     EMPTY_GLOBAL,
     FETCH_ERROR,
+    noMatchText,
     MyAgentsList,
 } from "./MyAgentsList";
 
@@ -186,6 +187,139 @@ describe("MyAgentsList — populated", () => {
         render(() => <MyAgentsList onReattach={() => {}} />);
         await screen.findByTestId("agent-my-agents-entry");
         expect(screen.getByText("My Agents")).toBeInTheDocument();
+    });
+
+    // The runtime badge must match AgentComposerStrip's tag exactly (same
+    // component, same size="tag" variant) so a container agent reads
+    // "SANDBOX" here too, not the sm-variant's "Container" wording — one
+    // consistent vocabulary between the picker row and the pane it opens.
+    it("renders the container runtime badge with the same 'tag' variant + SANDBOX wording as the composer strip", async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
+            makeRow({ agent_type: "container" }),
+        ]));
+        render(() => <MyAgentsList onReattach={() => {}} />);
+        await screen.findByTestId("agent-my-agents-entry");
+        const badge = screen.getByText("SANDBOX");
+        expect(badge).toHaveClass("runtime-badge--tag");
+        expect(screen.queryByText("Container")).toBeNull();
+    });
+
+    it("renders the host runtime badge with the same 'tag' variant + HOST wording as the composer strip", async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
+            makeRow({ agent_type: "host" }),
+        ]));
+        render(() => <MyAgentsList onReattach={() => {}} />);
+        await screen.findByTestId("agent-my-agents-entry");
+        const badge = screen.getByText("HOST");
+        expect(badge).toHaveClass("runtime-badge--tag");
+        expect(screen.queryByText("Host")).toBeNull();
+    });
+});
+
+describe("MyAgentsList — nameFilter (SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md)", () => {
+    it("narrows rows by case-insensitive substring match on instance_name", async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
+            makeRow({ instance_id: "a", instance_name: "Maks" }),
+            makeRow({ instance_id: "b", instance_name: "Other Agent" }),
+        ]));
+        const [nameFilter] = createSignal("mak");
+        render(() => <MyAgentsList nameFilter={nameFilter} onReattach={() => {}} />);
+        const entries = await screen.findAllByTestId("agent-my-agents-entry");
+        expect(entries).toHaveLength(1);
+        expect(screen.getByText("Maks")).toBeInTheDocument();
+        expect(screen.queryByText("Other Agent")).toBeNull();
+    });
+
+    it("falls back to definition_name when instance_name doesn't match but definition_name does", async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
+            makeRow({ instance_id: "a", instance_name: "", definition_name: "Claude Code" }),
+        ]));
+        const [nameFilter] = createSignal("claude");
+        render(() => <MyAgentsList nameFilter={nameFilter} onReattach={() => {}} />);
+        const entries = await screen.findAllByTestId("agent-my-agents-entry");
+        expect(entries).toHaveLength(1);
+    });
+
+    it("restores the full list when the filter is cleared", async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
+            makeRow({ instance_id: "a", instance_name: "Maks" }),
+            makeRow({ instance_id: "b", instance_name: "Other Agent" }),
+        ]));
+        const [nameFilter, setNameFilter] = createSignal("mak");
+        render(() => <MyAgentsList nameFilter={nameFilter} onReattach={() => {}} />);
+        await screen.findAllByTestId("agent-my-agents-entry");
+        setNameFilter("");
+        const entries = await screen.findAllByTestId("agent-my-agents-entry");
+        expect(entries).toHaveLength(2);
+    });
+
+    it("renders a distinct no-match empty state when the filter matches nothing, not the generic/identity empty copy", async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
+            makeRow({ instance_id: "a", instance_name: "Maks" }),
+        ]));
+        const [nameFilter] = createSignal("zzz-no-such-agent");
+        render(() => <MyAgentsList nameFilter={nameFilter} onReattach={() => {}} />);
+        const noMatch = await screen.findByTestId("agent-my-agents-no-match");
+        expect(noMatch).toHaveTextContent(noMatchText("zzz-no-such-agent"));
+        expect(screen.queryByTestId("agent-my-agents-empty")).toBeNull();
+        expect(screen.queryByText(EMPTY_GLOBAL)).toBeNull();
+    });
+
+    it("does not filter when nameFilter is absent (existing callers unaffected)", async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
+            makeRow({ instance_id: "a", instance_name: "Maks" }),
+            makeRow({ instance_id: "b", instance_name: "Other Agent" }),
+        ]));
+        render(() => <MyAgentsList onReattach={() => {}} />);
+        const entries = await screen.findAllByTestId("agent-my-agents-entry");
+        expect(entries).toHaveLength(2);
+    });
+
+    it("bumps the fetch limit to 100 once the filter becomes non-empty, and reverts it when cleared", async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult());
+        const [nameFilter, setNameFilter] = createSignal("");
+        render(() => <MyAgentsList nameFilter={nameFilter} onReattach={() => {}} />);
+        await screen.findByTestId("agent-my-agents-empty");
+        expect(RpcApi.ListRecentSessionsCommand).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ limit: 20 }),
+        );
+
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockClear();
+        setNameFilter("m");
+        await waitFor(() =>
+            expect(RpcApi.ListRecentSessionsCommand).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.objectContaining({ limit: 100 }),
+            ),
+        );
+
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockClear();
+        setNameFilter("");
+        await waitFor(() =>
+            expect(RpcApi.ListRecentSessionsCommand).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.objectContaining({ limit: 20 }),
+            ),
+        );
+    });
+
+    it("does not refetch on every keystroke once already searching (limit stays bumped, same call count)", async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
+            makeRow({ instance_id: "a", instance_name: "Maks" }),
+        ]));
+        const [nameFilter, setNameFilter] = createSignal("m");
+        render(() => <MyAgentsList nameFilter={nameFilter} onReattach={() => {}} />);
+        await screen.findAllByTestId("agent-my-agents-entry");
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockClear();
+
+        setNameFilter("ma");
+        setNameFilter("mak");
+        setNameFilter("maks");
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(RpcApi.ListRecentSessionsCommand).not.toHaveBeenCalled();
     });
 });
 
