@@ -633,7 +633,7 @@ pub(crate) async fn identity_self_accounts_impl(
     // authenticate with — see resolve_agent_definition_id.
     let def_id = resolve_agent_definition_id(state, agent_id)
         .map_err(|e| format!("identity.self.accounts: {e}"))?;
-    let links = state.id_store.agent_identity_list_for_agent(&def_id)
+    let links = state.identity_store.agent_identity_list_for_agent(&def_id)
         .map_err(|e| format!("identity.self.accounts: {e}"))?;
     let mut accounts = Vec::new();
     for link in &links {
@@ -682,7 +682,7 @@ pub(crate) async fn identity_account_validate_stored_impl(
     // resolution this ownership check always saw zero links and rejected.
     let def_id = resolve_agent_definition_id(state, agent_id)
         .map_err(|e| format!("identity.account.validate: {e}"))?;
-    let links = state.id_store.agent_identity_list_for_agent(&def_id)
+    let links = state.identity_store.agent_identity_list_for_agent(&def_id)
         .map_err(|e| format!("identity.account.validate: {e}"))?;
     if !links.iter().any(|l| l.account_id == account_id) {
         return Err("FORBIDDEN: account not linked to this agent".to_string());

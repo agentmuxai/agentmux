@@ -471,6 +471,41 @@ impl Store {
 
     // ---- Agent ↔ Identity junction ----
 
+    /// Delete every `db_agent_identity_links` row for `account_id`, on
+    /// WHATEVER store this is called on — added for
+    /// `docs/specs/SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md`: since links now
+    /// live in a different physical store (`identity_store`) than accounts
+    /// (`id_store`), `identity_delete`'s own same-connection cascade above
+    /// no longer reaches them (it only ever deleted rows in the SAME store
+    /// as the account, which was always true before this split). Callers
+    /// deleting an account must call this on `identity_store` in addition
+    /// to `identity_delete` on `id_store` — see the `deleteidentityaccount`
+    /// handler. Returns the same `(count, affected_agents)` shape
+    /// `identity_delete` did, captured before the delete in one transaction
+    /// for the same race-safety reason.
+    pub fn agent_identity_unlink_by_account(&self, account_id: &str) -> Result<(usize, Vec<String>), StoreError> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let affected_agents: Vec<String> = {
+            let mut stmt = tx.prepare(
+                "SELECT agent_id FROM db_agent_identity_links
+                 WHERE account_id = ?1 ORDER BY agent_id",
+            )?;
+            let iter = stmt.query_map(params![account_id], |row| row.get::<_, String>(0))?;
+            let mut out = Vec::new();
+            for r in iter {
+                out.push(r?);
+            }
+            out
+        };
+        let links_removed = tx.execute(
+            "DELETE FROM db_agent_identity_links WHERE account_id = ?1",
+            params![account_id],
+        )?;
+        tx.commit()?;
+        Ok((links_removed, affected_agents))
+    }
+
     /// Link an agent to an identity for a given provider. Overwrites any
     /// existing link for the same (agent_id, provider) — each agent has
     /// at most one account per provider.
@@ -1061,5 +1096,64 @@ mod tests {
             .query_row("SELECT count(*) FROM db_accounts WHERE id = 'acct-weird'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 1, "row must survive an unsuccessful repair attempt");
+    }
+
+    /// The actual bug this whole store split fixes
+    /// (docs/specs/REPORT_HISTORY_CONTINUITY_ACROSS_VERSION_UPGRADE_2026_08_17.md):
+    /// a link written in one process's lifetime must be findable by a LATER,
+    /// independent process opening the same always-global path — simulating
+    /// "close AgentMux, a new version/channel starts, reopen the agent."
+    ///
+    /// Before this fix, the equivalent lookup went through `id_store`
+    /// (`resolve_shared_store_path()`), which resolves to a fresh, empty
+    /// per-channel file on every non-`"stable"` channel — the second `Store`
+    /// below would have opened a DIFFERENT physical file in that world, and
+    /// this assertion would fail. `Store::open_identity_store` never
+    /// consults `isolated_auth_enabled()` at all, so two independent opens
+    /// of the same path always see the same data regardless of what channel
+    /// either "process" believes it's running on.
+    #[test]
+    fn identity_store_link_written_by_one_process_is_visible_to_a_later_independent_open() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+
+        // "Process 1" — e.g. the old version's srv instance.
+        {
+            let store = Store::open_identity_store(tmp.path()).unwrap();
+            store
+                .agent_identity_link("agent-continuing", "acct-real-login", "claude")
+                .unwrap();
+        } // dropped — simulates the process exiting (version closed).
+
+        // "Process 2" — e.g. the new version's srv instance, a completely
+        // independent Store handle opening the identical always-global path.
+        let store2 = Store::open_identity_store(tmp.path()).unwrap();
+        let links = store2.agent_identity_list_for_agent("agent-continuing").unwrap();
+        assert_eq!(
+            links.len(),
+            1,
+            "the agent's account link must survive a full close/reopen cycle \
+             (a version/channel switch) — this is conversation continuity"
+        );
+        assert_eq!(links[0].account_id, "acct-real-login");
+        assert_eq!(links[0].provider, "claude");
+    }
+
+    /// `db_agent_identity_links.account_id` must NOT carry a live FK to
+    /// `db_accounts` in this store (unlike the per-channel `objects.db`
+    /// schema) — `db_accounts` deliberately isn't part of this schema yet
+    /// (SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md §3.1: accounts get their own
+    /// creation-time scope split in a follow-up). A hard FK to a
+    /// nonexistent table would make every link write fail outright.
+    #[test]
+    fn identity_store_link_write_does_not_require_a_matching_accounts_row() {
+        let store = Store::open_identity_store(":memory:".as_ref()).unwrap();
+        // No db_accounts row for "acct-orphan-by-design" exists anywhere in
+        // this store (it has no db_accounts table at all) — the write must
+        // still succeed.
+        store
+            .agent_identity_link("agent-x", "acct-orphan-by-design", "claude")
+            .unwrap();
+        let links = store.agent_identity_list_for_agent("agent-x").unwrap();
+        assert_eq!(links.len(), 1);
     }
 }

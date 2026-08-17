@@ -72,10 +72,11 @@ use super::secret::resolve_secret;
 pub fn inject_identity_env(
     wstore: Arc<Store>,
     id_store: Arc<Store>,
+    identity_store: Arc<Store>,
     block_id: &str,
     env_vars: &mut HashMap<String, String>,
 ) -> Result<(), SpawnGateError> {
-    inject_identity_env_with_broker(wstore, id_store, None, block_id, env_vars)
+    inject_identity_env_with_broker(wstore, id_store, identity_store, None, block_id, env_vars)
 }
 
 /// `inject_identity_env` + optional broker handle so the OAuth-class
@@ -102,13 +103,14 @@ pub fn inject_identity_env(
 pub async fn inject_identity_env_async(
     wstore: Arc<Store>,
     id_store: Arc<Store>,
+    identity_store: Arc<Store>,
     broker: Option<Arc<Broker>>,
     block_id: String,
     env_vars: HashMap<String, String>,
 ) -> Result<HashMap<String, String>, SpawnGateError> {
     match tokio::task::spawn_blocking(move || {
         let mut env = env_vars;
-        inject_identity_env_with_broker(wstore, id_store, broker, &block_id, &mut env)
+        inject_identity_env_with_broker(wstore, id_store, identity_store, broker, &block_id, &mut env)
             .map(|()| env)
     })
     .await
@@ -231,6 +233,7 @@ fn resolve_bindings_for_instance(
 pub fn inject_identity_env_with_broker(
     wstore: Arc<Store>,
     id_store: Arc<Store>,
+    identity_store: Arc<Store>,
     broker: Option<Arc<Broker>>,
     block_id: &str,
     env_vars: &mut HashMap<String, String>,
@@ -330,7 +333,7 @@ pub fn inject_identity_env_with_broker(
     // oauth-class CLI provider has no binding at all is blocked unless the
     // ambient opt-in is set; the m0017 migration grandfathers pre-existing
     // linkless agents).
-    let bindings = resolve_bindings_for_instance(&id_store, &instance, broker.as_ref());
+    let bindings = resolve_bindings_for_instance(&identity_store, &instance, broker.as_ref());
 
     // Step 4: per-binding resolution + env injection.
     //
@@ -742,7 +745,7 @@ mod tests {
         // Spec §2.5 regression: a resolvable oauth account injects
         // unchanged — the layer-3 gate never fires (Ok even with
         // use_ambient_login=0).
-        inject_identity_env(store.clone(), store, "block-oauth", &mut env).unwrap();
+        inject_identity_env(store.clone(), store.clone(), store, "block-oauth", &mut env).unwrap();
 
         // OAuth dispatch sets the provider's config-dir env var.
         assert_eq!(
@@ -836,7 +839,7 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        inject_identity_env(store.clone(), store, "block-oauth-history", &mut env).unwrap();
+        inject_identity_env(store.clone(), store.clone(), store, "block-oauth-history", &mut env).unwrap();
 
         let global_history = paths.identity_history_dir("acct-claude", "claude", "projects");
         let via_link = std::fs::read(global_history.join("existing-session.jsonl"))
@@ -911,7 +914,7 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        let res = inject_identity_env(store.clone(), store, "block-bad", &mut env);
+        let res = inject_identity_env(store.clone(), store.clone(), store, "block-bad", &mut env);
 
         // Blocking spawn-gate error — and nothing injected.
         assert_eq!(
@@ -989,7 +992,7 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        let res = inject_identity_env(store.clone(), store, "block-alias", &mut env);
+        let res = inject_identity_env(store.clone(), store.clone(), store, "block-alias", &mut env);
 
         assert!(res.is_ok(), "expected Ok, got {res:?}");
         assert_eq!(
@@ -1081,7 +1084,7 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        let res = inject_identity_env(store.clone(), store, "block-gate-1", &mut env);
+        let res = inject_identity_env(store.clone(), store.clone(), store, "block-gate-1", &mut env);
 
         assert_eq!(
             res,
@@ -1126,7 +1129,7 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        let res = inject_identity_env(store.clone(), store, "block-gate-2", &mut env);
+        let res = inject_identity_env(store.clone(), store.clone(), store, "block-gate-2", &mut env);
 
         assert_eq!(
             res,
@@ -1164,7 +1167,7 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        let res = inject_identity_env(store.clone(), store, "block-gate-3", &mut env);
+        let res = inject_identity_env(store.clone(), store.clone(), store, "block-gate-3", &mut env);
 
         assert_eq!(
             res,
@@ -1177,7 +1180,7 @@ mod tests {
     fn inject_no_instance_does_nothing() {
         let store = make_store();
         let mut env: HashMap<String, String> = HashMap::new();
-        inject_identity_env(store.clone(), store, "block-no-instance", &mut env).unwrap();
+        inject_identity_env(store.clone(), store.clone(), store, "block-no-instance", &mut env).unwrap();
         assert!(env.is_empty());
     }
 
@@ -1203,7 +1206,7 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        let res = inject_identity_env(store.clone(), store, "block-blank", &mut env);
+        let res = inject_identity_env(store.clone(), store.clone(), store, "block-blank", &mut env);
 
         assert_eq!(
             res,
@@ -1227,7 +1230,7 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        let res = inject_identity_env(store.clone(), store, "block-empty", &mut env);
+        let res = inject_identity_env(store.clone(), store.clone(), store, "block-empty", &mut env);
 
         assert_eq!(
             res,
@@ -1314,7 +1317,7 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        inject_identity_env(store.clone(), store, "block-1", &mut env).unwrap();
+        inject_identity_env(store.clone(), store.clone(), store, "block-1", &mut env).unwrap();
 
         // GitHub writes both standard env-var names from one secret.
         assert_eq!(env.get("GITHUB_TOKEN").map(String::as_str), Some("ghp_round_trip"));
@@ -1385,7 +1388,7 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        inject_identity_env(store.clone(), store, "block-direct", &mut env).unwrap();
+        inject_identity_env(store.clone(), store.clone(), store, "block-direct", &mut env).unwrap();
 
         assert_eq!(env.get("GITHUB_TOKEN").map(String::as_str), Some("ghp_direct"));
         assert_eq!(env.get("GH_TOKEN").map(String::as_str), Some("ghp_direct"));
@@ -1450,7 +1453,7 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        inject_identity_env(store.clone(), store, "block-unlinked", &mut env).unwrap();
+        inject_identity_env(store.clone(), store.clone(), store, "block-unlinked", &mut env).unwrap();
 
         // Nothing injected — an account with no direct link is invisible
         // to the resolver.
@@ -1518,6 +1521,7 @@ mod tests {
         let broker = Arc::new(Broker::new());
         let mut env: HashMap<String, String> = HashMap::new();
         inject_identity_env_with_broker(
+            store.clone(),
             store.clone(),
             store,
             Some(broker.clone()),
@@ -1609,7 +1613,7 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        inject_identity_env(store.clone(), store, "block-mixed", &mut env).unwrap();
+        inject_identity_env(store.clone(), store.clone(), store, "block-mixed", &mut env).unwrap();
 
         // GitHub injection succeeded.
         assert_eq!(env.get("GITHUB_TOKEN").map(String::as_str), Some("ghp_good"));
@@ -1675,7 +1679,7 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        inject_identity_env(store.clone(), store, "block-future", &mut env).unwrap();
+        inject_identity_env(store.clone(), store.clone(), store, "block-future", &mut env).unwrap();
         // No env-var matrix for "custom" — nothing injected, no panic.
         assert!(env.is_empty());
     }
@@ -1779,7 +1783,7 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        inject_identity_env(store.clone(), store.clone(), "block-probe", &mut env).unwrap();
+        inject_identity_env(store.clone(), store.clone(), store.clone(), "block-probe", &mut env).unwrap();
 
         // Env injection still happened (resolver doesn't block on
         // probe outcome — the CLI launches with the dir env var set
@@ -1862,7 +1866,7 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        inject_identity_env(store.clone(), store.clone(), "block-probe-alias", &mut env).unwrap();
+        inject_identity_env(store.clone(), store.clone(), store.clone(), "block-probe-alias", &mut env).unwrap();
 
         assert!(env.get("CLAUDE_CONFIG_DIR").is_some());
         // Status row was UPDATED to needs_reauth — proves the probe ran
@@ -1945,7 +1949,7 @@ mod tests {
         store.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        inject_identity_env(store.clone(), store.clone(), "block-ok", &mut env).unwrap();
+        inject_identity_env(store.clone(), store.clone(), store.clone(), "block-ok", &mut env).unwrap();
 
         let after = store.identity_get("acct-ok").unwrap().unwrap();
         assert_eq!(after.status, oauth_status::VALID);
@@ -1989,6 +1993,12 @@ mod tests {
         // that doesn't exist in production's real id_store.
         let id_store_tmp = tempfile::NamedTempFile::new().unwrap();
         let id_store = Arc::new(Store::open_shared(id_store_tmp.path()).unwrap());
+        // Same reasoning as id_store above, for the new always-global
+        // identity store (SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md):
+        // open_identity_store's real schema (no db_accounts FK at all — see
+        // its own doc comment) rather than open_in_memory's channel schema.
+        let identity_store_tmp = tempfile::NamedTempFile::new().unwrap();
+        let identity_store = Arc::new(Store::open_identity_store(identity_store_tmp.path()).unwrap());
 
         let mut def = crate::backend::storage::store::AgentDefinition {
             id: "def-1".to_string(),
@@ -2052,7 +2062,7 @@ mod tests {
             },
         );
         id_store.identity_upsert(&claude).unwrap();
-        id_store
+        identity_store
             .agent_identity_link("def-1", "acct-drift", "claude")
             .unwrap();
 
@@ -2061,7 +2071,7 @@ mod tests {
         wstore.instance_create(&inst).unwrap();
 
         let mut env: HashMap<String, String> = HashMap::new();
-        let res = inject_identity_env(wstore, id_store, "block-drift", &mut env);
+        let res = inject_identity_env(wstore, id_store, identity_store, "block-drift", &mut env);
 
         assert!(res.is_ok(), "a valid claude account must not be blocked by a stale codex column: {res:?}");
         assert_eq!(

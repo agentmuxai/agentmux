@@ -108,6 +108,23 @@ pub fn resolve_shared_transcripts_dir() -> Option<PathBuf> {
     resolve_global_shared_root().map(|h| h.join("agents").join("transcripts"))
 }
 
+/// Resolve `~/.agentmux/shared/identity-store.db` — the permanently-global
+/// store for agent→account links, memory bundles, drone definitions,
+/// muxbus credentials, per-agent M2M credentials, native memory, and cron
+/// jobs. See `docs/specs/SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md`.
+///
+/// Unlike [`resolve_shared_store_path`], this is **never** redirected by
+/// [`agentmux_common::isolated_auth_enabled`] — none of the tables this
+/// store holds have a legitimate per-channel-isolation use case (that
+/// audit is §2.3 of the design doc above). Uses the same
+/// `AGENTMUX_HOME_OVERRIDE`/`AGENTMUX_SHARED_DIR` resolution as every
+/// other `resolve_shared_*` function in this file, via
+/// [`resolve_global_shared_root`], so tests/overrides behave consistently.
+/// Returns `None` only when the shared root itself can't be resolved.
+pub fn resolve_identity_store_path() -> Option<std::path::PathBuf> {
+    resolve_global_shared_root().map(|h| h.join("identity-store.db"))
+}
+
 /// The global, channel-independent `<home>/shared` root. Deliberately
 /// UNAFFECTED by `isolated_auth_enabled()` — callers that need the true
 /// `~/.agentmux` home (e.g. `migrations/runner.rs`'s `MigrationContext.home`)
@@ -339,6 +356,112 @@ mod tests {
             PathBuf::from("/tmp/test-home/dev/some-branch/identity-store.db"),
             "isolated shared store must live under the channel's own instance dir"
         );
+        clear();
+    }
+
+    // SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md — the regression class P3
+    // asks for: prove `resolve_identity_store_path` never varies by
+    // channel/isolation, the way `resolve_shared_store_path` deliberately
+    // does. This is the exact test the design doc's audit (§2.3) found
+    // missing for every non-account table in the old shared store.
+    #[test]
+    fn identity_store_path_is_global_on_stable_channel() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", "/tmp/test-home");
+        std::env::set_var("AGENTMUX_CHANNEL", "stable");
+        let r = resolve_identity_store_path().unwrap();
+        assert_eq!(r, PathBuf::from("/tmp/test-home/shared/identity-store.db"));
+        clear();
+    }
+
+    #[test]
+    fn identity_store_path_stays_global_on_non_stable_channel() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", "/tmp/test-home");
+        // The whole point: unlike resolve_shared_store_path, a non-stable
+        // (local/dev/portable — i.e. every version bump) channel must NOT
+        // redirect this path anywhere per-channel.
+        std::env::set_var("AGENTMUX_CHANNEL", "local-somebranch-abcd1234-ef56789a");
+        std::env::set_var("AGENTMUX_INSTANCE_DIR", "/tmp/test-home/channels/local-somebranch-abcd1234-ef56789a");
+        let r = resolve_identity_store_path().unwrap();
+        assert_eq!(
+            r,
+            PathBuf::from("/tmp/test-home/shared/identity-store.db"),
+            "identity store must stay global on a non-stable channel — this is the exact \
+             regression class that broke conversation continuity across a version bump \
+             (docs/specs/REPORT_HISTORY_CONTINUITY_ACROSS_VERSION_UPGRADE_2026_08_17.md)"
+        );
+        clear();
+    }
+
+    #[test]
+    fn identity_store_path_stays_global_even_with_isolated_auth_explicitly_on() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", "/tmp/test-home");
+        std::env::set_var("AGENTMUX_CHANNEL", "local-somebranch-abcd1234-ef56789a");
+        std::env::set_var("AGENTMUX_INSTANCE_DIR", "/tmp/test-home/channels/local-somebranch-abcd1234-ef56789a");
+        // Explicit isolation (the flag Armory testing relies on for
+        // db_accounts / identities_dir()) must have NO effect here — this
+        // store never had a legitimate isolation use case (design doc §2.3).
+        std::env::set_var("AGENTMUX_ISOLATED_AUTH", "1");
+        let r = resolve_identity_store_path().unwrap();
+        assert_eq!(r, PathBuf::from("/tmp/test-home/shared/identity-store.db"));
+        clear();
+    }
+
+    #[test]
+    fn identity_store_path_diverges_from_shared_store_path_under_isolation() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", "/tmp/test-home");
+        std::env::set_var("AGENTMUX_CHANNEL", "local-somebranch-abcd1234-ef56789a");
+        std::env::set_var("AGENTMUX_INSTANCE_DIR", "/tmp/test-home/channels/local-somebranch-abcd1234-ef56789a");
+        std::env::set_var("AGENTMUX_ISOLATED_AUTH", "1");
+        // Deliberately proves the two resolvers now disagree under
+        // isolation — resolve_shared_store_path (accounts, still
+        // isolatable for Armory) redirects per-channel;
+        // resolve_identity_store_path (links/bundles/drones/muxbus) does
+        // not. If a future change accidentally re-couples them, this test
+        // fails immediately instead of silently reintroducing the bug.
+        let identity = resolve_identity_store_path().unwrap();
+        let shared = resolve_shared_store_path().unwrap();
+        assert_ne!(
+            identity, shared,
+            "identity store and shared store must resolve to DIFFERENT paths under isolation \
+             — same failure mode as identities_dir() vs identity_history_dir(), see \
+             docs/specs/SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md §3.1"
+        );
+        clear();
+    }
+
+    #[test]
+    fn identity_store_path_default_is_global_when_channel_unset() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", "/tmp/test-home");
+        // No AGENTMUX_CHANNEL at all — same as resolve_shared_store_path's
+        // own conservative-stays-global default, but here it's not even a
+        // "default": there's no isolation branch to fall into at all.
+        let r = resolve_identity_store_path().unwrap();
+        assert_eq!(r, PathBuf::from("/tmp/test-home/shared/identity-store.db"));
+        clear();
+    }
+
+    #[test]
+    fn identity_store_path_is_sibling_of_shared_store_path() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", "/tmp/test-home");
+        std::env::set_var("AGENTMUX_CHANNEL", "stable");
+        // Both identity-store.db and store.db live directly under shared/ —
+        // NOT under shared/agents/ (that's resolve_shared_registry_dir's
+        // level, one directory deeper).
+        let identity = resolve_identity_store_path().unwrap();
+        let shared = resolve_shared_store_path().unwrap();
+        assert_eq!(identity.parent(), shared.parent());
         clear();
     }
 

@@ -1068,6 +1068,162 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
     Ok(())
 }
 
+/// `user_version` stamped into the new, permanently-global
+/// `~/.agentmux/shared/identity-store.db` (distinct file from
+/// `store.db` — see [`run_identity_store_schema`]'s own doc comment for
+/// why). Independent counter from `SHARED_STORE_SCHEMA_VERSION`.
+///   v1 — initial: agent→account links, memory bundles, drone
+///        definitions, muxbus credentials, per-agent M2M credentials,
+///        native memory mirror, cron jobs. Everything
+///        `run_shared_store_schema` already held EXCEPT `db_accounts` —
+///        see docs/specs/SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md §3.1.
+pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 1;
+
+/// Initialize (or re-validate) the `~/.agentmux/shared/identity-store.db`
+/// schema — the permanently-global store introduced by
+/// `docs/specs/SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md` to fix
+/// conversation-continuity-across-a-version-switch
+/// (`docs/specs/REPORT_HISTORY_CONTINUITY_ACROSS_VERSION_UPGRADE_2026_08_17.md`).
+///
+/// This is a **subset** of [`run_shared_store_schema`]'s tables — every
+/// one of them EXCEPT `db_accounts`, which stays out of this store
+/// deliberately: unlike agent→account links, memory bundles, drone
+/// definitions, muxbus credentials, and native memory, `db_accounts` has
+/// one genuine, intentional isolation need (Armory's disposable
+/// delete-account testing flow), so accounts get their own explicit
+/// creation-time scope split (SPEC §3.2, not yet implemented — accounts
+/// remain on the existing `id_store`/`resolve_shared_store_path()` path
+/// for now). `db_agent_identity_links.account_id` therefore has NO
+/// foreign key here (same reasoning `run_shared_store_schema` already
+/// uses to drop its FK to `db_agent_definitions`: the referenced table
+/// lives in a different physical file, and cross-database FK enforcement
+/// is impossible in SQLite — application code enforces referential
+/// integrity instead).
+///
+/// A dedicated store (not a subset of the existing shared store reached
+/// via a new always-global path) is deliberate, not just a naming choice:
+/// it makes "can this table ever be reached from a per-channel-isolated
+/// codepath" a structural fact (a totally separate file/connection)
+/// rather than a convention someone could violate by calling
+/// `resolve_shared_store_path()` for a new call site later — the exact
+/// failure mode `docs/specs/CHECKLIST_AGENT_DATA_SCOPE_ROUTING_2026_08_17.md`
+/// items 2-4 already document as having bitten this codebase more than
+/// once.
+///
+/// Idempotent — safe to call on every startup.
+pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS db_agent_identity_links (
+            agent_id   TEXT NOT NULL,
+            account_id TEXT NOT NULL,
+            provider   TEXT NOT NULL,
+            PRIMARY KEY (agent_id, provider)
+        );
+        CREATE INDEX IF NOT EXISTS idx_ids_agent_identity_links_account
+            ON db_agent_identity_links(account_id);
+
+        CREATE TABLE IF NOT EXISTS db_bundles (
+            id            TEXT PRIMARY KEY,
+            name          TEXT NOT NULL UNIQUE,
+            description   TEXT NOT NULL DEFAULT '',
+            is_blank      INTEGER NOT NULL DEFAULT 0,
+            is_global     INTEGER NOT NULL DEFAULT 0,
+            provider      TEXT NOT NULL DEFAULT '',
+            model         TEXT NOT NULL DEFAULT '',
+            instructions  TEXT NOT NULL DEFAULT '',
+            instructions_by_provider TEXT NOT NULL DEFAULT '{}',
+            context_files TEXT NOT NULL DEFAULT '[]',
+            mcp_servers   TEXT NOT NULL DEFAULT '[]',
+            skills        TEXT NOT NULL DEFAULT '[]',
+            sort_order    INTEGER NOT NULL DEFAULT 0,
+            created_at    INTEGER NOT NULL DEFAULT 0,
+            updated_at    INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_ids_bundles_is_blank
+            ON db_bundles(is_blank);
+
+        CREATE TABLE IF NOT EXISTS db_drone_definitions (
+            id          TEXT PRIMARY KEY,
+            name        TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            graph       TEXT NOT NULL DEFAULT '{\"nodes\":[],\"edges\":[]}',
+            viewport    TEXT NOT NULL DEFAULT '{\"x\":0,\"y\":0,\"zoom\":1}',
+            created_at  INTEGER NOT NULL DEFAULT 0,
+            updated_at  INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_ids_drone_definitions_updated
+            ON db_drone_definitions(updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS db_muxbus_credentials (
+            id             TEXT PRIMARY KEY DEFAULT 'global',
+            cognito_domain TEXT NOT NULL DEFAULT '',
+            client_id      TEXT NOT NULL DEFAULT '',
+            access_token   TEXT NOT NULL DEFAULT '',
+            refresh_token  TEXT NOT NULL DEFAULT '',
+            id_token       TEXT NOT NULL DEFAULT '',
+            expires_at     INTEGER NOT NULL DEFAULT 0,
+            user_email     TEXT NOT NULL DEFAULT '',
+            user_sub       TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS db_migrations (
+            id          TEXT PRIMARY KEY,
+            applied_at  TEXT NOT NULL,
+            duration_ms INTEGER NOT NULL DEFAULT 0,
+            scope       TEXT NOT NULL DEFAULT 'global'
+        );
+
+        CREATE TABLE IF NOT EXISTS db_cron_jobs (
+            id            TEXT PRIMARY KEY,
+            name          TEXT NOT NULL,
+            expression    TEXT NOT NULL,
+            prompt        TEXT NOT NULL,
+            target        TEXT NOT NULL,
+            created_by    TEXT NOT NULL DEFAULT '',
+            enabled       INTEGER NOT NULL DEFAULT 1,
+            last_fired    INTEGER,
+            fire_count    INTEGER NOT NULL DEFAULT 0,
+            max_fires     INTEGER,
+            created_at    INTEGER NOT NULL DEFAULT 0,
+            max_age_secs  INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_ids_cron_jobs_enabled
+            ON db_cron_jobs(enabled);
+
+        CREATE TABLE IF NOT EXISTS db_agent_credentials (
+            agent_id       TEXT PRIMARY KEY,
+            client_id      TEXT NOT NULL DEFAULT '',
+            client_secret  TEXT NOT NULL DEFAULT '',
+            token_endpoint TEXT NOT NULL DEFAULT '',
+            access_token   TEXT NOT NULL DEFAULT '',
+            expires_at     INTEGER NOT NULL DEFAULT 0,
+            created_at     INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS db_agent_native_memory (
+            agent_id           TEXT NOT NULL,
+            filename           TEXT NOT NULL,
+            content            TEXT NOT NULL,
+            metadata_type      TEXT NOT NULL DEFAULT '',
+            size_bytes         INTEGER NOT NULL DEFAULT 0,
+            updated_at         INTEGER NOT NULL DEFAULT 0,
+            last_seen_path     TEXT NOT NULL DEFAULT '',
+            last_seen_mtime_ms INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (agent_id, filename)
+        );",
+    )?;
+
+    // Seed the blank Memory singleton — same fixed id as objects.db/store.db
+    // so cross-version reads never see a missing blank row.
+    conn.execute_batch(
+        "INSERT OR IGNORE INTO db_bundles
+            (id, name, description, is_blank, created_at, updated_at)
+         VALUES ('blank', '__blank__', 'Vanilla CLI — no instructions, no context', 1, 0, 0);",
+    )?;
+
+    Ok(())
+}
+
 /// Initialize the FileStore schema. Creates the wave_file and file_data
 /// tables. Already a flat single-DDL store — unaffected by the
 /// `objects.db` flattening.
