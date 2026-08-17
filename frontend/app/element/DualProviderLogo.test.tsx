@@ -32,4 +32,18 @@ describe("DualProviderLogo", () => {
         const el = container.querySelector(".dual-provider-logo") as HTMLElement;
         expect(el.title).toBe("Claude Code harness");
     });
+
+    it("renders a visually distinct icon for the Anthropic vendor badge than the Claude harness icon", () => {
+        // Regression: ProviderLogo used to map both "claude" and "anthropic"
+        // to the identical claude-color.svg asset, so a claude-harness agent
+        // running on the anthropic vendor showed the same icon twice — the
+        // badge existed but was visually redundant, defeating the point of
+        // the harness-vs-vendor split this component exists to communicate.
+        const { container } = render(() => <DualProviderLogo harness="claude" vendor="anthropic" />);
+        const harnessIcon = container.querySelector(".dual-provider-logo > .provider-logo") as HTMLElement;
+        const vendorIcon = container.querySelector(".dual-provider-logo-badge .provider-logo") as HTMLElement;
+        expect(harnessIcon).not.toBeNull();
+        expect(vendorIcon).not.toBeNull();
+        expect(vendorIcon.innerHTML).not.toBe(harnessIcon.innerHTML);
+    });
 });

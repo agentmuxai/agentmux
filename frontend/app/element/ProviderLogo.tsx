@@ -8,6 +8,7 @@
 // the theme.
 
 import claudeColorSvg from "@lobehub/icons-static-svg/icons/claude-color.svg?raw";
+import anthropicSvg from "@lobehub/icons-static-svg/icons/anthropic.svg?raw";
 import codexColorSvg from "@lobehub/icons-static-svg/icons/codex-color.svg?raw";
 import geminiColorSvg from "@lobehub/icons-static-svg/icons/gemini-color.svg?raw";
 import copilotColorSvg from "@lobehub/icons-static-svg/icons/copilot-color.svg?raw";
@@ -79,7 +80,13 @@ export const ProviderLogo = (props: ProviderLogoProps): JSX.Element => {
     const inner = (): { html?: string; png?: string; jsx?: JSX.Element } => {
         const p = (props.provider ?? "").toLowerCase();
 
-        if (p === "anthropic" || p === "claude") return { html: claudeColorSvg };
+        // Distinct icons on purpose: "claude" is the harness (Claude Code,
+        // the CLI), "anthropic" is the model vendor serving responses. Using
+        // the same icon for both would defeat the point of DualProviderLogo,
+        // which exists specifically to show harness and vendor as separate
+        // things.
+        if (p === "claude") return { html: claudeColorSvg };
+        if (p === "anthropic") return { html: anthropicSvg };
         if (p === "codex") return { html: codexColorSvg };
         if (p === "openai") return { html: openaiSvg };
         if (p === "gemini" || p === "antigravity" || p === "agy") return { html: geminiColorSvg };
