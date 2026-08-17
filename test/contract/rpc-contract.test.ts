@@ -295,6 +295,7 @@ const KNOWN_REGISTERED_UNDECLARED = [
     "bundle.delete",
     "bundle.export",
     "bundle.export_for_agent",
+    "bundle.export_for_agent_with_history",
     "bundle.get",
     "bundle.import",
     "bundle.import_for_agent",
