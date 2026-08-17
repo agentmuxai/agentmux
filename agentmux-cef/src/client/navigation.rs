@@ -319,6 +319,45 @@ impl AgentMuxHandler {
         }
     }
 
+    /// CEF fires this once a navigation has COMMITTED and the specified
+    /// frame begins loading its content — i.e. the browser now represents
+    /// the new document, even though that document's own subresources
+    /// (images/scripts/iframes) may still be in flight. Distinct from
+    /// `is_loading` going false (`on_loading_state_change`, which waits for
+    /// the ENTIRE load — all subresources too) and from `on_load_end` (whose
+    /// own doc comment there notes it can fire before the navigation
+    /// controller has finished committing the history entry — not a
+    /// reliable "has this committed" signal either).
+    ///
+    /// For browser panes only: disarms the pane-load-watchdog the moment the
+    /// TARGET document commits, same as the existing disarm-on-`!is_loading`
+    /// path in `on_loading_state_change_browser_pane`. Without this, a page
+    /// that commits and renders successfully but has one slow subresource
+    /// could still hit the watchdog's deadline (is_loading stays true until
+    /// every subresource finishes) and have `fire_pane_load_watchdog`
+    /// replace the already-loaded, visible page with a synthetic
+    /// `ERR_CONNECTION_TIMED_OUT` — flagged inline by Codex and by reagentx
+    /// P1 on PR #2593 (second pass); the "address reagentx P1s" follow-up
+    /// commit only fixed the redirect-timer and pane-close disarm gaps, not
+    /// this one.
+    pub(crate) fn on_load_start(
+        &mut self,
+        browser: Option<&mut Browser>,
+        frame: Option<&mut Frame>,
+        _transition_type: TransitionType,
+    ) {
+        if !self.is_browser_pane {
+            return;
+        }
+        let Some(frame) = frame else { return };
+        if frame.is_main() != 1 {
+            return;
+        }
+        if let Some(b) = browser.as_deref() {
+            crate::browser_pane::callbacks::on_load_start_browser_pane(&self.state, b);
+        }
+    }
+
     pub(crate) fn on_load_end(
         &mut self,
         browser: Option<&mut Browser>,

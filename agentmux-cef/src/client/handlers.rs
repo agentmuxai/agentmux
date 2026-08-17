@@ -510,6 +510,16 @@ wrap_load_handler! {
             inner.on_loading_state_change(browser, is_loading, can_go_back, can_go_forward);
         }
 
+        fn on_load_start(
+            &self,
+            browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            transition_type: TransitionType,
+        ) {
+            let mut inner = self.inner.lock();
+            inner.on_load_start(browser, frame, transition_type);
+        }
+
         fn on_load_end(
             &self,
             browser: Option<&mut Browser>,

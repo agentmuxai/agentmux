@@ -295,6 +295,37 @@ pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str) {
     }
 }
 
+/// Called from `AgentMuxHandler::on_load_start` for a browser pane's MAIN
+/// frame only (caller already filtered on `frame.is_main()`), i.e. the
+/// moment a navigation actually COMMITS and starts loading its content —
+/// disarms the pane-load-watchdog right here, rather than waiting for
+/// `on_loading_state_change_browser_pane`'s `!is_loading` (which waits for
+/// EVERY subresource too). Once the target document has committed, the
+/// watchdog's whole purpose — catching a navigation that never resolves,
+/// leaving the pane blank — no longer applies: the user is now looking at
+/// real, committed content, even if a slow image/script/iframe keeps CEF's
+/// `is_loading` true past the 20s deadline. Firing the watchdog after this
+/// point would replace an already-successfully-loaded page with a synthetic
+/// `ERR_CONNECTION_TIMED_OUT` (reagentx P1 on PR #2593, second pass; also
+/// flagged inline by Codex on the same PR).
+///
+/// No-ops if nothing is armed for this block_id — e.g. a client-side (SPA)
+/// route change, which doesn't re-arm the watchdog in the first place
+/// (`arm_pane_load_watchdog` is only called from `on_before_browse` for a
+/// genuine top-level navigation), or a commit arriving after the watchdog
+/// already fired/disarmed via some other path.
+pub fn on_load_start_browser_pane(state: &Arc<AppState>, browser: &Browser) {
+    if let Some(block_id) = resolve_pane_block_id(state, browser) {
+        if state.browser_pane_load_watchdog.lock().remove(&block_id).is_some() {
+            crate::browser_pane::trace::pane_trace(
+                &block_id,
+                "load-watchdog-disarmed",
+                "main frame committed — target document has content, watchdog no longer needed",
+            );
+        }
+    }
+}
+
 /// Called from `AgentMuxHandler::on_load_end` when `is_browser_pane` is true.
 ///
 /// Chromium creates a fresh `Chrome_RenderWidgetHostHWND` on every
