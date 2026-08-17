@@ -45,6 +45,13 @@ interface CreateFromTemplateFormData {
      *  endpoint. Only meaningful — and only shown in the form — when the
      *  template's provider declares `baseUrlEnvVar` in the catalog. */
     modelVendorBaseUrl: string;
+    /** Initial model choice — a value from the template's harness's own
+     *  `models` list (e.g. "opus" for claude, "gpt-5.5" for codex). Empty
+     *  string when the harness declares no models list; the launch path
+     *  falls back to that harness's own default. Distinct from
+     *  `modelVendorBaseUrl` above: this picks WHICH model the harness
+     *  runs, not WHO serves it. */
+    model: string;
 }
 
 interface AgentCreateFromTemplateModalPanelProps {
@@ -78,6 +85,18 @@ export const AgentCreateFromTemplateModalPanel = (
     // a non-empty override for any other provider.
     const supportsCustomEndpoint = createMemo(
         () => !!PROVIDERS[props.template.provider]?.baseUrlEnvVar,
+    );
+
+    // ── Model (which model this harness runs) ────────────────────────
+    // The template card you clicked already picked the HARNESS (the CLI
+    // — "Claude Code", "Codex", etc.); this picks WHICH MODEL that
+    // harness runs, from its own model list (same list
+    // AgentRuntimeDropup's in-session picker reads via
+    // getProvider(id)?.models). Hidden entirely when the harness
+    // declares no models list — nothing to choose between.
+    const modelOptions = createMemo(() => PROVIDERS[props.template.provider]?.models ?? []);
+    const [model, setModel] = createSignal(
+        modelOptions().find((m) => m.default)?.value ?? modelOptions()[0]?.value ?? "",
     );
 
     // ── Runtime (host vs container) ────────────────────────────────
@@ -181,6 +200,7 @@ export const AgentCreateFromTemplateModalPanel = (
                 memoryId: memoryId(),
                 agentType: runtime(),
                 modelVendorBaseUrl: supportsCustomEndpoint() ? modelVendorBaseUrl().trim() : "",
+                model: modelOptions().length > 0 ? model() : "",
             });
             // Layer unmounts via close-on-success. Reset is defensive.
             setSubmitting(false);
@@ -205,6 +225,13 @@ export const AgentCreateFromTemplateModalPanel = (
                     A new user-owned agent will be cloned from this template.
                     The template stays untouched and can be used again.
                 </p>
+                <Show when={modelOptions().length > 0}>
+                    <p class="modal-panel-description agent-new-bundle-modal-harness-hint">
+                        {props.template.name} is the <strong>harness</strong> — the CLI tool
+                        that runs this agent. Pick which <strong>model</strong> it uses below;
+                        the harness stays the same either way.
+                    </p>
+                </Show>
             </header>
             <div class="modal-panel-body agent-new-bundle-modal-body">
                 <label class="agent-new-bundle-modal-field">
@@ -255,6 +282,26 @@ export const AgentCreateFromTemplateModalPanel = (
                         </span>
                     </Show>
                 </label>
+                <Show when={modelOptions().length > 0}>
+                    <label class="agent-new-bundle-modal-field">
+                        <span class="agent-new-bundle-modal-label">Model</span>
+                        <select
+                            class="agent-new-bundle-modal-input"
+                            value={model()}
+                            onChange={(e) => setModel(e.currentTarget.value)}
+                            disabled={submitting()}
+                            data-testid="create-from-template-model-select"
+                        >
+                            <For each={modelOptions()}>
+                                {(m) => <option value={m.value}>{m.label}</option>}
+                            </For>
+                        </select>
+                        <span class="agent-new-bundle-modal-hint">
+                            Which model {props.template.name} runs with. Changeable later
+                            from the agent pane's runtime picker.
+                        </span>
+                    </label>
+                </Show>
                 <Show when={supportsCustomEndpoint()}>
                     <label class="agent-new-bundle-modal-field">
                         <span class="agent-new-bundle-modal-label">Model Vendor / Custom Endpoint</span>

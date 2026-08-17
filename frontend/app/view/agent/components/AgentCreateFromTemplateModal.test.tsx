@@ -260,4 +260,88 @@ describe("AgentCreateFromTemplateModalPanel", () => {
         await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
         expect(onSubmit.mock.calls[0][0].modelVendorBaseUrl).toBe("");
     });
+
+    // #2594 follow-up: harness-then-model creation flow. The template
+    // card already picked the harness (claude); these cover the model
+    // picker that lets the user choose WHICH model that harness runs.
+    describe("model picker (harness-then-model creation flow)", () => {
+        it("renders a model select defaulting to the harness's own default model", async () => {
+            render(() => (
+                <AgentCreateFromTemplateModalPanel
+                    template={template}
+                    onSubmit={vi.fn().mockResolvedValue(undefined)}
+                    onCancel={vi.fn()}
+                />
+            ));
+            const select = screen.getByTestId(
+                "create-from-template-model-select",
+            ) as HTMLSelectElement;
+            // claude's catalog entry marks "sonnet" as `default: true`.
+            expect(select.value).toBe("sonnet");
+            expect(Array.from(select.options).map((o) => o.value)).toContain("opus");
+        });
+
+        it("shows the harness-vs-model explanatory hint for a harness with a models list", async () => {
+            render(() => (
+                <AgentCreateFromTemplateModalPanel
+                    template={template}
+                    onSubmit={vi.fn().mockResolvedValue(undefined)}
+                    onCancel={vi.fn()}
+                />
+            ));
+            expect(screen.getByText(/is the/)).toHaveTextContent("harness");
+        });
+
+        it("sends the user's picked model in onSubmit's form data", async () => {
+            const onSubmit = vi.fn().mockResolvedValue(undefined);
+            render(() => (
+                <AgentCreateFromTemplateModalPanel
+                    template={template}
+                    onSubmit={onSubmit}
+                    onCancel={vi.fn()}
+                />
+            ));
+            await flush();
+            await flush();
+            await flush();
+
+            const select = screen.getByTestId(
+                "create-from-template-model-select",
+            ) as HTMLSelectElement;
+            fireEvent.change(select, { target: { value: "opus" } });
+
+            const submit = screen.getByTestId("create-from-template-submit");
+            fireEvent.click(submit);
+
+            await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+            expect(onSubmit.mock.calls[0][0].model).toBe("opus");
+        });
+
+        it("hides the model select, the hint, and sends an empty model for a harness with no models list", async () => {
+            const noModelsTemplate = {
+                ...template,
+                provider: "not-a-real-provider",
+            } as AgentDefinition;
+            const onSubmit = vi.fn().mockResolvedValue(undefined);
+            render(() => (
+                <AgentCreateFromTemplateModalPanel
+                    template={noModelsTemplate}
+                    onSubmit={onSubmit}
+                    onCancel={vi.fn()}
+                />
+            ));
+            await flush();
+            await flush();
+            await flush();
+
+            expect(screen.queryByTestId("create-from-template-model-select")).toBeNull();
+            expect(screen.queryByText(/is the/)).toBeNull();
+
+            const submit = screen.getByTestId("create-from-template-submit");
+            fireEvent.click(submit);
+
+            await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+            expect(onSubmit.mock.calls[0][0].model).toBe("");
+        });
+    });
 });
