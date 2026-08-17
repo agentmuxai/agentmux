@@ -171,6 +171,7 @@ struct EnsureAccountDirResp {
 pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let mgr = state.auth_session_manager.clone();
     let wstore = state.id_store.clone();
+    let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     let wstore_for_ensure_dir = wstore.clone();
     engine.register_handler(
@@ -178,6 +179,7 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
         Box::new(move |data, _ctx| {
             let mgr = mgr.clone();
             let wstore = wstore.clone();
+            let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 let req: StartProviderAuthReq = serde_json::from_value(data)
@@ -227,6 +229,7 @@ pub fn register_identity_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) 
                 spawn_auth_cli(
                     mgr,
                     wstore,
+                    identity_store,
                     broker,
                     r.session_id.clone(),
                     req.provider_id,

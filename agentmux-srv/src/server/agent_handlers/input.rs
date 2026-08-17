@@ -97,6 +97,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
     // agentinput → send message to agent (persistent or per-turn subprocess)
     let wstore_ai = state.wstore.clone();
     let id_store_ai = state.id_store.clone();
+    let identity_store_ai = state.identity_store.clone();
     // Streaming-bash wrapper auth — clone the per-launch auth_key into the
     // handler's closure so each spawn can inject it into Claude's env.
     // See SPEC_STREAMING_BASH_RUNNER_2026_05_11.md §7.
@@ -117,6 +118,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
         Box::new(move |data, _ctx| {
             let wstore = wstore_ai.clone();
             let id_store = id_store_ai.clone();
+            let identity_store = identity_store_ai.clone();
             let auth_key = auth_key_ai.clone();
             let broker = broker_ai.clone();
             let container_manager = container_manager_ai.clone();
@@ -180,6 +182,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                 env_vars = match crate::identity::resolver::inject_identity_env_async(
                     wstore.clone(),
                     id_store.clone(),
+                    identity_store.clone(),
                     Some(broker.clone()),
                     cmd.blockid.clone(),
                     env_vars,

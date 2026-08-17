@@ -434,6 +434,15 @@ pub struct Stores {
     pub global_transcript_store: Option<Arc<FileStore>>,
     pub shared_store: Option<Arc<Store>>,
     pub id_store: Arc<Store>,
+    /// Permanently-global identity store (agent→account links, memory
+    /// bundles, drone definitions, muxbus/agent M2M credentials, native
+    /// memory, cron jobs) — see
+    /// `docs/specs/SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md`. Distinct from
+    /// `id_store`: never redirected by `isolated_auth_enabled()`. Falls
+    /// back to `wstore` (never `None`) on the same best-effort terms as
+    /// `id_store`'s own fallback, so a resolution/open failure degrades to
+    /// today's per-channel behavior instead of panicking.
+    pub identity_store: Arc<Store>,
     pub saga_log: Arc<crate::sagas::log::SagaLog>,
     pub saga_id_seed: u64,
 }
@@ -698,6 +707,40 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         None => wstore.clone(),
     };
 
+    // Permanently-global identity store (agent→account links, memory
+    // bundles, drone definitions, muxbus/agent M2M credentials, native
+    // memory, cron jobs) — see
+    // docs/specs/SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md. Deliberately NOT
+    // gated by isolated_auth_enabled() at all, unlike shared_store above:
+    // none of this store's tables have a legitimate per-channel-isolation
+    // use case. Best-effort, same fallback-to-wstore terms as id_store —
+    // a resolution/open failure degrades to today's per-channel behavior
+    // rather than being fatal.
+    let identity_store: Arc<Store> = match registry::resolve_identity_store_path() {
+        Some(path) => {
+            let parent = path.parent().unwrap_or(path.as_path());
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                tracing::warn!(path = %path.display(), error = %e, "identity store: failed to create dir — falling back to per-channel store");
+                wstore.clone()
+            } else {
+                match Store::open_identity_store(&path) {
+                    Ok(s) => {
+                        tracing::info!(path = %path.display(), "identity store: attached (always global)");
+                        Arc::new(s)
+                    }
+                    Err(e) => {
+                        tracing::warn!(path = %path.display(), error = %e, "identity store: failed to open — falling back to per-channel store");
+                        wstore.clone()
+                    }
+                }
+            }
+        }
+        None => {
+            tracing::warn!("identity store: could not resolve path — falling back to per-channel store");
+            wstore.clone()
+        }
+    };
+
     // Install the process-global handle so the block-controller stdout-reader
     // hot path can mirror agent `output` into the global zone without threading
     // the store through `resync_controller` and every controller constructor.
@@ -808,6 +851,7 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         global_transcript_store,
         shared_store,
         id_store,
+        identity_store,
         saga_log,
         saga_id_seed,
     }
@@ -1421,6 +1465,7 @@ pub fn build_app_state(
         wstore: stores.wstore,
         shared_store: stores.shared_store,
         id_store: stores.id_store,
+        identity_store: stores.identity_store,
         filestore: stores.filestore,
         global_transcript_store: stores.global_transcript_store,
         event_bus: bg.event_bus,

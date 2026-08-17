@@ -150,11 +150,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     let wstore = state.id_store.clone();
+    let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_UPSERT_IDENTITY_ACCOUNT,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
+            let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 // Accept the full IdentityAccount payload. Missing `id` → mint
@@ -173,8 +175,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     account.created_at = now;
                 }
                 account.updated_at = now;
+                // identity_upsert_with_mirror — reagentx P0 review on PR
+                // #2632.
                 wstore
-                    .identity_upsert(&account)
+                    .identity_upsert_with_mirror(&identity_store, &account)
                     .map_err(|e| format!("upsertidentityaccount: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "identityaccounts:changed".to_string(),
@@ -193,11 +197,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // SecretRef::Keychain pointer + masked tail + non-secret metadata.
     // See specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
     let wstore = state.id_store.clone();
+    let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_ACCOUNT_KEY_VERIFY,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
+            let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 // NB: `req.api_key` is a secret — never log `req`.
@@ -295,7 +301,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     created_at,
                     updated_at: now,
                 };
-                if let Err(e) = wstore.identity_upsert(&account) {
+                // identity_upsert_with_mirror — reagentx P0 review on PR #2632.
+                if let Err(e) = wstore.identity_upsert_with_mirror(&identity_store, &account) {
                     // DB write failed after the keychain write.
                     //  - New account: nothing references the secret yet, so
                     //    roll it back to avoid an orphan with no DB row.
@@ -344,10 +351,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // start: resolve config + client (gates on "not configured"), spawn the
     // flow, return session id + initial status. poll/cancel drive the rest.
     let oauth_wstore = state.id_store.clone();
+    let oauth_identity_store = state.identity_store.clone();
     engine.register_handler(
         COMMAND_ACCOUNT_OAUTH_START,
         Box::new(move |data, _ctx| {
             let wstore = oauth_wstore.clone();
+            let identity_store = oauth_identity_store.clone();
             Box::pin(async move {
                 let req: OAuthStartReq = serde_json::from_value(data)
                     .map_err(|e| format!("account.oauth.start: {e}"))?;
@@ -357,7 +366,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         client_secret: req.client_secret,
                     }
                 });
-                match crate::identity::oauth_client::start(&req.provider, req.name, byo, wstore) {
+                match crate::identity::oauth_client::start(&req.provider, req.name, byo, wstore, identity_store) {
                     Ok((session_id, status)) => Ok(Some(serde_json::json!({
                         "sessionId": session_id,
                         "status": oauth_status_wire(&status),
@@ -397,11 +406,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     let wstore = state.id_store.clone();
+    let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_DELETE_IDENTITY_ACCOUNT,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
+            let identity_store = identity_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 let cmd: CommandDeleteIdentityAccountData = serde_json::from_value(data)
@@ -436,14 +447,44 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .identity_delete(&cmd.id)
                     .map_err(|e| format!("deleteidentityaccount: {e}"))?;
                 let deleted = outcome.deleted;
-                if outcome.links_cascaded > 0 {
+                // Links now live in identity_store, a different physical
+                // store than the account row (id_store) —
+                // identity_delete's own cascade above only ever reaches
+                // rows in the SAME store it's called on, so it no longer
+                // finds anything to cascade (SPEC_IDENTITY_STORE_SPLIT_
+                // 2026_08_17.md). Clean up the real link rows here
+                // explicitly and merge the two outcomes for the existing
+                // notification logic below, so this doesn't regress into
+                // silently orphaning links on every account delete.
+                let (links_cascaded_from_identity_store, mut affected_agents) = identity_store
+                    .agent_identity_unlink_by_account(&cmd.id)
+                    .map_err(|e| format!("deleteidentityaccount: identity_store cleanup: {e}"))?;
+                let links_cascaded = outcome.links_cascaded + links_cascaded_from_identity_store;
+                affected_agents.extend(outcome.affected_agents);
+                affected_agents.sort();
+                affected_agents.dedup();
+                // Also remove the account's MIRROR row (identity_upsert_with_mirror's
+                // counterpart on delete) — without this, a stale copy of a
+                // deleted account survives in identity_store, and
+                // resolve_account's fallback would incorrectly resolve it
+                // again on the next spawn once id_store's own row is gone.
+                // Best-effort: a mirror cleanup failure must not block the
+                // real delete, which already succeeded above.
+                if let Err(e) = identity_store.identity_delete(&cmd.id) {
+                    tracing::warn!(
+                        account_id = %cmd.id,
+                        error = %e,
+                        "deleteidentityaccount: identity_store mirror row cleanup failed (non-fatal)"
+                    );
+                }
+                if links_cascaded > 0 {
                     // info!, not debug!: the production filter is
                     // "agentmuxsrv=info,info" (reagent P1, PR #2143).
                     // "identity.delete:" is `muxlog auth` vocabulary.
                     tracing::info!(
                         account_id = %cmd.id,
                         provider = %provider,
-                        links = outcome.links_cascaded,
+                        links = links_cascaded,
                         "identity.delete: links cascaded"
                     );
                 }
@@ -469,18 +510,18 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // drives the pane chip; enforcement lands at the next
                     // spawn (layer 3). Also poke the per-agent link-changed
                     // event so link tables refresh.
-                    if !outcome.affected_agents.is_empty() {
+                    if !affected_agents.is_empty() {
                         // info!, not debug!: the production filter is
                         // "agentmuxsrv=info,info". "identity.delete:" is
                         // `muxlog auth` vocabulary.
                         tracing::info!(
                             account_id = %cmd.id,
                             provider = %provider,
-                            count = outcome.affected_agents.len(),
-                            agent_ids = %outcome.affected_agents.join(","),
+                            count = affected_agents.len(),
+                            agent_ids = %affected_agents.join(","),
                             "identity.delete: running agent(s) affected"
                         );
-                        for agent_id in &outcome.affected_agents {
+                        for agent_id in &affected_agents {
                             broker.publish(crate::backend::wps::WaveEvent {
                                 event: format!("agentidentities:changed:{agent_id}"),
                                 scopes: vec![],
@@ -505,7 +546,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 Ok(Some(json!({
                     "deleted": deleted,
                     // Layer 4 — Armory delete-time disclosure (spec §4).
-                    "affectedAgents": outcome.affected_agents,
+                    "affectedAgents": affected_agents,
                 })))
             })
         }),
@@ -513,7 +554,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 
     // ---- Agent ↔ Identity junction ----
 
-    let wstore = state.id_store.clone();
+    let wstore = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_LINK_AGENT_IDENTITY,
@@ -538,7 +579,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.id_store.clone();
+    let wstore = state.identity_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_UNLINK_AGENT_IDENTITY,
@@ -592,7 +633,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    let wstore = state.id_store.clone();
+    let wstore = state.identity_store.clone();
     engine.register_handler(
         COMMAND_LIST_AGENT_IDENTITIES,
         Box::new(move |data, _ctx| {
@@ -609,7 +650,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // Every direct link across every agent — see the constant's doc comment.
-    let wstore = state.id_store.clone();
+    let wstore = state.identity_store.clone();
     engine.register_handler(
         COMMAND_LIST_ALL_AGENT_IDENTITIES,
         Box::new(move |_data, _ctx| {
@@ -630,11 +671,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // memory bundle names so the frontend renders without follow-ups.
     let wstore = state.wstore.clone();
     let id_store_lna = state.id_store.clone();
+    let identity_store_lna = state.identity_store.clone();
     engine.register_handler(
         COMMAND_LIST_NAMED_AGENTS,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
             let id_store = id_store_lna.clone();
+            let identity_store = identity_store_lna.clone();
             Box::pin(async move {
                 let cmd: CommandListNamedAgentsData =
                     serde_json::from_value(data).unwrap_or_default();
@@ -660,7 +703,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md
                 // §4 item 2. Bulk-fetched once and grouped by
                 // definition_id rather than queried per-row.
-                let agent_identity_links = id_store
+                let agent_identity_links = identity_store
                     .agent_identity_list_all()
                     .map_err(|e| format!("listnamedagents: agent_identity_links: {e}"))?;
                 let accounts = id_store

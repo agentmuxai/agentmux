@@ -41,12 +41,14 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // — particularly orphaned ones whose pane crashed.
     let wstore = state.wstore.clone();
     let id_store_lrs = state.id_store.clone();
+    let identity_store_lrs = state.identity_store.clone();
     let filestore = state.filestore.clone();
     engine.register_handler(
         COMMAND_LIST_RECENT_SESSIONS,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
             let id_store = id_store_lrs.clone();
+            let identity_store = identity_store_lrs.clone();
             let filestore = filestore.clone();
             Box::pin(async move {
                 let t0 = std::time::Instant::now();
@@ -277,7 +279,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // SPEC_ARMORY_PHASE4_STORAGE_RENAME_COMPLETION_2026_07_12.md
                 // §4 item 1. Bulk-fetched once and grouped by definition_id
                 // rather than queried per-row.
-                let agent_identity_links = id_store.agent_identity_list_all().unwrap_or_else(|e| {
+                let agent_identity_links = identity_store.agent_identity_list_all().unwrap_or_else(|e| {
                     tracing::warn!(
                         error = %e,
                         "listrecentsessions: agent_identity_list_all failed — degrading to \

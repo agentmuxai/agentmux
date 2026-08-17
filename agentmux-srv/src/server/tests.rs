@@ -45,6 +45,7 @@ pub(crate) fn test_state() -> AppState {
         wstore: wstore.clone(),
         shared_store: None,
         id_store: wstore.clone(),
+        identity_store: wstore.clone(),
         filestore,
         global_transcript_store: None,
         event_bus: event_bus.clone(),

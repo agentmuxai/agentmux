@@ -120,6 +120,7 @@ fn register_agent_kill_tree(engine: &Arc<WshRpcEngine>, state: &AppState) {
 fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
     let id_store = state.id_store.clone();
+    let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();
     let container_manager = state.container_manager.clone();
     let filestore = state.filestore.clone();
@@ -129,6 +130,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
             let id_store = id_store.clone();
+            let identity_store = identity_store.clone();
             let broker = broker.clone();
             let container_manager = container_manager.clone();
             let filestore = filestore.clone();
@@ -177,6 +179,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 env_vars = match crate::identity::resolver::inject_identity_env_async(
                     wstore.clone(),
                     id_store.clone(),
+                    identity_store.clone(),
                     Some(broker.clone()),
                     cmd.block_id.clone(),
                     env_vars,

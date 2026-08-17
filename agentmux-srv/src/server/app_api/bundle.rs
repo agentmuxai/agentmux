@@ -719,6 +719,7 @@ fn sessions_within_total_budget(sizes: &[u64], total_cap: u64) -> (usize, bool) 
 ///   cap (`MAX_TOTAL_UNCOMPRESSED_BYTES`). See `sessions_within_total_budget`.
 async fn bundle_export_for_agent_with_history_impl(
     id_store: Arc<crate::backend::storage::store::Store>,
+    identity_store: Arc<crate::backend::storage::store::Store>,
     wstore: &crate::backend::storage::store::Store,
     history_service: Arc<crate::backend::history::HistoryService>,
     req: ExportForAgentWithHistoryReq,
@@ -734,10 +735,15 @@ async fn bundle_export_for_agent_with_history_impl(
 
     let agent_id = req.agent_id.clone();
     let (sessions, session_count, _has_more) = {
-        let id_store = id_store.clone();
+        // identity_store, not id_store — agent-identity links now live in
+        // the permanently-global identity store
+        // (SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md); reagentx P1 review on
+        // PR #2632. build_export_for_agent above still reads the BUNDLE via
+        // id_store — bundle routing isn't part of this fix's scope.
+        let identity_store = identity_store.clone();
         let history_service = history_service.clone();
         tokio::task::spawn_blocking(move || {
-            history_service.sessions_for_agent(&id_store, &agent_id, 0, usize::MAX, "modified_at", "desc", true)
+            history_service.sessions_for_agent(&identity_store, &agent_id, 0, usize::MAX, "modified_at", "desc", true)
         })
         .await
         .map_err(|e| format!("bundle.export_for_agent_with_history: blocking task panicked: {e}"))?
@@ -836,18 +842,20 @@ fn register_bundle_export_for_agent(engine: &Arc<WshRpcEngine>, state: &AppState
 
 fn register_bundle_export_for_agent_with_history(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store = state.id_store.clone();
+    let identity_store = state.identity_store.clone();
     let wstore = state.wstore.clone();
     let history_service = state.history_service.clone();
     engine.register_handler(
         COMMAND_BUNDLE_EXPORT_FOR_AGENT_WITH_HISTORY,
         Box::new(move |data, _ctx| {
             let id_store = id_store.clone();
+            let identity_store = identity_store.clone();
             let wstore = wstore.clone();
             let history_service = history_service.clone();
             Box::pin(async move {
                 let req: ExportForAgentWithHistoryReq = serde_json::from_value(data)
                     .map_err(|e| format!("bundle.export_for_agent_with_history: {e}"))?;
-                bundle_export_for_agent_with_history_impl(id_store, &wstore, history_service, req)
+                bundle_export_for_agent_with_history_impl(id_store, identity_store, &wstore, history_service, req)
                     .await
                     .map(Some)
             })
@@ -3364,6 +3372,7 @@ mod export_import_for_agent_tests {
 
             let result = bundle_export_for_agent_with_history_impl(
                 state.id_store.clone(),
+                state.identity_store.clone(),
                 &state.wstore,
                 std::sync::Arc::new(history_service),
                 ExportForAgentWithHistoryReq { bundle_id: "bundle-1".to_string(), agent_id: "agent-1".to_string() },
@@ -3389,6 +3398,7 @@ mod export_import_for_agent_tests {
 
             let result = bundle_export_for_agent_with_history_impl(
                 state.id_store.clone(),
+                state.identity_store.clone(),
                 &state.wstore,
                 std::sync::Arc::new(history_service),
                 ExportForAgentWithHistoryReq { bundle_id: "bundle-1".to_string(), agent_id: "agent-1".to_string() },
@@ -3427,6 +3437,7 @@ mod export_import_for_agent_tests {
 
             let result = bundle_export_for_agent_with_history_impl(
                 state.id_store.clone(),
+                state.identity_store.clone(),
                 &state.wstore,
                 std::sync::Arc::new(history_service),
                 ExportForAgentWithHistoryReq { bundle_id: "bundle-1".to_string(), agent_id: "agent-1".to_string() },
@@ -3476,6 +3487,7 @@ mod export_import_for_agent_tests {
 
             let result = bundle_export_for_agent_with_history_impl(
                 state.id_store.clone(),
+                state.identity_store.clone(),
                 &state.wstore,
                 std::sync::Arc::new(history_service),
                 ExportForAgentWithHistoryReq { bundle_id: "bundle-1".to_string(), agent_id: "agent-1".to_string() },
