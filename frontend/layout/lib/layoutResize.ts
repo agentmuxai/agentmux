@@ -39,70 +39,23 @@ export const DefaultGapSizePx = 3;
 const MinNodeSizePx = 40;
 
 /**
- * Computes new sizes for every sibling in `siblings` when the one pane whose
- * edge is actually under the pointer (`drivenNodeId`) is resized to
- * `drivenDesiredSize`. The rest of `siblings` absorb the complementary delta
- * proportional to each one's *current* size (a pane holding more of the row
- * gives up more, one holding less gives up less) — not an equal split, and
- * not "snap everyone to the same value" (that's a different, selection-driven
- * model that doesn't fit a live drag; see SPEC_SHIFT_DRAG_GROUP_RESIZE_2026_08_03.md §3).
- *
- * Each sibling is floored at `minNodeSize`. If the combined floor headroom
- * across the other siblings is less than the drag calls for, `drivenNodeId`'s
- * own growth is capped to whatever was actually redistributable — this is
- * the same conservation-safety principle the plain 2-node resize already
- * applies to its one neighbor, generalized to N-1 neighbors instead of 1.
- * Shrinking `drivenNodeId` (giving size back to its siblings) has no such
- * cap: there's no max-size concept in this layout model, so growth is always
- * unconstrained. Pure function — no DOM/model dependency — so the
- * distribution math is directly unit-testable.
- *
- * SPEC_SHIFT_DRAG_GROUP_RESIZE_2026_08_03.md §5.2-§5.3.
+ * Shrinks `block` by `amount` in total, distributed proportionally to each
+ * member's own current size (bigger members give up more), floored at
+ * `minNodeSize`. A member clamped to its floor drops out of the pool and
+ * its shortfall re-spreads across whichever members are still above the
+ * floor — terminates within `block.length` rounds (each round either fully
+ * satisfies `remaining` or permanently removes at least one member).
+ * Mutates `result` in place; returns the amount actually shrunk (may be
+ * less than `amount` if the block's combined floor headroom is smaller).
  */
-export function computeGroupResizeSizes(
-    siblings: ResizeNodeOperation[],
-    drivenNodeId: string,
-    drivenDesiredSize: number,
-    minNodeSize: number
-): Map<string, number> {
-    const result = new Map<string, number>(siblings.map((s) => [s.nodeId, s.size]));
-    const driven = siblings.find((s) => s.nodeId === drivenNodeId);
-    const others = siblings.filter((s) => s.nodeId !== drivenNodeId);
-    if (!driven) return result;
-
-    const clampedDesired = Math.max(drivenDesiredSize, minNodeSize);
-    const totalDelta = clampedDesired - driven.size; // + = driven grows (others must shrink); - = driven shrinks (others grow)
-
-    if (others.length === 0 || totalDelta === 0) {
-        result.set(drivenNodeId, clampedDesired);
-        return result;
-    }
-
-    if (totalDelta < 0) {
-        // Driven shrinks; the space it gives up is unconstrained growth for
-        // the others (no max-size floor to violate), so one proportional
-        // pass is sufficient.
-        const othersStartSum = others.reduce((sum, s) => sum + s.size, 0);
-        const growTotal = -totalDelta;
-        if (othersStartSum > 0) {
-            for (const s of others) {
-                result.set(s.nodeId, s.size + growTotal * (s.size / othersStartSum));
-            }
-        }
-        result.set(drivenNodeId, clampedDesired);
-        return result;
-    }
-
-    // Driven grows; the others must give up `totalDelta` combined, each
-    // floored at `minNodeSize`. Iterative proportional shrink: a sibling
-    // clamped to its floor drops out of the pool and its shortfall is
-    // re-spread across whichever siblings are still above the floor. Each
-    // round either fully satisfies the remaining delta (nobody clamps, the
-    // while-loop exits on the next check) or permanently removes at least
-    // one sibling from the pool — so this always terminates within
-    // `others.length` rounds.
-    let pool = others.map((s) => ({ id: s.nodeId, size: s.size }));
-    let remaining = totalDelta;
+function shrinkBlockBy(
+    block: ResizeNodeOperation[],
+    amount: number,
+    minNodeSize: number,
+    result: Map<string, number>
+): number {
+    let pool = block.map((s) => ({ id: s.nodeId, size: s.size }));
+    let remaining = amount;
     while (remaining > 1e-6 && pool.length > 0) {
         const poolSum = pool.reduce((sum, p) => sum + result.get(p.id)!, 0);
         if (poolSum <= 0) break;
@@ -124,8 +77,107 @@ export function computeGroupResizeSizes(
         remaining -= takenThisRound;
         pool = nextPool;
     }
-    const actualDelta = totalDelta - Math.max(remaining, 0);
-    result.set(drivenNodeId, driven.size + actualDelta);
+    return amount - Math.max(remaining, 0);
+}
+
+/**
+ * Grows `block` by `amount` in total, distributed proportionally to each
+ * member's own *starting* size (using `block`'s own sizes, not any prior
+ * mutation of `result` in this call — matches how `shrinkBlockBy` computes
+ * its pool). No floor/cap: there's no max-size concept in this layout
+ * model. Mutates `result` in place.
+ */
+function growBlockBy(block: ResizeNodeOperation[], amount: number, result: Map<string, number>): void {
+    if (amount <= 0 || block.length === 0) return;
+    const blockSum = block.reduce((sum, s) => sum + s.size, 0);
+    if (blockSum <= 0) {
+        result.set(block[0].nodeId, block[0].size + amount);
+        return;
+    }
+    for (const s of block) {
+        result.set(s.nodeId, s.size + amount * (s.size / blockSum));
+    }
+}
+
+/**
+ * Computes new sizes for every sibling in `siblings` (in their parent's
+ * child order) when the pane whose edge is actually under the pointer
+ * (`drivenNodeId`) is dragged toward `drivenDesiredSize`.
+ *
+ * Modeled as two blocks meeting exactly at the dragged handle —
+ * `beforeBlock` (every sibling ahead of `drivenNodeId`) and `afterBlock`
+ * (`drivenNodeId` itself plus everyone after it) — rather than "one driven
+ * node vs. an undifferentiated pool of others". The same aggregate transfer
+ * amount `Δ` the raw pixel delta implies (`drivenDesiredSize - driven.size`)
+ * is applied to the *blocks'* totals: `beforeBlock` changes by `-Δ`,
+ * `afterBlock` by `+Δ`, exactly mirroring the plain 2-node baseline's
+ * `beforeNode`/`afterNode` relationship, generalized from one node per side
+ * to a block of them. Within each block, the change is distributed
+ * proportionally to each member's own current size (uniform scaling) — not
+ * an equal split, and not "snap everyone to the same value" (see
+ * SPEC_SHIFT_DRAG_GROUP_RESIZE_2026_08_03.md §3).
+ *
+ * This guarantees the handle border (the boundary between the two blocks)
+ * always tracks the pointer exactly, and — critically — that every OTHER
+ * border in the group moves in the same direction as the drag, never
+ * backward: for any block that scales uniformly, every border internal to
+ * it shifts the same direction as the block's own boundary tied to the
+ * drag. The prior "one driven node vs. every other sibling regardless of
+ * position" model didn't have this property — a sibling positioned past
+ * the driven node could get a growth share that pulled its shared border
+ * *toward* the driven node, i.e. opposite the drag. See
+ * SPEC_SHIFT_DRAG_GROUP_RESIZE_DIRECTION_FIX_2026_08_17.md for the full
+ * worked example and the geometric argument.
+ *
+ * The trade-off: the driven pane's own size is no longer pixel-exact when
+ * `afterBlock` has more than one member — it shares the block's change
+ * with whatever sits past it. Only the handle border itself is guaranteed
+ * to track the cursor 1:1; that's the invariant that actually matters for
+ * a drag interaction.
+ *
+ * Each block is floored at `minNodeSize` when shrinking (unconstrained
+ * when growing — no max-size concept exists). If the shrinking block's
+ * combined floor headroom is less than `Δ` calls for, the growing block's
+ * actual change is capped to whatever was actually redistributable — same
+ * conservation-safety principle the plain 2-node resize already applies,
+ * scoped to a block instead of a single neighbor. Pure function — no
+ * DOM/model dependency — so the distribution math is directly
+ * unit-testable.
+ *
+ * SPEC_SHIFT_DRAG_GROUP_RESIZE_2026_08_03.md §5.2-§5.3;
+ * SPEC_SHIFT_DRAG_GROUP_RESIZE_DIRECTION_FIX_2026_08_17.md §4.
+ */
+export function computeGroupResizeSizes(
+    siblings: ResizeNodeOperation[],
+    drivenNodeId: string,
+    drivenDesiredSize: number,
+    minNodeSize: number
+): Map<string, number> {
+    const result = new Map<string, number>(siblings.map((s) => [s.nodeId, s.size]));
+    const drivenIndex = siblings.findIndex((s) => s.nodeId === drivenNodeId);
+    if (drivenIndex === -1) return result;
+    const driven = siblings[drivenIndex];
+
+    const clampedDesired = Math.max(drivenDesiredSize, minNodeSize);
+    const totalDelta = clampedDesired - driven.size; // + = afterBlock grows / beforeBlock shrinks; - = afterBlock shrinks / beforeBlock grows
+
+    const beforeBlock = siblings.slice(0, drivenIndex);
+    const afterBlock = siblings.slice(drivenIndex); // includes driven itself
+
+    if (beforeBlock.length === 0 || totalDelta === 0) {
+        result.set(drivenNodeId, clampedDesired);
+        return result;
+    }
+
+    if (totalDelta < 0) {
+        // afterBlock (incl. driven) shrinks in total by -totalDelta; beforeBlock absorbs it as unconstrained growth.
+        const actualDelta = shrinkBlockBy(afterBlock, -totalDelta, minNodeSize, result);
+        growBlockBy(beforeBlock, actualDelta, result);
+    } else {
+        // beforeBlock shrinks in total by totalDelta, floored; afterBlock (incl. driven) grows by whatever was actually redistributable.
+        const actualDelta = shrinkBlockBy(beforeBlock, totalDelta, minNodeSize, result);
+        growBlockBy(afterBlock, actualDelta, result);
+    }
     return result;
 }
 
