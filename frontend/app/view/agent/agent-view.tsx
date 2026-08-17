@@ -186,7 +186,7 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
     //    additional pills, deduped against the stack by blockId, so
     //    cross-pane fork-switching keeps working.
     const layoutModel = getLayoutModelForStaticTab();
-    const agentDefinitions = useAgentDefinitions();
+    const [agentDefinitions] = useAgentDefinitions();
     const [openDefinitions] = useOpenDefinitionMap();
     const forks = useForkSet({
         definitions: agentDefinitions,

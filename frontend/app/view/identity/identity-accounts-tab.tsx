@@ -26,7 +26,7 @@ const STATUS_DOT: Record<string, string> = {
 
 export function AccountsTab({ model }: { model: IdentityViewModel }): JSX.Element {
     const groups = () => model.accountsByProvider();
-    const agents = useAgentDefinitions();
+    const [agents] = useAgentDefinitions();
 
     // Right-click an account row → "Bind to Agent" submenu + Copy account ID
     // (SPEC_ARMORY_BIND_TO_AGENT_CONTEXT_MENU_2026_08_09.md). Menu contents
@@ -167,7 +167,7 @@ function AccountDetail({ model, account }: { model: IdentityViewModel; account: 
     // pre-delete warning never fire for exactly the agents that matter
     // (reagent P1, PR #2161 round 1). The legacy index is kept as a union
     // for agents that predate direct links.
-    const agents = useAgentDefinitions();
+    const [agents] = useAgentDefinitions();
     const [linkedAgentIds, setLinkedAgentIds] = createSignal<string[]>([]);
     RpcApi.ListAllAgentIdentitiesCommand(TabRpcClient)
         .then((links) => {
