@@ -630,6 +630,18 @@ struct ExportForAgentWithHistoryReq {
     agent_id: String,
 }
 
+/// Per-transcript size ceiling for `bundle.export_for_agent_with_history`.
+/// reagentx P1 on PR #2613: reading every session fully into a `String`
+/// with no bound could exhaust server memory for the multi-GB histories
+/// this feature exists to migrate. Unlike `MAX_ABF_FILE_SIZE_BYTES`
+/// (context files, truncated with a warning when oversized — fine, since
+/// a partial context file is still useful), a transcript is skipped
+/// ENTIRELY rather than truncated: JSONL requires whole lines, and a
+/// truncated mid-record file could fail to parse (or silently misparse)
+/// on the receiving end, which is worse than the session being visibly
+/// absent with a warning explaining why.
+const MAX_HISTORY_SESSION_FILE_SIZE_BYTES: u64 = 200 * 1024 * 1024;
+
 /// `bundle.export_for_agent_with_history` —
 /// `docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`
 /// §3.3. Deliberately a SEPARATE, explicit, opt-in action from
@@ -641,16 +653,30 @@ struct ExportForAgentWithHistoryReq {
 /// `history/<provider>/<session_id>.jsonl`. Always returns a zip — a
 /// multi-file, potentially large archive has no sensible inline-JSON
 /// shape, unlike the plain export's optional format. A transcript that
-/// fails to read (deleted, permission issue) is warned about and skipped,
+/// fails to read (deleted, permission issue, or over
+/// `MAX_HISTORY_SESSION_FILE_SIZE_BYTES`) is warned about and skipped,
 /// never fails the whole export — same best-effort philosophy as the
 /// memory-splicing step above.
+///
+/// reagentx P1 on PR #2613, both addressed:
+/// - `sessions_for_agent(..., force_refresh: true)` — this export claims
+///   completeness ("included N of N known sessions"), so it can't rely on
+///   the interactive lazy-refresh-if-empty behavior; a session created
+///   since the index was first populated (by ANY prior call) must not be
+///   silently missing.
+/// - the actual file reads + zip + base64 encode run inside
+///   `spawn_blocking` — synchronous, potentially slow I/O and CPU work
+///   that must not block the async RPC worker thread. Only the already-
+///   resolved, owned `export`/`sessions` data crosses into the blocking
+///   closure; the `Store`/`HistoryService` DB lookups above stay on the
+///   async side, unchanged.
 async fn bundle_export_for_agent_with_history_impl(
     id_store: &crate::backend::storage::store::Store,
     wstore: &crate::backend::storage::store::Store,
     history_service: &crate::backend::history::HistoryService,
     req: ExportForAgentWithHistoryReq,
 ) -> Result<serde_json::Value, String> {
-    let (mut export, _agent, mut all_warnings, missing_skill_ids) = build_export_for_agent(
+    let (export, _agent, all_warnings, missing_skill_ids) = build_export_for_agent(
         id_store,
         wstore,
         &req.bundle_id,
@@ -660,39 +686,62 @@ async fn bundle_export_for_agent_with_history_impl(
     .await?;
 
     let (sessions, session_count, _has_more) = history_service
-        .sessions_for_agent(id_store, &req.agent_id, 0, usize::MAX, "modified_at", "desc")
+        .sessions_for_agent(id_store, &req.agent_id, 0, usize::MAX, "modified_at", "desc", true)
         .map_err(|e| format!("bundle.export_for_agent_with_history: {e}"))?;
 
-    let mut included = 0u32;
-    for session in &sessions {
-        match std::fs::read_to_string(&session.file_path) {
-            Ok(content) => {
-                export.files.push(crate::backend::bundle_export::BundleExportFile {
-                    path: format!("history/{}/{}.jsonl", session.provider, session.session_id),
-                    content,
-                });
-                included += 1;
+    tokio::task::spawn_blocking(move || {
+        let mut export = export;
+        let mut all_warnings = all_warnings;
+        let mut included = 0u32;
+        for session in &sessions {
+            match std::fs::metadata(&session.file_path) {
+                Ok(meta) if meta.len() > MAX_HISTORY_SESSION_FILE_SIZE_BYTES => {
+                    all_warnings.push(format!(
+                        "history: skipped session {} ({}) — {} bytes exceeds the {} byte limit",
+                        session.session_id, session.file_path, meta.len(), MAX_HISTORY_SESSION_FILE_SIZE_BYTES
+                    ));
+                    continue;
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    all_warnings.push(format!(
+                        "history: failed to read session {} ({}): {e}",
+                        session.session_id, session.file_path
+                    ));
+                    continue;
+                }
             }
-            Err(e) => all_warnings.push(format!(
-                "history: failed to read session {} ({}): {e}",
-                session.session_id, session.file_path
-            )),
+            match std::fs::read_to_string(&session.file_path) {
+                Ok(content) => {
+                    export.files.push(crate::backend::bundle_export::BundleExportFile {
+                        path: format!("history/{}/{}.jsonl", session.provider, session.session_id),
+                        content,
+                    });
+                    included += 1;
+                }
+                Err(e) => all_warnings.push(format!(
+                    "history: failed to read session {} ({}): {e}",
+                    session.session_id, session.file_path
+                )),
+            }
         }
-    }
-    all_warnings.push(format!("history: included {included} of {session_count} known session(s)"));
+        all_warnings.push(format!("history: included {included} of {session_count} known session(s)"));
 
-    let zip_bytes = crate::backend::bundle_export::zip_bundle_export(&export)
-        .map_err(|e| format!("bundle.export_for_agent_with_history: {e}"))?;
-    use base64::Engine as _;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(&zip_bytes);
-    Ok(json!({
-        "root_slug": export.root_slug,
-        "skipped_skills": export.skipped_skills,
-        "warnings": all_warnings,
-        "missing_skill_ids": missing_skill_ids,
-        "history_session_count": included,
-        "zip_base64": encoded,
-    }))
+        let zip_bytes = crate::backend::bundle_export::zip_bundle_export(&export)
+            .map_err(|e| format!("bundle.export_for_agent_with_history: {e}"))?;
+        use base64::Engine as _;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&zip_bytes);
+        Ok(json!({
+            "root_slug": export.root_slug,
+            "skipped_skills": export.skipped_skills,
+            "warnings": all_warnings,
+            "missing_skill_ids": missing_skill_ids,
+            "history_session_count": included,
+            "zip_base64": encoded,
+        }))
+    })
+    .await
+    .map_err(|e| format!("bundle.export_for_agent_with_history: blocking task panicked: {e}"))?
 }
 
 fn register_bundle_export_for_agent(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -3317,6 +3366,57 @@ mod export_import_for_agent_tests {
             assert!(
                 warnings.iter().any(|w| w.as_str().unwrap_or("").contains("failed to read session")),
                 "must warn about the unreadable session: {warnings:?}"
+            );
+        }
+
+        // reagentx P1 on PR #2613: an oversized transcript must be skipped
+        // (never truncated -- a partial JSONL file can fail or misparse on
+        // the receiving end) and warned about, not silently included or
+        // read into memory unbounded.
+        #[tokio::test]
+        async fn skips_and_warns_on_a_transcript_over_the_size_limit() {
+            let state = test_state();
+            let config_dir = tempfile::tempdir().unwrap();
+            make_agent(&state, "agent-1", "/work/proj", config_dir.path());
+            make_bundle(&state, "bundle-1", "Be helpful.");
+            link_agent_to_identity(&state, "agent-1", "acct-mine");
+
+            let session_dir = tempfile::tempdir().unwrap();
+            let oversized_path = session_dir.path().join("sess-huge.jsonl");
+            {
+                // Sparse file -- claims MAX_HISTORY_SESSION_FILE_SIZE_BYTES + 1
+                // bytes via metadata without actually writing/allocating
+                // that much, matching read_abf_file_path's own sparse-file
+                // test technique above.
+                let file = std::fs::File::create(&oversized_path).unwrap();
+                file.set_len(MAX_HISTORY_SESSION_FILE_SIZE_BYTES + 1).unwrap();
+            }
+
+            let index = SessionIndex::with_isolated_roots(
+                vec![Box::new(MockAdapter {
+                    files: vec![DiscoveredFile { file_path: oversized_path.to_string_lossy().into_owned(), mtime_ms: 1 }],
+                    identity_id: "acct-mine".to_string(),
+                })],
+                vec![session_dir.path().to_path_buf()],
+            );
+            let history_service = HistoryService::from_index(index);
+
+            let result = bundle_export_for_agent_with_history_impl(
+                &state.id_store,
+                &state.wstore,
+                &history_service,
+                ExportForAgentWithHistoryReq { bundle_id: "bundle-1".to_string(), agent_id: "agent-1".to_string() },
+            )
+            .await
+            .unwrap();
+
+            assert_eq!(result["history_session_count"], 0, "oversized session must not count as included");
+            let paths = unzip_paths(result["zip_base64"].as_str().unwrap());
+            assert!(!paths.iter().any(|p| p.contains("sess-huge")), "oversized session must not be in the zip: {paths:?}");
+            let warnings = result["warnings"].as_array().unwrap();
+            assert!(
+                warnings.iter().any(|w| w.as_str().unwrap_or("").contains("exceeds") && w.as_str().unwrap_or("").contains("sess-huge")),
+                "must warn about the size limit: {warnings:?}"
             );
         }
     }

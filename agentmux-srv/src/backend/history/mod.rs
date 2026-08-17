@@ -70,6 +70,17 @@ impl HistoryService {
     /// `bundle.rs`'s `bundle.export_for_agent_with_history`) can get this
     /// agent's `SessionMeta` list directly, without a JSON
     /// serialize/deserialize round-trip through the RPC-facing shape.
+    ///
+    /// `force_refresh`: reagentx P1 on PR #2613 — the lazy
+    /// refresh-only-if-empty behavior (shared with `list`/`get`, fine for
+    /// an interactive browse where slight staleness is an acceptable
+    /// trade for speed) is wrong for a caller claiming completeness, like
+    /// `bundle.export_for_agent_with_history`: once the index has been
+    /// populated once (by ANY prior call, interactive or otherwise), a
+    /// session created since then would silently be missing from an
+    /// export that reports itself as the full record. `list_for_agent`
+    /// (the interactive RPC) passes `false`, preserving its existing
+    /// speed/freshness trade-off; the export path passes `true`.
     pub fn sessions_for_agent(
         &self,
         store: &crate::backend::storage::store::Store,
@@ -78,8 +89,9 @@ impl HistoryService {
         limit: usize,
         sort_by: &str,
         sort_dir: &str,
+        force_refresh: bool,
     ) -> Result<(Vec<SessionMeta>, u32, bool), String> {
-        if self.index.is_empty() {
+        if force_refresh || self.index.is_empty() {
             self.index.refresh();
         }
 
@@ -123,7 +135,7 @@ impl HistoryService {
         sort_by: &str,
         sort_dir: &str,
     ) -> serde_json::Value {
-        let (page, total, has_more) = match self.sessions_for_agent(store, agent_id, offset, limit, sort_by, sort_dir) {
+        let (page, total, has_more) = match self.sessions_for_agent(store, agent_id, offset, limit, sort_by, sort_dir, false) {
             Ok(r) => r,
             Err(e) => return serde_json::json!({ "error": e }),
         };
@@ -323,5 +335,144 @@ mod tests {
         let result = service.list_for_agent(&store, "agent-with-no-links", 0, 10, "created_at", "desc");
         assert_eq!(result["total"], 0);
         assert_eq!(result["sessions"].as_array().unwrap().len(), 0);
+    }
+
+    fn insert_test_agent_and_link(store: &Store, agent_id: &str, account_id: &str) {
+        let mut def = crate::backend::storage::store::AgentDefinition {
+            id: agent_id.to_string(),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: String::new(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            memory_id: String::new(),
+        };
+        store.agent_def_insert(&mut def).unwrap();
+        store
+            .identity_upsert(&crate::backend::storage::store::IdentityAccount {
+                id: account_id.to_string(),
+                name: format!("claude-{account_id}"),
+                provider: "claude".to_string(),
+                kind: "pat".to_string(),
+                display_name: String::new(),
+                secret_ref: crate::backend::storage::store::SecretRef::OAuthConfigDir { dir: String::new() },
+                context: serde_json::json!({}),
+                status: "unknown".to_string(),
+                created_at: 0,
+                updated_at: 0,
+            })
+            .unwrap();
+        store.agent_identity_link(agent_id, account_id, "claude").unwrap();
+    }
+
+    /// Unlike `MockAdapter` (a fixed file list captured at construction),
+    /// this re-scans a real directory on every `discover_files()` call --
+    /// needed to exercise `refresh()`'s actual re-scan behavior, not just
+    /// the in-memory index it populates.
+    struct DynamicMockAdapter {
+        dir: std::path::PathBuf,
+        identity_id: String,
+    }
+    impl HistoryAdapter for DynamicMockAdapter {
+        fn provider(&self) -> &str {
+            "mock"
+        }
+        fn discover_files(&self) -> Result<Vec<DiscoveredFile>, HistoryError> {
+            let entries = std::fs::read_dir(&self.dir).map_err(|e| HistoryError::Other(e.to_string()))?;
+            Ok(entries
+                .flatten()
+                .map(|e| DiscoveredFile { file_path: e.path().to_string_lossy().into_owned(), mtime_ms: 0 })
+                .collect())
+        }
+        fn extract_meta(&self, file_path: &str) -> Result<Option<SessionMeta>, HistoryError> {
+            let id = std::path::Path::new(file_path)
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            Ok(Some(SessionMeta {
+                session_id: id,
+                file_path: file_path.to_string(),
+                provider: "mock".to_string(),
+                model: String::new(),
+                slug: String::new(),
+                working_directory: "/proj".to_string(),
+                created_at: 0,
+                modified_at: 0,
+                message_count: 0,
+                first_user_message: String::new(),
+                file_size_bytes: 0,
+                git_branch: String::new(),
+                total_tokens: 0,
+                subagent_count: 0,
+                identity_id: self.identity_id.clone(),
+            }))
+        }
+        fn parse_file(&self, _: &str) -> Result<Option<HistorySession>, HistoryError> {
+            Ok(None)
+        }
+    }
+
+    // reagentx P1 on PR #2613: sessions_for_agent's lazy
+    // refresh-only-if-empty behavior is wrong for a caller claiming
+    // completeness -- a session created after the index was first
+    // populated (by ANY prior call) must still show up when
+    // force_refresh=true, and must NOT show up when force_refresh=false
+    // (proving the two modes are genuinely different, not that refresh
+    // just always happens to run).
+    #[test]
+    fn force_refresh_true_picks_up_a_session_created_after_first_population_false_does_not() {
+        let dir = std::env::temp_dir().join(format!("amux-hist-force-refresh-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        write_session(&dir, "first");
+
+        let index = SessionIndex::with_isolated_roots(
+            vec![Box::new(DynamicMockAdapter { dir: dir.clone(), identity_id: "acct-mine".to_string() })],
+            vec![dir.clone()],
+        );
+        let service = HistoryService::from_index(index);
+        let store = Store::open_in_memory().unwrap();
+        insert_test_agent_and_link(&store, "agent-1", "acct-mine");
+
+        // First call populates the index (empty -> refresh runs regardless
+        // of force_refresh).
+        let (first_pass, total1, _) = service.sessions_for_agent(&store, "agent-1", 0, 10, "created_at", "desc", false).unwrap();
+        assert_eq!(total1, 1);
+        assert_eq!(first_pass[0].session_id, "first");
+
+        // A new session appears on disk after that first population.
+        write_session(&dir, "second");
+
+        let (stale, total_stale, _) =
+            service.sessions_for_agent(&store, "agent-1", 0, 10, "created_at", "desc", false).unwrap();
+        assert_eq!(total_stale, 1, "force_refresh=false must NOT see the new session (index already non-empty)");
+
+        let (fresh, total_fresh, _) =
+            service.sessions_for_agent(&store, "agent-1", 0, 10, "created_at", "desc", true).unwrap();
+        assert_eq!(total_fresh, 2, "force_refresh=true must see the new session");
+        assert!(fresh.iter().any(|s| s.session_id == "second"));
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
