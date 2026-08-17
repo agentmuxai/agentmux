@@ -47,7 +47,7 @@ interface AgentIdentityLinksPanelProps {
 }
 
 export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JSX.Element => {
-    const agents = useAgentDefinitions();
+    const [agents] = useAgentDefinitions();
 
     const [allLinks, setAllLinks] = createSignal<AgentDefinitionIdentity[]>([]);
     const [accounts, setAccounts] = createSignal<Account[]>(loadAccounts());
