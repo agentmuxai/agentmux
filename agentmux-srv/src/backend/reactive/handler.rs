@@ -332,6 +332,7 @@ impl Handler {
                 error: Some("rate limit exceeded".to_string()),
                 timestamp: now,
                 effective_tier: None,
+                requires_stop: None,
             };
         }
 
@@ -344,6 +345,7 @@ impl Handler {
                 error: Some(format!("invalid agent ID: {}", req.target_agent)),
                 timestamp: now,
                 effective_tier: None,
+                requires_stop: None,
             };
         }
 
@@ -373,6 +375,7 @@ impl Handler {
                     error: Some(err),
                     timestamp: now,
                     effective_tier: None,
+                    requires_stop: None,
                 };
             }
         };
@@ -455,6 +458,34 @@ impl Handler {
                 super::types::JektTier::Sensitive => "sensitive",
             })
         };
+        // Whether TIER=sensitive should actually STOP the receiving agent and
+        // require human confirmation, vs. just carry the tag for visual
+        // indication (SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17.md,
+        // repo-owner-confirmed directly in a live conversation, same channel
+        // this policy's own STOP rule already treats as authoritative).
+        //
+        // Cryptographic proof of identity is exactly what the STOP rule was
+        // protecting against the ABSENCE of (the spoofed-jekt-then-spoofed-
+        // muxbus-confirmation incident this whole tiering system exists to
+        // stop). Once a sender is actually verified — `sig_verified`,
+        // `reagent_verified`, or `lan_verified` all being `Some(true)` — that
+        // specific attack is no longer possible for this message, regardless
+        // of WHY it was marked sensitive (self-declared, or a keyword match
+        // on content a genuinely-signed sender is allowed to legitimately
+        // discuss, e.g. a code review of credential-handling code).
+        //
+        // This can never accidentally cover an active-forgery case: the three
+        // rules above that force `is_sensitive` from a signature actively
+        // failing (`is_network_tier_sig_invalid`, `is_lan_sig_invalid`,
+        // `is_unverified_sender`) are each keyed on the SAME field this
+        // checks for `Some(true)` reading `Some(false)` instead — the two can
+        // never both be true for the same field at once, so a message that
+        // reaches STOP-required via one of those three rules is, by
+        // construction, never simultaneously "verified" on that same tier.
+        let is_cryptographically_verified = req.sig_verified == Some(true)
+            || req.reagent_verified == Some(true)
+            || req.lan_verified == Some(true);
+        let requires_stop = is_sensitive && !is_cryptographically_verified;
         let priority = req.priority.as_deref().unwrap_or("normal");
 
         // Wrap in JEKT marker block (structured tag + human-readable header).
@@ -474,6 +505,7 @@ impl Handler {
             req.sig_verified,
             req.reagent_verified,
             req.lan_verified,
+            requires_stop,
             &request_id,
             priority,
         );
@@ -519,6 +551,7 @@ impl Handler {
                         error: None,
                         timestamp: now,
                         effective_tier: Some(effective_tier.to_string()),
+                        requires_stop: Some(requires_stop),
                     };
                 }
                 Ok(false) => {
@@ -552,6 +585,7 @@ impl Handler {
                         error: Some(e),
                         timestamp: now,
                         effective_tier: Some(effective_tier.to_string()),
+                        requires_stop: Some(requires_stop),
                     };
                 }
             }
@@ -580,6 +614,7 @@ impl Handler {
                     error: Some(err),
                     timestamp: now,
                     effective_tier: Some(effective_tier.to_string()),
+                    requires_stop: Some(requires_stop),
                 };
             }
         };
@@ -621,6 +656,7 @@ impl Handler {
                 error: Some(e),
                 timestamp: now,
                 effective_tier: Some(effective_tier.to_string()),
+                requires_stop: Some(requires_stop),
             };
         }
 
@@ -656,6 +692,7 @@ impl Handler {
             error: None,
             timestamp: now,
             effective_tier: Some(effective_tier.to_string()),
+            requires_stop: Some(requires_stop),
         }
     }
 
@@ -721,6 +758,7 @@ impl Handler {
                     error: None,
                     timestamp: now,
                     effective_tier: None,
+                    requires_stop: None,
                 })
             }
             SupervisorAction::Nudge => {

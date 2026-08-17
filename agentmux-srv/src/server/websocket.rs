@@ -445,7 +445,12 @@ async fn handle_incoming_text(
                             message,
                             &resp.request_id,
                             resp.effective_tier.as_deref(),
+                            resp.requires_stop,
                             "host",
+                            None,
+                            // Always host-tier here (this is the pane's own outbound
+                            // send) — reagent/lan verification never applies.
+                            None,
                             None,
                             incoming.priority.as_deref().unwrap_or("normal"),
                         );
@@ -486,7 +491,10 @@ async fn handle_incoming_text(
                                 message,
                                 &msg_id,
                                 None,
+                                None,
                                 "host",
+                                None,
+                                None,
                                 None,
                                 incoming.priority.as_deref().unwrap_or("normal"),
                             );
