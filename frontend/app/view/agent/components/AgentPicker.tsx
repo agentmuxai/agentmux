@@ -46,7 +46,6 @@ import { resolveEffectiveLaunchProvider } from "../agent-launch-env";
 import type { AgentViewModel } from "../agent-model";
 import { realAccountIdOrEmpty } from "../identity-carry-over";
 import { getProvider } from "../providers";
-import { AgentActionBar } from "./AgentActionBar";
 import { AgentCard } from "./AgentCard";
 import type { LaunchOverrides } from "./AgentLaunchModal";
 import { AgentPickerFilterBar } from "./AgentPickerFilterBar";
@@ -870,7 +869,6 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                                 </div>
                             </div>
                         </Show>
-                        <AgentActionBar />
                         {pickerOverlay()}
                     </div>
                 }
@@ -958,7 +956,6 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             </div>
                         </Show>
                     </div>
-                    <AgentActionBar />
                     {pickerOverlay()}
                 </div>
             </Show>
