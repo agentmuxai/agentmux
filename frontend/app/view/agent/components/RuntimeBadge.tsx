@@ -7,7 +7,7 @@ import "./RuntimeBadge.scss";
 interface RuntimeBadgeProps {
     runtime: "host" | "container" | string;
     /** sm = card rows (10px); md = pane rows (11px); tag = minimal
-     *  icon-less text label (10px, HOST/SANDBOX wording) for the agent
+     *  icon-less text label (9px, HOST/SANDBOX wording) for the agent
      *  composer strip, next to the model selector — see
      *  docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md §3.2.
      *  Default: sm. */
