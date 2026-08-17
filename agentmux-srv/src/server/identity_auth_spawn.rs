@@ -45,6 +45,7 @@ use super::identity_auth_persist::persist_oauth_success;
 pub(crate) fn spawn_auth_cli(
     mgr: Arc<crate::identity::auth_session::AuthSessionManager>,
     wstore: Arc<Store>,
+    identity_store: Arc<Store>,
     broker: Arc<Broker>,
     session_id: String,
     provider_id: String,
@@ -77,6 +78,7 @@ pub(crate) fn spawn_auth_cli(
         spawn_auth_cli_pty(
             mgr,
             wstore,
+            identity_store,
             broker,
             session_id,
             provider_id,
@@ -100,6 +102,7 @@ pub(crate) fn spawn_auth_cli(
     let auth_check_args_for_check = auth_check_args.clone();
     let auth_env_for_check = auth_env.clone();
     let wstore_for_task = wstore.clone();
+    let identity_store_for_task = identity_store.clone();
     let broker_for_task = broker.clone();
     let into_bundle_id_for_task = into_bundle_id.clone();
     let bundle_dir_for_task = bundle_dir.clone();
@@ -192,6 +195,7 @@ pub(crate) fn spawn_auth_cli(
         let check_args_stdout = auth_check_args_for_check.clone();
         let check_env_stdout = auth_env_for_check.clone();
         let wstore_stdout = wstore_for_task.clone();
+        let identity_store_stdout = identity_store_for_task.clone();
         let broker_stdout = broker_for_task.clone();
         let into_bundle_id_stdout = into_bundle_id_for_task.clone();
         let bundle_dir_stdout = bundle_dir_for_task.clone();
@@ -237,6 +241,7 @@ pub(crate) fn spawn_auth_cli(
                         // persistence and the session still succeeds.
                         let (bundle_id, account_id) = persist_oauth_success(
                             &wstore_stdout,
+                            &identity_store_stdout,
                             &broker_stdout,
                             direct_account,
                             &account_id_stdout,
@@ -301,6 +306,7 @@ pub(crate) fn spawn_auth_cli(
                     {
                         let (bundle_id, account_id) = persist_oauth_success(
                             &wstore_for_task,
+                            &identity_store_for_task,
                             &broker_for_task,
                             direct_account,
                             &account_id_for_task,
@@ -352,6 +358,7 @@ pub(crate) fn spawn_auth_cli(
 fn spawn_auth_cli_pty(
     mgr: Arc<crate::identity::auth_session::AuthSessionManager>,
     wstore: Arc<Store>,
+    identity_store: Arc<Store>,
     broker: Arc<Broker>,
     session_id: String,
     provider_id: String,
@@ -374,6 +381,7 @@ fn spawn_auth_cli_pty(
     let auth_check_args_for_check = auth_check_args.clone();
     let auth_env_for_check = auth_env.clone();
     let wstore_for_task = wstore.clone();
+    let identity_store_for_task = identity_store.clone();
     let broker_for_task = broker.clone();
     let into_bundle_id_for_task = into_bundle_id.clone();
     let bundle_dir_for_task = bundle_dir.clone();
@@ -507,6 +515,7 @@ fn spawn_auth_cli_pty(
         let check_args_drain = auth_check_args_for_check.clone();
         let check_env_drain = auth_env_for_check.clone();
         let wstore_drain = wstore_for_task.clone();
+        let identity_store_drain = identity_store_for_task.clone();
         let broker_drain = broker_for_task.clone();
         let into_bundle_id_drain = into_bundle_id_for_task.clone();
         let bundle_dir_drain = bundle_dir_for_task.clone();
@@ -564,6 +573,7 @@ fn spawn_auth_cli_pty(
                             let mgr2 = mgr_drain.clone();
                             let sid2 = sid_drain.clone();
                             let wstore2 = wstore_drain.clone();
+                            let identity_store2 = identity_store_drain.clone();
                             let broker2 = broker_drain.clone();
                             let into_bundle_id2 = into_bundle_id_drain.clone();
                             let bundle_dir2 = bundle_dir_drain.clone();
@@ -574,6 +584,7 @@ fn spawn_auth_cli_pty(
                                 if confirm_authenticated(&cli, &args, &env).await {
                                     let (bundle_id, account_id) = persist_oauth_success(
                                         &wstore2,
+                                        &identity_store2,
                                         &broker2,
                                         direct_account,
                                         &account_id2,
@@ -649,6 +660,7 @@ fn spawn_auth_cli_pty(
                     {
                         let (bundle_id, account_id) = persist_oauth_success(
                             &wstore_for_task,
+                            &identity_store_for_task,
                             &broker_for_task,
                             direct_account,
                             &account_id_for_task,

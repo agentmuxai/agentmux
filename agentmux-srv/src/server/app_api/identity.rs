@@ -33,6 +33,7 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
             let state = state.clone();
             Box::pin(async move {
                 let id_store = &state.id_store;
+                let identity_store = &state.identity_store;
                 let broker = &state.broker;
                 #[derive(serde::Deserialize)]
                 #[serde(rename_all = "snake_case")]
@@ -69,7 +70,7 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
                     // Ownership check: the supplied account_id must already be
                     // linked to the calling agent, so callers can't overwrite
                     // another agent's credentials by guessing a UUID.
-                    let links = id_store
+                    let links = identity_store
                         .agent_identity_list_for_agent(&def_id)
                         .map_err(|e| format!("identity.account.upsert: {e}"))?;
                     let owned = links.iter().any(|l| l.account_id == req.account_id);
@@ -142,7 +143,12 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
                 };
 
                 // Step 3 (upsert DB). Compensate on failure for new accounts.
-                if let Err(e) = id_store.identity_upsert(&account) {
+                // identity_upsert_with_mirror, not plain identity_upsert —
+                // reagentx P0 review on PR #2632: without the mirror write,
+                // an account created/updated after the fix shipped still had
+                // no fallback entry and reproduced the reported bug on its
+                // own next channel switch.
+                if let Err(e) = id_store.identity_upsert_with_mirror(&identity_store, &account) {
                     if is_new {
                         let aid = account_id.clone();
                         let _ = tokio::task::spawn_blocking(move || {
@@ -162,7 +168,7 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
                 // the agent's existing provider link with no compensation (the
                 // failure branch below only cleans up for is_new accounts) —
                 // removed rather than adding yet another compensating delete.
-                if let Err(e) = id_store.agent_identity_link(&def_id, &account_id, &req.provider) {
+                if let Err(e) = identity_store.agent_identity_link(&def_id, &account_id, &req.provider) {
                     // Only clean up for new accounts — on the update path the
                     // account still exists in the DB and may be linked to other providers,
                     // so deleting the keychain secret would destroy a valid credential.
@@ -254,6 +260,7 @@ fn register_identity_self_unlink(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let state = state.clone();
             Box::pin(async move {
                 let id_store = &state.id_store;
+                let identity_store = &state.identity_store;
                 let broker = &state.broker;
                 #[derive(serde::Deserialize)]
                 struct Req { agent_id: String, provider: String }
@@ -265,7 +272,7 @@ fn register_identity_self_unlink(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // unlinking by slug always matched zero rows (silent no-op).
                 let def_id = resolve_agent_definition_id(&state, &req.agent_id)
                     .map_err(|e| format!("identity.self.unlink: {e}"))?;
-                let unlinked = id_store
+                let unlinked = identity_store
                     .agent_identity_unlink(&def_id, &req.provider)
                     .map_err(|e| format!("identity.self.unlink: {e}"))?;
                 // info!, not debug!: the production filter is

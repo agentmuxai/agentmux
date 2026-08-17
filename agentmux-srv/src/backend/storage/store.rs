@@ -19,8 +19,9 @@ use crate::registry::{DefinitionStore, Registry};
 
 use super::error::StoreError;
 use super::migrations::{
-    check_schema_compat, run_object_schema, run_shared_store_schema, stamp_version,
-    OBJECT_SCHEMA_VERSION, SHARED_STORE_SCHEMA_VERSION,
+    check_schema_compat, run_identity_store_schema, run_object_schema, run_shared_store_schema,
+    stamp_version, IDENTITY_STORE_SCHEMA_VERSION, OBJECT_SCHEMA_VERSION,
+    SHARED_STORE_SCHEMA_VERSION,
 };
 
 /// SQLite-backed object store for StoreObj types.
@@ -115,6 +116,41 @@ impl Store {
         check_schema_compat(&conn, SHARED_STORE_SCHEMA_VERSION, "store.db")?;
         run_shared_store_schema(&conn)?;
         stamp_version(&conn, SHARED_STORE_SCHEMA_VERSION)?;
+        Ok(Self {
+            conn: Mutex::new(conn),
+            registry: Mutex::new(None),
+            def_registry: Mutex::new(None),
+            registry_agents_base: Mutex::new(None),
+            muxbus_save_lock: Mutex::new(()),
+        })
+    }
+
+    /// Open the permanently-global identity store at `path`
+    /// (`~/.agentmux/shared/identity-store.db`) — see
+    /// `docs/specs/SPEC_IDENTITY_STORE_SPLIT_2026_08_17.md`.
+    ///
+    /// Same WAL + busy-timeout config as [`open_shared`](Self::open_shared),
+    /// but runs [`run_identity_store_schema`] — a strict subset of
+    /// [`open_shared`](Self::open_shared)'s tables (everything except
+    /// `db_accounts`) — instead of `run_shared_store_schema`. Crucially,
+    /// this store's PATH is never gated by `isolated_auth_enabled()` (see
+    /// its resolver, `registry::resolve_identity_store_path`): unlike
+    /// `open_shared`, there is no isolated/per-channel variant of this
+    /// store at all.
+    pub fn open_identity_store(path: &Path) -> Result<Self, StoreError> {
+        let conn = Connection::open(path)?;
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL;
+             PRAGMA busy_timeout=5000;
+             PRAGMA foreign_keys=ON;
+             PRAGMA synchronous=NORMAL;
+             PRAGMA cache_size=-8000;
+             PRAGMA mmap_size=268435456;
+             PRAGMA temp_store=MEMORY;",
+        )?;
+        check_schema_compat(&conn, IDENTITY_STORE_SCHEMA_VERSION, "identity-store.db")?;
+        run_identity_store_schema(&conn)?;
+        stamp_version(&conn, IDENTITY_STORE_SCHEMA_VERSION)?;
         Ok(Self {
             conn: Mutex::new(conn),
             registry: Mutex::new(None),
