@@ -642,6 +642,39 @@ struct ExportForAgentWithHistoryReq {
 /// absent with a warning explaining why.
 const MAX_HISTORY_SESSION_FILE_SIZE_BYTES: u64 = 200 * 1024 * 1024;
 
+/// Aggregate ceiling across every session included in one
+/// `bundle.export_for_agent_with_history` call. reagentx P1, third review
+/// round: a per-file cap alone doesn't bound an agent with many sessions
+/// each just under it — this is the analogous total cap the sibling
+/// import path already enforces (`MAX_TOTAL_UNCOMPRESSED_BYTES`,
+/// `bundle_import.rs`), sized larger since export's job is specifically
+/// to carry as much real history as reasonably fits, not to validate a
+/// small hand-authored bundle. Sessions are processed in
+/// `sessions_for_agent`'s existing `modified_at desc` order, so hitting
+/// this cap keeps the most recent conversations and cuts off the oldest
+/// — the same priority a human moving "my history" to a new machine would
+/// want. Unlike import's reject-the-whole-thing-on-overflow behavior,
+/// export keeps its existing best-effort philosophy: stop including
+/// further sessions and say so in a warning, never fail the call outright.
+const MAX_TOTAL_HISTORY_BYTES: u64 = 500 * 1024 * 1024;
+
+/// Given per-session sizes already in priority order (most-recent-first,
+/// matching `sessions_for_agent`'s `modified_at desc` sort), decide how
+/// many fit within `total_cap`. Returns `(count_included, stopped_at_cap)`.
+/// Pure — no I/O — deliberately extracted so this decision is testable
+/// with tiny numbers instead of needing real `MAX_TOTAL_HISTORY_BYTES`-
+/// scale files on disk.
+fn sessions_within_total_budget(sizes: &[u64], total_cap: u64) -> (usize, bool) {
+    let mut total = 0u64;
+    for (i, &size) in sizes.iter().enumerate() {
+        if total + size > total_cap {
+            return (i, true);
+        }
+        total += size;
+    }
+    (sizes.len(), false)
+}
+
 /// `bundle.export_for_agent_with_history` —
 /// `docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`
 /// §3.3. Deliberately a SEPARATE, explicit, opt-in action from
@@ -680,6 +713,10 @@ const MAX_HISTORY_SESSION_FILE_SIZE_BYTES: u64 = 200 * 1024 * 1024;
 ///   that must not block the async RPC worker thread either. Only the
 ///   already-resolved, owned `export`/`sessions` data crosses into that
 ///   closure.
+/// - `MAX_TOTAL_HISTORY_BYTES` — a third review round caught that the
+///   per-session cap alone doesn't bound an agent with MANY sessions each
+///   just under it; the sibling import path enforces an analogous total
+///   cap (`MAX_TOTAL_UNCOMPRESSED_BYTES`). See `sessions_within_total_budget`.
 async fn bundle_export_for_agent_with_history_impl(
     id_store: Arc<crate::backend::storage::store::Store>,
     wstore: &crate::backend::storage::store::Store,
@@ -710,25 +747,43 @@ async fn bundle_export_for_agent_with_history_impl(
     tokio::task::spawn_blocking(move || {
         let mut export = export;
         let mut all_warnings = all_warnings;
-        let mut included = 0u32;
+
+        // Pass 1: stat every session, drop per-file-oversized ones. No
+        // reads yet — just sizes, so the pure budget decision below (pass
+        // 2) can be tested with tiny numbers instead of real files.
+        let mut sized: Vec<(&crate::backend::history::adapter::SessionMeta, u64)> = Vec::new();
         for session in &sessions {
             match std::fs::metadata(&session.file_path) {
                 Ok(meta) if meta.len() > MAX_HISTORY_SESSION_FILE_SIZE_BYTES => {
                     all_warnings.push(format!(
-                        "history: skipped session {} ({}) — {} bytes exceeds the {} byte limit",
+                        "history: skipped session {} ({}) — {} bytes exceeds the {} byte per-session limit",
                         session.session_id, session.file_path, meta.len(), MAX_HISTORY_SESSION_FILE_SIZE_BYTES
                     ));
-                    continue;
                 }
-                Ok(_) => {}
-                Err(e) => {
-                    all_warnings.push(format!(
-                        "history: failed to read session {} ({}): {e}",
-                        session.session_id, session.file_path
-                    ));
-                    continue;
-                }
+                Ok(meta) => sized.push((session, meta.len())),
+                Err(e) => all_warnings.push(format!(
+                    "history: failed to read session {} ({}): {e}",
+                    session.session_id, session.file_path
+                )),
             }
+        }
+
+        // Pass 2: how many of the (already most-recent-first-ordered)
+        // remaining sessions fit within the aggregate cap.
+        let sizes: Vec<u64> = sized.iter().map(|(_, size)| *size).collect();
+        let sized_count = sized.len();
+        let (fit_count, stopped_at_total_cap) = sessions_within_total_budget(&sizes, MAX_TOTAL_HISTORY_BYTES);
+        if stopped_at_total_cap {
+            let total: u64 = sizes[..fit_count].iter().sum();
+            all_warnings.push(format!(
+                "history: stopped after {total} bytes (limit {MAX_TOTAL_HISTORY_BYTES}) — {} additional session(s) omitted, oldest first",
+                sized_count - fit_count
+            ));
+        }
+
+        // Pass 3: actually read + include only what fit.
+        let mut included = 0u32;
+        for (session, _size) in sized.into_iter().take(fit_count) {
             match std::fs::read_to_string(&session.file_path) {
                 Ok(content) => {
                     export.files.push(crate::backend::bundle_export::BundleExportFile {
@@ -3436,6 +3491,52 @@ mod export_import_for_agent_tests {
                 warnings.iter().any(|w| w.as_str().unwrap_or("").contains("exceeds") && w.as_str().unwrap_or("").contains("sess-huge")),
                 "must warn about the size limit: {warnings:?}"
             );
+        }
+
+        // reagentx P1, third review round: a per-session cap alone doesn't
+        // bound an agent with many sessions each just under it. These
+        // exercise the pure sessions_within_total_budget decision directly
+        // with tiny numbers -- MAX_TOTAL_HISTORY_BYTES is 500 MiB, real
+        // enough files to trigger it would make this test slow and wasteful
+        // for no extra confidence over testing the same logic with small
+        // inputs.
+        #[test]
+        fn total_budget_includes_everything_when_under_the_cap() {
+            let (count, stopped) = sessions_within_total_budget(&[10, 10, 10], 100);
+            assert_eq!(count, 3);
+            assert!(!stopped);
+        }
+
+        #[test]
+        fn total_budget_stops_at_the_first_session_that_would_exceed_the_cap() {
+            // Most-recent-first order: [10, 10, 10] with cap 25 -- the
+            // third one (cumulative 30) doesn't fit, so only the first two
+            // (most recent) are included.
+            let (count, stopped) = sessions_within_total_budget(&[10, 10, 10], 25);
+            assert_eq!(count, 2, "must include the two most-recent sessions, not just any two that individually fit");
+            assert!(stopped);
+        }
+
+        #[test]
+        fn total_budget_includes_nothing_when_the_first_session_alone_exceeds_the_cap() {
+            let (count, stopped) = sessions_within_total_budget(&[50, 10], 25);
+            assert_eq!(count, 0);
+            assert!(stopped);
+        }
+
+        #[test]
+        fn total_budget_handles_an_empty_list() {
+            let (count, stopped) = sessions_within_total_budget(&[], 100);
+            assert_eq!(count, 0);
+            assert!(!stopped);
+        }
+
+        #[test]
+        fn total_budget_includes_a_session_that_exactly_fills_the_remaining_cap() {
+            // 10 + 15 == 25 exactly -- must NOT be treated as exceeding.
+            let (count, stopped) = sessions_within_total_budget(&[10, 15], 25);
+            assert_eq!(count, 2);
+            assert!(!stopped);
         }
     }
 }
