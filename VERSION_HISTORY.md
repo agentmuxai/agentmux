@@ -1,5 +1,18 @@
 # AgentMux Version History
 
+## 0.55.12 — 2026-08-17
+
+- docs: add CI completion notifications spec (agentmux-cloud PR #48)
+- fix(layout): shift-drag group resize no longer moves borders opposite the drag direction
+- feat(agent): filter/search bar atop MyAgentsList — quickly narrow to an existing agent by name
+- fix(agent): My Agents runtime badge matches composer-strip HOST/SANDBOX tag styling
+- fix(agent-pane): hold the brain-spinner overlay until launch-flow's auth check resolves, not just history paint
+- fix(layout): raise minimum pane size from 40px to 128px
+- feat(jekt): TIER=sensitive no longer stops work for a cryptographically verified sender
+- fix(agent): HOST/SANDBOX runtime tag reads as a small tag, not full-size text
+- fix(cef): auto-fetch patched Windows CEF runtime when missing
+
+
 ## 0.55.11 — 2026-08-17
 
 - fix(browser-pane): faster connection-timeout watchdog and human-readable load-error pages
