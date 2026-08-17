@@ -347,6 +347,14 @@ pub const COMMAND_BUNDLE_IMPORT_COMMIT: &str = "bundle.import.commit";
 // entry points that touch db_agent_native_memory.
 pub const COMMAND_BUNDLE_EXPORT_FOR_AGENT: &str = "bundle.export_for_agent";
 pub const COMMAND_BUNDLE_IMPORT_FOR_AGENT: &str = "bundle.import_for_agent";
+// SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md §3.3 —
+// deliberately separate from bundle.export_for_agent: a bundle is meant to
+// be shared/reused across agents and machines, while conversation history
+// is private, potentially large, and belongs to exactly one agent. This
+// is the explicit, opt-in action for the narrower case of actually moving
+// one agent's full record to another machine — never bundled into the
+// default export by default.
+pub const COMMAND_BUNDLE_EXPORT_FOR_AGENT_WITH_HISTORY: &str = "bundle.export_for_agent_with_history";
 // Structural ABF validator — Armory Bundle Format (ABF) UI-alignment pass.
 // Read-only: fetches the bundle and runs the pure bundle_validate module
 // against it, no Store writes.
