@@ -58,6 +58,21 @@ pub struct SessionMeta {
     pub git_branch: String,
     pub total_tokens: u64,
     pub subagent_count: u32,
+    /// The identity bundle id (`db_accounts.id` / the `<bundle_id>` path
+    /// segment under `identities/`) this session was discovered under, if
+    /// any. Empty for sessions found via a non-bundle base_dir (personal
+    /// `~/.claude`, the default `<shared>/providers/claude/projects`, or
+    /// legacy `~/.config/claude-*`) — those aren't attributable to a
+    /// specific identity. Lets `SessionIndex` answer "this agent's
+    /// sessions" in O(sessions for this identity) instead of a full scan;
+    /// see `docs/specs/SPEC_AGENT_IDENTITY_HISTORY_PERSISTENCE_PROTOCOL_2026_08_16.md`
+    /// §4.4. An agent's own id is resolved from this via
+    /// `db_agent_identity_links` (`Store::agent_identity_list_for_agent`),
+    /// not stored here directly — the same bundle can in principle be
+    /// shared, and this field reflects the filesystem fact (which bundle),
+    /// not a specific agent's claim on it.
+    #[serde(default)]
+    pub identity_id: String,
 }
 
 /// Full parsed session — produced on demand when user opens a conversation.
