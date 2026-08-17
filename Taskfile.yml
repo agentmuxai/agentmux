@@ -595,14 +595,27 @@ tasks:
                   fi
                   cefDir="$AGENTMUX_CEF_RUNTIME_DIR_WINDOWS"
                   cefSource="override"
-                elif [ -f "$cefBuildDefault/libcef.dll" ] && [ -f "$cefBuildDefault/icudtl.dat" ]; then
+                else
                   # Tier 2: the standard cef-build layout from
                   # docs/cef-build/build-patched-cef-windows.md, which
                   # documents this as picked up "automatically" — previously
                   # untrue, since this task never checked for it.
-                  echo "Found codec-enabled CEF at default cef-build location — using $cefBuildDefault"
-                  cefDir="$cefBuildDefault"
-                  cefSource="cef-build-default"
+                  #
+                  # Self-healing: if not already present, try downloading the
+                  # pre-built patched runtime from the agentmuxai/cef GitHub
+                  # release before falling through to the stock cargo-cache
+                  # tier — the ~3-6 hour local Chromium compile in that doc
+                  # only needs to happen once per CEF version, ever, on any
+                  # machine (scripts/cef-build/fetch-patched-cef-windows.sh).
+                  # Non-fatal: any failure here (gh missing/unauthenticated,
+                  # network) just leaves cefBuildDefault empty and we fall
+                  # through to tier 3 exactly as before.
+                  bash scripts/cef-build/fetch-patched-cef-windows.sh "$cefBuildDefault" || true
+                  if [ -f "$cefBuildDefault/libcef.dll" ] && [ -f "$cefBuildDefault/icudtl.dat" ]; then
+                    echo "Found codec-enabled CEF at default cef-build location — using $cefBuildDefault"
+                    cefDir="$cefBuildDefault"
+                    cefSource="cef-build-default"
+                  fi
                 fi
                 # Tier 3 (cefSource still "cargo-cache"): cargo/cef-dll-sys
                 # copies the ACTIVE build's full CEF runtime (libcef.dll +
