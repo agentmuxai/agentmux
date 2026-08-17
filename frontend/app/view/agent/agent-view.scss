@@ -26,7 +26,6 @@
 @use "styles/document";
 @use "styles/header-controls";
 @use "styles/pending-footer";
-@use "styles/action-bar";
 @use "styles/responsive";
 @use "styles/decision-panel";
 @use "styles/shell-node";
@@ -92,11 +91,11 @@
         position: absolute;
         top: 0;
         left: 0;
-        right: 0;   // Was `width: fit-content` (shrink-to-fit) — now spans
-                    // the full pane so the glass fill below covers the
-                    // whole trailing area past "+", not just [tabs][+]
-                    // itself. See
-                    // docs/specs/SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md.
+        right: 0; // Was `width: fit-content` (shrink-to-fit) — now spans
+        // the full pane so the glass fill below covers the
+        // whole trailing area past "+", not just [tabs][+]
+        // itself. See
+        // docs/specs/SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md.
         z-index: var(--z-pane-overlay, 4);
 
         // Glass panel over the trailing space right of "+" —
@@ -267,8 +266,8 @@
         // over any theme.
         background: repeating-linear-gradient(
             -45deg,
-            var(--accent-color)                                              0px,
-            var(--accent-color)                                              4px,
+            var(--accent-color) 0px,
+            var(--accent-color) 4px,
             color-mix(in srgb, var(--accent-color) 25%, var(--main-bg-color)) 4px,
             color-mix(in srgb, var(--accent-color) 25%, var(--main-bg-color)) 8px
         );
@@ -293,8 +292,12 @@
     // Shift by one stripe period (8px × √2 ≈ 11.314px) per cycle so the
     // repeating pattern loops seamlessly. translateX keeps the animation
     // on the GPU compositor.
-    from { transform: translateX(0); }
-    to   { transform: translateX(11.314px); }
+    from {
+        transform: translateX(0);
+    }
+    to {
+        transform: translateX(11.314px);
+    }
 }
 
 .agent-view {
