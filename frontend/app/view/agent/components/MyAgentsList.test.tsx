@@ -188,6 +188,32 @@ describe("MyAgentsList — populated", () => {
         await screen.findByTestId("agent-my-agents-entry");
         expect(screen.getByText("My Agents")).toBeInTheDocument();
     });
+
+    // The runtime badge must match AgentComposerStrip's tag exactly (same
+    // component, same size="tag" variant) so a container agent reads
+    // "SANDBOX" here too, not the sm-variant's "Container" wording — one
+    // consistent vocabulary between the picker row and the pane it opens.
+    it("renders the container runtime badge with the same 'tag' variant + SANDBOX wording as the composer strip", async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
+            makeRow({ agent_type: "container" }),
+        ]));
+        render(() => <MyAgentsList onReattach={() => {}} />);
+        await screen.findByTestId("agent-my-agents-entry");
+        const badge = screen.getByText("SANDBOX");
+        expect(badge).toHaveClass("runtime-badge--tag");
+        expect(screen.queryByText("Container")).toBeNull();
+    });
+
+    it("renders the host runtime badge with the same 'tag' variant + HOST wording as the composer strip", async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
+            makeRow({ agent_type: "host" }),
+        ]));
+        render(() => <MyAgentsList onReattach={() => {}} />);
+        await screen.findByTestId("agent-my-agents-entry");
+        const badge = screen.getByText("HOST");
+        expect(badge).toHaveClass("runtime-badge--tag");
+        expect(screen.queryByText("Host")).toBeNull();
+    });
 });
 
 describe("MyAgentsList — nameFilter (SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md)", () => {
