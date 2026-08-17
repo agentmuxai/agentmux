@@ -47,6 +47,7 @@ import { realAccountIdOrEmpty } from "../identity-carry-over";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { AgentCard } from "./AgentCard";
 import { AgentActionBar } from "./AgentActionBar";
+import { AgentPickerFilterBar } from "./AgentPickerFilterBar";
 import { HiddenTemplatesSection } from "./HiddenTemplatesSection";
 import type { LaunchOverrides } from "./AgentLaunchModal";
 import { MyAgentsList } from "./MyAgentsList";
@@ -119,6 +120,12 @@ interface AgentPickerProps {
 export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     const [launching, setLaunching] = createSignal<string | null>(null);
     const [nodejsError, setNodejsError] = createSignal<string | null>(null);
+    // Filter-bar query (SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md) —
+    // narrows MyAgentsList only, not the template grid below it (Q1,
+    // confirmed by the human operator): the ask was specifically to find
+    // an *existing agent*, and a shared query risks the template grid
+    // silently shrinking for an unrelated reason right next to it.
+    const [filterQuery, setFilterQuery] = createSignal("");
     const agents = useAgentDefinitions();
     const modalLayer = useModalLayer();
 
@@ -808,7 +815,13 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             current Option E session state.
                             Bottom: seeded templates, click = open the
                             create-from-template modal. */}
+                        <AgentPickerFilterBar
+                            value={filterQuery}
+                            onInput={setFilterQuery}
+                            onClear={() => setFilterQuery("")}
+                        />
                         <MyAgentsList
+                            nameFilter={filterQuery}
                             onReattach={handleReattach}
                             openDefinitions={openDefinitions}
                             onFork={handleFork}
