@@ -17,11 +17,130 @@
 //! `Chrome_RenderWidgetHostHWND` child on every navigation, stranding the
 //! old subclass on a destroyed HWND.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 use cef::*;
 
 use crate::state::AppState;
+
+/// How long a browser pane's top-level navigation may sit in CEF's real
+/// "still loading" state before we give up on it ourselves and show a
+/// synthetic `ERR_CONNECTION_TIMED_OUT` page. Chromium's actual TCP
+/// connect-timeout ceiling (`net::TransportConnectJob::ConnectionTimeout()`)
+/// is 4 minutes — the SAME code Chrome itself runs, so there is no CEF
+/// setting that makes "our" timeout longer than Chrome's; they share it.
+/// This is a deliberate product choice to bound a floating pane's UX well
+/// below that ceiling instead of leaving it blank for up to 4 minutes on a
+/// silently-dropped connection.
+const PANE_LOAD_WATCHDOG_TIMEOUT_MS: i64 = 20_000;
+
+/// Monotonic arm counter for the pane load watchdog — mirrors
+/// `client::navigation`'s `PAINT_GATE_NEXT_EPOCH` pattern. Each arm
+/// (navigation start) gets a fresh epoch; the delayed watchdog task captures
+/// it and only fires if it's still current when the deadline elapses, so a
+/// navigation that finishes — or a NEW navigation that starts — before the
+/// deadline can't have a stale watchdog fire over unrelated content.
+static PANE_LOAD_WATCHDOG_NEXT_EPOCH: AtomicU64 = AtomicU64::new(0);
+
+wrap_task! {
+    struct PaneLoadWatchdogTask {
+        state: Arc<AppState>,
+        block_id: String,
+        epoch: u64,
+    }
+    impl Task { fn execute(&self) {
+        fire_pane_load_watchdog(&self.state, &self.block_id, self.epoch);
+    }}
+}
+
+/// Arm a FRESH pane load watchdog — new epoch, new `PANE_LOAD_WATCHDOG_TIMEOUT_MS`
+/// deadline — for a main-frame browser-pane navigation that's about to
+/// start. Called from `client::lifecycle::on_before_browse` for a genuinely
+/// new navigation (`is_redirect == 0`), NOT from the loading-state-change
+/// handler — `on_before_browse` hands us the navigation's own target URL via
+/// CEF's `Request` object, which is the only reliable source for "what is
+/// this navigation actually trying to reach." (`Frame::url()` reflects the
+/// last COMMITTED document; for a navigation that's still pending — and a
+/// watchdog exists purely to handle the case where a navigation stays
+/// pending forever — that's still the PREVIOUS page.) `url` is stored
+/// alongside the arm so `fire_pane_load_watchdog` never has to re-derive it.
+///
+/// A redirect hop of an ALREADY-armed navigation must NOT call this — see
+/// `update_pane_load_watchdog_url` for why.
+pub(crate) fn arm_pane_load_watchdog(state: &Arc<AppState>, block_id: &str, browser: Browser, url: String) {
+    let epoch = PANE_LOAD_WATCHDOG_NEXT_EPOCH.fetch_add(1, Ordering::Relaxed);
+    state
+        .browser_pane_load_watchdog
+        .lock()
+        .insert(block_id.to_string(), (Instant::now(), epoch, browser, url));
+    let mut task = PaneLoadWatchdogTask::new(state.clone(), block_id.to_string(), epoch);
+    post_delayed_task(ThreadId::UI, Some(&mut task), PANE_LOAD_WATCHDOG_TIMEOUT_MS);
+}
+
+/// Update the STORED target URL for an already-armed watchdog, without
+/// touching its epoch or deadline. Called from `on_before_browse` for
+/// REDIRECT hops (`is_redirect != 0`) of a navigation that's already armed.
+///
+/// Calling `arm_pane_load_watchdog` instead (an earlier version of this fix
+/// did) hands out a fresh `PANE_LOAD_WATCHDOG_TIMEOUT_MS` deadline on EVERY
+/// hop of a redirect chain, so a site that redirects a handful of times
+/// before its final hop hangs could push the actual wait arbitrarily far
+/// past the intended 20s bound before the watchdog ever fires — defeating
+/// its whole purpose (reagentx P1 on PR #2593). The error page should still
+/// report the LATEST hop being attempted if the watchdog does eventually
+/// fire, though, so the URL itself is still updated — just not the timer.
+///
+/// No-ops if nothing is currently armed for `block_id` — e.g. a redirect
+/// notification arriving after the watchdog already fired/disarmed. Whichever
+/// of those already ran owns the outcome; there's nothing to update.
+pub(crate) fn update_pane_load_watchdog_url(state: &Arc<AppState>, block_id: &str, url: String) {
+    if let Some(entry) = state.browser_pane_load_watchdog.lock().get_mut(block_id) {
+        entry.3 = url;
+    }
+}
+
+/// Runs on the CEF UI thread when a pane's load-watchdog deadline elapses.
+/// No-ops if the navigation already finished (disarmed by
+/// `on_loading_state_change_browser_pane`) or a newer navigation re-armed
+/// the same pane (epoch mismatch) — both mean this specific timeout is
+/// stale and must not act.
+fn fire_pane_load_watchdog(state: &Arc<AppState>, block_id: &str, epoch: u64) {
+    let entry = state.browser_pane_load_watchdog.lock().remove(block_id);
+    let Some((armed_at, armed_epoch, mut browser, target_url)) = entry else { return };
+    if armed_epoch != epoch {
+        // A newer navigation re-armed this pane after this timeout was
+        // scheduled — put the newer entry back (we shouldn't have taken it)
+        // and let its OWN watchdog, or normal load completion, own the
+        // outcome instead of forcing a timeout over content that isn't even
+        // the navigation this timeout was scheduled for.
+        state
+            .browser_pane_load_watchdog
+            .lock()
+            .insert(block_id.to_string(), (armed_at, armed_epoch, browser, target_url));
+        return;
+    }
+    let Some(mut frame) = browser.main_frame() else { return };
+    tracing::warn!(
+        "[pane-load-watchdog] navigation still loading after {}ms, forcing timeout: block_id={} url={:?}",
+        PANE_LOAD_WATCHDOG_TIMEOUT_MS,
+        block_id,
+        target_url,
+    );
+    crate::browser_pane::trace::pane_trace(
+        block_id,
+        "load-watchdog-timeout",
+        &format!("url={target_url} after {}ms", PANE_LOAD_WATCHDOG_TIMEOUT_MS),
+    );
+    crate::client::navigation::show_load_error_page(
+        &mut frame,
+        &target_url,
+        sys::cef_errorcode_t::ERR_CONNECTION_TIMED_OUT as i32,
+        "ERR_CONNECTION_TIMED_OUT",
+        true,
+    );
+}
 
 /// Called from `AgentMuxHandler::on_after_created` when the browser being
 /// registered is a pane (label prefix `browser-pane-*`).
@@ -152,6 +271,18 @@ pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str) {
     if let Some(block_id) = block_id {
         state.browser_pane_zoom.lock().remove(block_id);
         state.browser_pane_context_menu_frame.lock().remove(block_id);
+
+        // If this pane closes mid-navigation, its load watchdog is still
+        // armed holding a cloned `Browser`. Without this removal,
+        // `fire_pane_load_watchdog` fires up to PANE_LOAD_WATCHDOG_TIMEOUT_MS
+        // later and calls `main_frame()`/`load_url()` on a browser that's
+        // already torn down (reagentx P1 on PR #2593).
+        if state.browser_pane_load_watchdog.lock().remove(block_id).is_some() {
+            tracing::debug!(
+                block_id = %block_id,
+                "[pane-load-watchdog] pane closed mid-navigation, watchdog disarmed"
+            );
+        }
     }
 
     // Windows only:
@@ -163,6 +294,37 @@ pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str) {
         if let Some(block_id) = block_id {
             crate::browser_pane::hwnd::uninstall_focus_redirect_for_block(block_id);
             crate::browser_pane::hwnd::remove_contexts_for_block(block_id);
+        }
+    }
+}
+
+/// Called from `AgentMuxHandler::on_load_start` for a browser pane's MAIN
+/// frame only (caller already filtered on `frame.is_main()`), i.e. the
+/// moment a navigation actually COMMITS and starts loading its content —
+/// disarms the pane-load-watchdog right here, rather than waiting for
+/// `on_loading_state_change_browser_pane`'s `!is_loading` (which waits for
+/// EVERY subresource too). Once the target document has committed, the
+/// watchdog's whole purpose — catching a navigation that never resolves,
+/// leaving the pane blank — no longer applies: the user is now looking at
+/// real, committed content, even if a slow image/script/iframe keeps CEF's
+/// `is_loading` true past the 20s deadline. Firing the watchdog after this
+/// point would replace an already-successfully-loaded page with a synthetic
+/// `ERR_CONNECTION_TIMED_OUT` (reagentx P1 on PR #2593, second pass; also
+/// flagged inline by Codex on the same PR).
+///
+/// No-ops if nothing is armed for this block_id — e.g. a client-side (SPA)
+/// route change, which doesn't re-arm the watchdog in the first place
+/// (`arm_pane_load_watchdog` is only called from `on_before_browse` for a
+/// genuine top-level navigation), or a commit arriving after the watchdog
+/// already fired/disarmed via some other path.
+pub fn on_load_start_browser_pane(state: &Arc<AppState>, browser: &Browser) {
+    if let Some(block_id) = resolve_pane_block_id(state, browser) {
+        if state.browser_pane_load_watchdog.lock().remove(&block_id).is_some() {
+            crate::browser_pane::trace::pane_trace(
+                &block_id,
+                "load-watchdog-disarmed",
+                "main frame committed — target document has content, watchdog no longer needed",
+            );
         }
     }
 }
@@ -278,6 +440,16 @@ pub fn on_loading_state_change_browser_pane(
     can_go_forward: bool,
 ) {
     if let Some(block_id) = resolve_pane_block_id(state, browser) {
+        if !is_loading {
+            // Navigation settled — either it committed normally or CEF's own
+            // `on_load_error` already showed a real error page. Either way
+            // the watchdog no longer applies to it. (Arming happens earlier,
+            // in `client::lifecycle::on_before_browse` — see
+            // `arm_pane_load_watchdog`'s doc comment for why it can't happen
+            // here.)
+            state.browser_pane_load_watchdog.lock().remove(&block_id);
+        }
+
         let url = {
             let mut b: cef::Browser = browser.clone();
             b.main_frame()
