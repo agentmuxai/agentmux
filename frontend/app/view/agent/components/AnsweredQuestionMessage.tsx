@@ -49,7 +49,7 @@ function timeoutNote(summary: string): string | null {
 
 export const AnsweredQuestionMessage = (props: AnsweredQuestionMessageProps): JSX.Element => {
     return (
-        <div class="agent-user-message">
+        <div class="agent-user-message agent-user-message--answered-question">
             <div class="agent-user-message-content agent-user-message-content--flow">
                 <Show when={timeoutNote(props.node.summary)}>
                     {(note) => <div class="agent-user-message-timeout-note">{note()}</div>}

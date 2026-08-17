@@ -431,6 +431,13 @@ describe("ToolBlock — answered AskUserQuestion renders as a user message", () 
         expect(container.querySelector(".agent-user-message-content pre")?.textContent).toBe("Yes");
     });
 
+    it("gets the `--answered-question` modifier class (drives the larger-text treatment)", () => {
+        const { container } = render(() => (
+            <ToolBlock node={answeredQuestion} pinned={false} onTogglePin={() => {}} />
+        ));
+        expect(container.querySelector(".agent-user-message--answered-question")).not.toBeNull();
+    });
+
     it("shows a muted timeout note for an auto-answered question", () => {
         const autoAnswered: ToolNode = {
             ...answeredQuestion,

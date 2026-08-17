@@ -1198,6 +1198,19 @@
         &--pinned {
             border-left-width: 4px;
         }
+
+        // Answered AskUserQuestion (AnsweredQuestionMessage.tsx) — the
+        // ORIGINAL ask behind this whole feature (before it grew the
+        // inverted-surface half): the answer should read as larger,
+        // expanded text, not just same-size-as-everything-else user
+        // input. em-relative (not a fixed --text-* token) so it scales
+        // with the pane's own zoom (--termfontsize) instead of fighting
+        // it. Scoped to this variant only — regular typed input keeps
+        // its normal size.
+        &--answered-question .agent-user-message-content pre {
+            font-size: 1.25em;
+            line-height: 1.4;
+        }
     }
 
     // === Section Headings ===

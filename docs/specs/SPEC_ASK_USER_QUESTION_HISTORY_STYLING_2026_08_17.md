@@ -229,6 +229,16 @@ e.g. the pane closed before an answer arrived) keep the existing generic
 `awaiting_answer` → terminal-without-answer transition is a different, legitimate
 "this didn't get answered" state that should keep looking like a tool outcome.
 
+**Larger text (added 2026-08-17, post-implementation feedback).** This was the
+*original* ask behind this feature before it grew the inverted-surface half — the
+answer shouldn't just match ordinary user-input styling, it should read larger
+than everything else in the pane. `AnsweredQuestionMessage`'s root gets a second
+class, `agent-user-message--answered-question`, and `_document-nodes.scss` scopes
+a `font-size: 1.25em` / `line-height: 1.4` bump to that variant's `<pre>` only —
+em-relative so it scales with the pane's own zoom (`--termfontsize`) rather than
+fighting it, and scoped narrowly so regular typed user input keeps its normal
+size (this spec never asked to enlarge *that*).
+
 ---
 
 ## Edge cases
