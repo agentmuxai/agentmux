@@ -960,9 +960,18 @@
 
     // === User Message ===
     // High-contrast user-input styling per
-    // `docs/specs/SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md`.
-    // Uses --user-input-color (distinct from --accent-color) so typed
-    // input pops independently of the accent re-theming surface.
+    // `docs/specs/SPEC_USER_INPUT_VISIBILITY_AND_STARTUP_COLLAPSE_2026_05_24.md`,
+    // inverted to a true fg/bg negative of normal output per
+    // `docs/specs/SPEC_ASK_USER_QUESTION_HISTORY_STYLING_2026_08_17.md`:
+    // background = the theme's normal TEXT color, text = the theme's
+    // normal solid BACKGROUND color. Every theme defines both as a
+    // contrasting opaque pair (see that spec's theme survey table), so
+    // this inverts correctly everywhere with no new per-theme tokens —
+    // a white-on-black theme gets black-on-white user input and vice
+    // versa. --user-input-color is kept as the left-border accent only
+    // (the identity marker from the 2026-05-24 spec); it doesn't
+    // conflict with the surface inversion since it's an edge, not the
+    // body fill.
     //
     // Regular user input NEVER soft-wraps — newlines are honored
     // verbatim and long lines scroll horizontally inside the message.
@@ -971,15 +980,31 @@
     // The startup-injection variant (`--startup`) gets a single-line
     // summary that expands on hover and pins on click — mirroring
     // the ToolBlock pattern in `tool-collapse.md`. See
-    // `components/UserMessageBlock.tsx` for the JSX side.
+    // `components/UserMessageBlock.tsx` for the JSX side. An answered
+    // AskUserQuestion also renders through this same class (see
+    // `components/AnsweredQuestionMessage.tsx`) so it inherits this
+    // inversion automatically once resolved.
     .agent-user-message {
         padding: 3px var(--space-1);
-        background: color-mix(in oklab, var(--user-input-color) 30%, var(--block-bg-solid-color));
+        background: var(--main-text-color);
+        color: var(--block-bg-solid-color);
         border-left: 3px solid var(--user-input-color);
         border-radius: 0;
         user-select: text;
         cursor: text;
         position: relative;
+
+        // Muted note above the message body — used only by
+        // AnsweredQuestionMessage's auto-timeout note today. Mixed
+        // toward this block's own (correct-contrast) background rather
+        // than --secondary-text-color, which was tuned for the AMBIENT
+        // surface, not this inverted one — using it here would read as
+        // near-invisible on the new light-on-dark-theme surface.
+        .agent-user-message-timeout-note {
+            color: color-mix(in oklab, var(--block-bg-solid-color) 70%, var(--main-text-color));
+            font-size: 0.85em;
+            margin-bottom: 2px;
+        }
 
         .agent-user-message-content {
             pre {
@@ -1130,7 +1155,7 @@
 
                     &:hover {
                         opacity: 1;
-                        background: color-mix(in oklab, var(--user-input-color) 35%, var(--block-bg-solid-color));
+                        background: color-mix(in oklab, var(--user-input-color) 35%, var(--main-text-color));
                     }
                     &:focus-visible {
                         outline: 2px solid var(--user-input-color);
@@ -1145,7 +1170,7 @@
         // a slightly deeper background so the user knows this is a
         // hover-preview, not a permanent expansion.
         &--expanded.agent-user-message--startup {
-            background: color-mix(in oklab, var(--user-input-color) 38%, var(--block-bg-solid-color));
+            background: color-mix(in oklab, var(--user-input-color) 38%, var(--main-text-color));
         }
 
         // Pinned state — thicker left border mirrors ToolBlock.pinned.
@@ -1990,6 +2015,13 @@
 // tie-back) — an additional modifier alongside the base chrome above,
 // not a fork of it.
 .agent-user-message-peek-overlay {
+    // Portal-rendered outside `.agent-user-message`, so it doesn't inherit
+    // that rule's inverted surface (SPEC_ASK_USER_QUESTION_HISTORY_STYLING_2026_08_17.md)
+    // from `.agent-node-peek-overlay`'s plain `--block-bg-solid-color`
+    // background above — this floating copy IS the same user-message body,
+    // just Portal-rendered, so it needs the same inversion explicitly.
+    background-color: var(--main-text-color);
+    color: var(--block-bg-solid-color);
     border: 2px solid var(--user-input-color);
 
     // These previously lived nested under `.agent-user-message
@@ -2023,7 +2055,7 @@
 
         &:hover {
             opacity: 1;
-            background: color-mix(in oklab, var(--user-input-color) 35%, var(--block-bg-solid-color));
+            background: color-mix(in oklab, var(--user-input-color) 35%, var(--main-text-color));
         }
         &:focus-visible {
             outline: 2px solid var(--user-input-color);

@@ -271,6 +271,15 @@ export interface ToolNode {
     /** Set when status === "awaiting_answer" (the tool is AskUserQuestion).
      *  Drives the question panel; the answer goes back as a tool_result. */
     question?: AskUserQuestionRequest;
+    /** Set alongside `summary` when an AskUserQuestion is answered (status
+     *  flips to "success"). Raw answer text with real newlines preserved —
+     *  `summary` is the decorated one-line log form (`; `-joined, prefixed
+     *  with an icon) and isn't fit for display as message content. Absent
+     *  on nodes answered before this field existed (legacy transcripts);
+     *  renderers must guard on presence, not just tool+status, and fall
+     *  back to the generic collapsed-row rendering.
+     *  See SPEC_ASK_USER_QUESTION_HISTORY_STYLING_2026_08_17.md. */
+    answerText?: string;
 }
 
 /**

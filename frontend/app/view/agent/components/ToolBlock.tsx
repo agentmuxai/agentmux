@@ -38,16 +38,16 @@
  *   reset on the next render cycle.
  */
 
-import clsx from "clsx";
-import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
 import { formatExactTime, formatTimeAgo } from "@/util/format-time";
-import type { BashResult, EditResult, GlobResult, GrepResult, WriteResult } from "../types";
-import type { ToolNode } from "../types";
-import { ToolBlockOverlay } from "./ToolBlockOverlay";
+import clsx from "clsx";
+import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { extractToolDetail } from "../stream-parser";
+import type { BashResult, EditResult, GlobResult, GrepResult, ToolNode, WriteResult } from "../types";
+import { AnsweredQuestionMessage } from "./AnsweredQuestionMessage";
 import { PeekOverlay } from "./PeekOverlay";
+import { ToolBlockOverlay } from "./ToolBlockOverlay";
 
 /**
  * Ref callback that plays a one-shot fade-in animation ONLY on a genuine
@@ -149,9 +149,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
             e.preventDefault();
             e.stopPropagation();
             const delta = e.deltaY < 0 ? PREVIEW_ZOOM_STEP : -PREVIEW_ZOOM_STEP;
-            setPreviewFontScale(prev =>
-                Math.min(PREVIEW_ZOOM_MAX, Math.max(PREVIEW_ZOOM_MIN, prev + delta))
-            );
+            setPreviewFontScale((prev) => Math.min(PREVIEW_ZOOM_MAX, Math.max(PREVIEW_ZOOM_MIN, prev + delta)));
         };
         panelRef.addEventListener("wheel", onWheel, { passive: false });
         onCleanup(() => panelRef?.removeEventListener("wheel", onWheel));
@@ -170,8 +168,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // transition baseline.
     let prevStatus: string = props.node.status;
     let prevNodeId: string = props.node.id;
-    const isActive = (s: string): boolean =>
-        s === "running" || s === "pending_approval";
+    const isActive = (s: string): boolean => s === "running" || s === "pending_approval";
     createEffect(() => {
         const s = props.node.status;
         const id = props.node.id;
@@ -206,8 +203,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     };
     const autoExpanded = (): boolean => {
         const s = props.node.status;
-        return s === "running" || s === "pending_approval"
-            || (!isFailTerminal() && !!props.heldOpen);
+        return s === "running" || s === "pending_approval" || (!isFailTerminal() && !!props.heldOpen);
     };
     // Hover-to-peek was removed in SPEC_TOOL_HOVER_CONSOLIDATION_2026_05_28
     // — expansion is now driven exclusively by pin + active-state auto-
@@ -290,7 +286,9 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // string, so the two never drift out of sync. Suppressed once the
     // panel is already expanded (command visible in context there) or
     // when there's nothing tool-kind-specific to show.
-    const cmdText = createMemo(() => extractToolDetail(props.node.tool, (props.node.params as Record<string, any>) ?? {}));
+    const cmdText = createMemo(() =>
+        extractToolDetail(props.node.tool, (props.node.params as Record<string, any>) ?? {})
+    );
 
     // Peek-tooltip time + estimate lines (SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md
     // §2.3). Real API-reported token/cost data doesn't exist per-tool-call
@@ -325,8 +323,8 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // make the show-check circularly depend on hover having already begun,
     // defeating its own purpose of deciding whether hover should open
     // anything in the first place.
-    const hasAnyPeekContent = createMemo(() =>
-        cmdText() !== "" || props.node.timestamp != null || peekEstimateText() != null
+    const hasAnyPeekContent = createMemo(
+        () => cmdText() !== "" || props.node.timestamp != null || peekEstimateText() != null
     );
 
     // Peek overlay — Portal-rendered (see PeekOverlay.tsx's doc comment for
@@ -350,145 +348,148 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     };
     onCleanup(() => clearTimeout(peekEnterTimer));
 
+    // A resolved AskUserQuestion renders as a user message instead of the
+    // generic collapsed tool row below — it substantively IS user input.
+    // Guarded on `answerText` (not just tool+status) so transcripts
+    // answered before this field existed keep the old rendering instead of
+    // showing an empty body. See SPEC_ASK_USER_QUESTION_HISTORY_STYLING_2026_08_17.md.
+    const isAnsweredQuestion = () =>
+        props.node.toolName === "AskUserQuestion" && props.node.status === "success" && props.node.answerText != null;
+
     return (
-        <div
-            ref={(el) => (rowEl = el)}
-            class={clsx("agent-tool-block", {
-                collapsed: !expanded(),
-                expanded: expanded(),
-                pinned: props.pinned,
-                running: props.node.status === "running",
-                success: props.node.status === "success",
-                failed: props.node.status === "failed",
-                canceled: props.node.status === "canceled",
-                pending_approval: props.node.status === "pending_approval",
-                awaiting_answer: props.node.status === "awaiting_answer",
-                denied: props.node.status === "denied",
-            })}
-            data-tool={props.node.tool.toLowerCase()}
-            // Raw provider tool name, distinct from `data-tool` above: `tool` is normalized to
-            // a coarse closed set (unrecognized names, e.g. "AskUserQuestion", collapse to
-            // "other" — see normalizeToolName in stream-parser.ts), which loses exactly the
-            // names CSS needs to target one specific open-ended tool without touching the
-            // shared "other" styling every other unrecognized tool also falls back to.
-            data-tool-name={props.node.toolName?.toLowerCase()}
-            onMouseEnter={() => { if (props.pinned || autoExpanded()) setUserHolding(true); }}
-            onMouseLeave={() => setUserHolding(false)}
-        >
-            <div class="agent-tool-summary" onClick={props.onTogglePin}>
-                <span class="agent-tool-status-icon">{statusIcon()}</span>
-                <span
-                    class="agent-tool-name-peek-anchor"
-                    onMouseEnter={handlePeekEnter}
-                    onMouseLeave={handlePeekLeave}
-                >
-                    <span class="agent-tool-name">{props.node.summary}</span>
-                </span>
-                <Show when={props.node.duration}>
-                    <span class="agent-tool-duration">({props.node.duration.toFixed(1)}s)</span>
-                </Show>
-                <Show when={resultPill() != null}>
+        <Show when={!isAnsweredQuestion()} fallback={<AnsweredQuestionMessage node={props.node} />}>
+            <div
+                ref={(el) => (rowEl = el)}
+                class={clsx("agent-tool-block", {
+                    collapsed: !expanded(),
+                    expanded: expanded(),
+                    pinned: props.pinned,
+                    running: props.node.status === "running",
+                    success: props.node.status === "success",
+                    failed: props.node.status === "failed",
+                    canceled: props.node.status === "canceled",
+                    pending_approval: props.node.status === "pending_approval",
+                    awaiting_answer: props.node.status === "awaiting_answer",
+                    denied: props.node.status === "denied",
+                })}
+                data-tool={props.node.tool.toLowerCase()}
+                // Raw provider tool name, distinct from `data-tool` above: `tool` is normalized to
+                // a coarse closed set (unrecognized names, e.g. "AskUserQuestion", collapse to
+                // "other" — see normalizeToolName in stream-parser.ts), which loses exactly the
+                // names CSS needs to target one specific open-ended tool without touching the
+                // shared "other" styling every other unrecognized tool also falls back to.
+                data-tool-name={props.node.toolName?.toLowerCase()}
+                onMouseEnter={() => {
+                    if (props.pinned || autoExpanded()) setUserHolding(true);
+                }}
+                onMouseLeave={() => setUserHolding(false)}
+            >
+                <div class="agent-tool-summary" onClick={props.onTogglePin}>
+                    <span class="agent-tool-status-icon">{statusIcon()}</span>
                     <span
-                        ref={fadeInOnMount}
-                        class={`agent-tool-result-pill pill-${resultPill()?.variant}`}
+                        class="agent-tool-name-peek-anchor"
+                        onMouseEnter={handlePeekEnter}
+                        onMouseLeave={handlePeekLeave}
                     >
-                        {resultPill()?.label}
+                        <span class="agent-tool-name">{props.node.summary}</span>
                     </span>
-                </Show>
-                {/* Live-tail: while streaming, show the last stdout/stderr
+                    <Show when={props.node.duration}>
+                        <span class="agent-tool-duration">({props.node.duration.toFixed(1)}s)</span>
+                    </Show>
+                    <Show when={resultPill() != null}>
+                        <span ref={fadeInOnMount} class={`agent-tool-result-pill pill-${resultPill()?.variant}`}>
+                            {resultPill()?.label}
+                        </span>
+                    </Show>
+                    {/* Live-tail: while streaming, show the last stdout/stderr
                     line so the user can watch real output without opening
                     the overlay. Skips kind:"system" chunks — those are
                     bashwrap internals ("[bashwrap] starting: N chars", PTY
                     ready, etc.) and are not useful here. If no stdout/stderr
                     has arrived yet (e.g. during a `sleep` prefix), show an
                     elapsed timer instead so the user knows it's alive. */}
-                <Show when={props.node.log?.open === true}>
-                    {(() => {
-                        const chunks = props.node.log?.chunks ?? [];
-                        // Walk backwards — find the last real output chunk
-                        let lastOutput: { kind: string; content: string } | undefined;
-                        for (let i = chunks.length - 1; i >= 0; i--) {
-                            const c = chunks[i];
-                            if (c.kind === "stdout" || c.kind === "stderr") {
-                                lastOutput = c;
-                                break;
+                    <Show when={props.node.log?.open === true}>
+                        {(() => {
+                            const chunks = props.node.log?.chunks ?? [];
+                            // Walk backwards — find the last real output chunk
+                            let lastOutput: { kind: string; content: string } | undefined;
+                            for (let i = chunks.length - 1; i >= 0; i--) {
+                                const c = chunks[i];
+                                if (c.kind === "stdout" || c.kind === "stderr") {
+                                    lastOutput = c;
+                                    break;
+                                }
                             }
-                        }
-                        if (lastOutput) {
+                            if (lastOutput) {
+                                return (
+                                    <span
+                                        class="agent-tool-live-tail"
+                                        title={`latest stream output (${chunks.length} chunks)`}
+                                    >
+                                        ↳ {lastOutput.content}
+                                    </span>
+                                );
+                            }
+                            // No stdout/stderr yet — show elapsed time
                             return (
-                                <span
-                                    class="agent-tool-live-tail"
-                                    title={`latest stream output (${chunks.length} chunks)`}
-                                >
-                                    ↳ {lastOutput.content}
+                                <span class="agent-tool-live-tail agent-tool-live-tail--waiting">
+                                    <ToolElapsedTicker startMs={props.node.timestamp ?? Date.now()} />
                                 </span>
                             );
-                        }
-                        // No stdout/stderr yet — show elapsed time
-                        return (
-                            <span class="agent-tool-live-tail agent-tool-live-tail--waiting">
-                                <ToolElapsedTicker startMs={props.node.timestamp ?? Date.now()} />
-                            </span>
-                        );
-                    })()}
-                </Show>
-            </div>
-            {/* Peek overlay — SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md,
+                        })()}
+                    </Show>
+                </div>
+                {/* Peek overlay — SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md,
                 styled to match UserMessageBlock.tsx's "Session context"
                 hover-to-peek (see PeekOverlay.tsx). Suppressed once the
                 panel is already expanded, since the command/time are
                 visible in context there — same condition the old
                 Tooltip-based version used. */}
-            <PeekOverlay
-                show={isPeeking() && hasAnyPeekContent() && !expanded()}
-                rowEl={() => rowEl}
-            >
-                <Show when={peekTimeText()}>
-                    <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
-                </Show>
-                <Show when={peekEstimateText()}>
-                    <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
-                </Show>
-                <Show when={cmdText()}>
-                    <div class="agent-node-peek-tooltip-body">{cmdText()}</div>
-                </Show>
-            </PeekOverlay>
-            {/* Panel — three render modes per `panelMode()`:
-             *
-             *   hidden  → `.agent-tool-panel--hidden` (off).
-             *   flow    → in-flow under the summary (default DOM
-             *             layout — pinned / running / post-hold).
-             *   overlay → absolute positioning above OR below the
-             *             summary so a hover near the pane's bottom
-             *             expands upward instead of being clipped.
-             *
-             * Always rendered in the DOM so CSS transitions can
-             * animate the off→on shift; `inert` + `aria-hidden`
-             * remove it from the focus/a11y tree when hidden.
-             */}
-            <div
-                ref={panelRef}
-                class={clsx("agent-tool-panel", {
-                    "agent-tool-panel--hidden": panelMode() === "hidden",
-                    "agent-tool-panel--flow": panelMode() === "flow",
-                })}
-                // Codex P2 on #988: with the always-rendered markup, the
-                // collapsed panel was visually hidden via max-height /
-                // opacity but still in the focusable + a11y tree, so
-                // keyboard users could tab into action buttons that
-                // aren't visible. `inert` removes the entire subtree
-                // from focus + accessibility while collapsed (Chrome 102+,
-                // supported in the bundled CEF runtime).
-                inert={!expanded()}
-                aria-hidden={!expanded()}
-                onClick={(e) => e.stopPropagation()}
-            >
-                <ToolBlockOverlay
-                    node={props.node}
-                    previewFontScale={previewFontScale}
-                />
+                <PeekOverlay show={isPeeking() && hasAnyPeekContent() && !expanded()} rowEl={() => rowEl}>
+                    <Show when={peekTimeText()}>
+                        <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
+                    </Show>
+                    <Show when={peekEstimateText()}>
+                        <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
+                    </Show>
+                    <Show when={cmdText()}>
+                        <div class="agent-node-peek-tooltip-body">{cmdText()}</div>
+                    </Show>
+                </PeekOverlay>
+                {/* Panel — three render modes per `panelMode()`:
+                 *
+                 *   hidden  → `.agent-tool-panel--hidden` (off).
+                 *   flow    → in-flow under the summary (default DOM
+                 *             layout — pinned / running / post-hold).
+                 *   overlay → absolute positioning above OR below the
+                 *             summary so a hover near the pane's bottom
+                 *             expands upward instead of being clipped.
+                 *
+                 * Always rendered in the DOM so CSS transitions can
+                 * animate the off→on shift; `inert` + `aria-hidden`
+                 * remove it from the focus/a11y tree when hidden.
+                 */}
+                <div
+                    ref={panelRef}
+                    class={clsx("agent-tool-panel", {
+                        "agent-tool-panel--hidden": panelMode() === "hidden",
+                        "agent-tool-panel--flow": panelMode() === "flow",
+                    })}
+                    // Codex P2 on #988: with the always-rendered markup, the
+                    // collapsed panel was visually hidden via max-height /
+                    // opacity but still in the focusable + a11y tree, so
+                    // keyboard users could tab into action buttons that
+                    // aren't visible. `inert` removes the entire subtree
+                    // from focus + accessibility while collapsed (Chrome 102+,
+                    // supported in the bundled CEF runtime).
+                    inert={!expanded()}
+                    aria-hidden={!expanded()}
+                    onClick={(e) => e.stopPropagation()}
+                >
+                    <ToolBlockOverlay node={props.node} previewFontScale={previewFontScale} />
+                </div>
             </div>
-        </div>
+        </Show>
     );
 };
 

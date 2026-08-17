@@ -135,6 +135,11 @@ export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuest
                 status: "success",
                 question: undefined,
                 summary,
+                // Raw text (real newlines), not the flattened `flatText`
+                // above — this drives AnsweredQuestionMessage's display,
+                // which should read like a real typed message, not a log
+                // line. See SPEC_ASK_USER_QUESTION_HISTORY_STYLING_2026_08_17.md.
+                answerText: outcome.answer_text,
             });
         }
         const applyDoc = (nodes: ToolNode[]) => {

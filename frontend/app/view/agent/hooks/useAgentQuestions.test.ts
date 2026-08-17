@@ -107,6 +107,31 @@ describe("useAgentQuestions — handleAnswer fallback", () => {
         dispose();
     });
 
+    // SPEC_ASK_USER_QUESTION_HISTORY_STYLING_2026_08_17.md: AnsweredQuestionMessage
+    // renders `answerText` as message content, so it must carry the raw
+    // answer with real newlines — NOT the `; `-flattened text baked into
+    // `summary` for the one-line transcript log form.
+    it("sets answerText to the raw, un-flattened answer text (real newlines, no icon prefix)", async () => {
+        hub.agentAnswer.mockResolvedValue(undefined);
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const { handleAnswer, dispose } = setup(sendMessage);
+
+        handleAnswer({
+            tool_use_id: TOOL_USE_ID,
+            answers: [],
+            answers_map: { "Pick one": "a", "Pick two": "b" },
+            answer_text: "Pick one: a\nPick two: b",
+            autoFilledCount: 0,
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+
+        const node = updatedNodeFromDispatch();
+        expect(node?.answerText).toBe("Pick one: a\nPick two: b");
+        expect(node?.summary).toBe("❓ Answered — Pick one: a; Pick two: b");
+        dispose();
+    });
+
     it("falls back to a follow-up message for a known-safe backend error — not just UNSUPPORTED_CONTROLLER", async () => {
         // The exact shape a fresh persistent controller instance returns
         // after a pane reopen — does NOT contain "UNSUPPORTED_CONTROLLER".
