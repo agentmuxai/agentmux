@@ -62,6 +62,41 @@ test("computeGroupResizeSizes - driven shrinks: no border moves opposite the dra
     }
 });
 
+test("computeGroupResizeSizes - driven reaches the true floor even when the raw cursor position implies it should go far below minNodeSize (regression: totalDelta must not be pre-clamped on driven's own raw desired size)", () => {
+    // afterBlock = [driven, far], both starting at 200 with a floor of 128 (headroom 72 each,
+    // 144 combined). beforeBlock = [x] has effectively unlimited headroom (only grows here).
+    // Dragging far enough that the RAW cursor-implied desired size for driven alone (50) is
+    // already below the floor must still let driven and far share the block's full 144 of
+    // real headroom — landing driven exactly at 128, not stalled wherever it happened to be
+    // when the raw desired first crossed the floor (the bug: pre-clamping drivenDesiredSize
+    // to minNodeSize before computing totalDelta freezes the aggregate delta the instant the
+    // UNSHARED raw position crosses the floor, even though driven's REAL size — shared
+    // proportionally with `far` — hasn't gotten there yet).
+    const minNodeSize = 128;
+    const siblings: ResizeNodeOperation[] = [
+        { nodeId: "x", size: 1000 },
+        { nodeId: "driven", size: 200 },
+        { nodeId: "far", size: 200 },
+    ];
+    const result = computeGroupResizeSizes(siblings, "driven", 50, minNodeSize);
+    assert.approximately(result.get("driven")!, 128, 1e-6, "driven must reach the actual floor, not stall above it");
+    assert.approximately(result.get("far")!, 128, 1e-6, "far shares the same block and floor headroom as driven");
+    assert.approximately(result.get("x")!, 1144, 1e-6, "beforeBlock absorbs the full 144 of real headroom the block could give up");
+    assert.approximately(
+        sum(sizesOf(result, ["x", "driven", "far"])),
+        1400,
+        1e-6,
+        "total size must be conserved"
+    );
+
+    // Dragging even further past the floor (raw desired well below 50) must not change the
+    // outcome — the block is already fully floored, this just re-confirms the cap holds.
+    const resultFurther = computeGroupResizeSizes(siblings, "driven", -1000, minNodeSize);
+    assert.approximately(resultFurther.get("driven")!, 128, 1e-6);
+    assert.approximately(resultFurther.get("far")!, 128, 1e-6);
+    assert.approximately(resultFurther.get("x")!, 1144, 1e-6);
+});
+
 test("computeGroupResizeSizes - driven grows: mirror case, no border moves opposite the drag direction", () => {
     const ids = ["a", "b", "c", "d"];
     const siblings: ResizeNodeOperation[] = [

@@ -161,14 +161,28 @@ export function computeGroupResizeSizes(
     if (drivenIndex === -1) return result;
     const driven = siblings[drivenIndex];
 
-    const clampedDesired = Math.max(drivenDesiredSize, minNodeSize);
-    const totalDelta = clampedDesired - driven.size; // + = afterBlock grows / beforeBlock shrinks; - = afterBlock shrinks / beforeBlock grows
-
     const beforeBlock = siblings.slice(0, drivenIndex);
     const afterBlock = siblings.slice(drivenIndex); // includes driven itself
 
-    if (beforeBlock.length === 0 || totalDelta === 0) {
-        result.set(drivenNodeId, clampedDesired);
+    if (beforeBlock.length === 0) {
+        // No block to redistribute with — driven alone is floored directly (degenerate
+        // fallback; cannot happen via onResizeMove in production, see the doc comment above).
+        result.set(drivenNodeId, Math.max(drivenDesiredSize, minNodeSize));
+        return result;
+    }
+
+    // Deliberately UNCLAMPED: floor enforcement happens per-member inside shrinkBlockBy,
+    // scoped to whichever block actually shrinks. Pre-clamping drivenDesiredSize to
+    // minNodeSize here (as the prior single-node model correctly did, since driven's
+    // final size WAS this value directly) would freeze totalDelta the instant the raw
+    // cursor position implies driven should go below the floor — even though driven's
+    // REAL final size, once shared proportionally across afterBlock, generally lands
+    // well above the floor when afterBlock has other members. That stops the drag from
+    // ever reaching the block's true (larger) headroom: the pane you're watching stalls
+    // above minNodeSize and further dragging does nothing. See
+    // SPEC_SHIFT_DRAG_GROUP_RESIZE_DIRECTION_FIX_2026_08_17.md §5 for the worked example.
+    const totalDelta = drivenDesiredSize - driven.size; // + = afterBlock grows / beforeBlock shrinks; - = afterBlock shrinks / beforeBlock grows
+    if (totalDelta === 0) {
         return result;
     }
 

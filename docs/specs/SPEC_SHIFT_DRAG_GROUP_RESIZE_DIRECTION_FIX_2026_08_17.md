@@ -208,6 +208,40 @@ Degenerate cases:
   runtime in this sandbox); `task dev` started so the requester can verify
   directly.
 
+## 6.1 Follow-on bug found via live use: premature stop before the floor
+
+User report, same session, after raising `MinNodeSizePx` to 128: "if I
+shift+drag a pane, it stops resizing before the 128px, why is that?"
+
+Root cause: `computeGroupResizeSizes` computed
+`clampedDesired = Math.max(drivenDesiredSize, minNodeSize)` and derived
+`totalDelta` from that **clamped** value, before the block split. That was
+correct under the pre-4.x single-node model, where driven's own final size
+*was* `clampedDesired` directly. Under the two-block model, driven's real
+final size is only its **proportional share** of `afterBlock`'s total
+change — generally larger than `clampedDesired` whenever `afterBlock` has
+other members. Pre-clamping the raw desired value to the floor freezes
+`totalDelta` the instant the *unshared* cursor-implied position crosses
+128, which happens long before the block's true combined headroom is
+exhausted — so the pane being watched stalls above 128 and further
+dragging does nothing.
+
+Fix: compute `totalDelta` from the **unclamped** `drivenDesiredSize`
+always. Floor enforcement is already handled correctly, per member, inside
+`shrinkBlockBy` — the upfront clamp was redundant for the main two-block
+path and actively wrong. The clamp is still needed (and correct) for the
+degenerate `beforeBlock.length === 0` fallback, where driven genuinely has
+no block to share with and its final size really is the directly-floored
+value — that branch keeps the `Math.max` clamp, now scoped to only that
+case.
+
+Added a regression test (`layoutResize.test.ts`) with a driven pane sharing
+`afterBlock` with one other sibling: dragging to a raw desired size far
+below the floor must still land driven exactly at 128 (using the block's
+real combined headroom), not stall wherever it was when the raw,
+unshared position first crossed 128 — and dragging further past that still
+holds at the correct floor rather than moving at all.
+
 ## 7. Out of scope
 
 - Scope A vs. Scope B (cross-branch pixel-alignment resize) — unchanged
