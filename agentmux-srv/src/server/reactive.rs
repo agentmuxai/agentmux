@@ -523,13 +523,33 @@ pub(super) async fn handle_reactive_inject(
                         );
                     }
                     Err(e) => {
-                        tracing::warn!(
-                            target = %req.target_agent,
-                            error = %e,
-                            url = %forward_url,
-                            "cross-instance forward failed — removing stale registry entry"
-                        );
-                        agent_registry::remove(&data_dir, &req.target_agent);
+                        // Connection-level failure (e.g. target port not
+                        // listening yet) is at least as plausible a transient
+                        // trigger as a parsed success:false body — same
+                        // liveness guard as that branch above (reagent P1 on
+                        // this PR: this Err(e) arm still evicted
+                        // unconditionally, inconsistent with the fix just
+                        // applied a few lines up for the same underlying bug
+                        // class). See
+                        // docs/retro/retro-cross-channel-jekt-eviction-2026-08-17.md.
+                        if agent_registry::is_pid_alive(entry.pid) {
+                            tracing::warn!(
+                                target = %req.target_agent,
+                                error = %e,
+                                url = %forward_url,
+                                pid = entry.pid,
+                                "cross-instance forward failed but owning process is alive — NOT evicting"
+                            );
+                        } else {
+                            tracing::warn!(
+                                target = %req.target_agent,
+                                error = %e,
+                                url = %forward_url,
+                                pid = entry.pid,
+                                "cross-instance forward failed, owning process is gone — removing registry entry"
+                            );
+                            agent_registry::remove(&data_dir, &req.target_agent);
+                        }
                     }
                 }
             }
@@ -624,14 +644,33 @@ pub(super) async fn handle_reactive_inject(
                         );
                     }
                     Err(e) => {
-                        tracing::warn!(
-                            target = %req.target_agent,
-                            channel = %entry.channel,
-                            error = %e,
-                            url = %forward_url,
-                            "cross-channel forward failed — evicting stale entry"
-                        );
-                        agent_registry::remove_shared(&shared_dir, &req.target_agent, &entry.channel);
+                        // Same liveness guard as the success:false branch
+                        // above — a connection failure can be the exact same
+                        // startup-race transient (target channel's srv not
+                        // listening yet), not proof the process is dead.
+                        // reagent P1 on this PR: this arm still evicted
+                        // unconditionally. See
+                        // docs/retro/retro-cross-channel-jekt-eviction-2026-08-17.md.
+                        if agent_registry::is_pid_alive(entry.pid) {
+                            tracing::warn!(
+                                target = %req.target_agent,
+                                channel = %entry.channel,
+                                error = %e,
+                                url = %forward_url,
+                                pid = entry.pid,
+                                "cross-channel forward failed but owning process is alive — NOT evicting"
+                            );
+                        } else {
+                            tracing::warn!(
+                                target = %req.target_agent,
+                                channel = %entry.channel,
+                                error = %e,
+                                url = %forward_url,
+                                pid = entry.pid,
+                                "cross-channel forward failed, owning process is gone — evicting entry"
+                            );
+                            agent_registry::remove_shared(&shared_dir, &req.target_agent, &entry.channel);
+                        }
                     }
                 }
             }
