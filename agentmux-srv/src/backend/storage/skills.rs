@@ -315,13 +315,25 @@ impl Store {
             .into_iter()
             .map(|item| item.skill)
             .collect();
+        // reagentx P1 on PR #2639: `has_own_skill_refs` must be decided
+        // BEFORE unioning in the bundle's referenced skills below — it
+        // reflects only the agent's OWN direct binds. Mandatory ABF means
+        // every agent has a bundle, so if a bundle's private skill alone
+        // could flip this flag, a legacy-only agent bound to any bundle
+        // that happens to reference one private skill would silently lose
+        // every `db_agent_skills` entry, with no action taken on the agent
+        // itself. The "own refs are authoritative" path is meant strictly
+        // for the agent's own binds (see `own_refs_take_over_entirely_and_discard_legacy_skills`).
+        let has_own_skill_refs = visible_skills.iter().any(|s| !s.is_global);
         // Composable model v2 (docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md,
         // GH issue #2024 item 3): union in the agent's bound bundle's own
         // referenced skills too — without this, db_bundle_skills_ref would
         // be exactly as inert at launch as the bundle's old inline `skills`
         // JSON column always was. Deduped by id since a global skill is
         // already visible via both `skill_list` above and
-        // `bundle_skill_list` below.
+        // `bundle_skill_list` below. Happens AFTER the has_own decision —
+        // bundle-referenced skills still appear in the final list, they
+        // just never trigger the "discard legacy" path on their own.
         if let Ok(Some(def)) = self.agent_def_get(agent_id) {
             if !def.memory_id.is_empty() {
                 for item in self.bundle_skill_list(&def.memory_id).unwrap_or_default() {
@@ -331,7 +343,6 @@ impl Store {
                 }
             }
         }
-        let has_own_skill_refs = visible_skills.iter().any(|s| !s.is_global);
         if has_own_skill_refs {
             crate::backend::agent_config::skills_to_agent_skills(&visible_skills, agent_id)
         } else {
@@ -957,6 +968,60 @@ mod effective_skills_tests {
         assert!(
             names.contains(&"Bundle Skill"),
             "a skill referenced only by the agent's bound bundle must still be effective: {names:?}"
+        );
+    }
+
+    /// reagentx P1 on PR #2639: `has_own_skill_refs` must reflect ONLY the
+    /// agent's own direct binds, never a bundle-referenced skill — mandatory
+    /// ABF means every agent has a bundle, so if a bundle's private skill
+    /// alone could flip this flag, a legacy-only agent bound to ANY bundle
+    /// that happens to reference one private skill would silently lose all
+    /// of its `db_agent_skills` entries the moment someone edits that
+    /// bundle, with no action taken on the agent itself. The bundle's
+    /// referenced skill must still appear in the result (it's not excluded)
+    /// — it just must not trigger the "own refs are authoritative, discard
+    /// legacy" path on its own.
+    #[test]
+    fn a_bundle_referenced_private_skill_does_not_discard_the_agents_own_legacy_skills() {
+        let store = make_store();
+        insert_test_bundle(&store, "bundle-1");
+        insert_agent_with_bundle(&store, "agent-1", "bundle-1");
+
+        store.agent_skill_insert(&AgentSkill {
+            id: "legacy-1".to_string(),
+            agent_id: "agent-1".to_string(),
+            name: "Legacy Skill".to_string(),
+            trigger: "legacy".to_string(),
+            skill_type: "prompt".to_string(),
+            description: "legacy description".to_string(),
+            content: "legacy content".to_string(),
+            created_at: 1_700_000_000_000,
+        }).unwrap();
+
+        let bundle_private_skill = Skill {
+            id: "bundle-private-1".to_string(),
+            name: "Bundle Private Skill".to_string(),
+            trigger: String::new(),
+            skill_type: "prompt".to_string(),
+            description: String::new(),
+            content: "content".to_string(),
+            is_global: false,
+            created_at: 1_700_000_000_000,
+            updated_at: 1_700_000_000_000,
+        };
+        store.skill_upsert_unique("some-other-context", &bundle_private_skill, false).unwrap();
+        store.bundle_skill_bind("bundle-1", "bundle-private-1").unwrap();
+        // agent-1 itself has NO own db_skills ref — only its bundle does.
+
+        let effective = store.effective_skills("agent-1");
+        let names: Vec<&str> = effective.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            names.contains(&"Legacy Skill"),
+            "a bundle-referenced private skill must not silently discard the agent's own legacy skills: {names:?}"
+        );
+        assert!(
+            names.contains(&"Bundle Private Skill"),
+            "the bundle-referenced skill must still be included, just not treated as agent-authoritative: {names:?}"
         );
     }
 
