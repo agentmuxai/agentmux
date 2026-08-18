@@ -523,13 +523,11 @@ export function update(
                     lastEventMs: command.at,
                     failure: null,
                     // Submitting until the first stream event /
-                    // subscribe transitions us to Streaming. The
-                    // TurnStart payload doesn't carry pendingContent;
-                    // a later PR can thread that through.
+                    // subscribe transitions us to Streaming.
                     turnPhase: {
                         kind: "Submitting",
                         submittedAt: command.at,
-                        pendingContent: "",
+                        pendingContent: command.content ?? "",
                     },
                     // Previously auto-collapsed the details panel on send (don't
                     // obscure the turn start). The panel now also hosts a live

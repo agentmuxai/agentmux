@@ -11,9 +11,11 @@ use crate::agents::TokenCounts;
 
 // ---- Session activity summary types ----
 
-/// Request for session:activity_summary — generate a per-turn live summary via
-/// Haiku, routed through the Ambient Model Call gateway (`crate::ambient`).
-/// See docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md.
+/// Request for session:activity_summary — maintain a stable, session-goal
+/// title via Haiku, routed through the Ambient Model Call gateway
+/// (`crate::ambient`). See
+/// docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md and
+/// docs/specs/SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct CommandActivitySummaryData {
@@ -24,6 +26,13 @@ pub struct CommandActivitySummaryData {
     /// turn). Used by the ambient gateway to cancel a stale in-flight call
     /// for the same block and reject a request that arrives out of order.
     pub generation: u64,
+    /// The user's newest message, verbatim (the frontend's
+    /// `TurnPhase.Submitting.pendingContent`) — what the title-maintaining
+    /// Haiku call evaluates against the current title. Falls back to a
+    /// FileStore output-tail digest server-side when absent (e.g. an older
+    /// frontend build) so the endpoint degrades gracefully instead of going
+    /// silent.
+    pub user_message: Option<String>,
 }
 
 /// Response from session:activity_summary. The backend also writes
