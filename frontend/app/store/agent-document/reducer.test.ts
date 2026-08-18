@@ -283,6 +283,46 @@ describe("agent document reducer", () => {
                 updateDropped: 1,
             });
         });
+
+        it("preserves an answered AskUserQuestion's answerText/timeoutNote/summary against the CLI's own trailing tool_result echo", () => {
+            // Regression: AskUserQuestion is a real tool call, so once the
+            // answer resumes the turn, the CLI's own tool_result for the
+            // same tool_use_id still arrives and gets parsed into a fresh,
+            // generic ToolNode (stream-parser.ts's toolResultToNode — no
+            // concept of answerText/timeoutNote). Without mergeReplacement's
+            // AskUserQuestion guard, that update wholesale-replaces the
+            // answered node (no log buffer to preserve otherwise) and
+            // silently reverts the collapsed-row rendering right after the
+            // user answers. See
+            // docs/retro/RETRO_ASK_USER_QUESTION_ANSWER_TEXT_CLOBBER_2026_08_18.md.
+            const answered = tool("q1", {
+                toolName: "AskUserQuestion",
+                status: "success",
+                summary: "❓ Answered — Red",
+                answerText: "Red",
+                questionText: "Which color do you like?",
+            });
+            const s0 = seed([answered]);
+
+            // The CLI's own tool_result echo: a fresh, generic node for the
+            // same id, built the way toolResultToNode() actually builds it —
+            // no answerText/timeoutNote, and a plain completed-tool summary.
+            const echo = tool("q1", {
+                toolName: "AskUserQuestion",
+                status: "success",
+                summary: "✓ AskUserQuestion",
+            });
+            const r = update(s0, {
+                type: "StreamFlush",
+                newNodes: [],
+                updatedNodes: [echo],
+            });
+
+            const result = r.state.nodes[0] as ToolNode;
+            expect(result.answerText).toBe("Red");
+            expect(result.summary).toBe("❓ Answered — Red");
+            expect(result.questionText).toBe("Which color do you like?");
+        });
     });
 
     describe("StreamTruncate suppression", () => {

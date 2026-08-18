@@ -133,6 +133,31 @@ describe("useAgentQuestions — handleAnswer fallback", () => {
         dispose();
     });
 
+    // AnsweredQuestionMessage re-prints the original prompt as agent text
+    // above the answer — flattened from `question.questions[].question`
+    // BEFORE `question` itself is cleared on answer, since `question` is
+    // what drives whether the panel still treats the node as pending.
+    it("sets questionText from the original prompt(s), joined with a blank line for multiple questions", async () => {
+        hub.agentAnswer.mockResolvedValue(undefined);
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const { handleAnswer, dispose } = setup(sendMessage);
+
+        handleAnswer({
+            tool_use_id: TOOL_USE_ID,
+            answers: [],
+            answers_map: { "Pick one": "a" },
+            answer_text: "Pick one: a",
+            autoFilledCount: 0,
+        });
+        await Promise.resolve();
+        await Promise.resolve();
+
+        const node = updatedNodeFromDispatch();
+        expect(node?.questionText).toBe("Pick one");
+        expect(node?.question).toBeUndefined();
+        dispose();
+    });
+
     // reagent P1 x2 on PR #2630: timeoutNote used to be parsed back out of
     // the decorated `summary` string at render time, which broke twice —
     // once because the "partly auto-answered" format embeds its own " — "
