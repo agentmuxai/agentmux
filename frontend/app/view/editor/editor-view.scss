@@ -251,6 +251,18 @@
 // the editor-specific modifiers (applied via getTabClass in
 // editor-tab-strip.tsx) stay here.
 
+// Editor-only wrapper around <EditorTabStrip>. The shared .pane-tab-strip is
+// deliberately shrink-to-fit (see PaneTabStrip.scss — no trailing dead space
+// with few tabs open), so its own border-bottom only spans the tabs/+ button,
+// not the full pane width. This wrapper carries a full-width border-bottom
+// instead, sitting at the same y-position (identical height/border-color) so
+// it reads as one continuous line under the strip and then all the way to
+// the pane's right edge. Scoped to the editor only — not touching the shared
+// component, so agent/terminal tab strips are unaffected.
+.editor-tab-strip-row {
+    border-bottom: 1px solid var(--border-color);
+}
+
 // Preview tab — italic title (matches VS Code). At most one preview tab
 // per pane; tree single-click replaces its file in place, tree
 // double-click (or editing) pins it. Visual cue tells the user this tab
@@ -463,13 +475,28 @@
     // hidden. lintGutter() stays in the extension set because it backs the
     // inline diagnostic underlines — only its empty marker column is removed
     // here — so the only visible gutter is the line numbers.
+    //
+    // !important: @codemirror/lint's lintGutterTheme sets `.cm-gutter-lint {
+    // width: 1.4em }` via EditorView.baseTheme(), which style-mod mounts into
+    // its own runtime-injected <style> tag at equal selector specificity to
+    // this rule — on a specificity tie CSS falls back to DOM/source order,
+    // and CodeMirror's stylesheet mounts after this one loads, so it was
+    // winning the width (the visible ~18px gap between the line number and
+    // the code) even though `display: none` should have zeroed it out.
     .cm-foldGutter,
     .cm-gutter-lint {
-        display: none;
+        display: none !important;
     }
 
     .cm-lineNumbers .cm-gutterElement {
-        padding: 0 1px 0 6px;
+        padding: 0 4px 0 6px;
+    }
+
+    // CodeMirror's default .cm-line left padding (6px) is the actual
+    // gutter-to-text gap — the gutter element above only contributes its own
+    // 1px right padding. Tightened to sit closer to the line numbers.
+    .cm-line {
+        padding-left: 3px;
     }
 }
 
