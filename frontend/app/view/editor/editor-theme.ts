@@ -34,16 +34,21 @@ const editorChromeTheme = EditorView.theme(
                 backgroundColor: "var(--highlight-bg-color)",
             },
         ".cm-activeLine": {
-            backgroundColor: "rgba(255, 255, 255, 0.035)",
+            backgroundColor: "color-mix(in srgb, var(--accent-color) 10%, transparent)",
         },
         ".cm-gutters": {
             backgroundColor: "transparent",
-            color: "var(--secondary-text-color)",
+            // Muted accent shade — dimmer than the active line's number
+            // (below) so the current line's number visibly stands out
+            // instead of blending into every other line number.
+            color: "color-mix(in srgb, var(--accent-color) 55%, var(--secondary-text-color))",
             border: "none",
         },
         ".cm-activeLineGutter": {
-            backgroundColor: "rgba(255, 255, 255, 0.035)",
-            color: "var(--main-text-color)",
+            backgroundColor: "color-mix(in srgb, var(--accent-color) 10%, transparent)",
+            // Full-strength accent — the distinct, brighter shade for the
+            // current line's number.
+            color: "var(--accent-color)",
         },
         ".cm-foldPlaceholder": {
             backgroundColor: "transparent",
