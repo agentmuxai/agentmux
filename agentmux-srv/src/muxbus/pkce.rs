@@ -46,6 +46,28 @@ fn relay_base_url() -> String {
 static ACTIVE_LOGIN: std::sync::Mutex<Option<tokio::task::AbortHandle>> =
     std::sync::Mutex::new(None);
 
+// Set immediately before cancel_active_login() aborts the task, so the
+// aborted flow's own `Err(e) if e.is_cancelled()` branch can tell "the user
+// clicked Cancel" apart from "a newer muxbus.login call superseded this one"
+// — same underlying tokio abort, different message the frontend needs to
+// react to differently (see HostPopover.tsx's Cancel button).
+static CANCELLED_BY_USER: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Abort the in-flight login flow, if any. Returns false if there was none
+/// (a harmless no-op — the UI can call this without checking state first).
+pub fn cancel_active_login() -> bool {
+    let mut guard = ACTIVE_LOGIN.lock().unwrap();
+    match guard.take() {
+        Some(handle) => {
+            CANCELLED_BY_USER.store(true, std::sync::atomic::Ordering::SeqCst);
+            handle.abort();
+            true
+        }
+        None => false,
+    }
+}
+
 pub async fn run_pkce_login(
     cognito_domain: &str,
     client_id: &str,
@@ -72,7 +94,11 @@ pub async fn run_pkce_login(
     match task.await {
         Ok(r) => r,
         Err(e) if e.is_cancelled() => {
-            Err("this login attempt was superseded by a newer one".to_string())
+            if CANCELLED_BY_USER.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                Err("sign-in cancelled".to_string())
+            } else {
+                Err("this login attempt was superseded by a newer one".to_string())
+            }
         }
         Err(e) => Err(format!("login task failed: {e}")),
     }
@@ -414,6 +440,13 @@ Connection: close
         format!("http://{addr}")
     }
 
+    // ACTIVE_LOGIN / CANCELLED_BY_USER are process-global statics — by
+    // design, only one login flow may exist per process. Cargo runs tests
+    // in this file on parallel threads of the same process by default, so
+    // any two tests that drive a real flow through those statics race each
+    // other unless serialized here.
+    static TEST_SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     // The superseded-login guarantee: starting flow B while flow A is pending
     // must abort A rather than leaving two flows both polling (and both able
     // to open browser tabs). Uses the real run_pkce_login entry so the
@@ -421,6 +454,7 @@ Connection: close
     // flows parked at the poll stage.
     #[tokio::test(flavor = "multi_thread")]
     async fn second_login_supersedes_first() {
+        let _serial = TEST_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let relay = spawn_fake_relay().await;
         std::env::set_var("AGENTMUX_MUXBUS_REST_URL", &relay);
 
@@ -454,5 +488,47 @@ Connection: close
         }
         flow_b.abort();
         std::env::remove_var("AGENTMUX_MUXBUS_REST_URL");
+    }
+
+    // A user-initiated Cancel must resolve the pending flow immediately
+    // (not wait out LOGIN_TIMEOUT_SECS) and report a "cancelled" error
+    // distinct from the supersede case above — otherwise the UI has no way
+    // to tell "you cancelled this" from "a newer login attempt replaced
+    // this", which is what src/statusbar/HostPopover.tsx's Cancel button
+    // needs to show a quiet, non-error reset instead of a scary banner.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn manual_cancel_resolves_promptly_with_cancelled_error() {
+        let _serial = TEST_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let relay = spawn_fake_relay().await;
+        std::env::set_var("AGENTMUX_MUXBUS_REST_URL", &relay);
+
+        let http = reqwest::Client::new();
+        let flow = tokio::spawn({
+            let http = http.clone();
+            async move { run_pkce_login("http://127.0.0.1:1", "test-client", &http).await }
+        });
+        // Give the flow time to register + start polling before cancelling.
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+        assert!(cancel_active_login(), "expected an active login to cancel");
+
+        let result = tokio::time::timeout(std::time::Duration::from_secs(2), flow)
+            .await
+            .expect("cancel should resolve the flow promptly, not after the 5-min timeout")
+            .expect("flow task must not panic");
+        assert!(
+            result.as_ref().is_err_and(|e| e.contains("cancelled")),
+            "expected a cancellation error, got: {result:?}"
+        );
+
+        std::env::remove_var("AGENTMUX_MUXBUS_REST_URL");
+    }
+
+    // Cancelling with no active login is a harmless no-op the UI can call
+    // defensively without checking state first.
+    #[tokio::test]
+    async fn cancel_with_no_active_login_is_a_noop() {
+        let _serial = TEST_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(!cancel_active_login());
     }
 }

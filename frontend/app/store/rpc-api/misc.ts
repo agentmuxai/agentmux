@@ -136,6 +136,16 @@ export const MiscApi = {
         return client.rpcCall("muxbus.login", data, { timeout: 360000, ...opts });
     },
 
+    // command "muxbus.login.cancel" — abort an in-flight muxbus.login (e.g.
+    // user closed the browser without completing sign-in). Resolves the
+    // pending MuxBusLoginCommand call with a "sign-in cancelled" error.
+    MuxBusLoginCancelCommand(
+        client: RpcClient,
+        opts?: RpcOpts,
+    ): Promise<{ cancelled: boolean }> {
+        return client.rpcCall("muxbus.login.cancel", {}, opts);
+    },
+
     // command "muxbus.status" — current credential state
     MuxBusStatusCommand(
         client: RpcClient,

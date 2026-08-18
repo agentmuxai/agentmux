@@ -65,6 +65,14 @@ export interface MuxBusController {
     refresh: () => Promise<void>;
     /** Run the browser PKCE login (blocks up to 5 min), then refresh. */
     connect: () => Promise<void>;
+    /**
+     * Abort an in-flight connect() — e.g. the user closed the login browser
+     * tab and doesn't want to wait out the 5-min server-side timeout. Safe
+     * to call even if nothing is in flight (no-op). Does not itself flip
+     * `loading` — the pending connect() call resolves on its own once the
+     * server-side abort lands, via its normal error path.
+     */
+    cancel: () => Promise<void>;
     /** Clear stored credentials, then refresh. */
     disconnect: () => Promise<void>;
     /** False when no built-in client id is baked into this build. */
@@ -99,13 +107,27 @@ export function useMuxBusStatus(): MuxBusController {
             });
             if (result.success) {
                 await refresh();
-            } else {
+            } else if (result.error !== "sign-in cancelled") {
+                // A user-initiated Cancel is not a failure — don't surface
+                // it as a scary error banner, just quietly go back to
+                // "Not connected" (see cancel() below and pkce.rs's
+                // CANCELLED_BY_USER, which is what produces this exact
+                // error string).
                 setError(result.error ?? "Login failed.");
             }
         } catch (e) {
             setError(String(e));
         } finally {
             setLoading(false);
+        }
+    };
+
+    const cancel = async () => {
+        try {
+            await RpcApi.MuxBusLoginCancelCommand(TabRpcClient);
+        } catch {
+            // best effort — the pending connect() call will still resolve
+            // (worst case via its own 5-min server-side timeout)
         }
     };
 
@@ -124,7 +146,7 @@ export function useMuxBusStatus(): MuxBusController {
 
     const isConfigured = () => MUXBUS_CLIENT_ID !== "";
 
-    return { status, loading, error, refresh, connect, disconnect, isConfigured };
+    return { status, loading, error, refresh, connect, cancel, disconnect, isConfigured };
 }
 
 /** Human-readable local expiry, or null when not connected. */
@@ -189,10 +211,9 @@ export const MuxBusConnectSection = (): JSX.Element => {
                         <span class="agent-identity-none">Not connected</span>
                         <button
                             class="agent-identity-new-btn"
-                            disabled={loading()}
-                            onClick={() => void muxbus.connect()}
+                            onClick={() => void (loading() ? muxbus.cancel() : muxbus.connect())}
                         >
-                            {loading() ? "Connecting…" : "Connect"}
+                            {loading() ? "Connecting… (Cancel)" : "Connect"}
                         </button>
                     </div>
                 }
@@ -281,10 +302,11 @@ export function AgentMuxConnectPanel(props: {
                                     <div class="identity-key-actions">
                                         <button
                                             class="identity-btn identity-btn-primary"
-                                            disabled={muxbus.loading()}
-                                            onClick={() => void muxbus.connect()}
+                                            onClick={() =>
+                                                void (muxbus.loading() ? muxbus.cancel() : muxbus.connect())
+                                            }
                                         >
-                                            {muxbus.loading() ? "Connecting…" : "Connect with AgentMux"}
+                                            {muxbus.loading() ? "Connecting… (Cancel)" : "Connect with AgentMux"}
                                         </button>
                                     </div>
                                 </>
