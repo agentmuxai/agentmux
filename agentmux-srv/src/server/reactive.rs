@@ -851,6 +851,66 @@ pub(super) async fn handle_reactive_register(
 }
 
 #[derive(serde::Deserialize)]
+pub(super) struct EnsureSigningKeyRequest {
+    agent_id: String,
+}
+
+/// Mint-or-reuse `agent_id`'s host-tier jekt signing key and return it,
+/// base64-encoded — the same value `agent_config::inject_jekt_signing_keys_into_mcp_json`
+/// writes into a real agent's `.mcp.json` at spawn time, exposed directly
+/// here instead of only reachable through `agent.open`'s WebSocket
+/// (`WshRpcEngine`) path. That path also spawns a real provider session,
+/// which makes it unusable for anything that just wants to exercise
+/// host-tier jekt signing/verification (tests, external harnesses) without
+/// the cost and side effects of a live LLM session.
+///
+/// reagentx P0 on this PR's first pass: gating this behind the same
+/// `X-AuthKey` as `register`/`unregister` is NOT the same trust level as
+/// those routes — `X-AuthKey`/`AGENTMUX_AUTH_KEY` is injected into every
+/// spawned agent's own subprocess env for its bashwrap/MCP tool calls
+/// (`agent_handlers/input.rs`), so any agent already holds it. Returning
+/// another agent's raw signing key to any caller with that shared key is
+/// secret-key exfiltration enabling cryptographic impersonation — it
+/// directly breaks the invariant `agent_jekt_keys.rs` documents ("never
+/// returned over any RPC ... only the agent it claims to be from ever held
+/// the key") and the entire premise `TRUST=host-verified` depends on.
+///
+/// There is no way to additionally verify "the HTTP caller genuinely IS
+/// `agent_id`" from this request alone — that's the exact problem host-tier
+/// signing exists to solve, so this endpoint can't lean on it without being
+/// circular. Instead: **disabled unless `AGENTMUX_ENABLE_TEST_ENDPOINTS=1`
+/// was set in the srv process's own environment before it started** — set
+/// by whoever launches the instance, not settable by a running agent's tool
+/// calls (unlike `X-AuthKey`, which every spawned agent already holds
+/// regardless of what's set here). Off by default, so no real user's real
+/// instance with real agents ever exposes it; on only for a deliberately
+/// isolated test/verification instance where every "agent" is synthetic.
+pub(super) async fn handle_reactive_ensure_signing_key(
+    State(state): State<AppState>,
+    Json(req): Json<EnsureSigningKeyRequest>,
+) -> Response {
+    if std::env::var("AGENTMUX_ENABLE_TEST_ENDPOINTS").as_deref() != Ok("1") {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "not found"})),
+        )
+            .into_response();
+    }
+    match state.wstore.agent_jekt_key_ensure(&req.agent_id) {
+        Ok(key) => {
+            use base64::Engine as _;
+            let key_b64 = base64::engine::general_purpose::STANDARD.encode(&key);
+            Json(json!({ "agent_id": req.agent_id, "jekt_key_b64": key_b64 })).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(serde::Deserialize)]
 pub(super) struct UnregisterRequest {
     agent_id: String,
 }
