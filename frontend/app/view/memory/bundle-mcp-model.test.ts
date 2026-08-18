@@ -137,8 +137,9 @@ describe("BundleMcpModel", () => {
             server("new-1", { is_global: false, bound_to_bundle: true }),
         ]);
 
-        await model.addPrivate("My Tool", '{"command":"my-tool"}');
+        const ok = await model.addPrivate("My Tool", '{"command":"my-tool"}');
 
+        expect(ok).toBe(true);
         expect(RpcApi.McpCatalogUpsertForBundleCommand).toHaveBeenCalledWith(
             {},
             { bundle_id: "bundle-1", name: "My Tool", config: '{"command":"my-tool"}' },
@@ -171,8 +172,9 @@ describe("BundleMcpModel", () => {
         const model = makeModel();
         await model.refresh();
 
-        await model.addPrivate("X", "{}");
+        const ok = await model.addPrivate("X", "{}");
 
+        expect(ok).toBe(false);
         expect(model.errorAtom()).toContain("already bound to this bundle");
         expect(model.addingAtom()).toBe(false);
     });

@@ -100,8 +100,16 @@ export class BundleMcpModel {
 
     /** Creates a NEW, PRIVATE server scoped directly to this bundle —
      *  the actually-functional "give this bundle its own tool" path. See
-     *  this class's own doc comment. */
-    async addPrivate(name: string, config: string): Promise<void> {
+     *  this class's own doc comment.
+     *
+     *  Returns whether it succeeded (never throws — same "log to errorAtom,
+     *  don't reject" convention as bind/unbind) so the caller can decide
+     *  whether it's safe to clear its own form state. reagentx P1 on
+     *  PR #2647: since this never rejected, `BundleMcpSection`'s
+     *  `.then(() => clearForm())` used to run unconditionally, silently
+     *  discarding the user's typed name/config on a failed add (duplicate
+     *  name, invalid JSON, FORBIDDEN) even though the error banner showed. */
+    async addPrivate(name: string, config: string): Promise<boolean> {
         this.setError(null);
         this.setAdding(true);
         try {
@@ -111,8 +119,10 @@ export class BundleMcpModel {
                 config,
             });
             await this.refresh();
+            return true;
         } catch (e) {
             this.setError(`Add failed: ${(e as Error).message ?? e}`);
+            return false;
         } finally {
             this.setAdding(false);
         }

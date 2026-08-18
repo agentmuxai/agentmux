@@ -42,7 +42,12 @@ export const BundleMcpSection = (props: BundleMcpSectionProps): JSX.Element => {
         e.preventDefault();
         const name = newName().trim();
         if (!name) return;
-        void model.addPrivate(name, newConfig()).then(() => {
+        // addPrivate never rejects (errors go to errorAtom, same convention
+        // as bind/unbind) — only clear the form on the reported success,
+        // otherwise a failed add (duplicate name, invalid JSON, FORBIDDEN)
+        // would silently wipe what the user typed. reagentx P1 on PR #2647.
+        void model.addPrivate(name, newConfig()).then((ok) => {
+            if (!ok) return;
             setNewName("");
             setNewConfig("{}");
         });

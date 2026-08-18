@@ -87,8 +87,10 @@ export class BundleSkillModel {
     }
 
     /** Creates a NEW, PRIVATE skill scoped directly to this bundle — see
-     *  BundleMcpModel.addPrivate's identical doc comment. */
-    async addPrivate(name: string, content: string): Promise<void> {
+     *  BundleMcpModel.addPrivate's identical doc comment, including why
+     *  this returns a success boolean instead of Promise<void> (reagentx
+     *  P1 on PR #2647). */
+    async addPrivate(name: string, content: string): Promise<boolean> {
         this.setError(null);
         this.setAdding(true);
         try {
@@ -98,8 +100,10 @@ export class BundleSkillModel {
                 content,
             });
             await this.refresh();
+            return true;
         } catch (e) {
             this.setError(`Add failed: ${(e as Error).message ?? e}`);
+            return false;
         } finally {
             this.setAdding(false);
         }

@@ -140,8 +140,9 @@ describe("BundleSkillModel", () => {
             skill("new-1", { is_global: false, bound_to_bundle: true }),
         ]);
 
-        await model.addPrivate("My Skill", "Do the thing");
+        const ok = await model.addPrivate("My Skill", "Do the thing");
 
+        expect(ok).toBe(true);
         expect(RpcApi.SkillCatalogUpsertForBundleCommand).toHaveBeenCalledWith(
             {},
             { bundle_id: "bundle-1", name: "My Skill", content: "Do the thing" },
@@ -174,8 +175,9 @@ describe("BundleSkillModel", () => {
         const model = makeModel();
         await model.refresh();
 
-        await model.addPrivate("X", "content");
+        const ok = await model.addPrivate("X", "content");
 
+        expect(ok).toBe(false);
         expect(model.errorAtom()).toContain("already bound to this bundle");
         expect(model.addingAtom()).toBe(false);
     });

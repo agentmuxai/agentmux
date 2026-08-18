@@ -28,7 +28,11 @@ export const BundleSkillsSection = (props: BundleSkillsSectionProps): JSX.Elemen
         e.preventDefault();
         const name = newName().trim();
         if (!name) return;
-        void model.addPrivate(name, newContent()).then(() => {
+        // See BundleMcpSection.tsx's identical comment — addPrivate never
+        // rejects, only clear the form on reported success. reagentx P1 on
+        // PR #2647.
+        void model.addPrivate(name, newContent()).then((ok) => {
+            if (!ok) return;
             setNewName("");
             setNewContent("");
         });
