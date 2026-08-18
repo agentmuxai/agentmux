@@ -1,5 +1,11 @@
 # AgentMux Version History
 
+## 0.55.15 — 2026-08-18
+
+- fix(agent-pane): stop the CLI's own tool_result echo from clobbering an answered AskUserQuestion's answerText
+- feat(muxlog): add muxlog phases — merged turn-phase timeline for one agent pane
+- fix(model-catalog): stop the automatic startup model-catalog refresh from prompting for the macOS Keychain password
+
 ## 0.55.14 — 2026-08-18
 
 - fix(sysinfo): dynamic y-axis scaling, fix 3-metric layout, fix slow first paint
