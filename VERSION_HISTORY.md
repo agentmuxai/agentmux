@@ -1,5 +1,13 @@
 # AgentMux Version History
 
+## 0.55.14 — 2026-08-18
+
+- fix(sysinfo): dynamic y-axis scaling, fix 3-metric layout, fix slow first paint
+- feat(agent-pane): pane title tracks the session's overall goal, not per-turn micro-steps
+- fix(browser-pane): stop loading-brain flicker on repeated load-state flips
+- fix(tabs): remove automatic tab color assignment
+
+
 ## 0.55.13 — 2026-08-17
 
 - feat(agent-pane): answered questions render as user input; user-input surface inverted per theme
