@@ -14,7 +14,6 @@
 - fix(identity): stop mislabeling macOS Keychain-backed Claude accounts as needs_reauth
 - fix(editor): + button now always opens a new tab instead of re-activating an existing scratch tab
 
-
 ## 0.55.13 — 2026-08-17
 
 - feat(agent-pane): answered questions render as user input; user-input surface inverted per theme
