@@ -30,6 +30,7 @@ const MoreDropdown = ({
     onSubmenuEnter,
     onSubmenuLeave,
     setSubmenuEl,
+    isItemMenuOpen,
 }: {
     widgets: () => { key: string; widget: WidgetConfigType }[];
     onClose: () => void;
@@ -48,6 +49,17 @@ const MoreDropdown = ({
     onSubmenuEnter?: () => void;
     onSubmenuLeave?: (e: MouseEvent) => void;
     setSubmenuEl?: (el: HTMLDivElement | null) => void;
+    /**
+     * True while the right-click item popover (pin/unpin, open-in-new-
+     * window, ...) is open. A right-click's popover renders at the cursor
+     * position, which makes the browser re-target hit-testing and fire a
+     * spurious mouseleave on whatever's underneath even though the cursor
+     * never actually moved — without this guard that leave reaches the
+     * per-row hover controller for a Case B parent row (e.g. Messengers
+     * nested inside More) and starts a close-intent, collapsing it out from
+     * under the user mid right-click.
+     */
+    isItemMenuOpen?: () => boolean;
 }): JSX.Element => {
     let overlayEl: HTMLDivElement | undefined;
     // Cut a transparent hole through any browser pane HWND behind this
@@ -137,7 +149,10 @@ const MoreDropdown = ({
             style={floatingStyle()}
             data-pane-overlay
             onMouseEnter={() => onSubmenuEnter?.()}
-            onMouseLeave={(e) => onSubmenuLeave?.(e)}
+            onMouseLeave={(e) => {
+                if (isItemMenuOpen?.()) return;
+                onSubmenuLeave?.(e);
+            }}
         >
             <For each={widgets()}>
                 {({ key, widget }) => {
@@ -177,7 +192,10 @@ const MoreDropdown = ({
                                     parentPeers.closeOthers(key);
                                     hover.onTriggerEnter();
                                 }}
-                                onMouseLeave={(e) => hover.onTriggerLeave(e)}
+                                onMouseLeave={(e) => {
+                                    if (isItemMenuOpen?.()) return;
+                                    hover.onTriggerLeave(e);
+                                }}
                                 onContextMenu={(e) => handleItemContextMenu(e, key)}
                             >
                                 <span class="action-widget-more-item-icon widget-icon">
@@ -201,7 +219,10 @@ const MoreDropdown = ({
                                     placement="right-start"
                                     gutter={8}
                                     onSubmenuEnter={() => hover.onSubmenuEnter()}
-                                    onSubmenuLeave={(e) => hover.onSubmenuLeave(e)}
+                                    onSubmenuLeave={(e) => {
+                                        if (isItemMenuOpen?.()) return;
+                                        hover.onSubmenuLeave(e);
+                                    }}
                                     setSubmenuEl={(el) => hover.setSubmenuEl(el)}
                                 />
                             </Show>

@@ -252,6 +252,20 @@ const ActionWidgets = (): JSX.Element => {
         shortName: string;
     } | null>(null);
 
+    // A right-click that opens the item popover makes the browser fire a
+    // synthetic mouseleave on whichever dropdown/flyout sits underneath —
+    // the popover renders at the cursor position, and Chromium re-runs
+    // hit-testing against the new topmost element even though the cursor
+    // itself never moved. Left unguarded, that spurious leave reaches the
+    // hover controller's onSubmenuLeave and starts a close-intent, so More
+    // (or a pinned parent's flyout) would collapse the moment you right-
+    // click an item inside it — losing the "menu stays open while you work
+    // with pin/unpin" behavior the outside-click handler already protects
+    // on the click side (its own `.closest(".popover-menu")` check). Every
+    // onSubmenuLeave call site below is gated on this so hover-driven close
+    // is suspended for as long as the item popover is open.
+    const isItemMenuOpen = () => itemMenuState() !== null;
+
     const handleItemContextMenu = (pos: { x: number; y: number }, key: string) => {
         setItemMenuState({ pos, shortName: key.replace("defwidget@", "") });
     };
@@ -528,8 +542,12 @@ const ActionWidgets = (): JSX.Element => {
                         wmap={wmap}
                         ref={(el) => (moreDropdownRef = el)}
                         onSubmenuEnter={() => moreHover.onSubmenuEnter()}
-                        onSubmenuLeave={(e) => moreHover.onSubmenuLeave(e)}
+                        onSubmenuLeave={(e) => {
+                            if (isItemMenuOpen()) return;
+                            moreHover.onSubmenuLeave(e);
+                        }}
                         setSubmenuEl={(el) => moreHover.setSubmenuEl(el)}
+                        isItemMenuOpen={isItemMenuOpen}
                     />
                 </Show>
             </Portal>
@@ -556,7 +574,10 @@ const ActionWidgets = (): JSX.Element => {
                                 onItemContextMenu={handleItemContextMenu}
                                 anchor={() => parentSlotRefs.get(key) ?? null}
                                 onSubmenuEnter={() => parentHoverControllers.get(key)?.onSubmenuEnter()}
-                                onSubmenuLeave={(e) => parentHoverControllers.get(key)?.onSubmenuLeave(e)}
+                                onSubmenuLeave={(e) => {
+                                    if (isItemMenuOpen()) return;
+                                    parentHoverControllers.get(key)?.onSubmenuLeave(e);
+                                }}
                                 setSubmenuEl={(el) => parentHoverControllers.get(key)?.setSubmenuEl(el)}
                                 ref={(el) => (pinnedFlyoutRef = el)}
                             />
