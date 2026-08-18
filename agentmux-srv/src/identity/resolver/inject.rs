@@ -1938,6 +1938,14 @@ mod tests {
         // bundle dir with NO token file → the probe surfaces
         // `needs_reauth` and the resolver upserts the account row
         // with the new status. Spec §4.4.
+        //
+        // Uses "codex", not "claude": the macOS Keychain carve-out added
+        // in oauth_probe.rs (retro-macos-keychain-credential-isolation-gap-
+        // 2026-08-17.md) makes a missing token file for "claude" return
+        // `None` (no status change) on macOS specifically, since Claude
+        // Code never writes `.credentials.json` there regardless of the
+        // config dir. "codex" isn't covered by that carve-out, so it keeps
+        // this test's original, platform-independent needs_reauth signal.
         let store = make_store();
 
         let mut def = crate::backend::storage::store::AgentDefinition {
@@ -1945,7 +1953,7 @@ mod tests {
             slug: String::new(),
             name: "T".to_string(),
             icon: "✦".to_string(),
-            provider: "claude".to_string(),
+            provider: "codex".to_string(),
             description: String::new(),
             working_directory: String::new(),
             shell: String::new(),
@@ -1978,10 +1986,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let bundle_dir = tmp.path().to_str().unwrap().to_string();
 
-        let claude = IdentityAccount {
-            id: "acct-claude".to_string(),
-            name: "claude-acct-claude".to_string(),
-            provider: "claude".to_string(),
+        let codex_acct = IdentityAccount {
+            id: "acct-codex".to_string(),
+            name: "codex-acct-codex".to_string(),
+            provider: "codex".to_string(),
             kind: "oauth".to_string(),
             display_name: String::new(),
             secret_ref: SecretRef::OAuthConfigDir { dir: bundle_dir },
@@ -1992,9 +2000,9 @@ mod tests {
             created_at: 0,
             updated_at: 0,
         };
-        store.identity_upsert(&claude).unwrap();
+        store.identity_upsert(&codex_acct).unwrap();
         store
-            .agent_identity_link("def-1", "acct-claude", "claude")
+            .agent_identity_link("def-1", "acct-codex", "codex")
             .unwrap();
 
         insert_block_for_agent(&store, "block-probe", "def-1");
@@ -2007,10 +2015,10 @@ mod tests {
         // Env injection still happened (resolver doesn't block on
         // probe outcome — the CLI launches with the dir env var set
         // and will trigger OAuth itself when it sees no tokens).
-        assert!(env.get("CLAUDE_CONFIG_DIR").is_some());
+        assert!(env.get("CODEX_HOME").is_some());
 
         // Status row was UPDATED to needs_reauth.
-        let after = store.identity_get("acct-claude").unwrap().unwrap();
+        let after = store.identity_get("acct-codex").unwrap().unwrap();
         assert_eq!(after.status, oauth_status::NEEDS_REAUTH);
     }
 
@@ -2024,6 +2032,14 @@ mod tests {
         // silently never refreshing that account's status. Same fixture
         // as inject_oauth_class_probes_and_flips_status_to_needs_reauth
         // above, but bound under the alias instead of the canonical id.
+        //
+        // Uses "codex-cli" → "codex", not "claude-code" → "claude": the
+        // macOS Keychain carve-out (oauth_probe.rs) means a missing token
+        // file for "claude" returns `None` on macOS regardless of whether
+        // canonicalization ran, which would make this test unable to
+        // distinguish "canonicalization is broken" from "hit the carve-out"
+        // on that platform. "codex" isn't covered by the carve-out, so it
+        // keeps the original, platform-independent needs_reauth signal.
         let store = make_store();
 
         let mut def = crate::backend::storage::store::AgentDefinition {
@@ -2031,7 +2047,7 @@ mod tests {
             slug: String::new(),
             name: "T".to_string(),
             icon: "✦".to_string(),
-            provider: "claude".to_string(),
+            provider: "codex".to_string(),
             description: String::new(),
             working_directory: String::new(),
             shell: String::new(),
@@ -2062,10 +2078,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let bundle_dir = tmp.path().to_str().unwrap().to_string();
 
-        let claude = IdentityAccount {
+        let codex_acct = IdentityAccount {
             id: "acct-alias".to_string(),
-            name: "claude-code-acct-alias".to_string(),
-            provider: "claude-code".to_string(),
+            name: "codex-cli-acct-alias".to_string(),
+            provider: "codex-cli".to_string(),
             kind: "oauth".to_string(),
             display_name: String::new(),
             secret_ref: SecretRef::OAuthConfigDir { dir: bundle_dir },
@@ -2074,10 +2090,10 @@ mod tests {
             created_at: 0,
             updated_at: 0,
         };
-        store.identity_upsert(&claude).unwrap();
-        // Bound under the alias, not the canonical "claude".
+        store.identity_upsert(&codex_acct).unwrap();
+        // Bound under the alias, not the canonical "codex".
         store
-            .agent_identity_link("def-1", "acct-alias", "claude-code")
+            .agent_identity_link("def-1", "acct-alias", "codex-cli")
             .unwrap();
 
         insert_block_for_agent(&store, "block-probe-alias", "def-1");
@@ -2087,7 +2103,7 @@ mod tests {
         let mut env: HashMap<String, String> = HashMap::new();
         inject_identity_env(store.clone(), store.clone(), store.clone(), "block-probe-alias", &mut env).unwrap();
 
-        assert!(env.get("CLAUDE_CONFIG_DIR").is_some());
+        assert!(env.get("CODEX_HOME").is_some());
         // Status row was UPDATED to needs_reauth — proves the probe ran
         // with the canonicalized provider id, not the raw alias (which
         // would have returned None and left status untouched at "valid").
