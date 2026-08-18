@@ -24,7 +24,15 @@ function defaultMemMeta(name: string, maxY: string): TimeSeriesMeta {
         name: name,
         label: "GB",
         miny: 0,
+        // `mem:total` is a hard cap (can't physically use more than total
+        // RAM) — autoMaxY zooms in tighter than that when actual usage sits
+        // well below it, without ever showing headroom that doesn't exist.
+        // See docs/reports/REPORT_SYSINFO_COMBINED_CHART_RESEARCH_2026_08_17.md.
         maxy: maxY,
+        autoMaxY: true,
+        // Floor in GB, not a fraction of total — keeps the axis from
+        // zooming in on sub-1GB noise on a mostly-idle machine.
+        autoMaxYFloor: 1,
         color: "var(--sysinfo-mem-color)",
         decimalPlaces: 1,
     };
@@ -35,7 +43,12 @@ function defaultNetMeta(name: string): TimeSeriesMeta {
         name: name,
         label: "MB/s",
         miny: 0,
-        maxy: 100,
+        // No hard cap (unlike CPU%/mem:total, there's no real ceiling for
+        // throughput) — was a fixed 100, which clipped real spikes above it
+        // and wasted most of the chart when idle traffic sat at 0-5 MB/s.
+        // See docs/reports/REPORT_SYSINFO_COMBINED_CHART_RESEARCH_2026_08_17.md.
+        autoMaxY: true,
+        autoMaxYFloor: 1,
         color: "var(--sysinfo-net-color)",
         decimalPlaces: 2,
     };
@@ -46,7 +59,10 @@ function defaultDiskMeta(name: string): TimeSeriesMeta {
         name: name,
         label: "MB/s",
         miny: 0,
-        maxy: 100,
+        // Same reasoning as defaultNetMeta above — disk throughput has no
+        // real ceiling either.
+        autoMaxY: true,
+        autoMaxYFloor: 1,
         color: "var(--sysinfo-net-color)",
         decimalPlaces: 2,
     };
