@@ -86,7 +86,7 @@ export function EditorTabStrip(props: Props): JSX.Element {
                     <span class="pane-tab-label">{basenameOf(tab)}</span>
                 )
             }
-            onAdd={() => void props.model.openScratch()}
+            onAdd={() => void props.model.openScratch(false)}
             addTitle="New scratch buffer"
         />
     );
