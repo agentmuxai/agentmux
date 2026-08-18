@@ -302,20 +302,47 @@ fn pid_alive(pid: u32) -> bool {
     sys.process(target).is_some()
 }
 
-/// Public entry point for callers outside this module (`server/reactive.rs`'s
-/// evict-on-forward-failure sites) that need to distinguish "the owning
-/// process is genuinely gone" (safe to evict permanently) from "the process
-/// is alive but this one forward attempt failed" (a transient hiccup — e.g.
-/// the target channel's srv is up but the specific agent hadn't finished its
-/// own registration yet, a momentary lock/timing race, ...). Before this,
-/// `remove_shared`/`remove` were called unconditionally on any `success:false`
-/// response, which is correct for a truly-dead channel but destroys a live
-/// channel's only path to being found again — nothing re-writes the shared
-/// entry except the agent's own one-time registration event, so an evicted
-/// live entry stays unreachable until that agent's controller restarts. See
-/// docs/retro/retro-cross-channel-jekt-eviction-2026-08-17.md.
-pub fn is_pid_alive(pid: u32) -> bool {
-    pid_alive(pid)
+/// Grace period during which a forward failure against a live-process entry
+/// is presumed transient rather than proof the specific agent is gone — see
+/// [`should_evict_on_forward_failure`].
+const FORWARD_FAILURE_GRACE_MS: u64 = 60_000;
+
+/// Should `server/reactive.rs`'s evict-on-forward-failure sites remove this
+/// entry after a failed forward (`success:false` or a connection error)?
+///
+/// `entry.pid` identifies the OWNING SRV PROCESS (`AgentEntry::pid`'s own
+/// doc comment: "OS PID of the owning agentmux-srv process"), not the
+/// individual agent — every agent registered under the same channel/srv
+/// shares one `pid` value. A first version of this function (PR #2640,
+/// reagent P1 round 2) checked ONLY `pid_alive(entry.pid)`: alive process ⇒
+/// never evict. That over-corrects — it can only ever prove "the whole
+/// process died," never "this ONE agent's controller died while its srv
+/// process kept running for other agents," which is at least as common a
+/// failure mode as a whole-process death on a host running multiple agents
+/// under one shared srv (the default topology — see the retro). Under that
+/// version, a genuinely-dead individual agent's entry would linger in the
+/// shared registry forever as long as ANY other agent kept that same srv
+/// process alive, with no self-healing path short of a full srv restart —
+/// strictly worse than the pre-PR-2640 behavior (unconditional eviction) for
+/// that case.
+///
+/// Evict when EITHER signal indicates death:
+/// - the owning process is confirmed dead (definitive), OR
+/// - the entry is older than [`FORWARD_FAILURE_GRACE_MS`] — a fresh entry
+///   gets one grace window to account for the specific race PR #2640 fixes
+///   (the registering agent's controller hasn't finished its own
+///   registration yet, even though its srv process and this file both
+///   already exist); anything older that still fails a forward is presumed
+///   genuinely gone, matching pre-PR-2640 behavior for everything but a
+///   just-registered entry.
+///
+/// See docs/retro/retro-cross-channel-jekt-eviction-2026-08-17.md.
+pub fn should_evict_on_forward_failure(entry: &AgentEntry) -> bool {
+    if !pid_alive(entry.pid) {
+        return true;
+    }
+    let age_ms = now_unix_millis().saturating_sub(entry.updated_at);
+    age_ms > FORWARD_FAILURE_GRACE_MS
 }
 
 /// Write (create or update) this channel's entry for `agent_id` in the
@@ -813,5 +840,48 @@ mod shared_tests {
     #[test]
     fn pid_alive_false_for_max_pid() {
         assert!(!pid_alive(u32::MAX));
+    }
+
+    fn entry_with(pid: u32, updated_at: u64) -> AgentEntry {
+        AgentEntry {
+            agent_id: "agentx".to_string(),
+            local_url: "http://127.0.0.1:9001".to_string(),
+            block_id: "block1".to_string(),
+            pid,
+            updated_at,
+            auth_key: String::new(),
+            channel: "dev-a".to_string(),
+            registration_nonce: 0,
+        }
+    }
+
+    #[test]
+    fn should_evict_on_forward_failure_true_for_dead_pid_even_when_fresh() {
+        // Dead process is definitive regardless of age — the original,
+        // pre-PR-2640 case this whole mechanism exists for.
+        let entry = entry_with(u32::MAX, now_unix_millis());
+        assert!(should_evict_on_forward_failure(&entry));
+    }
+
+    #[test]
+    fn should_evict_on_forward_failure_false_for_alive_pid_and_fresh_entry() {
+        // The race PR #2640 actually fixes: owning srv process is alive, the
+        // entry was JUST written (this agent's own registration is still
+        // settling) — a forward failure right now is presumed transient.
+        let entry = entry_with(std::process::id(), now_unix_millis());
+        assert!(!should_evict_on_forward_failure(&entry));
+    }
+
+    #[test]
+    fn should_evict_on_forward_failure_true_for_alive_pid_but_old_entry() {
+        // reagent P1 round 2 on PR #2640: a genuinely-dead INDIVIDUAL agent
+        // whose srv process stays alive for other agents (the shared-srv
+        // topology this host actually runs) must still be evictable once
+        // the entry is old enough that a startup race is no longer a
+        // plausible explanation — pid-liveness alone would wrongly protect
+        // this forever.
+        let stale_updated_at = now_unix_millis().saturating_sub(FORWARD_FAILURE_GRACE_MS + 1_000);
+        let entry = entry_with(std::process::id(), stale_updated_at);
+        assert!(should_evict_on_forward_failure(&entry));
     }
 }

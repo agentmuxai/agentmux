@@ -142,6 +142,33 @@ Verified: `cargo check -p agentmux-srv` clean; existing
    it would interrupt everyone's in-flight sessions, so this was left for a
    deliberate, coordinated restart rather than done unilaterally mid-session.
 
+## Addendum — reagent's second review caught a real granularity bug in the first fix
+
+The first version of this fix (`is_pid_alive`) checked only whether the
+*owning srv process* was alive before evicting. reagent caught, correctly,
+that `AgentEntry.pid` is stamped with the **srv process's** PID
+(`std::process::id()`), shared by every agent registered under that same
+channel/srv — not a per-agent PID. So a PID-only guard can only prove "the
+whole process died," never "this one agent's controller died while its srv
+process stayed up for other agents" — and on a host running multiple agents
+under one shared `srv` (the default topology here — see the incident this
+retro is about), that's at least as common a failure mode as a whole-process
+death. Under the PID-only guard, a genuinely-dead individual agent's entry
+would linger in the shared registry **forever**, strictly worse than the
+pre-this-PR behavior (unconditional eviction) for that specific case.
+
+Fix: `should_evict_on_forward_failure` (replacing `is_pid_alive` as the
+call sites' policy function) evicts when *either* signal indicates death —
+the owning process is confirmed dead (definitive), **or** the entry is
+older than a 60s grace period. A fresh entry with a live owning process gets
+the benefit of the doubt (the actual race this PR fixes); an old entry that
+still fails is presumed genuinely gone, regardless of whether its process
+happens to still be alive for other agents — matching pre-this-PR behavior
+for everything except a just-registered entry. Added three unit tests
+(`should_evict_on_forward_failure_{true_for_dead_pid_even_when_fresh,
+false_for_alive_pid_and_fresh_entry, true_for_alive_pid_but_old_entry}`) —
+the third directly encodes the regression reagent found.
+
 ## Timeline
 
 - Loap's `SendMessage` to `ScrollPinTest-host-7c31` fails: `agent not found`.
