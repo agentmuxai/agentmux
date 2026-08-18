@@ -1307,17 +1307,16 @@ const AgentPresentationView = ({
     // readActivitySummary()'s precedence in agent-model.ts).
     useBlockActivity({ blockId: model.blockId });
 
-    // Haiku-powered live mini-summary: generates a fresh phrase in
-    // term:ambient_summary on every genuine, backend-confirmed turn
-    // completion (turnJustEndedAtom, declared above — NOT TurnPhase.Done,
-    // which over-triggers, see that atom's doc comment), preferred over
-    // the OSC title above when both are present. Routed through the
-    // backend's Ambient Model Call gateway — see
+    // Haiku-powered session-goal title: maintains a stable PR-title-style
+    // phrase in term:ambient_summary, re-evaluated (and usually reaffirmed
+    // unchanged) each time the user submits a new message — NOT on turn
+    // completion; see useAgentActivitySummary.ts's module doc comment.
+    // Preferred over the OSC title above when both are present. Routed
+    // through the backend's Ambient Model Call gateway — see
     // docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md.
     useAgentActivitySummary({
         blockId: model.blockId,
         turnPhase: agentAtoms().turnPhaseAtom[0],
-        turnJustEndedAtom,
         getRootWidth: () => rootRef?.offsetWidth,
     });
 
@@ -1597,7 +1596,7 @@ const AgentPresentationView = ({
         // turn; the queue-drain (agent-message-accepted) re-enters Submitting
         // if needed.
         if (!wasAlreadyWorking) {
-            dispatchPane(model.blockId, { type: "TurnStart", at: Date.now() }, "user");
+            dispatchPane(model.blockId, { type: "TurnStart", at: Date.now(), content: message }, "user");
         }
         return commands.sendMessage(message, wasAlreadyWorking, authFailureToPreserve);
     };
