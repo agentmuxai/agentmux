@@ -1,5 +1,20 @@
 # AgentMux Version History
 
+## 0.55.14 — 2026-08-18
+
+- fix(sysinfo): dynamic y-axis scaling, fix 3-metric layout, fix slow first paint
+- feat(bundle): Bundle-level MCP Server and Skill references (composable model v2)
+- fix(bundle): a bundle-referenced private skill/server no longer discards agent-level legacy config
+- feat(agent-pane): pane title tracks the session's overall goal, not per-turn micro-steps
+- fix(browser-pane): stop loading-brain flicker on repeated load-state flips
+- fix(tabs): remove automatic tab color assignment
+- fix(types): add missing armory:section/warden:section to MetaType
+- feat(bundle): Bundle editor MCP Servers/Skills sections (composable model v2)
+- feat(editor): word-wrap toggle, tighter gutter spacing, accent-colored line numbers, full-width tab strip border
+- fix(identity): stop mislabeling macOS Keychain-backed Claude accounts as needs_reauth
+- fix(editor): + button now always opens a new tab instead of re-activating an existing scratch tab
+
+
 ## 0.55.13 — 2026-08-17
 
 - feat(agent-pane): answered questions render as user input; user-input surface inverted per theme
