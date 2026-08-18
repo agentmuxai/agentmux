@@ -6,7 +6,6 @@
 - feat(muxlog): add muxlog phases — merged turn-phase timeline for one agent pane
 - fix(model-catalog): stop the automatic startup model-catalog refresh from prompting for the macOS Keychain password
 
-
 ## 0.55.14 — 2026-08-18
 
 - fix(sysinfo): dynamic y-axis scaling, fix 3-metric layout, fix slow first paint
