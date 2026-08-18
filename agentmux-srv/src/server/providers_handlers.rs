@@ -64,13 +64,25 @@ pub fn register_providers_handlers(engine: &Arc<WshRpcEngine>, _state: &AppState
                     None => return empty_result(),
                 };
                 let dir = paths.provider_auth_dir(provider.auth_dir_name);
-                let token = match resolve_access_token(&dir).await {
+                // `allow_keychain_fallback: false` — this RPC is fired
+                // automatically, unprompted, on every app launch
+                // (`frontend/app-init.ts`'s init wave). Persisting or reading
+                // back a stored fallback token (model_catalog.rs's steps 2/3)
+                // can trigger an interactive macOS Keychain password prompt;
+                // a background model-label refresh must never surface one.
+                // The `CLAUDE_CODE_OAUTH_TOKEN` env var itself is still
+                // honored either way (a plain process-env read, no keychain
+                // involved) — only the keychain-touching persist/read-back
+                // is skipped, so macOS falls back to its static bundled
+                // catalog only when that env var isn't set for this process.
+                let token = match resolve_access_token(&dir, false).await {
                     Some(t) => t,
-                    // No token from the `.credentials.json` file, the
-                    // CLAUDE_CODE_OAUTH_TOKEN env var, or a previously
-                    // persisted copy of it (e.g. logged out, or macOS
-                    // Keychain with no `claude setup-token` token exported)
-                    // → empty → frontend keeps its static fallback.
+                    // No token from the `.credentials.json` file or the
+                    // CLAUDE_CODE_OAUTH_TOKEN env var — the two sources this
+                    // background call is allowed to use (see the comment
+                    // above; the keychain-backed fallback is deliberately
+                    // excluded) → empty → frontend keeps its static
+                    // fallback.
                     None => return empty_result(),
                 };
 
