@@ -460,8 +460,16 @@ export type AgentPaneCommand =
     /**
      * User pressed send — turn becomes active. Also clears stale
      * sessionStats from the previous turn.
+     *
+     * `content` — the literal text just submitted, threaded through into
+     * `TurnPhase.Submitting.pendingContent` (optional so the ~90 existing
+     * reducer/hook test call sites that construct this action without it
+     * keep compiling — the reducer defaults to `""` when absent). Used by
+     * `useAgentActivitySummary.ts` to derive the session-title Haiku call
+     * without a separate FileStore read. See
+     * docs/specs/SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md.
      */
-    | { type: "TurnStart"; at: number }
+    | { type: "TurnStart"; at: number; content?: string }
     /**
      * Stream produced session_end (or fallback timer fired). Final
      * stats merged with current turn-tokens. Clears currentTool,

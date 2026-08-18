@@ -1379,6 +1379,19 @@ describe("agent-pane-state reducer", () => {
             }
         });
 
+        // SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md:
+        // pendingContent now carries the literal submitted text when the
+        // caller supplies it — useAgentActivitySummary.ts reads it directly
+        // instead of re-deriving it from a FileStore output tail.
+        it("TurnStart threads command.content into turnPhase.pendingContent", () => {
+            const s0 = ready(100);
+            const r = update(s0, { type: "TurnStart", at: 110, content: "fix the login bug" });
+            expect(r.state.turnPhase.kind).toBe("Submitting");
+            if (r.state.turnPhase.kind === "Submitting") {
+                expect(r.state.turnPhase.pendingContent).toBe("fix the login bug");
+            }
+        });
+
         it("Suppressed TurnStart does NOT advance turnPhase", () => {
             // Stream unsubscribed → suppressed; phase stays Idle.
             const start = mk();

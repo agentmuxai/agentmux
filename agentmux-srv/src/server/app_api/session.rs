@@ -421,9 +421,28 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                     .map_err(|e| format!("session:activity_summary: {e}"))?
                     .ok_or_else(|| format!("BLOCK_NOT_FOUND: {}", cmd.block_id))?;
 
-                let Some(extracted) = read_recent_activity_digest(&filestore, &cmd.block_id) else {
+                // The user's newest message, verbatim — the frontend passes this
+                // directly from the just-submitted TurnStart content, so the
+                // common case needs no FileStore read at all. Falls back to the
+                // old tail-digest extraction only when the caller didn't supply
+                // one (e.g. an older frontend build), so the endpoint degrades
+                // gracefully instead of going silent. See
+                // docs/specs/SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md.
+                let user_message = cmd
+                    .user_message
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .or_else(|| read_recent_activity_digest(&filestore, &cmd.block_id));
+
+                let current_title = obj::meta_get_string(&block.meta, "term:ambient_summary", "");
+
+                // Nothing to anchor a title on AND nothing new to evaluate —
+                // matches the old digest-empty early return.
+                if user_message.is_none() && current_title.is_empty() {
                     return Ok(Some(empty_summary_result()));
-                };
+                }
 
                 let cli_path = obj::meta_get_string(&block.meta, "cmd", "");
                 if cli_path.is_empty() {
@@ -431,12 +450,7 @@ fn register_session_activity_summary(engine: &Arc<WshRpcEngine>, state: &AppStat
                     return Ok(Some(empty_summary_result()));
                 }
 
-                let prompt = format!(
-                    "Summarize in {word_target} words or fewer what is currently being worked on. \
-                     Plain text only — no markdown, no code fences, no backticks, no quotes, \
-                     no punctuation, no preamble.\n\n\
-                     Recent activity:\n\n{extracted}"
-                );
+                let prompt = build_session_title_prompt(&current_title, user_message.as_deref(), word_target);
 
                 let (summary, tokens) =
                     invoke_ambient_haiku_call(&cli_path, &prompt, &block.meta, cancel).await
@@ -557,12 +571,46 @@ fn register_session_next_prompt_suggestion(engine: &Arc<WshRpcEngine>, state: &A
     );
 }
 
+/// Build the session-goal-title prompt for `session:activity_summary`.
+/// Explicitly PR-title-style and stability-biased: the previous "what is
+/// currently being worked on" prompt regenerated from a blank slate every
+/// call (no memory of the prior title, no access to the original ask), so
+/// it thrashed between micro-steps instead of tracking the session's
+/// overall goal. Extracted as a pure function so the prompt shape itself
+/// (both fields embedded, correct fallback text) is unit-testable without
+/// spinning up the full RPC handler. See
+/// docs/specs/SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md.
+fn build_session_title_prompt(current_title: &str, user_message: Option<&str>, word_target: u32) -> String {
+    let current_title_display = if current_title.is_empty() { "(none yet)" } else { current_title };
+    let user_message_display =
+        user_message.unwrap_or("(no new message — re-evaluate from the title alone)");
+
+    format!(
+        "You maintain a short running TITLE for this work session, similar to a git \
+         pull-request title — it describes the OVERALL GOAL of the session, not the \
+         current micro-step or the most recent tool call.\n\n\
+         Current title: {current_title_display}\n\n\
+         The user just said:\n{user_message_display}\n\n\
+         Decide: does this message represent a genuinely NEW or EXPANDED top-level \
+         goal, or is it a continuation, follow-up, clarification, correction, or a \
+         step within the SAME goal the current title already describes?\n\n\
+         - If the current title still accurately describes the overall goal, repeat \
+         it back EXACTLY, unchanged.\n\
+         - Otherwise, output an updated title covering the (possibly still-in-progress) \
+         overall goal, in {word_target} words or fewer.\n\n\
+         Plain text only — no markdown, no code fences, no backticks, no quotes, \
+         no punctuation, no preamble."
+    )
+}
+
 /// Read the last 32 KB of a block's FileStore output, take the most recent
 /// ~30 non-empty lines, and extract digest text from them (`extract_digest_text`).
-/// Shared by both ambient call sites (activity_summary, next_prompt_suggestion)
-/// so their tail-read window stays identical. Returns `None` when there's
-/// nothing usable — callers should return an empty ambient result in that
-/// case without invoking the CLI.
+/// Used directly by `next_prompt_suggestion`; `activity_summary` now only
+/// falls back to this when the caller didn't supply `user_message` (see
+/// `docs/specs/SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md`) —
+/// the common case passes the literal just-submitted text instead. Returns
+/// `None` when there's nothing usable — callers should return an empty
+/// ambient result in that case without invoking the CLI.
 ///
 /// EVENT_BLOCK_FILE events have persist: 0 so the ring buffer is always
 /// empty — FileStore is the only reliable source. Tail-reading avoids
@@ -947,6 +995,43 @@ pub(super) fn extract_digest_text(lines: &[&str]) -> String {
     }
 
     parts.join("\n")
+}
+
+#[cfg(test)]
+mod build_session_title_prompt_tests {
+    use super::*;
+
+    #[test]
+    fn embeds_both_fields_when_present() {
+        let prompt = build_session_title_prompt("invert user input styling", Some("also fix the lint warning"), 7);
+        assert!(prompt.contains("Current title: invert user input styling"));
+        assert!(prompt.contains("The user just said:\nalso fix the lint warning"));
+        assert!(prompt.contains("in 7 words or fewer"));
+    }
+
+    #[test]
+    fn falls_back_to_none_yet_for_an_empty_current_title() {
+        let prompt = build_session_title_prompt("", Some("build a login page"), 7);
+        assert!(prompt.contains("Current title: (none yet)"));
+    }
+
+    #[test]
+    fn falls_back_to_a_placeholder_for_a_missing_user_message() {
+        let prompt = build_session_title_prompt("invert user input styling", None, 7);
+        assert!(prompt.contains("The user just said:\n(no new message — re-evaluate from the title alone)"));
+    }
+
+    #[test]
+    fn instructs_stability_over_regeneration() {
+        // The core behavior change: the prompt must explicitly bias toward
+        // KEEPING the current title, not regenerating fresh every call —
+        // this is what the old "what is currently being worked on" prompt
+        // never asked for. docs/specs/SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md.
+        let prompt = build_session_title_prompt("invert user input styling", Some("continue"), 7);
+        assert!(prompt.contains("repeat it back EXACTLY, unchanged"));
+        assert!(prompt.contains("OVERALL GOAL"));
+        assert!(!prompt.contains("what is currently being worked on"));
+    }
 }
 
 #[cfg(test)]
