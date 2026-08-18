@@ -96,15 +96,27 @@ pub fn read_oauth_access_token(config_dir: &Path) -> Option<String> {
 /// Callers should use this instead of calling [`read_oauth_access_token`]
 /// directly. Never logs the token.
 ///
-/// Steps 2/3 hit the OS keychain (via `identity::secret_store`), which wraps
-/// blocking `keyring` syscalls (can even trigger a macOS permission prompt on
-/// first access) — run on a `spawn_blocking` thread, matching the established
-/// pattern for the same calls in `app_api/mod.rs`'s
-/// `identity_account_validate_stored_impl`, so this never blocks an async
-/// runtime worker thread.
-pub async fn resolve_access_token(config_dir: &Path) -> Option<String> {
+/// `allow_keychain_fallback` gates steps 2/3 — both hit the OS keychain (via
+/// `identity::secret_store`), which wraps blocking `keyring` syscalls that
+/// can trigger an interactive macOS "App wants to use your confidential
+/// information" password prompt whenever a previously-stored entry exists
+/// under a code signature the OS doesn't already trust (e.g. a rebuilt local
+/// dev binary). That's fine for a flow the user explicitly triggered, but
+/// this function's only caller today (`providers.models`) is a silent,
+/// fire-and-forget background refresh fired on every app launch
+/// (`frontend/app-init.ts`) — a keychain prompt appearing unprompted at
+/// startup, for a purely cosmetic model-label refresh, is not acceptable.
+/// Pass `false` from any automatic/background caller; steps 2/3 (and the
+/// `spawn_blocking` they'd run on) are skipped entirely in that case, so
+/// there is no keychain interaction at all — matching the pre-existing,
+/// already-documented "macOS Keychain → empty → static fallback" contract.
+/// Only pass `true` from a path the user explicitly initiated.
+pub async fn resolve_access_token(config_dir: &Path, allow_keychain_fallback: bool) -> Option<String> {
     if let Some(token) = read_oauth_access_token(config_dir) {
         return Some(token);
+    }
+    if !allow_keychain_fallback {
+        return None;
     }
     tokio::task::spawn_blocking(|| {
         resolve_fallback_access_token(
@@ -204,6 +216,24 @@ pub async fn fetch_model_catalog(access_token: &str) -> Option<Vec<CatalogModel>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn resolve_access_token_never_touches_keychain_when_fallback_disallowed() {
+        // The fix for the app-launch keychain-prompt regression: when
+        // `allow_keychain_fallback` is false and no `.credentials.json`
+        // exists (the macOS case), this must return None without ever
+        // entering the env-var/keychain fallback branch at all — not just
+        // "return the same result," but structurally skip it, since even a
+        // *read* of a stale keychain entry can trigger an OS prompt. This
+        // test can't observe "no syscall happened" directly, but a real
+        // keychain entry under CLAUDE_OAUTH_TOKEN_ACCOUNT existing on the
+        // machine this test runs on would make the old (pre-fix) code path
+        // return Some(..) — so None here is a meaningful assertion, not a
+        // vacuous one, whenever such an entry happens to be present.
+        let tmp = tempfile::tempdir().unwrap();
+        let got = resolve_access_token(tmp.path(), false).await;
+        assert_eq!(got, None);
+    }
 
     #[test]
     fn parses_models_and_falls_back_display_name_to_id() {
