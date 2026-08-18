@@ -35,9 +35,7 @@ vi.mock("@/app/store/rpc-api", () => {
         // trigger the fetch; the drift-regression tests below set their
         // own `.mockResolvedValue`.
         GetMemoryCommand: vi.fn().mockResolvedValue(undefined),
-        AgentSessionReadCommand: vi
-            .fn()
-            .mockResolvedValue({ content: null, modts: null }),
+        AgentSessionReadCommand: vi.fn().mockResolvedValue({ content: null, modts: null }),
         AgentSessionArchiveCommand: vi.fn().mockResolvedValue({}),
         AgentDefCreateFromTemplateCommand: vi.fn().mockResolvedValue({
             definition_id: "new-def",
@@ -133,21 +131,14 @@ vi.mock("./HiddenTemplatesSection", () => ({
     HiddenTemplatesSection: () => null,
 }));
 
-vi.mock("./AgentActionBar", () => ({
-    AgentActionBar: () => null,
-}));
-
 vi.mock("./MyAgentsList", () => ({
     MyAgentsList: (props: any) => (
-        <div
-            data-testid="my-agents-list-mock"
-            data-name-filter={props.nameFilter?.() ?? ""}
-        />
+        <div data-testid="my-agents-list-mock" data-name-filter={props.nameFilter?.() ?? ""} />
     ),
 }));
 
-import { AgentPicker } from "./AgentPicker";
 import { ContextMenuModel } from "@/app/store/contextmenu";
+import { AgentPicker } from "./AgentPicker";
 
 let RpcApi: typeof import("@/app/store/rpc-api").RpcApi;
 const contextMenuShow = vi.mocked(ContextMenuModel.showContextMenu);
@@ -204,10 +195,7 @@ beforeEach(async () => {
     modalLayerClose.mockClear();
     contextMenuShow.mockClear();
     ({ RpcApi } = await import("@/app/store/rpc-api"));
-    vi.mocked(RpcApi.ListAgentDefinitionsCommand).mockResolvedValue([
-        claudeTemplate,
-        userAgent,
-    ]);
+    vi.mocked(RpcApi.ListAgentDefinitionsCommand).mockResolvedValue([claudeTemplate, userAgent]);
 });
 
 afterEach(() => {
@@ -299,9 +287,7 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         // Invoke the menu item's click handler directly — this is
         // what the CEF bridge does after the user picks the row.
         menu[0].click();
-        await waitFor(() =>
-            expect(RpcApi.AgentDefHideCommand).toHaveBeenCalledTimes(1),
-        );
+        await waitFor(() => expect(RpcApi.AgentDefHideCommand).toHaveBeenCalledTimes(1));
         const call = vi.mocked(RpcApi.AgentDefHideCommand).mock.calls[0];
         expect(call[1]).toEqual({ definition_id: "tpl-claude" });
     });
@@ -352,14 +338,7 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         // + override carry the user's picks rather than silently falling
         // back (reagent P2 on #1576; model threading added #2594 follow-
         // up work).
-        await req.onCreatedAndLaunch(
-            "new-def-id",
-            "id-work",
-            "mem-notes",
-            "Mary",
-            "container",
-            "opus",
-        );
+        await req.onCreatedAndLaunch("new-def-id", "id-work", "mem-notes", "Mary", "container", "opus");
         expect(model.launchAgentDefinition).toHaveBeenCalledTimes(1);
         const [stubAgent, overrides] = model.launchAgentDefinition.mock.calls[0];
         expect(stubAgent.id).toBe("new-def-id");
@@ -490,9 +469,7 @@ describe("AgentPicker — filter bar", () => {
         render(() => <AgentPicker model={model as any} />);
         const bar = await screen.findByTestId("agent-picker-filter-bar");
         const myAgents = await screen.findByTestId("my-agents-list-mock");
-        expect(
-            bar.compareDocumentPosition(myAgents) & Node.DOCUMENT_POSITION_FOLLOWING,
-        ).toBeTruthy();
+        expect(bar.compareDocumentPosition(myAgents) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
     it("threads typed text into MyAgentsList's nameFilter prop", async () => {
