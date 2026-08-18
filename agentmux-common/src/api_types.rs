@@ -274,3 +274,43 @@ pub struct WorkspaceNameRequest {
     pub workspace_id: Option<String>,
     pub name: String,
 }
+
+// ── UI automation ───────────────────────────────────────────────────────────
+//
+// `block_id` is stamped by agentmux-mcp from its own trusted AGENTMUX_BLOCKID
+// env (never agent-suppliable — same convention as ShellCreateRequest's
+// `agent_block_id` above), so every UI-automation call is scoped to the
+// caller's own pane by construction. See
+// docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md.
+
+/// `POST /api/v1/ui/screenshot`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiScreenshotRequest {
+    pub block_id: String,
+}
+
+/// Response for `POST /api/v1/ui/screenshot`. `path` is a file already
+/// written to disk (openable via the `OpenMedia` tool); `png_base64` is the
+/// same image inline, for a caller that can render an MCP `ImageContent`
+/// block directly without a second round trip.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiScreenshotResponse {
+    pub path: String,
+    pub png_base64: String,
+}
+
+/// `POST /api/v1/ui/click`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiClickRequest {
+    pub block_id: String,
+    pub selector: String,
+}
+
+/// `POST /api/v1/ui/query`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiQueryRequest {
+    pub block_id: String,
+    pub selector: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}

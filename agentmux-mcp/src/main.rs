@@ -31,6 +31,7 @@ use agentmux_common::api_types::{
     InjectRequest, PaneOpenRequest, PaneOpenResponse, ShellCreateRequest, ShellCreateResponse,
     ShellInputFailure, ShellInputRequest, ShellInputResponse, ShellStatusRequest, ShellStatusResponse,
     ShellStopRequest, ShellStopResponse, TabActivateRequest, TabNameRequest, TabNewRequest,
+    UiClickRequest, UiQueryRequest, UiScreenshotRequest, UiScreenshotResponse,
     WindowFocusRequest, WindowNameRequest, WorkspaceNameRequest, PaneTitleRequest,
 };
 use anyhow::Result;
@@ -187,6 +188,37 @@ const FOCUS_WINDOW_TOOL: &str = r#"{
     "properties": {
       "window_id": { "type": "string", "description": "Optional window to focus; defaults to your own" }
     }
+  }
+}"#;
+
+const UI_SCREENSHOT_TOOL: &str = r#"{
+  "name": "UIScreenshot",
+  "description": "Capture a screenshot of your OWN AgentMux pane's UI — clipped to just that pane, not the whole shared window (can't see other panes/agents). Returns a file path; use the Read tool on that path to view the image yourself, or OpenMedia to show it to the user. Use this to visually verify a UI change (e.g. after UIClick-ing a button).",
+  "inputSchema": { "type": "object", "properties": {} }
+}"#;
+
+const UI_CLICK_TOOL: &str = r#"{
+  "name": "UIClick",
+  "description": "Click an element in your OWN AgentMux pane's UI — a real synthesized mouse click (not a scripted .click()), so focus/hover/pointer behavior matches a human click. Scoped to your own pane's DOM subtree only; cannot reach another pane or agent's UI. Use UIQuery first if you're not sure of the right CSS selector.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "selector": { "type": "string", "description": "CSS selector for the element to click, scoped to your own pane" }
+    },
+    "required": ["selector"]
+  }
+}"#;
+
+const UI_QUERY_TOOL: &str = r#"{
+  "name": "UIQuery",
+  "description": "Find elements in your OWN AgentMux pane's UI matching a CSS selector — returns tag, text, attributes, bounding rect, and focus state for each match. Scoped to your own pane's DOM subtree only. Use this to locate an element before UIClick-ing it, or to read rendered text/state without taking a screenshot.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "selector": { "type": "string", "description": "CSS selector to match, scoped to your own pane" },
+      "limit": { "type": "number", "description": "Max number of matches to return (default: all)" }
+    },
+    "required": ["selector"]
   }
 }"#;
 
@@ -538,6 +570,10 @@ async fn main() {
                 let new_tab: Value = serde_json::from_str(NEW_TAB_TOOL).expect("static json");
                 let focus_window: Value =
                     serde_json::from_str(FOCUS_WINDOW_TOOL).expect("static json");
+                let ui_screenshot: Value =
+                    serde_json::from_str(UI_SCREENSHOT_TOOL).expect("static json");
+                let ui_click: Value = serde_json::from_str(UI_CLICK_TOOL).expect("static json");
+                let ui_query: Value = serde_json::from_str(UI_QUERY_TOOL).expect("static json");
                 let loop_tool: Value = serde_json::from_str(LOOP_TOOL).expect("static json");
                 let loop_stop: Value = serde_json::from_str(LOOP_STOP_TOOL).expect("static json");
                 let loop_list: Value = serde_json::from_str(LOOP_LIST_TOOL).expect("static json");
@@ -558,7 +594,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, open_media, send_message, discover_agents, get_agent_transcript, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, open_media, send_message, discover_agents, get_agent_transcript, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {
@@ -1510,6 +1546,89 @@ async fn call_tool(
                 anyhow::bail!("focus window failed: HTTP {status} — {text}");
             }
             Ok("Focused window".to_string())
+        }
+        "UIScreenshot" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let url = format!("{}/api/v1/ui/screenshot", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&UiScreenshotRequest { block_id: block_id.to_string() })
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("screenshot failed: HTTP {status} — {text}");
+            }
+            let result: UiScreenshotResponse = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            Ok(format!(
+                "Screenshot saved to {} — use Read on that path to view it yourself, or OpenMedia to show it to the user.",
+                result.path
+            ))
+        }
+        "UIClick" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let selector = arguments
+                .get("selector")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: selector"))?;
+            let url = format!("{}/api/v1/ui/click", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&UiClickRequest {
+                    block_id: block_id.to_string(),
+                    selector: selector.to_string(),
+                })
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("click failed: HTTP {status} — {text}");
+            }
+            Ok(format!("Clicked {selector:?}"))
+        }
+        "UIQuery" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let selector = arguments
+                .get("selector")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: selector"))?;
+            let limit = arguments.get("limit").and_then(|v| v.as_u64()).map(|n| n as u32);
+            let url = format!("{}/api/v1/ui/query", local_url.trim_end_matches('/'));
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&UiQueryRequest {
+                    block_id: block_id.to_string(),
+                    selector: selector.to_string(),
+                    limit,
+                })
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("query failed: HTTP {status} — {text}");
+            }
+            let body: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            let matches = body
+                .get("data")
+                .and_then(|d| d.get("matches"))
+                .cloned()
+                .unwrap_or_else(|| json!([]));
+            Ok(serde_json::to_string_pretty(&matches).unwrap_or_else(|_| matches.to_string()))
         }
         "Loop" => {
             let prompt = arguments

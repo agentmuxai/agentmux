@@ -55,6 +55,7 @@ pub(crate) fn test_state() -> AppState {
         config_watcher,
         messagebus: Arc::new(crate::backend::messagebus::MessageBus::new()),
         http_client: reqwest::Client::new(),
+        host_ipc: Arc::new(tokio::sync::Mutex::new(None)),
         local_web_url: String::new(),
         subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus.clone(), wstore.clone())),
         history_service: Arc::new(crate::backend::history::HistoryService::new()),
@@ -358,6 +359,163 @@ async fn service_unknown_method_returns_error() {
     // success=false is skipped by serde (skip_serializing_if), so it's null
     assert!(!json["success"].as_bool().unwrap_or(false));
     assert!(json["error"].as_str().unwrap().contains("unknown"));
+}
+
+// ── UI automation (SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18) ───
+
+/// Minimal fake `/agentmux/browser/*` responder — returns `response_body`
+/// verbatim for any request whose `Authorization: Bearer <token>` matches
+/// `expect_bearer`, otherwise a canned unauthorized error. Enough to drive
+/// the srv-side proxy handlers without a real CEF host.
+async fn spawn_fake_browser_api(response_body: &'static str, expect_bearer: &'static str) -> u16 {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else { return };
+            let expected_auth = format!("Bearer {expect_bearer}");
+            tokio::spawn(async move {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut buf = [0u8; 4096];
+                let Ok(n) = stream.read(&mut buf).await else { return };
+                let req = String::from_utf8_lossy(&buf[..n]);
+                let body = if req.contains(&expected_auth) {
+                    response_body
+                } else {
+                    r#"{"ok":false,"error":"unauthorized"}"#
+                };
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes()).await;
+            });
+        }
+    });
+    port
+}
+
+#[tokio::test]
+async fn host_ipc_register_sets_state() {
+    let app = test_router();
+    let req = Request::builder()
+        .uri("/agentmux/service")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            r#"{"service":"host_ipc","method":"Register","args":[9999,"tok-123"]}"#,
+        ))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json["success"].as_bool().unwrap());
+}
+
+#[tokio::test]
+async fn ui_click_requires_host_registration_first() {
+    let app = test_router();
+    let req = Request::builder()
+        .uri("/api/v1/ui/click")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(r#"{"block_id":"b1","selector":"button"}"#))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn ui_click_proxies_to_host_after_registration() {
+    let state = test_state();
+    let port = spawn_fake_browser_api(r#"{"ok":true,"data":{}}"#, "tok-abc").await;
+    *state.host_ipc.lock().await = Some(HostIpc {
+        port,
+        token: "tok-abc".to_string(),
+    });
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .uri("/api/v1/ui/click")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(r#"{"block_id":"b1","selector":"button"}"#))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["ok"], true);
+}
+
+#[tokio::test]
+async fn ui_click_surfaces_a_host_side_error() {
+    let state = test_state();
+    let port = spawn_fake_browser_api(
+        r#"{"ok":false,"error":"selector \"button\" matched no element"}"#,
+        "tok-abc",
+    )
+    .await;
+    *state.host_ipc.lock().await = Some(HostIpc {
+        port,
+        token: "tok-abc".to_string(),
+    });
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .uri("/api/v1/ui/click")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(r#"{"block_id":"b1","selector":"button"}"#))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["ok"], false);
+    assert!(json["error"].as_str().unwrap().contains("matched no element"));
+}
+
+#[tokio::test]
+async fn ui_query_returns_host_matches() {
+    let state = test_state();
+    let port = spawn_fake_browser_api(
+        r#"{"ok":true,"data":{"matches":[{"selector":"body > button:nth-of-type(1)","tag":"button","text":"Sign in","attrs":{},"rect":{"x":0,"y":0,"width":10,"height":10},"focused":false}]}}"#,
+        "tok-abc",
+    )
+    .await;
+    *state.host_ipc.lock().await = Some(HostIpc {
+        port,
+        token: "tok-abc".to_string(),
+    });
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .uri("/api/v1/ui/query")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(r#"{"block_id":"b1","selector":"button"}"#))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["data"]["matches"][0]["text"], "Sign in");
 }
 
 #[tokio::test]

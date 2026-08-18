@@ -1549,6 +1549,7 @@ pub fn build_app_state(
                 tracing::warn!(error = %e, "failed to build http_client with timeout, using default");
                 reqwest::Client::new()
             }),
+        host_ipc: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
         process_tracker: net.process_tracker.clone(),
         process_broker: net.process_broker.clone(),
         dock_snapshots: std::sync::Arc::new(crate::backend::dock_snapshot::DockSnapshotCache::new()),

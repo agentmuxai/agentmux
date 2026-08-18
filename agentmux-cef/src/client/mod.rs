@@ -87,6 +87,10 @@ pub(crate) use helpers::{backend_get_client_window_ids, backend_get_window_topol
 // SPEC_POOL_ADOPTION_AND_WINDOW_ROW_CRUMB Residual 2 — crumb-based label
 // resolution for `demote_srv_cleanup`'s no-registration fallback.
 pub(crate) use helpers::backend_find_window_by_label;
+// SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18 — one-time push of
+// this host's own ipc_port/ipc_token to srv, so srv can proxy agent-facing
+// UI-automation calls through to this host's browser_api routes.
+pub(crate) use helpers::register_ipc_with_backend;
 pub(crate) use lifecycle::{
     retry_backend_window_id_lookup, BACKEND_WINDOW_ID_RETRY_ATTEMPTS,
     BACKEND_WINDOW_ID_RETRY_DELAY,

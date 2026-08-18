@@ -733,6 +733,23 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
         }
     }
 
+    // Push this host's ipc_port/ipc_token to srv (host_ipc.Register) so
+    // srv can proxy /api/v1/ui/{screenshot,click,query} (agent-facing UI
+    // automation) to this host's /agentmux/browser/* routes. Must run
+    // after backend_endpoints.web_endpoint is known (just above) — see
+    // SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md. Runs off
+    // the UI thread via spawn_blocking (raw-TCP, synchronous, same as
+    // every other client::helpers call) so a slow/unreachable srv can't
+    // stall startup.
+    {
+        let web_endpoint = app_state.backend_endpoints.lock().web_endpoint.clone();
+        let auth_key = app_state.auth_key.lock().clone();
+        let ipc_token = app_state.ipc_token.clone();
+        runtime.spawn_blocking(move || {
+            client::register_ipc_with_backend(&web_endpoint, &auth_key, ipc_port, &ipc_token);
+        });
+    }
+
     // Create the App handler with state.
     let mut cef_app = app::AgentMuxApp::new(app_state.clone(), ipc_port);
 
