@@ -790,13 +790,20 @@ export class EditorViewModel implements ViewModel {
     // ── Scratch buffer ──────────────────────────────────────────────────
 
     /** Open (or focus) a scratch buffer. Called from the constructor when
-     *  editor:scratch is true and no other file is open. */
-    async openScratch(): Promise<void> {
-        // Reuse an existing scratch tab if one is already open in this pane.
-        const existing = snapshot(this.blockId)?.tabs.find((t) => t.isScratch);
-        if (existing) {
-            dispatch(this.blockId, { type: "SwitchTab", tabId: existing.id, source: "system" });
-            return;
+     *  editor:scratch is true and no other file is open (`reuseExisting`
+     *  true — idempotency guard, in case that path ever fires twice), and
+     *  from the "+" button (`reuseExisting` false — a user clicking "+"
+     *  always wants a genuinely new tab, same as any other tabbed UI;
+     *  silently re-activating the pane's existing scratch tab there reads
+     *  as "+ does nothing" when that tab is already the active one). */
+    async openScratch(reuseExisting: boolean = true): Promise<void> {
+        if (reuseExisting) {
+            // Reuse an existing scratch tab if one is already open in this pane.
+            const existing = snapshot(this.blockId)?.tabs.find((t) => t.isScratch);
+            if (existing) {
+                dispatch(this.blockId, { type: "SwitchTab", tabId: existing.id, source: "system" });
+                return;
+            }
         }
         try {
             // Exclude scratch files already open in any editor pane so that
