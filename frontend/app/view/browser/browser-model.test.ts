@@ -6,7 +6,7 @@
 // reload/giveFocus. This is the frontend half of the orphan-prevention
 // fix in SPEC_BROWSER_PANE_LIFECYCLE_TESTS.md §4.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock every platform-layer module the model touches BEFORE import.
 // vi.mock is hoisted, so the mocks are in place when browser-model imports them.
@@ -190,6 +190,15 @@ describe("BrowserViewModel lifecycle gating", () => {
 describe("BrowserViewModel nav-state loading wiring", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        // Layer 3 (SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md)
+        // holds a loading:false dispatch briefly so a rapid true→false→true
+        // flip collapses into one visible transition — tests that assert on
+        // a `false` outcome need to advance past that hold.
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
     });
 
     it("loadingAtom starts true after construction (the ctor's initial navigate())", () => {
@@ -209,7 +218,7 @@ describe("BrowserViewModel nav-state loading wiring", () => {
         expect(vm.loadingAtom()).toBe(true);
     });
 
-    it("an on_loading_state_change event with is_loading:false clears loadingAtom", () => {
+    it("an on_loading_state_change event with is_loading:false clears loadingAtom after the debounce hold", () => {
         const { vm, navStateHandler } = makeVMWithNavStateHandler();
         navStateHandler({
             block_id: "test-block-id",
@@ -218,29 +227,105 @@ describe("BrowserViewModel nav-state loading wiring", () => {
             can_go_back: true,
             can_go_forward: false,
         });
-        expect(vm.loadingAtom()).toBe(false);
+        // canGoBackAtom flows through the separate, non-debounced
+        // HistoryUpdated dispatch — updates immediately regardless of the
+        // loading hold.
         expect(vm.canGoBackAtom()).toBe(true);
+        // loadingAtom is held briefly (layer 3) before it clears.
+        expect(vm.loadingAtom()).toBe(true);
+        vi.advanceTimersByTime(250);
+        expect(vm.loadingAtom()).toBe(false);
     });
 
-    it("the url_only (on_load_end) event — no is_loading field — also clears loadingAtom", () => {
+    it("a true arriving within the debounce window cancels the pending false — no flicker", () => {
         const { vm, navStateHandler } = makeVMWithNavStateHandler();
+        navStateHandler({
+            block_id: "test-block-id",
+            url: "https://example.com",
+            is_loading: false,
+            can_go_back: false,
+            can_go_forward: false,
+        });
+        expect(vm.loadingAtom()).toBe(true); // still held
+        vi.advanceTimersByTime(50); // well within the hold window
+        navStateHandler({
+            block_id: "test-block-id",
+            url: "https://example.com",
+            is_loading: true,
+            can_go_back: false,
+            can_go_forward: false,
+        });
+        // The held false never fires — advance well past when it would have.
+        vi.advanceTimersByTime(500);
+        expect(vm.loadingAtom()).toBe(true);
+    });
+
+    // reagent P1 on PR #2642: this used to send ONLY the url_only event and
+    // assert it alone cleared loadingAtom via an immediate (non-debounced)
+    // LoadFinished dispatch — that dispatch is now removed, since it
+    // bypassed the layer-3 debounce hold for exactly the same-tick
+    // redirect-hop case the hold exists to coalesce. Real
+    // on_load_end_browser_pane calls ALWAYS emit a paired is_loading:false
+    // event first (layer 1) — simulate that real pairing here, not the
+    // url_only event in isolation.
+    it("the paired is_loading:false + url_only (on_load_end) events clear loadingAtom after the debounce hold", () => {
+        const { vm, navStateHandler } = makeVMWithNavStateHandler();
+        navStateHandler({
+            block_id: "test-block-id",
+            url: "https://example.com",
+            is_loading: false,
+            can_go_back: false,
+            can_go_forward: false,
+        });
         navStateHandler({
             block_id: "test-block-id",
             url: "https://example.com",
             url_only: true,
         });
+        expect(vm.loadingAtom()).toBe(true); // still held
+        vi.advanceTimersByTime(250);
         expect(vm.loadingAtom()).toBe(false);
+    });
+
+    it("a same-tick redirect hop's url_only event no longer bypasses the debounce hold", () => {
+        const { vm, navStateHandler } = makeVMWithNavStateHandler();
+        // The finishing hop's is_loading:false, immediately followed by the
+        // url_only address-bar-sync event Rust always pairs with it.
+        navStateHandler({
+            block_id: "test-block-id",
+            url: "https://a.com",
+            is_loading: false,
+            can_go_back: false,
+            can_go_forward: false,
+        });
+        navStateHandler({ block_id: "test-block-id", url: "https://a.com", url_only: true });
+        // A fresh redirect hop lands within the debounce window.
+        vi.advanceTimersByTime(50);
+        navStateHandler({
+            block_id: "test-block-id",
+            url: "https://b.com",
+            is_loading: true,
+            can_go_back: false,
+            can_go_forward: false,
+        });
+        // The held false never fires — advance well past when it would have.
+        vi.advanceTimersByTime(500);
+        expect(vm.loadingAtom()).toBe(true);
     });
 
     it("re-navigating after load-finished sets loadingAtom true again, and a subsequent is_loading:false clears it", () => {
         const { vm, navStateHandler } = makeVMWithNavStateHandler();
         navStateHandler({ block_id: "test-block-id", url: "https://a.com", is_loading: false, can_go_back: false, can_go_forward: false });
+        vi.advanceTimersByTime(250);
         expect(vm.loadingAtom()).toBe(false);
 
+        // navigate() cancels any pending held false so a stale hold can't
+        // clobber this fresh true a moment later.
         vm.navigate("https://b.com");
         expect(vm.loadingAtom()).toBe(true);
 
         navStateHandler({ block_id: "test-block-id", url: "https://b.com", is_loading: false, can_go_back: true, can_go_forward: false });
+        vi.advanceTimersByTime(250);
         expect(vm.loadingAtom()).toBe(false);
     });
 
