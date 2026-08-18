@@ -45,6 +45,7 @@ const META_TREE_EXPANDED = "editor:tree_expanded";
 const META_SHOW_HIDDEN = "editor:show_hidden";
 const META_TREE_WIDTH = "editor:tree_width";
 const META_PREVIEW_HEIGHT = "editor:preview_height";
+const META_WORD_WRAP = "editor:word_wrap";
 const META_LEGACY_FILE = "file";
 // Reuse (SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md
 // Part 2): files pushed by reuse-and-not-yet-mounted OpenEditor calls.
@@ -155,6 +156,13 @@ export class EditorViewModel implements ViewModel {
 
     private _previewHeight = createSignal<number>(PREVIEW_HEIGHT_DEFAULT);
     previewHeightAtom: Accessor<number> = this._previewHeight[0];
+
+    // Word wrap defaults ON (matches the editor's long-standing hardcoded
+    // behavior before this setting existed — see editor-view.tsx's
+    // wordWrapCompartment) so existing panes see no behavior change until
+    // the user explicitly turns it off via the right-click menu.
+    private _wordWrap = createSignal<boolean>(true);
+    wordWrapAtom: Accessor<boolean> = this._wordWrap[0];
 
     // Per-tab editor mode: "preview" | "source" | "split".
     // Not persisted — tabs return to their language-appropriate default on reopen.
@@ -392,6 +400,9 @@ export class EditorViewModel implements ViewModel {
         const persistedPreviewH = meta?.[META_PREVIEW_HEIGHT];
         if (typeof persistedPreviewH === "number") {
             this._previewHeight[1](clampPreviewHeight(persistedPreviewH));
+        }
+        if (meta?.[META_WORD_WRAP] === false) {
+            this._wordWrap[1](false);
         }
 
         // Backwards-compat hydration: existing block meta uses `file` (the
@@ -1117,6 +1128,27 @@ export class EditorViewModel implements ViewModel {
         const next = !this._showHidden[0]();
         this._showHidden[1](next);
         await this.persistMeta({ [META_SHOW_HIDDEN]: next });
+    }
+
+    async toggleWordWrap(): Promise<void> {
+        const next = !this._wordWrap[0]();
+        this._wordWrap[1](next);
+        await this.persistMeta({ [META_WORD_WRAP]: next });
+    }
+
+    /** Right-click menu items for the editor's own body (the CodeMirror
+     *  area) — surfaced by blockframe.tsx's onBodyContextMenu ahead of the
+     *  generic pane actions (magnify/close). Context-specific to this view,
+     *  same extension point sysinfo/browser/agent use for their own toggles. */
+    getBodyContextMenuItems(): ContextMenuItem[] {
+        return [
+            {
+                label: "Word Wrap",
+                type: "checkbox",
+                checked: this.wordWrapAtom(),
+                click: () => void this.toggleWordWrap(),
+            },
+        ];
     }
 
     setTreeWidth(width: number): void {

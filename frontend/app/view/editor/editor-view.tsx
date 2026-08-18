@@ -169,6 +169,12 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
     let lspChangeDebounce: ReturnType<typeof setTimeout> | null = null;
     const [lspState, setLspState] = createSignal<LspState | null>(null);
     const lintCompartment = new Compartment();
+    // Word wrap toggle (right-click menu → editor-model.ts's
+    // getBodyContextMenuItems). Reconfigured live on toggle (see the
+    // createEffect below) and resynced on every tab switch — it's a
+    // pane-wide setting, not per-tab, so a stale per-tab CodeMirror-state
+    // snapshot (cmStates) must not be allowed to reintroduce an old value.
+    const wordWrapCompartment = new Compartment();
 
     const teardownLsp = async (): Promise<void> => {
         if (lspChangeDebounce) {
@@ -322,7 +328,7 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
             // no debugger/breakpoint margin, so the numbers sit tight to code.
             lintGutter(),
             lintCompartment.of([]),
-            EditorView.lineWrapping,
+            wordWrapCompartment.of(model.wordWrapAtom() ? [EditorView.lineWrapping] : []),
             EditorView.updateListener.of((update) => {
                 if (update.docChanged) {
                     const content = update.state.doc.toString();
@@ -480,6 +486,13 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
             const saved = cmStates.get(activeId);
             if (saved && cmView) {
                 cmView.setState(saved);
+                // Resync the pane-wide word-wrap setting — the restored state
+                // was snapshotted with whatever wrap value was active *at
+                // that time*, which may be stale if the user toggled it via
+                // another tab since.
+                cmView.dispatch({
+                    effects: wordWrapCompartment.reconfigure(model.wordWrapAtom() ? [EditorView.lineWrapping] : []),
+                });
                 setLiveDoc(saved.doc.toString()); // seed preview from restored doc
                 // Re-wire LSP for the now-active file's content.
                 void startLspIfSupported(path, lang, content);
@@ -490,6 +503,14 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                 void startLspIfSupported(path, lang, content);
             });
         });
+    });
+
+    // Live-toggle word wrap (right-click menu → model.toggleWordWrap()) on
+    // whichever tab is currently showing, without rebuilding CodeMirror.
+    createEffect(() => {
+        const wrap = model.wordWrapAtom();
+        if (!cmView) return;
+        cmView.dispatch({ effects: wordWrapCompartment.reconfigure(wrap ? [EditorView.lineWrapping] : []) });
     });
 
     // Clear cached CodeMirror state when its tab closes, so re-opening
@@ -738,12 +759,14 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
 
             <div class="editor-main-column">
                 <Show when={model.tabsAtom().length > 0}>
-                    <EditorTabStrip
-                        model={model}
-                        saveAsTabId={saveAsTabId()}
-                        onSaveAsConfirm={(path) => void handleSaveAsConfirm(path)}
-                        onSaveAsCancel={() => setSaveAsTabId(null)}
-                    />
+                    <div class="editor-tab-strip-row">
+                        <EditorTabStrip
+                            model={model}
+                            saveAsTabId={saveAsTabId()}
+                            onSaveAsConfirm={(path) => void handleSaveAsConfirm(path)}
+                            onSaveAsCancel={() => setSaveAsTabId(null)}
+                        />
+                    </div>
                 </Show>
 
                 <Show when={isMarkdown() && model.tabsAtom().length > 0}>
