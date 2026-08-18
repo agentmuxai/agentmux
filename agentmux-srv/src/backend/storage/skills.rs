@@ -239,6 +239,17 @@ pub struct SkillCatalogItem {
     pub bound_count: i64,
 }
 
+/// `bundle_skill_list`'s response shape — mirrors `SkillListItem`, but
+/// "bound" means a `db_bundle_skills_ref` row for this bundle, not an
+/// agent's `db_agent_skills_ref` row. Composable model v2,
+/// docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md.
+#[derive(Debug, Clone, Serialize)]
+pub struct SkillBundleListItem {
+    #[serde(flatten)]
+    pub skill: Skill,
+    pub bound_to_bundle: bool,
+}
+
 impl Store {
     /// List all skills visible to an agent: own (referenced) + global, each
     /// annotated with whether this specific agent holds the bind ref.
@@ -298,13 +309,40 @@ impl Store {
     /// standalone Skill primitive via the RPC layer at all).
     pub fn effective_skills(&self, agent_id: &str) -> Vec<AgentSkill> {
         let legacy_skills = self.agent_skill_list(agent_id).unwrap_or_default();
-        let visible_skills: Vec<Skill> = self
+        let mut visible_skills: Vec<Skill> = self
             .skill_list(agent_id)
             .unwrap_or_default()
             .into_iter()
             .map(|item| item.skill)
             .collect();
+        // reagentx P1 on PR #2639: `has_own_skill_refs` must be decided
+        // BEFORE unioning in the bundle's referenced skills below — it
+        // reflects only the agent's OWN direct binds. Mandatory ABF means
+        // every agent has a bundle, so if a bundle's private skill alone
+        // could flip this flag, a legacy-only agent bound to any bundle
+        // that happens to reference one private skill would silently lose
+        // every `db_agent_skills` entry, with no action taken on the agent
+        // itself. The "own refs are authoritative" path is meant strictly
+        // for the agent's own binds (see `own_refs_take_over_entirely_and_discard_legacy_skills`).
         let has_own_skill_refs = visible_skills.iter().any(|s| !s.is_global);
+        // Composable model v2 (docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md,
+        // GH issue #2024 item 3): union in the agent's bound bundle's own
+        // referenced skills too — without this, db_bundle_skills_ref would
+        // be exactly as inert at launch as the bundle's old inline `skills`
+        // JSON column always was. Deduped by id since a global skill is
+        // already visible via both `skill_list` above and
+        // `bundle_skill_list` below. Happens AFTER the has_own decision —
+        // bundle-referenced skills still appear in the final list, they
+        // just never trigger the "discard legacy" path on their own.
+        if let Ok(Some(def)) = self.agent_def_get(agent_id) {
+            if !def.memory_id.is_empty() {
+                for item in self.bundle_skill_list(&def.memory_id).unwrap_or_default() {
+                    if !visible_skills.iter().any(|s| s.id == item.skill.id) {
+                        visible_skills.push(item.skill);
+                    }
+                }
+            }
+        }
         if has_own_skill_refs {
             crate::backend::agent_config::skills_to_agent_skills(&visible_skills, agent_id)
         } else {
@@ -426,11 +464,13 @@ impl Store {
         }
     }
 
-    /// Delete a standalone skill and purge its ref rows. Returns true if deleted.
+    /// Delete a standalone skill and purge its ref rows (both agent- and
+    /// bundle-level). Returns true if deleted.
     pub fn skill_delete(&self, id: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         // Purge ref rows explicitly (FK cascades may be off on some builds).
         conn.execute("DELETE FROM db_agent_skills_ref WHERE skill_id = ?1", params![id])?;
+        conn.execute("DELETE FROM db_bundle_skills_ref WHERE skill_id = ?1", params![id])?;
         let rows = conn.execute("DELETE FROM db_skills WHERE id = ?1", params![id])?;
         Ok(rows > 0)
     }
@@ -594,6 +634,179 @@ impl Store {
         )?;
         Ok(count > 0)
     }
+
+    // ── Bundle-level references (composable model v2) ──────────────────
+    // docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md, GH issue #2024
+    // item 3. Mirror the agent-level methods above exactly, keyed by
+    // bundle_id via db_bundle_skills_ref instead of agent_id/db_agent_skills_ref.
+
+    /// Bundle-level sibling of `skill_list` — this bundle's own (referenced)
+    /// and global skills, each annotated with whether this specific bundle
+    /// holds the `db_bundle_skills_ref` row.
+    pub fn bundle_skill_list(&self, bundle_id: &str) -> Result<Vec<SkillBundleListItem>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT s.id, s.name, s.trigger, s.skill_type, s.description, s.content, s.is_global, s.created_at, s.updated_at,
+                    EXISTS(SELECT 1 FROM db_bundle_skills_ref r WHERE r.skill_id = s.id AND r.bundle_id = ?1) AS bound_to_bundle
+             FROM db_skills s
+             WHERE s.is_global = 1
+                OR s.id IN (SELECT skill_id FROM db_bundle_skills_ref WHERE bundle_id = ?1)
+             ORDER BY s.is_global DESC, s.updated_at DESC",
+        )?;
+        let rows = stmt.query_map(params![bundle_id], |row| {
+            Ok(SkillBundleListItem {
+                skill: Skill {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    trigger: row.get(2)?,
+                    skill_type: row.get(3)?,
+                    description: row.get(4)?,
+                    content: row.get(5)?,
+                    is_global: row.get::<_, i64>(6)? != 0,
+                    created_at: row.get(7)?,
+                    updated_at: row.get(8)?,
+                },
+                bound_to_bundle: row.get::<_, i64>(9)? != 0,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// Bind a skill to a bundle (insert ref row). Idempotent.
+    ///
+    /// `id_store` (NOT `self`) is where bundle existence is checked — see
+    /// `Store::bundle_mcp_bind`'s doc comment (mcp_servers.rs) for the full
+    /// reasoning (reagentx P0 review on PR #2639).
+    pub fn bundle_skill_bind(&self, id_store: &Store, bundle_id: &str, skill_id: &str) -> Result<(), StoreError> {
+        let bundle_exists: bool = {
+            let conn = id_store.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM db_bundles WHERE id = ?1)",
+                params![bundle_id],
+                |row| row.get(0),
+            )?
+        };
+        if !bundle_exists {
+            return Err(StoreError::Other(format!(
+                "bundle {bundle_id} not found — cannot bind a skill to a nonexistent bundle"
+            )));
+        }
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR IGNORE INTO db_bundle_skills_ref (bundle_id, skill_id) VALUES (?1, ?2)",
+            params![bundle_id, skill_id],
+        )?;
+        Ok(())
+    }
+
+    /// Atomically create a NEW, PRIVATE (never global) skill scoped and
+    /// bound directly to a bundle, enforcing bundle-scoped name uniqueness
+    /// — the bundle-level analog of `skill_upsert_unique`. See
+    /// `Store::bundle_mcp_upsert_unique`'s doc comment (mcp_servers.rs) for
+    /// the full reasoning (reagentx P1 review on PR #2639).
+    pub fn bundle_skill_upsert_unique(
+        &self,
+        id_store: &Store,
+        bundle_id: &str,
+        skill: &Skill,
+        bind_new: bool,
+    ) -> Result<(), StoreError> {
+        let bundle_exists: bool = {
+            let conn = id_store.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM db_bundles WHERE id = ?1)",
+                params![bundle_id],
+                |row| row.get(0),
+            )?
+        };
+        if !bundle_exists {
+            return Err(StoreError::Other(format!(
+                "bundle {bundle_id} not found — cannot create a skill for a nonexistent bundle"
+            )));
+        }
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let dup: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM db_skills
+             WHERE name = ?1 AND id <> ?2 AND (is_global = 1 OR id IN (
+               SELECT skill_id FROM db_bundle_skills_ref WHERE bundle_id = ?3
+             ))",
+            params![skill.name, skill.id, bundle_id],
+            |r| r.get(0),
+        )?;
+        if dup > 0 {
+            return Err(StoreError::Other(format!(
+                "skill name '{}' already bound to this bundle",
+                skill.name
+            )));
+        }
+        // is_global hardcoded to 0 — see bundle_mcp_upsert_unique's
+        // identical comment.
+        tx.execute(
+            "INSERT INTO db_skills (id, name, trigger, skill_type, description, content, is_global, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8)
+             ON CONFLICT(id) DO UPDATE SET
+               name=excluded.name, trigger=excluded.trigger, skill_type=excluded.skill_type,
+               description=excluded.description, content=excluded.content,
+               updated_at=excluded.updated_at",
+            params![
+                skill.id, skill.name, skill.trigger, skill.skill_type,
+                skill.description, skill.content,
+                skill.created_at, skill.updated_at,
+            ],
+        )?;
+        if bind_new {
+            tx.execute(
+                "INSERT OR IGNORE INTO db_bundle_skills_ref (bundle_id, skill_id) VALUES (?1, ?2)",
+                params![bundle_id, skill.id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Unbind a skill from a bundle. Returns true if a row was removed.
+    pub fn bundle_skill_unbind(&self, bundle_id: &str, skill_id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "DELETE FROM db_bundle_skills_ref WHERE bundle_id = ?1 AND skill_id = ?2",
+            params![bundle_id, skill_id],
+        )?;
+        Ok(rows > 0)
+    }
+
+    /// Return true if the given skill is accessible to the bundle (global or
+    /// bundle-bound). Mirrors `skill_is_accessible_to`.
+    pub fn bundle_skill_is_accessible_to(&self, bundle_id: &str, skill_id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM db_skills
+             WHERE id = ?1 AND (is_global = 1 OR id IN (
+               SELECT skill_id FROM db_bundle_skills_ref WHERE bundle_id = ?2
+             ))",
+            rusqlite::params![skill_id, bundle_id],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    /// Return true if the bundle has a direct ref binding to this skill
+    /// (global excluded). Mirrors `skill_is_bound_to` — used for
+    /// edit/delete-ownership checks, as opposed to
+    /// `bundle_skill_is_accessible_to`'s broader read-access check.
+    pub fn bundle_skill_is_bound_to(&self, bundle_id: &str, skill_id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM db_bundle_skills_ref WHERE bundle_id = ?1 AND skill_id = ?2",
+            rusqlite::params![bundle_id, skill_id],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
 }
 
 #[cfg(test)]
@@ -746,5 +959,391 @@ mod effective_skills_tests {
         let effective = store.effective_skills("agent-1");
         assert_eq!(effective.len(), 1);
         assert_eq!(effective[0].skill_type, "agent-skill");
+    }
+
+    fn insert_agent_with_bundle(store: &Store, id: &str, memory_id: &str) {
+        let mut def = AgentDefinition {
+            id: id.to_string(),
+            slug: String::new(),
+            name: "Test Agent".to_string(),
+            icon: String::new(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 1_700_000_000_000,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 1_700_000_000_000,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            memory_id: memory_id.to_string(),
+        };
+        store.agent_def_insert(&mut def).unwrap();
+    }
+
+    fn insert_test_bundle(store: &Store, id: &str) {
+        store
+            .bundle_memory_upsert(&crate::backend::storage::memory_bundles::Memory {
+                id: id.to_string(),
+                name: format!("Bundle {id}"),
+                description: String::new(),
+                is_blank: false,
+                is_global: false,
+                provider: "claude".to_string(),
+                model: "anthropic".to_string(),
+                instructions: String::new(),
+                instructions_by_provider: "{}".to_string(),
+                context_files: "[]".to_string(),
+                mcp_servers: "[]".to_string(),
+                skills: "[]".to_string(),
+                sort_order: 0,
+                created_at: 1_700_000_000_000,
+                updated_at: 1_700_000_000_000,
+            })
+            .unwrap();
+    }
+
+    /// Composable model v2 (docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md,
+    /// GH issue #2024 item 3): a skill referenced by the agent's OWN bound
+    /// bundle (not the agent itself) must show up in effective_skills —
+    /// otherwise the new bundle-level ref tables are inert at launch, same
+    /// as the bug this whole feature exists to fix (see
+    /// `write_agent_config_files`'s doc comment on why this must be a
+    /// single source of truth shared with the RPC handler).
+    #[test]
+    fn effective_skills_includes_the_bound_bundles_referenced_skills() {
+        let store = make_store();
+        insert_test_bundle(&store, "bundle-1");
+        insert_agent_with_bundle(&store, "agent-1", "bundle-1");
+
+        let bundle_skill = Skill {
+            id: "bundle-skill-1".to_string(),
+            name: "Bundle Skill".to_string(),
+            trigger: String::new(),
+            skill_type: "prompt".to_string(),
+            description: String::new(),
+            content: "content".to_string(),
+            is_global: false,
+            created_at: 1_700_000_000_000,
+            updated_at: 1_700_000_000_000,
+        };
+        // Upserted under an unrelated agent context, then bound to the
+        // BUNDLE (not to agent-1 directly) — simulates a skill added via
+        // the bundle editor, not the agent's own Stash.
+        store.skill_upsert_unique("some-other-context", &bundle_skill, false).unwrap();
+        store.bundle_skill_bind(&store, "bundle-1", "bundle-skill-1").unwrap();
+
+        let effective = store.effective_skills("agent-1");
+        let names: Vec<&str> = effective.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            names.contains(&"Bundle Skill"),
+            "a skill referenced only by the agent's bound bundle must still be effective: {names:?}"
+        );
+    }
+
+    /// End-to-end proof of the reagentx P1 fix, mirrored from
+    /// mcp_servers.rs's identical test: a skill created via
+    /// `bundle_skill_upsert_unique` reaches a spawned agent's effective
+    /// skill list.
+    #[test]
+    fn effective_skills_includes_a_bundle_owned_private_skill_created_via_upsert_unique() {
+        let store = make_store();
+        insert_test_bundle(&store, "bundle-1");
+        insert_agent_with_bundle(&store, "agent-1", "bundle-1");
+
+        let bundle_skill = Skill {
+            id: "bundle-own-skill".to_string(),
+            name: "Bundle-Owned Skill".to_string(),
+            trigger: String::new(),
+            skill_type: "prompt".to_string(),
+            description: String::new(),
+            content: "content".to_string(),
+            is_global: true, // ignored — upsert_unique forces is_global=false
+            created_at: 1_700_000_000_000,
+            updated_at: 1_700_000_000_000,
+        };
+        store.bundle_skill_upsert_unique(&store, "bundle-1", &bundle_skill, true).unwrap();
+
+        let effective = store.effective_skills("agent-1");
+        let names: Vec<&str> = effective.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            names.contains(&"Bundle-Owned Skill"),
+            "a bundle-owned private skill created via bundle_skill_upsert_unique must reach the agent's effective skills: {names:?}"
+        );
+    }
+
+    /// reagentx P1 on PR #2639: `has_own_skill_refs` must reflect ONLY the
+    /// agent's own direct binds, never a bundle-referenced skill — mandatory
+    /// ABF means every agent has a bundle, so if a bundle's private skill
+    /// alone could flip this flag, a legacy-only agent bound to ANY bundle
+    /// that happens to reference one private skill would silently lose all
+    /// of its `db_agent_skills` entries the moment someone edits that
+    /// bundle, with no action taken on the agent itself. The bundle's
+    /// referenced skill must still appear in the result (it's not excluded)
+    /// — it just must not trigger the "own refs are authoritative, discard
+    /// legacy" path on its own.
+    #[test]
+    fn a_bundle_referenced_private_skill_does_not_discard_the_agents_own_legacy_skills() {
+        let store = make_store();
+        insert_test_bundle(&store, "bundle-1");
+        insert_agent_with_bundle(&store, "agent-1", "bundle-1");
+
+        store.agent_skill_insert(&AgentSkill {
+            id: "legacy-1".to_string(),
+            agent_id: "agent-1".to_string(),
+            name: "Legacy Skill".to_string(),
+            trigger: "legacy".to_string(),
+            skill_type: "prompt".to_string(),
+            description: "legacy description".to_string(),
+            content: "legacy content".to_string(),
+            created_at: 1_700_000_000_000,
+        }).unwrap();
+
+        let bundle_private_skill = Skill {
+            id: "bundle-private-1".to_string(),
+            name: "Bundle Private Skill".to_string(),
+            trigger: String::new(),
+            skill_type: "prompt".to_string(),
+            description: String::new(),
+            content: "content".to_string(),
+            is_global: false,
+            created_at: 1_700_000_000_000,
+            updated_at: 1_700_000_000_000,
+        };
+        store.skill_upsert_unique("some-other-context", &bundle_private_skill, false).unwrap();
+        store.bundle_skill_bind(&store, "bundle-1", "bundle-private-1").unwrap();
+        // agent-1 itself has NO own db_skills ref — only its bundle does.
+
+        let effective = store.effective_skills("agent-1");
+        let names: Vec<&str> = effective.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            names.contains(&"Legacy Skill"),
+            "a bundle-referenced private skill must not silently discard the agent's own legacy skills: {names:?}"
+        );
+        assert!(
+            names.contains(&"Bundle Private Skill"),
+            "the bundle-referenced skill must still be included, just not treated as agent-authoritative: {names:?}"
+        );
+    }
+
+    #[test]
+    fn effective_skills_does_not_duplicate_a_global_skill_visible_via_both_agent_and_bundle() {
+        let store = make_store();
+        insert_test_bundle(&store, "bundle-1");
+        insert_agent_with_bundle(&store, "agent-1", "bundle-1");
+        store.skill_upsert_unique_global(&global_skill("global-1", "Global Skill")).unwrap();
+
+        let effective = store.effective_skills("agent-1");
+        let matches: Vec<_> = effective.iter().filter(|s| s.name == "Global Skill").collect();
+        assert_eq!(matches.len(), 1, "a global skill visible via both the agent and its bundle must not be duplicated: {effective:?}");
+    }
+}
+
+#[cfg(test)]
+mod bundle_ref_tests {
+    use super::*;
+    use crate::backend::storage::memory_bundles::Memory;
+
+    fn make_store() -> Store {
+        Store::open_in_memory().unwrap()
+    }
+
+    fn insert_bundle(store: &Store, id: &str) {
+        store
+            .bundle_memory_upsert(&Memory {
+                id: id.to_string(),
+                name: format!("Bundle {id}"),
+                description: String::new(),
+                is_blank: false,
+                is_global: false,
+                provider: "claude".to_string(),
+                model: "anthropic".to_string(),
+                instructions: String::new(),
+                instructions_by_provider: "{}".to_string(),
+                context_files: "[]".to_string(),
+                mcp_servers: "[]".to_string(),
+                skills: "[]".to_string(),
+                sort_order: 0,
+                created_at: 1_700_000_000_000,
+                updated_at: 1_700_000_000_000,
+            })
+            .unwrap();
+    }
+
+    fn skill(id: &str, name: &str, is_global: bool) -> Skill {
+        Skill {
+            id: id.to_string(),
+            name: name.to_string(),
+            trigger: String::new(),
+            skill_type: "prompt".to_string(),
+            description: String::new(),
+            content: "content".to_string(),
+            is_global,
+            created_at: 1_700_000_000_000,
+            updated_at: 1_700_000_000_000,
+        }
+    }
+
+    #[test]
+    fn bind_makes_a_private_skill_visible_in_bundle_skill_list() {
+        let store = make_store();
+        insert_bundle(&store, "bundle-1");
+        store.skill_upsert_unique_global(&skill("skill-global", "Global", true)).unwrap();
+        store
+            .skill_upsert_unique("some-other-agent-context", &skill("skill-private", "Private", false), false)
+            .unwrap_or(());
+
+        let before = store.bundle_skill_list("bundle-1").unwrap();
+        assert_eq!(before.len(), 1, "only the global skill should be visible before any bind: {before:?}");
+
+        store.bundle_skill_bind(&store, "bundle-1", "skill-private").unwrap();
+        let after = store.bundle_skill_list("bundle-1").unwrap();
+        assert_eq!(after.len(), 2, "private skill must now be visible after binding: {after:?}");
+        let private_item = after.iter().find(|i| i.skill.id == "skill-private").expect("private skill present");
+        assert!(private_item.bound_to_bundle);
+    }
+
+    #[test]
+    fn bind_is_not_visible_to_a_different_bundle() {
+        let store = make_store();
+        insert_bundle(&store, "bundle-1");
+        insert_bundle(&store, "bundle-2");
+        store
+            .skill_upsert_unique("ctx", &skill("skill-private", "Private", false), false)
+            .unwrap_or(());
+        store.bundle_skill_bind(&store, "bundle-1", "skill-private").unwrap();
+
+        let bundle2_list = store.bundle_skill_list("bundle-2").unwrap();
+        assert!(
+            bundle2_list.is_empty(),
+            "a private skill bound to bundle-1 must not leak into bundle-2's list: {bundle2_list:?}"
+        );
+    }
+
+    #[test]
+    fn bind_errors_when_the_bundle_does_not_exist() {
+        let store = make_store();
+        store.skill_upsert_unique_global(&skill("skill-1", "S", true)).unwrap();
+        let result = store.bundle_skill_bind(&store, "no-such-bundle", "skill-1");
+        assert!(result.is_err(), "binding to a nonexistent bundle must error, not silently no-op");
+    }
+
+    #[test]
+    fn unbind_removes_the_ref_and_is_idempotent() {
+        let store = make_store();
+        insert_bundle(&store, "bundle-1");
+        store
+            .skill_upsert_unique("ctx", &skill("skill-private", "Private", false), false)
+            .unwrap_or(());
+        store.bundle_skill_bind(&store, "bundle-1", "skill-private").unwrap();
+
+        let removed = store.bundle_skill_unbind("bundle-1", "skill-private").unwrap();
+        assert!(removed);
+        assert!(store.bundle_skill_list("bundle-1").unwrap().is_empty());
+
+        let removed_again = store.bundle_skill_unbind("bundle-1", "skill-private").unwrap();
+        assert!(!removed_again, "unbinding an already-unbound pair returns false, not an error");
+    }
+
+    #[test]
+    fn deleting_a_skill_purges_its_bundle_ref_too() {
+        let store = make_store();
+        insert_bundle(&store, "bundle-1");
+        store
+            .skill_upsert_unique("ctx", &skill("skill-private", "Private", false), false)
+            .unwrap_or(());
+        store.bundle_skill_bind(&store, "bundle-1", "skill-private").unwrap();
+        assert_eq!(store.bundle_skill_list("bundle-1").unwrap().len(), 1);
+
+        store.skill_delete("skill-private").unwrap();
+        assert!(
+            store.bundle_skill_list("bundle-1").unwrap().is_empty(),
+            "the bundle ref row must be purged when the underlying skill is deleted"
+        );
+    }
+
+    /// reagentx P0 review on PR #2639: bundle existence must be checked
+    /// against `id_store`, not `self` — see the identical test in
+    /// mcp_servers.rs for the full reasoning, mirrored here for skills.
+    #[test]
+    fn bind_checks_bundle_existence_in_id_store_not_self() {
+        let wstore = make_store();
+        let id_store = make_store();
+        insert_bundle(&id_store, "bundle-1");
+        wstore.skill_upsert_unique_global(&skill("skill-1", "S", true)).unwrap();
+
+        let result = wstore.bundle_skill_bind(&id_store, "bundle-1", "skill-1");
+        assert!(result.is_ok(), "must check bundle existence against id_store, not self: {result:?}");
+    }
+
+    #[test]
+    fn bind_fails_when_bundle_exists_only_in_self_not_id_store() {
+        let wstore = make_store();
+        let id_store = make_store();
+        insert_bundle(&wstore, "bundle-1");
+        wstore.skill_upsert_unique_global(&skill("skill-1", "S", true)).unwrap();
+
+        let result = wstore.bundle_skill_bind(&id_store, "bundle-1", "skill-1");
+        assert!(
+            result.is_err(),
+            "a bundle only present in self's non-authoritative copy must not satisfy the id_store check: {result:?}"
+        );
+    }
+
+    /// reagentx P1 review on PR #2639: the missing "give this bundle its
+    /// own skill" path — see the identical test in mcp_servers.rs.
+    #[test]
+    fn upsert_unique_creates_a_new_private_skill_bound_to_the_bundle() {
+        let store = make_store();
+        insert_bundle(&store, "bundle-1");
+
+        store
+            .bundle_skill_upsert_unique(&store, "bundle-1", &skill("new-skill", "Bundle-Only Skill", true), true)
+            .unwrap();
+
+        let list = store.bundle_skill_list("bundle-1").unwrap();
+        let item = list.iter().find(|i| i.skill.id == "new-skill").expect("newly created skill present");
+        assert!(item.bound_to_bundle);
+        assert!(!item.skill.is_global, "upsert_unique must force is_global=false regardless of the input struct");
+    }
+
+    #[test]
+    fn upsert_unique_rejects_a_duplicate_name_already_bound_to_the_bundle() {
+        let store = make_store();
+        insert_bundle(&store, "bundle-1");
+        store.bundle_skill_upsert_unique(&store, "bundle-1", &skill("skill-a", "Dup Name", true), true).unwrap();
+
+        let result = store.bundle_skill_upsert_unique(&store, "bundle-1", &skill("skill-b", "Dup Name", true), true);
+        assert!(result.is_err(), "a second skill with the same name bound to the same bundle must be rejected");
+    }
+
+    #[test]
+    fn is_accessible_to_reflects_global_and_bound_state() {
+        let store = make_store();
+        insert_bundle(&store, "bundle-1");
+        store.skill_upsert_unique_global(&skill("skill-global", "Global", true)).unwrap();
+        store
+            .skill_upsert_unique("ctx", &skill("skill-private", "Private", false), false)
+            .unwrap_or(());
+
+        assert!(store.bundle_skill_is_accessible_to("bundle-1", "skill-global").unwrap());
+        assert!(!store.bundle_skill_is_accessible_to("bundle-1", "skill-private").unwrap());
+        store.bundle_skill_bind(&store, "bundle-1", "skill-private").unwrap();
+        assert!(store.bundle_skill_is_accessible_to("bundle-1", "skill-private").unwrap());
     }
 }
