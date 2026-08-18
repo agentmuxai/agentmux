@@ -13,45 +13,30 @@
 
 import { markEnd, markStart } from "@/perf";
 import { fireAndForget } from "@/util/util";
-import { TAB_COLORS } from "@/app/tab/tab";
-import { activeTabId, workspace } from "./window-identity";
-import { ObjectService, WorkspaceService } from "./services";
+import { WorkspaceService } from "./services";
 import { holdRevealGate, scheduleRevealLift } from "./tab-reveal";
-import * as WOS from "./wos";
-
-/**
- * Picks a random color for a newly-created tab, so successive tabs read
- * as visually distinct at a glance instead of all defaulting to the same
- * hue. The first (startup) tab is unaffected — it keeps its fixed "Blue"
- * standard color, applied separately by the startup-tab backfill in
- * tabbar.tsx. Users can still change the colour per-tab via the
- * right-click menu after creation.
- */
-function randomNewTabColor(): string {
-    return TAB_COLORS[Math.floor(Math.random() * TAB_COLORS.length)].hex;
-}
+import { activeTabId, workspace } from "./window-identity";
 
 export function createTab() {
     const ws = workspace();
     if (ws == null) return;
     fireAndForget(async () => {
-        // Pin the gate while CreateTab + UpdateObjectMeta + preset import
-        // + applyTabPreset run. Calling scheduleRevealLift here would let
-        // the 80ms SETTLE window elapse during the (longtask-free) RPCs
-        // and layout-model polling inside applyTabPreset, so the gate
-        // would lift before the agent/sysinfo/swarm blocks have mounted
-        // and the user would still see the piecemeal cascade. The
-        // detector is started in `finally` once the preset apply has
-        // returned (or failed) — at that point SETTLE / MAX_GATE measure
-        // the actual mount window. See issue #774 /
-        // SPEC_TAB_CONTENT_REVEAL_GATE.md.
+        // Pin the gate while CreateTab + preset import + applyTabPreset
+        // run. Calling scheduleRevealLift here would let the 80ms SETTLE
+        // window elapse during the (longtask-free) RPCs and layout-model
+        // polling inside applyTabPreset, so the gate would lift before the
+        // agent/sysinfo/swarm blocks have mounted and the user would still
+        // see the piecemeal cascade. The detector is started in `finally`
+        // once the preset apply has returned (or failed) — at that point
+        // SETTLE / MAX_GATE measure the actual mount window. See issue
+        // #774 / SPEC_TAB_CONTENT_REVEAL_GATE.md.
         holdRevealGate();
         try {
             const tabId = await WorkspaceService.CreateTab(ws.oid, "", true, false);
-            await ObjectService.UpdateObjectMeta(
-                WOS.makeORef("tab", tabId),
-                { "tab:color": randomNewTabColor() } as MetaType,
-            );
+            // New tabs intentionally start with no `tab:color` — see
+            // docs/reports/REPORT_REMOVE_AUTO_TAB_COLOR_2026_08_18.md. Users
+            // still pick one manually via the right-click swatch picker
+            // (tab.tsx); this used to auto-assign a random hex here.
             // Default-layout preset (agent + sysinfo + swarm). Lives in
             // a single central module so any future tab-creation path
             // (duplicate, tear-off destination, startup-tab backfill)

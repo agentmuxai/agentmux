@@ -1391,7 +1391,6 @@ declare global {
         // Tab accent color (frontend/app/tab/tab.tsx, tabbar.tsx). Was missing
         // here despite being a real, actively-set meta key — #859.
         "tab:color"?: string | null;
-        "tab:color-initialized"?: boolean;
         "cmd:*"?: boolean;
         cmd?: string;
         "cmd:interactive"?: boolean;
