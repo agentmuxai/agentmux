@@ -112,13 +112,15 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
     const intervalSecs = createMemo(() => model.intervalSecsAtom());
 
     const title = createMemo(() => yvals().length > 1);
-    // Exactly 3 metrics (the "CPU + Mem + Net" plot type) stacks as a single
-    // column of 3 full-width rows instead of falling into the 2-column grid
-    // below: at 2 columns, 3 panels wrap to a 2+1 layout that leaves the
-    // second row half empty. >3 (the "All CPU" per-core plot type, up to 32
-    // panels) keeps 2 columns — this change is scoped to the specific case
-    // that was actually losing space.
-    const cols1 = createMemo(() => yvals().length === 3);
+    // The "CPU + Mem + Net" plot type stacks as a single column of 3
+    // full-width rows instead of falling into the 2-column grid below: at 2
+    // columns, 3 panels wrap to a 2+1 layout that leaves the second row
+    // half empty. Keyed off the plot type itself, NOT `yvals().length === 3`
+    // (reagentx P2 on PR #2638) — "All CPU" also produces exactly 3 panels
+    // on any machine with exactly 3 detected cores, which would otherwise
+    // incorrectly force that view into the single-column layout meant only
+    // for this one plot type.
+    const cols1 = createMemo(() => model.plotTypeSelectedAtom() === "CPU + Mem + Net");
     const cols2 = createMemo(() => yvals().length > 2 && !cols1());
 
     return (
