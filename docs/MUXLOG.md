@@ -21,6 +21,7 @@ muxlog bridge       # startup-handshake trace — debug "Can't reconnect" loops
 muxlog errors       # just the ERROR/WARN lines across host + sidecar
 muxlog swarm        # subagent/swarm lifecycle trace — spawn/name/status, debug duplicate groups
 muxlog auth         # provider auth/identity trace — login, OAuth dir wiring, unlink/logout
+muxlog phases       # merged turn-phase timeline for one pane — defaults to your own ($AGENTMUX_BLOCKID)
 muxlog help         # full usage
 ```
 
@@ -84,6 +85,7 @@ muxlog srv --since 2026-06-15T23:30 cat        # a time window
 | `muxlog bridge` | the startup handshake — `Loading URL`, `Injected IPC …`, `backend-ready`, `window.api`, `Bootstrap failed` — correlated in time, so a reconnect loop is obvious at a glance |
 | `muxlog swarm` | subagent/swarm lifecycle — spawn, `display_name` resolution (`subagent.GenerateName`), status transitions (`reconcile_stale_subagents`' active→abandoned pass), and the `parent_block_id`/`session_id`/`workflow_id` each event carries — filters the sidecar log to `subagent_watcher.rs`'s tracing target so a duplicate-group or stuck-status report is diagnosable from logs alone (srv-side only; there's no host-side subagent logging to combine in) |
 | `muxlog auth` | provider auth / identity lifecycle — the login flow (`auth.start` / `auth.spawn` child start+exit / `auth.cancel`), OAuth config-dir wiring, `auth success (direct-account)` persistence, `CheckCliAuth` + the one-time `claude auth:` credential import, and the logout side (`identity.unlink:` provider unlinks, `identity.delete:` account + keychain removal). Auth events span multiple srv modules, so this filters on the **message** vocabulary rather than a tracing target — pass your own `--grep` to override, or combine `--since`/`--level`/`-i` as usual. Ideal for repeated login/logout stress runs |
+| `muxlog phases [<block-id>]` | **Merged, chronological turn-phase timeline for one agent pane** — combines the frontend's `[wave-turn]` transition log (host) with the backend's `[health] turn_active flip` log (srv) into a single, correctly-ordered stream, instead of the two separate files you'd otherwise have to cross-reference by hand. Defaults to your own pane via `$AGENTMUX_BLOCKID` (already set in every agent's shell env) — pass an explicit block id to look at a different pane. Host and srv logs are correlated to the SAME running instance automatically (matched by version + source root, not just "most recently active" independently for each), so this stays correct even with several instances running. A stray/late `StreamFlushObserved` re-promotion is tagged `(stray)` distinctly from a legitimate one; a `watchdog: tick #N` heartbeat line appears every ~60s as direct proof the recovery watchdog is alive, not just inferred from silence. `--raw` emits the original NDJSON for matched lines only. See `docs/specs/SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18.md` |
 
 ---
 

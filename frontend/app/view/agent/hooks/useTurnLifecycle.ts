@@ -363,6 +363,20 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
     // extra or redundant tick is a same-reference no-op for every pane
     // that isn't actually stuck.
     const onVisibilityChange = () => {
+        // Logged on EVERY invocation (both directions), not just the
+        // "visible" branch below that dispatches the catch-up tick — this
+        // is the only direct evidence that `visibilitychange` fired at all
+        // for this pane's window, which the fix above depends on but which
+        // no log line confirmed before this. Without it, a future incident
+        // is back to inferring from the resulting (indistinguishable from
+        // a regular 5s interval tick) `StreamWatchdogTick` dispatch, same
+        // gap the Aug 14 report had to reason around. See
+        // docs/specs/SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18.md.
+        console.info(
+            "[wave-turn]",
+            `pane=${opts.blockId.slice(0, 7)}`,
+            `visibility: ${document.visibilityState === "visible" ? "hidden→visible" : "visible→hidden"}`,
+        );
         if (document.visibilityState === "visible") {
             opts.model.dispatchPane({
                 type: "StreamWatchdogTick",

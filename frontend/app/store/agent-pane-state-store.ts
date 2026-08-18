@@ -117,7 +117,26 @@ interface Slot {
     // every 5s watchdog tick for as long as the stall lasts. Reset on every
     // turnPhase.kind transition, see dispatch().
     stuckLogged: boolean;
+    // Counts `StreamWatchdogTick` dispatches for this pane since it was
+    // registered. Every `WATCHDOG_HEARTBEAT_EVERY_N_TICKS`th tick gets a
+    // `[wave-turn] watchdog: tick` line regardless of whether the reducer
+    // found anything stuck — the edge-triggered `stream-stuck`/
+    // `working-recovered` lines below only fire when something is WRONG,
+    // so a genuinely-dead watchdog interval (never dispatching this
+    // command at all) produces total silence, indistinguishable from "the
+    // watchdog is fine and nothing needed recovering." That ambiguity is
+    // exactly what made docs/reports/REPORT_AGENTA_STUCK_WORKING_INVESTIGATION_2026_08_14.md's
+    // root-cause reasoning (§4) an inference from absence rather than a
+    // direct fact ("if it were ticking we'd see a line — we don't").
+    // See docs/specs/SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18.md.
+    watchdogTickCount: number;
 }
+
+// One heartbeat line per this many `StreamWatchdogTick` dispatches (5s
+// interval per useTurnLifecycle.ts's WATCHDOG_INTERVAL_MS) — ~60s cadence.
+// Cheap proof-of-life without flooding a long-running pane's log with a
+// line every 5s.
+const WATCHDOG_HEARTBEAT_EVERY_N_TICKS = 12;
 
 const slots = new Map<string, Slot>();
 
@@ -176,7 +195,7 @@ export function registerPane(
     agentId: string,
     proj: AgentPaneProjections,
 ): void {
-    slots.set(blockId, { state: initialState(agentId), proj, stuckLogged: false });
+    slots.set(blockId, { state: initialState(agentId), proj, stuckLogged: false, watchdogTickCount: 0 });
 }
 
 /**
@@ -237,14 +256,44 @@ export function dispatch(
         slot.stuckLogged = false;
     }
     if (prev.turnPhase.kind !== slot.state.turnPhase.kind) {
+        // Tag a STRAY `StreamFlushObserved` re-promotion distinctly from a
+        // legitimate one. The reducer's `StreamFlushObserved` arm promotes
+        // to `Streaming` from `Submitting` (the normal hand-off — first
+        // content arriving after submit) OR from `Idle`/`Disconnected`/
+        // `Done` (a flush arriving after the turn already looked finished
+        // — the re-promotion risk #7 of
+        // docs/reports/REPORT_WORKING_STATE_TELEMETRY_AUDIT_2026_07_27.md
+        // describes). Only the second group is the "stray/late" shape that
+        // docs/reports/REPORT_AGENTA_STUCK_WORKING_INVESTIGATION_2026_08_14.md
+        // §3 had to reconstruct by hand from surrounding context — tagging
+        // it here makes that distinction a direct grep instead of an
+        // inference. See docs/specs/SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18.md.
+        const isStrayFlush =
+            command.type === "StreamFlushObserved" &&
+            slot.state.turnPhase.kind === "Streaming" &&
+            prev.turnPhase.kind !== "Submitting";
         console.info(
             "[wave-turn]",
             `pane=${blockId.slice(0, 7)}`,
             `${prev.turnPhase.kind} → ${slot.state.turnPhase.kind}`,
-            `cmd=${command.type}`,
+            `cmd=${command.type}${isStrayFlush ? " (stray)" : ""}`,
             `toolsActive=${slot.state.turnPhase.kind === "Streaming" ? slot.state.turnPhase.toolsActive : "-"}`,
             `currentTool=${slot.state.currentTool ?? "-"}`,
         );
+    }
+
+    // Periodic watchdog-liveness heartbeat — see WATCHDOG_HEARTBEAT_EVERY_N_TICKS's
+    // doc comment on `Slot` for why this exists alongside the edge-triggered
+    // stream-stuck/working-recovered lines below rather than replacing them.
+    if (command.type === "StreamWatchdogTick") {
+        slot.watchdogTickCount++;
+        if (slot.watchdogTickCount % WATCHDOG_HEARTBEAT_EVERY_N_TICKS === 0) {
+            console.info(
+                "[wave-turn]",
+                `pane=${blockId.slice(0, 7)}`,
+                `watchdog: tick #${slot.watchdogTickCount} — alive, phase=${slot.state.turnPhase.kind}`,
+            );
+        }
     }
 
     // Project changes — only call setters for fields that actually

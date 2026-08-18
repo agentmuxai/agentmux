@@ -273,4 +273,88 @@ describe("agent-pane-state-store (cascade contracts)", () => {
             });
         });
     });
+
+    // ────────────────────────────────────────────────────────────────
+    // SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18.md — [wave-turn]
+    // additions that let `muxlog phases` distinguish a stray re-promotion
+    // from a legitimate one, and give a direct proof-of-life for the
+    // watchdog interval instead of inferring it from silence.
+    // ────────────────────────────────────────────────────────────────
+    describe("[wave-turn] stray StreamFlushObserved tagging", () => {
+        it("tags a flush that re-promotes from Idle as (stray)", () => {
+            const info = vi.spyOn(console, "info").mockImplementation(() => {});
+            try {
+                registerPane("blockStray", "agentA", noopProj());
+                dispatch("blockStray", { type: "InitReady", at: 100 });
+                // StreamSubscribe from Idle stays Idle but sets lastEventMs,
+                // which is what un-gates StreamFlushObserved below.
+                dispatch("blockStray", { type: "StreamSubscribe", at: 100 });
+                info.mockClear();
+
+                dispatch("blockStray", { type: "StreamFlushObserved", addedCount: 1, at: 200 });
+
+                const line = info.mock.calls.find((c) => c[0] === "[wave-turn]");
+                expect(line).toBeDefined();
+                expect(line?.join(" ")).toContain("Idle → Streaming");
+                expect(line?.join(" ")).toContain("(stray)");
+            } finally {
+                info.mockRestore();
+            }
+        });
+
+        it("does NOT tag the normal Submitting → Streaming hand-off", () => {
+            const info = vi.spyOn(console, "info").mockImplementation(() => {});
+            try {
+                registerPane("blockNormal", "agentA", noopProj());
+                dispatch("blockNormal", { type: "InitReady", at: 100 });
+                dispatch("blockNormal", { type: "StreamSubscribe", at: 100 });
+                dispatch("blockNormal", { type: "TurnStart", at: 110 });
+                info.mockClear();
+
+                dispatch("blockNormal", { type: "StreamFlushObserved", addedCount: 1, at: 120 });
+
+                const line = info.mock.calls.find((c) => c[0] === "[wave-turn]");
+                expect(line).toBeDefined();
+                expect(line?.join(" ")).toContain("Submitting → Streaming");
+                expect(line?.join(" ")).not.toContain("(stray)");
+            } finally {
+                info.mockRestore();
+            }
+        });
+    });
+
+    describe("[wave-turn] watchdog tick heartbeat", () => {
+        it("logs a heartbeat only every 12th StreamWatchdogTick dispatch", () => {
+            const info = vi.spyOn(console, "info").mockImplementation(() => {});
+            try {
+                registerPane("blockTick", "agentA", noopProj());
+                info.mockClear();
+
+                const heartbeatCalls = () =>
+                    info.mock.calls.filter((c) => c.join(" ").includes("watchdog: tick #"));
+
+                for (let i = 1; i <= 11; i++) {
+                    dispatch("blockTick", { type: "StreamWatchdogTick", nowMs: i * 5000 });
+                }
+                expect(heartbeatCalls()).toHaveLength(0);
+
+                dispatch("blockTick", { type: "StreamWatchdogTick", nowMs: 12 * 5000 });
+                expect(heartbeatCalls()).toHaveLength(1);
+                expect(heartbeatCalls()[0].join(" ")).toContain("watchdog: tick #12");
+
+                // Counts independently of whether the reducer itself no-ops
+                // (unsubscribed pane here — lastEventMs is still null) —
+                // this heartbeat is proof the INTERVAL dispatched the
+                // command at all, not proof the reducer found work to do.
+                for (let i = 13; i <= 23; i++) {
+                    dispatch("blockTick", { type: "StreamWatchdogTick", nowMs: i * 5000 });
+                }
+                expect(heartbeatCalls()).toHaveLength(1);
+                dispatch("blockTick", { type: "StreamWatchdogTick", nowMs: 24 * 5000 });
+                expect(heartbeatCalls()).toHaveLength(2);
+            } finally {
+                info.mockRestore();
+            }
+        });
+    });
 });
