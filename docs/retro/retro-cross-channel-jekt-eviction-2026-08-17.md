@@ -121,18 +121,17 @@ Verified: `cargo check -p agentmux-srv` clean; existing
 2. **This fix prevents *future* wrongful evictions — it does not restore
    `ScrollPinTest-host-7c31`'s entry, already deleted before the fix
    landed.** Nothing re-writes a channel's shared registry entry except
-   that agent's own one-time registration event; recovering reachability
-   for that specific agent requires it to go through that event again (in
-   practice, a restart/respawn of that agent/pane). This is itself evidence
-   for a second, independent improvement worth considering separately: a
-   periodic re-write (heartbeat) of the shared registry entry for as long
-   as an agent is alive, so a wrongful eviction (from any future bug, not
-   just this one) self-heals within one heartbeat interval instead of
-   requiring a restart. Not implemented here — deliberately scoped this
-   pass to "stop the bleeding" (don't evict live entries) rather than also
-   adding new always-on background work per agent, which touches more
-   call sites (every controller type that currently calls
-   `write_shared_from_env` once) and deserves its own review.
+   that agent's own one-time registration event (or, as of Addendum 2, the
+   new heartbeat — but only once a build containing it is running);
+   recovering reachability for that specific agent requires it to go
+   through a fresh registration event (in practice, a restart/respawn of
+   that agent/pane).
+   ~~This is itself evidence for a second, independent improvement worth
+   considering separately: a periodic re-write (heartbeat)... Not
+   implemented here.~~ **Superseded by Addendum 2 — the heartbeat turned out
+   to be required for THIS fix to work at all past an agent's first minute
+   of life, not just a nice-to-have for faster self-healing. Implemented in
+   `bootstrap.rs`.**
 3. **The fix has not yet taken effect on any running instance.** It's a
    Rust (`agentmux-srv`) change — unlike the frontend TypeScript fix on this
    same branch, it needs `task build:backend` + an srv restart to take
@@ -168,6 +167,45 @@ for everything except a just-registered entry. Added three unit tests
 (`should_evict_on_forward_failure_{true_for_dead_pid_even_when_fresh,
 false_for_alive_pid_and_fresh_entry, true_for_alive_pid_but_old_entry}`) —
 the third directly encodes the regression reagent found.
+
+## Addendum 2 — reagent's third review: the age-grace fix was hollow without a heartbeat
+
+reagent caught, again correctly, that `should_evict_on_forward_failure`'s
+age check keys off `entry.updated_at` — which, as this retro's own root
+cause section already documented, is stamped **once at registration and
+never refreshed** (no heartbeat existed anywhere in the codebase at that
+point). That means the 60s grace window only ever covers an agent's first
+minute of life. Every steady-state agent — including this retro's own
+`ScrollPinTest-host-7c31`, already up "a few minutes" when the original
+failure hit — sits well outside that window permanently, so a single
+transient forward failure against a long-running agent still evicted it
+immediately, reproducing the exact bug this PR claims to fix. The "known
+gap" this retro's original text flagged ("a periodic re-write (heartbeat)
+of the shared registry entry... not implemented here — deliberately scoped
+this pass to 'stop the bleeding'") turned out not to be an optional
+follow-up — it's load-bearing for the fix to do anything at all past the
+first minute of an agent's life.
+
+Fix: added a periodic heartbeat (`bootstrap.rs`, 20s interval, well under
+the 60s grace window) that re-writes every locally-registered agent's Tier
+2 (per-channel) and Tier 2b (host-global shared) registry entries, driven
+from `reactive::get_global_handler().list_agents()` — the in-memory Tier-1
+registry, which is authoritative and always current (updated synchronously
+on register/unregister, no staleness window of its own). A live agent's
+on-disk entries now stay fresh indefinitely; a genuinely-dead agent simply
+stops appearing in `list_agents()` (already handled by its own
+register/unregister lifecycle) and its entries age past the grace period
+and become evictable again within one heartbeat interval.
+
+This is the third round of reagent review on this PR, each catching a
+progressively subtler gap in the same mechanism: (1) no guard at all, (2)
+PID-only guard with wrong granularity (process vs. individual agent), (3)
+age-only guard with no heartbeat to make age meaningful. Worth naming as a
+pattern for next time: an eviction/staleness policy that reads a field
+("is this fresh," "is this alive") is only as good as the mechanism that
+keeps that field truthful — reviewing the READ side without checking
+whether anything WRITES to keep it current is an easy gap to miss, and was
+missed twice in a row here before reagent's third pass caught it.
 
 ## Timeline
 
