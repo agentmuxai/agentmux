@@ -1312,6 +1312,62 @@ pub async fn bind_listeners_and_network(
         backend::reactive::registry::cleanup_stale_shared(&shared_dir, 4 * 60 * 60 * 1000);
     }
 
+    // Periodic re-registration heartbeat for every LOCALLY-registered agent's
+    // Tier 2 (per-channel) and Tier 2b (host-global shared) registry
+    // entries. Without this, an entry's `updated_at` is stamped once at
+    // registration and never refreshed — so `should_evict_on_forward_failure`
+    // (registry.rs)'s grace-period check is only ever true in the ~60s right
+    // after an agent registers, useless for any steady-state agent (i.e.
+    // most of them). reagent P1 round 3 on PR #2640: the PID+age eviction
+    // guard from the earlier commits on that PR doesn't actually protect a
+    // live, long-running agent from a single transient forward failure,
+    // reproducing the exact bug the PR claims to fix. This heartbeat closes
+    // that gap: `reactive::get_global_handler().list_agents()` is the
+    // in-memory Tier-1 registry, updated synchronously on every
+    // register/unregister — so it's always accurate, with no staleness
+    // window of its own. Re-writing from it keeps a live agent's on-disk
+    // entries fresh indefinitely; a genuinely-dead agent simply stops
+    // appearing in `list_agents()` (its own register/unregister lifecycle
+    // already handles that), so its entries age past the grace period and
+    // become evictable again within one heartbeat interval. The interval is
+    // well under `FORWARD_FAILURE_GRACE_MS` so a live entry's age never
+    // approaches the grace threshold between heartbeats. See
+    // docs/retro/retro-cross-channel-jekt-eviction-2026-08-17.md.
+    {
+        let local_web_url = local_web_url.clone();
+        tokio::spawn(async move {
+            const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(20);
+            let mut interval = tokio::time::interval(HEARTBEAT_INTERVAL);
+            loop {
+                interval.tick().await;
+                let data_dir = base::get_wave_data_dir();
+                for reg in reactive::get_global_handler().list_agents() {
+                    // _with_nonce, not the plain write/write_shared_from_env
+                    // — those hardcode registration_nonce: 0, which would
+                    // silently break remove_if_nonce/
+                    // remove_shared_from_env_if_nonce's compare-and-remove
+                    // on this agent's own clean-exit cleanup (reagent P1
+                    // round 4 on PR #2640: every 20s heartbeat tick would
+                    // zero out the real nonce already recorded in
+                    // `reg.registration_nonce`).
+                    backend::reactive::registry::write_with_nonce(
+                        &data_dir,
+                        &reg.agent_id,
+                        &local_web_url,
+                        &reg.block_id,
+                        reg.registration_nonce,
+                    );
+                    backend::reactive::registry::write_shared_from_env_with_nonce(
+                        &reg.agent_id,
+                        &local_web_url,
+                        &reg.block_id,
+                        reg.registration_nonce,
+                    );
+                }
+            }
+        });
+    }
+
     // Tracks agent-spawned OS processes per block. Registered trackers
     // live as long as their agent pane; the background poller emits
     // delta events (`agent:process-added`/`-exited`) to the frontend.
