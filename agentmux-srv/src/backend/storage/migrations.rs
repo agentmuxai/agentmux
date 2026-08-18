@@ -181,7 +181,14 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 7;
 ///        independently claimed v20/v21 for an unrelated table pair — see
 ///        docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md,
 ///        issue #2492.
-pub const OBJECT_SCHEMA_VERSION: i64 = 22;
+///   v23 — db_bundle_skills_ref, db_bundle_mcp_ref: bundle-level references
+///        to the standalone skill/MCP-server primitives, mirroring the v10
+///        agent-level ref tables but keyed by bundle_id — composable model
+///        v2, step 1 of docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md
+///        (GH issue #2024 item 3). A bundle's existing mcp_servers/skills
+///        JSON columns are untouched by this — still the .abf export/import
+///        format — these ref tables are the new live-resolution path.
+pub const OBJECT_SCHEMA_VERSION: i64 = 23;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -597,6 +604,29 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             PRIMARY KEY (agent_id, mcp_id),
             FOREIGN KEY (agent_id) REFERENCES db_agent_definitions(id) ON DELETE CASCADE,
             FOREIGN KEY (mcp_id)   REFERENCES db_mcp_servers(id) ON DELETE CASCADE
+        );
+
+        -- v23: Bundle-level MCP/skill references (composable model v2,
+        -- docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md) — same shape
+        -- as the agent-level ref tables above, keyed by bundle_id instead of
+        -- agent_id. A bundle's existing `mcp_servers`/`skills` JSON columns
+        -- stay untouched (still consumed by .abf export/import); these ref
+        -- tables are the new live-resolution path, wired into launch-time
+        -- config generation alongside the agent-level refs.
+        CREATE TABLE IF NOT EXISTS db_bundle_skills_ref (
+            bundle_id TEXT NOT NULL,
+            skill_id  TEXT NOT NULL,
+            PRIMARY KEY (bundle_id, skill_id),
+            FOREIGN KEY (bundle_id) REFERENCES db_bundles(id) ON DELETE CASCADE,
+            FOREIGN KEY (skill_id)  REFERENCES db_skills(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS db_bundle_mcp_ref (
+            bundle_id TEXT NOT NULL,
+            mcp_id    TEXT NOT NULL,
+            PRIMARY KEY (bundle_id, mcp_id),
+            FOREIGN KEY (bundle_id) REFERENCES db_bundles(id) ON DELETE CASCADE,
+            FOREIGN KEY (mcp_id)    REFERENCES db_mcp_servers(id) ON DELETE CASCADE
         );
 
         -- v7: MuxBus cloud connectivity — global singleton PKCE token store.

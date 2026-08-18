@@ -48,6 +48,17 @@ pub struct McpServerCatalogItem {
     pub bound_count: i64,
 }
 
+/// `bundle_mcp_list`'s response shape — mirrors `McpServerListItem`, but
+/// "bound" means a `db_bundle_mcp_ref` row for this bundle, not an agent's
+/// `db_agent_mcp_ref` row. Composable model v2,
+/// docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md.
+#[derive(Debug, Clone, Serialize)]
+pub struct McpServerBundleListItem {
+    #[serde(flatten)]
+    pub server: McpServer,
+    pub bound_to_bundle: bool,
+}
+
 impl Store {
     /// List all MCP servers visible to an agent: own (referenced) + global,
     /// each annotated with whether this specific agent holds the bind ref.
@@ -80,6 +91,34 @@ impl Store {
             out.push(row?);
         }
         Ok(out)
+    }
+
+    /// Every MCP server visible to an agent for config materialization:
+    /// `mcp_server_list`'s own+global set, unioned with the agent's bound
+    /// bundle's own referenced servers (composable model v2,
+    /// docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md, GH issue #2024
+    /// item 3) — without this, `db_bundle_mcp_ref` would be exactly as
+    /// inert at launch as the bundle's old inline `mcp_servers` JSON column
+    /// always was. Deduped by id. Single source of truth for
+    /// `write_agent_config_files` — mirrors `effective_skills`'s own
+    /// same-source-of-truth requirement (see its doc comment).
+    pub fn effective_mcp_servers(&self, agent_id: &str) -> Vec<McpServer> {
+        let mut visible: Vec<McpServer> = self
+            .mcp_server_list(agent_id)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|item| item.server)
+            .collect();
+        if let Ok(Some(def)) = self.agent_def_get(agent_id) {
+            if !def.memory_id.is_empty() {
+                for item in self.bundle_mcp_list(&def.memory_id).unwrap_or_default() {
+                    if !visible.iter().any(|s| s.id == item.server.id) {
+                        visible.push(item.server);
+                    }
+                }
+            }
+        }
+        visible
     }
 
     /// List every GLOBAL MCP server — the Armory catalog view. Unlike
@@ -188,10 +227,13 @@ impl Store {
         }
     }
 
-    /// Delete a standalone MCP server and purge ref rows. Returns true if deleted.
+    /// Delete a standalone MCP server and purge ref rows (both agent- and
+    /// bundle-level — FK cascades may be off on some builds, same reasoning
+    /// as `skill_delete`). Returns true if deleted.
     pub fn mcp_server_delete(&self, id: &str) -> Result<bool, StoreError> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM db_agent_mcp_ref WHERE mcp_id = ?1", params![id])?;
+        conn.execute("DELETE FROM db_bundle_mcp_ref WHERE mcp_id = ?1", params![id])?;
         let rows = conn.execute("DELETE FROM db_mcp_servers WHERE id = ?1", params![id])?;
         Ok(rows > 0)
     }
@@ -350,5 +392,351 @@ impl Store {
             |row| row.get(0),
         )?;
         Ok(count > 0)
+    }
+
+    // ── Bundle-level references (composable model v2) ──────────────────
+    // docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md, GH issue #2024
+    // item 3. Mirror the agent-level methods above exactly, keyed by
+    // bundle_id via db_bundle_mcp_ref instead of agent_id/db_agent_mcp_ref.
+    // Access-control policy (e.g. "only global servers may be bound") is
+    // the RPC handler layer's job, same as the agent-level methods above —
+    // these are the raw, permissive primitives.
+
+    /// Bundle-level sibling of `mcp_server_list` — this bundle's own
+    /// (referenced) + global servers, each annotated with whether this
+    /// specific bundle holds the `db_bundle_mcp_ref` row.
+    pub fn bundle_mcp_list(&self, bundle_id: &str) -> Result<Vec<McpServerBundleListItem>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT s.id, s.name, s.transport, s.config, s.is_global, s.created_at, s.updated_at,
+                    EXISTS(SELECT 1 FROM db_bundle_mcp_ref r WHERE r.mcp_id = s.id AND r.bundle_id = ?1) AS bound_to_bundle
+             FROM db_mcp_servers s
+             WHERE s.is_global = 1
+                OR s.id IN (SELECT mcp_id FROM db_bundle_mcp_ref WHERE bundle_id = ?1)
+             ORDER BY s.is_global DESC, s.updated_at DESC",
+        )?;
+        let rows = stmt.query_map(params![bundle_id], |row| {
+            Ok(McpServerBundleListItem {
+                server: McpServer {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    transport: row.get(2)?,
+                    config: row.get(3)?,
+                    is_global: row.get::<_, i64>(4)? != 0,
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                },
+                bound_to_bundle: row.get::<_, i64>(7)? != 0,
+            })
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// Bind an MCP server to a bundle (insert ref row). Idempotent — binding
+    /// an already-bound pair is a silent no-op success.
+    ///
+    /// Errors if `bundle_id` doesn't exist: `db_bundle_mcp_ref.bundle_id`
+    /// has an FK to `db_bundles(id)`, but without this explicit check an
+    /// invalid bundle_id would have the FK silently swallow the
+    /// `INSERT OR IGNORE` — indistinguishable, by affected-row-count alone,
+    /// from the equally-silent "already bound" case. Same fix as
+    /// `mcp_server_bind`'s agent-existence guard.
+    pub fn bundle_mcp_bind(&self, bundle_id: &str, mcp_id: &str) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let bundle_exists: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM db_bundles WHERE id = ?1)",
+            params![bundle_id],
+            |row| row.get(0),
+        )?;
+        if !bundle_exists {
+            return Err(StoreError::Other(format!(
+                "bundle {bundle_id} not found — cannot bind an MCP server to a nonexistent bundle"
+            )));
+        }
+        conn.execute(
+            "INSERT OR IGNORE INTO db_bundle_mcp_ref (bundle_id, mcp_id) VALUES (?1, ?2)",
+            params![bundle_id, mcp_id],
+        )?;
+        Ok(())
+    }
+
+    /// Unbind an MCP server from a bundle. Returns true if a row was removed.
+    pub fn bundle_mcp_unbind(&self, bundle_id: &str, mcp_id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "DELETE FROM db_bundle_mcp_ref WHERE bundle_id = ?1 AND mcp_id = ?2",
+            params![bundle_id, mcp_id],
+        )?;
+        Ok(rows > 0)
+    }
+
+    /// Return true if the given MCP server is accessible to the bundle
+    /// (global or bundle-bound). Mirrors `mcp_server_is_accessible_to`.
+    pub fn bundle_mcp_is_accessible_to(&self, bundle_id: &str, mcp_id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM db_mcp_servers
+             WHERE id = ?1 AND (is_global = 1 OR id IN (
+               SELECT mcp_id FROM db_bundle_mcp_ref WHERE bundle_id = ?2
+             ))",
+            rusqlite::params![mcp_id, bundle_id],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+}
+
+#[cfg(test)]
+mod bundle_ref_tests {
+    use super::*;
+    use crate::backend::storage::memory_bundles::Memory;
+
+    fn make_store() -> Store {
+        Store::open_in_memory().unwrap()
+    }
+
+    fn insert_bundle(store: &Store, id: &str) {
+        store
+            .bundle_memory_upsert(&Memory {
+                id: id.to_string(),
+                name: format!("Bundle {id}"),
+                description: String::new(),
+                is_blank: false,
+                is_global: false,
+                provider: "claude".to_string(),
+                model: "anthropic".to_string(),
+                instructions: String::new(),
+                instructions_by_provider: "{}".to_string(),
+                context_files: "[]".to_string(),
+                mcp_servers: "[]".to_string(),
+                skills: "[]".to_string(),
+                sort_order: 0,
+                created_at: 1_700_000_000_000,
+                updated_at: 1_700_000_000_000,
+            })
+            .unwrap();
+    }
+
+    fn server(id: &str, name: &str, is_global: bool) -> McpServer {
+        McpServer {
+            id: id.to_string(),
+            name: name.to_string(),
+            transport: "stdio".to_string(),
+            config: "{}".to_string(),
+            is_global,
+            created_at: 1_700_000_000_000,
+            updated_at: 1_700_000_000_000,
+        }
+    }
+
+    #[test]
+    fn bind_makes_a_private_server_visible_in_bundle_mcp_list() {
+        let store = make_store();
+        insert_bundle(&store, "bundle-1");
+        store.mcp_server_upsert_unique_global(&server("srv-global", "Global", true)).unwrap();
+        // A private (non-global) server, upserted without any agent bind —
+        // simulates a server that exists but this bundle hasn't referenced.
+        store
+            .mcp_server_upsert_unique("some-other-agent-context", &server("srv-private", "Private", false), false)
+            .unwrap_or(());
+
+        let before = store.bundle_mcp_list("bundle-1").unwrap();
+        assert_eq!(before.len(), 1, "only the global server should be visible before any bind: {before:?}");
+        assert!(!before[0].bound_to_bundle, "global server isn't bundle-bound yet");
+
+        store.bundle_mcp_bind("bundle-1", "srv-private").unwrap();
+        let after = store.bundle_mcp_list("bundle-1").unwrap();
+        assert_eq!(after.len(), 2, "private server must now be visible after binding: {after:?}");
+        let private_item = after.iter().find(|i| i.server.id == "srv-private").expect("private server present");
+        assert!(private_item.bound_to_bundle);
+    }
+
+    #[test]
+    fn bind_is_not_visible_to_a_different_bundle() {
+        let store = make_store();
+        insert_bundle(&store, "bundle-1");
+        insert_bundle(&store, "bundle-2");
+        store
+            .mcp_server_upsert_unique("some-other-agent-context", &server("srv-private", "Private", false), false)
+            .unwrap_or(());
+        store.bundle_mcp_bind("bundle-1", "srv-private").unwrap();
+
+        let bundle2_list = store.bundle_mcp_list("bundle-2").unwrap();
+        assert!(
+            bundle2_list.is_empty(),
+            "a private server bound to bundle-1 must not leak into bundle-2's list: {bundle2_list:?}"
+        );
+    }
+
+    #[test]
+    fn bind_errors_when_the_bundle_does_not_exist() {
+        let store = make_store();
+        store.mcp_server_upsert_unique_global(&server("srv-1", "S", true)).unwrap();
+        let result = store.bundle_mcp_bind("no-such-bundle", "srv-1");
+        assert!(result.is_err(), "binding to a nonexistent bundle must error, not silently no-op");
+    }
+
+    #[test]
+    fn unbind_removes_the_ref_and_is_idempotent() {
+        let store = make_store();
+        insert_bundle(&store, "bundle-1");
+        store
+            .mcp_server_upsert_unique("ctx", &server("srv-private", "Private", false), false)
+            .unwrap_or(());
+        store.bundle_mcp_bind("bundle-1", "srv-private").unwrap();
+
+        let removed = store.bundle_mcp_unbind("bundle-1", "srv-private").unwrap();
+        assert!(removed);
+        assert!(store.bundle_mcp_list("bundle-1").unwrap().is_empty());
+
+        let removed_again = store.bundle_mcp_unbind("bundle-1", "srv-private").unwrap();
+        assert!(!removed_again, "unbinding an already-unbound pair returns false, not an error");
+    }
+
+    #[test]
+    fn deleting_a_server_purges_its_bundle_ref_too() {
+        let store = make_store();
+        insert_bundle(&store, "bundle-1");
+        store
+            .mcp_server_upsert_unique("ctx", &server("srv-private", "Private", false), false)
+            .unwrap_or(());
+        store.bundle_mcp_bind("bundle-1", "srv-private").unwrap();
+        assert_eq!(store.bundle_mcp_list("bundle-1").unwrap().len(), 1);
+
+        store.mcp_server_delete("srv-private").unwrap();
+        assert!(
+            store.bundle_mcp_list("bundle-1").unwrap().is_empty(),
+            "the bundle ref row must be purged when the underlying server is deleted"
+        );
+    }
+
+    #[test]
+    fn is_accessible_to_reflects_global_and_bound_state() {
+        let store = make_store();
+        insert_bundle(&store, "bundle-1");
+        store.mcp_server_upsert_unique_global(&server("srv-global", "Global", true)).unwrap();
+        store
+            .mcp_server_upsert_unique("ctx", &server("srv-private", "Private", false), false)
+            .unwrap_or(());
+
+        assert!(store.bundle_mcp_is_accessible_to("bundle-1", "srv-global").unwrap());
+        assert!(!store.bundle_mcp_is_accessible_to("bundle-1", "srv-private").unwrap());
+        store.bundle_mcp_bind("bundle-1", "srv-private").unwrap();
+        assert!(store.bundle_mcp_is_accessible_to("bundle-1", "srv-private").unwrap());
+    }
+
+    fn insert_agent_with_bundle(store: &Store, id: &str, memory_id: &str) {
+        let mut def = crate::backend::storage::store::AgentDefinition {
+            id: id.to_string(),
+            slug: String::new(),
+            name: "Test Agent".to_string(),
+            icon: String::new(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 1_700_000_000_000,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 1_700_000_000_000,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            memory_id: memory_id.to_string(),
+        };
+        store.agent_def_insert(&mut def).unwrap();
+    }
+
+    /// Composable model v2: an MCP server referenced by the agent's OWN
+    /// bound bundle (not the agent itself) must show up in
+    /// `effective_mcp_servers` — same requirement as
+    /// `effective_skills_includes_the_bound_bundles_referenced_skills` in
+    /// skills.rs, mirrored here for MCP.
+    #[test]
+    fn effective_mcp_servers_includes_the_bound_bundles_referenced_servers() {
+        let store = make_store();
+        insert_bundle(&store, "bundle-1");
+        insert_agent_with_bundle(&store, "agent-1", "bundle-1");
+        store
+            .mcp_server_upsert_unique("some-other-context", &server("bundle-srv", "Bundle Server", false), false)
+            .unwrap_or(());
+        store.bundle_mcp_bind("bundle-1", "bundle-srv").unwrap();
+
+        let effective = store.effective_mcp_servers("agent-1");
+        let names: Vec<&str> = effective.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            names.contains(&"Bundle Server"),
+            "a server referenced only by the agent's bound bundle must still be effective: {names:?}"
+        );
+    }
+
+    #[test]
+    fn effective_mcp_servers_does_not_duplicate_a_global_server_visible_via_both_agent_and_bundle() {
+        let store = make_store();
+        insert_bundle(&store, "bundle-1");
+        insert_agent_with_bundle(&store, "agent-1", "bundle-1");
+        store.mcp_server_upsert_unique_global(&server("global-1", "Global Server", true)).unwrap();
+
+        let effective = store.effective_mcp_servers("agent-1");
+        let matches: Vec<_> = effective.iter().filter(|s| s.name == "Global Server").collect();
+        assert_eq!(matches.len(), 1, "a global server visible via both the agent and its bundle must not be duplicated: {effective:?}");
+    }
+
+    #[test]
+    fn effective_mcp_servers_is_unaffected_when_agent_has_no_bundle() {
+        let store = make_store();
+        let mut def = crate::backend::storage::store::AgentDefinition {
+            id: "agent-no-bundle".to_string(),
+            slug: String::new(),
+            name: "No Bundle".to_string(),
+            icon: String::new(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 1_700_000_000_000,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 1_700_000_000_000,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            memory_id: String::new(),
+        };
+        store.agent_def_insert(&mut def).unwrap();
+        store.mcp_server_upsert_unique_global(&server("global-1", "Global Server", true)).unwrap();
+
+        let effective = store.effective_mcp_servers("agent-no-bundle");
+        assert_eq!(effective.len(), 1, "an agent with no bundle still sees globals, unaffected by the new union logic: {effective:?}");
     }
 }

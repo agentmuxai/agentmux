@@ -25,6 +25,9 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_mcp_catalog_bind(engine, state);
     register_mcp_catalog_list_for_agent(engine, state);
     register_mcp_catalog_unbind(engine, state);
+    register_mcp_catalog_bind_to_bundle(engine, state);
+    register_mcp_catalog_unbind_from_bundle(engine, state);
+    register_mcp_catalog_list_for_bundle(engine, state);
 }
 
 fn register_mcp_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -546,6 +549,117 @@ fn register_mcp_catalog_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     });
                 }
                 Ok(Some(json!({ "deleted": deleted })))
+            })
+        }),
+    );
+}
+
+// Bundle-scoped sibling of register_mcp_catalog_bind (above) — same DB
+// write and "only global servers may be bound" safety check, keyed by
+// bundle_id via bundle_mcp_bind instead of agent_id/mcp_server_bind.
+// Composable model v2, docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md
+// (GH issue #2024 item 3).
+fn register_mcp_catalog_bind_to_bundle(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_MCP_CATALOG_BIND_TO_BUNDLE,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Req { bundle_id: String, mcp_id: String }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("mcp.catalog.bind_to_bundle: {e}"))?;
+                // Only global servers (or ones already bound) may be bound, so
+                // this surface can't be used to bootstrap read access to
+                // another entity's private server config — same rule as
+                // mcp.catalog.bind.
+                match wstore.mcp_server_get(&req.mcp_id)
+                    .map_err(|e| format!("mcp.catalog.bind_to_bundle: {e}"))?
+                {
+                    None => return Err("mcp.catalog.bind_to_bundle: MCP server not found".to_string()),
+                    Some(s) if !s.is_global => {
+                        if !wstore.bundle_mcp_is_accessible_to(&req.bundle_id, &req.mcp_id)
+                            .map_err(|e| format!("mcp.catalog.bind_to_bundle: {e}"))?
+                        {
+                            return Err("FORBIDDEN: can only bind global MCP servers to a bundle".to_string());
+                        }
+                    }
+                    Some(_) => {}
+                }
+                wstore.bundle_mcp_bind(&req.bundle_id, &req.mcp_id)
+                    .map_err(|e| format!("mcp.catalog.bind_to_bundle: {e}"))?;
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "mcp:changed".to_string(),
+                    scopes: vec![], sender: String::new(), persist: 0, data: None,
+                });
+                Ok(Some(json!({ "bound": true })))
+            })
+        }),
+    );
+}
+
+/// Bundle-scoped sibling of `mcp.list` — GLOBAL SERVERS ONLY plus this
+/// bundle's own referenced servers, each annotated with `bound_to_bundle`.
+/// No `check_s1` (a bundle has no agent identity to gate on). Deliberately
+/// restricted to global + bundle-bound rows only (not "every private
+/// server anywhere") for the same IDOR reasoning as
+/// `mcp_server_list_global_for_agent`'s doc comment — see
+/// `bundle_mcp_list`'s own implementation.
+fn register_mcp_catalog_list_for_bundle(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_MCP_CATALOG_LIST_FOR_BUNDLE,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Req { bundle_id: String }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("mcp.catalog.list_for_bundle: {e}"))?;
+                let servers = wstore.bundle_mcp_list(&req.bundle_id)
+                    .map_err(|e| format!("mcp.catalog.list_for_bundle: {e}"))?;
+                Ok(Some(serde_json::to_value(&servers).map_err(|e| e.to_string())?))
+            })
+        }),
+    );
+}
+
+// Bundle-scoped sibling of register_mcp_catalog_unbind (above) — same
+// "global rows only" guard for the same defense-in-depth reasoning.
+fn register_mcp_catalog_unbind_from_bundle(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_MCP_CATALOG_UNBIND_FROM_BUNDLE,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Req { bundle_id: String, mcp_id: String }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("mcp.catalog.unbind_from_bundle: {e}"))?;
+                match wstore.mcp_server_get(&req.mcp_id)
+                    .map_err(|e| format!("mcp.catalog.unbind_from_bundle: {e}"))?
+                {
+                    None => return Err("mcp.catalog.unbind_from_bundle: MCP server not found".to_string()),
+                    Some(s) if !s.is_global => {
+                        return Err("FORBIDDEN: can only unbind global MCP servers from a bundle".to_string());
+                    }
+                    Some(_) => {}
+                }
+                let unbound = wstore.bundle_mcp_unbind(&req.bundle_id, &req.mcp_id)
+                    .map_err(|e| format!("mcp.catalog.unbind_from_bundle: {e}"))?;
+                if unbound {
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: "mcp:changed".to_string(),
+                        scopes: vec![], sender: String::new(), persist: 0, data: None,
+                    });
+                }
+                Ok(Some(json!({ "unbound": unbound })))
             })
         }),
     );

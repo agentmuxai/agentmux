@@ -738,12 +738,10 @@ pub(super) fn write_agent_config_files(
     // legacy blob's user servers are merged in ONLY when the agent has no own
     // ref-bound servers (so a global server never wipes a legacy-only agent's
     // .mcp.json). When the agent has own refs, those are authoritative.
-    // Same unwrap as visible_skills above — this path doesn't need bound_to_agent.
-    let visible_mcp: Vec<crate::backend::storage::McpServer> = wstore.mcp_server_list(&agent.id)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|item| item.server)
-        .collect(); // own refs + globals
+    // `effective_mcp_servers` (not the raw `mcp_server_list`) also unions in
+    // the agent's bound bundle's own referenced servers — composable model
+    // v2, docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md.
+    let visible_mcp: Vec<crate::backend::storage::McpServer> = wstore.effective_mcp_servers(&agent.id); // own refs + bundle refs + globals
     let has_own_mcp_refs = visible_mcp.iter().any(|s| !s.is_global);
     if !visible_mcp.is_empty() {
         let blob_for_merge = if has_own_mcp_refs {
