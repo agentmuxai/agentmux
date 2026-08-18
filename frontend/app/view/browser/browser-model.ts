@@ -467,13 +467,20 @@ export class BrowserViewModel implements ViewModel {
                         "nav-state",
                     );
                 }
-            } else {
-                // The url_only (on_load_end) event — main-frame load actually
-                // finished. Kept as a defense-in-depth clear even though
-                // on_loading_state_change_pane's is_loading:false branch
-                // above should already have cleared it.
-                this._dispatch({ type: "LoadFinished" }, "nav-state");
             }
+            // No `else { dispatch LoadFinished }` here anymore — reagent P1
+            // on PR #2642. That fallback used to matter when `is_loading`
+            // came only from the frame-blind on_loading_state_change_pane
+            // callback and could lag; layer 1
+            // (SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md)
+            // made the Rust side emit a dedicated, reliable is_loading:false
+            // event from the SAME on_load_end_browser_pane call that emits
+            // this url_only one, so it's always paired now and the fallback
+            // is redundant. Worse than redundant: `_dispatch` here applied
+            // loading:false IMMEDIATELY, bypassing dispatchLoadingChanged's
+            // debounce hold (layer 3) — for exactly the same-tick
+            // redirect-hop case that debounce exists to coalesce, defeating
+            // it entirely.
             // Persist the real URL to block meta so pane restore lands
             // on the last page, not whatever was passed at create time.
             RpcApi.SetMetaCommand(TabRpcClient, {

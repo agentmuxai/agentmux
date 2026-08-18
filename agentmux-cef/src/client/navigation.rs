@@ -641,6 +641,7 @@ impl AgentMuxHandler {
                     crate::browser_pane::callbacks::set_pane_main_frame_loading(
                         &self.state,
                         &block_id,
+                        b,
                         &failed_url,
                         false,
                     );
