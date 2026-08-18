@@ -288,6 +288,14 @@ export interface ToolNode {
      *  which broke two prior string-split attempts (reagent P1 x2 on PR
      *  #2630). Undefined for a manually-answered question. */
     timeoutNote?: string;
+    /** Set alongside `answerText` when an AskUserQuestion is answered — the
+     *  original question prompt(s) (`question.questions[].question`),
+     *  flattened to plain text before `question` itself is cleared. Lets
+     *  the resolved node re-print the exchange as an ordinary back-and-
+     *  forth (question read as agent text, answer read as user text)
+     *  instead of only ever showing the answer half. Undefined for a
+     *  legacy transcript answered before this field existed. */
+    questionText?: string;
 }
 
 /**

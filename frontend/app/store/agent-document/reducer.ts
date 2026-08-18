@@ -902,10 +902,37 @@ function isDuplicate(
  * `log.chunks` across the replacement and flip `log.open = false`
  * since the tool has terminated. For non-tool nodes the behavior is
  * the same as the prior unconditional replacement.
+ *
+ * Also preserves an already-answered AskUserQuestion's `answerText`/
+ * `timeoutNote`/`questionText`/`summary` across a same-id replacement —
+ * those are frontend-only optimistic fields the parser's fresh-built
+ * replacement never carries, and AskUserQuestion's own `tool_result` echo
+ * (which always eventually arrives once the answer resumes the turn) would
+ * otherwise wholesale-clobber them since the tool has no log buffer.
  */
 function mergeReplacement(existing: DocumentNode, replacement: DocumentNode): DocumentNode {
     if (existing.type !== "tool" || replacement.type !== "tool") {
         return replacement;
+    }
+    // An answered AskUserQuestion's `answerText`/`timeoutNote` are set only
+    // by useAgentQuestions.ts's optimistic handleAnswer — they never come
+    // from the event stream. But AskUserQuestion IS a real tool call, so
+    // once the answer resumes the turn, the CLI's own `tool_result` for the
+    // same tool_use_id still arrives and gets parsed into a fresh, generic
+    // ToolNode via stream-parser.ts's toolResultToNode() (no concept of
+    // these fields). Without this guard that update lands here and wins
+    // the wholesale-replace path below, silently reverting the node to the
+    // pre-answered-styling collapsed-row rendering shortly after the user
+    // answers. See docs/retro/RETRO_ASK_USER_QUESTION_ANSWER_TEXT_CLOBBER_2026_08_18.md.
+    const existingTool = existing as ToolNode;
+    if (existingTool.toolName === "AskUserQuestion" && existingTool.answerText != null) {
+        return {
+            ...(replacement as ToolNode),
+            summary: existingTool.summary,
+            answerText: existingTool.answerText,
+            timeoutNote: existingTool.timeoutNote,
+            questionText: existingTool.questionText,
+        };
     }
     const existingLog = (existing as ToolNode).log;
     if (!existingLog || existingLog.chunks.length === 0) {
