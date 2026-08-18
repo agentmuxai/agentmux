@@ -2511,6 +2511,9 @@ declare global {
         // gateway uses it to cancel a stale in-flight request for the same
         // block and reject a request that arrives out of order.
         generation: number;
+        // The user's newest message, verbatim (TurnPhase.Submitting.pendingContent).
+        // Falls back to a FileStore tail digest server-side when absent.
+        user_message?: string;
     };
 
     // wshrpc.ActivitySummaryResult

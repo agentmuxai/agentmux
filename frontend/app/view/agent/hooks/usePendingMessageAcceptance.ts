@@ -98,7 +98,7 @@ export function usePendingMessageAcceptance(opts: UsePendingMessageAcceptanceOpt
                 currentPhase == null;
             if (needsTurnStart) {
                 trail("agent:dispatch:TurnStart", { messageId });
-                opts.model.dispatchPane({ type: "TurnStart", at: Date.now() });
+                opts.model.dispatchPane({ type: "TurnStart", at: Date.now(), content: pending.text });
                 trail("agent:dispatch:TurnStart:done", { messageId });
                 opts.onTurnStartFromQueue?.();
             }
