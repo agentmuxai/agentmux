@@ -260,14 +260,57 @@ describe("BrowserViewModel nav-state loading wiring", () => {
         expect(vm.loadingAtom()).toBe(true);
     });
 
-    it("the url_only (on_load_end) event — no is_loading field — also clears loadingAtom", () => {
+    // reagent P1 on PR #2642: this used to send ONLY the url_only event and
+    // assert it alone cleared loadingAtom via an immediate (non-debounced)
+    // LoadFinished dispatch — that dispatch is now removed, since it
+    // bypassed the layer-3 debounce hold for exactly the same-tick
+    // redirect-hop case the hold exists to coalesce. Real
+    // on_load_end_browser_pane calls ALWAYS emit a paired is_loading:false
+    // event first (layer 1) — simulate that real pairing here, not the
+    // url_only event in isolation.
+    it("the paired is_loading:false + url_only (on_load_end) events clear loadingAtom after the debounce hold", () => {
         const { vm, navStateHandler } = makeVMWithNavStateHandler();
+        navStateHandler({
+            block_id: "test-block-id",
+            url: "https://example.com",
+            is_loading: false,
+            can_go_back: false,
+            can_go_forward: false,
+        });
         navStateHandler({
             block_id: "test-block-id",
             url: "https://example.com",
             url_only: true,
         });
+        expect(vm.loadingAtom()).toBe(true); // still held
+        vi.advanceTimersByTime(250);
         expect(vm.loadingAtom()).toBe(false);
+    });
+
+    it("a same-tick redirect hop's url_only event no longer bypasses the debounce hold", () => {
+        const { vm, navStateHandler } = makeVMWithNavStateHandler();
+        // The finishing hop's is_loading:false, immediately followed by the
+        // url_only address-bar-sync event Rust always pairs with it.
+        navStateHandler({
+            block_id: "test-block-id",
+            url: "https://a.com",
+            is_loading: false,
+            can_go_back: false,
+            can_go_forward: false,
+        });
+        navStateHandler({ block_id: "test-block-id", url: "https://a.com", url_only: true });
+        // A fresh redirect hop lands within the debounce window.
+        vi.advanceTimersByTime(50);
+        navStateHandler({
+            block_id: "test-block-id",
+            url: "https://b.com",
+            is_loading: true,
+            can_go_back: false,
+            can_go_forward: false,
+        });
+        // The held false never fires — advance well past when it would have.
+        vi.advanceTimersByTime(500);
+        expect(vm.loadingAtom()).toBe(true);
     });
 
     it("re-navigating after load-finished sets loadingAtom true again, and a subsequent is_loading:false clears it", () => {
