@@ -141,6 +141,13 @@ export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuest
             if (n.type !== "tool" || n.status !== "awaiting_answer") continue;
             if (n.question?.tool_use_id !== outcome.tool_use_id) continue;
             originals.push(n);
+            // Flatten the original prompt(s) to plain text BEFORE `question`
+            // is cleared below — AnsweredQuestionMessage re-prints this as
+            // ordinary agent text so the resolved node reads as a real
+            // question-then-answer exchange, not just the answer half.
+            // Header/options are the interactive panel's own affordance and
+            // don't belong in a read-back of "what the agent said."
+            const questionText = n.question?.questions.map((q) => q.question).join("\n\n");
             updated.push({
                 ...n,
                 status: "success",
@@ -152,6 +159,7 @@ export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuest
                 // line. See SPEC_ASK_USER_QUESTION_HISTORY_STYLING_2026_08_17.md.
                 answerText: outcome.answer_text,
                 timeoutNote,
+                questionText,
             });
         }
         const applyDoc = (nodes: ToolNode[]) => {

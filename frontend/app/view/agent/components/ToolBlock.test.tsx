@@ -431,11 +431,39 @@ describe("ToolBlock — answered AskUserQuestion renders as a user message", () 
         expect(container.querySelector(".agent-user-message-content pre")?.textContent).toBe("Yes");
     });
 
-    it("gets the `--answered-question` modifier class (drives the larger-text treatment)", () => {
+    it("renders the answer at normal size — no enlarged-text modifier", () => {
+        // Reverted per direct user feedback after the larger-text variant
+        // shipped: the answer should read at the SAME size as ordinary
+        // typed input, not enlarged.
         const { container } = render(() => (
             <ToolBlock node={answeredQuestion} pinned={false} onTogglePin={() => {}} />
         ));
-        expect(container.querySelector(".agent-user-message--answered-question")).not.toBeNull();
+        expect(container.querySelector(".agent-user-message--answered-question")).toBeNull();
+    });
+
+    it("prints the original question as agent text before the answer", () => {
+        const withQuestion: ToolNode = {
+            ...answeredQuestion,
+            questionText: "Which color do you like?",
+        };
+        const { container } = render(() => (
+            <ToolBlock node={withQuestion} pinned={false} onTogglePin={() => {}} />
+        ));
+        const markdown = container.querySelector(".agent-markdown-block");
+        expect(markdown?.textContent).toContain("Which color do you like?");
+        const userMessage = container.querySelector(".agent-user-message");
+        expect(userMessage?.textContent).toBe("Yes");
+        // Question reads before the answer in document order.
+        const position = markdown!.compareDocumentPosition(userMessage!);
+        expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("omits the question block when questionText is absent (answered before that field existed)", () => {
+        const { container } = render(() => (
+            <ToolBlock node={answeredQuestion} pinned={false} onTogglePin={() => {}} />
+        ));
+        expect(container.querySelector(".agent-markdown-block")).toBeNull();
+        expect(container.querySelector(".agent-user-message-content pre")?.textContent).toBe("Yes");
     });
 
     it("shows the muted timeout note verbatim from node.timeoutNote — no parsing involved", () => {
