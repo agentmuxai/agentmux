@@ -170,3 +170,33 @@
         pointer-events: none;
     }
 }
+
+// Small corner badge used instead of .browser-loading-overlay once the pane
+// has already painted real content once (layer 2,
+// SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md — see
+// browser-view.tsx's hasPaintedOnce branch). Deliberately tiny: its
+// data-pane-overlay rect only needs to cover itself, not the page, so even
+// a loading flip layer 1 doesn't catch can't blank the visible content.
+.browser-loading-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background-color: rgb(from var(--block-bg-color) r g b);
+    border: 1px solid var(--border-color);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    opacity: 1;
+
+    &.is-fading {
+        opacity: 0;
+        transition: opacity 200ms ease-out;
+        pointer-events: none;
+    }
+}
+
+.browser-loading-badge-spinner svg {
+    width: 18px;
+    height: 18px;
+}
