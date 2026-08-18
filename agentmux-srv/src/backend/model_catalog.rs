@@ -96,37 +96,44 @@ pub fn read_oauth_access_token(config_dir: &Path) -> Option<String> {
 /// Callers should use this instead of calling [`read_oauth_access_token`]
 /// directly. Never logs the token.
 ///
-/// `allow_keychain_fallback` gates steps 2/3 — both hit the OS keychain (via
-/// `identity::secret_store`), which wraps blocking `keyring` syscalls that
-/// can trigger an interactive macOS "App wants to use your confidential
-/// information" password prompt whenever a previously-stored entry exists
-/// under a code signature the OS doesn't already trust (e.g. a rebuilt local
-/// dev binary). That's fine for a flow the user explicitly triggered, but
-/// this function's only caller today (`providers.models`) is a silent,
-/// fire-and-forget background refresh fired on every app launch
-/// (`frontend/app-init.ts`) — a keychain prompt appearing unprompted at
-/// startup, for a purely cosmetic model-label refresh, is not acceptable.
-/// Pass `false` from any automatic/background caller; steps 2/3 (and the
-/// `spawn_blocking` they'd run on) are skipped entirely in that case, so
-/// there is no keychain interaction at all — matching the pre-existing,
-/// already-documented "macOS Keychain → empty → static fallback" contract.
-/// Only pass `true` from a path the user explicitly initiated.
+/// `allow_keychain_fallback` gates the two operations in steps 2/3 that
+/// actually touch the OS keychain (via `identity::secret_store`, which
+/// wraps blocking `keyring` syscalls): *persisting* a freshly-read env-var
+/// token, and reading back a *previously-persisted* one. Either can trigger
+/// an interactive macOS "App wants to use your confidential information"
+/// password prompt whenever a stored entry exists under a code signature
+/// the OS doesn't already trust (e.g. a rebuilt local dev binary). That's
+/// fine for a flow the user explicitly triggered, but this function's only
+/// caller today (`providers.models`) is a silent, fire-and-forget background
+/// refresh fired on every app launch (`frontend/app-init.ts`) — a keychain
+/// prompt appearing unprompted at startup, for a purely cosmetic
+/// model-label refresh, is not acceptable.
+///
+/// Reading the `CLAUDE_CODE_OAUTH_TOKEN` env var itself is a plain
+/// process-env read with no keychain interaction, so it's always
+/// attempted regardless of this flag (Codex P2, PR #2654) — only the
+/// persist-on-find and read-the-stored-copy operations are skipped when
+/// `false`. Pass `false` from any automatic/background caller; pass `true`
+/// only from a path the user explicitly initiated.
 pub async fn resolve_access_token(config_dir: &Path, allow_keychain_fallback: bool) -> Option<String> {
     if let Some(token) = read_oauth_access_token(config_dir) {
         return Some(token);
     }
-    if !allow_keychain_fallback {
-        return None;
-    }
-    tokio::task::spawn_blocking(|| {
+    tokio::task::spawn_blocking(move || {
         resolve_fallback_access_token(
             || std::env::var("CLAUDE_CODE_OAUTH_TOKEN").ok(),
             |token| {
+                if !allow_keychain_fallback {
+                    return;
+                }
                 if let Err(e) = secret_store::put(CLAUDE_OAUTH_TOKEN_ACCOUNT, token) {
                     tracing::warn!("model catalog: failed to persist CLAUDE_CODE_OAUTH_TOKEN: {e}");
                 }
             },
             || {
+                if !allow_keychain_fallback {
+                    return None;
+                }
                 secret_store::get(CLAUDE_OAUTH_TOKEN_ACCOUNT)
                     .ok()
                     .map(|z| z.to_string())
@@ -220,19 +227,56 @@ mod tests {
     #[tokio::test]
     async fn resolve_access_token_never_touches_keychain_when_fallback_disallowed() {
         // The fix for the app-launch keychain-prompt regression: when
-        // `allow_keychain_fallback` is false and no `.credentials.json`
-        // exists (the macOS case), this must return None without ever
-        // entering the env-var/keychain fallback branch at all — not just
-        // "return the same result," but structurally skip it, since even a
-        // *read* of a stale keychain entry can trigger an OS prompt. This
-        // test can't observe "no syscall happened" directly, but a real
-        // keychain entry under CLAUDE_OAUTH_TOKEN_ACCOUNT existing on the
-        // machine this test runs on would make the old (pre-fix) code path
-        // return Some(..) — so None here is a meaningful assertion, not a
-        // vacuous one, whenever such an entry happens to be present.
+        // `allow_keychain_fallback` is false, no `.credentials.json` exists
+        // (the macOS case), and the env var isn't set either, this must
+        // return None without ever entering the keychain-touching persist/
+        // read-back branch — not just "return the same result," but
+        // structurally skip it, since even a *read* of a stale keychain
+        // entry can trigger an OS prompt. This test can't observe "no
+        // syscall happened" directly, but a real keychain entry under
+        // CLAUDE_OAUTH_TOKEN_ACCOUNT existing on the machine this test runs
+        // on would make the old (pre-fix) code path return Some(..) — so
+        // None here is a meaningful assertion, not a vacuous one, whenever
+        // such an entry happens to be present.
+        let _lock = crate::test_support::ISOLATED_AUTH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let had_env = std::env::var("CLAUDE_CODE_OAUTH_TOKEN").ok();
+        std::env::remove_var("CLAUDE_CODE_OAUTH_TOKEN");
+
         let tmp = tempfile::tempdir().unwrap();
         let got = resolve_access_token(tmp.path(), false).await;
+
+        if let Some(v) = had_env {
+            std::env::set_var("CLAUDE_CODE_OAUTH_TOKEN", v);
+        }
         assert_eq!(got, None);
+    }
+
+    #[tokio::test]
+    async fn resolve_access_token_still_honors_env_var_when_fallback_disallowed() {
+        // Codex P2, PR #2654: reading CLAUDE_CODE_OAUTH_TOKEN is a plain
+        // process-env read with no keychain interaction, so it must still
+        // resolve even with `allow_keychain_fallback: false` — only
+        // persisting it (or reading a previously-persisted copy) is
+        // keychain-touching and gated. Before this fix, disallowing
+        // keychain fallback also silently dropped this env var, making the
+        // only real caller (providers.models) always return an empty
+        // catalog for exactly the users this env var exists for.
+        let _lock = crate::test_support::ISOLATED_AUTH_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let had_env = std::env::var("CLAUDE_CODE_OAUTH_TOKEN").ok();
+        std::env::set_var("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat-test-token");
+
+        let tmp = tempfile::tempdir().unwrap();
+        let got = resolve_access_token(tmp.path(), false).await;
+
+        match had_env {
+            Some(v) => std::env::set_var("CLAUDE_CODE_OAUTH_TOKEN", v),
+            None => std::env::remove_var("CLAUDE_CODE_OAUTH_TOKEN"),
+        }
+        assert_eq!(got.as_deref(), Some("sk-ant-oat-test-token"));
     }
 
     #[test]

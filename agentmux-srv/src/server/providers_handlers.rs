@@ -66,13 +66,15 @@ pub fn register_providers_handlers(engine: &Arc<WshRpcEngine>, _state: &AppState
                 let dir = paths.provider_auth_dir(provider.auth_dir_name);
                 // `allow_keychain_fallback: false` — this RPC is fired
                 // automatically, unprompted, on every app launch
-                // (`frontend/app-init.ts`'s init wave). The env-var/keychain
-                // fallback (model_catalog.rs's steps 2/3) can trigger an
-                // interactive macOS Keychain password prompt; a background
-                // model-label refresh must never surface one. This means the
-                // catalog silently stays on the file-based source only
-                // (Linux/Windows) — macOS keeps its static bundled fallback,
-                // per the module's own documented contract.
+                // (`frontend/app-init.ts`'s init wave). Persisting or reading
+                // back a stored fallback token (model_catalog.rs's steps 2/3)
+                // can trigger an interactive macOS Keychain password prompt;
+                // a background model-label refresh must never surface one.
+                // The `CLAUDE_CODE_OAUTH_TOKEN` env var itself is still
+                // honored either way (a plain process-env read, no keychain
+                // involved) — only the keychain-touching persist/read-back
+                // is skipped, so macOS falls back to its static bundled
+                // catalog only when that env var isn't set for this process.
                 let token = match resolve_access_token(&dir, false).await {
                     Some(t) => t,
                     // No token from the `.credentials.json` file (logged
