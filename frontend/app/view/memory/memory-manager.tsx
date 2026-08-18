@@ -25,6 +25,8 @@ import { useModalLayer } from "@/app/element/modal-layer";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { PROVIDERS } from "@/app/view/agent/providers/catalog";
 import { type MemoryDraft, MemoryViewModel } from "./memory-model";
+import { BundleMcpSection } from "./BundleMcpSection";
+import { BundleSkillsSection } from "./BundleSkillsSection";
 
 import "./memory-view.scss";
 
@@ -240,6 +242,15 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                                             Delete
                                         </button>
                                     </div>
+                                    {/* MCP servers / skills are managed live via
+                                        their own bind/unbind + upsert-for-bundle
+                                        RPCs, independent of the edit-draft flow
+                                        above — same reason AgentMcpModal/
+                                        AgentSkillsModal sit outside the agent's
+                                        own edit form. Composable model v2,
+                                        docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md. */}
+                                    <BundleMcpSection bundleId={memory().id} />
+                                    <BundleSkillsSection bundleId={memory().id} />
                                 </Show>
                             </div>
                         )}
@@ -465,13 +476,13 @@ const MemoryManagerBody = (props: MemoryManagerBodyProps): JSX.Element => {
                             </Show>
 
                             <p class="memory-view-form-hint">
-                                This bundle's other Armory Bundle Format (ABF) components — context files,
-                                MCP servers, and skills — will be editable here in a follow-up. For now they're
-                                persisted as JSON and round-trip cleanly through the form; use{" "}
+                                MCP servers and skills are managed on the bundle's own detail
+                                view (Cancel to get back there), not in this edit form — they
+                                take effect live and don't need a Save. Context files are still
+                                persisted as JSON and round-trip cleanly through this form; use{" "}
                                 <strong>Validate</strong> above to catch unsafe paths or malformed JSON in
                                 them. To bring in an existing <code>.abf</code> archive's components directly,
-                                use <strong>Import Bundle</strong> from the bundle list (Cancel to get back
-                                there).
+                                use <strong>Import Bundle</strong> from the bundle list.
                             </p>
                         </form>
                     )}
