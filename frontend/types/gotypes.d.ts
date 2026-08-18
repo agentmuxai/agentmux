@@ -595,6 +595,16 @@ declare global {
     /** `skill.catalog.list`'s response shape — see McpServerCatalogItem. */
     type SkillCatalogItem = Skill & { bound_count: number };
 
+    /** `mcp.catalog.list_for_bundle`'s response shape — an McpServer plus
+     *  whether the given bundle specifically holds the `db_bundle_mcp_ref`
+     *  bind (as opposed to just being visible because it's global).
+     *  Composable model v2, docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md. */
+    type McpServerBundleListItem = McpServer & { bound_to_bundle: boolean };
+
+    /** `skill.catalog.list_for_bundle`'s response shape — see
+     *  McpServerBundleListItem. */
+    type SkillBundleListItem = Skill & { bound_to_bundle: boolean };
+
     /** Drone pane (issue #753 Phase 1). Mirrors the Rust types in
      *  agentmux-srv/src/drone/types.rs. */
     type DroneDefinition = {
@@ -1391,7 +1401,6 @@ declare global {
         // Tab accent color (frontend/app/tab/tab.tsx, tabbar.tsx). Was missing
         // here despite being a real, actively-set meta key — #859.
         "tab:color"?: string | null;
-        "tab:color-initialized"?: boolean;
         "cmd:*"?: boolean;
         cmd?: string;
         "cmd:interactive"?: boolean;

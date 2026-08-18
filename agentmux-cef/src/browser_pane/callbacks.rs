@@ -142,6 +142,118 @@ fn fire_pane_load_watchdog(state: &Arc<AppState>, block_id: &str, epoch: u64) {
     );
 }
 
+/// Set (or clear) the main-frame-loading tracker for `block_id` and, if the
+/// tracked state actually changed, emit a `browser-pane-nav-state` event
+/// carrying the corrected `is_loading` for the frontend spinner.
+///
+/// `url` is supplied by the caller rather than re-derived here — but,
+/// unlike `arm_pane_load_watchdog`'s `url` (which deliberately wants the
+/// navigation's own PENDING request target), every caller here should pass
+/// the frame's CURRENT/already-committed URL, never a pending target. Every
+/// `browser-pane-nav-state` event's `url` field unconditionally drives the
+/// frontend's `UrlConfirmed` dispatch (`browser-model.ts`), regardless of
+/// this event's actual purpose being only the loading-spinner signal — an
+/// earlier version of `on_before_browse`'s call site passed the pending
+/// target here, which jumped the address bar to where a navigation was
+/// headed before it committed, and got the bar stuck on a redirect chain's
+/// first hop for the whole chain (reagent P2 on PR #2642). Passing the
+/// current URL instead makes this event's `UrlConfirmed` dispatch a
+/// harmless no-op — `on_load_end_browser_pane`/`on_load_error` already did
+/// this correctly (frame's now-current committed or failed URL);
+/// `on_before_browse` now passes `Frame::url()` (the previous page) too.
+///
+/// No epoch/generation guard is needed for the `false` case (unlike
+/// `browser_pane_load_watchdog`'s epoch): a `false` call only ever
+/// originates from `on_load_end_browser_pane` or a main-frame `on_load_error`
+/// that already survived the `ERR_ABORTED` filter — i.e. a navigation that
+/// was genuinely superseded by a newer one is reported as `ERR_ABORTED` and
+/// filtered out before reaching this function, so a real (non-aborted)
+/// completion/error for `block_id` can't race a newer navigation that's
+/// already `true` in the tracker. The `true` case DOES need the
+/// owning-label check below — see `resolve_pane_label`'s doc comment and
+/// `browser_pane_main_frame_loading`'s own doc comment on `AppState` for
+/// why (cross-window redock, reagent P1 on PR #2642).
+///
+/// See `docs/specs/SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md`
+/// layer 1.
+pub(crate) fn set_pane_main_frame_loading(
+    state: &Arc<AppState>,
+    block_id: &str,
+    browser: &Browser,
+    url: &str,
+    loading: bool,
+) {
+    let changed = {
+        let mut map = state.browser_pane_main_frame_loading.lock();
+        if loading {
+            // Record which LABEL owns this loading episode — a fresh
+            // navigation (this pane's first load, a reload, back/forward,
+            // or a redock's brand-new browser instance's first load) always
+            // gets ITS OWN label recorded here, so it's always treated as
+            // "changed" (and emits) even if a stale entry for the same
+            // block_id was left behind by a not-yet-cleaned-up predecessor.
+            // A redirect hop of an already-loading navigation (same
+            // browser, same label) leaves the owner unchanged — correctly
+            // a no-op, it's the same loading episode, not a new one.
+            let owner = resolve_pane_label(state, browser).unwrap_or_default();
+            map.insert(block_id.to_string(), owner.clone())
+                .as_deref()
+                != Some(owner.as_str())
+        } else {
+            map.remove(block_id).is_some()
+        }
+    };
+    if !changed {
+        return; // already in the target state — no redundant emit
+    }
+    tracing::info!(
+        "[browser-pane:diag][{}] main-frame-loading={} url={:?}",
+        block_id.chars().take(7).collect::<String>(),
+        loading,
+        url,
+    );
+    crate::events::emit_event_from_state(
+        state,
+        "browser-pane-nav-state",
+        &serde_json::json!({
+            "block_id": block_id,
+            "url": url,
+            "is_loading": loading,
+        }),
+    );
+}
+
+/// Current value of the main-frame-loading tracker for `block_id`. Read by
+/// `on_loading_state_change_browser_pane` so its own emitted `is_loading`
+/// field (that event also legitimately carries `can_go_back`/
+/// `can_go_forward`, so it can't simply stop emitting `is_loading`
+/// altogether) reflects this corrected, main-frame-scoped signal instead of
+/// forwarding CEF's raw frame-blind parameter a second time.
+pub(crate) fn is_pane_main_frame_loading(state: &Arc<AppState>, block_id: &str) -> bool {
+    state.browser_pane_main_frame_loading.lock().contains_key(block_id)
+}
+
+/// Resolve the full pane LABEL (`browser-pane-<block_id>-<seq>`) for a
+/// browser — same lookup as `resolve_pane_block_id` below, but keeps the
+/// `-<seq>` suffix instead of stripping it. The suffix is what makes this
+/// useful: it uniquely identifies THIS specific browser INSTANCE, whereas
+/// `block_id` alone is shared across a close+recreate (redock reuses the
+/// same block_id under a fresh label with a bumped seq). Used by
+/// `set_pane_main_frame_loading` to record which instance owns a loading
+/// episode, so `on_before_close_browser_pane`'s cleanup can tell whether
+/// it's still the owner before removing the entry.
+pub(crate) fn resolve_pane_label(state: &Arc<AppState>, browser: &Browser) -> Option<String> {
+    state
+        .list_browsers()
+        .into_iter()
+        .find(|(_k, b)| {
+            let mut b_clone = b.clone();
+            let mut browser_clone: cef::Browser = browser.clone();
+            b_clone.is_same(Some(&mut browser_clone)) != 0
+        })
+        .map(|(label, _)| label)
+}
+
 /// Called from `AgentMuxHandler::on_after_created` when the browser being
 /// registered is a pane (label prefix `browser-pane-*`).
 ///
@@ -271,6 +383,22 @@ pub fn on_before_close_browser_pane(state: &Arc<AppState>, label: &str) {
     if let Some(block_id) = block_id {
         state.browser_pane_zoom.lock().remove(block_id);
         state.browser_pane_context_menu_frame.lock().remove(block_id);
+        // Drop the main-frame-loading tracker entry too — otherwise a pane
+        // closed mid-navigation leaves a stale entry behind. ONLY if we're
+        // still the recorded OWNER (see `browser_pane_main_frame_loading`'s
+        // doc comment on `AppState`): on a cross-window redock, the target
+        // window's `close()` synchronously replays the deferred create — a
+        // NEW browser, same block_id, a fresh label — well before THIS
+        // (possibly much-delayed) async CEF close callback runs. An
+        // unconditional remove here would delete the NEW pane's legitimate
+        // entry out from under it, reporting `is_loading:false` while the
+        // redocked page is still genuinely loading (reagent P1 on PR #2642).
+        {
+            let mut map = state.browser_pane_main_frame_loading.lock();
+            if map.get(block_id).map(String::as_str) == Some(label) {
+                map.remove(block_id);
+            }
+        }
 
         // If this pane closes mid-navigation, its load watchdog is still
         // armed holding a cloned `Browser`. Without this removal,
@@ -352,6 +480,12 @@ pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
         };
         crate::browser_pane::trace::pane_trace(&block_id, "load-end", &format!("url={url}"));
 
+        // Main-frame load actually finished — clear the loading-spinner
+        // tracker (layer 1, SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md).
+        // `on_load_end_browser_pane` is only ever called for the main frame
+        // (filtered at the `client::navigation::on_load_end` call site).
+        set_pane_main_frame_loading(state, &block_id, browser, &url, false);
+
         // Every navigation replaces the page's own DOM/inline-style state,
         // so any CSS `zoom` injected before this load is gone with it --
         // re-apply this pane's stored factor (no-op if it's never been
@@ -427,11 +561,26 @@ pub fn on_load_end_browser_pane(state: &Arc<AppState>, browser: &Browser) {
 /// history state changes — navigation start, navigation commit, and after
 /// back/forward. `can_go_back` / `can_go_forward` are provided as direct
 /// parameters (not queried after the fact), so they're guaranteed to reflect
-/// the real committed state rather than the pre-commit race window. Same for
-/// `is_loading` — CEF's actual navigation-controller loading state, forwarded
-/// verbatim so the frontend's loading indicator reflects real top-level
-/// navigations only, not client-side (SPA) route changes, which don't invoke
-/// this callback. See SPEC_BROWSER_PANE_LOADING_BRAIN_INDICATOR_2026_07_11.md §4.1.
+/// the real committed state rather than the pre-commit race window — those
+/// are legitimately browser-level (not frame-specific) and still forwarded
+/// verbatim.
+///
+/// `is_loading`, by contrast, is CEF's aggregate loading state across the
+/// WHOLE frame tree (this callback carries no frame parameter at all — it
+/// structurally can't distinguish which frame's load it's reporting), so a
+/// sub-frame/subresource load (an ad iframe, a chat widget, an analytics
+/// beacon) can flip it long after the main document is done — the loading
+/// spinner used to trust it directly, which produced repeated
+/// show/hide/show flicker (see
+/// `docs/specs/SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md`
+/// cause 1; supersedes SPEC_BROWSER_PANE_LOADING_BRAIN_INDICATOR_2026_07_11.md
+/// §4.1's "forwarded verbatim" design, which never investigated sub-frame
+/// aggregation). The EMITTED `is_loading` field now instead reads
+/// `is_pane_main_frame_loading` — the dedicated, main-frame-only tracker
+/// maintained by `set_pane_main_frame_loading` from `on_before_browse` /
+/// `on_load_end_browser_pane` / a main-frame `on_load_error`. The raw
+/// parameter is still used for the watchdog disarm below, unchanged — that
+/// behavior isn't part of this fix.
 pub fn on_loading_state_change_browser_pane(
     state: &Arc<AppState>,
     browser: &Browser,
@@ -446,7 +595,9 @@ pub fn on_loading_state_change_browser_pane(
             // the watchdog no longer applies to it. (Arming happens earlier,
             // in `client::lifecycle::on_before_browse` — see
             // `arm_pane_load_watchdog`'s doc comment for why it can't happen
-            // here.)
+            // here.) Deliberately keyed on the RAW CEF `is_loading` param,
+            // not `is_pane_main_frame_loading` — the watchdog's own
+            // arm/disarm behavior is unchanged by this fix.
             state.browser_pane_load_watchdog.lock().remove(&block_id);
         }
 
@@ -456,10 +607,11 @@ pub fn on_loading_state_change_browser_pane(
                 .map(|f| cef::CefString::from(&cef::ImplFrame::url(&f)).to_string())
                 .unwrap_or_default()
         };
+        let corrected_is_loading = is_pane_main_frame_loading(state, &block_id);
         let block_id_short: String = block_id.chars().take(7).collect();
         tracing::info!(
-            "[browser-pane:diag][{}] emit-nav-state url={:?} url_only=false is_loading={} can_back={} can_forward={}",
-            block_id_short, url, is_loading, can_go_back, can_go_forward,
+            "[browser-pane:diag][{}] emit-nav-state url={:?} url_only=false is_loading={} (raw_cef_is_loading={}) can_back={} can_forward={}",
+            block_id_short, url, corrected_is_loading, is_loading, can_go_back, can_go_forward,
         );
         crate::events::emit_event_from_state(
             state,
@@ -469,7 +621,7 @@ pub fn on_loading_state_change_browser_pane(
                 "url": url,
                 "can_go_back": can_go_back,
                 "can_go_forward": can_go_forward,
-                "is_loading": is_loading,
+                "is_loading": corrected_is_loading,
             }),
         );
     } else {

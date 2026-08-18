@@ -157,6 +157,37 @@ pub struct AppState {
     pub browser_pane_load_watchdog:
         Mutex<std::collections::HashMap<String, (std::time::Instant, u64, Browser, String)>>,
 
+    /// Maps a pane `block_id`, while its MAIN FRAME is currently between
+    /// navigation-start and load-finish, to the LABEL of the browser
+    /// instance currently "owning" that loading episode. This is the
+    /// frontend loading spinner's actual `is_loading` source of truth,
+    /// deliberately separate from `browser_pane_load_watchdog` above (which
+    /// disarms at navigation COMMIT via `on_load_start_browser_pane` —
+    /// correct for the watchdog's own "did this ever commit" purpose, but
+    /// far too early for "has the page finished loading") and from CEF's
+    /// raw `on_loading_state_change` callback (which aggregates loading
+    /// state across the WHOLE frame tree — no frame parameter on that
+    /// callback at all — so a sub-frame/subresource load, e.g. an ad iframe
+    /// or chat widget, can flip it long after the main document is done).
+    /// Inserted in `client::lifecycle::on_before_browse`'s main-frame
+    /// branch, removed in `browser_pane::callbacks::on_load_end_browser_pane`
+    /// (main-frame load actually finished) or a main-frame, non-`ERR_ABORTED`
+    /// `on_load_error`.
+    ///
+    /// Keyed on the OWNING LABEL (`browser-pane-<block_id>-<seq>`), not just
+    /// presence, so `on_before_close_browser_pane`'s cleanup can tell "am I
+    /// still the pane this entry belongs to" before removing it — on a
+    /// cross-window redock, the target window's `close()` synchronously
+    /// replays the deferred create (a NEW browser, same `block_id`, a fresh
+    /// `-<seq>` label) well before the OLD browser's real async CEF
+    /// `on_before_close` gets around to firing; an unconditional
+    /// presence-only remove there would delete the NEW pane's legitimate
+    /// entry (reagent P1 on PR #2642).
+    ///
+    /// See `docs/specs/SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md`
+    /// layer 1 for the full diagnosis and design.
+    pub browser_pane_main_frame_loading: Mutex<std::collections::HashMap<String, String>>,
+
     /// Phase B.5e — host's projection of the launcher's
     /// authoritative `state.instance_registry`. Fed by
     /// `Event::WindowInstanceAssigned` /
@@ -627,6 +658,7 @@ impl Default for AppState {
             linux_paint_gate_pending: Mutex::new(std::collections::HashMap::new()),
             linux_first_paint_seen: Mutex::new(std::collections::HashSet::new()),
             browser_pane_load_watchdog: Mutex::new(std::collections::HashMap::new()),
+            browser_pane_main_frame_loading: Mutex::new(std::collections::HashMap::new()),
             shadow_backend_window_ids: Mutex::new(HashMap::new()),
             shadow_window_meta: Mutex::new(HashMap::new()),
             shadow_instance_registry: Mutex::new({

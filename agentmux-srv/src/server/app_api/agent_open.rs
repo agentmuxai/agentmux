@@ -738,13 +738,24 @@ pub(super) fn write_agent_config_files(
     // legacy blob's user servers are merged in ONLY when the agent has no own
     // ref-bound servers (so a global server never wipes a legacy-only agent's
     // .mcp.json). When the agent has own refs, those are authoritative.
-    // Same unwrap as visible_skills above — this path doesn't need bound_to_agent.
-    let visible_mcp: Vec<crate::backend::storage::McpServer> = wstore.mcp_server_list(&agent.id)
+    // `effective_mcp_servers` (not the raw `mcp_server_list`) also unions in
+    // the agent's bound bundle's own referenced servers — composable model
+    // v2, docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md.
+    let visible_mcp: Vec<crate::backend::storage::McpServer> = wstore.effective_mcp_servers(&agent.id); // own refs + bundle refs + globals
+    // reagentx P1 on PR #2639: has_own_mcp_refs must reflect ONLY the
+    // agent's own direct binds, computed from the raw (pre-bundle-union)
+    // mcp_server_list — NOT from `visible_mcp` above, which already
+    // includes the bundle's referenced servers. Mandatory ABF means every
+    // agent has a bundle, so if a bundle's private server alone could flip
+    // this flag, a legacy-only agent bound to any bundle that happens to
+    // reference one private server would have its legacy .mcp.json blob
+    // silently dropped, even though the agent itself never bound anything.
+    // Same fix as effective_skills's has_own_skill_refs — see its own
+    // comment for the full reasoning.
+    let has_own_mcp_refs = wstore.mcp_server_list(&agent.id)
         .unwrap_or_default()
-        .into_iter()
-        .map(|item| item.server)
-        .collect(); // own refs + globals
-    let has_own_mcp_refs = visible_mcp.iter().any(|s| !s.is_global);
+        .iter()
+        .any(|item| !item.server.is_global);
     if !visible_mcp.is_empty() {
         let blob_for_merge = if has_own_mcp_refs {
             None
@@ -1018,5 +1029,85 @@ mod write_agent_config_files_tests {
         write_agent_config_files(&wstore, &id_store, &agent, "test-agent", work_dir_str).unwrap();
 
         assert!(sentinel.exists(), "file outside the working directory must never be deleted");
+    }
+
+    /// reagentx P1 on PR #2639: a bundle referencing a private MCP server
+    /// must not silently drop the agent's legacy `.mcp.json` blob merge —
+    /// `has_own_mcp_refs` must reflect only the agent's own direct binds.
+    /// Mandatory ABF means every agent has a bundle, so if a bundle's
+    /// private server alone could flip this flag, a legacy-only agent bound
+    /// to any bundle referencing one private server would have its legacy
+    /// server config silently dropped, even though the agent itself never
+    /// bound anything.
+    #[test]
+    fn a_bundle_referenced_private_mcp_server_does_not_drop_the_agents_legacy_mcp_blob() {
+        let wstore = make_store();
+        let id_store = make_store();
+        let work_dir = tempfile::tempdir().unwrap();
+        let work_dir_str = work_dir.path().to_str().unwrap();
+
+        let mut agent = make_agent("agent-1", work_dir_str);
+        agent.memory_id = "bundle-1".to_string();
+        wstore.agent_def_insert(&mut agent).unwrap();
+
+        wstore
+            .bundle_memory_upsert(&crate::backend::storage::memory_bundles::Memory {
+                id: "bundle-1".to_string(),
+                name: "Bundle 1".to_string(),
+                description: String::new(),
+                is_blank: false,
+                is_global: false,
+                provider: "claude".to_string(),
+                model: "anthropic".to_string(),
+                instructions: String::new(),
+                instructions_by_provider: "{}".to_string(),
+                context_files: "[]".to_string(),
+                mcp_servers: "[]".to_string(),
+                skills: "[]".to_string(),
+                sort_order: 0,
+                created_at: 1_700_000_000_000,
+                updated_at: 1_700_000_000_000,
+            })
+            .unwrap();
+        wstore
+            .mcp_server_upsert_unique(
+                "some-other-context",
+                &crate::backend::storage::McpServer {
+                    id: "bundle-private-server".to_string(),
+                    name: "bundle-server".to_string(),
+                    transport: "stdio".to_string(),
+                    config: r#"{"command":"bundle-tool"}"#.to_string(),
+                    is_global: false,
+                    created_at: 1_700_000_000_000,
+                    updated_at: 1_700_000_000_000,
+                },
+                false,
+            )
+            .unwrap_or(());
+        wstore.bundle_mcp_bind(&wstore, "bundle-1", "bundle-private-server").unwrap();
+        // agent-1 itself has NO own db_mcp_servers ref — only its bundle does.
+
+        wstore
+            .agent_content_set(&crate::backend::storage::content::AgentContent {
+                agent_id: "agent-1".to_string(),
+                content_type: "mcp".to_string(),
+                content: r#"{"mcpServers":{"legacy-server":{"command":"legacy-tool"}}}"#.to_string(),
+                updated_at: 1_700_000_000_000,
+            })
+            .unwrap();
+
+        write_agent_config_files(&wstore, &id_store, &agent, "test-agent", work_dir_str).unwrap();
+
+        let mcp_json_path = work_dir.path().join(".mcp.json");
+        let mcp_json = std::fs::read_to_string(&mcp_json_path).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&mcp_json).unwrap();
+        assert!(
+            parsed["mcpServers"].get("legacy-server").is_some(),
+            "a bundle-referenced private server must not silently drop the agent's legacy .mcp.json blob: {mcp_json}"
+        );
+        assert!(
+            parsed["mcpServers"].get("bundle-server").is_some(),
+            "the bundle-referenced server must still be included, just not treated as agent-authoritative: {mcp_json}"
+        );
     }
 }
