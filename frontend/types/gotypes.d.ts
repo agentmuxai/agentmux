@@ -1500,6 +1500,10 @@ declare global {
         "subagent:slug"?: string;
         "subagent:parent"?: string;
         "subagent:session"?: string;
+        // Selected rail section, meta-backed so it survives a block remount
+        // and the view model can react to it (armory-model.ts/warden-model.ts).
+        "armory:section"?: "accounts" | "memory" | "skills" | "mcp" | "bundles";
+        "warden:section"?: "host" | "lan" | "internet" | "audit" | "supervisor";
     };
 
     // tsgenmeta.MethodMeta
