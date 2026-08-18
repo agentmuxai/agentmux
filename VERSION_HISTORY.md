@@ -1,5 +1,19 @@
 # AgentMux Version History
 
+## 0.55.13 — 2026-08-17
+
+- feat(agent-pane): answered questions render as user input; user-input surface inverted per theme
+- fix(agent): eliminate Agent Picker loading flicker with a combined reveal gate
+- fix(launcher): stop inherited MSYS stdio from breaking CEF host CREATE_SUSPENDED spawn
+- fix(identity): agent-account links survive a version/channel switch — new permanently-global identity store
+- feat(widgets): parent widgets with grouped submenus — Messengers
+- fix(ui): distinct icon for Anthropic vendor badge, no longer identical to the Claude harness icon
+- feat(reactive): expose POST /agentmux/reactive/ensure-signing-key for host-tier jekt signing tests
+- fix(statusbar): popovers and tooltips paint over native browser-pane HWNDs
+- fix(agent): remove agent-definitions Import/Export toolbar from the Agent Picker
+- fix(reactive): don't evict cross-channel jekt registry entries whose owning process is still alive
+
+
 ## 0.55.12 — 2026-08-17
 
 - docs: add CI completion notifications spec (agentmux-cloud PR #48)

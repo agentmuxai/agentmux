@@ -1,27 +1,26 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms, setActiveTab } from "@/store/global";
-import { settingsAtom } from "@/store/config-signals";
-import { fireAndForget } from "@/util/util";
-import { isMacOS } from "@/util/platformutil";
-import { HamburgerMenu } from "@/app/window/hamburger-menu";
 import { useWindowDrag } from "@/app/hook/useWindowDrag.platform";
-import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { Portal } from "solid-js/web";
-import type { JSX } from "solid-js";
-import { ObjectService, WorkspaceService } from "../store/services";
+import { HamburgerMenu } from "@/app/window/hamburger-menu";
+import { deleteLayoutModelForTab } from "@/layout/index";
+import { settingsAtom } from "@/store/config-signals";
+import { atoms, setActiveTab } from "@/store/global";
 import { RpcApi } from "@/store/rpc-api";
 import { TabRpcClient } from "@/store/rpc-util";
-import { makeORef, getObjectValue } from "../store/wos";
-import { registerTabCloseRequestHandler } from "./tab-close-request";
-import { deleteLayoutModelForTab } from "@/layout/index";
+import { isMacOS } from "@/util/platformutil";
+import { fireAndForget } from "@/util/util";
+import type { JSX } from "solid-js";
+import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
+import { Portal } from "solid-js/web";
+import { WorkspaceService } from "../store/services";
 import { DroppableTab } from "./droppable-tab";
 import { TabCloseConfirmModal } from "./tab-close-confirm-modal";
-import { createTearOffTabAtRelease } from "./tab-tearoff-rpc";
-import { useTabTearOffEvents } from "./tab-tearoff-events";
-import { useTabDragAndDrop } from "./tab-reorder";
+import { registerTabCloseRequestHandler } from "./tab-close-request";
 import { useActiveTabColorLine } from "./tab-color-line";
+import { useTabDragAndDrop } from "./tab-reorder";
+import { useTabTearOffEvents } from "./tab-tearoff-events";
+import { createTearOffTabAtRelease } from "./tab-tearoff-rpc";
 import "./tabbar.scss";
 
 interface TabBarProps {
@@ -96,57 +95,32 @@ function TabBar(props: TabBarProps): JSX.Element {
         }
     });
 
-    // Startup-tab color: if the workspace has exactly one tab and it has no
-    // tab:color set, apply the theme Blue from TAB_COLORS. The backend-created
-    // startup tab doesn't get a color meta, so without this the first tab
-    // stays neutral while every user-created tab is vibrant.
-    onMount(() => {
-        const ws = props.workspace;
-        if (!ws) return;
-        const ids = [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])];
-        if (ids.length !== 1) return;
-        const firstId = ids[0];
-        const tab = getObjectValue<Tab>(makeORef("tab", firstId));
-        if (!tab) return;
-        if (tab.meta?.["tab:color"]) return;
-        // Skip if the default-color backfill has already run once for this
-        // tab. Without this guard, a user who clears the color on a single-
-        // tab workspace would have it silently restored on the next mount.
-        if (tab.meta?.["tab:color-initialized"]) return;
-        // #2562c5 is the "Blue" entry in TAB_COLORS — same as the color
-        // picker's blue swatch, so stays consistent with user-chosen blue.
-        fireAndForget(async () => {
-            try {
-                await ObjectService.UpdateObjectMeta(
-                    makeORef("tab", firstId),
-                    { "tab:color": "#2562c5", "tab:color-initialized": true } as MetaType,
-                );
-            } catch (e) {
-                console.error("[tabbar] startup-tab color apply failed:", e);
-            }
-        });
-    });
+    // The startup tab intentionally has no `tab:color` — see
+    // docs/reports/REPORT_REMOVE_AUTO_TAB_COLOR_2026_08_18.md. This used to
+    // backfill a fixed "Blue" here so the first tab wouldn't look different
+    // from every (then-randomly-colored) subsequent tab; now that new tabs
+    // no longer auto-assign a color either (tab-actions.ts's createTab()),
+    // there's no inconsistency left to paper over.
 
     // Commit-on-release tab tear-off. Fired from the drag monitor's onDrop
     // (useTabDragAndDrop, tab-reorder.ts) when the tab is released below
     // the strip. See tab-tearoff-rpc.ts for the full derivation.
     const tearOffTabAtRelease = createTearOffTabAtRelease(
         () => props.workspace,
-        () => tabBarScrollRef,
+        () => tabBarScrollRef
     );
 
     // In-strip reorder DnD + pane-drag-over-strip cleanup + Windows
     // tear-off-cursor workaround + wheel-scroll.
-    useTabDragAndDrop(
-        { tabBarScrollRef: () => tabBarScrollRef },
-        () => props.workspace,
-        tabIds,
-        tearOffTabAtRelease,
-    );
+    useTabDragAndDrop({ tabBarScrollRef: () => tabBarScrollRef }, () => props.workspace, tabIds, tearOffTabAtRelease);
 
     // Phase 4/5 — cross-window tear-off event listeners (hover/merge/
     // standalone/cancel-back).
-    useTabTearOffEvents(() => props.workspace, () => tabBarScrollRef, tabIds);
+    useTabTearOffEvents(
+        () => props.workspace,
+        () => tabBarScrollRef,
+        tabIds
+    );
 
     if (!props.workspace) return null;
 
@@ -158,7 +132,7 @@ function TabBar(props: TabBarProps): JSX.Element {
             tabBarScrollRef: () => tabBarScrollRef,
             tabBarFillRef: () => tabBarFillRef,
         },
-        tabIds,
+        tabIds
     );
 
     return (
@@ -225,19 +199,19 @@ function TabBar(props: TabBarProps): JSX.Element {
                     end tab strip can still position that edge past what's
                     currently visible. */}
                 <Portal mount={document.body}>
-                <div
-                    class="active-tab-color-line"
-                    aria-hidden="true"
-                    style={{
-                        position: "fixed",
-                        left: `${lineLeft()}px`,
-                        width: `${lineWidth()}px`,
-                        bottom: `${lineBottom()}px`,
-                        height: "3px",
-                        background: activeTabColor()!,
-                        "pointer-events": "none",
-                    }}
-                />
+                    <div
+                        class="active-tab-color-line"
+                        aria-hidden="true"
+                        style={{
+                            position: "fixed",
+                            left: `${lineLeft()}px`,
+                            width: `${lineWidth()}px`,
+                            bottom: `${lineBottom()}px`,
+                            height: "3px",
+                            background: activeTabColor()!,
+                            "pointer-events": "none",
+                        }}
+                    />
                 </Portal>
             </Show>
             <Show when={pendingCloseTabId() !== null}>
@@ -247,7 +221,9 @@ function TabBar(props: TabBarProps): JSX.Element {
                         const tabId = pendingCloseTabId()!;
                         setPendingCloseTabId(null);
                         if (skipFuture) {
-                            fireAndForget(() => RpcApi.SetConfigCommand(TabRpcClient, { "tab:skipcloseconfirm": true } as any));
+                            fireAndForget(() =>
+                                RpcApi.SetConfigCommand(TabRpcClient, { "tab:skipcloseconfirm": true } as any)
+                            );
                         }
                         handleClose(tabId);
                     }}
