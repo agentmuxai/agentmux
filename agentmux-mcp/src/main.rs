@@ -199,7 +199,7 @@ const UI_SCREENSHOT_TOOL: &str = r#"{
 
 const UI_CLICK_TOOL: &str = r#"{
   "name": "UIClick",
-  "description": "Click an element in your OWN AgentMux pane's UI — a real synthesized mouse click (not a scripted .click()), so focus/hover/pointer behavior matches a human click. Scoped to your own pane's DOM subtree only; cannot reach another pane or agent's UI. Use UIQuery first if you're not sure of the right CSS selector.",
+  "description": "Click an element in AgentMux's UI — a real synthesized mouse click (not a scripted .click()), so focus/hover/pointer behavior matches a human click. Reaches your OWN pane and shared app chrome (status bar, hamburger menu, window controls); cannot reach a DIFFERENT pane or agent's UI. Use UIQuery first if you're not sure of the right CSS selector.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -211,7 +211,7 @@ const UI_CLICK_TOOL: &str = r#"{
 
 const UI_QUERY_TOOL: &str = r#"{
   "name": "UIQuery",
-  "description": "Find elements in your OWN AgentMux pane's UI matching a CSS selector — returns tag, text, attributes, bounding rect, and focus state for each match. Scoped to your own pane's DOM subtree only. Use this to locate an element before UIClick-ing it, or to read rendered text/state without taking a screenshot.",
+  "description": "Find elements in AgentMux's UI matching a CSS selector — returns tag, text, attributes, bounding rect, and focus state for each match. Reaches your OWN pane and shared app chrome (status bar, hamburger menu, window controls); cannot reach a DIFFERENT pane or agent's UI. Use this to locate an element before UIClick-ing it, or to read rendered text/state (e.g. did a button's label change) without taking a screenshot.",
   "inputSchema": {
     "type": "object",
     "properties": {

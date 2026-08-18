@@ -1,7 +1,27 @@
 # SPEC: Agent UI Automation (Click + Screenshot) as a First-Class Agent App API Capability
 
-Status: draft
+Status: Phase 1 implemented (branch `agenty-0629j/feat-agent-ui-automation`)
 Date: 2026-08-18
+
+**Implementation update (same day):** §6's scoping design as originally
+written ("default every tool to the caller's own window/pane") turned out to
+be stricter than intended once built — the muxbus sign-in chip that
+motivated this whole spec (§0/§7) lives in the status bar, which is app-wide
+chrome rendered as a *sibling* of the pane-content tree
+(`frontend/app/workspace/workspace.tsx:85`), not a descendant of any pane's
+`[data-blockid]` wrapper. Strict pane-subtree scoping made it structurally
+unreachable — the exact motivating scenario couldn't work. Resolved
+(repo-owner confirmed): `UIClick`/`UIQuery` allow an element if it's either
+inside the caller's own pane OR not inside ANY pane's `[data-blockid]`
+wrapper (shared chrome — not owned by any one agent, so reaching it isn't
+the kind of leak reaching another agent's pane would be); still never allow
+reaching a *different* pane. `UIScreenshot` deliberately keeps the original
+strict pane-only rule — a screenshot's CDP `clip` is a single rectangle
+that can't exclude another agent's pane sitting geometrically between the
+caller's pane and a chrome element the way an element-level filter can, so
+widening it the same way would leak pixels. See
+`agentmux-cef/src/browser_api/scripts/query.js`'s `__amq_allowed_for` for
+the actual implementation.
 
 ## 0. Origin
 
