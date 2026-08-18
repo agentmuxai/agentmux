@@ -2170,6 +2170,7 @@ declare global {
         label?: string;
         description?: string;
         magnified?: boolean;
+        children?: string[];
         blockdef: BlockDef;
     };
 

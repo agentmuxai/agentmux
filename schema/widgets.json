@@ -54,15 +54,18 @@
         "magnified": {
           "type": "boolean"
         },
+        "children": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "blockdef": {
           "$ref": "#/$defs/BlockDef"
         }
       },
       "additionalProperties": false,
-      "type": "object",
-      "required": [
-        "blockdef"
-      ]
+      "type": "object"
     }
   },
   "additionalProperties": {

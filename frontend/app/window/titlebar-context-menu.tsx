@@ -7,19 +7,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { createTab, getApi } from "@/store/global";
 import { fireAndForget } from "@/util/util";
 import { createSignal, type JSX } from "solid-js";
-
-function getPinnedKeys(settings: Record<string, any>, widgets: Record<string, any>): string[] {
-    const pinned: string[] | undefined = settings["widget:pinned"];
-    if (pinned !== undefined) {
-        // Filter out stale keys that no longer exist in the widget map to avoid
-        // writing ghost entries back to the server on each toggle.
-        return pinned.filter((shortName) => widgets[`defwidget@${shortName}`] != null);
-    }
-    return Object.entries(widgets)
-        .filter(([, w]: any) => w["display:pinned"])
-        .sort(([, a]: any, [, b]: any) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0))
-        .map(([key]) => key.replace("defwidget@", ""));
-}
+import { getEffectiveGroupedChildKeys, getPinnedKeys } from "./action-widgets-config";
 
 interface TitleBarContextMenuProps {
     pos: { x: number; y: number };
@@ -83,8 +71,15 @@ const TitleBarContextMenu = (props: TitleBarContextMenuProps): JSX.Element => {
             },
         });
 
+        // A grouped child not currently individually pinned (e.g.
+        // Messengers' Discord/Slack/etc.) is excluded here the same way
+        // it's excluded from the bar's own pinned/More lists — only
+        // reachable by expanding its parent's flyout. Once a user promotes
+        // one out via that flyout's own right-click "Pin to bar", it shows
+        // up here too, checked, like any other pinned widget.
+        const grouped = getEffectiveGroupedChildKeys(widgets(), settings());
         const widgetEntries = Object.entries(widgets())
-            .filter(([key]) => key.startsWith("defwidget@"))
+            .filter(([key]) => key.startsWith("defwidget@") && !grouped.has(key.replace("defwidget@", "")))
             .sort(([, a]: any, [, b]: any) => (a["display:order"] ?? 0) - (b["display:order"] ?? 0));
 
         if (widgetEntries.length > 0) {

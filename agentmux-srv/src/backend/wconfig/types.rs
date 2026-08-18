@@ -503,6 +503,14 @@ pub struct WidgetConfigType {
     #[serde(default, skip_serializing_if = "is_false")]
     pub magnified: bool,
 
+    /// Ordered short-names (no "defwidget@" prefix, same convention as
+    /// `widget:pinned`) of this widget's children. A non-empty `children`
+    /// list is what makes a widget entry a "parent" — it expands a submenu
+    /// on the widget bar / More dropdown instead of opening a pane, so its
+    /// own `blockdef` is unused.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<String>,
+
     #[serde(rename = "blockdef", default)]
     pub block_def: BlockDef,
 }

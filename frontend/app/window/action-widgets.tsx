@@ -22,6 +22,7 @@ import { Tooltip } from "@/app/element/tooltip";
 import { PopoverMenu, type PopoverMenuItem } from "@/app/element/popover-menu";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { createPeerRegistry, createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
 import { atoms, getApi } from "@/store/global";
 import { fireAndForget, isBlank, makeIconClass } from "@/util/util";
 import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
@@ -35,6 +36,7 @@ import {
     unpinWidget,
 } from "./action-widgets-config";
 import { MoreDropdown } from "./more-dropdown";
+import { PinnedWidgetFlyout } from "./pinned-widget-flyout";
 import { useWidgetBarResponsive } from "./use-widget-bar-responsive";
 import { useWidgetDragReorder } from "./use-widget-drag-reorder";
 import "./action-widgets.scss";
@@ -51,19 +53,29 @@ const ActionWidget = (props: {
     widget: WidgetConfigType;
     iconOnly: boolean;
     onContextMenu?: (e: MouseEvent) => void;
+    onClick?: () => void;
+    onMouseEnter?: () => void;
+    onMouseLeave?: (e: MouseEvent) => void;
 }): JSX.Element => (
-    <div onContextMenu={props.onContextMenu}>
+    <div
+        onContextMenu={props.onContextMenu}
+        onMouseEnter={() => props.onMouseEnter?.()}
+        onMouseLeave={(e) => props.onMouseLeave?.(e)}
+    >
         <Tooltip
             content={props.widget.description || props.widget.label}
             placement="bottom"
             divClassName="flex flex-row items-center gap-1 px-2 py-0.5 text-secondary hover:bg-hoverbg hover:text-white rounded-sm h-full"
-            divOnClick={() => handleWidgetSelect(props.widget)}
+            divOnClick={props.onClick ?? (() => handleWidgetSelect(props.widget))}
         >
             <div class="widget-icon text-sm">
                 <i class={makeIconClass(props.widget.icon, true, { defaultIcon: "browser" })}></i>
             </div>
             <Show when={!props.iconOnly && !isBlank(props.widget.label)}>
                 <div class="text-xs whitespace-nowrap">{props.widget.label}</div>
+            </Show>
+            <Show when={(props.widget.children?.length ?? 0) > 0}>
+                <i class="fa-sharp fa-solid fa-chevron-down action-widget-parent-chevron" />
             </Show>
         </Tooltip>
     </div>
@@ -115,14 +127,139 @@ const ActionWidgets = (): JSX.Element => {
         pinnedWidgets,
     });
 
+    // ── Pinned-parent flyout (Case A, SPEC_WIDGET_BAR_PARENT_SUBMENUS_2026_08_12.md §3.3) ──
+    // Exactly one pinned parent's flyout can be open at a time — a single
+    // scalar (rather than a per-key visible map) is the source of truth for
+    // which one, and rendering is keyed directly off it. Each parent row still
+    // gets its own createSubmenuHover controller (open-delay + safe-triangle
+    // close) registered in a shared peer registry so hovering onto a new
+    // parent row force-closes whichever one is currently open, same as any
+    // other peer-submenu level in the app.
+    const [openParentKey, setOpenParentKey] = createSignal<string | null>(null);
+    const parentPeers = createPeerRegistry();
+    const parentHoverControllers = new Map<string, SubmenuHoverController>();
+    const parentSlotRefs = new Map<string, HTMLDivElement>();
+    let pinnedFlyoutRef: HTMLDivElement | undefined;
+
+    const closeParentFlyout = (key: string) => {
+        parentHoverControllers.get(key)?.close();
+        setOpenParentKey((cur) => (cur === key ? null : cur));
+    };
+
+    const registerParentHover = (key: string): SubmenuHoverController => {
+        // Reuse an existing controller for this key rather than always
+        // creating+registering a fresh one (reagent P1 on this PR):
+        // getPinnedWidgets() allocates new {key, widget} object literals on
+        // every fullConfigAtom change, so Solid's reference-diffing <For>
+        // tears down and rebuilds EVERY pinned slot — including this one —
+        // on any config change, not just when the pinned set actually
+        // changes. That includes this PR's own "Pin to bar" RPC round-trip
+        // for a child inside this very flyout. Disposing an open controller
+        // fires its onClose and force-closes the flyout out from under the
+        // user; reusing the same instance across that reference churn keeps
+        // it open. See the matching component-level onCleanup below for
+        // where these actually get disposed (component unmount, not per-row
+        // teardown).
+        const existing = parentHoverControllers.get(key);
+        if (existing) return existing;
+        const hover = createSubmenuHover({
+            // Closing any other open peer — including the More button's own
+            // controller, registered below under MORE_PEER_KEY — already
+            // happens via parentPeers.closeOthers(key) on mouseenter/click
+            // (immediately, not gated on this delayed onOpen), so this only
+            // needs to update this row's own state.
+            onOpen: () => setOpenParentKey(key),
+            onClose: () => setOpenParentKey((cur) => (cur === key ? null : cur)),
+        });
+        parentHoverControllers.set(key, hover);
+        parentPeers.register(key, hover);
+        return hover;
+    };
+
+    // Component-level teardown for every pinned-parent hover controller —
+    // deliberately NOT per-<For>-item (see registerParentHover above).
+    onCleanup(() => {
+        for (const hover of parentHoverControllers.values()) hover.dispose();
+        parentHoverControllers.clear();
+    });
+
+    const handleParentSlotClick = (key: string) => {
+        if (openParentKey() === key) {
+            closeParentFlyout(key);
+            return;
+        }
+        // closeOthers closes every other registered peer — every other
+        // pinned parent AND the More button's own controller (MORE_PEER_KEY,
+        // registered below) — symmetrically with how hovering/clicking More
+        // closes this row.
+        parentPeers.closeOthers(key);
+        // openNow() (not a direct setOpenParentKey) so the controller's own
+        // isOpen flips true — otherwise (reagent P1 on this PR) the mouse is
+        // already over the row when a click happens, no later onMouseEnter
+        // ever arrives to resync isOpen, and the subsequent onMouseLeave's
+        // `if (!isOpen) return` skips starting the close-intent timer
+        // entirely — the flyout would stay open until an unrelated close
+        // path (outside click, Escape, re-click) fired.
+        parentHoverControllers.get(key)?.openNow();
+    };
+
+    // Close on outside click / Escape — mirrors the More dropdown's own
+    // outside-click effect below, scoped to whichever parent is open.
+    createEffect(() => {
+        const key = openParentKey();
+        if (key === null) return;
+        const handler = (e: MouseEvent) => {
+            const t = e.target as Node;
+            if (parentSlotRefs.get(key)?.contains(t) || pinnedFlyoutRef?.contains(t)) return;
+            const el = t instanceof Element ? t : (t as Node).parentElement;
+            if (el?.closest(".popover-menu")) return;
+            closeParentFlyout(key);
+        };
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape") closeParentFlyout(key);
+        };
+        document.addEventListener("mousedown", handler, true);
+        document.addEventListener("keydown", onKey);
+        onCleanup(() => {
+            document.removeEventListener("mousedown", handler, true);
+            document.removeEventListener("keydown", onKey);
+        });
+    });
+
     // More dropdown state
     const [moreOpen, setMoreOpen] = createSignal(false);
 
+    // The More button gets its own createSubmenuHover controller, registered
+    // as a peer in the SAME parentPeers registry pinned parents use — so
+    // hovering onto Messengers closes More and hovering onto More closes
+    // Messengers, symmetrically. Before this, More was click-only: hovering
+    // onto a pinned parent still force-closed it (via peer-close below), but
+    // hovering back onto More never reopened it, only an explicit click did.
+    const MORE_PEER_KEY = "__more__";
+    const moreHover = createSubmenuHover({
+        onOpen: () => setMoreOpen(true),
+        onClose: () => setMoreOpen(false),
+    });
+    const unregisterMoreHover = parentPeers.register(MORE_PEER_KEY, moreHover);
+    onCleanup(() => {
+        unregisterMoreHover();
+        moreHover.dispose();
+    });
+
     const openMore = (_e: MouseEvent) => {
-        setMoreOpen(!moreOpen());
+        if (moreOpen()) {
+            moreHover.close();
+            return;
+        }
+        parentPeers.closeOthers(MORE_PEER_KEY);
+        // openNow(), not a direct setMoreOpen — same click-must-sync-
+        // controller-state rationale as handleParentSlotClick above (reagent
+        // P1 on this PR): without it, the next mouse-leave's `if (!isOpen)
+        // return` would skip starting the close-intent timer.
+        moreHover.openNow();
     };
 
-    const closeMore = () => setMoreOpen(false);
+    const closeMore = () => moreHover.close();
 
     // Item context menu — rendered independently so the More dropdown stays open
     // while the user interacts with pin/unpin. itemMenuState drives a PopoverMenu
@@ -131,6 +268,20 @@ const ActionWidgets = (): JSX.Element => {
         pos: { x: number; y: number };
         shortName: string;
     } | null>(null);
+
+    // A right-click that opens the item popover makes the browser fire a
+    // synthetic mouseleave on whichever dropdown/flyout sits underneath —
+    // the popover renders at the cursor position, and Chromium re-runs
+    // hit-testing against the new topmost element even though the cursor
+    // itself never moved. Left unguarded, that spurious leave reaches the
+    // hover controller's onSubmenuLeave and starts a close-intent, so More
+    // (or a pinned parent's flyout) would collapse the moment you right-
+    // click an item inside it — losing the "menu stays open while you work
+    // with pin/unpin" behavior the outside-click handler already protects
+    // on the click side (its own `.closest(".popover-menu")` check). Every
+    // onSubmenuLeave call site below is gated on this so hover-driven close
+    // is suspended for as long as the item popover is open.
+    const isItemMenuOpen = () => itemMenuState() !== null;
 
     const handleItemContextMenu = (pos: { x: number; y: number }, key: string) => {
         setItemMenuState({ pos, shortName: key.replace("defwidget@", "") });
@@ -141,9 +292,20 @@ const ActionWidgets = (): JSX.Element => {
 
     const buildItemMenuItems = (shortName: string): PopoverMenuItem[] => {
         const widgetDef = resolveWidgetDef(shortName);
+        // A parent row's right-click is scoped to the group as a whole (§3.5)
+        // — no "Open in New Window"/"Open in Floating Pane" (no single pane a
+        // parent represents), and worded "group" instead of the leaf phrasing.
+        // Same underlying pinWidget/unpinWidget call either way.
+        if ((widgetDef?.children?.length ?? 0) > 0) {
+            return [
+                getPinnedKeys(settings(), wmap()).includes(shortName)
+                    ? { label: "Unpin group from bar", click: () => { unpinWidget(shortName, settings(), wmap()); } }
+                    : { label: "Pin group to bar", click: () => { pinWidget(shortName, settings(), wmap()); } },
+            ];
+        }
         const blockMeta = widgetDef?.blockdef?.meta as Record<string, unknown> | undefined;
         const view = (blockMeta?.["view"] as string) ?? null;
-        return [
+        const items: PopoverMenuItem[] = [
             {
                 label: "Open in New Window",
                 click: () => {
@@ -162,11 +324,24 @@ const ActionWidgets = (): JSX.Element => {
                     );
                 },
             },
-            { type: "separator" } as PopoverMenuItem,
+        ];
+        // Pin/Unpin here works for a grouped child too — e.g. right-clicking
+        // "Discord" inside the Messengers flyout and choosing "Pin to bar"
+        // PROMOTES it out of the group onto the bar as a standalone widget;
+        // "Unpin from bar" reverses that, and it goes back to living only
+        // inside Messengers (see getEffectiveGroupedChildKeys). This used to
+        // be a silent no-op (reagent P2 on this PR) because getPinnedKeys()
+        // unconditionally stripped grouped children regardless of
+        // widget:pinned — fixed at the source, so the ordinary Pin/Unpin
+        // item below is correct for a child exactly as it is for any other
+        // widget, no special-casing needed here.
+        items.push({ type: "separator" } as PopoverMenuItem);
+        items.push(
             getPinnedKeys(settings(), wmap()).includes(shortName)
                 ? { label: "Unpin from bar", click: () => { unpinWidget(shortName, settings(), wmap()); } }
-                : { label: "Pin to bar", click: () => { pinWidget(shortName, settings(), wmap()); } },
-        ];
+                : { label: "Pin to bar", click: () => { pinWidget(shortName, settings(), wmap()); } }
+        );
+        return items;
     };
 
     // Close on outside click — ignore clicks inside button, dropdown, or any
@@ -178,7 +353,7 @@ const ActionWidgets = (): JSX.Element => {
             if (moreButtonRef?.contains(t) || moreDropdownRef?.contains(t)) return;
             const el = t instanceof Element ? t : (t as Node).parentElement;
             if (el?.closest(".popover-menu")) return;
-            setMoreOpen(false);
+            moreHover.close();
         };
         document.addEventListener("mousedown", handler, true);
         onCleanup(() => document.removeEventListener("mousedown", handler, true));
@@ -218,6 +393,22 @@ const ActionWidgets = (): JSX.Element => {
         handlePointerCancel();
         armContextMenuDismiss(key);
         const shortName = key.replace("defwidget@", "");
+        const isParent = (wmap()[key]?.children?.length ?? 0) > 0;
+        // A parent's right-click is scoped to group-level actions (§3.5) —
+        // no "Open in New Window" (no single pane a parent represents), and
+        // "Unpin group from bar" instead of the leaf "Unpin from bar" so the
+        // whole-group-leaves-the-bar mental model reads differently from a
+        // single pane's shortcut. Unpinning uses the same underlying
+        // unpinWidget() call either way — a parent is just another key in
+        // `widget:pinned`.
+        if (isParent) {
+            closeParentFlyout(key);
+            ContextMenuModel.showContextMenu(
+                [{ label: "Unpin group from bar", click: () => unpinWidget(shortName, settings(), wmap()) }],
+                e
+            );
+            return;
+        }
         ContextMenuModel.showContextMenu(
             [
                 { label: "New Window", click: () => {
@@ -243,27 +434,46 @@ const ActionWidgets = (): JSX.Element => {
                 data-drag-region="false"
             >
                 <For each={visiblePinnedWidgets()}>
-                    {({ key, widget }, idx) => (
-                        <>
-                            <Show when={draggingKey() != null && dropIndex() === idx() && draggingKey() !== key}>
-                                <div class="action-widget-drop-indicator" />
-                            </Show>
-                            <div
-                                class={`action-widget-slot${draggingKey() === key ? " dragging" : ""}${contextMenuActiveKey() === key ? " context-active" : ""}`}
-                                data-widget-slot={idx()}
-                                onPointerDown={(e) => handlePointerDown(key, e)}
-                                onPointerMove={handlePointerMove}
-                                onPointerUp={handlePointerUp}
-                                onPointerCancel={handlePointerCancel}
-                            >
-                                <ActionWidget
-                                    widget={widget}
-                                    iconOnly={!showWidgetLabels()}
-                                    onContextMenu={(e) => handlePinnedContextMenu(e, key)}
-                                />
-                            </div>
-                        </>
-                    )}
+                    {({ key, widget }, idx) => {
+                        const isParent = (widget.children?.length ?? 0) > 0;
+                        const hover = isParent ? registerParentHover(key) : null;
+                        return (
+                            <>
+                                <Show when={draggingKey() != null && dropIndex() === idx() && draggingKey() !== key}>
+                                    <div class="action-widget-drop-indicator" />
+                                </Show>
+                                <div
+                                    ref={(el) => {
+                                        if (!isParent) return;
+                                        parentSlotRefs.set(key, el);
+                                        onCleanup(() => parentSlotRefs.delete(key));
+                                    }}
+                                    class={`action-widget-slot${draggingKey() === key ? " dragging" : ""}${contextMenuActiveKey() === key ? " context-active" : ""}`}
+                                    data-widget-slot={idx()}
+                                    onPointerDown={(e) => handlePointerDown(key, e)}
+                                    onPointerMove={handlePointerMove}
+                                    onPointerUp={handlePointerUp}
+                                    onPointerCancel={handlePointerCancel}
+                                >
+                                    <ActionWidget
+                                        widget={widget}
+                                        iconOnly={!showWidgetLabels()}
+                                        onContextMenu={(e) => handlePinnedContextMenu(e, key)}
+                                        onClick={isParent ? () => handleParentSlotClick(key) : undefined}
+                                        onMouseEnter={
+                                            hover
+                                                ? () => {
+                                                      parentPeers.closeOthers(key);
+                                                      hover.onTriggerEnter();
+                                                  }
+                                                : undefined
+                                        }
+                                        onMouseLeave={hover ? (e) => hover.onTriggerLeave(e) : undefined}
+                                    />
+                                </div>
+                            </>
+                        );
+                    }}
                 </For>
                 <Show when={draggingKey() != null && dropIndex() === visiblePinnedWidgets().length}>
                     <div class="action-widget-drop-indicator" />
@@ -275,6 +485,11 @@ const ActionWidgets = (): JSX.Element => {
                         class="action-widget-more-btn"
                         classList={{ open: moreOpen() }}
                         onClick={openMore}
+                        onMouseEnter={() => {
+                            parentPeers.closeOthers(MORE_PEER_KEY);
+                            moreHover.onTriggerEnter();
+                        }}
+                        onMouseLeave={(e) => moreHover.onTriggerLeave(e)}
                     >
                         <i class="fa-solid fa-ellipsis" />
                         <Show when={showWidgetLabels()}>
@@ -343,7 +558,48 @@ const ActionWidgets = (): JSX.Element => {
                         settings={settings}
                         wmap={wmap}
                         ref={(el) => (moreDropdownRef = el)}
+                        onSubmenuEnter={() => moreHover.onSubmenuEnter()}
+                        onSubmenuLeave={(e) => {
+                            if (isItemMenuOpen()) return;
+                            moreHover.onSubmenuLeave(e);
+                        }}
+                        setSubmenuEl={(el) => moreHover.setSubmenuEl(el)}
+                        isItemMenuOpen={isItemMenuOpen}
                     />
+                </Show>
+            </Portal>
+
+            <Portal>
+                <Show when={openParentKey()}>
+                    {(keyAccessor) => {
+                        // Capture a plain string once instead of re-invoking
+                        // the Show's accessor from these callbacks — several
+                        // of them (onClose, and PinnedWidgetFlyout's own
+                        // onCleanup calling setSubmenuEl(null)) can still fire
+                        // during/after this <Show> branch unmounts, and
+                        // calling a stale keyed-Show accessor post-unmount
+                        // throws ("Attempting to access a stale value from
+                        // <Show>") — reproduced live via muxlog while testing
+                        // this PR's own click-to-close path.
+                        const key = keyAccessor();
+                        return (
+                            <PinnedWidgetFlyout
+                                widget={wmap()[key]}
+                                wmap={wmap}
+                                settings={settings}
+                                onClose={() => closeParentFlyout(key)}
+                                onItemContextMenu={handleItemContextMenu}
+                                anchor={() => parentSlotRefs.get(key) ?? null}
+                                onSubmenuEnter={() => parentHoverControllers.get(key)?.onSubmenuEnter()}
+                                onSubmenuLeave={(e) => {
+                                    if (isItemMenuOpen()) return;
+                                    parentHoverControllers.get(key)?.onSubmenuLeave(e);
+                                }}
+                                setSubmenuEl={(el) => parentHoverControllers.get(key)?.setSubmenuEl(el)}
+                                ref={(el) => (pinnedFlyoutRef = el)}
+                            />
+                        );
+                    }}
                 </Show>
             </Portal>
 

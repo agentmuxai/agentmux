@@ -7,6 +7,7 @@
  */
 
 import { atoms, createBlockSplitHorizontally, createBlockSplitVertically, getApi, replaceBlock } from "@/app/store/global";
+import { buildPaneWidgetMenuItems } from "@/app/window/action-widgets-config";
 import { readText as clipboardReadText, writeText as clipboardWriteText } from "@/util/clipboard";
 
 type SplitDirection = "up" | "down" | "left" | "right";
@@ -100,36 +101,24 @@ async function handleSplitPane(blockData: Block, direction: SplitDirection): Pro
 
 // ─── Replace With submenu ─────────────────────────────────────────────────────
 
-/** Non-pane widget views that should be excluded from the Replace submenu. */
-const nonPaneViews = new Set(["devtools"]);
-
 /**
- * Build a "Replace With..." submenu listing all pane-based widgets.
- * Returns an array with the submenu item + a trailing separator, or empty
- * array if no replacement widgets are available.
+ * Build a "Replace With..." submenu listing all pane-based widgets (grouped
+ * widgets — e.g. the Messengers group's Discord/Slack/etc. — nest under
+ * their parent's own label rather than each showing up individually; see
+ * buildPaneWidgetMenuItems). Returns an array with the submenu item + a
+ * trailing separator, or empty array if no replacement widgets are
+ * available.
  */
 function buildReplaceSubmenu(blockData: Block): ContextMenuItem[] {
     const fullConfig = atoms.fullConfigAtom();
-    const widgets = fullConfig?.widgets ?? {};
-    const currentView = blockData?.meta?.view;
-
-    const items: ContextMenuItem[] = Object.values(widgets)
-        .filter((w) => {
-            const view = w.blockdef?.meta?.view;
-            if (!view || nonPaneViews.has(view)) return false;
-            if (view === currentView) return false;
-            return true;
-        })
-        .sort((a, b) => {
-            const orderA = a["display:order"] ?? 0;
-            const orderB = b["display:order"] ?? 0;
-            if (orderA !== orderB) return orderA - orderB;
-            return (a.label ?? "").localeCompare(b.label ?? "");
-        })
-        .map((widget) => ({
-            label: widget.label ?? "Unnamed",
-            click: () => void replaceBlock(blockData.oid, widget.blockdef, true),
-        }));
+    const wmap = fullConfig?.widgets ?? {};
+    const settings = fullConfig?.settings ?? {};
+    const items = buildPaneWidgetMenuItems(
+        wmap,
+        settings,
+        (blockdef) => void replaceBlock(blockData.oid, blockdef, true),
+        { excludeView: blockData?.meta?.view }
+    );
 
     if (items.length === 0) return [];
     return [
