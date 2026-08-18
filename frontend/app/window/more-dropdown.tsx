@@ -12,7 +12,7 @@ import {
     assertMenuInPaintableArea,
     computeMenuPosition,
 } from "@/app/util/menu-position";
-import { createPeerRegistry, createSubmenuHover } from "@/app/util/submenu-hover";
+import { createPeerRegistry, createSubmenuHover, type SubmenuHoverController } from "@/app/util/submenu-hover";
 import { makeIconClass } from "@/util/util";
 import { autoUpdate } from "@floating-ui/dom";
 import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
@@ -132,6 +132,21 @@ const MoreDropdown = ({
     // same hover-intent + peer-close shape as flyoutmenu.tsx's own SubMenu,
     // scoped to this one dropdown instance.
     const parentPeers = createPeerRegistry();
+    // Keyed by widget short-name, deliberately OUTSIDE the <For> below —
+    // see the reuse-not-recreate comment at its one call site (reagent P1
+    // on this PR): `widgets()` (clippedPinnedWidgets + moreWidgets)
+    // allocates fresh {key, widget} object literals on every
+    // fullConfigAtom change, so Solid's reference-diffing <For> tears down
+    // and rebuilds every row on any config change — including this PR's
+    // own "Pin to bar" RPC round-trip for a child inside an open nested
+    // submenu. Disposing an open controller mid-render would force-close
+    // that submenu via its onClose (closeParentSub) out from under the
+    // user.
+    const parentRowHoverControllers = new Map<string, SubmenuHoverController>();
+    onCleanup(() => {
+        for (const hover of parentRowHoverControllers.values()) hover.dispose();
+        parentRowHoverControllers.clear();
+    });
     const [visibleParentSubMenus, setVisibleParentSubMenus] = createSignal<Record<string, boolean>>({});
     const openParentSub = (key: string) => setVisibleParentSubMenus((prev) => ({ ...prev, [key]: true }));
     const closeParentSub = (key: string) =>
@@ -173,15 +188,15 @@ const MoreDropdown = ({
                     }
 
                     let rowEl: HTMLDivElement | undefined;
-                    const hover = createSubmenuHover({
-                        onOpen: () => openParentSub(key),
-                        onClose: () => closeParentSub(key),
-                    });
-                    const unregister = parentPeers.register(key, hover);
-                    onCleanup(() => {
-                        unregister();
-                        hover.dispose();
-                    });
+                    let hover = parentRowHoverControllers.get(key);
+                    if (!hover) {
+                        hover = createSubmenuHover({
+                            onOpen: () => openParentSub(key),
+                            onClose: () => closeParentSub(key),
+                        });
+                        parentRowHoverControllers.set(key, hover);
+                        parentPeers.register(key, hover);
+                    }
 
                     return (
                         <>

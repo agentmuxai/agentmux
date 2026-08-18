@@ -147,6 +147,21 @@ const ActionWidgets = (): JSX.Element => {
     };
 
     const registerParentHover = (key: string): SubmenuHoverController => {
+        // Reuse an existing controller for this key rather than always
+        // creating+registering a fresh one (reagent P1 on this PR):
+        // getPinnedWidgets() allocates new {key, widget} object literals on
+        // every fullConfigAtom change, so Solid's reference-diffing <For>
+        // tears down and rebuilds EVERY pinned slot — including this one —
+        // on any config change, not just when the pinned set actually
+        // changes. That includes this PR's own "Pin to bar" RPC round-trip
+        // for a child inside this very flyout. Disposing an open controller
+        // fires its onClose and force-closes the flyout out from under the
+        // user; reusing the same instance across that reference churn keeps
+        // it open. See the matching component-level onCleanup below for
+        // where these actually get disposed (component unmount, not per-row
+        // teardown).
+        const existing = parentHoverControllers.get(key);
+        if (existing) return existing;
         const hover = createSubmenuHover({
             // Closing any other open peer — including the More button's own
             // controller, registered below under MORE_PEER_KEY — already
@@ -157,14 +172,16 @@ const ActionWidgets = (): JSX.Element => {
             onClose: () => setOpenParentKey((cur) => (cur === key ? null : cur)),
         });
         parentHoverControllers.set(key, hover);
-        const unregister = parentPeers.register(key, hover);
-        onCleanup(() => {
-            unregister();
-            hover.dispose();
-            parentHoverControllers.delete(key);
-        });
+        parentPeers.register(key, hover);
         return hover;
     };
+
+    // Component-level teardown for every pinned-parent hover controller —
+    // deliberately NOT per-<For>-item (see registerParentHover above).
+    onCleanup(() => {
+        for (const hover of parentHoverControllers.values()) hover.dispose();
+        parentHoverControllers.clear();
+    });
 
     const handleParentSlotClick = (key: string) => {
         if (openParentKey() === key) {
