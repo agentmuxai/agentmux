@@ -199,6 +199,53 @@ export class BrowserViewModel implements ViewModel {
         bpDispatch(this.blockId, cmd, "system");
     }
 
+    /**
+     * Layer 3, SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md:
+     * cheap defense-in-depth against a rapid true→false→true loading-signal
+     * burst that layers 1-2 (the Rust-side main-frame-scoped signal, and
+     * the small-badge overlay) didn't catch — e.g. a same-tick redirect
+     * hop. NOT a substitute for those; masking symptom without fixing
+     * signal fidelity would still let a chatty page wear through this
+     * window repeatedly.
+     *
+     * Only the HIDE direction (`loading: false`) is held. A `true` always
+     * dispatches immediately — the spinner should never be slow to SHOW,
+     * only avoid flickering back to "loaded" and forth again. Holding a
+     * `false` briefly and canceling it if a fresh `true` arrives within the
+     * window collapses a flip burst into one visible transition.
+     */
+    private static readonly LOADING_HIDE_DEBOUNCE_MS = 200;
+    private _pendingLoadingHideTimer: ReturnType<typeof setTimeout> | null = null;
+
+    /** Cancel any held `loading:false` dispatch. Called whenever something
+     *  else is about to make `loading` true again — a stale held false
+     *  firing afterward would otherwise clobber that fresh true back to
+     *  false a moment later. */
+    private cancelPendingLoadingHide(): void {
+        if (this._pendingLoadingHideTimer) {
+            clearTimeout(this._pendingLoadingHideTimer);
+            this._pendingLoadingHideTimer = null;
+        }
+    }
+
+    private dispatchLoadingChanged(
+        tabId: string,
+        loading: boolean,
+        canGoBack: boolean,
+        canGoForward: boolean,
+        src: string,
+    ): void {
+        this.cancelPendingLoadingHide();
+        if (loading) {
+            this._dispatch({ type: "TabLoadingChanged", tabId, loading, canGoBack, canGoForward }, src);
+            return;
+        }
+        this._pendingLoadingHideTimer = setTimeout(() => {
+            this._pendingLoadingHideTimer = null;
+            this._dispatch({ type: "TabLoadingChanged", tabId, loading: false, canGoBack, canGoForward }, src);
+        }, BrowserViewModel.LOADING_HIDE_DEBOUNCE_MS);
+    }
+
     /** Tag every diag log with the block prefix so multi-pane sessions
      *  are greppable per pane. See docs/specs/browser-pane-reducer-roadmap.md
      *  Phase 1. */
@@ -412,14 +459,11 @@ export class BrowserViewModel implements ViewModel {
             if (payload.is_loading !== undefined) {
                 const activeTabId = bpSnapshot(this.blockId)?.activeTabId;
                 if (activeTabId != null) {
-                    this._dispatch(
-                        {
-                            type: "TabLoadingChanged",
-                            tabId: activeTabId,
-                            loading: payload.is_loading,
-                            canGoBack: payload.can_go_back ?? this.canGoBackAtom(),
-                            canGoForward: payload.can_go_forward ?? this.canGoForwardAtom(),
-                        },
+                    this.dispatchLoadingChanged(
+                        activeTabId,
+                        payload.is_loading,
+                        payload.can_go_back ?? this.canGoBackAtom(),
+                        payload.can_go_forward ?? this.canGoForwardAtom(),
                         "nav-state",
                     );
                 }
@@ -501,6 +545,7 @@ export class BrowserViewModel implements ViewModel {
             }
         }
 
+        this.cancelPendingLoadingHide();
         this._dispatch({ type: "Navigate", url: normalized }, "navigate");
         // can_go_back / can_go_forward are set by the `browser-pane-nav-state`
         // event subscription; we don't touch them here. CEF is the source of
@@ -518,6 +563,10 @@ export class BrowserViewModel implements ViewModel {
     goBack(): void {
         this.diag(`goBack closed=${this.closed}`);
         if (this.closed) return;
+        // Cancel any held loading:false from dispatchLoadingChanged — it
+        // would otherwise fire after this dispatch and clobber the fresh
+        // loading:true back to false a moment later.
+        this.cancelPendingLoadingHide();
         // CEF owns the history — we just fire the IPC. The button's
         // enabled/disabled state came from `can_go_back` in the nav-state
         // event, so if we got here the browser has somewhere to go.
@@ -528,6 +577,7 @@ export class BrowserViewModel implements ViewModel {
     goForward(): void {
         this.diag(`goForward closed=${this.closed}`);
         if (this.closed) return;
+        this.cancelPendingLoadingHide();
         this._dispatch({ type: "LoadStarted" }, "goForward");
         invokeCommand("browser_pane_go_forward", { block_id: this.blockId }).catch(() => {});
     }
@@ -535,6 +585,7 @@ export class BrowserViewModel implements ViewModel {
     reload(): void {
         this.diag(`reload closed=${this.closed}`);
         if (this.closed) return;
+        this.cancelPendingLoadingHide();
         const url = this.urlAtom();
         if (url) {
             this._dispatch({ type: "UrlCleared" }, "reload-clear");
@@ -675,6 +726,7 @@ export class BrowserViewModel implements ViewModel {
 
     dispose(): void {
         this.diag(`dispose`);
+        this.cancelPendingLoadingHide();
         this._dispatch({ type: "Disposed" }, "dispose");
         if (this._navUnsub) {
             this._navUnsub();

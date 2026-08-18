@@ -805,6 +805,18 @@ impl AgentMuxHandler {
                 if let Some(block_id) =
                     crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, b)
                 {
+                    // Layer 1, SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md:
+                    // the main frame is (still) loading whether this is a
+                    // fresh navigation or a redirect hop — no-ops (via the
+                    // insert-already-present check) if a hop finds it
+                    // already true. Must run before `url` is moved into the
+                    // watchdog calls below.
+                    crate::browser_pane::callbacks::set_pane_main_frame_loading(
+                        &self.state,
+                        &block_id,
+                        &url,
+                        true,
+                    );
                     if is_redirect != 0 {
                         crate::browser_pane::callbacks::update_pane_load_watchdog_url(
                             &self.state,

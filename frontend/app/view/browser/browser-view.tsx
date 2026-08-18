@@ -117,6 +117,24 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
         if (spinnerFadeTimeout) clearTimeout(spinnerFadeTimeout);
     });
 
+    // Layer 2, SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md:
+    // once the pane has painted real content at least once, a later loading
+    // flip (reload, back/forward, a redirect chain — layer 1 deliberately
+    // doesn't suppress those, they're real navigations) no longer needs to
+    // cover a blank gap. Hiding the whole native pane HWND for it would just
+    // flash the already-visible page away and back for no reason — that's
+    // the reported bug. Tracks a real true→false `loadingAtom()` transition
+    // (not the initial read, which is `false` only before the constructor's
+    // `Navigate` dispatch takes effect); never resets within this view's
+    // lifetime — a fresh pane construction gets its own fresh signal.
+    const [hasPaintedOnce, setHasPaintedOnce] = createSignal(false);
+    let wasLoading = false;
+    createEffect(() => {
+        const loading = model.loadingAtom();
+        if (wasLoading && !loading) setHasPaintedOnce(true);
+        wasLoading = loading;
+    });
+
     return (
         <div class="browser-view">
             <BrowserNavBar
@@ -185,11 +203,33 @@ function BrowserViewInner(props: { model: BrowserViewModel }): JSX.Element {
                     losing the "fade and un-punch together" behavior this
                     design relies on. BrainSpinner's own `fading` prop is
                     unnecessary here since opacity on this wrapper already
-                    fades everything nested inside it. */}
+                    fades everything nested inside it.
+
+                    Layer 2 (SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md)
+                    branches this on `hasPaintedOnce()`: full-pane coverage
+                    only for the FIRST load, when there's genuinely nothing
+                    behind it yet to hide. Once the pane has painted once, a
+                    later loading flip gets a small corner badge instead —
+                    its `data-pane-overlay` rect is tiny, so even a flip
+                    layer 1 doesn't catch can only punch a small hole, never
+                    hide the whole visible page. */}
                 <Show when={spinnerMounted()}>
-                    <div class="browser-loading-overlay" classList={{ "is-fading": spinnerFading() }} data-pane-overlay>
-                        <BrainSpinner />
-                    </div>
+                    <Show
+                        when={!hasPaintedOnce()}
+                        fallback={
+                            <div
+                                class="browser-loading-badge"
+                                classList={{ "is-fading": spinnerFading() }}
+                                data-pane-overlay
+                            >
+                                <BrainSpinner class="browser-loading-badge-spinner" />
+                            </div>
+                        }
+                    >
+                        <div class="browser-loading-overlay" classList={{ "is-fading": spinnerFading() }} data-pane-overlay>
+                            <BrainSpinner />
+                        </div>
+                    </Show>
                 </Show>
             </div>
         </div>
