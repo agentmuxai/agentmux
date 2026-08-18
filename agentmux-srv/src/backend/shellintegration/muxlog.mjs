@@ -356,9 +356,21 @@ function resolveFile(target, opt) {
 // field for it, since the frontend's console-log pipe just forwards a
 // space-joined string). `[health] turn_active flip` instead carries the FULL
 // block id as a structured tracing field (`fields.block_id`). Both are
-// checked; a custom parser is used instead of `renderLine`'s generic
-// `--grep`/`--target` filters because those only ever look at the message
-// text, never at arbitrary structured fields like `block_id`.
+// checked via a custom `matcher`, since `renderLine`'s generic `--grep`/
+// `--target` only ever look at the message text, never at arbitrary
+// structured fields like `block_id`.
+//
+// The recipe's own `matcher` (which pane/block this line is even about) is
+// NON-NEGOTIABLE — always applied, never overridden — but every OTHER
+// generic muxlog option the top-level help documents as applying "any
+// position" (`--grep`, `--level`, `--target`, `--exclude-target`, `-a`)
+// still needs to compose on top of it, the same way `swarm`/`auth`/`bridge`
+// compose theirs via `renderLine`/`printLastLines` (reagent P2 on PR #2653 —
+// `phases` originally bypassed all of these silently). A user's `--grep`
+// ADDS an extra AND-filter here rather than replacing the recipe's own
+// matcher (unlike `auth`'s `opt.grep || default`) — replacing it would
+// defeat the entire point of `phases`, which is "only lines about this one
+// block."
 function collectPhaseLines(file, opt, matcher) {
     const out = [];
     for (const l of readForDisplay(file, true).split("\n")) {
@@ -368,6 +380,13 @@ function collectPhaseLines(file, opt, matcher) {
         try { j = JSON.parse(t); } catch { continue; }
         const fields = j.fields || {};
         const msg = String(fields.message ?? j.message ?? "");
+        const target = j.target || "";
+        const level = (j.level || "INFO").toUpperCase();
+        if (!opt.all && /blockcontroller::subprocess|subprocess stdout → blockfile/.test(target + " " + msg)) continue;
+        if (opt.level && !opt.level.includes(level.toLowerCase())) continue;
+        if (opt.target && !target.includes(opt.target)) continue;
+        if (opt.excludeTarget && target.includes(opt.excludeTarget)) continue;
+        if (opt.grep && !opt.grep.test(msg)) continue;
         if (!matcher(msg, fields)) continue;
         if (opt.since && j.timestamp && j.timestamp < opt.since) continue;
         out.push({ ts: j.timestamp || "", msg, raw: t });
