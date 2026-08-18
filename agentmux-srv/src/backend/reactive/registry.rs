@@ -302,6 +302,22 @@ fn pid_alive(pid: u32) -> bool {
     sys.process(target).is_some()
 }
 
+/// Public entry point for callers outside this module (`server/reactive.rs`'s
+/// evict-on-forward-failure sites) that need to distinguish "the owning
+/// process is genuinely gone" (safe to evict permanently) from "the process
+/// is alive but this one forward attempt failed" (a transient hiccup — e.g.
+/// the target channel's srv is up but the specific agent hadn't finished its
+/// own registration yet, a momentary lock/timing race, ...). Before this,
+/// `remove_shared`/`remove` were called unconditionally on any `success:false`
+/// response, which is correct for a truly-dead channel but destroys a live
+/// channel's only path to being found again — nothing re-writes the shared
+/// entry except the agent's own one-time registration event, so an evicted
+/// live entry stays unreachable until that agent's controller restarts. See
+/// docs/retro/retro-cross-channel-jekt-eviction-2026-08-17.md.
+pub fn is_pid_alive(pid: u32) -> bool {
+    pid_alive(pid)
+}
+
 /// Write (create or update) this channel's entry for `agent_id` in the
 /// host-global shared registry. Writes only this channel's own file
 /// (`shared_channel_path`) — never touches another channel's file, so

@@ -482,19 +482,36 @@ pub(super) async fn handle_reactive_inject(
                                 );
                                 return Json(body);
                             }
-                            // success:false — this entry is stale (e.g. agent
-                            // unregistered without a clean shutdown); evict
-                            // and fall through to Tier 2b/3 instead of
-                            // returning the failure (reagent P1 on #2350 —
-                            // this previously returned unconditionally
-                            // whenever the body parsed, regardless of
-                            // success, so a stale same-channel entry never
-                            // fell through to any later tier).
-                            tracing::warn!(
-                                target = %req.target_agent,
-                                "cross-instance forward: success=false — evicting and falling through"
-                            );
-                            agent_registry::remove(&data_dir, &req.target_agent);
+                            // success:false — could mean this entry is stale
+                            // (e.g. agent unregistered without a clean
+                            // shutdown) OR that the owning process is alive
+                            // but hasn't (yet) registered this specific agent
+                            // — e.g. right after that channel's srv came up.
+                            // Only evict if the owning PID is confirmed gone;
+                            // otherwise a single transient miss permanently
+                            // destroys the only path back to a live channel,
+                            // since nothing re-writes this entry except that
+                            // agent's own one-time registration event. See
+                            // docs/retro/retro-cross-channel-jekt-eviction-2026-08-17.md.
+                            // Falls through to Tier 2b/3 either way (reagent
+                            // P1 on #2350 — this previously returned
+                            // unconditionally whenever the body parsed,
+                            // regardless of success, so a stale same-channel
+                            // entry never fell through to any later tier).
+                            if agent_registry::is_pid_alive(entry.pid) {
+                                tracing::warn!(
+                                    target = %req.target_agent,
+                                    pid = entry.pid,
+                                    "cross-instance forward: success=false but owning process is alive — NOT evicting, falling through"
+                                );
+                            } else {
+                                tracing::warn!(
+                                    target = %req.target_agent,
+                                    pid = entry.pid,
+                                    "cross-instance forward: success=false, owning process is gone — evicting and falling through"
+                                );
+                                agent_registry::remove(&data_dir, &req.target_agent);
+                            }
                         }
                     }
                     Ok(r) => {
@@ -570,15 +587,31 @@ pub(super) async fn handle_reactive_inject(
                                 );
                                 return Json(body);
                             }
-                            // success:false — this channel's entry is stale
-                            // (e.g. agent unregistered without a clean
-                            // shutdown); evict and try the next candidate.
-                            tracing::warn!(
-                                target = %req.target_agent,
-                                channel = %entry.channel,
-                                "cross-channel forward: success=false — evicting and trying next candidate"
-                            );
-                            agent_registry::remove_shared(&shared_dir, &req.target_agent, &entry.channel);
+                            // success:false — same ambiguity as Tier 2a above:
+                            // could be a genuinely stale entry, or a live
+                            // channel whose srv is up but hadn't (yet)
+                            // registered this specific agent. Only evict on a
+                            // confirmed-dead PID; a live-but-momentarily-
+                            // not-found process just falls through to the
+                            // next candidate without losing its registry
+                            // entry. See
+                            // docs/retro/retro-cross-channel-jekt-eviction-2026-08-17.md.
+                            if agent_registry::is_pid_alive(entry.pid) {
+                                tracing::warn!(
+                                    target = %req.target_agent,
+                                    channel = %entry.channel,
+                                    pid = entry.pid,
+                                    "cross-channel forward: success=false but owning process is alive — NOT evicting, trying next candidate"
+                                );
+                            } else {
+                                tracing::warn!(
+                                    target = %req.target_agent,
+                                    channel = %entry.channel,
+                                    pid = entry.pid,
+                                    "cross-channel forward: success=false, owning process is gone — evicting and trying next candidate"
+                                );
+                                agent_registry::remove_shared(&shared_dir, &req.target_agent, &entry.channel);
+                            }
                         }
                     }
                     Ok(r) => {

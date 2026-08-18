@@ -164,8 +164,34 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // — this is the "input-gating race" both prior passes deferred pending
     // live reports continuing, which they did.
     let pendingProgrammaticScroll = false;
+    // Last scrollHeight observed at a pin-correction call — diagnostic only,
+    // see docs/analysis/ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md.
+    // A shrink between two consecutive calls means content that was already
+    // laid out at true bottom got shorter while pinned (a tool-call
+    // running->terminal swap, a spinner-run reclassification, a markdown
+    // re-highlight reflow, ...). By the time THIS function runs, the
+    // browser's own scrollTop auto-clamp for that shrink has already
+    // happened synchronously as part of the layout pass that produced it —
+    // there is nothing left here to animate away (confirmed against
+    // PLAN_AGENT_PANE_RESIZE_SCROLL_PIN_2026_08_05.md §2's "H1" math, which
+    // established the same clamp-is-already-synchronous fact for the grow
+    // case). This log exists purely so a live repro
+    // (`muxlog fe grep wave-scroll-shrink`) can identify WHICH content
+    // change produced a given visible "scroll went backward" report — the
+    // real fix has to happen upstream, at whatever DOM swap caused the
+    // shrink (e.g. a FLIP-style freeze-then-ease on that element), not here.
+    let lastKnownScrollHeight = 0;
     function scrollToTrueBottom(): void {
         if (!scrollRef) return;
+        const h = scrollRef.scrollHeight;
+        if (lastKnownScrollHeight > 0 && h < lastKnownScrollHeight - 1) {
+            console.info(
+                "[wave-scroll-shrink]",
+                `pane=${props.blockId?.slice(0, 7) ?? "?"}`,
+                `scrollHeight ${lastKnownScrollHeight}px -> ${h}px (delta=${lastKnownScrollHeight - h}px)`,
+            );
+        }
+        lastKnownScrollHeight = h;
         pendingProgrammaticScroll = true;
         scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "auto" });
     }
