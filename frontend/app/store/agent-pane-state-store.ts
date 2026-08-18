@@ -256,27 +256,39 @@ export function dispatch(
         slot.stuckLogged = false;
     }
     if (prev.turnPhase.kind !== slot.state.turnPhase.kind) {
-        // Tag a STRAY `StreamFlushObserved` re-promotion distinctly from a
-        // legitimate one. The reducer's `StreamFlushObserved` arm promotes
-        // to `Streaming` from `Submitting` (the normal hand-off — first
-        // content arriving after submit) OR from `Idle`/`Disconnected`/
-        // `Done` (a flush arriving after the turn already looked finished
-        // — the re-promotion risk #7 of
-        // docs/reports/REPORT_WORKING_STATE_TELEMETRY_AUDIT_2026_07_27.md
-        // describes). Only the second group is the "stray/late" shape that
-        // docs/reports/REPORT_AGENTA_STUCK_WORKING_INVESTIGATION_2026_08_14.md
-        // §3 had to reconstruct by hand from surrounding context — tagging
-        // it here makes that distinction a direct grep instead of an
-        // inference. See docs/specs/SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18.md.
-        const isStrayFlush =
-            command.type === "StreamFlushObserved" &&
-            slot.state.turnPhase.kind === "Streaming" &&
-            prev.turnPhase.kind !== "Submitting";
+        // NOTE: an earlier version of this line auto-tagged every
+        // `StreamFlushObserved` promotion from a non-`Submitting` phase as
+        // `(stray)`, on the theory that only `Submitting → Streaming` is
+        // the "normal" hand-off. reagent P1 on PR #2653 caught that this is
+        // wrong: reducer.ts's `StreamFlushObserved` arm documents BOTH
+        // `Idle`/`Disconnected` re-promotion (a legitimate stream drop +
+        // resubscribe, e.g. an agent respawn mid-stall) AND `Done.completed`
+        // re-promotion (session_end fires after every model API round, so
+        // this is the normal shape of a multi-round tool continuation) as
+        // intentional, non-anomalous cases — NOT the rare genuine-anomaly
+        // shape docs/reports/REPORT_AGENTA_STUCK_WORKING_INVESTIGATION_2026_08_14.md
+        // found (§3). A blanket "not Submitting" heuristic mislabels the
+        // common healthy case, drowning out the rare real one — the exact
+        // opposite of this feature's purpose. There is no reliable way to
+        // tell the two apart from this transition alone (both look
+        // identical: `Done → Streaming cmd=StreamFlushObserved`); the Aug
+        // 14 report's own strayness conclusion required EXTERNAL context
+        // (the backend's independent `[health] active:false` signal, and
+        // that literally nothing else ever arrived afterward) that isn't
+        // available at dispatch time. The already-reliable signal for "this
+        // promotion never resolved" is the existing edge-triggered
+        // `stream-stuck`/`working-recovered` lines below (elapsed-time-
+        // based, not shape-based) plus the watchdog heartbeat above — no
+        // auto-tag needed on this line; a reader of `muxlog phases` can
+        // already see the raw `X → Y` transition and judge it themselves
+        // with the merged fe+srv context the recipe exists to provide. See
+        // docs/specs/SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18.md's
+        // Implementation notes for the full account.
         console.info(
             "[wave-turn]",
             `pane=${blockId.slice(0, 7)}`,
             `${prev.turnPhase.kind} → ${slot.state.turnPhase.kind}`,
-            `cmd=${command.type}${isStrayFlush ? " (stray)" : ""}`,
+            `cmd=${command.type}`,
             `toolsActive=${slot.state.turnPhase.kind === "Streaming" ? slot.state.turnPhase.toolsActive : "-"}`,
             `currentTool=${slot.state.currentTool ?? "-"}`,
         );

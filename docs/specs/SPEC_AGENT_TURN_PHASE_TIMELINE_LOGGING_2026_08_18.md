@@ -144,6 +144,16 @@ dispatch. Add `[wave-turn] visibility: hidden→visible` /
 
 ### 4. Explicitly tag a stray/late `StreamFlushObserved` re-promotion
 
+**Superseded — see "The `(stray)` tag was removed, not fixed" under
+Review findings addressed, below.** This item's original design (tag any
+promotion from a non-`Submitting` phase as `(stray)`) shipped in round 1
+and was caught by review as actively wrong: it mislabels the documented,
+legitimate `Idle`/`Disconnected`/`Done.completed` re-promotion cases
+alongside genuine anomalies. Left here, unedited, as a record of the
+original (flawed) design rather than silently rewritten — the superseding
+section explains why and what replaces it (nothing; the raw transition
+plus the srv-side context from item 2 is enough for a reader to judge).
+
 Today, a legitimate multi-round continuation and a stray/late flush both
 log identically as `cmd=StreamFlushObserved` — an investigator has to
 reconstruct which one happened from surrounding context by hand (exactly
@@ -237,14 +247,99 @@ for future muxlog recipes that need to correlate more than one log file.
 
 Verified: `tsc --noEmit` clean; `npx vitest run` on the three touched
 frontend files (216/216 passing, including new coverage for the
-stray-flush tag, the watchdog heartbeat cadence, and both
-`visibilitychange` directions); `node --check` on `muxlog.mjs`; and a
-manual end-to-end run of `muxlog phases` against synthetic host+srv NDJSON
-fixtures covering: correct block-id filtering (excluding another pane's
-`[wave-turn]` lines and another block's `[health]` line), correct
-chronological interleaving across the two files, the `(stray)` tag,
-`--raw`, `-n`, the `$AGENTMUX_BLOCKID` default, and both "no block id
-given" / "no matching lines" error paths.
+watchdog heartbeat cadence, and both `visibilitychange` directions);
+`node --check` on `muxlog.mjs`; and a manual end-to-end run of
+`muxlog phases` against synthetic host+srv NDJSON fixtures covering:
+correct block-id filtering (excluding another pane's `[wave-turn]` lines
+and another block's `[health]` line), correct chronological interleaving
+across the two files, `--raw`, `-n`, the `$AGENTMUX_BLOCKID` default, and
+both "no block id given" / "no matching lines" error paths.
+
+## Review findings addressed (2026-08-18, same day — reagent CHANGES_REQUESTED)
+
+Four issues surfaced across two reagent review rounds on PR #2653, all
+fixed before merge:
+
+1. **`phases` silently ignored `--grep`/`--level`/`--target`/`-a`**
+   (P2, round 1). `collectPhaseLines`'s custom matcher never consulted
+   these `opt` fields, unlike `swarm`/`auth`/`bridge` which compose them
+   via `renderLine`/`printLastLines`. Fixed: `collectPhaseLines` now
+   applies all of them, with a user's `--grep` ADDING an extra AND-filter
+   on top of the recipe's own per-pane matcher rather than replacing it
+   (unlike `auth`'s `opt.grep || default` pattern) — replacing it would
+   defeat the entire point of `phases`, which is "only lines about this
+   one block."
+2. **`[health]` lines rendered identically regardless of `active`/
+   `was_active`/`exit_code`** (P1, round 2). Those fields live in
+   `health.rs`'s structured tracing fields, never in the static message
+   text `"[health] turn_active flip"` — `renderPhaseLine` printed only
+   `entry.msg`, so the merged timeline couldn't actually show the one
+   thing srv lines exist to expose. Fixed: `collectPhaseLines` now keeps
+   `fields`, and `renderPhaseLine` appends them (minus `message`/
+   `block_id`, both redundant) for every srv line, unconditionally — not
+   gated behind `--verbose` like the generic path, since it's the entire
+   reason srv lines are in this recipe.
+3. **Host/srv resolution wasn't verified to actually contain the
+   requested pane** (two P1s, round 2, same root cause). `hostCands[0]`
+   was picked by recency alone — with several instances running, the
+   caller's OWN pane could easily not be in whichever instance happened
+   to be most recently active, silently resolving to the wrong instance
+   (and, via that wrong host, the wrong srv pairing) and reporting "no
+   lines found" instead of the real timeline. Separately, srv correlation
+   by `(source, version)` filename metadata broke for two retained dev
+   builds of the same branch at the same version, since `source` for a
+   dev build (`"dev:" + branch`) drops the `<hash>` build-directory
+   segment that actually distinguishes them. Fixed with one mechanism for
+   both: `resolvePhaseFiles` now scans candidates newest-first for actual
+   CONTENT containing this pane's lines, using `(source, version)` only as
+   a cheap search-order hint (try the most-likely pairing first), never as
+   the sole decision — falling back to the old metadata-only pick only
+   when no candidate's content matches at all (e.g. the pane genuinely has
+   no `[health]` lines yet). Verified against three adversarial fixture
+   scenarios: a more-recently-touched decoy instance that would win a
+   naive most-recent pick, a decoy in the shared root sharing `source:
+   "shared"`, and two same-`(source, version)` dev builds distinguished
+   only by their build hash — content-scan resolution picked the correct
+   pairing in all three.
+4. **The `(stray)` `StreamFlushObserved` re-promotion tag was actively
+   wrong** (P1, round 2) — see the standalone note below; the feature was
+   removed, not merely fixed.
+
+### The `(stray)` tag was removed, not fixed
+
+The original design (target-state item 4, now historical) tagged any
+`StreamFlushObserved` promotion from a non-`Submitting` phase as
+`(stray)`. reagent's review caught that this mislabels the COMMON healthy
+case: `reducer.ts`'s `StreamFlushObserved` arm documents both
+`Idle`/`Disconnected` re-promotion (a legitimate stream drop + resubscribe,
+e.g. an agent respawn mid-stall) and `Done.completed` re-promotion (normal
+— `session_end` fires after every model API round, so this is just the
+next round of a multi-round tool continuation) as intentional,
+non-anomalous transitions. A blanket "not Submitting" heuristic tags both
+of those as `(stray)` right alongside the rare genuine anomaly the Aug 14
+report found — drowning the signal this feature exists to surface in
+false positives from ordinary operation. No test had covered the
+`Done.completed → Streaming` case, which is exactly the gap that let this
+ship in round 1.
+
+There is no reliable way to distinguish "genuine anomaly" from "legitimate
+continuation" purely from the phase-transition shape at dispatch time —
+the Aug 14 report's own strayness conclusion depended on EXTERNAL context
+(the backend's independent `active:false` signal, and that literally
+nothing else ever arrived for the rest of the day) that isn't available in
+the moment. Rather than build a more elaborate (and likely still-fragile)
+heuristic, the tag was removed outright: the raw `X → Streaming
+cmd=StreamFlushObserved` transition is still logged and still visible in
+`muxlog phases`'s merged timeline, and a reader can judge it themselves
+using the SAME external context (the srv-side `active`/`was_active`
+fields now rendered alongside it, per finding 2 above, plus whether the
+watchdog's own `stream-stuck`/`working-recovered`/heartbeat lines show it
+ever actually got stuck) — which is a strictly better position to judge
+from than a single unreliable auto-tag. If a future incident needs this
+distinction badly enough to justify it, tracking "how long has this phase
+been terminal" as real state (rather than inferring it from the
+transition's `from`-phase alone) would be the honest way to build it —
+flagged here as a known non-goal for this spec, not a TODO.
 
 ---
 

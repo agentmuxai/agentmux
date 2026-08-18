@@ -276,47 +276,54 @@ describe("agent-pane-state-store (cascade contracts)", () => {
 
     // ────────────────────────────────────────────────────────────────
     // SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18.md — [wave-turn]
-    // additions that let `muxlog phases` distinguish a stray re-promotion
-    // from a legitimate one, and give a direct proof-of-life for the
-    // watchdog interval instead of inferring it from silence.
+    // transition logging must NOT auto-classify a StreamFlushObserved
+    // re-promotion as anomalous. An earlier version of this line tagged
+    // any promotion from a non-Submitting phase as `(stray)`; reagent P1
+    // on PR #2653 caught that Idle/Disconnected (stream drop + resubscribe)
+    // and Done.completed (a normal multi-round tool continuation —
+    // session_end fires after every model API round) are BOTH documented,
+    // legitimate cases in reducer.ts's own StreamFlushObserved arm, not
+    // anomalies — so the blanket heuristic mislabeled the common healthy
+    // path. Removed; these tests lock down that no such mislabeling
+    // returns, covering every promotion source the reducer allows,
+    // including the specific Done.completed case that had zero coverage
+    // before (reagent's own callout).
     // ────────────────────────────────────────────────────────────────
-    describe("[wave-turn] stray StreamFlushObserved tagging", () => {
-        it("tags a flush that re-promotes from Idle as (stray)", () => {
+    describe("[wave-turn] StreamFlushObserved re-promotion — no anomaly auto-tagging", () => {
+        it.each([
+            ["Idle", (id: string) => {
+                dispatch(id, { type: "InitReady", at: 100 });
+                dispatch(id, { type: "StreamSubscribe", at: 100 }); // sets lastEventMs, stays Idle
+            }],
+            ["Submitting", (id: string) => {
+                dispatch(id, { type: "InitReady", at: 100 });
+                dispatch(id, { type: "StreamSubscribe", at: 100 });
+                dispatch(id, { type: "TurnStart", at: 110 });
+            }],
+            ["Done", (id: string) => {
+                // Reaches Done with outcome "completed" — no RequestStop.
+                dispatch(id, { type: "InitReady", at: 100 });
+                dispatch(id, { type: "StreamSubscribe", at: 100 });
+                dispatch(id, { type: "TurnStart", at: 110 });
+                dispatch(id, { type: "StreamFlushObserved", addedCount: 1, at: 120 });
+                dispatch(id, { type: "TurnEnd", stats: null });
+            }],
+        ])("promoting from %s never appends an anomaly label to the transition line", (fromKind, setup) => {
             const info = vi.spyOn(console, "info").mockImplementation(() => {});
             try {
-                registerPane("blockStray", "agentA", noopProj());
-                dispatch("blockStray", { type: "InitReady", at: 100 });
-                // StreamSubscribe from Idle stays Idle but sets lastEventMs,
-                // which is what un-gates StreamFlushObserved below.
-                dispatch("blockStray", { type: "StreamSubscribe", at: 100 });
+                const blockId = `block-${fromKind}`;
+                registerPane(blockId, "agentA", noopProj());
+                setup(blockId);
                 info.mockClear();
 
-                dispatch("blockStray", { type: "StreamFlushObserved", addedCount: 1, at: 200 });
+                dispatch(blockId, { type: "StreamFlushObserved", addedCount: 1, at: 999 });
 
                 const line = info.mock.calls.find((c) => c[0] === "[wave-turn]");
                 expect(line).toBeDefined();
-                expect(line?.join(" ")).toContain("Idle → Streaming");
-                expect(line?.join(" ")).toContain("(stray)");
-            } finally {
-                info.mockRestore();
-            }
-        });
-
-        it("does NOT tag the normal Submitting → Streaming hand-off", () => {
-            const info = vi.spyOn(console, "info").mockImplementation(() => {});
-            try {
-                registerPane("blockNormal", "agentA", noopProj());
-                dispatch("blockNormal", { type: "InitReady", at: 100 });
-                dispatch("blockNormal", { type: "StreamSubscribe", at: 100 });
-                dispatch("blockNormal", { type: "TurnStart", at: 110 });
-                info.mockClear();
-
-                dispatch("blockNormal", { type: "StreamFlushObserved", addedCount: 1, at: 120 });
-
-                const line = info.mock.calls.find((c) => c[0] === "[wave-turn]");
-                expect(line).toBeDefined();
-                expect(line?.join(" ")).toContain("Submitting → Streaming");
-                expect(line?.join(" ")).not.toContain("(stray)");
+                expect(line?.join(" ")).toContain(`${fromKind} → Streaming`);
+                // No parenthetical anomaly tag of any kind — the raw
+                // transition is all this line ever claims.
+                expect(line?.join(" ")).not.toMatch(/\(\w+\)/);
             } finally {
                 info.mockRestore();
             }

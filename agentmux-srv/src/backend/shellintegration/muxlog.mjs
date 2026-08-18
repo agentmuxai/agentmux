@@ -389,18 +389,37 @@ function collectPhaseLines(file, opt, matcher) {
         if (opt.grep && !opt.grep.test(msg)) continue;
         if (!matcher(msg, fields)) continue;
         if (opt.since && j.timestamp && j.timestamp < opt.since) continue;
-        out.push({ ts: j.timestamp || "", msg, raw: t });
+        out.push({ ts: j.timestamp || "", msg, fields, raw: t });
     }
     return out;
 }
 
 const PHASE_SOURCE_COLOR = { fe: "\x1b[36m", srv: "\x1b[35m" }; // cyan / magenta
 
+// [health] turn_active flip's own useful payload lives in structured fields
+// (agentmux-srv/src/backend/blockcontroller/health.rs: `active`, `was_active`,
+// `exit_code`), NOT in the message text — which is the same static string
+// "[health] turn_active flip" every time. Surfacing only `entry.msg` (as an
+// earlier version of this recipe did) made every non-`--raw` srv line in the
+// timeline render identically regardless of whether the turn became active
+// or inactive — the exact fact the merged timeline exists to expose (reagent
+// P1 on PR #2653). Always shown for srv lines (not gated behind --verbose,
+// unlike the generic renderLine path) since it's the entire reason srv lines
+// are in this recipe's timeline at all.
+function extraFieldsSuffix(fields) {
+    const shown = { ...fields };
+    delete shown.message;
+    delete shown.block_id; // redundant — already implied by the block filter
+    const keys = Object.keys(shown);
+    return keys.length ? `  ${DIM}${keys.map((k) => `${k}=${shown[k]}`).join(" ")}${RESET}` : "";
+}
+
 function renderPhaseLine(entry, opt) {
     if (opt.raw) return entry.raw;
     const ts = (entry.ts || "").replace(/^.*T/, "").replace(/\..*$/, "") || "--:--:--";
     const c = PHASE_SOURCE_COLOR[entry.source] ?? "";
-    return `${DIM}${ts}${RESET} ${c}${entry.source.padEnd(3)}${RESET}  ${entry.msg}`;
+    const suffix = entry.source === "srv" ? extraFieldsSuffix(entry.fields) : "";
+    return `${DIM}${ts}${RESET} ${c}${entry.source.padEnd(3)}${RESET}  ${entry.msg}${suffix}`;
 }
 
 function resolveBlockId(pos) {
@@ -415,7 +434,46 @@ function resolveBlockId(pos) {
     return id;
 }
 
-function phasesTimeline(pos, opt) {
+// Whether `file` actually contains at least one line matching BOTH `tag`
+// (e.g. "[wave-turn]") and `needle` (a pane prefix or full block id).
+// Content presence is the ground truth for "is this the right log for this
+// pane" — filename metadata (source/version) is only ever a search-order
+// hint below, never sufficient on its own (reagent P1 x2 on PR #2653; see
+// resolvePhaseFiles's own doc comment for the two concrete failure modes
+// that motivated this).
+function fileContainsPane(file, tag, needle) {
+    let content = "";
+    try { content = fs.readFileSync(file, "utf8"); } catch { return false; }
+    return content.includes(tag) && content.includes(needle);
+}
+
+// Resolve the ONE host+srv log pair that actually belongs to `blockId`'s
+// running instance. Two correlation bugs, both caught live by reagent
+// review while this recipe was under review, motivate doing this by
+// CONTENT rather than by filename metadata:
+//
+//   1. Picking `hostCands[0]` (globally most-recently-active host log,
+//      respecting only `-i`) without checking it actually contains the
+//      requested block id: with several instances running, the caller's
+//      OWN pane (the common case — default $AGENTMUX_BLOCKID) can easily
+//      NOT be in whichever instance happens to be most recently active
+//      overall, silently resolving to the wrong instance's host log (and,
+//      via that wrong host, the wrong srv pairing too) and reporting "no
+//      lines found" instead of the real timeline — defeating the "zero
+//      setup self-audit" the recipe exists to provide.
+//   2. Correlating srv→host by `(source, version)` filename metadata alone:
+//      `source` for a dev build is `"dev:" + <branch>` only — it drops the
+//      `<hash>` build-directory segment, so two retained dev builds of the
+//      SAME branch at the SAME version are indistinguishable by this key,
+//      and the mtime-sorted first match can be an unrelated build's srv
+//      log. (`source` alone, with no version check at all, has an even
+//      coarser version of the same problem: the shared root holds several
+//      version-tagged pairs at once.)
+//
+// Fix: content presence is the ground truth for both. `source`/`version`
+// are used ONLY to order candidates cheaply (try the most-likely pairing
+// first) before falling back to a full scan — never as the sole decision.
+function resolvePhaseFiles(pos, opt) {
     const blockId = resolveBlockId(pos);
     const prefix = `pane=${blockId.slice(0, 7)}`;
 
@@ -425,33 +483,35 @@ function phasesTimeline(pos, opt) {
         console.error(`muxlog: no host log found${opt.instance ? ` matching '${opt.instance}'` : ""}. Try \`muxlog ls\`.`);
         process.exit(1);
     }
-    const hostEntry = hostCands[0]; // most recently active
+    // Scan newest-first for the first host log that actually contains this
+    // pane. Falls back to the most-recent candidate (old behavior) only if
+    // NONE contain it — the timeline query below still runs and reports a
+    // clear "no lines found" naming the (real, if wrong) file it checked,
+    // rather than crashing outright.
+    const hostEntry = hostCands.find((e) => fileContainsPane(e.file, "[wave-turn]", prefix)) ?? hostCands[0];
 
-    // Correlate the srv log to the SAME running instance the host log came
-    // from — NOT independently "most recently active srv log overall".
-    // `source` alone (shared / dev:<branch> / channel:<x>) is NOT enough:
-    // the shared root routinely holds several version-tagged host/srv pairs
-    // at once (every release + every portable build writes there), so two
-    // files can share `source: "shared"` while belonging to completely
-    // unrelated running instances — confirmed live while building this
-    // recipe (a synthetic `source: "shared"` host fixture matched against
-    // the real, currently-running production srv log instead of its own
-    // paired fixture). A real host/srv pair from the same instance shares
-    // BOTH `source` and the version embedded in each filename, so match on
-    // both; fall back to source-only, then to the plain most-recent pick,
-    // only if no exact pairing exists (e.g. unusual log-rotation naming).
     const srvCands = discover("srv");
+    const bySourceVersion = srvCands.filter((e) => e.source === hostEntry.source && e.version === hostEntry.version);
+    const bySource = srvCands.filter((e) => e.source === hostEntry.source);
     const srvEntry =
-        srvCands.find((e) => e.source === hostEntry.source && e.version === hostEntry.version) ||
-        srvCands.find((e) => e.source === hostEntry.source) ||
-        srvCands[0];
+        bySourceVersion.find((e) => fileContainsPane(e.file, "[health]", blockId)) ??
+        bySource.find((e) => fileContainsPane(e.file, "[health]", blockId)) ??
+        srvCands.find((e) => fileContainsPane(e.file, "[health]", blockId)) ??
+        // No srv log anywhere contains this block id yet — not necessarily
+        // an error (e.g. the pane opened but no turn has run since srv last
+        // rotated). Fall back to the best-guess pairing so the timeline
+        // still shows whatever fe-side lines exist.
+        bySourceVersion[0] ?? bySource[0] ?? srvCands[0];
     if (!srvEntry) {
         console.error("muxlog: no srv log found. Try `muxlog ls`.");
         process.exit(1);
     }
 
-    const hostFile = hostEntry.file;
-    const srvFile = srvEntry.file;
+    return { blockId, prefix, hostFile: hostEntry.file, srvFile: srvEntry.file };
+}
+
+function phasesTimeline(pos, opt) {
+    const { blockId, prefix, hostFile, srvFile } = resolvePhaseFiles(pos, opt);
 
     const feLines = collectPhaseLines(hostFile, opt, (msg) => msg.includes("[wave-turn]") && msg.includes(prefix))
         .map((e) => ({ ...e, source: "fe" }));
