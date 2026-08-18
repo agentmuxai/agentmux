@@ -3,11 +3,11 @@
 //
 // SolidJS migration: all Jotai/React types replaced with SolidJS equivalents.
 
-import type { Placement } from "@floating-ui/dom";
-import type { Accessor, JSX } from "solid-js";
-import type { SignalAtom } from "@/util/util";
 import type { PaneVoiceHandle } from "@/app/hook/useVoiceInput";
+import type { SignalAtom } from "@/util/util";
+import type { Placement } from "@floating-ui/dom";
 import type * as rxjs from "rxjs";
+import type { Accessor, JSX } from "solid-js";
 
 declare global {
     // All atoms are now SolidJS Accessors (call as function to read reactive value).
@@ -110,11 +110,21 @@ declare global {
         getConfigDir: () => string;
         getUserHomeDir: () => string;
         getAboutModalDetails: () => AboutModalDetails;
-        getBackendInfo: () => Promise<{ pid?: number; started_at?: string; web_endpoint?: string; version: string; pending_migrations?: number }>;
+        getBackendInfo: () => Promise<{
+            pid?: number;
+            started_at?: string;
+            web_endpoint?: string;
+            version: string;
+            pending_migrations?: number;
+        }>;
         restartBackend: () => Promise<void>;
         getDocsiteUrl: () => string;
         getZoomFactor: () => number;
-        showContextMenu: (workspaceId: string, menu?: NativeContextMenuItem[], position?: { x: number; y: number }) => void;
+        showContextMenu: (
+            workspaceId: string,
+            menu?: NativeContextMenuItem[],
+            position?: { x: number; y: number }
+        ) => void;
         onContextMenuClick: (callback: (id: string) => void) => void;
         onNavigate: (callback: (url: string) => void) => void;
         onIframeNavigate: (callback: (url: string) => void) => void;
@@ -206,12 +216,19 @@ declare global {
             loginArgs: string[],
             authEnv: Record<string, string>,
             requiresTty?: boolean,
-            authConfigDirEnvVar?: string,
+            authConfigDirEnvVar?: string
         ) => Promise<string | null>;
         cancelCliLogin: () => Promise<void>;
         getCliLoginStatus: () => Promise<{ active: boolean; credential_changed: boolean; generation: number }>;
-        seedProviderAuthFromGlobal: (providerId: string, configDir?: string) => Promise<{ seeded: boolean; status: string; expiresAt?: number | null }>;
-        openLoginTerminal: (cliPath: string, loginArgs: string[], authEnv: Record<string, string>) => Promise<{ opened: boolean }>;
+        seedProviderAuthFromGlobal: (
+            providerId: string,
+            configDir?: string
+        ) => Promise<{ seeded: boolean; status: string; expiresAt?: number | null }>;
+        openLoginTerminal: (
+            cliPath: string,
+            loginArgs: string[],
+            authEnv: Record<string, string>
+        ) => Promise<{ opened: boolean }>;
         listen: (event: string, callback: (event: any) => void) => Promise<() => void>;
         startCrossDrag: (
             dragType: "pane" | "tab",
@@ -242,7 +259,7 @@ declare global {
             width?: number,
             height?: number,
             tabAnchorX?: number,
-            tabAnchorY?: number,
+            tabAnchorY?: number
         ) => Promise<string>;
         /** Phase 6 — promote a pre-warmed pool window for tear-off.
          *  Returns the destination window label on success. Throws if
@@ -260,7 +277,7 @@ declare global {
             width?: number,
             height?: number,
             tabAnchorX?: number,
-            tabAnchorY?: number,
+            tabAnchorY?: number
         ) => Promise<string>;
         /** Tear-off Phase 2 Win32 SC_MOVE handshake. Call AFTER
          *  TearOffTab + openWindowAtPosition; this hands cursor capture
@@ -638,6 +655,18 @@ declare global {
         maxy?: string | number;
         miny?: string | number;
         decimalPlaces?: number;
+        /** When true, the chart's y-max is computed from the visible
+         *  window's own data (largest value + padding) instead of using
+         *  `maxy` directly as a fixed ceiling. `maxy`, if still set, becomes
+         *  a hard cap the auto-scaled value will never exceed (e.g. memory
+         *  used can never exceed `mem:total`). See
+         *  docs/reports/REPORT_SYSINFO_COMBINED_CHART_RESEARCH_2026_08_17.md. */
+        autoMaxY?: boolean;
+        /** Floor for the auto-scaled max — the axis never zooms in tighter
+         *  than this, so a near-idle window (e.g. 0.1 MB/s network) doesn't
+         *  blow tiny noise up to fill the whole chart. Only used when
+         *  `autoMaxY` is true. */
+        autoMaxYFloor?: number;
     };
 
     interface SuggestionRequestContext {

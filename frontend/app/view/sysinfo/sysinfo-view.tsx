@@ -4,12 +4,11 @@
 import { waveEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import clsx from "clsx";
-import { createEffect, createMemo, createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, on, onCleanup, onMount, Show } from "solid-js";
 
 import type { SysinfoViewModel } from "./sysinfo-model";
 import { SingleLinePlot } from "./sysinfo-plot";
-import type { DataItem } from "./sysinfo-types";
 import { convertWaveEventToDataItem } from "./sysinfo-util";
 
 type SysinfoViewProps = {
@@ -83,21 +82,54 @@ function SysinfoViewInner(props: SysinfoViewProps): JSX.Element {
         const id = setInterval(() => setPlotData(model.dataAtom()), CHART_UPDATE_INTERVAL_MS);
         onCleanup(() => clearInterval(id));
     });
+    // Sync immediately whenever the initial (or a reconnect-triggered) load
+    // finishes, instead of waiting for the next throttle tick. `plotData`'s
+    // initial value above is a one-time snapshot taken at mount — if the
+    // pane mounts before loadInitialData()'s RPC resolves (the common
+    // case), it captures `[]`, and without this effect the chart would sit
+    // blank until the interval above happened to fire, up to
+    // CHART_UPDATE_INTERVAL_MS (2s) after the real data was already ready.
+    // That interval exists to throttle STEADY-STATE repaints, not to gate
+    // the first paint — this was the actual cause of a slow-feeling first
+    // load, not a missing loading indicator or slow RPC.
+    //
+    // `on()` scopes tracking to loadingAtom() ONLY — model.dataAtom() is
+    // read for its current value but deliberately NOT tracked, or this
+    // effect would re-fire on every ~1Hz sample and defeat the throttle
+    // above entirely (the exact ~13% sustained GPU cost the throttle was
+    // added to fix, see CHART_UPDATE_INTERVAL_MS's comment).
+    createEffect(
+        on(
+            () => model.loadingAtom(),
+            (loading) => {
+                if (!loading) setPlotData(model.dataAtom());
+            }
+        )
+    );
     const yvals = createMemo(() => model.metrics());
     const plotMeta = createMemo(() => model.plotMetaAtom());
     const targetLen = createMemo(() => model.numPoints() + 1);
     const intervalSecs = createMemo(() => model.intervalSecsAtom());
 
     const title = createMemo(() => yvals().length > 1);
-    const cols2 = createMemo(() => yvals().length > 2);
+    // The "CPU + Mem + Net" plot type stacks as a single column of 3
+    // full-width rows instead of falling into the 2-column grid below: at 2
+    // columns, 3 panels wrap to a 2+1 layout that leaves the second row
+    // half empty. Keyed off the plot type itself, NOT `yvals().length === 3`
+    // (reagentx P2 on PR #2638) — "All CPU" also produces exactly 3 panels
+    // on any machine with exactly 3 detected cores, which would otherwise
+    // incorrectly force that view into the single-column layout meant only
+    // for this one plot type.
+    const cols1 = createMemo(() => model.plotTypeSelectedAtom() === "CPU + Mem + Net");
+    const cols2 = createMemo(() => yvals().length > 2 && !cols1());
 
     return (
         <div class="flex flex-col flex-grow mb-0 overflow-y-auto">
             <div
-                class={clsx(
-                    "w-full h-full grid grid-rows-[repeat(auto-fit,minmax(100px,1fr))] gap-[10px]",
-                    { "grid-cols-2": cols2() }
-                )}
+                class={clsx("w-full h-full grid grid-rows-[repeat(auto-fit,minmax(100px,1fr))] gap-[10px]", {
+                    "grid-cols-1": cols1(),
+                    "grid-cols-2": cols2(),
+                })}
             >
                 <For each={yvals()}>
                     {(yval) => (
