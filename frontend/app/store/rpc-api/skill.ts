@@ -136,4 +136,35 @@ export const SkillApi = {
     ): Promise<{ unbound: boolean }> {
         return client.rpcCall("skill.catalog.unbind", data, opts);
     },
+
+    // ── Bundle-scoped siblings (composable model v2) ────────────────────
+    // docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md, GH issue #2024
+    // item 3. Same no-agent_id/no-check_s1 shape as the catalog trio above,
+    // keyed by bundle_id instead of agent_id — only global skills (or ones
+    // already bundle-bound) may be bound, same trust boundary as
+    // SkillCatalogBindCommand.
+
+    SkillCatalogBindToBundleCommand(
+        client: RpcClient,
+        data: { bundle_id: string; skill_id: string },
+        opts?: RpcOpts,
+    ): Promise<{ bound: boolean }> {
+        return client.rpcCall("skill.catalog.bind_to_bundle", data, opts);
+    },
+
+    SkillCatalogUnbindFromBundleCommand(
+        client: RpcClient,
+        data: { bundle_id: string; skill_id: string },
+        opts?: RpcOpts,
+    ): Promise<{ unbound: boolean }> {
+        return client.rpcCall("skill.catalog.unbind_from_bundle", data, opts);
+    },
+
+    SkillCatalogListForBundleCommand(
+        client: RpcClient,
+        data: { bundle_id: string },
+        opts?: RpcOpts,
+    ): Promise<SkillBundleListItem[]> {
+        return client.rpcCall("skill.catalog.list_for_bundle", data, opts);
+    },
 };

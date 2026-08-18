@@ -137,4 +137,35 @@ export const McpApi = {
     ): Promise<{ unbound: boolean }> {
         return client.rpcCall("mcp.catalog.unbind", data, opts);
     },
+
+    // ── Bundle-scoped siblings (composable model v2) ────────────────────
+    // docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md, GH issue #2024
+    // item 3. Same no-agent_id/no-check_s1 shape as the catalog trio above,
+    // keyed by bundle_id instead of agent_id — only global servers (or ones
+    // already bundle-bound) may be bound, same trust boundary as
+    // McpCatalogBindCommand.
+
+    McpCatalogBindToBundleCommand(
+        client: RpcClient,
+        data: { bundle_id: string; mcp_id: string },
+        opts?: RpcOpts,
+    ): Promise<{ bound: boolean }> {
+        return client.rpcCall("mcp.catalog.bind_to_bundle", data, opts);
+    },
+
+    McpCatalogUnbindFromBundleCommand(
+        client: RpcClient,
+        data: { bundle_id: string; mcp_id: string },
+        opts?: RpcOpts,
+    ): Promise<{ unbound: boolean }> {
+        return client.rpcCall("mcp.catalog.unbind_from_bundle", data, opts);
+    },
+
+    McpCatalogListForBundleCommand(
+        client: RpcClient,
+        data: { bundle_id: string },
+        opts?: RpcOpts,
+    ): Promise<McpServerBundleListItem[]> {
+        return client.rpcCall("mcp.catalog.list_for_bundle", data, opts);
+    },
 };
