@@ -144,14 +144,23 @@ fn fire_pane_load_watchdog(state: &Arc<AppState>, block_id: &str, epoch: u64) {
 
 /// Set (or clear) the main-frame-loading tracker for `block_id` and, if the
 /// tracked state actually changed, emit a `browser-pane-nav-state` event
-/// carrying the corrected `is_loading` for the frontend spinner. `url`
-/// is supplied by the caller rather than re-derived here because the
-/// correct source differs by call site: `on_before_browse` must pass the
-/// navigation's own REQUEST target (the frame hasn't committed yet, so
-/// `Frame::url()` there would still report the previous page — same
-/// reasoning as `arm_pane_load_watchdog`'s doc comment), while
-/// `on_load_end_browser_pane`/`on_load_error` pass the frame's now-current
-/// (committed or failed) URL.
+/// carrying the corrected `is_loading` for the frontend spinner.
+///
+/// `url` is supplied by the caller rather than re-derived here — but,
+/// unlike `arm_pane_load_watchdog`'s `url` (which deliberately wants the
+/// navigation's own PENDING request target), every caller here should pass
+/// the frame's CURRENT/already-committed URL, never a pending target. Every
+/// `browser-pane-nav-state` event's `url` field unconditionally drives the
+/// frontend's `UrlConfirmed` dispatch (`browser-model.ts`), regardless of
+/// this event's actual purpose being only the loading-spinner signal — an
+/// earlier version of `on_before_browse`'s call site passed the pending
+/// target here, which jumped the address bar to where a navigation was
+/// headed before it committed, and got the bar stuck on a redirect chain's
+/// first hop for the whole chain (reagent P2 on PR #2642). Passing the
+/// current URL instead makes this event's `UrlConfirmed` dispatch a
+/// harmless no-op — `on_load_end_browser_pane`/`on_load_error` already did
+/// this correctly (frame's now-current committed or failed URL);
+/// `on_before_browse` now passes `Frame::url()` (the previous page) too.
 ///
 /// No epoch/generation guard is needed here (unlike
 /// `browser_pane_load_watchdog`'s epoch): a `false` call only ever

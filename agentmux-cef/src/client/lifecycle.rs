@@ -811,10 +811,31 @@ impl AgentMuxHandler {
                     // insert-already-present check) if a hop finds it
                     // already true. Must run before `url` is moved into the
                     // watchdog calls below.
+                    //
+                    // Deliberately passes the frame's CURRENT committed URL
+                    // (`Frame::url()`), NOT `url` (this navigation's own
+                    // pending TARGET, used below for the watchdog) — every
+                    // `browser-pane-nav-state` event's `url` field
+                    // unconditionally drives the frontend's `UrlConfirmed`
+                    // dispatch regardless of this event's actual purpose
+                    // being only the loading-spinner signal. Passing the
+                    // pending target jumped the address bar to where the
+                    // navigation is headed before it commits — and on a
+                    // redirect chain, the insert-already-present no-op above
+                    // means only the FIRST hop's target would ever be sent
+                    // (subsequent hops don't change the tracked state), so
+                    // the bar would get stuck on that first intermediate hop
+                    // for the whole chain. Passing the current (pre-this-
+                    // navigation) URL instead makes this event's UrlConfirmed
+                    // dispatch a harmless no-op — reagent P2 on PR #2642.
+                    let current_url = frame
+                        .as_ref()
+                        .map(|f| CefString::from(&f.url()).to_string())
+                        .unwrap_or_default();
                     crate::browser_pane::callbacks::set_pane_main_frame_loading(
                         &self.state,
                         &block_id,
-                        &url,
+                        &current_url,
                         true,
                     );
                     if is_redirect != 0 {
