@@ -439,28 +439,112 @@ impl Store {
     /// Bind an MCP server to a bundle (insert ref row). Idempotent — binding
     /// an already-bound pair is a silent no-op success.
     ///
-    /// Errors if `bundle_id` doesn't exist: `db_bundle_mcp_ref.bundle_id`
-    /// has an FK to `db_bundles(id)`, but without this explicit check an
-    /// invalid bundle_id would have the FK silently swallow the
-    /// `INSERT OR IGNORE` — indistinguishable, by affected-row-count alone,
-    /// from the equally-silent "already bound" case. Same fix as
-    /// `mcp_server_bind`'s agent-existence guard.
-    pub fn bundle_mcp_bind(&self, bundle_id: &str, mcp_id: &str) -> Result<(), StoreError> {
-        let conn = self.conn.lock().unwrap();
-        let bundle_exists: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM db_bundles WHERE id = ?1)",
-            params![bundle_id],
-            |row| row.get(0),
-        )?;
+    /// `id_store` (NOT `self`) is where bundle existence is checked —
+    /// reagentx P0 review on PR #2639: bundles are authoritatively written
+    /// through `id_store` (the shared store in a normal production
+    /// install), not `wstore`/`self`, where this method's own table lives.
+    /// `self`'s own local `db_bundles` copy is essentially always empty in
+    /// that case, so checking existence there (as the original version of
+    /// this method did) made "bundle not found" fire for every real
+    /// production bundle. `id_store` is a separate physical store/connection
+    /// with no possible cross-database FK to it — same "check at the
+    /// application layer, not via FK" pattern as
+    /// `identity::resolver::resolve_account`'s cross-store lookups.
+    pub fn bundle_mcp_bind(&self, id_store: &Store, bundle_id: &str, mcp_id: &str) -> Result<(), StoreError> {
+        let bundle_exists: bool = {
+            let conn = id_store.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM db_bundles WHERE id = ?1)",
+                params![bundle_id],
+                |row| row.get(0),
+            )?
+        };
         if !bundle_exists {
             return Err(StoreError::Other(format!(
                 "bundle {bundle_id} not found — cannot bind an MCP server to a nonexistent bundle"
             )));
         }
+        let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT OR IGNORE INTO db_bundle_mcp_ref (bundle_id, mcp_id) VALUES (?1, ?2)",
             params![bundle_id, mcp_id],
         )?;
+        Ok(())
+    }
+
+    /// Atomically create a NEW, PRIVATE (never global) MCP server scoped
+    /// and bound directly to a bundle, enforcing bundle-scoped name
+    /// uniqueness — the bundle-level analog of `mcp_server_upsert_unique`.
+    ///
+    /// reagentx P1 review on PR #2639: `bundle_mcp_bind` can only bind
+    /// EXISTING global rows (binding an existing private row would let one
+    /// bundle "steal" read access to whatever entity that row already
+    /// privately belongs to — the same cross-entity IDOR
+    /// `mcp.catalog.bind`'s own "only global" restriction guards against).
+    /// But globals already reach every agent unconditionally via
+    /// `effective_mcp_servers`, so binding one to a bundle has literally no
+    /// effect. This method is the missing piece: it creates a BRAND-NEW row
+    /// that has never belonged to anyone else, so there's no theft risk —
+    /// this is how a bundle gets a genuinely bundle-specific tool that
+    /// isn't already visible to every other agent.
+    pub fn bundle_mcp_upsert_unique(
+        &self,
+        id_store: &Store,
+        bundle_id: &str,
+        server: &McpServer,
+        bind_new: bool,
+    ) -> Result<(), StoreError> {
+        let bundle_exists: bool = {
+            let conn = id_store.conn.lock().unwrap();
+            conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM db_bundles WHERE id = ?1)",
+                params![bundle_id],
+                |row| row.get(0),
+            )?
+        };
+        if !bundle_exists {
+            return Err(StoreError::Other(format!(
+                "bundle {bundle_id} not found — cannot create an MCP server for a nonexistent bundle"
+            )));
+        }
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let dup: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM db_mcp_servers
+             WHERE name = ?1 AND id <> ?2 AND (is_global = 1 OR id IN (
+               SELECT mcp_id FROM db_bundle_mcp_ref WHERE bundle_id = ?3
+             ))",
+            params![server.name, server.id, bundle_id],
+            |r| r.get(0),
+        )?;
+        if dup > 0 {
+            return Err(StoreError::Other(format!(
+                "server name '{}' already bound to this bundle",
+                server.name
+            )));
+        }
+        // is_global hardcoded to 0 — this method's entire purpose is
+        // creating PRIVATE bundle-scoped content (mirrors
+        // mcp_server_upsert_unique_global's opposite hardcode of 1).
+        // Referencing an EXISTING global server is bundle_mcp_bind's job.
+        tx.execute(
+            "INSERT INTO db_mcp_servers (id, name, transport, config, is_global, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, 0, ?5, ?6)
+             ON CONFLICT(id) DO UPDATE SET
+               name=excluded.name, transport=excluded.transport, config=excluded.config,
+               updated_at=excluded.updated_at",
+            params![
+                server.id, server.name, server.transport, server.config,
+                server.created_at, server.updated_at,
+            ],
+        )?;
+        if bind_new {
+            tx.execute(
+                "INSERT OR IGNORE INTO db_bundle_mcp_ref (bundle_id, mcp_id) VALUES (?1, ?2)",
+                params![bundle_id, server.id],
+            )?;
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -484,6 +568,20 @@ impl Store {
                SELECT mcp_id FROM db_bundle_mcp_ref WHERE bundle_id = ?2
              ))",
             rusqlite::params![mcp_id, bundle_id],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    /// Return true if the bundle has a direct ref binding to this MCP
+    /// server (global excluded). Mirrors `mcp_server_is_bound_to` — used
+    /// for edit/delete-ownership checks, as opposed to
+    /// `bundle_mcp_is_accessible_to`'s broader read-access check.
+    pub fn bundle_mcp_is_bound_to(&self, bundle_id: &str, mcp_id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM db_bundle_mcp_ref WHERE bundle_id = ?1 AND mcp_id = ?2",
+            rusqlite::params![bundle_id, mcp_id],
             |row| row.get(0),
         )?;
         Ok(count > 0)
@@ -548,7 +646,7 @@ mod bundle_ref_tests {
         assert_eq!(before.len(), 1, "only the global server should be visible before any bind: {before:?}");
         assert!(!before[0].bound_to_bundle, "global server isn't bundle-bound yet");
 
-        store.bundle_mcp_bind("bundle-1", "srv-private").unwrap();
+        store.bundle_mcp_bind(&store, "bundle-1", "srv-private").unwrap();
         let after = store.bundle_mcp_list("bundle-1").unwrap();
         assert_eq!(after.len(), 2, "private server must now be visible after binding: {after:?}");
         let private_item = after.iter().find(|i| i.server.id == "srv-private").expect("private server present");
@@ -563,7 +661,7 @@ mod bundle_ref_tests {
         store
             .mcp_server_upsert_unique("some-other-agent-context", &server("srv-private", "Private", false), false)
             .unwrap_or(());
-        store.bundle_mcp_bind("bundle-1", "srv-private").unwrap();
+        store.bundle_mcp_bind(&store, "bundle-1", "srv-private").unwrap();
 
         let bundle2_list = store.bundle_mcp_list("bundle-2").unwrap();
         assert!(
@@ -576,7 +674,7 @@ mod bundle_ref_tests {
     fn bind_errors_when_the_bundle_does_not_exist() {
         let store = make_store();
         store.mcp_server_upsert_unique_global(&server("srv-1", "S", true)).unwrap();
-        let result = store.bundle_mcp_bind("no-such-bundle", "srv-1");
+        let result = store.bundle_mcp_bind(&store, "no-such-bundle", "srv-1");
         assert!(result.is_err(), "binding to a nonexistent bundle must error, not silently no-op");
     }
 
@@ -587,7 +685,7 @@ mod bundle_ref_tests {
         store
             .mcp_server_upsert_unique("ctx", &server("srv-private", "Private", false), false)
             .unwrap_or(());
-        store.bundle_mcp_bind("bundle-1", "srv-private").unwrap();
+        store.bundle_mcp_bind(&store, "bundle-1", "srv-private").unwrap();
 
         let removed = store.bundle_mcp_unbind("bundle-1", "srv-private").unwrap();
         assert!(removed);
@@ -604,7 +702,7 @@ mod bundle_ref_tests {
         store
             .mcp_server_upsert_unique("ctx", &server("srv-private", "Private", false), false)
             .unwrap_or(());
-        store.bundle_mcp_bind("bundle-1", "srv-private").unwrap();
+        store.bundle_mcp_bind(&store, "bundle-1", "srv-private").unwrap();
         assert_eq!(store.bundle_mcp_list("bundle-1").unwrap().len(), 1);
 
         store.mcp_server_delete("srv-private").unwrap();
@@ -612,6 +710,79 @@ mod bundle_ref_tests {
             store.bundle_mcp_list("bundle-1").unwrap().is_empty(),
             "the bundle ref row must be purged when the underlying server is deleted"
         );
+    }
+
+    /// reagentx P0 review on PR #2639: bundle existence must be checked
+    /// against `id_store` (the caller-supplied param), which is where
+    /// bundles are authoritatively written in production — NOT against
+    /// `self` (wstore), whose own local `db_bundles` copy is essentially
+    /// always empty for real bundles. Two-store setup mirrors production:
+    /// the bundle exists ONLY in `id_store`.
+    #[test]
+    fn bind_checks_bundle_existence_in_id_store_not_self() {
+        let wstore = make_store();
+        let id_store = make_store();
+        insert_bundle(&id_store, "bundle-1");
+        wstore.mcp_server_upsert_unique_global(&server("srv-1", "S", true)).unwrap();
+
+        let result = wstore.bundle_mcp_bind(&id_store, "bundle-1", "srv-1");
+        assert!(result.is_ok(), "must check bundle existence against id_store, not self: {result:?}");
+    }
+
+    /// Inverse of the above: a bundle that exists only in `self`'s own
+    /// (non-authoritative) local copy — never in `id_store`, where it
+    /// should really live — must NOT be treated as existing. This
+    /// reproduces the exact reported production bug (checking the wrong
+    /// store made every real bind fail with "bundle not found") in the
+    /// opposite direction: without the fix, `self` was checked instead of
+    /// `id_store`, which would make THIS test's bind wrongly succeed.
+    #[test]
+    fn bind_fails_when_bundle_exists_only_in_self_not_id_store() {
+        let wstore = make_store();
+        let id_store = make_store();
+        insert_bundle(&wstore, "bundle-1"); // wrong store — simulates the pre-fix bug's mirror image
+        wstore.mcp_server_upsert_unique_global(&server("srv-1", "S", true)).unwrap();
+
+        let result = wstore.bundle_mcp_bind(&id_store, "bundle-1", "srv-1");
+        assert!(
+            result.is_err(),
+            "a bundle only present in self's non-authoritative copy must not satisfy the id_store check: {result:?}"
+        );
+    }
+
+    /// reagentx P1 review on PR #2639: `bundle_mcp_upsert_unique` is the
+    /// missing "give this bundle its own tool" path — `bind_to_bundle`
+    /// alone can only reference already-global rows, which have no effect
+    /// once bound (already unconditionally visible to every agent). This
+    /// creates a genuinely NEW private server, bound only to this bundle.
+    #[test]
+    fn upsert_unique_creates_a_new_private_server_bound_to_the_bundle() {
+        let store = make_store();
+        insert_bundle(&store, "bundle-1");
+
+        store
+            .bundle_mcp_upsert_unique(
+                &store,
+                "bundle-1",
+                &server("new-srv", "Bundle-Only Tool", true), // is_global: true here is IGNORED
+                true,
+            )
+            .unwrap();
+
+        let list = store.bundle_mcp_list("bundle-1").unwrap();
+        let item = list.iter().find(|i| i.server.id == "new-srv").expect("newly created server present");
+        assert!(item.bound_to_bundle);
+        assert!(!item.server.is_global, "upsert_unique must force is_global=false regardless of the input struct");
+    }
+
+    #[test]
+    fn upsert_unique_rejects_a_duplicate_name_already_bound_to_the_bundle() {
+        let store = make_store();
+        insert_bundle(&store, "bundle-1");
+        store.bundle_mcp_upsert_unique(&store, "bundle-1", &server("srv-a", "Dup Name", true), true).unwrap();
+
+        let result = store.bundle_mcp_upsert_unique(&store, "bundle-1", &server("srv-b", "Dup Name", true), true);
+        assert!(result.is_err(), "a second server with the same name bound to the same bundle must be rejected");
     }
 
     #[test]
@@ -625,7 +796,7 @@ mod bundle_ref_tests {
 
         assert!(store.bundle_mcp_is_accessible_to("bundle-1", "srv-global").unwrap());
         assert!(!store.bundle_mcp_is_accessible_to("bundle-1", "srv-private").unwrap());
-        store.bundle_mcp_bind("bundle-1", "srv-private").unwrap();
+        store.bundle_mcp_bind(&store, "bundle-1", "srv-private").unwrap();
         assert!(store.bundle_mcp_is_accessible_to("bundle-1", "srv-private").unwrap());
     }
 
@@ -677,13 +848,36 @@ mod bundle_ref_tests {
         store
             .mcp_server_upsert_unique("some-other-context", &server("bundle-srv", "Bundle Server", false), false)
             .unwrap_or(());
-        store.bundle_mcp_bind("bundle-1", "bundle-srv").unwrap();
+        store.bundle_mcp_bind(&store, "bundle-1", "bundle-srv").unwrap();
 
         let effective = store.effective_mcp_servers("agent-1");
         let names: Vec<&str> = effective.iter().map(|s| s.name.as_str()).collect();
         assert!(
             names.contains(&"Bundle Server"),
             "a server referenced only by the agent's bound bundle must still be effective: {names:?}"
+        );
+    }
+
+    /// End-to-end proof of the reagentx P1 fix: a server created via
+    /// `bundle_mcp_upsert_unique` (the new "give this bundle its own tool"
+    /// path) reaches a spawned agent's effective config — closing the gap
+    /// where `bind_to_bundle` alone could only reference already-global
+    /// rows that have no effect once bound.
+    #[test]
+    fn effective_mcp_servers_includes_a_bundle_owned_private_server_created_via_upsert_unique() {
+        let store = make_store();
+        insert_bundle(&store, "bundle-1");
+        insert_agent_with_bundle(&store, "agent-1", "bundle-1");
+
+        store
+            .bundle_mcp_upsert_unique(&store, "bundle-1", &server("bundle-own-tool", "Bundle-Owned Tool", false), true)
+            .unwrap();
+
+        let effective = store.effective_mcp_servers("agent-1");
+        let names: Vec<&str> = effective.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            names.contains(&"Bundle-Owned Tool"),
+            "a bundle-owned private server created via bundle_mcp_upsert_unique must reach the agent's effective config: {names:?}"
         );
     }
 

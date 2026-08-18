@@ -28,6 +28,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_mcp_catalog_bind_to_bundle(engine, state);
     register_mcp_catalog_unbind_from_bundle(engine, state);
     register_mcp_catalog_list_for_bundle(engine, state);
+    register_mcp_catalog_upsert_for_bundle(engine, state);
 }
 
 fn register_mcp_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -561,11 +562,13 @@ fn register_mcp_catalog_delete(engine: &Arc<WshRpcEngine>, state: &AppState) {
 // (GH issue #2024 item 3).
 fn register_mcp_catalog_bind_to_bundle(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let id_store = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_MCP_CATALOG_BIND_TO_BUNDLE,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
+            let id_store = id_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
@@ -589,7 +592,7 @@ fn register_mcp_catalog_bind_to_bundle(engine: &Arc<WshRpcEngine>, state: &AppSt
                     }
                     Some(_) => {}
                 }
-                wstore.bundle_mcp_bind(&req.bundle_id, &req.mcp_id)
+                wstore.bundle_mcp_bind(&id_store, &req.bundle_id, &req.mcp_id)
                     .map_err(|e| format!("mcp.catalog.bind_to_bundle: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "mcp:changed".to_string(),
@@ -627,8 +630,98 @@ fn register_mcp_catalog_list_for_bundle(engine: &Arc<WshRpcEngine>, state: &AppS
     );
 }
 
-// Bundle-scoped sibling of register_mcp_catalog_unbind (above) — same
-// "global rows only" guard for the same defense-in-depth reasoning.
+/// Creates a NEW, PRIVATE MCP server scoped directly to a bundle (never
+/// global) — the bundle-level analog of `mcp.upsert` (agent-scoped), no
+/// `check_s1` (a bundle has no agent identity to gate on; `bundle.upsert`
+/// itself already has no such gate either — same trust level). See
+/// `Store::bundle_mcp_upsert_unique`'s doc comment for why this exists:
+/// `bind_to_bundle` alone can only reference already-global rows, which
+/// have no effect once bound (already unconditionally visible everywhere)
+/// — this is the actual "give this bundle its own tool" path.
+fn register_mcp_catalog_upsert_for_bundle(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    let id_store = state.id_store.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_MCP_CATALOG_UPSERT_FOR_BUNDLE,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let id_store = id_store.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Req {
+                    bundle_id: String,
+                    #[serde(default)] id: String,
+                    name: String,
+                    #[serde(default = "default_transport")] transport: String,
+                    #[serde(default = "default_config")] config: String,
+                }
+                fn default_transport() -> String { "stdio".to_string() }
+                fn default_config() -> String { "{}".to_string() }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("mcp.catalog.upsert_for_bundle: {e}"))?;
+
+                match serde_json::from_str::<serde_json::Value>(&req.config) {
+                    Ok(serde_json::Value::Object(_)) => {}
+                    Ok(_) => return Err("mcp.catalog.upsert_for_bundle: config must be a JSON object".to_string()),
+                    Err(_) => return Err("mcp.catalog.upsert_for_bundle: config must be valid JSON".to_string()),
+                }
+                if req.name == "agentmux" {
+                    return Err("FORBIDDEN: 'agentmux' is a reserved MCP server name".to_string());
+                }
+
+                let now = now_ms();
+                let (id, created_at) = if req.id.is_empty() {
+                    (uuid::Uuid::new_v4().to_string(), now)
+                } else {
+                    if !wstore.bundle_mcp_is_bound_to(&req.bundle_id, &req.id)
+                        .map_err(|e| format!("mcp.catalog.upsert_for_bundle: {e}"))?
+                    {
+                        return Err("FORBIDDEN: MCP server not bound to this bundle".to_string());
+                    }
+                    let existing = wstore.mcp_server_get(&req.id)
+                        .map_err(|e| format!("mcp.catalog.upsert_for_bundle: {e}"))?;
+                    match existing {
+                        Some(s) if s.is_global => {
+                            return Err("FORBIDDEN: cannot mutate a global MCP server".to_string());
+                        }
+                        Some(s) => (req.id.clone(), s.created_at),
+                        None => (req.id.clone(), now),
+                    }
+                };
+
+                let server = crate::backend::storage::McpServer {
+                    id: id.clone(),
+                    name: req.name,
+                    transport: req.transport,
+                    config: req.config,
+                    is_global: false,
+                    created_at,
+                    updated_at: now,
+                };
+                wstore.bundle_mcp_upsert_unique(&id_store, &req.bundle_id, &server, req.id.is_empty())
+                    .map_err(|e| format!("mcp.catalog.upsert_for_bundle: {e}"))?;
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "mcp:changed".to_string(),
+                    scopes: vec![], sender: String::new(), persist: 0, data: None,
+                });
+                Ok(Some(serde_json::to_value(&server).map_err(|e| e.to_string())?))
+            })
+        }),
+    );
+}
+
+// Bundle-scoped sibling of register_mcp_catalog_unbind (above). Unlike the
+// agent-level unbind, this does NOT restrict to global-only: the only way a
+// PRIVATE server ever becomes bundle-bound is via
+// register_mcp_catalog_upsert_for_bundle (below), which always binds the
+// server to the SAME bundle it just created it for — there is no path for
+// bundle B to end up bound to bundle A's private server (bind_to_bundle
+// itself still enforces global-only for EXISTING rows), so unbinding a
+// bundle's own private ref carries none of the "sever another entity's
+// binding" defense-in-depth concern the agent-level restriction guards
+// against.
 fn register_mcp_catalog_unbind_from_bundle(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
     let broker = state.broker.clone();
@@ -642,15 +735,6 @@ fn register_mcp_catalog_unbind_from_bundle(engine: &Arc<WshRpcEngine>, state: &A
                 struct Req { bundle_id: String, mcp_id: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("mcp.catalog.unbind_from_bundle: {e}"))?;
-                match wstore.mcp_server_get(&req.mcp_id)
-                    .map_err(|e| format!("mcp.catalog.unbind_from_bundle: {e}"))?
-                {
-                    None => return Err("mcp.catalog.unbind_from_bundle: MCP server not found".to_string()),
-                    Some(s) if !s.is_global => {
-                        return Err("FORBIDDEN: can only unbind global MCP servers from a bundle".to_string());
-                    }
-                    Some(_) => {}
-                }
                 let unbound = wstore.bundle_mcp_unbind(&req.bundle_id, &req.mcp_id)
                     .map_err(|e| format!("mcp.catalog.unbind_from_bundle: {e}"))?;
                 if unbound {

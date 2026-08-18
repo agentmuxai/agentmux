@@ -26,6 +26,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_skill_catalog_bind_to_bundle(engine, state);
     register_skill_catalog_unbind_from_bundle(engine, state);
     register_skill_catalog_list_for_bundle(engine, state);
+    register_skill_catalog_upsert_for_bundle(engine, state);
 }
 
 fn register_skill_list(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -479,11 +480,13 @@ fn register_skill_catalog_unbind(engine: &Arc<WshRpcEngine>, state: &AppState) {
 // (GH issue #2024 item 3).
 fn register_skill_catalog_bind_to_bundle(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    let id_store = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_SKILL_CATALOG_BIND_TO_BUNDLE,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
+            let id_store = id_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 #[derive(serde::Deserialize)]
@@ -507,7 +510,7 @@ fn register_skill_catalog_bind_to_bundle(engine: &Arc<WshRpcEngine>, state: &App
                     }
                     Some(_) => {}
                 }
-                wstore.bundle_skill_bind(&req.bundle_id, &req.skill_id)
+                wstore.bundle_skill_bind(&id_store, &req.bundle_id, &req.skill_id)
                     .map_err(|e| format!("skill.catalog.bind_to_bundle: {e}"))?;
                 broker.publish(crate::backend::wps::WaveEvent {
                     event: "skills:changed".to_string(),
@@ -544,8 +547,81 @@ fn register_skill_catalog_list_for_bundle(engine: &Arc<WshRpcEngine>, state: &Ap
     );
 }
 
-// Bundle-scoped sibling of register_skill_catalog_unbind (above) — same
-// "global rows only" guard for the same defense-in-depth reasoning.
+/// Creates a NEW, PRIVATE skill scoped directly to a bundle (never global)
+/// — the bundle-level analog of `skill.upsert` (agent-scoped). See
+/// `mcp.rs`'s `register_mcp_catalog_upsert_for_bundle` for the full
+/// reasoning (reagentx P1 review on PR #2639).
+fn register_skill_catalog_upsert_for_bundle(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    let id_store = state.id_store.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_SKILL_CATALOG_UPSERT_FOR_BUNDLE,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let id_store = id_store.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                #[derive(serde::Deserialize)]
+                struct Req {
+                    bundle_id: String,
+                    #[serde(default)] id: String,
+                    name: String,
+                    #[serde(default)] trigger: String,
+                    #[serde(default = "default_skill_type")] skill_type: String,
+                    #[serde(default)] description: String,
+                    #[serde(default)] content: String,
+                }
+                fn default_skill_type() -> String { "prompt".to_string() }
+                let req: Req = serde_json::from_value(data)
+                    .map_err(|e| format!("skill.catalog.upsert_for_bundle: {e}"))?;
+
+                let now = now_ms();
+                let (id, created_at) = if req.id.is_empty() {
+                    (uuid::Uuid::new_v4().to_string(), now)
+                } else {
+                    if !wstore.bundle_skill_is_bound_to(&req.bundle_id, &req.id)
+                        .map_err(|e| format!("skill.catalog.upsert_for_bundle: {e}"))?
+                    {
+                        return Err("FORBIDDEN: skill not bound to this bundle".to_string());
+                    }
+                    let existing = wstore.skill_get(&req.id)
+                        .map_err(|e| format!("skill.catalog.upsert_for_bundle: {e}"))?;
+                    match existing {
+                        Some(s) if s.is_global => {
+                            return Err("FORBIDDEN: cannot mutate a global skill".to_string());
+                        }
+                        Some(s) => (req.id.clone(), s.created_at),
+                        None => (req.id.clone(), now),
+                    }
+                };
+
+                let skill = crate::backend::storage::Skill {
+                    id: id.clone(),
+                    name: req.name,
+                    trigger: req.trigger,
+                    skill_type: req.skill_type,
+                    description: req.description,
+                    content: req.content,
+                    is_global: false,
+                    created_at,
+                    updated_at: now,
+                };
+                wstore.bundle_skill_upsert_unique(&id_store, &req.bundle_id, &skill, req.id.is_empty())
+                    .map_err(|e| format!("skill.catalog.upsert_for_bundle: {e}"))?;
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "skills:changed".to_string(),
+                    scopes: vec![], sender: String::new(), persist: 0, data: None,
+                });
+                Ok(Some(serde_json::to_value(&skill).map_err(|e| e.to_string())?))
+            })
+        }),
+    );
+}
+
+// Bundle-scoped sibling of register_skill_catalog_unbind (above). See
+// mcp.rs's register_mcp_catalog_unbind_from_bundle for why this does NOT
+// restrict to global-only, unlike its agent-level sibling.
 fn register_skill_catalog_unbind_from_bundle(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
     let broker = state.broker.clone();
@@ -559,15 +635,6 @@ fn register_skill_catalog_unbind_from_bundle(engine: &Arc<WshRpcEngine>, state: 
                 struct Req { bundle_id: String, skill_id: String }
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("skill.catalog.unbind_from_bundle: {e}"))?;
-                match wstore.skill_get(&req.skill_id)
-                    .map_err(|e| format!("skill.catalog.unbind_from_bundle: {e}"))?
-                {
-                    None => return Err("skill.catalog.unbind_from_bundle: skill not found".to_string()),
-                    Some(s) if !s.is_global => {
-                        return Err("FORBIDDEN: can only unbind global skills from a bundle".to_string());
-                    }
-                    Some(_) => {}
-                }
                 let unbound = wstore.bundle_skill_unbind(&req.bundle_id, &req.skill_id)
                     .map_err(|e| format!("skill.catalog.unbind_from_bundle: {e}"))?;
                 if unbound {

@@ -167,4 +167,22 @@ export const SkillApi = {
     ): Promise<SkillBundleListItem[]> {
         return client.rpcCall("skill.catalog.list_for_bundle", data, opts);
     },
+
+    // Creates a NEW, PRIVATE skill scoped directly to a bundle — see
+    // McpApi.McpCatalogUpsertForBundleCommand's identical comment.
+    SkillCatalogUpsertForBundleCommand(
+        client: RpcClient,
+        data: {
+            bundle_id: string;
+            id?: string;
+            name: string;
+            trigger?: string;
+            skill_type?: string;
+            description?: string;
+            content?: string;
+        },
+        opts?: RpcOpts,
+    ): Promise<Skill> {
+        return client.rpcCall("skill.catalog.upsert_for_bundle", data, opts);
+    },
 };

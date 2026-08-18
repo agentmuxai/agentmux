@@ -188,6 +188,9 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 7;
 ///        (GH issue #2024 item 3). A bundle's existing mcp_servers/skills
 ///        JSON columns are untouched by this — still the .abf export/import
 ///        format — these ref tables are the new live-resolution path.
+///        Deliberately NO FK to db_bundles (unlike the agent-level ref
+///        tables' FK to db_agent_definitions) — see this table's own doc
+///        comment at its CREATE TABLE for why.
 pub const OBJECT_SCHEMA_VERSION: i64 = 23;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
@@ -613,20 +616,33 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         -- stay untouched (still consumed by .abf export/import); these ref
         -- tables are the new live-resolution path, wired into launch-time
         -- config generation alongside the agent-level refs.
+        --
+        -- reagentx P0 review on PR #2639: NO foreign key to db_bundles here,
+        -- unlike the agent-level ref tables' FK to db_agent_definitions.
+        -- Bundles are authoritatively written through `id_store` (the
+        -- shared store in a normal production install — see
+        -- `bundle.rs::register_bundle_upsert`), not `wstore`/objects.db,
+        -- where this table lives (it must live here to FK to
+        -- db_mcp_servers/db_skills, which ARE wstore-local). wstore's own
+        -- copy of db_bundles is a schema-compatible but essentially always-
+        -- empty local mirror in that case — an FK against it would make
+        -- every real bind fail. Same no-FK-to-a-table-living-in-the-wrong-
+        -- store reasoning as `db_agent_identity_links.account_id`'s
+        -- deliberate lack of an account FK (see that table's own doc
+        -- comment). Existence is checked at the application layer instead
+        -- — see `Store::bundle_mcp_bind`'s `id_store` parameter.
         CREATE TABLE IF NOT EXISTS db_bundle_skills_ref (
             bundle_id TEXT NOT NULL,
             skill_id  TEXT NOT NULL,
             PRIMARY KEY (bundle_id, skill_id),
-            FOREIGN KEY (bundle_id) REFERENCES db_bundles(id) ON DELETE CASCADE,
-            FOREIGN KEY (skill_id)  REFERENCES db_skills(id) ON DELETE CASCADE
+            FOREIGN KEY (skill_id) REFERENCES db_skills(id) ON DELETE CASCADE
         );
 
         CREATE TABLE IF NOT EXISTS db_bundle_mcp_ref (
             bundle_id TEXT NOT NULL,
             mcp_id    TEXT NOT NULL,
             PRIMARY KEY (bundle_id, mcp_id),
-            FOREIGN KEY (bundle_id) REFERENCES db_bundles(id) ON DELETE CASCADE,
-            FOREIGN KEY (mcp_id)    REFERENCES db_mcp_servers(id) ON DELETE CASCADE
+            FOREIGN KEY (mcp_id) REFERENCES db_mcp_servers(id) ON DELETE CASCADE
         );
 
         -- v7: MuxBus cloud connectivity — global singleton PKCE token store.

@@ -404,6 +404,13 @@ pub const COMMAND_SKILL_CATALOG_UNBIND: &str = "skill.catalog.unbind";
 pub const COMMAND_SKILL_CATALOG_BIND_TO_BUNDLE: &str = "skill.catalog.bind_to_bundle";
 pub const COMMAND_SKILL_CATALOG_UNBIND_FROM_BUNDLE: &str = "skill.catalog.unbind_from_bundle";
 pub const COMMAND_SKILL_CATALOG_LIST_FOR_BUNDLE: &str = "skill.catalog.list_for_bundle";
+// reagentx P1 review on PR #2639: bind_to_bundle can only reference an
+// EXISTING global skill, but a global skill already reaches every agent
+// unconditionally regardless of bundle binding — so binding one has no
+// effect. This creates a BRAND-NEW private skill scoped to the bundle
+// (never previously visible to anyone), giving the bundle a genuinely
+// bundle-specific skill. See Store::bundle_skill_upsert_unique.
+pub const COMMAND_SKILL_CATALOG_UPSERT_FOR_BUNDLE: &str = "skill.catalog.upsert_for_bundle";
 
 // App API — v1 standalone MCP Server primitives
 pub const COMMAND_MCP_LIST: &str = "mcp.list";
@@ -442,6 +449,8 @@ pub const COMMAND_MCP_CATALOG_UNBIND: &str = "mcp.catalog.unbind";
 pub const COMMAND_MCP_CATALOG_BIND_TO_BUNDLE: &str = "mcp.catalog.bind_to_bundle";
 pub const COMMAND_MCP_CATALOG_UNBIND_FROM_BUNDLE: &str = "mcp.catalog.unbind_from_bundle";
 pub const COMMAND_MCP_CATALOG_LIST_FOR_BUNDLE: &str = "mcp.catalog.list_for_bundle";
+// See the identical comment on COMMAND_SKILL_CATALOG_UPSERT_FOR_BUNDLE above.
+pub const COMMAND_MCP_CATALOG_UPSERT_FOR_BUNDLE: &str = "mcp.catalog.upsert_for_bundle";
 
 // App API Tier 1 — session archival commands
 pub const COMMAND_SESSION_ARCHIVE: &str = "session:archive";

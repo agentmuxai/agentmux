@@ -1084,7 +1084,7 @@ mod write_agent_config_files_tests {
                 false,
             )
             .unwrap_or(());
-        wstore.bundle_mcp_bind("bundle-1", "bundle-private-server").unwrap();
+        wstore.bundle_mcp_bind(&wstore, "bundle-1", "bundle-private-server").unwrap();
         // agent-1 itself has NO own db_mcp_servers ref — only its bundle does.
 
         wstore

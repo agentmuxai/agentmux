@@ -168,4 +168,17 @@ export const McpApi = {
     ): Promise<McpServerBundleListItem[]> {
         return client.rpcCall("mcp.catalog.list_for_bundle", data, opts);
     },
+
+    // Creates a NEW, PRIVATE server scoped directly to a bundle (never
+    // global) — the actual "give this bundle its own tool" path.
+    // McpCatalogBindToBundleCommand alone can only reference already-global
+    // rows, which have no effect once bound (already unconditionally
+    // visible to every agent).
+    McpCatalogUpsertForBundleCommand(
+        client: RpcClient,
+        data: { bundle_id: string; id?: string; name: string; transport?: string; config?: string },
+        opts?: RpcOpts,
+    ): Promise<McpServer> {
+        return client.rpcCall("mcp.catalog.upsert_for_bundle", data, opts);
+    },
 };
