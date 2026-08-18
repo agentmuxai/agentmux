@@ -626,6 +626,29 @@ impl AgentMuxHandler {
             error_code_i32
         );
 
+        // Layer 1, SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md:
+        // a real (non-ERR_ABORTED, already filtered above) main-frame error
+        // ends the pane's main-frame-loading state same as a successful
+        // on_load_end would — the spinner shouldn't stay up forever on a
+        // failed navigation. A navigation that got superseded by a newer
+        // one is reported as ERR_ABORTED (filtered above), so this can't
+        // race a newer navigation that's already marked loading.
+        if self.is_browser_pane {
+            if let Some(b) = browser.as_deref() {
+                if let Some(block_id) =
+                    crate::browser_pane::callbacks::resolve_pane_block_id(&self.state, b)
+                {
+                    crate::browser_pane::callbacks::set_pane_main_frame_loading(
+                        &self.state,
+                        &block_id,
+                        b,
+                        &failed_url,
+                        false,
+                    );
+                }
+            }
+        }
+
         show_load_error_page(frame, &failed_url, error_code_i32, &error_text, self.is_browser_pane);
     }
 }
