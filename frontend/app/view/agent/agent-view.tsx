@@ -1,104 +1,114 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { writeText as clipboardWriteText } from "@/util/clipboard";
-import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, type JSX } from "solid-js";
-import { Portal } from "solid-js/web";
-import type { AgentViewModel } from "./agent-model";
-import { getProvider } from "./providers";
-import { createAgentAtoms } from "./state";
-import type { SignalPair } from "./state";
-import type { DocumentNode } from "./types";
+import { BrainSpinner } from "@/app/element/BrainSpinner";
+import { DragOverlay } from "@/app/element/dragoverlay";
+import { PaneTabRenameInput } from "@/app/element/PaneTabRenameInput";
+import { PaneTabStrip } from "@/app/element/PaneTabStrip";
+import { dispatchIfRegistered as dispatchDocIfRegistered } from "@/app/store/agent-document-store";
 import {
-    dispatchIfRegistered as dispatchDocIfRegistered,
-} from "@/app/store/agent-document-store";
-import {
-    dispatch as dispatchPane,
-    dispatchIfRegistered as dispatchPaneIfRegistered,
-    snapshot as paneSnapshot,
-} from "@/app/store/agent-pane-state-store";
+    snapshot as layoutSnapshot,
+    registerPane as registerLayoutPane,
+    unregisterPane as unregisterLayoutPane,
+    type LayoutView,
+} from "@/app/store/agent-pane-layout-store";
 import {
     registerPane as registerAgentPane,
     unregisterPane as unregisterAgentPane,
     type AgentPaneModel,
 } from "@/app/store/agent-pane-registration";
 import {
+    dispatch as dispatchPane,
+    dispatchIfRegistered as dispatchPaneIfRegistered,
+    snapshot as paneSnapshot,
+} from "@/app/store/agent-pane-state-store";
+import { workingFromPhase } from "@/app/store/agent-pane-state/types";
+import {
     registerActivity as registerAgentActivity,
     unregisterActivity as unregisterAgentActivity,
 } from "@/app/store/agentActivity";
-import {
-    registerPane as registerLayoutPane,
-    snapshot as layoutSnapshot,
-    unregisterPane as unregisterLayoutPane,
-    type LayoutView,
-} from "@/app/store/agent-pane-layout-store";
-import { workingFromPhase } from "@/app/store/agent-pane-state/types";
 import { getRecentDispatches } from "@/app/store/command-source";
-import { getTrail } from "@/log/render-trail";
-import { useAgentStream } from "./useAgentStream";
-import { useActivityLog } from "./hooks/useActivityLog";
-import { useHistoryPagination } from "./hooks/useHistoryPagination";
-import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
-import { useInSessionSearch } from "./hooks/useInSessionSearch";
-import { useScrollToNode } from "./hooks/useScrollToNode";
-import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
-import { useProcessCount } from "./hooks/useProcessCount";
-import { usePtyWidth, computeTermSizeFromEl } from "./hooks/usePtyWidth";
-import { useControllerStatusEvents, didTurnJustEnd } from "./hooks/useControllerStatusEvents";
-import { useBlockActivity } from "./hooks/useBlockActivity";
-import { useAgentActivitySummary } from "./hooks/useAgentActivitySummary";
-import { useNextPromptSuggestion } from "./hooks/useNextPromptSuggestion";
-import { useAgentCommands } from "./hooks/useAgentCommands";
-import { useAgentFailure } from "./hooks/useAgentFailure";
-import { PaneRow } from "./components/PaneRow";
-import { AgentHistoryTabView } from "./history/AgentHistoryTabView";
-import { HISTORY_TAB_FOR_META_KEY, openOrFocusHistoryTab } from "./open-history-tab";
-import { injectHistoryLink } from "./inject-history-link";
-import { PaneTabStrip } from "@/app/element/PaneTabStrip";
-import { PaneTabRenameInput } from "@/app/element/PaneTabRenameInput";
-import { useForkSet } from "./fork/useForkSet";
-import { closeBlockInStack, getLayoutModelForStaticTab, pushBlockOntoStack, setActiveBlockInStack } from "@/layout/index";
-import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
-import { useSnapshotPersistence } from "./hooks/useSnapshotPersistence";
-import { useAgentDecisions } from "./hooks/useAgentDecisions";
-import { useAgentQuestions } from "./hooks/useAgentQuestions";
-import { BlockService } from "@/app/store/services";
-import { makeWindowFocusSignal } from "@/app/window/window-focus";
-import { useAgentCloseConfirm } from "./hooks/useAgentCloseConfirm";
-import { handleAgentIdChange } from "@/app/view/term/termagent";
-import { DragOverlay } from "@/app/element/dragoverlay";
-import { AgentControlBar } from "./components/AgentControlBar";
-import { ActivityDock } from "./components/ActivityDock";
-import { hasRunningPromotedTool, nextToolPromotionAt } from "./activity/tool-adapter";
-import { earliestLiveAttachedStartMs } from "./activity/attached-task";
-import { allSubagentsAtom } from "./activity/subagent-source";
-import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
-import { AgentQuestionPanel } from "./components/AgentQuestionPanel";
-import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
-import { AgentCredentialsRevokedChip } from "./components/AgentCredentialsRevokedChip";
-import { AgentDocumentView, AgentAuthPanel } from "./components/AgentDocumentView";
-import { AgentFooter, AgentWorkingRow } from "./components/AgentFooter";
-import { AgentComposerStrip } from "./components/AgentComposerStrip";
-import { AgentShellSubblock } from "./components/AgentShellSubblock";
-import { ResizableDetailsDrawer } from "./components/ResizableDetailsDrawer";
-import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
-import { AgentPicker, useAgentDefinitions, useOpenDefinitionMap } from "./components/AgentPicker";
-import { AgentSearchBar } from "./components/AgentSearchBar";
-import { BrainSpinner } from "@/app/element/BrainSpinner";
-import { scheduleOnSettle } from "@/app/util/settle-detector";
-import { SlashCommandPicker } from "./components/SlashCommandPicker";
-import { SlashHelpPanel } from "./components/SlashHelpPanel";
+import { ContextMenuModel } from "@/app/store/contextmenu";
+import {
+    atoms,
+    createBlock,
+    getApi,
+    openOrFocusPaneByView,
+    pushNotification,
+    refocusNode,
+    WOS,
+} from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { atoms, createBlock, getApi, openOrFocusPaneByView, pushNotification, refocusNode, WOS } from "@/app/store/global";
-import { ObjectService } from "@/app/store/services";
-import { ConfirmModal } from "@/element/modal";
-import { ModalLayer } from "@/element/ModalLayer";
-import { useModalLayer } from "@/element/modal-layer";
-import { ContextMenuModel } from "@/app/store/contextmenu";
+import { BlockService, ObjectService } from "@/app/store/services";
+import { scheduleOnSettle } from "@/app/util/settle-detector";
 import { loadAccounts, type AgentAccounts } from "@/app/view/identity/identity-model";
-import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
+import { handleAgentIdChange } from "@/app/view/term/termagent";
+import { makeWindowFocusSignal } from "@/app/window/window-focus";
+import { ConfirmModal } from "@/element/modal";
+import { useModalLayer } from "@/element/modal-layer";
+import { ModalLayer } from "@/element/ModalLayer";
+import {
+    closeBlockInStack,
+    getLayoutModelForStaticTab,
+    pushBlockOntoStack,
+    setActiveBlockInStack,
+} from "@/layout/index";
+import { getTrail } from "@/log/render-trail";
+import { writeText as clipboardWriteText } from "@/util/clipboard";
+import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { Portal } from "solid-js/web";
+import { earliestLiveAttachedStartMs } from "./activity/attached-task";
+import { allSubagentsAtom } from "./activity/subagent-source";
+import { hasRunningPromotedTool, nextToolPromotionAt } from "./activity/tool-adapter";
+import type { AgentViewModel } from "./agent-model";
 import "./agent-view.scss";
+import { ActivityDock } from "./components/ActivityDock";
+import { AgentComposerStrip } from "./components/AgentComposerStrip";
+import { AgentControlBar } from "./components/AgentControlBar";
+import { AgentCredentialsRevokedChip } from "./components/AgentCredentialsRevokedChip";
+import { AgentDecisionPanel } from "./components/AgentDecisionPanel";
+import { AgentDisconnectedBanner } from "./components/AgentDisconnectedBanner";
+import { AgentAuthPanel, AgentDocumentView } from "./components/AgentDocumentView";
+import { AgentFooter, AgentWorkingRow } from "./components/AgentFooter";
+import { AgentPicker, useAgentDefinitions, useOpenDefinitionMap } from "./components/AgentPicker";
+import { AgentQuestionPanel } from "./components/AgentQuestionPanel";
+import { AgentSearchBar } from "./components/AgentSearchBar";
+import { AgentShellSubblock } from "./components/AgentShellSubblock";
+import { PaneRow } from "./components/PaneRow";
+import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
+import { ResizableDetailsDrawer } from "./components/ResizableDetailsDrawer";
+import { SlashCommandPicker } from "./components/SlashCommandPicker";
+import { SlashHelpPanel } from "./components/SlashHelpPanel";
+import { useForkSet } from "./fork/useForkSet";
+import { AgentHistoryTabView } from "./history/AgentHistoryTabView";
+import { useActivityLog } from "./hooks/useActivityLog";
+import { useAgentActivitySummary } from "./hooks/useAgentActivitySummary";
+import { useAgentCloseConfirm } from "./hooks/useAgentCloseConfirm";
+import { useAgentCommands } from "./hooks/useAgentCommands";
+import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
+import { useAgentDecisions } from "./hooks/useAgentDecisions";
+import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
+import { useAgentFailure } from "./hooks/useAgentFailure";
+import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
+import { useAgentQuestions } from "./hooks/useAgentQuestions";
+import { useBlockActivity } from "./hooks/useBlockActivity";
+import { didTurnJustEnd, useControllerStatusEvents } from "./hooks/useControllerStatusEvents";
+import { useHistoryPagination } from "./hooks/useHistoryPagination";
+import { useInSessionSearch } from "./hooks/useInSessionSearch";
+import { useNextPromptSuggestion } from "./hooks/useNextPromptSuggestion";
+import { useProcessCount } from "./hooks/useProcessCount";
+import { computeTermSizeFromEl, usePtyWidth } from "./hooks/usePtyWidth";
+import { useScrollToNode } from "./hooks/useScrollToNode";
+import { useSnapshotPersistence } from "./hooks/useSnapshotPersistence";
+import { injectHistoryLink } from "./inject-history-link";
+import { HISTORY_TAB_FOR_META_KEY, openOrFocusHistoryTab } from "./open-history-tab";
+import { getProvider } from "./providers";
+import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
+import type { SignalPair } from "./state";
+import { createAgentAtoms } from "./state";
+import type { DocumentNode } from "./types";
+import { useAgentStream } from "./useAgentStream";
 
 // Matches a CSI or OSC ANSI escape sequence (the standard sindresorhus/ansi-regex
 // pattern). Used by sanitizeLogTextForTerminal below to strip escape sequences
@@ -305,7 +315,7 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
             paneOpenResult = (await TabRpcClient.rpcCall(
                 "pane.open",
                 { view: "agent", skip_placement: true, meta: { view: "agent" } },
-                {},
+                {}
             )) as { block_id: string };
         } catch (e: unknown) {
             pushNotification({
@@ -449,10 +459,7 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
                     <Show
                         when={isHistoryTab()}
                         fallback={
-                            <Show
-                                when={agentId()}
-                                fallback={<AgentPicker model={model} />}
-                            >
+                            <Show when={agentId()} fallback={<AgentPicker model={model} />}>
                                 <AgentPresentationView
                                     model={model}
                                     agentId={agentId()}
@@ -532,10 +539,7 @@ const AgentPresentationView = ({
             // over AgentDefinition.working_directory, which is often empty or a
             // stale default for template-launched and continuation agents.
             const block = model.blockAtom();
-            const workingDirectory =
-                (block?.meta?.["cmd:cwd"] as string) ||
-                currentAgent()?.working_directory ||
-                "";
+            const workingDirectory = (block?.meta?.["cmd:cwd"] as string) || currentAgent()?.working_directory || "";
             const agent = currentAgent() ?? null;
             modalLayer.open({
                 kind: "agent-stash",
@@ -644,14 +648,16 @@ const AgentPresentationView = ({
             const midTurn = workingFromPhase(phase);
             if (midTurn) {
                 console.warn(
-                    `[agent-view] DISPOSE UNEXPECTED(mid-turn) blockId=${model.blockId.slice(0, 7)} turnPhase=${JSON.stringify(phase)} stack=${new Error().stack}`,
+                    `[agent-view] DISPOSE UNEXPECTED(mid-turn) blockId=${model.blockId.slice(0, 7)} turnPhase=${JSON.stringify(phase)} stack=${new Error().stack}`
                 );
                 try {
                     console.warn(`[agent-view] DISPOSE mid-turn render_trail=${JSON.stringify(getTrail())}`);
                     console.warn(
-                        `[agent-view] DISPOSE mid-turn recent_dispatches=${JSON.stringify(getRecentDispatches(40))}`,
+                        `[agent-view] DISPOSE mid-turn recent_dispatches=${JSON.stringify(getRecentDispatches(40))}`
                     );
-                } catch { /* best-effort diagnostic */ }
+                } catch {
+                    /* best-effort diagnostic */
+                }
             }
             unregisterAgentPane(model.blockId);
             unregisterAgentActivity(model.blockId);
@@ -698,8 +704,7 @@ const AgentPresentationView = ({
     // DEV-only: CDP validation hook — lets engineers run
     // `__agentLayout()` in the console to snapshot the slice state.
     if (import.meta.env.DEV) {
-        (window as unknown as { __agentLayout?: () => unknown }).__agentLayout = () =>
-            layoutSnapshot(model.blockId);
+        (window as unknown as { __agentLayout?: () => unknown }).__agentLayout = () => layoutSnapshot(model.blockId);
     }
 
     // Activity log — collects per-session diagnostic entries from launch
@@ -951,11 +956,7 @@ const AgentPresentationView = ({
     // controllerstatus event. Does NOT touch turnJustEndedAtom — see
     // trackTurnJustEnded for why that's kept separate.
     function reconcileTurnActive(active: boolean): void {
-        dispatchPaneIfRegistered(
-            model.blockId,
-            { type: "ReconcileTurnActive", at: Date.now(), active },
-            "system",
-        );
+        dispatchPaneIfRegistered(model.blockId, { type: "ReconcileTurnActive", at: Date.now(), active }, "system");
     }
 
     // Feeds the turnJustEndedAtom edge-detector. Deliberately called ONLY
@@ -1008,18 +1009,20 @@ const AgentPresentationView = ({
     // new turn already started (its running tools are legit). tools-only
     // scope: thinking markdown, shells (turn-independent), and questions
     // keep their session-bounded lifecycles.
-    createEffect(on(turnJustEndedAtom, (n) => {
-        if (n === 0) return;
-        const timer = setTimeout(() => {
-            if (workingFromPhase(agentAtoms().turnPhaseAtom[0]())) return;
-            dispatchDocIfRegistered(model.blockId, {
-                type: "ScrubOrphanedInProgress",
-                at: Date.now(),
-                scope: "tools-only",
-            });
-        }, 2_000);
-        onCleanup(() => clearTimeout(timer));
-    }));
+    createEffect(
+        on(turnJustEndedAtom, (n) => {
+            if (n === 0) return;
+            const timer = setTimeout(() => {
+                if (workingFromPhase(agentAtoms().turnPhaseAtom[0]())) return;
+                dispatchDocIfRegistered(model.blockId, {
+                    type: "ScrubOrphanedInProgress",
+                    at: Date.now(),
+                    scope: "tools-only",
+                });
+            }, 2_000);
+            onCleanup(() => clearTimeout(timer));
+        })
+    );
 
     // Posts a permanent, visible line into the pane's own conversation \u2014
     // distinct from `log()`, which routes to the hidden activity-log/shell-
@@ -1258,49 +1261,55 @@ const AgentPresentationView = ({
     // still bounded — just by that heartbeat's cadence instead of an
     // instant refocus, not left uncovered entirely.
     const windowFocused = makeWindowFocusSignal();
-    createEffect(on(windowFocused, (focused) => {
-        if (!focused) return;
-        void BlockService.GetControllerStatus(model.blockId)
-            .then((rts) => {
-                if (!rts) return;
-                const active = !!rts.turn_active;
-                // Mirror the live useControllerStatusEvents handler below —
-                // reagent P2: a turn-end detected ONLY via this focus poll
-                // (the missed-live-push case this mechanism exists for)
-                // must still bump turnJustEndedAtom, or
-                // useAgentActivitySummary/useNextPromptSuggestion silently
-                // never fire for that turn's completion.
-                trackTurnJustEnded(active);
-                // Independent of the turnJustEnded edge above: this RPC
-                // response is itself a fresh, authoritative confirmation of
-                // idleness whenever active is false — attempt the deferred
-                // refresh unconditionally on that, not only when
-                // trackTurnJustEnded's edge detector fires. didTurnJustEnd
-                // requires prev===true (a CONFIRMED active state to
-                // transition FROM); a pane whose backend state was never
-                // confirmed either way before this poll (wasTurnActive
-                // undefined — e.g. the live confirming controllerstatus
-                // push was itself missed, the exact gap this poll exists to
-                // self-heal) computes turnJustEnded=false here even though
-                // this is the FIRST time idleness has been confirmed. The
-                // reactive turnPhaseAtom effect (below) can't rescue this
-                // either: ReconcileTurnActive no-ops (same state reference)
-                // once local turnPhase already reads idle/Done, so it never
-                // re-fires off this same confirmation. Without this call,
-                // a /login deferred mid-turn — where the turn then ends via
-                // session_end while the live idle controllerstatus push is
-                // lost — would leave the refresh (and any held messages)
-                // stuck until the user happens to send another message.
-                // codex P1 on PR #2338 (twenty-eighth re-review).
-                if (!active) {
-                    void commands.flushPendingControllerRefresh();
-                }
-            })
-            .catch(() => {
-                // Best-effort — the live subscription and next mount remain
-                // as fallbacks; nothing user-visible to report on failure.
-            });
-    }, { defer: true }));
+    createEffect(
+        on(
+            windowFocused,
+            (focused) => {
+                if (!focused) return;
+                void BlockService.GetControllerStatus(model.blockId)
+                    .then((rts) => {
+                        if (!rts) return;
+                        const active = !!rts.turn_active;
+                        // Mirror the live useControllerStatusEvents handler below —
+                        // reagent P2: a turn-end detected ONLY via this focus poll
+                        // (the missed-live-push case this mechanism exists for)
+                        // must still bump turnJustEndedAtom, or
+                        // useAgentActivitySummary/useNextPromptSuggestion silently
+                        // never fire for that turn's completion.
+                        trackTurnJustEnded(active);
+                        // Independent of the turnJustEnded edge above: this RPC
+                        // response is itself a fresh, authoritative confirmation of
+                        // idleness whenever active is false — attempt the deferred
+                        // refresh unconditionally on that, not only when
+                        // trackTurnJustEnded's edge detector fires. didTurnJustEnd
+                        // requires prev===true (a CONFIRMED active state to
+                        // transition FROM); a pane whose backend state was never
+                        // confirmed either way before this poll (wasTurnActive
+                        // undefined — e.g. the live confirming controllerstatus
+                        // push was itself missed, the exact gap this poll exists to
+                        // self-heal) computes turnJustEnded=false here even though
+                        // this is the FIRST time idleness has been confirmed. The
+                        // reactive turnPhaseAtom effect (below) can't rescue this
+                        // either: ReconcileTurnActive no-ops (same state reference)
+                        // once local turnPhase already reads idle/Done, so it never
+                        // re-fires off this same confirmation. Without this call,
+                        // a /login deferred mid-turn — where the turn then ends via
+                        // session_end while the live idle controllerstatus push is
+                        // lost — would leave the refresh (and any held messages)
+                        // stuck until the user happens to send another message.
+                        // codex P1 on PR #2338 (twenty-eighth re-review).
+                        if (!active) {
+                            void commands.flushPendingControllerRefresh();
+                        }
+                    })
+                    .catch(() => {
+                        // Best-effort — the live subscription and next mount remain
+                        // as fallbacks; nothing user-visible to report on failure.
+                    });
+            },
+            { defer: true }
+        )
+    );
 
     // Subscribe to Claude Code OSC window-title extractions and write them
     // to term:osc_title block metadata (free fallback signal — see
@@ -1407,11 +1416,9 @@ const AgentPresentationView = ({
     // at all" and "is it the loading (vs. worked) variant" independent of
     // the anchor's own inset-from-scrollbar geometry.
     const workingRowLoading = createMemo(
-        () => showingLaunchActivity() || workingFromPhase(agentAtoms().turnPhaseAtom[0]()),
+        () => showingLaunchActivity() || workingFromPhase(agentAtoms().turnPhaseAtom[0]())
     );
-    const workingRowVisible = createMemo(
-        () => workingRowLoading() || agentAtoms().sessionStatsAtom[0]() != null,
-    );
+    const workingRowVisible = createMemo(() => workingRowLoading() || agentAtoms().sessionStatsAtom[0]() != null);
 
     // Ref CALLBACK, not a one-shot onMount(): originally fixed a bug where
     // Agent History's now-removed `bodyMode` in-place swap (PR #2509)
@@ -1495,7 +1502,7 @@ const AgentPresentationView = ({
             dispatchPaneIfRegistered(
                 model.blockId,
                 startMs != null ? { type: "AttachedTaskObserved", at: startMs } : { type: "AttachedTaskCleared" },
-                "system",
+                "system"
             );
         }
         const at = nextToolPromotionAt(nodes, now);
@@ -1556,9 +1563,7 @@ const AgentPresentationView = ({
 
     // Mark turn as active when the user sends a message — TurnStart
     // also clears stale sessionStats from the prior turn.
-    const handleSendMessage = (
-        message: string,
-    ): Promise<void> => {
+    const handleSendMessage = (message: string): Promise<void> => {
         // Bang commands (`!cmd`) output writes into the shell terminal (see
         // `log`/`handleShellTermReady` above). Auto-open the details drawer so
         // the shell — and thus the output — is immediately visible; without
@@ -1877,10 +1882,7 @@ const AgentPresentationView = ({
         const sel = window.getSelection()?.toString();
         if (!sel) return; // no selection, let default behavior
         e.preventDefault();
-        ContextMenuModel.showContextMenu(
-            [{ label: "Copy", click: () => clipboardWriteText(sel) }],
-            e,
-        );
+        ContextMenuModel.showContextMenu([{ label: "Copy", click: () => clipboardWriteText(sel) }], e);
     };
 
     return (
@@ -1929,8 +1931,10 @@ const AgentPresentationView = ({
                     <div
                         class="agent-pane-progress-bar"
                         classList={{
-                            "agent-pane-progress-bar--active": showingLaunchActivity() || workingFromPhase(agentAtoms().turnPhaseAtom[0]()),
-                            "agent-pane-progress-bar--stopping": agentAtoms().turnPhaseAtom[0]().kind === "Interrupting",
+                            "agent-pane-progress-bar--active":
+                                showingLaunchActivity() || workingFromPhase(agentAtoms().turnPhaseAtom[0]()),
+                            "agent-pane-progress-bar--stopping":
+                                agentAtoms().turnPhaseAtom[0]().kind === "Interrupting",
                         }}
                         role="progressbar"
                         aria-label="Agent working"
@@ -2011,9 +2015,13 @@ const AgentPresentationView = ({
                     onLoadOlder={history.loadOlder}
                     loadingOlder={history.loadingOlder}
                     scrollCommand={scroll.command}
-                    scrollToBottomRef={(fn) => { scrollToBottomFn = fn; }}
+                    scrollToBottomRef={(fn) => {
+                        scrollToBottomFn = fn;
+                    }}
                     highlightNodeId={search.highlightId}
-                    registerHistoryReadyCallback={(fn) => { historyReadyFn = fn; }}
+                    registerHistoryReadyCallback={(fn) => {
+                        historyReadyFn = fn;
+                    }}
                     zoomFactor={zoomFactor}
                     blockId={model.blockId}
                     layoutView={layoutView}
@@ -2041,18 +2049,14 @@ const AgentPresentationView = ({
                             launchPhase={status.launchPhase()}
                             onCancelLogin={status.cancelLogin}
                             hasAuthUrl={!!status.authUrl()}
-                            waitingReason={
-                                (() => {
-                                    const phase = agentAtoms().turnPhaseAtom[0]();
-                                    return phase.kind === "Streaming" ? (phase.waitingReason ?? null) : null;
-                                })()
-                            }
-                            retryAfterMs={
-                                (() => {
-                                    const phase = agentAtoms().turnPhaseAtom[0]();
-                                    return phase.kind === "Streaming" ? (phase.retryAfterMs ?? null) : null;
-                                })()
-                            }
+                            waitingReason={(() => {
+                                const phase = agentAtoms().turnPhaseAtom[0]();
+                                return phase.kind === "Streaming" ? (phase.waitingReason ?? null) : null;
+                            })()}
+                            retryAfterMs={(() => {
+                                const phase = agentAtoms().turnPhaseAtom[0]();
+                                return phase.kind === "Streaming" ? (phase.retryAfterMs ?? null) : null;
+                            })()}
                         />
                     </Show>
                 </div>
@@ -2178,11 +2182,7 @@ const AgentPresentationView = ({
                     // click, the second subscribe is harmless — the
                     // reducer's Disconnected→Idle transition is the
                     // same regardless of who calls it.
-                    dispatchPane(
-                        model.blockId,
-                        { type: "StreamSubscribe", at: Date.now() },
-                        "user",
-                    );
+                    dispatchPane(model.blockId, { type: "StreamSubscribe", at: Date.now() }, "user");
                 }}
             />
 
@@ -2190,19 +2190,13 @@ const AgentPresentationView = ({
                 subagents) sit just above the composer so task status is adjacent
                 to where the user's attention already is. Moved from the top per
                 SPEC_ACTIVITY_DOCK_BOTTOM_MOVE_2026_06_20. */}
-            <ActivityDock
-                documentAtom={agentAtoms().documentAtom}
-                blockId={model.blockId}
-            />
+            <ActivityDock documentAtom={agentAtoms().documentAtom} blockId={model.blockId} />
 
             {/* Composer status strip — single 28-32px row with live
                 activity ticker and Log button that toggles the log panel.
                 State (detailsOpen) is reducer-owned (PR #1068). */}
             <AgentComposerStrip
-                loading={
-                    showingLaunchActivity()
-                    || workingFromPhase(agentAtoms().turnPhaseAtom[0]())
-                }
+                loading={showingLaunchActivity() || workingFromPhase(agentAtoms().turnPhaseAtom[0]())}
                 sessionTotals={agentAtoms().sessionTotalsAtom[0]()}
                 turnTokens={agentAtoms().turnTokensAtom[0]()}
                 processCount={processCount()}
@@ -2210,9 +2204,7 @@ const AgentPresentationView = ({
                     createBlock({ meta: { view: "swarm" } });
                 }}
                 logOpen={agentAtoms().detailsOpenAtom[0]()}
-                onToggleLog={() =>
-                    dispatchPane(model.blockId, { type: "DetailsToggle" }, "user")
-                }
+                onToggleLog={() => dispatchPane(model.blockId, { type: "DetailsToggle" }, "user")}
                 contextTokens={agentAtoms().contextTokensAtom[0]()}
                 contextWindow={agentAtoms().contextWindowAtom[0]() ?? provider()?.contextWindow}
                 authStatus={loginStatus()}
@@ -2264,7 +2256,9 @@ const AgentPresentationView = ({
                     onRecallLatestQueued={commands.recallLatestHeld}
                     getCompletions={commands.completions}
                     viewModel={model}
-                    isComposerEmptyRef={(fn) => { composerIsEmptyFn = fn; }}
+                    isComposerEmptyRef={(fn) => {
+                        composerIsEmptyFn = fn;
+                    }}
                 />
                 {/* Details panel — just the shell + control bar now. Activity-log
                     lines write directly into the terminal (handleShellTermReady)
@@ -2312,20 +2306,14 @@ const AgentPresentationView = ({
                     </div>
                 </Show>
             </div>
-            {/* AgentActionBar (Add / Import / Export) lives in the
-                AgentPicker view only. Once an agent is loaded the user
-                is working in the conversation; the action bar would
-                just take up vertical space. */}
             <Show when={closeConfirm()}>
                 {(info) => (
                     <ConfirmModal
                         open={true}
                         title="Close pane?"
-                        description={
-                            `This agent has ${info().count} ${
-                                info().count === 1 ? "process" : "processes"
-                            } still running. Close and kill them all?`
-                        }
+                        description={`This agent has ${info().count} ${
+                            info().count === 1 ? "process" : "processes"
+                        } still running. Close and kill them all?`}
                         confirmLabel="Close and kill"
                         destructive
                         onConfirm={handleCloseConfirmAccept}

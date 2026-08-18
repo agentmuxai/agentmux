@@ -118,9 +118,18 @@
             }
         }
     },
+    "defwidget@messengers": {
+        "display:order": 10,
+        "display:pinned": false,
+        "icon": "comments",
+        "label": "Messengers",
+        "description": "Team chat and messaging apps",
+        "children": ["discord", "slack", "telegram", "whatsapp", "teams"]
+    },
     "defwidget@discord": {
         "display:order": 10,
         "display:pinned": false,
+        "display:hidden": true,
         "icon": "brands@discord",
         "color": "#5865f2",
         "label": "Discord",
@@ -136,6 +145,7 @@
     "defwidget@slack": {
         "display:order": 11,
         "display:pinned": false,
+        "display:hidden": true,
         "icon": "brands@slack",
         "color": "#4a154b",
         "label": "Slack",
@@ -151,6 +161,7 @@
     "defwidget@telegram": {
         "display:order": 12,
         "display:pinned": false,
+        "display:hidden": true,
         "icon": "brands@telegram",
         "color": "#229ed9",
         "label": "Telegram",
@@ -166,6 +177,7 @@
     "defwidget@whatsapp": {
         "display:order": 13,
         "display:pinned": false,
+        "display:hidden": true,
         "icon": "brands@whatsapp",
         "color": "#25d366",
         "label": "WhatsApp",
@@ -181,6 +193,7 @@
     "defwidget@teams": {
         "display:order": 14,
         "display:pinned": false,
+        "display:hidden": true,
         "icon": "brands@microsoft",
         "color": "#6264a7",
         "label": "Teams",

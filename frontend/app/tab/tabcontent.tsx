@@ -11,32 +11,21 @@ import { TileLayoutContents } from "@/layout/lib/types";
 import { atoms, createBlock, getApi, getHostName, getUserName, isDev } from "@/store/global";
 import * as services from "@/store/services";
 import * as WOS from "@/store/wos";
+import { buildPaneWidgetMenuItems } from "@/app/window/action-widgets-config";
 import { createMemo, Show } from "solid-js";
 import type { JSX } from "solid-js";
 
-/** Non-pane widget views excluded from the empty-tab context menu. */
-const nonPaneViews = new Set(["devtools"]);
-
-/** Build a flat widget menu for right-clicking an empty tab (no panes). */
+/**
+ * Build a widget menu for right-clicking an empty tab (no panes). Grouped
+ * widgets (e.g. Messengers' Discord/Slack/etc.) nest under their parent's
+ * own label instead of each showing up individually — see
+ * buildPaneWidgetMenuItems.
+ */
 function buildEmptyTabMenu(): ContextMenuItem[] {
     const fullConfig = atoms.fullConfigAtom();
-    const widgets = fullConfig?.widgets ?? {};
-
-    return Object.values(widgets)
-        .filter((w) => {
-            const view = w.blockdef?.meta?.view;
-            return view && !nonPaneViews.has(view);
-        })
-        .sort((a, b) => {
-            const orderA = a["display:order"] ?? 0;
-            const orderB = b["display:order"] ?? 0;
-            if (orderA !== orderB) return orderA - orderB;
-            return (a.label ?? "").localeCompare(b.label ?? "");
-        })
-        .map((widget) => ({
-            label: widget.label ?? "Unnamed",
-            click: () => void createBlock(widget.blockdef),
-        }));
+    const wmap = fullConfig?.widgets ?? {};
+    const settings = fullConfig?.settings ?? {};
+    return buildPaneWidgetMenuItems(wmap, settings, (blockdef) => void createBlock(blockdef));
 }
 
 function TabContent(props: { tabId: string }): JSX.Element {

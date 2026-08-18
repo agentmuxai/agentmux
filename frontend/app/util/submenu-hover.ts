@@ -55,6 +55,18 @@ export interface SubmenuHoverController {
      * reusable for a future onTriggerEnter (unlike dispose()).
      */
     close(): void;
+    /**
+     * Force-open now, bypassing the open delay — the click-to-open
+     * counterpart to close(). Without this, a caller that opens by setting
+     * its own external state directly (rather than through onTriggerEnter)
+     * leaves `isOpen` internally false; the next onTriggerLeave then no-ops
+     * (`if (!isOpen) return`) since nothing ever recorded the open, so the
+     * safe-triangle close-intent never starts and the submenu is stuck open
+     * until an unrelated close path (outside click, Escape, re-click) fires.
+     * Calling this instead keeps internal state truthful, so a later mouse
+     * leave closes normally like any hover-opened submenu.
+     */
+    openNow(): void;
     /** Tear down all timers/listeners. Call on unmount / menu close. */
     dispose(): void;
 }
@@ -202,6 +214,14 @@ export function createSubmenuHover(opts: SubmenuHoverOptions): SubmenuHoverContr
             doClose();
         },
 
+        openNow() {
+            clearOpenTimer();
+            cancelPendingClose();
+            if (isOpen) return;
+            isOpen = true;
+            opts.onOpen();
+        },
+
         // Same as close() — if this was open, onClose() MUST fire so the
         // caller's own state (e.g. a visibleSubMenus map entry) stays in
         // sync with reality. Skipping it left a stale visible:true entry
@@ -211,6 +231,42 @@ export function createSubmenuHover(opts: SubmenuHoverOptions): SubmenuHoverContr
         dispose() {
             clearOpenTimer();
             doClose();
+        },
+    };
+}
+
+export interface PeerRegistry {
+    /**
+     * Register a peer's hover controller. Returns an unregister function —
+     * callers own their own cleanup (e.g. Solid's `onCleanup(unregister)`)
+     * since this module stays framework-agnostic.
+     */
+    register(key: string, hover: SubmenuHoverController): () => void;
+    /** Force-close every registered peer except `key`. */
+    closeOthers(key: string): void;
+}
+
+/**
+ * Tracks the hover controllers of peer (same-level) menu items/slots so
+ * entering one can force-close any other peer's still-open submenu
+ * immediately — matching how a native/VS-Code-style menu behaves for an
+ * explicit new selection, on top of (not instead of) the safe-triangle
+ * grace period each controller gives its OWN trigger-to-submenu approach.
+ * Scoped to whatever the caller considers one "level" — one per MenuBody,
+ * one per SubMenu, one per pinned-widget-bar row of parent slots. Peers
+ * never reach across levels/scopes a caller doesn't register together.
+ */
+export function createPeerRegistry(): PeerRegistry {
+    const peers = new Map<string, SubmenuHoverController>();
+    return {
+        register(key, hover) {
+            peers.set(key, hover);
+            return () => peers.delete(key);
+        },
+        closeOthers(key) {
+            for (const [k, h] of peers) {
+                if (k !== key) h.close();
+            }
         },
     };
 }
