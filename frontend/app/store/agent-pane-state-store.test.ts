@@ -273,4 +273,95 @@ describe("agent-pane-state-store (cascade contracts)", () => {
             });
         });
     });
+
+    // ────────────────────────────────────────────────────────────────
+    // SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18.md — [wave-turn]
+    // transition logging must NOT auto-classify a StreamFlushObserved
+    // re-promotion as anomalous. An earlier version of this line tagged
+    // any promotion from a non-Submitting phase as `(stray)`; reagent P1
+    // on PR #2653 caught that Idle/Disconnected (stream drop + resubscribe)
+    // and Done.completed (a normal multi-round tool continuation —
+    // session_end fires after every model API round) are BOTH documented,
+    // legitimate cases in reducer.ts's own StreamFlushObserved arm, not
+    // anomalies — so the blanket heuristic mislabeled the common healthy
+    // path. Removed; these tests lock down that no such mislabeling
+    // returns, covering every promotion source the reducer allows,
+    // including the specific Done.completed case that had zero coverage
+    // before (reagent's own callout).
+    // ────────────────────────────────────────────────────────────────
+    describe("[wave-turn] StreamFlushObserved re-promotion — no anomaly auto-tagging", () => {
+        it.each([
+            ["Idle", (id: string) => {
+                dispatch(id, { type: "InitReady", at: 100 });
+                dispatch(id, { type: "StreamSubscribe", at: 100 }); // sets lastEventMs, stays Idle
+            }],
+            ["Submitting", (id: string) => {
+                dispatch(id, { type: "InitReady", at: 100 });
+                dispatch(id, { type: "StreamSubscribe", at: 100 });
+                dispatch(id, { type: "TurnStart", at: 110 });
+            }],
+            ["Done", (id: string) => {
+                // Reaches Done with outcome "completed" — no RequestStop.
+                dispatch(id, { type: "InitReady", at: 100 });
+                dispatch(id, { type: "StreamSubscribe", at: 100 });
+                dispatch(id, { type: "TurnStart", at: 110 });
+                dispatch(id, { type: "StreamFlushObserved", addedCount: 1, at: 120 });
+                dispatch(id, { type: "TurnEnd", stats: null });
+            }],
+        ])("promoting from %s never appends an anomaly label to the transition line", (fromKind, setup) => {
+            const info = vi.spyOn(console, "info").mockImplementation(() => {});
+            try {
+                const blockId = `block-${fromKind}`;
+                registerPane(blockId, "agentA", noopProj());
+                setup(blockId);
+                info.mockClear();
+
+                dispatch(blockId, { type: "StreamFlushObserved", addedCount: 1, at: 999 });
+
+                const line = info.mock.calls.find((c) => c[0] === "[wave-turn]");
+                expect(line).toBeDefined();
+                expect(line?.join(" ")).toContain(`${fromKind} → Streaming`);
+                // No parenthetical anomaly tag of any kind — the raw
+                // transition is all this line ever claims.
+                expect(line?.join(" ")).not.toMatch(/\(\w+\)/);
+            } finally {
+                info.mockRestore();
+            }
+        });
+    });
+
+    describe("[wave-turn] watchdog tick heartbeat", () => {
+        it("logs a heartbeat only every 12th StreamWatchdogTick dispatch", () => {
+            const info = vi.spyOn(console, "info").mockImplementation(() => {});
+            try {
+                registerPane("blockTick", "agentA", noopProj());
+                info.mockClear();
+
+                const heartbeatCalls = () =>
+                    info.mock.calls.filter((c) => c.join(" ").includes("watchdog: tick #"));
+
+                for (let i = 1; i <= 11; i++) {
+                    dispatch("blockTick", { type: "StreamWatchdogTick", nowMs: i * 5000 });
+                }
+                expect(heartbeatCalls()).toHaveLength(0);
+
+                dispatch("blockTick", { type: "StreamWatchdogTick", nowMs: 12 * 5000 });
+                expect(heartbeatCalls()).toHaveLength(1);
+                expect(heartbeatCalls()[0].join(" ")).toContain("watchdog: tick #12");
+
+                // Counts independently of whether the reducer itself no-ops
+                // (unsubscribed pane here — lastEventMs is still null) —
+                // this heartbeat is proof the INTERVAL dispatched the
+                // command at all, not proof the reducer found work to do.
+                for (let i = 13; i <= 23; i++) {
+                    dispatch("blockTick", { type: "StreamWatchdogTick", nowMs: i * 5000 });
+                }
+                expect(heartbeatCalls()).toHaveLength(1);
+                dispatch("blockTick", { type: "StreamWatchdogTick", nowMs: 24 * 5000 });
+                expect(heartbeatCalls()).toHaveLength(2);
+            } finally {
+                info.mockRestore();
+            }
+        });
+    });
 });

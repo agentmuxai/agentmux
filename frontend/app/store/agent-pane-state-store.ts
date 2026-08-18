@@ -117,7 +117,26 @@ interface Slot {
     // every 5s watchdog tick for as long as the stall lasts. Reset on every
     // turnPhase.kind transition, see dispatch().
     stuckLogged: boolean;
+    // Counts `StreamWatchdogTick` dispatches for this pane since it was
+    // registered. Every `WATCHDOG_HEARTBEAT_EVERY_N_TICKS`th tick gets a
+    // `[wave-turn] watchdog: tick` line regardless of whether the reducer
+    // found anything stuck — the edge-triggered `stream-stuck`/
+    // `working-recovered` lines below only fire when something is WRONG,
+    // so a genuinely-dead watchdog interval (never dispatching this
+    // command at all) produces total silence, indistinguishable from "the
+    // watchdog is fine and nothing needed recovering." That ambiguity is
+    // exactly what made docs/reports/REPORT_AGENTA_STUCK_WORKING_INVESTIGATION_2026_08_14.md's
+    // root-cause reasoning (§4) an inference from absence rather than a
+    // direct fact ("if it were ticking we'd see a line — we don't").
+    // See docs/specs/SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18.md.
+    watchdogTickCount: number;
 }
+
+// One heartbeat line per this many `StreamWatchdogTick` dispatches (5s
+// interval per useTurnLifecycle.ts's WATCHDOG_INTERVAL_MS) — ~60s cadence.
+// Cheap proof-of-life without flooding a long-running pane's log with a
+// line every 5s.
+const WATCHDOG_HEARTBEAT_EVERY_N_TICKS = 12;
 
 const slots = new Map<string, Slot>();
 
@@ -176,7 +195,7 @@ export function registerPane(
     agentId: string,
     proj: AgentPaneProjections,
 ): void {
-    slots.set(blockId, { state: initialState(agentId), proj, stuckLogged: false });
+    slots.set(blockId, { state: initialState(agentId), proj, stuckLogged: false, watchdogTickCount: 0 });
 }
 
 /**
@@ -237,6 +256,34 @@ export function dispatch(
         slot.stuckLogged = false;
     }
     if (prev.turnPhase.kind !== slot.state.turnPhase.kind) {
+        // NOTE: an earlier version of this line auto-tagged every
+        // `StreamFlushObserved` promotion from a non-`Submitting` phase as
+        // `(stray)`, on the theory that only `Submitting → Streaming` is
+        // the "normal" hand-off. reagent P1 on PR #2653 caught that this is
+        // wrong: reducer.ts's `StreamFlushObserved` arm documents BOTH
+        // `Idle`/`Disconnected` re-promotion (a legitimate stream drop +
+        // resubscribe, e.g. an agent respawn mid-stall) AND `Done.completed`
+        // re-promotion (session_end fires after every model API round, so
+        // this is the normal shape of a multi-round tool continuation) as
+        // intentional, non-anomalous cases — NOT the rare genuine-anomaly
+        // shape docs/reports/REPORT_AGENTA_STUCK_WORKING_INVESTIGATION_2026_08_14.md
+        // found (§3). A blanket "not Submitting" heuristic mislabels the
+        // common healthy case, drowning out the rare real one — the exact
+        // opposite of this feature's purpose. There is no reliable way to
+        // tell the two apart from this transition alone (both look
+        // identical: `Done → Streaming cmd=StreamFlushObserved`); the Aug
+        // 14 report's own strayness conclusion required EXTERNAL context
+        // (the backend's independent `[health] active:false` signal, and
+        // that literally nothing else ever arrived afterward) that isn't
+        // available at dispatch time. The already-reliable signal for "this
+        // promotion never resolved" is the existing edge-triggered
+        // `stream-stuck`/`working-recovered` lines below (elapsed-time-
+        // based, not shape-based) plus the watchdog heartbeat above — no
+        // auto-tag needed on this line; a reader of `muxlog phases` can
+        // already see the raw `X → Y` transition and judge it themselves
+        // with the merged fe+srv context the recipe exists to provide. See
+        // docs/specs/SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18.md's
+        // Implementation notes for the full account.
         console.info(
             "[wave-turn]",
             `pane=${blockId.slice(0, 7)}`,
@@ -245,6 +292,20 @@ export function dispatch(
             `toolsActive=${slot.state.turnPhase.kind === "Streaming" ? slot.state.turnPhase.toolsActive : "-"}`,
             `currentTool=${slot.state.currentTool ?? "-"}`,
         );
+    }
+
+    // Periodic watchdog-liveness heartbeat — see WATCHDOG_HEARTBEAT_EVERY_N_TICKS's
+    // doc comment on `Slot` for why this exists alongside the edge-triggered
+    // stream-stuck/working-recovered lines below rather than replacing them.
+    if (command.type === "StreamWatchdogTick") {
+        slot.watchdogTickCount++;
+        if (slot.watchdogTickCount % WATCHDOG_HEARTBEAT_EVERY_N_TICKS === 0) {
+            console.info(
+                "[wave-turn]",
+                `pane=${blockId.slice(0, 7)}`,
+                `watchdog: tick #${slot.watchdogTickCount} — alive, phase=${slot.state.turnPhase.kind}`,
+            );
+        }
     }
 
     // Project changes — only call setters for fields that actually

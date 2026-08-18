@@ -342,6 +342,198 @@ function resolveFile(target, opt) {
     return cands[0].file; // most recently active
 }
 
+// ─── phases ───────────────────────────────────────────────────────────────────
+// Unified turn-phase timeline for ONE agent pane, merged chronologically across
+// the frontend's `[wave-turn]` transition log (host) and the backend's
+// `[health] turn_active flip` log (srv) — the two separate files an
+// investigator previously had to cross-reference by hand to answer "why did
+// this pane show Working". See
+// docs/specs/SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18.md.
+//
+// Block-id matching differs by source: `[wave-turn]` embeds only a 7-char
+// PANE PREFIX in its plain message text (`pane=abc1234`, from
+// `blockId.slice(0, 7)` in agent-pane-state-store.ts — there is no structured
+// field for it, since the frontend's console-log pipe just forwards a
+// space-joined string). `[health] turn_active flip` instead carries the FULL
+// block id as a structured tracing field (`fields.block_id`). Both are
+// checked via a custom `matcher`, since `renderLine`'s generic `--grep`/
+// `--target` only ever look at the message text, never at arbitrary
+// structured fields like `block_id`.
+//
+// The recipe's own `matcher` (which pane/block this line is even about) is
+// NON-NEGOTIABLE — always applied, never overridden — but every OTHER
+// generic muxlog option the top-level help documents as applying "any
+// position" (`--grep`, `--level`, `--target`, `--exclude-target`, `-a`)
+// still needs to compose on top of it, the same way `swarm`/`auth`/`bridge`
+// compose theirs via `renderLine`/`printLastLines` (reagent P2 on PR #2653 —
+// `phases` originally bypassed all of these silently). A user's `--grep`
+// ADDS an extra AND-filter here rather than replacing the recipe's own
+// matcher (unlike `auth`'s `opt.grep || default`) — replacing it would
+// defeat the entire point of `phases`, which is "only lines about this one
+// block."
+function collectPhaseLines(file, opt, matcher) {
+    const out = [];
+    for (const l of readForDisplay(file, true).split("\n")) {
+        const t = l.trim();
+        if (!t) continue;
+        let j;
+        try { j = JSON.parse(t); } catch { continue; }
+        const fields = j.fields || {};
+        const msg = String(fields.message ?? j.message ?? "");
+        const target = j.target || "";
+        const level = (j.level || "INFO").toUpperCase();
+        if (!opt.all && /blockcontroller::subprocess|subprocess stdout → blockfile/.test(target + " " + msg)) continue;
+        if (opt.level && !opt.level.includes(level.toLowerCase())) continue;
+        if (opt.target && !target.includes(opt.target)) continue;
+        if (opt.excludeTarget && target.includes(opt.excludeTarget)) continue;
+        if (opt.grep && !opt.grep.test(msg)) continue;
+        if (!matcher(msg, fields)) continue;
+        if (opt.since && j.timestamp && j.timestamp < opt.since) continue;
+        out.push({ ts: j.timestamp || "", msg, fields, raw: t });
+    }
+    return out;
+}
+
+const PHASE_SOURCE_COLOR = { fe: "\x1b[36m", srv: "\x1b[35m" }; // cyan / magenta
+
+// [health] turn_active flip's own useful payload lives in structured fields
+// (agentmux-srv/src/backend/blockcontroller/health.rs: `active`, `was_active`,
+// `exit_code`), NOT in the message text — which is the same static string
+// "[health] turn_active flip" every time. Surfacing only `entry.msg` (as an
+// earlier version of this recipe did) made every non-`--raw` srv line in the
+// timeline render identically regardless of whether the turn became active
+// or inactive — the exact fact the merged timeline exists to expose (reagent
+// P1 on PR #2653). Always shown for srv lines (not gated behind --verbose,
+// unlike the generic renderLine path) since it's the entire reason srv lines
+// are in this recipe's timeline at all.
+function extraFieldsSuffix(fields) {
+    const shown = { ...fields };
+    delete shown.message;
+    delete shown.block_id; // redundant — already implied by the block filter
+    const keys = Object.keys(shown);
+    return keys.length ? `  ${DIM}${keys.map((k) => `${k}=${shown[k]}`).join(" ")}${RESET}` : "";
+}
+
+function renderPhaseLine(entry, opt) {
+    if (opt.raw) return entry.raw;
+    const ts = (entry.ts || "").replace(/^.*T/, "").replace(/\..*$/, "") || "--:--:--";
+    const c = PHASE_SOURCE_COLOR[entry.source] ?? "";
+    const suffix = entry.source === "srv" ? extraFieldsSuffix(entry.fields) : "";
+    return `${DIM}${ts}${RESET} ${c}${entry.source.padEnd(3)}${RESET}  ${entry.msg}${suffix}`;
+}
+
+function resolveBlockId(pos) {
+    const id = pos[1] || process.env.AGENTMUX_BLOCKID;
+    if (!id) {
+        console.error(
+            "muxlog: `phases` needs a block id — pass one explicitly (`muxlog phases <block-id>`) " +
+            "or run this from inside an agent's own shell, where $AGENTMUX_BLOCKID is already set.",
+        );
+        process.exit(1);
+    }
+    return id;
+}
+
+// Whether `file` actually contains at least one line matching BOTH `tag`
+// (e.g. "[wave-turn]") and `needle` (a pane prefix or full block id).
+// Content presence is the ground truth for "is this the right log for this
+// pane" — filename metadata (source/version) is only ever a search-order
+// hint below, never sufficient on its own (reagent P1 x2 on PR #2653; see
+// resolvePhaseFiles's own doc comment for the two concrete failure modes
+// that motivated this).
+function fileContainsPane(file, tag, needle) {
+    let content = "";
+    try { content = fs.readFileSync(file, "utf8"); } catch { return false; }
+    return content.includes(tag) && content.includes(needle);
+}
+
+// Resolve the ONE host+srv log pair that actually belongs to `blockId`'s
+// running instance. Two correlation bugs, both caught live by reagent
+// review while this recipe was under review, motivate doing this by
+// CONTENT rather than by filename metadata:
+//
+//   1. Picking `hostCands[0]` (globally most-recently-active host log,
+//      respecting only `-i`) without checking it actually contains the
+//      requested block id: with several instances running, the caller's
+//      OWN pane (the common case — default $AGENTMUX_BLOCKID) can easily
+//      NOT be in whichever instance happens to be most recently active
+//      overall, silently resolving to the wrong instance's host log (and,
+//      via that wrong host, the wrong srv pairing too) and reporting "no
+//      lines found" instead of the real timeline — defeating the "zero
+//      setup self-audit" the recipe exists to provide.
+//   2. Correlating srv→host by `(source, version)` filename metadata alone:
+//      `source` for a dev build is `"dev:" + <branch>` only — it drops the
+//      `<hash>` build-directory segment, so two retained dev builds of the
+//      SAME branch at the SAME version are indistinguishable by this key,
+//      and the mtime-sorted first match can be an unrelated build's srv
+//      log. (`source` alone, with no version check at all, has an even
+//      coarser version of the same problem: the shared root holds several
+//      version-tagged pairs at once.)
+//
+// Fix: content presence is the ground truth for both. `source`/`version`
+// are used ONLY to order candidates cheaply (try the most-likely pairing
+// first) before falling back to a full scan — never as the sole decision.
+function resolvePhaseFiles(pos, opt) {
+    const blockId = resolveBlockId(pos);
+    const prefix = `pane=${blockId.slice(0, 7)}`;
+
+    let hostCands = discover("host");
+    if (opt.instance) hostCands = hostCands.filter((e) => e.file.toLowerCase().includes(opt.instance.toLowerCase()) || e.source.includes(opt.instance) || e.version.includes(opt.instance));
+    if (!hostCands.length) {
+        console.error(`muxlog: no host log found${opt.instance ? ` matching '${opt.instance}'` : ""}. Try \`muxlog ls\`.`);
+        process.exit(1);
+    }
+    // Scan newest-first for the first host log that actually contains this
+    // pane. Falls back to the most-recent candidate (old behavior) only if
+    // NONE contain it — the timeline query below still runs and reports a
+    // clear "no lines found" naming the (real, if wrong) file it checked,
+    // rather than crashing outright.
+    const hostEntry = hostCands.find((e) => fileContainsPane(e.file, "[wave-turn]", prefix)) ?? hostCands[0];
+
+    const srvCands = discover("srv");
+    const bySourceVersion = srvCands.filter((e) => e.source === hostEntry.source && e.version === hostEntry.version);
+    const bySource = srvCands.filter((e) => e.source === hostEntry.source);
+    const srvEntry =
+        bySourceVersion.find((e) => fileContainsPane(e.file, "[health]", blockId)) ??
+        bySource.find((e) => fileContainsPane(e.file, "[health]", blockId)) ??
+        srvCands.find((e) => fileContainsPane(e.file, "[health]", blockId)) ??
+        // No srv log anywhere contains this block id yet — not necessarily
+        // an error (e.g. the pane opened but no turn has run since srv last
+        // rotated). Fall back to the best-guess pairing so the timeline
+        // still shows whatever fe-side lines exist.
+        bySourceVersion[0] ?? bySource[0] ?? srvCands[0];
+    if (!srvEntry) {
+        console.error("muxlog: no srv log found. Try `muxlog ls`.");
+        process.exit(1);
+    }
+
+    return { blockId, prefix, hostFile: hostEntry.file, srvFile: srvEntry.file };
+}
+
+function phasesTimeline(pos, opt) {
+    const { blockId, prefix, hostFile, srvFile } = resolvePhaseFiles(pos, opt);
+
+    const feLines = collectPhaseLines(hostFile, opt, (msg) => msg.includes("[wave-turn]") && msg.includes(prefix))
+        .map((e) => ({ ...e, source: "fe" }));
+    const srvLines = collectPhaseLines(srvFile, opt, (msg, fields) => msg.includes("[health]") && fields.block_id === blockId)
+        .map((e) => ({ ...e, source: "srv" }));
+
+    const merged = [...feLines, ...srvLines].sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
+    if (!merged.length) {
+        console.error(
+            `muxlog phases: no [wave-turn]/[health] lines found for block ${blockId} in\n` +
+            `  host: ${hostFile}\n  srv:  ${srvFile}`,
+        );
+        process.exit(1);
+    }
+
+    console.log(`=== phases: ${blockId} ===`);
+    console.log(`    host: ${hostFile}`);
+    console.log(`    srv:  ${srvFile}\n`);
+    const tail = opt.n > 0 ? merged.slice(-opt.n) : merged;
+    for (const e of tail) console.log(renderPhaseLine(e, opt));
+}
+
 const HELP = `muxlog — AgentMux log viewer
 
   muxlog [host|srv|launcher|fe|all] [tail|cat|grep <re>]   default: host tail (follow)
@@ -351,6 +543,7 @@ const HELP = `muxlog — AgentMux log viewer
   muxlog bridge                      startup-handshake trace (debug reconnect loops)
   muxlog swarm                       subagent/swarm lifecycle trace (spawn/name/status, debug duplicate groups)
   muxlog auth                        provider auth/identity trace (login/OAuth wiring/unlink/account removal, credstate snapshots)
+  muxlog phases [<block-id>]         merged turn-phase timeline (host [wave-turn] + srv [health]) for one pane — defaults to $AGENTMUX_BLOCKID
 
 Options (any position):
   -i <substr>   pick the instance whose log path/branch/version matches <substr>
@@ -430,12 +623,19 @@ function main() {
         printLastLines(f, opt.n, opt, true);
         return;
     }
+    if (cmd === "phases") {
+        // One-shot merged timeline, not a live follow — see phasesTimeline's
+        // own doc comment for why host+srv need correlated instance
+        // resolution and custom (not renderLine's generic) filtering.
+        phasesTimeline(pos, opt);
+        return;
+    }
 
     const targets = ["host", "srv", "launcher", "fe", "all"];
     const validActions = ["tail", "cat", "grep"];
     // A first token that is neither a known recipe (help/ls/mem/errors/swarm/
-    // auth/bridge — all handled above and returned), a log target, nor a bare
-    // action is an unknown command. Without this guard it silently falls
+    // auth/bridge/phases — all handled above and returned), a log target,
+    // nor a bare action is an unknown command. Without this guard it silently falls
     // through to `follow(host)` below and tails the host log forever with no
     // filter — which is exactly how a typo, or `muxlog auth` run against a
     // build predating the auth recipe, appears to "hang". Fail fast instead.

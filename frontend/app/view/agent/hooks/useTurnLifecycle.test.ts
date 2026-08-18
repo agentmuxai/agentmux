@@ -262,4 +262,49 @@ describe("useTurnLifecycle — dispatch-side timeout wiring", () => {
 
         expect(dispatchPane).not.toHaveBeenCalled();
     });
+
+    // SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18.md: log every
+    // visibilitychange firing (both directions), not just the "visible"
+    // branch that dispatches the catch-up tick — this is the only direct
+    // evidence the listener fired at all for a given pane, which the fix
+    // above depends on but which nothing confirmed before this.
+    it("logs [wave-turn] visibility: hidden→visible when the document becomes visible", () => {
+        createRoot((d) => {
+            dispose = d;
+            const [getPhase, setP] = createSignal<TurnPhase>({ kind: "Idle" });
+            useTurnLifecycle(mkOpts(getPhase, setP));
+        });
+
+        const info = vi.spyOn(console, "info").mockImplementation(() => {});
+        try {
+            Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+            document.dispatchEvent(new Event("visibilitychange"));
+
+            const line = info.mock.calls.find((c) => c[0] === "[wave-turn]");
+            expect(line).toBeDefined();
+            expect(line?.join(" ")).toContain("visibility: hidden→visible");
+        } finally {
+            info.mockRestore();
+        }
+    });
+
+    it("logs [wave-turn] visibility: visible→hidden when the document becomes hidden", () => {
+        createRoot((d) => {
+            dispose = d;
+            const [getPhase, setP] = createSignal<TurnPhase>({ kind: "Idle" });
+            useTurnLifecycle(mkOpts(getPhase, setP));
+        });
+
+        const info = vi.spyOn(console, "info").mockImplementation(() => {});
+        try {
+            Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+            document.dispatchEvent(new Event("visibilitychange"));
+
+            const line = info.mock.calls.find((c) => c[0] === "[wave-turn]");
+            expect(line).toBeDefined();
+            expect(line?.join(" ")).toContain("visibility: visible→hidden");
+        } finally {
+            info.mockRestore();
+        }
+    });
 });
