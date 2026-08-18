@@ -207,6 +207,35 @@ keeps that field truthful — reviewing the READ side without checking
 whether anything WRITES to keep it current is an easy gap to miss, and was
 missed twice in a row here before reagent's third pass caught it.
 
+## Addendum 3 — reagent's fourth review: the heartbeat itself zeroed a field it didn't know about
+
+The heartbeat added in Addendum 2 called the plain `registry::write` /
+`registry::write_shared_from_env`, both of which hardcode
+`registration_nonce: 0`. Every 20s tick then overwrote each live agent's
+*real* nonce (already sitting right there on `AgentRegistration`, just
+unused) with 0. `remove_if_nonce`/`remove_shared_from_env_if_nonce`
+(`persistent.rs`) — the compare-and-remove a controller's own exit-handler
+uses so it only ever deletes the entry IT registered, not a fallback
+respawn's fresher one (issue #2363) — require `entry.registration_nonce ==
+expected_nonce`. Zeroed by the heartbeat, that comparison would fail
+silently on every clean exit, and the entry would linger until the 4-hour
+TTL sweep instead of being cleaned up immediately as designed — the
+heartbeat, in fixing Addendum 2's gap, quietly broke a different, already-
+correct cleanup path it didn't know it was touching.
+
+Fix: switched to `write_with_nonce` / `write_shared_from_env_with_nonce`,
+threading `reg.registration_nonce` through on every heartbeat tick instead
+of dropping it.
+
+Fourth round, fourth distinct bug in the same ~15 lines: (1) no guard, (2)
+wrong-granularity guard (process vs. agent), (3) guard with no heartbeat to
+back it, (4) heartbeat that broke an unrelated invariant it didn't
+preserve. Each fix so far touched code adjacent to the previous fix without
+re-deriving the full set of invariants that code already depended on —
+worth remembering next time a "small" fix touches a shared write path: check
+every OTHER reader of the fields being written, not just the one that
+motivated the change.
+
 ## Timeline
 
 - Loap's `SendMessage` to `ScrollPinTest-host-7c31` fails: `agent not found`.

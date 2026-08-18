@@ -1298,16 +1298,26 @@ pub async fn bind_listeners_and_network(
                 interval.tick().await;
                 let data_dir = base::get_wave_data_dir();
                 for reg in reactive::get_global_handler().list_agents() {
-                    backend::reactive::registry::write(
+                    // _with_nonce, not the plain write/write_shared_from_env
+                    // — those hardcode registration_nonce: 0, which would
+                    // silently break remove_if_nonce/
+                    // remove_shared_from_env_if_nonce's compare-and-remove
+                    // on this agent's own clean-exit cleanup (reagent P1
+                    // round 4 on PR #2640: every 20s heartbeat tick would
+                    // zero out the real nonce already recorded in
+                    // `reg.registration_nonce`).
+                    backend::reactive::registry::write_with_nonce(
                         &data_dir,
                         &reg.agent_id,
                         &local_web_url,
                         &reg.block_id,
+                        reg.registration_nonce,
                     );
-                    backend::reactive::registry::write_shared_from_env(
+                    backend::reactive::registry::write_shared_from_env_with_nonce(
                         &reg.agent_id,
                         &local_web_url,
                         &reg.block_id,
+                        reg.registration_nonce,
                     );
                 }
             }
