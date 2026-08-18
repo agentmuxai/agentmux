@@ -4,11 +4,11 @@
 import * as Plot from "@observablehq/plot";
 import dayjs from "dayjs";
 import * as htl from "htl";
-import { createEffect, createSignal, onCleanup, onMount, Show } from "solid-js";
 import type { JSX } from "solid-js";
+import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 
 import type { DataItem } from "./sysinfo-types";
-import { resolveDomainBound } from "./sysinfo-util";
+import { computeAutoMaxY, resolveDomainBound } from "./sysinfo-util";
 
 type SingleLinePlotProps = {
     plotData: Array<DataItem>;
@@ -67,7 +67,17 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
     });
 
     createEffect(() => {
-        const { plotData, yval, yvalMeta, blockId, defaultColor, title = false, sparkline = false, targetLen, intervalSecs } = props;
+        const {
+            plotData,
+            yval,
+            yvalMeta,
+            blockId,
+            defaultColor,
+            title = false,
+            sparkline = false,
+            targetLen,
+            intervalSecs,
+        } = props;
         const pw = plotWidth();
         const ph = plotHeight();
 
@@ -124,13 +134,25 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
         marks.push(
             Plot.ruleX(
                 plotData,
-                Plot.pointerX({ x: "ts", py: yval, stroke: "var(--grey-text-color)", strokeWidth: 1, strokeDasharray: 2 })
+                Plot.pointerX({
+                    x: "ts",
+                    py: yval,
+                    stroke: "var(--grey-text-color)",
+                    strokeWidth: 1,
+                    strokeDasharray: 2,
+                })
             )
         );
         marks.push(
             Plot.ruleY(
                 plotData,
-                Plot.pointerX({ px: "ts", y: yval, stroke: "var(--grey-text-color)", strokeWidth: 1, strokeDasharray: 2 })
+                Plot.pointerX({
+                    px: "ts",
+                    y: yval,
+                    stroke: "var(--grey-text-color)",
+                    strokeWidth: 1,
+                    strokeDasharray: 2,
+                })
             )
         );
         marks.push(
@@ -155,7 +177,18 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
             )
         );
 
-        const maxY = resolveDomainBound(yvalMeta?.maxy, plotData[plotData.length - 1]) ?? 100;
+        // Dynamic (auto-scaled) max for metrics with no natural ceiling
+        // (network/disk) or a fixed ceiling that wastes most of the chart
+        // when actual usage sits well below it (memory) — see
+        // computeAutoMaxY's own doc comment and
+        // docs/reports/REPORT_SYSINFO_COMBINED_CHART_RESEARCH_2026_08_17.md.
+        // CPU keeps its fixed 0-100 (autoMaxY unset): auto-scaling an
+        // already-bounded percentage would make ordinary noise read as
+        // dramatic spikes.
+        const hardCapY = resolveDomainBound(yvalMeta?.maxy, plotData[plotData.length - 1]);
+        const maxY = yvalMeta?.autoMaxY
+            ? computeAutoMaxY(plotData, yval, yvalMeta?.autoMaxYFloor ?? 1, hardCapY)
+            : (hardCapY ?? 100);
         const minY = resolveDomainBound(yvalMeta?.miny, plotData[plotData.length - 1]) ?? 0;
         const maxX = plotData[plotData.length - 1].ts;
         const minX = maxX - targetLen * intervalSecs * 1000;
@@ -168,7 +201,10 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
                 tickFormat: (d: number) => dayjs.unix(d / 1000).format("h:mm A"),
                 domain: [minX, maxX],
             },
-            y: { label: labelY, domain: [minY, maxY] },
+            // `nice: true` rounds the computed domain to human-friendly tick
+            // values (e.g. 0-87 -> 0-100) — matters most for autoMaxY
+            // metrics, whose raw computed ceiling is rarely a round number.
+            y: { label: labelY, domain: [minY, maxY], nice: true },
             width: pw,
             height: ph,
             marks: marks,
