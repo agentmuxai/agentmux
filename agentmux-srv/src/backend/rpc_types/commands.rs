@@ -393,6 +393,25 @@ pub const COMMAND_SKILL_CATALOG_BIND: &str = "skill.catalog.bind";
 pub const COMMAND_SKILL_CATALOG_LIST_FOR_AGENT: &str = "skill.catalog.list_for_agent";
 pub const COMMAND_SKILL_CATALOG_UNBIND: &str = "skill.catalog.unbind";
 
+// Bundle-scoped siblings of the three above (composable model v2,
+// docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md, GH issue #2024 item
+// 3) — same no-check_s1 shape (a bundle has no agent identity to gate on
+// either), same "only global rows may be bound" restriction as
+// skill.catalog.bind, for the same IDOR reasoning: skill.catalog.list_for_bundle
+// returns any row this bundle references, so only allowing global (no
+// per-entity secret) rows to be bound keeps that list safe to expose to an
+// unauthenticated window connection with a caller-chosen bundle_id.
+pub const COMMAND_SKILL_CATALOG_BIND_TO_BUNDLE: &str = "skill.catalog.bind_to_bundle";
+pub const COMMAND_SKILL_CATALOG_UNBIND_FROM_BUNDLE: &str = "skill.catalog.unbind_from_bundle";
+pub const COMMAND_SKILL_CATALOG_LIST_FOR_BUNDLE: &str = "skill.catalog.list_for_bundle";
+// reagentx P1 review on PR #2639: bind_to_bundle can only reference an
+// EXISTING global skill, but a global skill already reaches every agent
+// unconditionally regardless of bundle binding — so binding one has no
+// effect. This creates a BRAND-NEW private skill scoped to the bundle
+// (never previously visible to anyone), giving the bundle a genuinely
+// bundle-specific skill. See Store::bundle_skill_upsert_unique.
+pub const COMMAND_SKILL_CATALOG_UPSERT_FOR_BUNDLE: &str = "skill.catalog.upsert_for_bundle";
+
 // App API — v1 standalone MCP Server primitives
 pub const COMMAND_MCP_LIST: &str = "mcp.list";
 pub const COMMAND_MCP_GET: &str = "mcp.get";
@@ -424,6 +443,14 @@ pub const COMMAND_MCP_CATALOG_BIND: &str = "mcp.catalog.bind";
 // docs/reports/REPORT_ARMORY_ARCHITECTURE_AND_NAMING_REVIEW_2026_07_23.md §2.2.
 pub const COMMAND_MCP_CATALOG_LIST_FOR_AGENT: &str = "mcp.catalog.list_for_agent";
 pub const COMMAND_MCP_CATALOG_UNBIND: &str = "mcp.catalog.unbind";
+
+// Bundle-scoped siblings of the three above — see the identical comment on
+// the skill.catalog.* trio above (SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md).
+pub const COMMAND_MCP_CATALOG_BIND_TO_BUNDLE: &str = "mcp.catalog.bind_to_bundle";
+pub const COMMAND_MCP_CATALOG_UNBIND_FROM_BUNDLE: &str = "mcp.catalog.unbind_from_bundle";
+pub const COMMAND_MCP_CATALOG_LIST_FOR_BUNDLE: &str = "mcp.catalog.list_for_bundle";
+// See the identical comment on COMMAND_SKILL_CATALOG_UPSERT_FOR_BUNDLE above.
+pub const COMMAND_MCP_CATALOG_UPSERT_FOR_BUNDLE: &str = "mcp.catalog.upsert_for_bundle";
 
 // App API Tier 1 — session archival commands
 pub const COMMAND_SESSION_ARCHIVE: &str = "session:archive";
