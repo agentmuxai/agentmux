@@ -77,10 +77,12 @@ pub fn register_providers_handlers(engine: &Arc<WshRpcEngine>, _state: &AppState
                 // catalog only when that env var isn't set for this process.
                 let token = match resolve_access_token(&dir, false).await {
                     Some(t) => t,
-                    // No token from the `.credentials.json` file (logged
-                    // out, or macOS Keychain — the only source this
-                    // background call is allowed to use) → empty → frontend
-                    // keeps its static fallback.
+                    // No token from the `.credentials.json` file or the
+                    // CLAUDE_CODE_OAUTH_TOKEN env var — the two sources this
+                    // background call is allowed to use (see the comment
+                    // above; the keychain-backed fallback is deliberately
+                    // excluded) → empty → frontend keeps its static
+                    // fallback.
                     None => return empty_result(),
                 };
 
