@@ -23,6 +23,7 @@ pub fn build_default_config() -> FullConfigType {
 
     match serde_json::from_str::<HashMap<String, WidgetConfigType>>(WIDGETS_JSON) {
         Ok(widgets) => {
+            validate_widget_configs(&widgets);
             config.widgets = widgets;
         }
         Err(e) => {
@@ -31,6 +32,28 @@ pub fn build_default_config() -> FullConfigType {
     }
 
     config
+}
+
+/// Soft validation for widget entries loaded from `widgets.json`: a widget
+/// must be either a leaf (non-empty `blockdef.meta`) or a parent (non-empty
+/// `children`), never neither, never both. Logged as a startup warning, not
+/// a hard failure, matching how other config issues are handled.
+fn validate_widget_configs(widgets: &HashMap<String, WidgetConfigType>) {
+    for (key, widget) in widgets {
+        let has_blockdef = !widget.block_def.meta.is_empty();
+        let has_children = !widget.children.is_empty();
+        if has_blockdef && has_children {
+            eprintln!(
+                "wconfig: widget \"{}\" has both a blockdef and children — children (parent behavior) takes precedence",
+                key
+            );
+        } else if !has_blockdef && !has_children {
+            eprintln!(
+                "wconfig: widget \"{}\" has neither a blockdef nor children — it can't open a pane or expand a submenu",
+                key
+            );
+        }
+    }
 }
 
 // ---- Config loading helpers ----
@@ -255,4 +278,77 @@ pub fn expand_env_vars(s: &str) -> String {
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn leaf_widget() -> WidgetConfigType {
+        WidgetConfigType {
+            block_def: super::super::types::BlockDef {
+                meta: std::collections::HashMap::from([("view".to_string(), serde_json::json!("browser"))]),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    fn parent_widget(children: &[&str]) -> WidgetConfigType {
+        WidgetConfigType {
+            children: children.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    // validate_widget_configs only logs (eprintln) — these tests just confirm
+    // it doesn't panic for every combination, since there's no return value
+    // to assert on. The real coverage of "parent xor leaf" is enforced by the
+    // embedded widgets.json actually loading without triggering a warning,
+    // which build_default_config's own tests below check indirectly by
+    // asserting on the real parsed shape.
+    #[test]
+    fn test_validate_widget_configs_does_not_panic() {
+        let widgets: HashMap<String, WidgetConfigType> = HashMap::from([
+            ("defwidget@leaf".to_string(), leaf_widget()),
+            ("defwidget@parent".to_string(), parent_widget(&["leaf"])),
+            ("defwidget@neither".to_string(), WidgetConfigType::default()),
+            (
+                "defwidget@both".to_string(),
+                WidgetConfigType {
+                    children: vec!["leaf".to_string()],
+                    ..leaf_widget()
+                },
+            ),
+        ]);
+        validate_widget_configs(&widgets);
+    }
+
+    #[test]
+    fn test_build_default_config_loads_messengers_group() {
+        let config = build_default_config();
+        let messengers = config
+            .widgets
+            .get("defwidget@messengers")
+            .expect("defwidget@messengers should be in the embedded widgets.json");
+        assert_eq!(
+            messengers.children,
+            vec!["discord", "slack", "telegram", "whatsapp", "teams"]
+        );
+        assert!(
+            messengers.block_def.meta.is_empty(),
+            "a parent widget shouldn't carry a blockdef"
+        );
+
+        for short_name in ["discord", "slack", "telegram", "whatsapp", "teams"] {
+            let key = format!("defwidget@{short_name}");
+            let child = config
+                .widgets
+                .get(&key)
+                .unwrap_or_else(|| panic!("{key} should still be in widgets.json"));
+            assert!(child.display_hidden, "{key} should be display:hidden now that it's grouped");
+            assert!(child.children.is_empty(), "{key} is a leaf, not itself a parent");
+            assert!(!child.block_def.meta.is_empty(), "{key} should still carry its own blockdef");
+        }
+    }
 }

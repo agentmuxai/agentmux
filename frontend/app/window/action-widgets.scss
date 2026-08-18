@@ -20,6 +20,15 @@
     color: var(--widget-icon-hover-color);
 }
 
+// Trailing chevron on a pinned parent widget (SPEC_WIDGET_BAR_PARENT_SUBMENUS_2026_08_12.md
+// §3.3) — a small "this expands" affordance, same spirit as the More
+// button's own chevron just below.
+.action-widget-parent-chevron {
+    font-size: 8px;
+    opacity: 0.6;
+    margin-left: 1px;
+}
+
 .action-widgets {
     display: flex;
     flex-direction: row;
@@ -165,6 +174,15 @@
             text-transform: capitalize;
             flex: 1 1 auto;
             min-width: 0;
+        }
+
+        // Trailing disclosure chevron on a parent row (Case B,
+        // SPEC_WIDGET_BAR_PARENT_SUBMENUS_2026_08_12.md §3.4) — same
+        // treatment FlyoutMenu already gives any item.subItems row.
+        .action-widget-more-item-chevron {
+            font-size: 10px;
+            opacity: 0.6;
+            flex-shrink: 0;
         }
     }
 }
