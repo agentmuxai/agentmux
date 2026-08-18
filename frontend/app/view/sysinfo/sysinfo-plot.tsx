@@ -193,6 +193,17 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
         const maxX = plotData[plotData.length - 1].ts;
         const minX = maxX - targetLen * intervalSecs * 1000;
 
+        // `nice: true` rounds the computed domain OUTWARD to human-friendly
+        // tick values (e.g. 0-87 -> 0-100) — good for an uncapped autoMaxY
+        // metric (network/disk), where there's no physical ceiling to
+        // violate. Disabled specifically when a hard cap is in effect
+        // (memory's mem:total): nicing can push the rendered axis max past
+        // the cap, visually showing headroom that doesn't exist and
+        // defeating computeAutoMaxY's hard-cap guarantee (reagentx P1 on PR
+        // #2638). CPU's fixed [0, 100] doesn't need nicing either way — a
+        // round domain already.
+        const niceY = yvalMeta?.autoMaxY && hardCapY == null;
+
         const plot = Plot.plot({
             axis: !sparkline,
             x: {
@@ -201,10 +212,7 @@ function SingleLinePlot(props: SingleLinePlotProps): JSX.Element {
                 tickFormat: (d: number) => dayjs.unix(d / 1000).format("h:mm A"),
                 domain: [minX, maxX],
             },
-            // `nice: true` rounds the computed domain to human-friendly tick
-            // values (e.g. 0-87 -> 0-100) — matters most for autoMaxY
-            // metrics, whose raw computed ceiling is rarely a round number.
-            y: { label: labelY, domain: [minY, maxY], nice: true },
+            y: { label: labelY, domain: [minY, maxY], nice: niceY },
             width: pw,
             height: ph,
             marks: marks,
