@@ -72,6 +72,23 @@ impl OAuthProbeStatus {
 /// isn't supported for the provider (so the caller skips status
 /// updates rather than mis-writing `needs_reauth` for a provider whose
 /// file we just don't know how to parse yet).
+///
+/// **macOS caveat (`claude` only):** the Claude Code CLI stores OAuth
+/// credentials in the encrypted macOS Keychain, never in
+/// `<dir>/.credentials.json` — confirmed against Claude Code's own docs
+/// and empirically on a real per-identity bundle dir on this machine (zero
+/// `.credentials.json` present despite a working session). Unlike Linux
+/// and Windows, this is true regardless of `CLAUDE_CONFIG_DIR` — see
+/// `docs/retro/retro-macos-keychain-credential-isolation-gap-2026-08-17.md`.
+/// So on macOS, a missing `claude` token file is not evidence the account
+/// needs reauth — it's the expected, permanent shape, and reporting
+/// `NeedsReauth` here would be a standing false positive on every working
+/// macOS Claude account. `None` is returned instead (status left alone) —
+/// see the `None` variant's doc above for why that's the honest answer
+/// when this probe genuinely can't tell. `codex`/`openclaw` are not
+/// covered by this carve-out: their macOS credential-storage behavior
+/// hasn't been verified, so their existing file-probe semantics are
+/// unchanged.
 pub fn probe_oauth_status(
     provider: &str,
     dir: &str,
@@ -94,6 +111,18 @@ pub fn probe_oauth_status(
     let contents = match std::fs::read_to_string(&probe_path) {
         Ok(s) => s,
         Err(e) => {
+            if provider == "claude" && cfg!(target_os = "macos") {
+                tracing::debug!(
+                    target: "identity",
+                    provider,
+                    path = %probe_path.display(),
+                    error = %e,
+                    "oauth probe: token file unreadable on macOS — Claude Code stores \
+                     credentials in Keychain here, not this file, so this is not evidence \
+                     of needs_reauth; leaving status unchanged"
+                );
+                return None;
+            }
             tracing::debug!(
                 target: "identity",
                 provider,
@@ -212,7 +241,35 @@ mod tests {
     }
 
     #[test]
-    fn probe_oauth_status_missing_dir_is_needs_reauth() {
+    fn probe_oauth_status_missing_dir_is_needs_reauth_for_codex() {
+        // codex isn't covered by the macOS carve-out (its macOS
+        // credential-storage behavior hasn't been verified the way
+        // Claude Code's has) — a missing file is still a definitive
+        // needs_reauth signal for it, on every platform.
+        let r = probe_oauth_status("codex", "/definitely/does/not/exist-xyz-9q", 0);
+        assert_eq!(r, Some(OAuthProbeStatus::NeedsReauth));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn probe_oauth_status_missing_dir_is_none_for_claude_on_macos() {
+        // Claude Code stores OAuth credentials in the macOS Keychain, not
+        // `<dir>/.credentials.json`, regardless of CLAUDE_CONFIG_DIR — a
+        // missing file here is the expected, permanent shape on macOS, not
+        // evidence of needs_reauth. See
+        // docs/retro/retro-macos-keychain-credential-isolation-gap-2026-08-17.md.
+        // Asserting `None` (not `NeedsReauth`) is what stops this probe
+        // from mislabeling every working macOS Claude account as needing
+        // reauth.
+        let r = probe_oauth_status("claude", "/definitely/does/not/exist-xyz-9q", 0);
+        assert_eq!(r, None);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn probe_oauth_status_missing_dir_is_needs_reauth_for_claude_off_macos() {
+        // On Linux/Windows, CLAUDE_CONFIG_DIR genuinely relocates
+        // `.credentials.json` — a missing file there is a real signal.
         let r = probe_oauth_status("claude", "/definitely/does/not/exist-xyz-9q", 0);
         assert_eq!(r, Some(OAuthProbeStatus::NeedsReauth));
     }
