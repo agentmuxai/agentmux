@@ -684,6 +684,50 @@ impl Store {
                     let tokens: MuxBusTokens = serde_json::from_str(&blob).map_err(|e| {
                         StoreError::Other(format!("muxbus: stored keychain blob is corrupted: {e}"))
                     })?;
+
+                    // Codex P1, PR #2665: a blob and split entries can
+                    // coexist on this same machine if an EARLIER blob→split
+                    // migration (the pre-2026-08-03 upgrade path, which ran
+                    // unconditionally on every platform before this fix
+                    // existed) wrote the split entries successfully but its
+                    // own best-effort blob delete then failed or was
+                    // interrupted. Split is always the fresher data in that
+                    // case — it's only ever written FROM a blob, never the
+                    // reverse — so a hit here doesn't necessarily mean the
+                    // blob is authoritative; check for that coexistence and
+                    // prefer split, finishing the earlier interrupted
+                    // cleanup by migrating it into this fix's own preferred
+                    // single-blob format instead of silently serving stale
+                    // (possibly expired or previous-account) blob data
+                    // forever.
+                    match read_split_tokens() {
+                        Ok(Some(split_tokens)) => {
+                            if allow_migration {
+                                match write_single_blob(&split_tokens) {
+                                    Ok(_) => delete_split_tokens(),
+                                    Err(_) => {
+                                        tracing::warn!(
+                                            "muxbus: keychain write failed reconciling coexisting \
+                                             blob + split entries — leaving both in place for now"
+                                        );
+                                    }
+                                }
+                            }
+                            return Ok(split_tokens);
+                        }
+                        Ok(None) => {} // no coexistence — the blob alone is authoritative
+                        Err(e) => {
+                            // Can't confirm whether split entries coexist —
+                            // fall back to the blob we already have in hand
+                            // rather than failing a read that would
+                            // otherwise have succeeded.
+                            tracing::warn!(
+                                error = %e,
+                                "muxbus: couldn't check for a coexisting split-entry layout — \
+                                 using the blob value"
+                            );
+                        }
+                    }
                     return Ok(tokens);
                 }
                 Ok(None) => {} // not yet on the single-blob layout — check other sources below
