@@ -92,11 +92,13 @@ impl TargetCache {
         if debug_port == 0 {
             return Err("CEF debug port not yet configured".to_string());
         }
-        let already_cached = self.already_cached();
 
         // Path 1: a dedicated browser-pane block — resolve by URL match,
-        // exactly as originally shipped.
+        // exactly as originally shipped. Target exclusivity (via
+        // already_cached) matters here: two browser panes must never be
+        // handed the same dedicated target.
         let resolved = if let Some(pane_url) = state.browser_panes.pane_url(state, block_id) {
+            let already_cached = self.already_cached();
             let target_id =
                 Self::resolve_by_url(debug_port, &pane_url, block_id, &already_cached).await?;
             ResolvedTarget {
@@ -105,9 +107,9 @@ impl TargetCache {
             }
         } else {
             // Path 2 (fallback): not a browser pane — a DOM node inside
-            // one of the shared window pages. Probe.
-            let target_id =
-                Self::resolve_by_dom_probe(debug_port, block_id, &already_cached).await?;
+            // one of the shared window pages. Probe. NOT target-exclusive
+            // — see resolve_by_dom_probe's doc comment for why.
+            let target_id = Self::resolve_by_dom_probe(debug_port, block_id).await?;
             ResolvedTarget {
                 target_id,
                 scope_to_block: true,
@@ -170,15 +172,25 @@ impl TargetCache {
         }
     }
 
-    /// Probe every unclaimed "page" CDP target and ask each one (via a
-    /// cheap `Runtime.evaluate`) whether its DOM contains this block's
+    /// Probe every "page" CDP target and ask each one (via a cheap
+    /// `Runtime.evaluate`) whether its DOM contains this block's
     /// `[data-blockid]` wrapper. There are normally only a handful of live
     /// top-level windows, so this is fast; no window-topology bookkeeping
     /// (host↔srv round trip) is needed.
+    ///
+    /// Deliberately does NOT exclude already-cached/claimed targets the way
+    /// `resolve_by_url` does — that exclusivity is a Path-1 (dedicated
+    /// browser-pane) concept, where one CDP target really can only belong
+    /// to one block. Path 2's whole premise is the opposite: MANY blocks
+    /// (every pane in a window) legitimately share ONE target. Applying
+    /// Path-1's exclusivity here was a real bug (caught during live
+    /// verification, 2026-08-19): the first block resolved in a window
+    /// would "claim" the only target, and every other block in that SAME
+    /// window would then fail to resolve at all — see
+    /// `resolve_by_dom_probe_lets_multiple_blocks_share_one_window_target`.
     async fn resolve_by_dom_probe(
         debug_port: u16,
         block_id: &str,
-        already_cached: &[String],
     ) -> Result<String, ResolveError> {
         let targets = Self::fetch_page_targets(debug_port).await?;
         // JSON-encode block_id so it's a safe JS string literal; the
@@ -194,7 +206,7 @@ impl TargetCache {
 
         for t in targets
             .iter()
-            .filter(|t| (t.kind == "page" || t.kind.is_empty()) && !already_cached.contains(&t.id))
+            .filter(|t| t.kind == "page" || t.kind.is_empty())
         {
             let ws_url = format!("ws://127.0.0.1:{debug_port}/devtools/page/{}", t.id);
             let mut cdp = match CdpSession::connect(&ws_url).await {
@@ -220,11 +232,11 @@ impl TargetCache {
 
         let probed = targets
             .iter()
-            .filter(|t| (t.kind == "page" || t.kind.is_empty()) && !already_cached.contains(&t.id))
+            .filter(|t| t.kind == "page" || t.kind.is_empty())
             .count();
         Err(format!(
             "UNKNOWN_BLOCK_ID: no CDP target's DOM contains a [data-blockid=\"{block_id}\"] \
-             element (probed {probed} unclaimed page targets)"
+             element (probed {probed} page targets)"
         ))
     }
 
@@ -321,10 +333,116 @@ mod tests {
         )
         .await;
 
-        let err = TargetCache::resolve_by_dom_probe(port, "some-block-id", &[])
+        let err = TargetCache::resolve_by_dom_probe(port, "some-block-id")
             .await
             .expect_err("no CDP target is actually reachable in this test");
         assert!(err.contains("UNKNOWN_BLOCK_ID"), "got: {err}");
         assert!(err.contains("some-block-id"), "got: {err}");
+    }
+
+    /// Minimal fake CDP endpoint: serves `/json` (like `spawn_fake_json_endpoint`)
+    /// AND accepts a WebSocket at `/devtools/page/<id>`, answering every
+    /// `Runtime.evaluate` call with `{result: {value: true}}` — i.e. "yes,
+    /// this target's DOM contains whatever [data-blockid] selector was
+    /// asked about." Good enough to exercise the DOM-probe *success* path,
+    /// which the connect-always-fails tests above can't reach.
+    async fn spawn_fake_cdp_endpoint(json_body: &'static str) -> u16 {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            loop {
+                let Ok((stream, _)) = listener.accept().await else { return };
+                tokio::spawn(async move {
+                    // Peek (not consume) the request line to route: `/json`
+                    // is a plain HTTP GET, `/devtools/page/<id>` is a WS
+                    // upgrade. Using `peek` (rather than reading via a
+                    // BufReader and calling `.into_inner()`) matters: `
+                    // BufReader::into_inner()` DISCARDS whatever it already
+                    // buffered past the first line, desyncing the stream
+                    // and hanging `accept_async`'s handshake read forever —
+                    // that was a real bug in an earlier version of this
+                    // test helper (2026-08-19), not in production code.
+                    let mut peek_buf = [0u8; 16];
+                    let Ok(n) = stream.peek(&mut peek_buf).await else { return };
+                    if peek_buf[..n].starts_with(b"GET /json") {
+                        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                        let mut stream = stream;
+                        let mut buf = [0u8; 1024];
+                        let _ = stream.read(&mut buf).await; // drain the request, best-effort
+                        let resp = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            json_body.len(),
+                            json_body
+                        );
+                        let _ = stream.write_all(resp.as_bytes()).await;
+                        return;
+                    }
+                    // WebSocket upgrade for /devtools/page/<id>.
+                    let mut ws = match tokio_tungstenite::accept_async(stream).await {
+                        Ok(w) => w,
+                        Err(_) => return,
+                    };
+                    use futures_util::{SinkExt, StreamExt};
+                    while let Some(Ok(msg)) = ws.next().await {
+                        let tokio_tungstenite::tungstenite::Message::Text(text) = msg else {
+                            continue;
+                        };
+                        let Ok(req): Result<serde_json::Value, _> = serde_json::from_str(&text)
+                        else {
+                            continue;
+                        };
+                        let id = req.get("id").cloned().unwrap_or(serde_json::json!(0));
+                        let reply = serde_json::json!({ "id": id, "result": { "result": { "value": true } } });
+                        if ws
+                            .send(tokio_tungstenite::tungstenite::Message::Text(
+                                reply.to_string().into(),
+                            ))
+                            .await
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
+                });
+            }
+        });
+        port
+    }
+
+    // Regression test for a real bug caught during live verification
+    // (2026-08-19): two DIFFERENT blocks that legitimately live in the SAME
+    // shared window (e.g. an "agent" pane and a "sysinfo" pane both on the
+    // main window) must BOTH resolve successfully to that one shared
+    // target. The `already_cached` target-exclusivity check that Path 1
+    // needs (two browser panes must never be handed the same dedicated
+    // target) was wrongly also applied to Path 2, where "many blocks, one
+    // shared target" is the whole point — the first block_id resolved
+    // would "claim" the only target, so any lookup for a different block
+    // in the SAME window then failed with UNKNOWN_BLOCK_ID even though its
+    // [data-blockid] element genuinely exists on that page.
+    #[tokio::test]
+    async fn resolve_by_dom_probe_lets_multiple_blocks_share_one_window_target() {
+        let port = spawn_fake_cdp_endpoint(
+            r#"[{"id": "main-window-target", "type": "page", "url": "http://127.0.0.1:5307/"}]"#,
+        )
+        .await;
+
+        let first = TargetCache::resolve_by_dom_probe(port, "agent-block-id")
+            .await
+            .expect("first block in the shared window should resolve");
+        assert_eq!(first, "main-window-target");
+
+        // The critical assertion: a SECOND, different block_id in the SAME
+        // window must ALSO resolve — this is what broke before the fix,
+        // when resolve() fed the first block's already-cached target_id
+        // into an exclusivity filter this function no longer has.
+        let second = TargetCache::resolve_by_dom_probe(port, "sysinfo-block-id")
+            .await
+            .expect(
+                "a second block sharing the same window target must still resolve — \
+                 target exclusivity is a Path-1 (dedicated browser pane) concept, \
+                 not a Path-2 (shared window) one",
+            );
+        assert_eq!(second, "main-window-target");
     }
 }
