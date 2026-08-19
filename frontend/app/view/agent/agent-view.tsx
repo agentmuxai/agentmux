@@ -2213,6 +2213,18 @@ const AgentPresentationView = ({
                 providerId={provider()?.id ?? ""}
                 agentMode={block()?.meta?.["agentMode"] as string | undefined}
                 compacting={agentAtoms().compactingAtom[0]()}
+                // Route through handleSendMessage — same pattern as the
+                // SlashHelpPanel's onInvoke above, and for the same reason:
+                // this needs the same pre-TurnStart wasAlreadyWorking
+                // snapshot the composer path computes, not a bare
+                // commands.sendMessage() call (which would default
+                // wasAlreadyWorking to false regardless of the pane's real
+                // turn state). "/compact" is deliberately NOT a registered
+                // SlashCommand — see AgentComposerStrip's onCompact doc
+                // comment for why that would break instead of help.
+                onCompact={() => {
+                    void handleSendMessage("/compact");
+                }}
             />
 
             <div class="agent-composer-region">

@@ -438,6 +438,34 @@
     }
 }
 
+// Manual "Compact now" trigger — same subtle chrome treatment as the
+// process badge (neutral, not a loud CTA; Shell stays the strip's one
+// real call-to-action). Sits immediately right of the context text.
+.agent-composer-strip-compact-btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px var(--space-1);
+    font-size: 10px;
+    font-family: var(--termfontfamily, monospace);
+    color: var(--secondary-text-color);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    cursor: default;
+    transition: background 80ms ease, color 80ms ease;
+
+    &:hover:not(:disabled) {
+        background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+        color: var(--main-text-color);
+        border-color: color-mix(in srgb, var(--accent-color) 30%, transparent);
+    }
+
+    &:disabled {
+        opacity: 0.35;
+        cursor: default;
+    }
+}
+
 // Context text (replaces ContextWindowBar graphic).
 .agent-composer-strip-ctx {
     font-family: var(--termfontfamily, monospace);

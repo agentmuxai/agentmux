@@ -227,6 +227,22 @@ export interface AgentPaneState {
      *  Cleared alongside currentTool on ToolEnd / TurnEnd / TurnReset. */
     currentToolArg: string | null;
     turnTokens: TurnTokens | null;
+    /**
+     * True for the duration of a turn started specifically to send a
+     * manual "/compact" (the composer's "Compact now" button, or a user
+     * typing it) — set on `TurnStart` when `command.content === "/compact"`,
+     * consumed and reset by `CompactionBoundary`. Exists because a manual
+     * `CompactionBoundary.trigger` alone is NOT a safe signal that THIS
+     * pane's currently-working turn is the synthetic one that action
+     * opened: the reducer's own tests deliberately model a manual
+     * boundary landing while an unrelated real turn is already streaming
+     * (compaction_started/compact_boundary travel over independent
+     * transports with no ordering guarantee against the primary NDJSON
+     * stream — see the CompactionStarted race-guard tests). Only end the
+     * turn when we know FOR THIS PANE that its own working turn is the
+     * one the manual compact opened. codex P1 on PR #2659.
+     */
+    pendingCompactTurn: boolean;
     pending: PendingMessage[];
     /**
      * Init phase — `InitPending` until history fetch resolves (or fails).
@@ -329,6 +345,7 @@ export const initialState = (agentId: string): AgentPaneState => ({
     currentTool: null,
     currentToolArg: null,
     turnTokens: null,
+    pendingCompactTurn: false,
     lastContextTokens: null,
     lastContextWindow: null,
     lastContextModel: null,

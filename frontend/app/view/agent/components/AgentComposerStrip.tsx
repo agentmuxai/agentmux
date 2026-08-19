@@ -128,6 +128,27 @@ interface AgentComposerStripProps {
      * docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md.
      */
     compacting?: CompactionState | null;
+    /**
+     * Manually trigger compaction now, instead of waiting for the CLI's
+     * own auto-compact threshold. Only meaningful for Claude — sends the
+     * literal text "/compact" through the normal send-message path
+     * (agent-view.tsx's handleSendMessage), which the CLI's persistent
+     * stream-json stdin protocol recognizes as its real /compact command
+     * (verified empirically against a live `claude` process — see
+     * docs/reports/REPORT_TOKEN_ACCOUNTING_AND_COMPACTION_CONTROL_2026_08_18.md
+     * §6). Deliberately NOT routed through the SlashCommand registry
+     * (commands/providers/claude.ts) — a REGISTERED command's handler
+     * returning `{kind:"passthrough"}` is a documented no-op in
+     * dispatch.ts's `formatResult` ("passthrough from a handler is a
+     * noop here... ignored"), so registering `/compact` there would
+     * actually swallow it instead of forwarding it. Leaving it
+     * unregistered means dispatchSlashCommand's own top-level
+     * unknown-command path returns passthrough BEFORE calling any
+     * handler, which useAgentCommands.sendMessage correctly forwards
+     * as a real turn — the same path a user manually typing "/compact"
+     * already takes today.
+     */
+    onCompact?: () => void;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────
@@ -202,6 +223,17 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         return `${formatCompactNumber(t)} / ${formatCompactNumber(w)}`;
     };
 
+    // Only offer manual compaction for Claude (the only provider this has
+    // been verified against — see onCompact's doc comment), only once
+    // there's something to compact, and not while a turn is already in
+    // flight or a compaction is already running.
+    const canCompact = (): boolean =>
+        props.providerId === "claude"
+        && props.onCompact != null
+        && ctxText() != null
+        && !props.loading
+        && !props.compacting;
+
     return (
         <div class="agent-composer-strip" classList={{ "agent-composer-strip--expanded": props.logOpen }}>
             {/* Controls zone — the consolidated Mode/Model/Effort trigger +
@@ -271,6 +303,24 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                     >
                         {ctxText()}
                     </span>
+                </Show>
+                <Show when={props.providerId === "claude" && props.onCompact != null && ctxText() != null}>
+                    <button
+                        type="button"
+                        class="agent-composer-strip-compact-btn"
+                        data-strip-button
+                        disabled={!canCompact()}
+                        title={
+                            canCompact()
+                                ? "Summarize and trim this session's history now, instead of waiting for the CLI's own auto-compact threshold."
+                                : props.compacting
+                                    ? "Already compacting…"
+                                    : "Wait for the current turn to finish before compacting."
+                        }
+                        onClick={() => props.onCompact?.()}
+                    >
+                        Compact
+                    </button>
                 </Show>
                 <Show when={props.authStatus === "authenticated" || props.authStatus === "unauthenticated"}>
                     <span

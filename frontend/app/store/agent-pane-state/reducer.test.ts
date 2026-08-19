@@ -548,6 +548,103 @@ describe("agent-pane-state reducer", () => {
                 expect(r.state.lastContextTokens).toBe(2_000);
                 expect(r.events[0]).toMatchObject({ type: "context-compacted", source: "real", trigger: "auto" });
             });
+
+            // codex P1 on PR #2659: a manual "/compact" (the composer's
+            // "Compact now" button, or a user typing it) goes through
+            // handleSendMessage, which dispatches TurnStart the same as any
+            // real conversational turn — but the CLI's response to a
+            // standalone /compact is never an assistant text frame or a
+            // `result` frame, only `system/status` + this boundary. Without
+            // ending the turn here, the pane is stuck "Working" forever
+            // after every successful manual compaction.
+            describe("ends a synthetic manual-compact turn (codex P1, PR #2659)", () => {
+                /** Like `streaming()`, but the turn was started for "/compact"
+                 *  specifically — sets `pendingCompactTurn`, the signal
+                 *  CompactionBoundary actually gates on. */
+                const compactStreaming = (atMs = 100) => {
+                    const s1 = update(ready(atMs), { type: "TurnStart", at: atMs, content: "/compact" }).state;
+                    return update(s1, { type: "StreamFlushObserved", addedCount: 1, at: atMs }).state;
+                };
+
+                it("transitions a Streaming turn to Done.completed on a MANUAL boundary, when the turn was started for /compact", () => {
+                    const s0 = compactStreaming(100);
+                    const r = update(s0, {
+                        type: "CompactionBoundary",
+                        trigger: "manual",
+                        preTokens: 30_000,
+                        postTokens: 2_000,
+                        durationMs: 5_000,
+                        at: 200,
+                    }, 200);
+                    expect(r.state.turnPhase).toEqual({ kind: "Done", outcome: "completed", finishedAt: 200 });
+                    expect(r.state.currentTool).toBeNull();
+                    expect(r.state.currentToolArg).toBeNull();
+                    expect(r.state.turnTokens).toBeNull();
+                    expect(r.state.pendingCompactTurn).toBe(false);
+                    // The existing compaction bookkeeping still runs unchanged.
+                    expect(r.state.compacting).toBeNull();
+                    expect(r.state.lastContextTokens).toBe(2_000);
+                });
+
+                it("does NOT end an AUTO-triggered compaction's turn — auto-compaction happens transparently mid-turn", () => {
+                    const s0 = compactStreaming(100);
+                    const r = update(s0, {
+                        type: "CompactionBoundary",
+                        trigger: "auto",
+                        preTokens: 30_000,
+                        postTokens: 2_000,
+                        durationMs: 5_000,
+                        at: 200,
+                    }, 200);
+                    expect(r.state.turnPhase.kind).toBe("Streaming");
+                });
+
+                it("does NOT end an unrelated real turn on a MANUAL boundary, when THIS pane's turn wasn't started for /compact (reducer race-guard regression)", () => {
+                    // Exactly the scenario the pre-existing CompactionStarted
+                    // race-guard tests model: compaction_started/
+                    // compact_boundary can arrive out of order relative to
+                    // an unrelated, already-streaming turn. A manual trigger
+                    // alone must NOT be read as "this pane's turn is the
+                    // synthetic /compact one" — only pendingCompactTurn can
+                    // say that.
+                    const s0 = streaming(100); // ordinary turn, not "/compact"
+                    const r = update(s0, {
+                        type: "CompactionBoundary",
+                        trigger: "manual",
+                        preTokens: 30_000,
+                        postTokens: 2_000,
+                        durationMs: 5_000,
+                        at: 200,
+                    }, 200);
+                    expect(r.state.turnPhase.kind).toBe("Streaming");
+                });
+
+                it("reports 'stopped', not 'completed', when the user hit Esc during a manual compaction", () => {
+                    const s0 = compactStreaming(100);
+                    const interrupting = update(s0, { type: "RequestStop", at: 150 }, 150).state;
+                    const r = update(interrupting, {
+                        type: "CompactionBoundary",
+                        trigger: "manual",
+                        preTokens: 30_000,
+                        postTokens: 2_000,
+                        durationMs: 5_000,
+                        at: 200,
+                    }, 200);
+                    expect(r.state.turnPhase).toEqual({ kind: "Done", outcome: "stopped", finishedAt: 200 });
+                });
+
+                it("is a no-op on turnPhase when the pane is already idle (stale/late boundary after the turn ended some other way)", () => {
+                    const r = update(mk(), {
+                        type: "CompactionBoundary",
+                        trigger: "manual",
+                        preTokens: 30_000,
+                        postTokens: 2_000,
+                        durationMs: 5_000,
+                        at: 100,
+                    }, 100);
+                    expect(r.state.turnPhase.kind).toBe("Idle");
+                });
+            });
         });
 
         describe("TokensIn heuristic suppression", () => {
