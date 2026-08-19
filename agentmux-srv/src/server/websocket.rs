@@ -1290,7 +1290,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // App API handlers (agent.open, agent.send, agent.stop, agent.status, agent.list, agent.output)
     super::app_api::register_app_api_handlers(engine, &state);
 
-    // MuxBus cloud connectivity (muxbus.login / muxbus.status / muxbus.disconnect)
+    // MuxBus cloud connectivity (muxbus.login / muxbus.login.cancel / muxbus.status / muxbus.disconnect)
     super::muxbus_handlers::register_muxbus_handlers(engine, &state);
 
     // Native memory file browser (agent:memory:list / read_file / write_file)
