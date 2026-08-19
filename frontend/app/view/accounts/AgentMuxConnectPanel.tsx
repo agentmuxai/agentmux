@@ -111,8 +111,8 @@ export function useMuxBusStatus(): MuxBusController {
                 // A user-initiated Cancel is not a failure — don't surface
                 // it as a scary error banner, just quietly go back to
                 // "Not connected" (see cancel() below and pkce.rs's
-                // CANCELLED_BY_USER, which is what produces this exact
-                // error string).
+                // per-attempt CANCELLED_IDS tracking, which is what produces
+                // this exact error string).
                 setError(result.error ?? "Login failed.");
             }
         } catch (e) {

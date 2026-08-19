@@ -448,7 +448,7 @@ Connection: close
         format!("http://{addr}")
     }
 
-    // ACTIVE_LOGIN / CANCELLED_BY_USER are process-global statics — by
+    // ACTIVE_LOGIN / CANCELLED_IDS are process-global statics — by
     // design, only one login flow may exist per process. Cargo runs tests
     // in this file on parallel threads of the same process by default, so
     // any two tests that drive a real flow through those statics race each
