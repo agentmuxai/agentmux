@@ -160,11 +160,50 @@ pub struct MuxBusCredentials {
 /// Everything else on `MuxBusCredentials` is non-secret metadata and stays
 /// in SQLite, matching how `SecretRef::Keychain` accounts already split
 /// pointer-metadata (DB) from plaintext (keychain) elsewhere in this codebase.
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 struct MuxBusTokens {
     access_token: String,
     refresh_token: String,
     id_token: String,
+}
+
+/// On-disk JSON shape for the single-blob format (macOS/Linux's preferred
+/// layout, `write_single_blob`/`LEGACY_BLOB_KEYCHAIN_ID`). Wraps
+/// `MuxBusTokens` with a generation stamp — the SAME `new_generation()`
+/// nanosecond-timestamp scheme the chunked layout already uses for its own
+/// cross-field torn-write check — so a blob and split entries found
+/// coexisting (`muxbus_load_tokens`'s reconciliation) can be compared for
+/// actual freshness instead of assuming a fixed direction is always right.
+///
+/// reagent P1 on PR #2665: an earlier version of the reconciliation logic
+/// hardcoded "split is always fresher," which was true for the ONE
+/// historical case that motivated it (an old pre-fix blob→split migration
+/// whose blob delete failed) but breaks once THIS fix's own self-heal can
+/// also leave stale split leftovers behind a newer blob (if
+/// `delete_split_tokens` partially fails, then a later muxbus_save — which
+/// on macOS/Linux only ever writes the blob — updates the blob but not the
+/// stale split entries). An actual freshness comparison handles both
+/// directions correctly instead of guessing.
+///
+/// `#[serde(default)]` on `generation` means a genuinely old, pre-fix
+/// legacy blob (written before this stamp existed) deserializes with an
+/// empty generation, which reads as timestamp `0` — always losing a
+/// freshness comparison against any split entry's real generation stamp,
+/// which is exactly the right outcome for that original historical case.
+#[derive(Serialize, Deserialize, Default)]
+struct MuxBusBlob {
+    #[serde(flatten)]
+    tokens: MuxBusTokens,
+    #[serde(default)]
+    generation: String,
+}
+
+/// Parse a `new_generation()`-style nanosecond-timestamp string into a
+/// comparable number. An empty or corrupted value reads as `0` — the
+/// oldest possible timestamp — so it always loses a freshness comparison
+/// rather than erroring a read that would otherwise succeed.
+fn generation_as_number(generation: &str) -> u128 {
+    generation.parse().unwrap_or(0)
 }
 
 /// What a keychain entry held immediately before a write to it, so a later
@@ -372,7 +411,16 @@ fn read_chunked_field(field_key: &str) -> Result<Option<(String, String)>, Store
 /// regardless of which one ran.
 fn write_single_blob(tokens: &MuxBusTokens) -> Result<Vec<(String, PriorKeychainState)>, StoreError> {
     let prior = PriorKeychainState::capture(LEGACY_BLOB_KEYCHAIN_ID);
-    let blob = serde_json::to_string(tokens)
+    // Always stamps a FRESH generation, even when the caller is re-writing
+    // the same token values (e.g. reconciling a coexisting blob + split
+    // layout in `muxbus_load_tokens` — see `MuxBusBlob`'s doc comment) —
+    // "written just now" is itself real freshness information for the next
+    // comparison, regardless of whether the underlying secret changed.
+    let value = MuxBusBlob {
+        tokens: tokens.clone(),
+        generation: new_generation(),
+    };
+    let blob = serde_json::to_string(&value)
         .map_err(|e| StoreError::Other(format!("muxbus: failed to serialize tokens: {e}")))?;
     if let Err(e) = secret_store::put(LEGACY_BLOB_KEYCHAIN_ID, &blob) {
         return Err(StoreError::Other(format!("muxbus: keychain write failed: {e}")));
@@ -465,7 +513,11 @@ fn write_split_tokens(tokens: &MuxBusTokens) -> Result<Vec<(String, PriorKeychai
 /// read itself failed (locked keychain, no Secret Service daemon,
 /// permission denied — not just "no entry"), which the caller may still
 /// recover from via a legacy fallback.
-fn read_split_tokens() -> Result<Option<MuxBusTokens>, StoreError> {
+/// Returns the tokens plus the generation stamp shared by all three fields
+/// (validated equal below) — callers that need to compare this layout's
+/// freshness against a coexisting blob use the second element; callers that
+/// don't (the common case) just ignore it.
+fn read_split_tokens() -> Result<Option<(MuxBusTokens, String)>, StoreError> {
     let access = read_chunked_field(&field_key(FIELD_ACCESS))?;
     let refresh = read_chunked_field(&field_key(FIELD_REFRESH))?;
     let id = read_chunked_field(&field_key(FIELD_ID))?;
@@ -483,11 +535,14 @@ fn read_split_tokens() -> Result<Option<MuxBusTokens>, StoreError> {
             // stamps only match when they came from the SAME
             // write_split_tokens call — a mismatch means a torn write.
             if gen_a == gen_r && gen_r == gen_i {
-                Ok(Some(MuxBusTokens {
-                    access_token,
-                    refresh_token,
-                    id_token,
-                }))
+                Ok(Some((
+                    MuxBusTokens {
+                        access_token,
+                        refresh_token,
+                        id_token,
+                    },
+                    gen_a,
+                )))
             } else {
                 tracing::warn!(
                     "muxbus: split keychain entries have mismatched generation stamps (a torn \
@@ -658,7 +713,7 @@ impl Store {
         // migration needed on a hit here — it's already the right format.
         if cfg!(target_os = "windows") {
             match read_split_tokens() {
-                Ok(Some(tokens)) => return Ok(tokens),
+                Ok(Some((tokens, _generation))) => return Ok(tokens),
                 Ok(None) => {} // not yet on the split layout — check other sources below
                 Err(e) => {
                     if !legacy_access.is_empty() {
@@ -681,39 +736,55 @@ impl Store {
                     // corrupted. A malformed blob here means something wrote
                     // bad data, not "no credential" — treat it the same way
                     // a real read error is treated: propagate it.
-                    let tokens: MuxBusTokens = serde_json::from_str(&blob).map_err(|e| {
+                    let parsed: MuxBusBlob = serde_json::from_str(&blob).map_err(|e| {
                         StoreError::Other(format!("muxbus: stored keychain blob is corrupted: {e}"))
                     })?;
+                    let blob_generation = generation_as_number(&parsed.generation);
 
-                    // Codex P1, PR #2665: a blob and split entries can
-                    // coexist on this same machine if an EARLIER blob→split
-                    // migration (the pre-2026-08-03 upgrade path, which ran
-                    // unconditionally on every platform before this fix
-                    // existed) wrote the split entries successfully but its
-                    // own best-effort blob delete then failed or was
-                    // interrupted. Split is always the fresher data in that
-                    // case — it's only ever written FROM a blob, never the
-                    // reverse — so a hit here doesn't necessarily mean the
-                    // blob is authoritative; check for that coexistence and
-                    // prefer split, finishing the earlier interrupted
-                    // cleanup by migrating it into this fix's own preferred
-                    // single-blob format instead of silently serving stale
-                    // (possibly expired or previous-account) blob data
-                    // forever.
+                    // A blob and split entries can coexist on this same
+                    // machine two different ways, and they don't agree on
+                    // which one is fresher — an actual timestamp comparison
+                    // (not a hardcoded direction) is the only way to get
+                    // both right. See `MuxBusBlob`'s doc comment.
+                    //   1. (Codex P1) An EARLIER blob→split migration (the
+                    //      pre-2026-08-03 upgrade path, which ran on every
+                    //      platform before this fix existed) wrote split
+                    //      entries but its own best-effort blob delete then
+                    //      failed — split is fresher there.
+                    //   2. (reagent P1) THIS fix's own self-heal
+                    //      (split→blob) can leave stale split leftovers if
+                    //      `delete_split_tokens` partially fails; a later
+                    //      `muxbus_save` (macOS/Linux only ever writes the
+                    //      blob) then makes the blob fresher than those
+                    //      leftovers.
                     match read_split_tokens() {
-                        Ok(Some(split_tokens)) => {
-                            if allow_migration {
-                                match write_single_blob(&split_tokens) {
-                                    Ok(_) => delete_split_tokens(),
-                                    Err(_) => {
-                                        tracing::warn!(
-                                            "muxbus: keychain write failed reconciling coexisting \
-                                             blob + split entries — leaving both in place for now"
-                                        );
+                        Ok(Some((split_tokens, split_generation))) => {
+                            if generation_as_number(&split_generation) > blob_generation {
+                                // Split is genuinely newer — finish the
+                                // interrupted migration into this fix's
+                                // preferred single-blob format.
+                                if allow_migration {
+                                    match write_single_blob(&split_tokens) {
+                                        Ok(_) => delete_split_tokens(),
+                                        Err(_) => {
+                                            tracing::warn!(
+                                                "muxbus: keychain write failed reconciling coexisting \
+                                                 blob + split entries (split was fresher) — leaving \
+                                                 both in place for now"
+                                            );
+                                        }
                                     }
                                 }
+                                return Ok(split_tokens);
                             }
-                            return Ok(split_tokens);
+                            // Blob is the same age or newer — it's
+                            // authoritative. The split entries are a stale
+                            // leftover from an incomplete cleanup; finish
+                            // that cleanup now instead of leaving it to
+                            // silently mislead the NEXT load too.
+                            if allow_migration {
+                                delete_split_tokens();
+                            }
                         }
                         Ok(None) => {} // no coexistence — the blob alone is authoritative
                         Err(e) => {
@@ -728,7 +799,7 @@ impl Store {
                             );
                         }
                     }
-                    return Ok(tokens);
+                    return Ok(parsed.tokens);
                 }
                 Ok(None) => {} // not yet on the single-blob layout — check other sources below
                 Err(e) => {
@@ -785,11 +856,13 @@ impl Store {
             }
         } else {
             match read_split_tokens() {
-                Ok(Some(tokens)) => {
-                    // Self-heal: collapse the pre-fix chunked entries into
-                    // one blob so every subsequent load — and every future
-                    // OS Keychain consent prompt — touches exactly one
-                    // entry instead of up to twelve.
+                Ok(Some((tokens, _generation))) => {
+                    // No coexisting blob was found (the branch above this
+                    // one already checked and returned) — self-heal:
+                    // collapse the pre-fix chunked entries into one blob so
+                    // every subsequent load — and every future OS Keychain
+                    // consent prompt — touches exactly one entry instead of
+                    // up to twelve.
                     if allow_migration {
                         match write_single_blob(&tokens) {
                             Ok(_) => delete_split_tokens(),
@@ -1005,6 +1078,51 @@ mod tests {
         assert_eq!(back.access_token, "at");
         assert_eq!(back.refresh_token, "rt");
         assert_eq!(back.id_token, "it");
+    }
+
+    #[test]
+    fn muxbus_blob_round_trips_with_generation() {
+        let value = MuxBusBlob {
+            tokens: MuxBusTokens {
+                access_token: "at".to_string(),
+                refresh_token: "rt".to_string(),
+                id_token: "it".to_string(),
+            },
+            generation: "12345".to_string(),
+        };
+        let json = serde_json::to_string(&value).unwrap();
+        let back: MuxBusBlob = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.tokens.access_token, "at");
+        assert_eq!(back.generation, "12345");
+    }
+
+    #[test]
+    fn muxbus_blob_deserializes_a_pre_generation_legacy_blob_with_empty_generation() {
+        // A genuinely old, pre-fix blob has no `generation` key at all —
+        // `#[serde(default)]` must fill it in as "" rather than fail to
+        // parse, so it correctly reads as the oldest possible timestamp in
+        // any freshness comparison (see `generation_as_number`).
+        let legacy_json = r#"{"access_token":"at","refresh_token":"rt","id_token":"it"}"#;
+        let back: MuxBusBlob = serde_json::from_str(legacy_json).unwrap();
+        assert_eq!(back.tokens.access_token, "at");
+        assert_eq!(back.generation, "");
+    }
+
+    #[test]
+    fn generation_as_number_orders_real_timestamps_correctly() {
+        let older = new_generation();
+        let newer = new_generation();
+        assert!(
+            generation_as_number(&newer) >= generation_as_number(&older),
+            "a later new_generation() call must not compare as older"
+        );
+    }
+
+    #[test]
+    fn generation_as_number_treats_empty_or_corrupted_values_as_the_oldest_possible() {
+        assert_eq!(generation_as_number(""), 0);
+        assert_eq!(generation_as_number("not-a-number"), 0);
+        assert!(generation_as_number(&new_generation()) > generation_as_number(""));
     }
 
     #[test]
