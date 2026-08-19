@@ -277,22 +277,44 @@ pub struct WorkspaceNameRequest {
 
 // ── UI automation ───────────────────────────────────────────────────────────
 //
-// `block_id` is stamped by agentmux-mcp from its own trusted AGENTMUX_BLOCKID
-// env when called through the MCP tool schema (same convention as
-// ShellCreateRequest's `agent_block_id` above) — the schema never exposes
-// block_id as an agent-settable argument. This is NOT a server-side
-// enforcement boundary: an agent that bypasses the MCP wrapper and calls
-// /api/v1/ui/* directly (it holds the same shared X-AuthKey every other
-// App-API route trusts) can supply any block_id, including a different
-// pane's real one — see agentmux-srv/src/server/ui_handlers.rs's module
-// doc comment for the full explanation and why this isn't fixed in the PR
-// that added these types. See
+// `block_id` is NOT a field on any of these requests, on purpose (2026-08-19,
+// reagent + Codex review, PR #2662 — a client-supplied `block_id` here was a
+// real cross-agent content-disclosure vulnerability: /api/v1/ui/* shares the
+// same instance-wide X-AuthKey every App-API route trusts, and any agent can
+// read that key from its own environment, so a bare `block_id` field could
+// never be trusted from the request body no matter which layer stamped it).
+//
+// Instead, every request here carries `UiAutomationAuth`: the calling
+// agent's own slug, a timestamp, and an HMAC-SHA256 signature over them
+// using that agent's own `AGENTMUX_JEKT_KEY` (the SAME per-agent signing key
+// already used for jekt sender authentication — reused rather than inventing
+// a parallel credential system; see `agentmux_common::jekt_sign`). srv
+// verifies the signature against the claimed agent_id's key on file
+// (`Store::agent_jekt_key_load`) and, ONLY once that succeeds, looks up that
+// agent's actual current block_id server-side (`ReactiveHandler::get_agent`)
+// — the block_id a UI-automation call actually operates on is never taken
+// from the client at all, so there is nothing left to spoof. See
+// `agentmux-srv/src/server/ui_handlers.rs::verified_block_id` and
 // docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md.
+
+/// Identity proof shared by every `/api/v1/ui/*` request. `sig` is
+/// `jekt_sign::sign_jekt(key, "ui-automation-identity", agent_id,
+/// "__srv__", ts_secs, "")` — the fixed msgid/target_agent/message values
+/// exist purely for domain separation from real jekt message signatures
+/// (no genuine jekt uses this literal msgid, and "__srv__" is not a
+/// spawnable agent name), not because those fields carry meaning here.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UiAutomationAuth {
+    pub agent_id: String,
+    pub ts_secs: i64,
+    pub sig: String,
+}
 
 /// `POST /api/v1/ui/screenshot`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiScreenshotRequest {
-    pub block_id: String,
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
 }
 
 /// Response for `POST /api/v1/ui/screenshot`. `path` is a file already
@@ -308,14 +330,16 @@ pub struct UiScreenshotResponse {
 /// `POST /api/v1/ui/click`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiClickRequest {
-    pub block_id: String,
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
     pub selector: String,
 }
 
 /// `POST /api/v1/ui/query`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UiQueryRequest {
-    pub block_id: String,
+    #[serde(flatten)]
+    pub auth: UiAutomationAuth,
     pub selector: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,

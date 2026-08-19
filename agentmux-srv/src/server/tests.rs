@@ -496,18 +496,119 @@ async fn host_ipc_register_rejects_a_conflicting_second_registration() {
     );
 }
 
+/// Mint a jekt key for a fresh, uniquely-named test agent, register it
+/// with the global `ReactiveHandler` under a fresh unique block_id (the
+/// `block_id_hint` is just a readable label, uuid-suffixed for real
+/// uniqueness), and return a valid `{agent_id, ts_secs, sig}` JSON
+/// fragment for it. Both agent_id AND block_id must be unique per call
+/// (not just agent_id) — `ReactiveHandler` is a process-global singleton
+/// shared by every test in this binary, and two tests registering
+/// different agents under the SAME literal block_id raced each other
+/// (confirmed flaky under `cargo test`'s default parallelism, though
+/// deterministic in isolation) until this was unique per call too.
+fn signed_ui_auth(state: &AppState, block_id_hint: &str) -> (String, serde_json::Value) {
+    let unique = uuid::Uuid::new_v4();
+    let agent_id = format!("test-agent-{unique}");
+    let block_id = format!("{block_id_hint}-{unique}");
+    let key = state.wstore.agent_jekt_key_ensure(&agent_id).unwrap();
+    crate::backend::reactive::handler::get_global_handler()
+        .register_agent(&agent_id, &block_id, None)
+        .unwrap();
+    let ts_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let sig = agentmux_common::jekt_sign::sign_jekt(
+        &key,
+        "ui-automation-identity",
+        &agent_id,
+        "__srv__",
+        ts_secs,
+        "",
+    );
+    (
+        agent_id.clone(),
+        serde_json::json!({ "agent_id": agent_id, "ts_secs": ts_secs, "sig": sig }),
+    )
+}
+
 #[tokio::test]
 async fn ui_click_requires_host_registration_first() {
+    let state = test_state();
+    let (_agent_id, auth) = signed_ui_auth(&state, "b1");
+    let mut body = auth;
+    body["selector"] = serde_json::json!("button");
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .uri("/api/v1/ui/click")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn ui_click_rejects_an_unsigned_request() {
     let app = test_router();
     let req = Request::builder()
         .uri("/api/v1/ui/click")
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
         .header("Content-Type", "application/json")
-        .body(Body::from(r#"{"block_id":"b1","selector":"button"}"#))
+        .body(Body::from(
+            r#"{"agent_id":"nobody","ts_secs":9999999999,"sig":"forged","selector":"button"}"#,
+        ))
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+// The exact attack this fix closes (reagent + Codex, PR #2662, 2026-08-19):
+// an agent that reads the shared X-AuthKey from its own environment claims
+// to BE a different agent (whose pane it wants to read/click), but signs
+// with its OWN key (it can never have another agent's key). Must be
+// rejected — `agent_a`'s valid signature over `agent_a`'s own identity
+// does not verify against `agent_b`'s claimed identity, regardless of the
+// host being registered and ready to serve a legitimate request.
+#[tokio::test]
+async fn ui_click_rejects_a_forged_agent_identity() {
+    let state = test_state();
+    let port = spawn_fake_browser_api(r#"{"ok":true,"data":{}}"#, "tok-abc").await;
+    *state.host_ipc.lock().await = Some(HostIpc {
+        port,
+        token: "tok-abc".to_string(),
+    });
+
+    // Victim: a real agent with its own key and pane.
+    let (victim_agent_id, _victim_auth) = signed_ui_auth(&state, "victim-block");
+
+    // Attacker: mints its OWN key/registration, then signs with ITS OWN
+    // key but substitutes the VICTIM's agent_id into the request — exactly
+    // what a bypassing agent would try after reading the victim's agent_id
+    // from e.g. Layout()/DiscoverAgents().
+    let (_attacker_agent_id, attacker_auth) = signed_ui_auth(&state, "attacker-block");
+    let mut forged = attacker_auth;
+    forged["agent_id"] = serde_json::json!(victim_agent_id);
+    forged["selector"] = serde_json::json!("button");
+
+    let app = build_router(state);
+    let req = Request::builder()
+        .uri("/api/v1/ui/click")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(forged.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "a signature valid for the attacker's own identity must not verify for a different claimed agent_id"
+    );
 }
 
 #[tokio::test]
@@ -518,6 +619,9 @@ async fn ui_click_proxies_to_host_after_registration() {
         port,
         token: "tok-abc".to_string(),
     });
+    let (_agent_id, auth) = signed_ui_auth(&state, "b1");
+    let mut body = auth;
+    body["selector"] = serde_json::json!("button");
     let app = build_router(state);
 
     let req = Request::builder()
@@ -525,7 +629,7 @@ async fn ui_click_proxies_to_host_after_registration() {
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
         .header("Content-Type", "application/json")
-        .body(Body::from(r#"{"block_id":"b1","selector":"button"}"#))
+        .body(Body::from(body.to_string()))
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -548,6 +652,9 @@ async fn ui_click_surfaces_a_host_side_error() {
         port,
         token: "tok-abc".to_string(),
     });
+    let (_agent_id, auth) = signed_ui_auth(&state, "b1");
+    let mut body = auth;
+    body["selector"] = serde_json::json!("button");
     let app = build_router(state);
 
     let req = Request::builder()
@@ -555,7 +662,7 @@ async fn ui_click_surfaces_a_host_side_error() {
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
         .header("Content-Type", "application/json")
-        .body(Body::from(r#"{"block_id":"b1","selector":"button"}"#))
+        .body(Body::from(body.to_string()))
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
@@ -579,6 +686,9 @@ async fn ui_query_returns_host_matches() {
         port,
         token: "tok-abc".to_string(),
     });
+    let (_agent_id, auth) = signed_ui_auth(&state, "b1");
+    let mut body = auth;
+    body["selector"] = serde_json::json!("button");
     let app = build_router(state);
 
     let req = Request::builder()
@@ -586,7 +696,7 @@ async fn ui_query_returns_host_matches() {
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
         .header("Content-Type", "application/json")
-        .body(Body::from(r#"{"block_id":"b1","selector":"button"}"#))
+        .body(Body::from(body.to_string()))
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);

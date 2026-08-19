@@ -3,27 +3,26 @@
 
 //! Agent-facing UI automation (`UIScreenshot` / `UIClick` / `UIQuery` MCP
 //! tools) — proxies to the paired CEF host's `/agentmux/browser/*` CDP
-//! routes (`agentmux-cef/src/browser_api/`). `block_id` on every request is
-//! stamped by agentmux-mcp from its own trusted `AGENTMUX_BLOCKID` env when
-//! called through the MCP tool schema (which never exposes `block_id` as
-//! an agent-settable argument), so a well-behaved caller is scoped to its
-//! own pane by construction.
+//! routes (`agentmux-cef/src/browser_api/`).
 //!
-//! **This is not a server-side enforcement boundary.** `/api/v1/ui/*`
-//! shares the same instance-wide `X-AuthKey` every other App-API route
-//! uses, and that key is present in an agent's own process environment —
-//! an agent could bypass the MCP wrapper entirely and POST a DIFFERENT
-//! (real) pane's block_id directly, and this endpoint has no way to tell
-//! that block_id doesn't actually belong to the caller (Codex review,
-//! PR #2662, 2026-08-19). `query.js`'s `__amq_allowed_for` scoping (fixed
-//! in the same PR to also block containment, not just direct nesting) only
-//! protects a caller from reaching outside WHICHEVER block_id it supplied
-//! — it can't detect that the supplied block_id was never the caller's own
-//! in the first place. Closing that fully requires a per-agent credential
-//! distinguishing "this specific agent" at the HTTP layer, which doesn't
-//! exist anywhere in the App-API surface today (this endpoint doesn't
-//! introduce the gap, it inherits an existing one) — tracked as follow-up,
-//! not fixed in this PR.
+//! **`block_id` is never a client-supplied field on any request here**
+//! (2026-08-19, reagent + Codex review, PR #2662 — a bare client-supplied
+//! `block_id` was a real cross-agent content-disclosure vulnerability:
+//! `/api/v1/ui/*` shares the same instance-wide `X-AuthKey` every App-API
+//! route trusts, and any agent can read that key from its own environment,
+//! so no amount of "the MCP schema never exposes it" convention actually
+//! stopped a bypassing agent from supplying a different pane's real
+//! `block_id`). Every request instead carries `UiAutomationAuth` — an
+//! HMAC-SHA256 signature over the caller's own agent_id, using that
+//! agent's own `AGENTMUX_JEKT_KEY` (the same per-agent key already used
+//! for jekt sender authentication, see `agentmux_common::jekt_sign`).
+//! [`verified_block_id`] verifies that signature against the claimed
+//! agent's key on file, and — only once verification succeeds — looks up
+//! that agent's actual current block_id server-side via the global
+//! `ReactiveHandler` registry. The block_id a call actually operates on is
+//! never taken from the client at all, so there's nothing left to spoof:
+//! an agent without a valid signature for identity X cannot act as X, full
+//! stop, regardless of what it claims in the request body.
 //!
 //! See `agentmux_common::api_types`'s "UI automation" section and
 //! `docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md`.
@@ -35,9 +34,75 @@ use axum::Json;
 use base64::Engine as _;
 use serde_json::json;
 
-use agentmux_common::api_types::{UiClickRequest, UiQueryRequest, UiScreenshotRequest, UiScreenshotResponse};
+use agentmux_common::api_types::{
+    UiAutomationAuth, UiClickRequest, UiQueryRequest, UiScreenshotRequest, UiScreenshotResponse,
+};
 
 use super::{AppState, HostIpc};
+
+/// Signatures older than this are rejected — bounds replay of a leaked/
+/// logged signature to a short window. Mirrors `server/reactive.rs`'s
+/// `JEKT_SIG_MAX_AGE_SECS` (same threat model: a host-tier HMAC signature
+/// verified locally, not a one-time nonce scheme).
+const UI_AUTOMATION_SIG_MAX_AGE_SECS: i64 = 300;
+
+fn now_unix_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Verify `auth` proves the caller genuinely is `auth.agent_id` (via that
+/// agent's own jekt key — an attacker without agent_id's key cannot
+/// produce a valid signature no matter what it claims), then derive that
+/// agent's ACTUAL current block_id server-side. Never trusts a block_id
+/// from the client — there isn't one to trust. See this module's own doc
+/// comment for the full rationale.
+fn verified_block_id(state: &AppState, auth: &UiAutomationAuth) -> Result<String, String> {
+    if auth.ts_secs <= 0 || (now_unix_secs() - auth.ts_secs).abs() > UI_AUTOMATION_SIG_MAX_AGE_SECS
+    {
+        return Err("signature timestamp missing or outside the freshness window".to_string());
+    }
+    let key = match state.wstore.agent_jekt_key_load(&auth.agent_id) {
+        Ok(Some(k)) => k,
+        Ok(None) => {
+            return Err(format!(
+                "no signing key on file for agent_id={:?} — respawn this agent to get one",
+                auth.agent_id
+            ))
+        }
+        Err(e) => return Err(format!("load signing key: {e}")),
+    };
+    let ok = agentmux_common::jekt_sign::verify_jekt(
+        &key,
+        "ui-automation-identity",
+        &auth.agent_id,
+        "__srv__",
+        auth.ts_secs,
+        "",
+        &auth.sig,
+    );
+    if !ok {
+        tracing::warn!(
+            agent_id = %auth.agent_id,
+            "[ui-automation] REJECTED an invalid identity signature — either a forged \
+             request or a stale/corrupted key"
+        );
+        return Err("identity signature verification failed".to_string());
+    }
+
+    crate::backend::reactive::handler::get_global_handler()
+        .get_agent(&auth.agent_id)
+        .map(|reg| reg.block_id)
+        .ok_or_else(|| {
+            format!(
+                "agent_id={:?} verified but is not currently registered with a pane \
+                 (not spawned via AgentMux, or not yet registered)",
+                auth.agent_id
+            )
+        })
+}
 
 async fn get_host_ipc(state: &AppState) -> Result<HostIpc, String> {
     state.host_ipc.lock().await.clone().ok_or_else(|| {
@@ -116,6 +181,10 @@ pub(crate) async fn handle_ui_screenshot(
     State(state): State<AppState>,
     Json(req): Json<UiScreenshotRequest>,
 ) -> impl IntoResponse {
+    let block_id = match verified_block_id(&state, &req.auth) {
+        Ok(b) => b,
+        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+    };
     let host = match get_host_ipc(&state).await {
         Ok(h) => h,
         Err(e) => return err_response(StatusCode::SERVICE_UNAVAILABLE, e),
@@ -125,7 +194,7 @@ pub(crate) async fn handle_ui_screenshot(
         &state,
         &host,
         "screenshot",
-        json!({ "block_id": req.block_id }),
+        json!({ "block_id": block_id }),
     )
     .await
     {
@@ -181,7 +250,8 @@ pub(crate) async fn handle_ui_screenshot(
     prune_old_screenshots(&dir);
 
     tracing::info!(
-        block_id = %req.block_id,
+        agent_id = %req.auth.agent_id,
+        block_id = %block_id,
         path = %path.display(),
         "[ui-automation] screenshot"
     );
@@ -203,6 +273,10 @@ pub(crate) async fn handle_ui_click(
     State(state): State<AppState>,
     Json(req): Json<UiClickRequest>,
 ) -> impl IntoResponse {
+    let block_id = match verified_block_id(&state, &req.auth) {
+        Ok(b) => b,
+        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+    };
     let host = match get_host_ipc(&state).await {
         Ok(h) => h,
         Err(e) => return err_response(StatusCode::SERVICE_UNAVAILABLE, e),
@@ -212,7 +286,7 @@ pub(crate) async fn handle_ui_click(
         &state,
         &host,
         "click_element",
-        json!({ "block_id": req.block_id, "selector": req.selector }),
+        json!({ "block_id": block_id, "selector": req.selector }),
     )
     .await
     {
@@ -229,7 +303,8 @@ pub(crate) async fn handle_ui_click(
     }
 
     tracing::info!(
-        block_id = %req.block_id,
+        agent_id = %req.auth.agent_id,
+        block_id = %block_id,
         selector = %req.selector,
         "[ui-automation] click"
     );
@@ -243,6 +318,10 @@ pub(crate) async fn handle_ui_query(
     State(state): State<AppState>,
     Json(req): Json<UiQueryRequest>,
 ) -> impl IntoResponse {
+    let block_id = match verified_block_id(&state, &req.auth) {
+        Ok(b) => b,
+        Err(e) => return err_response(StatusCode::UNAUTHORIZED, e),
+    };
     let host = match get_host_ipc(&state).await {
         Ok(h) => h,
         Err(e) => return err_response(StatusCode::SERVICE_UNAVAILABLE, e),
@@ -252,7 +331,7 @@ pub(crate) async fn handle_ui_query(
         &state,
         &host,
         "query",
-        json!({ "block_id": req.block_id, "selector": req.selector, "limit": req.limit }),
+        json!({ "block_id": block_id, "selector": req.selector, "limit": req.limit }),
     )
     .await
     {
@@ -268,7 +347,12 @@ pub(crate) async fn handle_ui_query(
         return err_response(StatusCode::BAD_REQUEST, err);
     }
 
-    tracing::info!(block_id = %req.block_id, selector = %req.selector, "[ui-automation] query");
+    tracing::info!(
+        agent_id = %req.auth.agent_id,
+        block_id = %block_id,
+        selector = %req.selector,
+        "[ui-automation] query"
+    );
     let data = host_resp.get("data").cloned().unwrap_or(json!({ "matches": [] }));
     (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response()
 }

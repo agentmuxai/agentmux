@@ -725,6 +725,44 @@ fn sign_outgoing_jekt(
     (msgid, ts_secs, jekt_sig, lan_sig)
 }
 
+/// Build the identity proof every `/api/v1/ui/*` request carries — an
+/// HMAC-SHA256 signature over this agent's own agent_id, using this
+/// agent's own `AGENTMUX_JEKT_KEY` (the same per-agent key `sign_outgoing_jekt`
+/// above uses for jekt messages; reused rather than inventing a parallel
+/// credential system). Unlike jekt signing, a missing key here is a hard
+/// error, not a silent "send unsigned" — srv has no unverified fallback
+/// path for UI automation (see `agentmux-srv/src/server/ui_handlers.rs`'s
+/// module doc comment), so a tool call with no key would just 401 anyway;
+/// failing fast with a clear "respawn to get a key" message is more useful
+/// than a confusing round trip.
+fn sign_ui_automation_auth() -> Result<agentmux_common::api_types::UiAutomationAuth> {
+    let agent_id = agent_slug()?;
+    let key_b64 = std::env::var("AGENTMUX_JEKT_KEY")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "AGENTMUX_JEKT_KEY is not set — this agent needs to be respawned to get a \
+                 signing key before it can use UI automation (UIScreenshot/UIClick/UIQuery)"
+            )
+        })?;
+    let key = agentmux_common::jekt_sign::decode_key(&key_b64)
+        .ok_or_else(|| anyhow::anyhow!("AGENTMUX_JEKT_KEY is set but not valid base64"))?;
+    let ts_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let sig = agentmux_common::jekt_sign::sign_jekt(
+        &key,
+        "ui-automation-identity",
+        &agent_id,
+        "__srv__",
+        ts_secs,
+        "",
+    );
+    Ok(agentmux_common::api_types::UiAutomationAuth { agent_id, ts_secs, sig })
+}
+
 async fn call_tool(
     params: &Value,
     local_url: &str,
@@ -1549,11 +1587,12 @@ async fn call_tool(
         }
         "UIScreenshot" => {
             require_agent_env(local_url, auth_key, block_id)?;
+            let auth = sign_ui_automation_auth()?;
             let url = format!("{}/api/v1/ui/screenshot", local_url.trim_end_matches('/'));
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
-                .json(&UiScreenshotRequest { block_id: block_id.to_string() })
+                .json(&UiScreenshotRequest { auth })
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
@@ -1573,6 +1612,7 @@ async fn call_tool(
         }
         "UIClick" => {
             require_agent_env(local_url, auth_key, block_id)?;
+            let auth = sign_ui_automation_auth()?;
             let selector = arguments
                 .get("selector")
                 .and_then(|v| v.as_str())
@@ -1582,7 +1622,7 @@ async fn call_tool(
                 .post(&url)
                 .header("X-AuthKey", auth_key)
                 .json(&UiClickRequest {
-                    block_id: block_id.to_string(),
+                    auth,
                     selector: selector.to_string(),
                 })
                 .send()
@@ -1597,6 +1637,7 @@ async fn call_tool(
         }
         "UIQuery" => {
             require_agent_env(local_url, auth_key, block_id)?;
+            let auth = sign_ui_automation_auth()?;
             let selector = arguments
                 .get("selector")
                 .and_then(|v| v.as_str())
@@ -1607,7 +1648,7 @@ async fn call_tool(
                 .post(&url)
                 .header("X-AuthKey", auth_key)
                 .json(&UiQueryRequest {
-                    block_id: block_id.to_string(),
+                    auth,
                     selector: selector.to_string(),
                     limit,
                 })
