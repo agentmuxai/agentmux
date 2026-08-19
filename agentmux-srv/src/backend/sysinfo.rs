@@ -590,6 +590,55 @@ mod handle_anomaly_tests {
         assert!(count.is_some_and(|c| c > 0), "got {count:?}");
     }
 
+    /// Regression test for the `sysinfo` v0.34.2 `CreateToolhelp32Snapshot`
+    /// handle leak (docs/status/STATUS_SRV_SECTION_HANDLE_LEAK_2026_08_08.md,
+    /// docs/status/STATUS_SRV_SECTION_HANDLE_LEAK_LIVE_RECURRENCE_2026_08_19.md).
+    /// That version's Windows `refresh_processes_specifics` never closed the
+    /// handle it got from `CreateToolhelp32Snapshot`, leaking one `Section`
+    /// object (kernel-charged, pagefile-backed) per call — invisible to this
+    /// process's own working-set/private-bytes, only visible as a climbing
+    /// `GetProcessHandleCount`. Repeats the exact call pattern
+    /// `run_sysinfo_loop` makes per tick (`ProcessesToUpdate::All`, the light
+    /// refresh kind used for the parent-link pass) many times and asserts
+    /// this process's own handle count does NOT grow linearly with call
+    /// count — a fixed `sysinfo` leaks ~0 handles/call; the broken 0.34.2
+    /// leaked exactly 1/call, so 500 calls would have shown +500, not "a
+    /// small bounded amount from unrelated one-time OS/runtime activity."
+    #[test]
+    fn refresh_processes_specifics_does_not_leak_a_handle_per_call() {
+        let pid = std::process::id();
+        let mut sys = sysinfo::System::new();
+        // Warm up: first call(s) can allocate one-time bookkeeping (e.g. the
+        // process list's initial capacity) that isn't part of the per-call
+        // leak this test is checking for.
+        for _ in 0..5 {
+            sys.refresh_processes_specifics(
+                ProcessesToUpdate::All,
+                false,
+                ProcessRefreshKind::nothing(),
+            );
+        }
+        let before = process_handle_count(pid).expect("own handle count must be queryable");
+
+        const CALLS: u32 = 500;
+        for _ in 0..CALLS {
+            sys.refresh_processes_specifics(
+                ProcessesToUpdate::All,
+                false,
+                ProcessRefreshKind::nothing(),
+            );
+        }
+        let after = process_handle_count(pid).expect("own handle count must be queryable");
+
+        let grew_by = after.saturating_sub(before);
+        assert!(
+            grew_by < CALLS / 2,
+            "handle count grew by {grew_by} over {CALLS} refresh_processes_specifics calls \
+             (before={before}, after={after}) — consistent with a per-call handle leak \
+             (the fixed-in-0.35.0 CreateToolhelp32Snapshot bug leaked exactly 1/call)"
+        );
+    }
+
     fn anomaly(pid: u32) -> HandleAnomaly {
         HandleAnomaly { pid, name: format!("proc{pid}.exe"), handles: 99_999, is_agentmux: false }
     }
