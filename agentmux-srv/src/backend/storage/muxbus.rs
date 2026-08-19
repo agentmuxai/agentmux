@@ -13,15 +13,25 @@ use crate::identity::secret_store;
 /// shared with the broker's credential id, see `crate::muxbus::CREDENTIAL_ID`.
 const MUXBUS_KEYCHAIN_ID: &str = crate::muxbus::CREDENTIAL_ID;
 
-/// Legacy (pre-2026-08-03) single-entry key holding all three tokens as one
-/// JSON blob. Windows Credential Manager caps a single entry's blob at 2560
-/// bytes (`CRED_MAX_CREDENTIAL_BLOB_SIZE`) — a Cognito `id_token` alone can
-/// approach that, and combined with `access_token`+`refresh_token` reliably
-/// exceeds it (see `docs/specs/PLAN_MUXBUS_KEYCHAIN_WINDOWS_BLOB_LIMIT_2026_08_03.md`).
-/// macOS/Linux have no comparable cap, so existing users there may still
-/// have a valid entry under this old key — kept only as a one-time
-/// migration source (`muxbus_load_tokens`); every new write goes through
-/// the chunked per-field layout below instead.
+/// Single-entry key holding all three tokens as one JSON blob. Two different
+/// roles depending on platform (see `muxbus_load_tokens` / `muxbus_save`):
+///
+/// - **Windows**: legacy (pre-2026-08-03) only. Windows Credential Manager
+///   caps a single entry's blob at 2560 bytes (`CRED_MAX_CREDENTIAL_BLOB_SIZE`)
+///   — a Cognito `id_token` alone can approach that, and combined with
+///   `access_token`+`refresh_token` reliably exceeds it (see
+///   `docs/specs/PLAN_MUXBUS_KEYCHAIN_WINDOWS_BLOB_LIMIT_2026_08_03.md`). Kept
+///   only as a one-time migration source there; every Windows write goes
+///   through the chunked per-field layout below instead.
+/// - **macOS/Linux**: the CURRENT, preferred format. These platforms have no
+///   comparable blob-size cap, so the chunked layout's only purpose there
+///   was to be platform-uniform with Windows — but each of its ~12 separate
+///   keychain entries is its own OS-level access-consent decision, and macOS
+///   Keychain prompts per-entry until each is individually trusted. Granting
+///   "Always Allow" on one entry just surfaced the next entry's own prompt,
+///   making the whole flow look broken (retro-macos-muxbus-keychain-prompt-
+///   storm-2026-08-19.md). One combined blob means one prompt, that one
+///   "Always Allow" click actually sticks.
 const LEGACY_BLOB_KEYCHAIN_ID: &str = MUXBUS_KEYCHAIN_ID;
 
 const FIELD_ACCESS: &str = "access";
@@ -150,11 +160,50 @@ pub struct MuxBusCredentials {
 /// Everything else on `MuxBusCredentials` is non-secret metadata and stays
 /// in SQLite, matching how `SecretRef::Keychain` accounts already split
 /// pointer-metadata (DB) from plaintext (keychain) elsewhere in this codebase.
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 struct MuxBusTokens {
     access_token: String,
     refresh_token: String,
     id_token: String,
+}
+
+/// On-disk JSON shape for the single-blob format (macOS/Linux's preferred
+/// layout, `write_single_blob`/`LEGACY_BLOB_KEYCHAIN_ID`). Wraps
+/// `MuxBusTokens` with a generation stamp — the SAME `new_generation()`
+/// nanosecond-timestamp scheme the chunked layout already uses for its own
+/// cross-field torn-write check — so a blob and split entries found
+/// coexisting (`muxbus_load_tokens`'s reconciliation) can be compared for
+/// actual freshness instead of assuming a fixed direction is always right.
+///
+/// reagent P1 on PR #2665: an earlier version of the reconciliation logic
+/// hardcoded "split is always fresher," which was true for the ONE
+/// historical case that motivated it (an old pre-fix blob→split migration
+/// whose blob delete failed) but breaks once THIS fix's own self-heal can
+/// also leave stale split leftovers behind a newer blob (if
+/// `delete_split_tokens` partially fails, then a later muxbus_save — which
+/// on macOS/Linux only ever writes the blob — updates the blob but not the
+/// stale split entries). An actual freshness comparison handles both
+/// directions correctly instead of guessing.
+///
+/// `#[serde(default)]` on `generation` means a genuinely old, pre-fix
+/// legacy blob (written before this stamp existed) deserializes with an
+/// empty generation, which reads as timestamp `0` — always losing a
+/// freshness comparison against any split entry's real generation stamp,
+/// which is exactly the right outcome for that original historical case.
+#[derive(Serialize, Deserialize, Default)]
+struct MuxBusBlob {
+    #[serde(flatten)]
+    tokens: MuxBusTokens,
+    #[serde(default)]
+    generation: String,
+}
+
+/// Parse a `new_generation()`-style nanosecond-timestamp string into a
+/// comparable number. An empty or corrupted value reads as `0` — the
+/// oldest possible timestamp — so it always loses a freshness comparison
+/// rather than erroring a read that would otherwise succeed.
+fn generation_as_number(generation: &str) -> u128 {
+    generation.parse().unwrap_or(0)
 }
 
 /// What a keychain entry held immediately before a write to it, so a later
@@ -351,6 +400,75 @@ fn read_chunked_field(field_key: &str) -> Result<Option<(String, String)>, Store
     Ok(Some((value, generation)))
 }
 
+/// Write all three tokens as one combined JSON blob under a single keychain
+/// entry (`LEGACY_BLOB_KEYCHAIN_ID` — the CURRENT preferred format on
+/// macOS/Linux, see that constant's doc comment). One `SecItemAdd`/
+/// `SecItemUpdate` call is inherently atomic at the OS level, so this needs
+/// none of `write_split_tokens`'s cross-field generation-stamp/rollback
+/// machinery — there's only one field. Returns the pre-call state wrapped in
+/// the same `Vec<(String, PriorKeychainState)>` shape `write_split_tokens`
+/// returns, so `muxbus_save`'s SQL-failure rollback branch works unchanged
+/// regardless of which one ran.
+fn write_single_blob(tokens: &MuxBusTokens) -> Result<Vec<(String, PriorKeychainState)>, StoreError> {
+    let prior = PriorKeychainState::capture(LEGACY_BLOB_KEYCHAIN_ID);
+    // Always stamps a FRESH generation, even when the caller is re-writing
+    // the same token values (e.g. reconciling a coexisting blob + split
+    // layout in `muxbus_load_tokens` — see `MuxBusBlob`'s doc comment) —
+    // "written just now" is itself real freshness information for the next
+    // comparison, regardless of whether the underlying secret changed.
+    let value = MuxBusBlob {
+        tokens: tokens.clone(),
+        generation: new_generation(),
+    };
+    let blob = serde_json::to_string(&value)
+        .map_err(|e| StoreError::Other(format!("muxbus: failed to serialize tokens: {e}")))?;
+    if let Err(e) = secret_store::put(LEGACY_BLOB_KEYCHAIN_ID, &blob) {
+        return Err(StoreError::Other(format!("muxbus: keychain write failed: {e}")));
+    }
+    Ok(vec![(LEGACY_BLOB_KEYCHAIN_ID.to_string(), prior)])
+}
+
+/// Delete every entry the chunked per-field layout could have written
+/// (`FIELD_ACCESS`/`FIELD_REFRESH`/`FIELD_ID`'s chunks + `:count` + `:gen`).
+/// Shared by `muxbus_clear` (unconditional logout cleanup, any platform) and
+/// the macOS/Linux migration path in `muxbus_load_tokens` (collapsing a
+/// pre-fix install's chunked entries into the single-blob format — see
+/// `LEGACY_BLOB_KEYCHAIN_ID`'s doc comment). Best-effort: `secret_store::delete`
+/// on a non-existent entry is a no-op success, and a real delete failure here
+/// just leaves an orphaned, unreadable-without-the-others chunk behind rather
+/// than losing anything live.
+fn delete_split_tokens() {
+    for field in [FIELD_ACCESS, FIELD_REFRESH, FIELD_ID] {
+        let fk = field_key(field);
+        // A count-read failure must NOT be treated as "0 chunks" (see
+        // read_chunk_count's doc comment) — that would delete nothing here
+        // while still unconditionally deleting the `:count` key below,
+        // orphaning the real token chunks in the OS keychain. Fall back to
+        // scanning a generous bound instead: `secret_store::delete` on a
+        // non-existent entry is a no-op success, so deleting past the real
+        // count is harmless — it guarantees actual cleanup even when the
+        // count itself is unreadable.
+        let count = match read_chunk_count(&fk) {
+            Ok(n) => n,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    field = %fk,
+                    "muxbus: couldn't read this field's chunk count while deleting split \
+                     entries — falling back to a bounded scan so real token chunks still get \
+                     deleted"
+                );
+                MAX_PLAUSIBLE_CHUNKS
+            }
+        };
+        for i in 0..count {
+            let _ = secret_store::delete(&chunk_key(&fk, i));
+        }
+        let _ = secret_store::delete(&count_key(&fk));
+        let _ = secret_store::delete(&generation_key(&fk));
+    }
+}
+
 /// Write all three token fields, each independently chunked
 /// (`write_chunked_field`). On a later field's failure, rolls back every
 /// entry every earlier field in this call already wrote — otherwise a
@@ -395,7 +513,11 @@ fn write_split_tokens(tokens: &MuxBusTokens) -> Result<Vec<(String, PriorKeychai
 /// read itself failed (locked keychain, no Secret Service daemon,
 /// permission denied — not just "no entry"), which the caller may still
 /// recover from via a legacy fallback.
-fn read_split_tokens() -> Result<Option<MuxBusTokens>, StoreError> {
+/// Returns the tokens plus the generation stamp shared by all three fields
+/// (validated equal below) — callers that need to compare this layout's
+/// freshness against a coexisting blob use the second element; callers that
+/// don't (the common case) just ignore it.
+fn read_split_tokens() -> Result<Option<(MuxBusTokens, String)>, StoreError> {
     let access = read_chunked_field(&field_key(FIELD_ACCESS))?;
     let refresh = read_chunked_field(&field_key(FIELD_REFRESH))?;
     let id = read_chunked_field(&field_key(FIELD_ID))?;
@@ -413,11 +535,14 @@ fn read_split_tokens() -> Result<Option<MuxBusTokens>, StoreError> {
             // stamps only match when they came from the SAME
             // write_split_tokens call — a mismatch means a torn write.
             if gen_a == gen_r && gen_r == gen_i {
-                Ok(Some(MuxBusTokens {
-                    access_token,
-                    refresh_token,
-                    id_token,
-                }))
+                Ok(Some((
+                    MuxBusTokens {
+                        access_token,
+                        refresh_token,
+                        id_token,
+                    },
+                    gen_a,
+                )))
             } else {
                 tracing::warn!(
                     "muxbus: split keychain entries have mismatched generation stamps (a torn \
@@ -581,58 +706,187 @@ impl Store {
             id_token: legacy_id.to_string(),
         };
 
-        match read_split_tokens() {
-            Ok(Some(tokens)) => return Ok(tokens),
-            Ok(None) => {} // not yet on the split layout — check legacy sources below
-            Err(e) => {
-                if !legacy_access.is_empty() {
-                    tracing::warn!(
-                        error = %e,
-                        "muxbus: keychain read failed, falling back to legacy plaintext columns"
-                    );
-                    return Ok(legacy_plaintext());
+        // Check THIS platform's preferred, current layout first — Windows
+        // needs the chunked per-field layout (its 1280-char keychain entry
+        // cap); macOS/Linux use the single combined blob instead (see
+        // LEGACY_BLOB_KEYCHAIN_ID's doc comment for why they differ). No
+        // migration needed on a hit here — it's already the right format.
+        if cfg!(target_os = "windows") {
+            match read_split_tokens() {
+                Ok(Some((tokens, _generation))) => return Ok(tokens),
+                Ok(None) => {} // not yet on the split layout — check other sources below
+                Err(e) => {
+                    if !legacy_access.is_empty() {
+                        tracing::warn!(
+                            error = %e,
+                            "muxbus: keychain read failed, falling back to legacy plaintext columns"
+                        );
+                        return Ok(legacy_plaintext());
+                    }
+                    return Err(e);
                 }
-                return Err(e);
             }
-        }
+        } else {
+            match secret_store::get_optional(LEGACY_BLOB_KEYCHAIN_ID) {
+                Ok(Some(blob)) => {
+                    // reagent P2: a corrupted/unparseable keychain blob used
+                    // to silently collapse to MuxBusTokens::default() via
+                    // unwrap_or_default() — presenting as a full logout
+                    // instead of surfacing that something is actually
+                    // corrupted. A malformed blob here means something wrote
+                    // bad data, not "no credential" — treat it the same way
+                    // a real read error is treated: propagate it.
+                    let parsed: MuxBusBlob = serde_json::from_str(&blob).map_err(|e| {
+                        StoreError::Other(format!("muxbus: stored keychain blob is corrupted: {e}"))
+                    })?;
+                    let blob_generation = generation_as_number(&parsed.generation);
 
-        match secret_store::get_optional(LEGACY_BLOB_KEYCHAIN_ID) {
-            Ok(Some(blob)) => {
-                // reagent P2: a corrupted/unparseable keychain blob used to
-                // silently collapse to MuxBusTokens::default() via
-                // unwrap_or_default() — presenting as a full logout instead
-                // of surfacing that something is actually corrupted. A
-                // malformed blob here means something wrote bad data, not
-                // "no credential" — treat it the same way a real read error
-                // is treated: propagate it.
-                let tokens: MuxBusTokens = serde_json::from_str(&blob).map_err(|e| {
-                    StoreError::Other(format!("muxbus: stored keychain blob is corrupted: {e}"))
-                })?;
-                if allow_migration {
-                    match write_split_tokens(&tokens) {
-                        Ok(_) => {
-                            let _ = secret_store::delete(LEGACY_BLOB_KEYCHAIN_ID);
+                    // A blob and split entries can coexist on this same
+                    // machine two different ways, and they don't agree on
+                    // which one is fresher — an actual timestamp comparison
+                    // (not a hardcoded direction) is the only way to get
+                    // both right. See `MuxBusBlob`'s doc comment.
+                    //   1. (Codex P1) An EARLIER blob→split migration (the
+                    //      pre-2026-08-03 upgrade path, which ran on every
+                    //      platform before this fix existed) wrote split
+                    //      entries but its own best-effort blob delete then
+                    //      failed — split is fresher there.
+                    //   2. (reagent P1) THIS fix's own self-heal
+                    //      (split→blob) can leave stale split leftovers if
+                    //      `delete_split_tokens` partially fails; a later
+                    //      `muxbus_save` (macOS/Linux only ever writes the
+                    //      blob) then makes the blob fresher than those
+                    //      leftovers.
+                    match read_split_tokens() {
+                        Ok(Some((split_tokens, split_generation))) => {
+                            if generation_as_number(&split_generation) > blob_generation {
+                                // Split is genuinely newer — finish the
+                                // interrupted migration into this fix's
+                                // preferred single-blob format.
+                                if allow_migration {
+                                    match write_single_blob(&split_tokens) {
+                                        Ok(_) => delete_split_tokens(),
+                                        Err(_) => {
+                                            tracing::warn!(
+                                                "muxbus: keychain write failed reconciling coexisting \
+                                                 blob + split entries (split was fresher) — leaving \
+                                                 both in place for now"
+                                            );
+                                        }
+                                    }
+                                }
+                                return Ok(split_tokens);
+                            }
+                            // Blob is the same age or newer — it's
+                            // authoritative. The split entries are a stale
+                            // leftover from an incomplete cleanup; finish
+                            // that cleanup now instead of leaving it to
+                            // silently mislead the NEXT load too.
+                            if allow_migration {
+                                delete_split_tokens();
+                            }
                         }
-                        Err(_) => {
+                        Ok(None) => {} // no coexistence — the blob alone is authoritative
+                        Err(e) => {
+                            // Can't confirm whether split entries coexist —
+                            // fall back to the blob we already have in hand
+                            // rather than failing a read that would
+                            // otherwise have succeeded.
                             tracing::warn!(
-                                "muxbus: keychain write failed migrating the legacy combined-blob \
-                                 entry to split entries — leaving the old entry in place for now"
+                                error = %e,
+                                "muxbus: couldn't check for a coexisting split-entry layout — \
+                                 using the blob value"
                             );
                         }
                     }
+                    return Ok(parsed.tokens);
                 }
-                return Ok(tokens);
+                Ok(None) => {} // not yet on the single-blob layout — check other sources below
+                Err(e) => {
+                    if !legacy_access.is_empty() {
+                        tracing::warn!(
+                            error = %e,
+                            "muxbus: keychain read failed, falling back to legacy plaintext columns"
+                        );
+                        return Ok(legacy_plaintext());
+                    }
+                    return Err(StoreError::Other(format!("muxbus: keychain read failed: {e}")));
+                }
             }
-            Ok(None) => {}
-            Err(e) => {
-                if !legacy_access.is_empty() {
-                    tracing::warn!(
-                        error = %e,
-                        "muxbus: keychain read failed, falling back to legacy plaintext columns"
-                    );
-                    return Ok(legacy_plaintext());
+        }
+
+        // Not on this platform's preferred layout — check the OTHER layout
+        // as a migration source. On Windows this is the pre-2026-08-03
+        // single-blob format. On macOS/Linux this is the chunked layout a
+        // PRE-2026-08-19-FIX install on this same platform may have written
+        // (every platform wrote it uniformly before this fix existed) — see
+        // retro-macos-muxbus-keychain-prompt-storm-2026-08-19.md.
+        if cfg!(target_os = "windows") {
+            match secret_store::get_optional(LEGACY_BLOB_KEYCHAIN_ID) {
+                Ok(Some(blob)) => {
+                    let tokens: MuxBusTokens = serde_json::from_str(&blob).map_err(|e| {
+                        StoreError::Other(format!("muxbus: stored keychain blob is corrupted: {e}"))
+                    })?;
+                    if allow_migration {
+                        match write_split_tokens(&tokens) {
+                            Ok(_) => {
+                                let _ = secret_store::delete(LEGACY_BLOB_KEYCHAIN_ID);
+                            }
+                            Err(_) => {
+                                tracing::warn!(
+                                    "muxbus: keychain write failed migrating the legacy combined-blob \
+                                     entry to split entries — leaving the old entry in place for now"
+                                );
+                            }
+                        }
+                    }
+                    return Ok(tokens);
                 }
-                return Err(StoreError::Other(format!("muxbus: keychain read failed: {e}")));
+                Ok(None) => {}
+                Err(e) => {
+                    if !legacy_access.is_empty() {
+                        tracing::warn!(
+                            error = %e,
+                            "muxbus: keychain read failed, falling back to legacy plaintext columns"
+                        );
+                        return Ok(legacy_plaintext());
+                    }
+                    return Err(StoreError::Other(format!("muxbus: keychain read failed: {e}")));
+                }
+            }
+        } else {
+            match read_split_tokens() {
+                Ok(Some((tokens, _generation))) => {
+                    // No coexisting blob was found (the branch above this
+                    // one already checked and returned) — self-heal:
+                    // collapse the pre-fix chunked entries into one blob so
+                    // every subsequent load — and every future OS Keychain
+                    // consent prompt — touches exactly one entry instead of
+                    // up to twelve.
+                    if allow_migration {
+                        match write_single_blob(&tokens) {
+                            Ok(_) => delete_split_tokens(),
+                            Err(_) => {
+                                tracing::warn!(
+                                    "muxbus: keychain write failed migrating chunked entries to a \
+                                     single blob — leaving the old entries in place for now"
+                                );
+                            }
+                        }
+                    }
+                    return Ok(tokens);
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    if !legacy_access.is_empty() {
+                        tracing::warn!(
+                            error = %e,
+                            "muxbus: keychain read failed, falling back to legacy plaintext columns"
+                        );
+                        return Ok(legacy_plaintext());
+                    }
+                    return Err(e);
+                }
             }
         }
 
@@ -645,10 +899,15 @@ impl Store {
             if allow_migration {
                 // Lazy migration: this row predates keychain-backed storage.
                 // Use the plaintext columns this one time, and self-heal by
-                // writing them into the split keychain entries + blanking
-                // the SQL columns so every subsequent load hits the
-                // keychain path instead.
-                match write_split_tokens(&tokens) {
+                // writing them into this platform's preferred keychain
+                // layout + blanking the SQL columns so every subsequent
+                // load hits the keychain path instead.
+                let write_result = if cfg!(target_os = "windows") {
+                    write_split_tokens(&tokens)
+                } else {
+                    write_single_blob(&tokens)
+                };
+                match write_result {
                     Ok(_) => {
                         let conn = self.conn.lock().unwrap();
                         let _ = conn.execute(
@@ -702,15 +961,22 @@ impl Store {
             id_token: creds.id_token.clone(),
         };
 
-        // Writes all three split entries, rolling back among themselves on
-        // a mid-way failure; returns each field's pre-call state so the SQL
-        // failure branch below can roll all three back together too if the
-        // SQL write itself then fails (reagent P2 on #2260: without this, a
-        // keychain write that succeeds followed by a SQL write that then
-        // fails — e.g. a transient lock — leaves the FRESH tokens paired
-        // with the OLD SQL metadata, a mismatch that previously only
-        // self-healed on the next successful save).
-        let priors = write_split_tokens(&tokens)?;
+        // Windows needs the chunked per-field layout (its 1280-char keychain
+        // entry cap — see LEGACY_BLOB_KEYCHAIN_ID's doc comment); macOS/Linux
+        // have no such cap, so they write the single combined blob instead,
+        // to avoid the ~12-separate-consent-prompts problem chunking causes
+        // on macOS Keychain specifically. Either function returns each
+        // entry's pre-call state so the SQL failure branch below can roll it
+        // all back together too if the SQL write itself then fails (reagent
+        // P2 on #2260: without this, a keychain write that succeeds followed
+        // by a SQL write that then fails — e.g. a transient lock — leaves
+        // the FRESH tokens paired with the OLD SQL metadata, a mismatch that
+        // previously only self-healed on the next successful save).
+        let priors = if cfg!(target_os = "windows") {
+            write_split_tokens(&tokens)?
+        } else {
+            write_single_blob(&tokens)?
+        };
 
         let sql_result = {
             let conn = self.conn.lock().unwrap();
@@ -772,39 +1038,14 @@ impl Store {
         // against each other for.
         let _clear_guard = self.muxbus_save_lock.lock().unwrap();
         // Best-effort — a missing/inaccessible keychain entry must not block
-        // clearing the (still-useful) SQL row. Clears every chunk + the
-        // count entry for each of the three current-layout fields, plus the
-        // legacy combined-blob key, in case a migration never got the
-        // chance to run before logout.
-        for field in [FIELD_ACCESS, FIELD_REFRESH, FIELD_ID] {
-            let fk = field_key(field);
-            // A count-read failure must NOT be treated as "0 chunks" (see
-            // read_chunk_count's doc comment) — that would delete nothing
-            // here while still unconditionally deleting the `:count` key
-            // below, orphaning the real token chunks in the OS keychain
-            // while logout appears to have succeeded. Fall back to
-            // scanning a generous bound instead: `secret_store::delete` on
-            // a non-existent entry is a no-op success, so deleting past
-            // the real count is harmless — it guarantees actual cleanup
-            // even when the count itself is unreadable.
-            let count = match read_chunk_count(&fk) {
-                Ok(n) => n,
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        field = %fk,
-                        "muxbus_clear: couldn't read this field's chunk count — falling back to a \
-                         bounded scan so real token chunks still get deleted"
-                    );
-                    MAX_PLAUSIBLE_CHUNKS
-                }
-            };
-            for i in 0..count {
-                let _ = secret_store::delete(&chunk_key(&fk, i));
-            }
-            let _ = secret_store::delete(&count_key(&fk));
-            let _ = secret_store::delete(&generation_key(&fk));
-        }
+        // clearing the (still-useful) SQL row. Clears every chunk + count/gen
+        // entry the Windows-only chunked layout could have written (harmless
+        // no-ops on macOS/Linux, which never write it, but a pre-fix install
+        // there may still have some left over — see `delete_split_tokens`),
+        // plus the single combined-blob key every platform's CURRENT write
+        // path (`write_single_blob` on macOS/Linux) or legacy migration
+        // source (Windows) uses.
+        delete_split_tokens();
         let _ = secret_store::delete(LEGACY_BLOB_KEYCHAIN_ID);
         {
             let conn = self.conn.lock().unwrap();
@@ -837,6 +1078,51 @@ mod tests {
         assert_eq!(back.access_token, "at");
         assert_eq!(back.refresh_token, "rt");
         assert_eq!(back.id_token, "it");
+    }
+
+    #[test]
+    fn muxbus_blob_round_trips_with_generation() {
+        let value = MuxBusBlob {
+            tokens: MuxBusTokens {
+                access_token: "at".to_string(),
+                refresh_token: "rt".to_string(),
+                id_token: "it".to_string(),
+            },
+            generation: "12345".to_string(),
+        };
+        let json = serde_json::to_string(&value).unwrap();
+        let back: MuxBusBlob = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.tokens.access_token, "at");
+        assert_eq!(back.generation, "12345");
+    }
+
+    #[test]
+    fn muxbus_blob_deserializes_a_pre_generation_legacy_blob_with_empty_generation() {
+        // A genuinely old, pre-fix blob has no `generation` key at all —
+        // `#[serde(default)]` must fill it in as "" rather than fail to
+        // parse, so it correctly reads as the oldest possible timestamp in
+        // any freshness comparison (see `generation_as_number`).
+        let legacy_json = r#"{"access_token":"at","refresh_token":"rt","id_token":"it"}"#;
+        let back: MuxBusBlob = serde_json::from_str(legacy_json).unwrap();
+        assert_eq!(back.tokens.access_token, "at");
+        assert_eq!(back.generation, "");
+    }
+
+    #[test]
+    fn generation_as_number_orders_real_timestamps_correctly() {
+        let older = new_generation();
+        let newer = new_generation();
+        assert!(
+            generation_as_number(&newer) >= generation_as_number(&older),
+            "a later new_generation() call must not compare as older"
+        );
+    }
+
+    #[test]
+    fn generation_as_number_treats_empty_or_corrupted_values_as_the_oldest_possible() {
+        assert_eq!(generation_as_number(""), 0);
+        assert_eq!(generation_as_number("not-a-number"), 0);
+        assert!(generation_as_number(&new_generation()) > generation_as_number(""));
     }
 
     #[test]
