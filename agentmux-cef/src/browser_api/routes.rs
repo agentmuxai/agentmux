@@ -34,7 +34,7 @@ pub async fn query(
     }
 
     // Resolve block_id → CDP target id.
-    let target = match state
+    let resolved = match state
         .browser_api
         .target_cache
         .resolve(&state, &req.block_id)
@@ -46,7 +46,7 @@ pub async fn query(
 
     // Open the CDP WebSocket for that target.
     let debug_port = *state.debug_port.lock();
-    let ws_url = format!("ws://127.0.0.1:{debug_port}/devtools/page/{target}");
+    let ws_url = format!("ws://127.0.0.1:{debug_port}/devtools/page/{}", resolved.target_id);
     let mut cdp = match CdpSession::connect(&ws_url).await {
         Ok(s) => s,
         Err(e) => {
@@ -73,13 +73,22 @@ pub async fn query(
     }
 
     // Call the helper. Serializing the selector through serde_json
-    // handles quote-escaping safely.
+    // handles quote-escaping safely. `scope_to_block` selects whether the
+    // query is scoped to this block's own [data-blockid] subtree (a
+    // shared window page) or unscoped (a dedicated browser pane, which IS
+    // already this block's own isolated page).
     let selector_js = serde_json::to_string(&req.selector)
         .unwrap_or_else(|_| "\"\"".to_string());
+    let block_id_js = if resolved.scope_to_block {
+        serde_json::to_string(&req.block_id).unwrap_or_else(|_| "null".to_string())
+    } else {
+        "null".to_string()
+    };
     let call_expr = format!(
-        "__amq_query({sel}, {lim})",
+        "__amq_query({sel}, {lim}, {bid})",
         sel = selector_js,
         lim = req.limit.unwrap_or(0),
+        bid = block_id_js,
     );
     let eval_result = match cdp
         .call(
@@ -137,7 +146,7 @@ pub async fn focus_info(
         );
     }
 
-    let mut cdp = match open_cdp_for_block(&state, &req.block_id).await {
+    let (mut cdp, _scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
         Ok(c) => c,
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
@@ -155,6 +164,12 @@ pub async fn focus_info(
         return ok_body(ApiResponse::err(format!("CDP inject helper: {e}")));
     }
 
+    // focus_info intentionally reports whatever has focus in the whole
+    // page, not scoped to this block — it's a read of global page state
+    // (mirrors document.activeElement's own semantics), not an action on
+    // this block specifically. Not currently reachable via any
+    // agent-facing MCP tool (see SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md
+    // Phase 1 scope), so this is unchanged from its original behavior.
     let eval_result = match cdp
         .call(
             "Runtime.evaluate",
@@ -210,7 +225,7 @@ pub async fn eval(
         );
     }
 
-    let mut cdp = match open_cdp_for_block(&state, &req.block_id).await {
+    let (mut cdp, _scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
         Ok(c) => c,
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
@@ -282,7 +297,7 @@ pub async fn screenshot(
         );
     }
 
-    let mut cdp = match open_cdp_for_block(&state, &req.block_id).await {
+    let (mut cdp, scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
         Ok(c) => c,
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
@@ -298,6 +313,55 @@ pub async fn screenshot(
     if format == "jpeg" {
         params["quality"] = json!(req.quality.unwrap_or(80).min(100));
     }
+
+    // Shared-page targets (main/pool/floating windows) hold other panes'
+    // DOM too — clip the capture to this block's own [data-blockid] rect
+    // so a screenshot can't read another pane's on-screen content. A
+    // dedicated browser-pane target already IS this block's own page, so
+    // no clip is needed (and __amq_rect_of would find nothing to clip to —
+    // there's no [data-blockid] concept inside third-party page content).
+    if scope_to_block {
+        let helper = include_str!("scripts/query.js");
+        if let Err(e) = cdp
+            .call(
+                "Runtime.evaluate",
+                json!({ "expression": helper, "returnByValue": false }),
+            )
+            .await
+        {
+            let _ = cdp.close().await;
+            return ok_body(ApiResponse::err(format!("CDP inject helper: {e}")));
+        }
+        let block_id_js = serde_json::to_string(&req.block_id).unwrap_or_else(|_| "\"\"".to_string());
+        let rect_expr = format!("__amq_rect_of({block_id_js})");
+        let rect_reply = cdp
+            .call(
+                "Runtime.evaluate",
+                json!({ "expression": rect_expr, "returnByValue": true }),
+            )
+            .await;
+        let rect = rect_reply
+            .ok()
+            .and_then(|v| v.get("result").and_then(|r| r.get("value")).cloned())
+            .filter(|v| !v.is_null());
+        match rect {
+            Some(r) => {
+                let x = r.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let y = r.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let width = r.get("width").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let height = r.get("height").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                params["clip"] = json!({ "x": x, "y": y, "width": width, "height": height, "scale": 1.0 });
+            }
+            None => {
+                let _ = cdp.close().await;
+                return ok_body(ApiResponse::err(format!(
+                    "pane not found: no [data-blockid=\"{}\"] element on this page",
+                    req.block_id
+                )));
+            }
+        }
+    }
+
     let cap = match cdp
         .call("Page.captureScreenshot", params)
         .await
@@ -344,7 +408,7 @@ pub async fn click_element(
         );
     }
 
-    let mut cdp = match open_cdp_for_block(&state, &req.block_id).await {
+    let (mut cdp, scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
         Ok(c) => c,
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
@@ -362,9 +426,17 @@ pub async fn click_element(
         return ok_body(ApiResponse::err(format!("CDP inject helper: {e}")));
     }
 
-    // Ask the helper for the element's centroid in viewport coords.
+    // Ask the helper for the element's centroid in viewport coords,
+    // scoped to this block's own [data-blockid] subtree on shared pages
+    // (see resolver::ResolvedTarget::scope_to_block) — an agent can only
+    // ever click inside its own pane this way.
     let selector_js = serde_json::to_string(&req.selector).unwrap_or_else(|_| "\"\"".into());
-    let centroid_expr = format!("__amq_centroid_of({selector_js})");
+    let block_id_js = if scope_to_block {
+        serde_json::to_string(&req.block_id).unwrap_or_else(|_| "null".to_string())
+    } else {
+        "null".to_string()
+    };
+    let centroid_expr = format!("__amq_centroid_of({selector_js}, {block_id_js})");
     let cent_reply = match cdp
         .call(
             "Runtime.evaluate",
@@ -439,17 +511,30 @@ pub async fn focus_element(
         );
     }
 
-    let mut cdp = match open_cdp_for_block(&state, &req.block_id).await {
+    let (mut cdp, scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
         Ok(c) => c,
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
 
+    let helper = include_str!("scripts/query.js");
+    if let Err(e) = cdp
+        .call(
+            "Runtime.evaluate",
+            json!({ "expression": helper, "returnByValue": false }),
+        )
+        .await
+    {
+        let _ = cdp.close().await;
+        return ok_body(ApiResponse::err(format!("CDP inject helper: {e}")));
+    }
+
     let selector_js = serde_json::to_string(&req.selector).unwrap_or_else(|_| "\"\"".into());
-    let script = format!(
-        "(() => {{ const e = document.querySelector({sel}); \
-            if (!e) return false; e.focus(); return true; }})()",
-        sel = selector_js,
-    );
+    let block_id_js = if scope_to_block {
+        serde_json::to_string(&req.block_id).unwrap_or_else(|_| "null".to_string())
+    } else {
+        "null".to_string()
+    };
+    let script = format!("__amq_focus({selector_js}, {block_id_js})");
 
     let reply = match cdp
         .call(
@@ -505,18 +590,31 @@ pub async fn dispatch_key(
         ));
     }
 
-    let mut cdp = match open_cdp_for_block(&state, &req.block_id).await {
+    let (mut cdp, scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
         Ok(c) => c,
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
 
     // Optionally focus a selector first.
     if let Some(sel) = &req.selector {
+        let helper = include_str!("scripts/query.js");
+        if let Err(e) = cdp
+            .call(
+                "Runtime.evaluate",
+                json!({ "expression": helper, "returnByValue": false }),
+            )
+            .await
+        {
+            let _ = cdp.close().await;
+            return ok_body(ApiResponse::err(format!("CDP inject helper: {e}")));
+        }
         let sel_js = serde_json::to_string(sel).unwrap_or_else(|_| "\"\"".into());
-        let script = format!(
-            "(() => {{ const e = document.querySelector({sel_js}); \
-                if (!e) return false; e.focus(); return true; }})()"
-        );
+        let block_id_js = if scope_to_block {
+            serde_json::to_string(&req.block_id).unwrap_or_else(|_| "null".to_string())
+        } else {
+            "null".to_string()
+        };
+        let script = format!("__amq_focus({sel_js}, {block_id_js})");
         let reply = cdp
             .call(
                 "Runtime.evaluate",
@@ -611,7 +709,7 @@ pub async fn navigate(
         );
     }
 
-    let mut cdp = match open_cdp_for_block(&state, &req.block_id).await {
+    let (mut cdp, _scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
         Ok(c) => c,
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
@@ -649,7 +747,7 @@ pub async fn back(
         );
     }
 
-    let mut cdp = match open_cdp_for_block(&state, &req.block_id).await {
+    let (mut cdp, _scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
         Ok(c) => c,
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
@@ -681,7 +779,7 @@ pub async fn forward(
         );
     }
 
-    let mut cdp = match open_cdp_for_block(&state, &req.block_id).await {
+    let (mut cdp, _scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
         Ok(c) => c,
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
@@ -713,7 +811,7 @@ pub async fn reload(
         );
     }
 
-    let mut cdp = match open_cdp_for_block(&state, &req.block_id).await {
+    let (mut cdp, _scope_to_block) = match open_cdp_for_block(&state, &req.block_id).await {
         Ok(c) => c,
         Err(e) => return ok_body(ApiResponse::err(e)),
     };
@@ -731,10 +829,15 @@ pub async fn reload(
 
 // ── shared helpers ──────────────────────────────────────────────────────
 
+/// Returns the open CDP session plus whether the resolved target is a
+/// SHARED page (true — caller must scope DOM lookups to this block's own
+/// `[data-blockid]` subtree) or a dedicated browser-pane page (false —
+/// already isolated, scoping would break third-party content that has no
+/// `data-blockid` concept). See `resolver::ResolvedTarget`.
 async fn open_cdp_for_block(
     state: &Arc<AppState>,
     block_id: &str,
-) -> Result<CdpSession, String> {
+) -> Result<(CdpSession, bool), String> {
     let debug_port = *state.debug_port.lock();
     // Two attempts: the cached target id goes stale whenever the pane's
     // CDP target rotates (navigation-driven process swap, etc. — nothing
@@ -744,19 +847,19 @@ async fn open_cdp_for_block(
     // stale entry and attempt 2 re-resolves from a fresh `/json` probe.
     let mut last_err = String::new();
     for attempt in 0..2 {
-        let target = state
+        let resolved = state
             .browser_api
             .target_cache
             .resolve(state, block_id)
             .await?;
-        let ws_url = format!("ws://127.0.0.1:{debug_port}/devtools/page/{target}");
+        let ws_url = format!("ws://127.0.0.1:{debug_port}/devtools/page/{}", resolved.target_id);
         match CdpSession::connect(&ws_url).await {
-            Ok(session) => return Ok(session),
+            Ok(session) => return Ok((session, resolved.scope_to_block)),
             Err(e) => {
                 state.browser_api.target_cache.forget(block_id);
                 last_err = format!("CDP connect: {e}");
                 tracing::debug!(
-                    block_id, target, attempt, error = %last_err,
+                    block_id, target = resolved.target_id.as_str(), attempt, error = %last_err,
                     "[browser-api] CDP connect failed — dropped cached target"
                 );
             }
