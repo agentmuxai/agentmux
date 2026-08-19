@@ -278,9 +278,15 @@ pub struct WorkspaceNameRequest {
 // ── UI automation ───────────────────────────────────────────────────────────
 //
 // `block_id` is stamped by agentmux-mcp from its own trusted AGENTMUX_BLOCKID
-// env (never agent-suppliable — same convention as ShellCreateRequest's
-// `agent_block_id` above), so every UI-automation call is scoped to the
-// caller's own pane by construction. See
+// env when called through the MCP tool schema (same convention as
+// ShellCreateRequest's `agent_block_id` above) — the schema never exposes
+// block_id as an agent-settable argument. This is NOT a server-side
+// enforcement boundary: an agent that bypasses the MCP wrapper and calls
+// /api/v1/ui/* directly (it holds the same shared X-AuthKey every other
+// App-API route trusts) can supply any block_id, including a different
+// pane's real one — see agentmux-srv/src/server/ui_handlers.rs's module
+// doc comment for the full explanation and why this isn't fixed in the PR
+// that added these types. See
 // docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md.
 
 /// `POST /api/v1/ui/screenshot`

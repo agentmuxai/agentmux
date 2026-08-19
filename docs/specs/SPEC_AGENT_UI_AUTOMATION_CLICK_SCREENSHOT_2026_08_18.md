@@ -23,6 +23,44 @@ widening it the same way would leak pixels. See
 `agentmux-cef/src/browser_api/scripts/query.js`'s `__amq_allowed_for` for
 the actual implementation.
 
+**Review findings (2026-08-19, PR #2662 — Codex + reagent, converging
+independently on the same root cause for one of them):**
+- **Fixed, P0:** `__amq_allowed_for` only checked whether a matched element
+  was *inside* a different pane's `[data-blockid]` wrapper, never whether
+  it *contained* other panes as descendants — `body`/`#root`/any shared
+  layout container isn't itself inside any pane, so it was waved through as
+  "shared chrome," and `UIQuery` would return its full `textContent`
+  (every pane's content, including other agents'), while `UIClick` could
+  dispatch a real click at its centroid, landing on a different pane's
+  actual element. Fixed: an element with no `[data-blockid]` ancestor is
+  only allowed if none of its own descendants belong to a different block
+  either. Verified live: querying `body` now correctly returns zero
+  matches instead of leaking all panes' content.
+- **Fixed, P0 (host_ipc.Register):** the registration handshake
+  unconditionally overwrote `state.host_ipc` with whatever the caller
+  supplied, over the same shared `X-AuthKey` every agent's environment
+  holds — any agent could permanently hijack the credential for the whole
+  session, with no self-heal. Fixed: rejects any re-registration whose
+  port/token differ from what's already stored (identical re-registration
+  is still a harmless no-op).
+- **Acknowledged, not fixed — genuine open gap (Codex P1):** `block_id` on
+  `/api/v1/ui/*` is trusted from the request body. The MCP tool schema
+  never exposes it as an agent-settable argument, so a *well-behaved*
+  caller going through the sanctioned MCP path is scoped to its own pane —
+  but an agent that bypasses the MCP wrapper and calls the HTTP route
+  directly (it holds the same shared `X-AuthKey`) can supply a *different*
+  pane's real `block_id`, and nothing here can tell it doesn't actually
+  belong to the caller. This is not unique to UI automation — it's how
+  every existing App-API MCP-bound route's identity-stamping already
+  works (`SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28.md`'s S1) — but this
+  spec's own §6 language ("holds by construction," "never
+  agent-suppliable") overclaimed it as airtight, which review correctly
+  called out. Fully closing it needs a per-agent credential distinguishing
+  individual agents at the HTTP layer, which doesn't exist anywhere in the
+  App-API surface today; that's a genuinely separate, larger piece of work
+  than this PR, tracked as follow-up rather than silently left
+  undocumented.
+
 ## 0. Origin
 
 This spec was prompted by a concrete gap hit in-session: verifying a fix to

@@ -4,10 +4,28 @@
 //! Agent-facing UI automation (`UIScreenshot` / `UIClick` / `UIQuery` MCP
 //! tools) — proxies to the paired CEF host's `/agentmux/browser/*` CDP
 //! routes (`agentmux-cef/src/browser_api/`). `block_id` on every request is
-//! stamped by agentmux-mcp from its own trusted `AGENTMUX_BLOCKID` env
-//! (never agent-suppliable), so every call is scoped to the caller's own
-//! pane by construction — see `agentmux_common::api_types`'s "UI
-//! automation" section and
+//! stamped by agentmux-mcp from its own trusted `AGENTMUX_BLOCKID` env when
+//! called through the MCP tool schema (which never exposes `block_id` as
+//! an agent-settable argument), so a well-behaved caller is scoped to its
+//! own pane by construction.
+//!
+//! **This is not a server-side enforcement boundary.** `/api/v1/ui/*`
+//! shares the same instance-wide `X-AuthKey` every other App-API route
+//! uses, and that key is present in an agent's own process environment —
+//! an agent could bypass the MCP wrapper entirely and POST a DIFFERENT
+//! (real) pane's block_id directly, and this endpoint has no way to tell
+//! that block_id doesn't actually belong to the caller (Codex review,
+//! PR #2662, 2026-08-19). `query.js`'s `__amq_allowed_for` scoping (fixed
+//! in the same PR to also block containment, not just direct nesting) only
+//! protects a caller from reaching outside WHICHEVER block_id it supplied
+//! — it can't detect that the supplied block_id was never the caller's own
+//! in the first place. Closing that fully requires a per-agent credential
+//! distinguishing "this specific agent" at the HTTP layer, which doesn't
+//! exist anywhere in the App-API surface today (this endpoint doesn't
+//! introduce the gap, it inherits an existing one) — tracked as follow-up,
+//! not fixed in this PR.
+//!
+//! See `agentmux_common::api_types`'s "UI automation" section and
 //! `docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md`.
 
 use axum::extract::State;
