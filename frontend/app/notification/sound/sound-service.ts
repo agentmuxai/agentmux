@@ -32,6 +32,11 @@ import { SOUNDS, type SoundId } from "./sounds";
 import { SoundPlayer } from "./sound-player";
 import { ToolTonesPlayer } from "./tool-tones-player";
 import { WaitingTonePlayer } from "./waiting-tone-player";
+import {
+    DEFAULT_MASTER_VOLUME,
+    DEFAULT_TOOLTONES_VOLUME,
+    DEFAULT_WAITING_VOLUME,
+} from "./sound-defaults";
 
 let installed = false;
 let replayMode = false;
@@ -107,15 +112,15 @@ export function installSoundService(): () => void {
     const volumeDispose = createRoot((dispose) => {
         createEffect(() => {
             const vol = getSettingsKeyAtom("notify:sounds:volume")();
-            player.setMasterGain(typeof vol === "number" ? vol : 0.6);
+            player.setMasterGain(typeof vol === "number" ? vol : DEFAULT_MASTER_VOLUME);
         });
         createEffect(() => {
             const vol = getSettingsKeyAtom("notify:tooltones:volume")();
-            toolTones.setVolume(typeof vol === "number" ? vol : 0.15);
+            toolTones.setVolume(typeof vol === "number" ? vol : DEFAULT_TOOLTONES_VOLUME);
         });
         createEffect(() => {
             const vol = getSettingsKeyAtom("notify:sounds:waiting:volume")();
-            const v = typeof vol === "number" ? vol : 0.25;
+            const v = typeof vol === "number" ? vol : DEFAULT_WAITING_VOLUME;
             for (const wp of waitingTones.values()) wp.setVolume(v);
         });
         // Spec §8: kill all active waiting tones when the master switch or
@@ -141,7 +146,7 @@ export function installSoundService(): () => void {
             const winFocused = windowFocused();
             const suppressRaw = getSettingsKeyAtom("notify:sounds:suppresswhenfocused")();
             const shouldSuppress = suppressRaw !== false;
-            const vol = (getSettingsKeyAtom("notify:sounds:waiting:volume")() as number | undefined) ?? 0.25;
+            const vol = (getSettingsKeyAtom("notify:sounds:waiting:volume")() as number | undefined) ?? DEFAULT_WAITING_VOLUME;
 
             const toSuspend: string[] = [];
             const toResume: string[] = [];
@@ -278,7 +283,7 @@ function startWaiting(blockId: string): void {
     }
 
     const vol =
-        (getSettingsKeyAtom("notify:sounds:waiting:volume")() as number | undefined) ?? 0.25;
+        (getSettingsKeyAtom("notify:sounds:waiting:volume")() as number | undefined) ?? DEFAULT_WAITING_VOLUME;
     wp.start(vol);
 }
 

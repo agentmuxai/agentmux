@@ -18,13 +18,14 @@
 import { playSynthFallback } from "./synth-fallback";
 import type { SoundDef } from "./sounds";
 import { SOUNDS } from "./sounds";
+import { DEFAULT_MASTER_VOLUME } from "./sound-defaults";
 
 export class SoundPlayer {
     private ctx: AudioContext | null = null;
     private masterGain: GainNode | null = null;
     private buffers = new Map<string, AudioBuffer>();
     private primed = false;
-    private masterGainValue = 0.6;
+    private masterGainValue = DEFAULT_MASTER_VOLUME;
 
     /** Whether the AudioContext has been created. */
     isPrimed(): boolean {
