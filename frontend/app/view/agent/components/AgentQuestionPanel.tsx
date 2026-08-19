@@ -8,14 +8,15 @@
  * single- or multi-select options plus a free-text "Other", and submits the
  * answer so the caller can deliver it back to the agent as a tool_result.
  *
- * Also runs a 30s auto-timeout so an unanswered question can never block the
- * agent's turn forever: any question the user hasn't touched by zero is
+ * Also runs an auto-timeout (default 30s, user-configurable via
+ * `agent:askquestiontimeoutms`) so an unanswered question can never block
+ * the agent's turn forever: any question the user hasn't touched by zero is
  * filled in with its recommended option and the (possibly-merged) answer is
  * submitted automatically. See §2.3 for why this merges rather than
  * disarming on first interaction. Hovering the panel hides the countdown and
  * pauses the underlying deadline for a flat 15s from that hover, then
- * unconditionally resumes at a fresh 30s regardless of whether the mouse is
- * still there — a bounded, self-resuming pause, not the permanent disarm
+ * unconditionally resumes at a fresh timeout regardless of whether the mouse
+ * is still there — a bounded, self-resuming pause, not the permanent disarm
  * §2.3/§5.1 rejected. See the hover-pause spec above.
  *
  * Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md,
@@ -26,17 +27,19 @@
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, type Accessor, type JSX } from "solid-js";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
+import { getSettingsKeyAtom } from "@/app/store/global";
 import type { AskUserQuestionAnswer, AskUserQuestionOption, AskUserQuestionRequest, ToolNode } from "../types";
 import "./AgentQuestionPanel.scss";
 
-/** How long an AskUserQuestion panel waits for a human before auto-selecting
- *  the recommended option(s) and submitting. Hardcoded per
- *  SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md §5.2 — not user-
- *  configurable in v1. */
-const AUTO_TIMEOUT_MS = 30_000;
+/** Fallback when `agent:askquestiontimeoutms` is unset — see
+ *  `autoTimeoutMs()` inside the component. Was a hardcoded constant per
+ *  SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md §5.2 ("not user-
+ *  configurable in v1... a reasonable follow-up if requested later"); now
+ *  user-configurable, this is only the default. */
+const DEFAULT_AUTO_TIMEOUT_MS = 30_000;
 
 /** How long the countdown stays hidden after a hover into the panel, before
- *  an unanswered question-set's timer resumes (fresh AUTO_TIMEOUT_MS, not
+ *  an unanswered question-set's timer resumes (fresh autoTimeoutMs(), not
  *  resumed from wherever it was paused) — a flat window timed from the
  *  triggering `mouseenter`, unconditional regardless of whether the mouse is
  *  still over the panel when it elapses. See
@@ -112,11 +115,20 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
     const queueDepth = () => props.pending().length;
     const request = (): AskUserQuestionRequest | null => head()?.question ?? null;
 
+    /** `agent:askquestiontimeoutms` if set to a positive number, else
+     *  `DEFAULT_AUTO_TIMEOUT_MS`. Read fresh at every re-arm point below
+     *  (not cached) so a mid-session settings change takes effect on the
+     *  next question rather than requiring a reload. */
+    const autoTimeoutMs = (): number => {
+        const v = getSettingsKeyAtom("agent:askquestiontimeoutms")();
+        return typeof v === "number" && v > 0 ? v : DEFAULT_AUTO_TIMEOUT_MS;
+    };
+
     const [minimized, setMinimized] = createSignal(false);
     const [state, setState] = createSignal<QState[]>([]);
     /** Milliseconds left before the auto-timeout fires. See the timer effect
      *  below (defined after `submit`, once all its dependencies exist). */
-    const [remainingMs, setRemainingMs] = createSignal(AUTO_TIMEOUT_MS);
+    const [remainingMs, setRemainingMs] = createSignal(autoTimeoutMs());
     /** True while the countdown is suppressed by a recent hover. Drives both
      *  the UI (rendered nothing while true, §3.4 of the hover-pause spec)
      *  and whether the timer effect below is armed. Bounded, NOT tied to
@@ -147,7 +159,7 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
         void r?.tool_use_id; // touch so the effect re-runs on change
         setMinimized(false);
         setState((r?.questions ?? []).map(() => ({ selected: [], other: "" })));
-        setRemainingMs(AUTO_TIMEOUT_MS);
+        setRemainingMs(autoTimeoutMs());
         clearHideTimer();
         setHidden(false);
     });
@@ -181,7 +193,7 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
         setHidden(true);
         hideTimeoutId = setTimeout(() => {
             hideTimeoutId = undefined;
-            setHidden(false); // timer effect below re-arms at a fresh AUTO_TIMEOUT_MS
+            setHidden(false); // timer effect below re-arms at a fresh autoTimeoutMs()
         }, HOVER_HIDE_GRACE_MS);
     };
 
@@ -309,7 +321,7 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
     // Gated on `hidden()` (SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md
     // §3.3): this is a *live, strictly bounded* pause, not a permanent
     // disarm — a hover starts a flat HOVER_HIDE_GRACE_MS window, and once it
-    // elapses this effect re-runs and re-arms at a fresh AUTO_TIMEOUT_MS
+    // elapses this effect re-runs and re-arms at a fresh autoTimeoutMs()
     // UNCONDITIONALLY, regardless of whether the mouse is still over the
     // panel (see onPanelPointerEnter's doc comment and spec §9 for why —
     // an earlier, rejected version of this stayed hidden for as long as the
@@ -327,7 +339,7 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
         void r?.tool_use_id; // touch so the effect re-runs on change, same as the reset effect
         if (!r || hidden()) return; // paused while hidden; re-arms when hidden() flips false
 
-        setRemainingMs(AUTO_TIMEOUT_MS); // fresh retrigger, not resumed from wherever it was paused
+        setRemainingMs(autoTimeoutMs()); // fresh retrigger, not resumed from wherever it was paused
         const intervalId = setInterval(() => {
             setRemainingMs((prev) => {
                 if (prev <= 1000) {
