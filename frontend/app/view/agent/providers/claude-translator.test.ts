@@ -322,7 +322,7 @@ describe("ClaudeTranslator", () => {
             });
         });
 
-        it("carries token usage — input sums uncached + cache_creation + cache_read", () => {
+        it("carries token usage — input sums uncached + cache_creation + cache_read, and preserves the split", () => {
             const t = new ClaudeTranslator();
             const events = t.translate({
                 type: "result",
@@ -334,10 +334,17 @@ describe("ClaudeTranslator", () => {
                     output_tokens: 512,
                 },
             });
+            // input_tokens stays the combined total (back-compat for existing
+            // consumers); fresh/cache_creation/cache_read carry the split
+            // that was previously discarded — see
+            // docs/reports/REPORT_TOKEN_ACCOUNTING_AND_COMPACTION_CONTROL_2026_08_18.md §5.2.
             expect((events[0] as any).stats).toEqual({
                 duration_ms: 1000,
                 input_tokens: 2 + 49164 + 20685,
                 output_tokens: 512,
+                fresh_input_tokens: 2,
+                cache_creation_input_tokens: 49164,
+                cache_read_input_tokens: 20685,
             });
         });
 

@@ -487,20 +487,31 @@ export function useAgentStream({
                     const inner = rawEvent.type === "stream_event" ? rawEvent.event : rawEvent;
                     if (inner?.type === "message_start") {
                         // input_tokens is only the uncached prompt; cache_creation/
-                        // cache_read carry the rest of the real prompt size.
+                        // cache_read carry the rest of the real prompt size. Keep
+                        // the split (not just the sum) so downstream state can
+                        // tell a cheap cache-served turn from an expensive fresh
+                        // one — see TurnTokens' doc comment in ../types.ts.
                         const u = inner.message?.usage;
+                        const freshInput = u?.input_tokens as number | undefined;
+                        const cacheCreation = u?.cache_creation_input_tokens as number | undefined;
+                        const cacheRead = u?.cache_read_input_tokens as number | undefined;
                         const inputTok =
-                            u?.input_tokens != null
-                                ? (u.input_tokens as number)
-                                  + ((u.cache_creation_input_tokens as number | undefined) ?? 0)
-                                  + ((u.cache_read_input_tokens as number | undefined) ?? 0)
+                            freshInput != null
+                                ? freshInput + (cacheCreation ?? 0) + (cacheRead ?? 0)
                                 : undefined;
                         if (inputTok != null) {
                             // message.model is the resolved model id (e.g.
                             // "claude-opus-4-8") — used to seed the context-window
                             // meter per model (Opus/Sonnet 1M, Haiku 200K).
                             const modelId = inner.message?.model as string | undefined;
-                            const paneEvents = model.dispatchPane({ type: "TokensIn", input: inputTok, model: modelId });
+                            const paneEvents = model.dispatchPane({
+                                type: "TokensIn",
+                                input: inputTok,
+                                model: modelId,
+                                freshInput,
+                                cacheCreation: cacheCreation ?? 0,
+                                cacheRead: cacheRead ?? 0,
+                            });
                             // Detect context compaction from the reducer's event output.
                             // Primary signal for Claude is the real CompactionBoundary
                             // path above; this heuristic (≥50% token drop from a >10k

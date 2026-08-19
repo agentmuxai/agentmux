@@ -21,6 +21,20 @@ import { createStore } from "solid-js/store";
 export interface ServiceUsage {
     input: number;
     output: number;
+    /**
+     * Breakdown of `input` by cache status (fresh + cacheCreation + cacheRead
+     * === input). Optional — providers without a structured cache signal
+     * (codex/gemini/copilot) never set these, so consumers must treat them
+     * as "unknown," not "zero." See TurnTokens'/SessionStats' doc comments
+     * in view/agent/types.ts for the source of this split, and
+     * docs/reports/REPORT_TOKEN_ACCOUNTING_AND_COMPACTION_CONTROL_2026_08_18.md
+     * §2.2/§5.2/§5.3 for why it's tracked (cache_read tokens cost ~0.1x a
+     * fresh token — the breakdown is what actually explains cost, the raw
+     * input number alone doesn't).
+     */
+    freshInput?: number;
+    cacheCreation?: number;
+    cacheRead?: number;
 }
 
 interface TokenUsageState {
@@ -44,9 +58,26 @@ export function recordTurn(provider: string, tokens: ServiceUsage | null | undef
     if (input === 0 && output === 0) return;
     const id = provider.toLowerCase();
     const current = state.byService[id] ?? { input: 0, output: 0 };
+    // Breakdown fields accumulate only when provided — `?? 0` on the
+    // current side (not the incoming side) so a provider that has never
+    // reported a breakdown keeps reading as `undefined` (unknown) rather
+    // than silently becoming `0` (known-zero) the moment ANY turn for it
+    // omits the fields. Once any turn does supply the fields for this
+    // service, the running total is exact from that point on.
+    const hasBreakdown =
+        tokens.freshInput != null || tokens.cacheCreation != null || tokens.cacheRead != null;
     setState("byService", id, {
         input: current.input + input,
         output: current.output + output,
+        freshInput: hasBreakdown
+            ? (current.freshInput ?? 0) + (tokens.freshInput ?? 0)
+            : current.freshInput,
+        cacheCreation: hasBreakdown
+            ? (current.cacheCreation ?? 0) + (tokens.cacheCreation ?? 0)
+            : current.cacheCreation,
+        cacheRead: hasBreakdown
+            ? (current.cacheRead ?? 0) + (tokens.cacheRead ?? 0)
+            : current.cacheRead,
     });
 }
 
@@ -58,11 +89,40 @@ export function getTotal(): ServiceUsage {
     const services = state.byService;
     let input = 0;
     let output = 0;
+    let cacheRead = 0;
+    let hasBreakdown = false;
     for (const id in services) {
         input += services[id].input;
         output += services[id].output;
+        if (services[id].cacheRead != null) {
+            hasBreakdown = true;
+            cacheRead += services[id].cacheRead ?? 0;
+        }
     }
-    return { input, output };
+    return { input, output, cacheRead: hasBreakdown ? cacheRead : undefined };
+}
+
+/**
+ * Fraction of total prompt tokens (input + cacheCreation + cacheRead) served
+ * from cache this session, across every service. `null` when no service has
+ * reported a cache breakdown yet (e.g. session just started, or every active
+ * provider is one that never reports cache fields) — render as "—", not "0%".
+ * See docs/reports/REPORT_TOKEN_ACCOUNTING_AND_COMPACTION_CONTROL_2026_08_18.md §5.3.
+ */
+export function getCacheHitRate(): number | null {
+    const services = state.byService;
+    let promptTotal = 0;
+    let cacheRead = 0;
+    let hasBreakdown = false;
+    for (const id in services) {
+        const u = services[id];
+        if (u.freshInput == null && u.cacheCreation == null && u.cacheRead == null) continue;
+        hasBreakdown = true;
+        promptTotal += (u.freshInput ?? 0) + (u.cacheCreation ?? 0) + (u.cacheRead ?? 0);
+        cacheRead += u.cacheRead ?? 0;
+    }
+    if (!hasBreakdown || promptTotal === 0) return null;
+    return cacheRead / promptTotal;
 }
 
 /**
@@ -73,6 +133,9 @@ export interface ServiceRow {
     id: string;
     input: number;
     output: number;
+    freshInput?: number;
+    cacheCreation?: number;
+    cacheRead?: number;
 }
 
 export function getBreakdown(): ServiceRow[] {
@@ -80,6 +143,9 @@ export function getBreakdown(): ServiceRow[] {
         id,
         input: u.input,
         output: u.output,
+        freshInput: u.freshInput,
+        cacheCreation: u.cacheCreation,
+        cacheRead: u.cacheRead,
     }));
     rows.sort((a, b) => {
         const aTotal = a.input + a.output;
