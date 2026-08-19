@@ -68,18 +68,32 @@
   // __amq_rect_of below for why that one stays strictly pane-only).
   // `blockId` falsy → no ownership concept applies (the browser-pane
   // case, where the CDP target already IS that block's own isolated
-  // page). Otherwise: an element is allowed if it's either (a) not
-  // inside ANY pane's [data-blockid] wrapper — shared app chrome
-  // (status bar, hamburger menu, window controls), not owned by any one
-  // agent, so reaching it isn't the kind of privacy leak reaching
-  // another agent's pane would be — or (b) inside blockId's OWN pane.
-  // Never allowed: inside a DIFFERENT block's [data-blockid] wrapper.
-  // See §6 of SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md.
+  // page). Otherwise: an element is allowed if it's either (a) inside
+  // blockId's OWN pane, or (b) shared app chrome (status bar, hamburger
+  // menu, window controls) — not owned by any one agent, so reaching it
+  // isn't the kind of privacy leak reaching another agent's pane would
+  // be. Never allowed: inside, OR CONTAINING, a DIFFERENT block's
+  // [data-blockid] wrapper.
+  //
+  // The "containing" half matters and was a real bug (Codex review,
+  // PR #2662, 2026-08-19): `body`/`#root`/a layout wrapper aren't
+  // themselves inside any pane's [data-blockid], so the naive "not
+  // inside a foreign pane → shared chrome" rule would wave them through
+  // as chrome — but querying one returns `textContent` spanning EVERY
+  // pane underneath it (every other agent's content), and clicking one
+  // dispatches at a centroid that could land inside any of those panes.
+  // A container is only genuinely "shared chrome" if none of its OWN
+  // descendants belong to a different block either.
   window.__amq_allowed_for = (el, blockId) => {
     if (!blockId) return true;
     const owner = el.closest('[data-blockid]');
-    if (!owner) return true;
-    return owner.getAttribute('data-blockid') === blockId;
+    if (owner) {
+      return owner.getAttribute('data-blockid') === blockId;
+    }
+    for (const descendant of el.querySelectorAll('[data-blockid]')) {
+      if (descendant.getAttribute('data-blockid') !== blockId) return false;
+    }
+    return true;
   };
 
   // Return viewport-space centroid of the first ALLOWED selector match

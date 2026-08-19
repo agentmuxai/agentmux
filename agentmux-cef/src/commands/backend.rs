@@ -131,6 +131,22 @@ pub async fn restart_backend(state: Arc<AppState>) -> Result<serde_json::Value, 
         endpoints.web_endpoint = result.web_endpoint.clone();
     }
 
+    // Re-register this host's UI-automation credentials with the FRESH srv
+    // instance — its AppState::host_ipc starts as None, and the only other
+    // registration call happens once, at initial host startup (lib.rs), so
+    // without this, UIScreenshot/UIClick/UIQuery would 503 for the rest of
+    // the host process's lifetime after any backend restart (reagent P2,
+    // PR #2662, 2026-08-19).
+    {
+        let web_endpoint = result.web_endpoint.clone();
+        let auth_key = state.auth_key.lock().clone();
+        let ipc_port = *state.ipc_port.lock();
+        let ipc_token = state.ipc_token.clone();
+        tokio::task::spawn_blocking(move || {
+            crate::client::register_ipc_with_backend(&web_endpoint, &auth_key, ipc_port, &ipc_token);
+        });
+    }
+
     // Emit backend-ready event
     let payload = serde_json::json!({
         "ws": result.ws_endpoint,
