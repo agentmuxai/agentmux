@@ -44,6 +44,7 @@ pub(crate) fn spawn_host_supervised(
         .env("AGENTMUX_BACKEND_PID", srv.pid.to_string())
         .env("AGENTMUX_PENDING_MIGRATIONS", srv.pending_migrations.to_string())
         .env("AGENTMUX_AUTH_KEY", &srv.auth_key)
+        .env("AGENTMUX_HOST_REG_SECRET", &srv.host_reg_secret)
         .env("AGENTMUX_INSTANCE_ID", &srv.instance_id)
         .envs(host_env.iter().cloned())
         .env("AGENTMUX_LAUNCHER_PIPE", pipe_path)
@@ -140,6 +141,7 @@ pub(crate) fn spawn_host_unix(
         .env("AGENTMUX_BACKEND_PID", srv.pid.to_string())
         .env("AGENTMUX_PENDING_MIGRATIONS", srv.pending_migrations.to_string())
         .env("AGENTMUX_AUTH_KEY", &srv.auth_key)
+        .env("AGENTMUX_HOST_REG_SECRET", &srv.host_reg_secret)
         .env("AGENTMUX_INSTANCE_ID", &srv.instance_id)
         // Parent-identity stamp: our pid == the host's getppid (we spawn it
         // directly). A dev-build host normally ignores AGENTMUX_BACKEND_WS

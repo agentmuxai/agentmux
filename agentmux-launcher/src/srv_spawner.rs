@@ -45,6 +45,17 @@ pub struct SrvSpawnResult {
     pub web_endpoint: String,
     pub instance_id: String,
     pub auth_key: String,
+    /// Shared secret proving to srv that a `host_ipc.Register` call really
+    /// comes from the paired host, not an agent process (agents share
+    /// `auth_key` too — see `agentmux-srv/src/server/service/host_ipc.rs`).
+    /// Minted once per `spawn_srv` call (same lifetime as `auth_key`) and
+    /// given to both host and srv's spawn env — see `host_spawn.rs`'s
+    /// `AGENTMUX_HOST_REG_SECRET` env line and this file's own
+    /// `AGENTMUX_HOST_REG_SECRET` env line below. Survives every host-only
+    /// crash-restart automatically, exactly like `auth_key` does (this
+    /// struct is held in the launcher's own stack frame across restarts —
+    /// see `SrvSpawnResult`'s own doc comment above).
+    pub host_reg_secret: String,
     /// Number of data migrations still pending after the in-process startup run.
     /// Non-zero means run_pending_migrations failed; status-bar shows a retry message.
     pub pending_migrations: usize,
@@ -290,6 +301,9 @@ pub async fn spawn_srv(
     // This is the launcher's responsibility now; host receives it via
     // AGENTMUX_AUTH_KEY env so srv + host + frontend agree on the key.
     let auth_key = uuid::Uuid::new_v4().to_string();
+    // Minted alongside auth_key, same lifetime/reuse rules — see
+    // `SrvSpawnResult::host_reg_secret`'s doc comment.
+    let host_reg_secret = uuid::Uuid::new_v4().to_string();
     let version = env!("CARGO_PKG_VERSION");
     let instance_id = format!("v{}", version);
 
@@ -311,6 +325,7 @@ pub async fn spawn_srv(
         &instance_id,
     ])
     .env("AGENTMUX_AUTH_KEY", &auth_key)
+    .env("AGENTMUX_HOST_REG_SECRET", &host_reg_secret)
     // Canonical AGENTMUX_* env vars (INSTANCE_DIR / DATA_DIR /
     // CONFIG_DIR / LOG_DIR / CEF_CACHE_DIR / AGENTS_DIR / INSTANCE_
     // RUNTIME_DIR / SHARED_DIR / RUNTIME_MODE). Replaces the old
@@ -428,6 +443,7 @@ pub async fn spawn_srv(
     // doesn't cause the launcher to kill srv prematurely.
     let (migration_tx, mut migration_rx) = mpsc::channel::<()>(4);
     let auth_key_for_estart = auth_key.clone();
+    let host_reg_secret_for_estart = host_reg_secret.clone();
     let started_at_for_estart = started_at.clone();
     let pid_for_log = pid;
     tokio::spawn(async move {
@@ -442,6 +458,7 @@ pub async fn spawn_srv(
                     web_endpoint: parsed.web_endpoint,
                     instance_id: parsed.instance_id,
                     auth_key: auth_key_for_estart.clone(),
+                    host_reg_secret: host_reg_secret_for_estart.clone(),
                     pending_migrations: parsed.pending_migrations,
                     started_at: started_at_for_estart.clone(),
                 };

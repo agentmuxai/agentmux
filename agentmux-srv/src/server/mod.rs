@@ -27,6 +27,7 @@ mod messaging_handlers;
 mod muxbus_handlers;
 mod muxspect_handlers;
 mod native_memory_handlers;
+mod ui_handlers;
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -64,6 +65,14 @@ use agentmux_common::api_types::{
 };
 
 // ---- AppState ----
+
+/// The paired CEF host's CDP-automation credentials, pushed once via
+/// `host_ipc.Register` — see `AppState::host_ipc`.
+#[derive(Clone, Debug)]
+pub struct HostIpc {
+    pub port: u16,
+    pub token: String,
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -155,6 +164,23 @@ pub struct AppState {
     pub local_web_url: String,
     /// Shared HTTP client for cross-instance inject forwarding.
     pub http_client: reqwest::Client,
+    /// This instance's paired CEF host's `ipc_port` + `ipc_token`
+    /// (`/agentmux/browser/*` on the host's own IPC server — CDP-based
+    /// screenshot/click/query automation). `None` until the host calls
+    /// `host_ipc.Register` once at its own startup (there is no way to
+    /// know these values before then — the host generates `ipc_token`
+    /// for itself and is the sole source of truth, see
+    /// `agentmux-cef/src/client/helpers.rs::register_ipc_with_backend`).
+    /// Backs the `/api/v1/ui/{screenshot,click,query}` proxy routes.
+    /// See `docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md`.
+    pub host_ipc: Arc<tokio::sync::Mutex<Option<HostIpc>>>,
+    /// Shared secret only the paired host (never an agent) is given —
+    /// gates `host_ipc.Register` so an agent process can't spoof the
+    /// host's own credential push (both share the general `auth_key`
+    /// already, so that alone can't distinguish them). `None` if nobody
+    /// configured one, in which case `handle_register` rejects every
+    /// registration. See `Config::host_reg_secret`'s doc comment.
+    pub host_reg_secret: Option<String>,
     /// Phase E.2c.2 — srv reducer's canonical state. Workspace HTTP/WS
     /// RPC handlers route through the reducer (dispatch
     /// `Command::Create/Delete/...Workspace` and read out of
@@ -454,6 +480,13 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/agent/preset/get", get(handle_agent_preset_get))
         .route("/api/v1/agent/identity/accounts", get(handle_agent_identity_accounts))
         .route("/api/v1/agent/identity/validate", post(handle_agent_identity_validate))
+        // Agent UI automation (SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md)
+        // — proxies to the paired CEF host's browser_api CDP routes. `block_id`
+        // is stamped by agentmux-mcp from AGENTMUX_BLOCKID, same trust model as
+        // the agent/memory/preset/identity routes just above.
+        .route("/api/v1/ui/screenshot", post(ui_handlers::handle_ui_screenshot))
+        .route("/api/v1/ui/click", post(ui_handlers::handle_ui_click))
+        .route("/api/v1/ui/query", post(ui_handlers::handle_ui_query))
         .route("/api/messaging/status", get(messaging_handlers::handle_status))
         .route("/api/messaging/discord/send", post(messaging_handlers::handle_discord_send))
         .route("/api/messaging/telegram/send", post(messaging_handlers::handle_telegram_send))

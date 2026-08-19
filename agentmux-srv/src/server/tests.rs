@@ -55,6 +55,8 @@ pub(crate) fn test_state() -> AppState {
         config_watcher,
         messagebus: Arc::new(crate::backend::messagebus::MessageBus::new()),
         http_client: reqwest::Client::new(),
+        host_ipc: Arc::new(tokio::sync::Mutex::new(None)),
+        host_reg_secret: Some("test-host-reg-secret".to_string()),
         local_web_url: String::new(),
         subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus.clone(), wstore.clone())),
         history_service: Arc::new(crate::backend::history::HistoryService::new()),
@@ -358,6 +360,487 @@ async fn service_unknown_method_returns_error() {
     // success=false is skipped by serde (skip_serializing_if), so it's null
     assert!(!json["success"].as_bool().unwrap_or(false));
     assert!(json["error"].as_str().unwrap().contains("unknown"));
+}
+
+// ── UI automation (SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18) ───
+
+/// Minimal fake `/agentmux/browser/*` responder — returns `response_body`
+/// verbatim for any request whose `Authorization: Bearer <token>` matches
+/// `expect_bearer`, otherwise a canned unauthorized error. Enough to drive
+/// the srv-side proxy handlers without a real CEF host.
+async fn spawn_fake_browser_api(response_body: &'static str, expect_bearer: &'static str) -> u16 {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut stream, _)) = listener.accept().await else { return };
+            let expected_auth = format!("Bearer {expect_bearer}");
+            tokio::spawn(async move {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut buf = [0u8; 4096];
+                let Ok(n) = stream.read(&mut buf).await else { return };
+                let req = String::from_utf8_lossy(&buf[..n]);
+                let body = if req.contains(&expected_auth) {
+                    response_body
+                } else {
+                    r#"{"ok":false,"error":"unauthorized"}"#
+                };
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.write_all(resp.as_bytes()).await;
+            });
+        }
+    });
+    port
+}
+
+#[tokio::test]
+async fn host_ipc_register_sets_state() {
+    let app = test_router();
+    let req = Request::builder()
+        .uri("/agentmux/service")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            r#"{"service":"host_ipc","method":"Register","args":[9999,"tok-123","test-host-reg-secret"]}"#,
+        ))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json["success"].as_bool().unwrap());
+}
+
+// Regression test for a P0 flagged in review (reagent, 2026-08-19, PR #2662,
+// second re-review round): the conflicting-registration liveness check
+// above only helps once `state.host_ipc` already holds something to probe.
+// At every srv startup — and the window after any `restart_backend` before
+// the host re-registers — `state.host_ipc` is `None`, so there was nothing
+// to compare against and ANY caller won the race outright. An attacker
+// agent could register first, then stand up its own always-200 `/health`
+// responder to permanently defeat the liveness check on every future
+// legitimate registration too. Fixed with `AGENTMUX_HOST_REG_SECRET`, a
+// credential never given to agents — this test proves a caller without it
+// cannot win even in the `None` state the earlier fix couldn't cover.
+#[tokio::test]
+async fn host_ipc_register_rejects_without_the_matching_secret_even_when_state_is_none() {
+    let app = test_router(); // state.host_ipc starts None, host_reg_secret = "test-host-reg-secret"
+    let no_secret = Request::builder()
+        .uri("/agentmux/service")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            r#"{"service":"host_ipc","method":"Register","args":[9999,"attacker-token"]}"#,
+        ))
+        .unwrap();
+    let resp = app.clone().oneshot(no_secret).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        !json["success"].as_bool().unwrap_or(false),
+        "a caller with no secret at all must be rejected, even against an empty state.host_ipc"
+    );
+
+    let wrong_secret = Request::builder()
+        .uri("/agentmux/service")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            r#"{"service":"host_ipc","method":"Register","args":[9999,"attacker-token","not-the-real-secret"]}"#,
+        ))
+        .unwrap();
+    let resp = app.oneshot(wrong_secret).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        !json["success"].as_bool().unwrap_or(false),
+        "a caller with the wrong secret must be rejected, even against an empty state.host_ipc"
+    );
+}
+
+// Companion to the above: if srv itself was never given a secret to check
+// against (a config/spawn bug rather than an attack), it must fail closed
+// — reject every registration — rather than silently accepting the first
+// caller as trusted.
+#[tokio::test]
+async fn host_ipc_register_rejects_everything_when_srv_has_no_secret_configured() {
+    let mut state = test_state();
+    state.host_reg_secret = None;
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .uri("/agentmux/service")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            r#"{"service":"host_ipc","method":"Register","args":[9999,"tok-123","anything"]}"#,
+        ))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        !json["success"].as_bool().unwrap_or(false),
+        "srv with no host_reg_secret configured must reject every registration attempt"
+    );
+}
+
+// Regression test for a P0 flagged in review (reagent, 2026-08-19, PR #2662):
+// `host_ipc.Register` unconditionally overwrote `state.host_ipc` with
+// whatever the caller supplied. Every route on `/agentmux/service` shares
+// ONE instance-wide `X-AuthKey` — including agent-spawned processes, which
+// can read that key from their own environment via a shell command — so
+// any agent could re-register a fake port/token and silently redirect
+// every other agent's UIScreenshot/UIClick/UIQuery to an attacker-controlled
+// endpoint for the rest of the session. Fixed: a conflicting re-registration
+// is rejected UNLESS the currently-registered host is unreachable at its
+// own /health route (see host_ipc.rs's handle_register for why an
+// unconditional reject was ALSO wrong — it broke real crash-restart
+// recovery, reagent P1 re-review same PR). This test uses a live fake
+// server for the first registration so the liveness probe genuinely finds
+// it alive; `host_ipc_register_recovers_when_old_host_is_unreachable`
+// below covers the opposite (dead old host) case.
+#[tokio::test]
+async fn host_ipc_register_rejects_a_conflicting_second_registration_while_old_host_is_alive() {
+    let state = test_state();
+    let alive_port = spawn_fake_browser_api(r#"{"ok":true,"data":{}}"#, "irrelevant").await;
+    let app = build_router(state);
+
+    let first = Request::builder()
+        .uri("/agentmux/service")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(format!(
+            r#"{{"service":"host_ipc","method":"Register","args":[{alive_port},"real-host-token","test-host-reg-secret"]}}"#
+        )))
+        .unwrap();
+    let resp = app.clone().oneshot(first).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json["success"].as_bool().unwrap(), "first registration should succeed");
+
+    // A spoofed re-registration with DIFFERENT credentials, while the real
+    // host (alive_port) is STILL alive and responding — the attack reagent
+    // flagged. Carries the correct secret (an agent could never actually
+    // supply this — see the secret-gate tests above; this test isolates the
+    // liveness-conflict check specifically) so it reaches that check and is
+    // rejected there, not merely at the secret gate.
+    let spoof = Request::builder()
+        .uri("/agentmux/service")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            r#"{"service":"host_ipc","method":"Register","args":[6666,"attacker-token","test-host-reg-secret"]}"#,
+        ))
+        .unwrap();
+    let resp = app.clone().oneshot(spoof).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        !json["success"].as_bool().unwrap_or(false),
+        "a conflicting re-registration must be rejected while the old host is still alive"
+    );
+
+    // An IDENTICAL re-registration (e.g. a legitimate retry) is still a
+    // harmless no-op, not an error — no liveness probe needed for this case.
+    let retry = Request::builder()
+        .uri("/agentmux/service")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(format!(
+            r#"{{"service":"host_ipc","method":"Register","args":[{alive_port},"real-host-token","test-host-reg-secret"]}}"#
+        )))
+        .unwrap();
+    let resp = app.oneshot(retry).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        json["success"].as_bool().unwrap(),
+        "an identical re-registration should be accepted as a no-op"
+    );
+}
+
+// The crash-restart recovery path reagent's re-review specifically called
+// out: the OLD registration points at a host that's no longer reachable
+// (crashed; the launcher relaunched just the host per its Job Object
+// sibling design, with a fresh ipc_port/ipc_token). The new registration
+// must be accepted, not permanently rejected.
+#[tokio::test]
+async fn host_ipc_register_recovers_when_old_host_is_unreachable() {
+    // A port nothing is listening on: bind then immediately drop the
+    // listener, so the OS won't hand this port to anything else for the
+    // duration of this fast test, and a connection attempt reliably fails
+    // fast (loopback connection-refused) rather than hanging.
+    let dead_port = {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        listener.local_addr().unwrap().port()
+    };
+
+    let state = test_state();
+    *state.host_ipc.lock().await = Some(HostIpc {
+        port: dead_port,
+        token: "stale-token".to_string(),
+    });
+    let app = build_router(state);
+
+    let recovery = Request::builder()
+        .uri("/agentmux/service")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            r#"{"service":"host_ipc","method":"Register","args":[7777,"relaunched-host-token","test-host-reg-secret"]}"#,
+        ))
+        .unwrap();
+    let resp = app.oneshot(recovery).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        json["success"].as_bool().unwrap(),
+        "a re-registration must be accepted once the previously-registered host is unreachable"
+    );
+}
+
+/// Mint a jekt key for a fresh, uniquely-named test agent, register it
+/// with the global `ReactiveHandler` under a fresh unique block_id (the
+/// `block_id_hint` is just a readable label, uuid-suffixed for real
+/// uniqueness), and return a valid `{agent_id, ts_secs, sig}` JSON
+/// fragment for it. Both agent_id AND block_id must be unique per call
+/// (not just agent_id) — `ReactiveHandler` is a process-global singleton
+/// shared by every test in this binary, and two tests registering
+/// different agents under the SAME literal block_id raced each other
+/// (confirmed flaky under `cargo test`'s default parallelism, though
+/// deterministic in isolation) until this was unique per call too.
+fn signed_ui_auth(state: &AppState, block_id_hint: &str) -> (String, serde_json::Value) {
+    let unique = uuid::Uuid::new_v4();
+    let agent_id = format!("test-agent-{unique}");
+    let block_id = format!("{block_id_hint}-{unique}");
+    let key = state.wstore.agent_jekt_key_ensure(&agent_id).unwrap();
+    crate::backend::reactive::handler::get_global_handler()
+        .register_agent(&agent_id, &block_id, None)
+        .unwrap();
+    let ts_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let sig = agentmux_common::jekt_sign::sign_jekt(
+        &key,
+        "ui-automation-identity",
+        &agent_id,
+        "__srv__",
+        ts_secs,
+        "",
+    );
+    (
+        agent_id.clone(),
+        serde_json::json!({ "agent_id": agent_id, "ts_secs": ts_secs, "sig": sig }),
+    )
+}
+
+#[tokio::test]
+async fn ui_click_requires_host_registration_first() {
+    let state = test_state();
+    let (_agent_id, auth) = signed_ui_auth(&state, "b1");
+    let mut body = auth;
+    body["selector"] = serde_json::json!("button");
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .uri("/api/v1/ui/click")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+#[tokio::test]
+async fn ui_click_rejects_an_unsigned_request() {
+    let app = test_router();
+    let req = Request::builder()
+        .uri("/api/v1/ui/click")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            r#"{"agent_id":"nobody","ts_secs":9999999999,"sig":"forged","selector":"button"}"#,
+        ))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+// The exact attack this fix closes (reagent + Codex, PR #2662, 2026-08-19):
+// an agent that reads the shared X-AuthKey from its own environment claims
+// to BE a different agent (whose pane it wants to read/click), but signs
+// with its OWN key (it can never have another agent's key). Must be
+// rejected — `agent_a`'s valid signature over `agent_a`'s own identity
+// does not verify against `agent_b`'s claimed identity, regardless of the
+// host being registered and ready to serve a legitimate request.
+#[tokio::test]
+async fn ui_click_rejects_a_forged_agent_identity() {
+    let state = test_state();
+    let port = spawn_fake_browser_api(r#"{"ok":true,"data":{}}"#, "tok-abc").await;
+    *state.host_ipc.lock().await = Some(HostIpc {
+        port,
+        token: "tok-abc".to_string(),
+    });
+
+    // Victim: a real agent with its own key and pane.
+    let (victim_agent_id, _victim_auth) = signed_ui_auth(&state, "victim-block");
+
+    // Attacker: mints its OWN key/registration, then signs with ITS OWN
+    // key but substitutes the VICTIM's agent_id into the request — exactly
+    // what a bypassing agent would try after reading the victim's agent_id
+    // from e.g. Layout()/DiscoverAgents().
+    let (_attacker_agent_id, attacker_auth) = signed_ui_auth(&state, "attacker-block");
+    let mut forged = attacker_auth;
+    forged["agent_id"] = serde_json::json!(victim_agent_id);
+    forged["selector"] = serde_json::json!("button");
+
+    let app = build_router(state);
+    let req = Request::builder()
+        .uri("/api/v1/ui/click")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(forged.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "a signature valid for the attacker's own identity must not verify for a different claimed agent_id"
+    );
+}
+
+#[tokio::test]
+async fn ui_click_proxies_to_host_after_registration() {
+    let state = test_state();
+    let port = spawn_fake_browser_api(r#"{"ok":true,"data":{}}"#, "tok-abc").await;
+    *state.host_ipc.lock().await = Some(HostIpc {
+        port,
+        token: "tok-abc".to_string(),
+    });
+    let (_agent_id, auth) = signed_ui_auth(&state, "b1");
+    let mut body = auth;
+    body["selector"] = serde_json::json!("button");
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .uri("/api/v1/ui/click")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["ok"], true);
+}
+
+#[tokio::test]
+async fn ui_click_surfaces_a_host_side_error() {
+    let state = test_state();
+    let port = spawn_fake_browser_api(
+        r#"{"ok":false,"error":"selector \"button\" matched no element"}"#,
+        "tok-abc",
+    )
+    .await;
+    *state.host_ipc.lock().await = Some(HostIpc {
+        port,
+        token: "tok-abc".to_string(),
+    });
+    let (_agent_id, auth) = signed_ui_auth(&state, "b1");
+    let mut body = auth;
+    body["selector"] = serde_json::json!("button");
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .uri("/api/v1/ui/click")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["ok"], false);
+    assert!(json["error"].as_str().unwrap().contains("matched no element"));
+}
+
+#[tokio::test]
+async fn ui_query_returns_host_matches() {
+    let state = test_state();
+    let port = spawn_fake_browser_api(
+        r#"{"ok":true,"data":{"matches":[{"selector":"body > button:nth-of-type(1)","tag":"button","text":"Sign in","attrs":{},"rect":{"x":0,"y":0,"width":10,"height":10},"focused":false}]}}"#,
+        "tok-abc",
+    )
+    .await;
+    *state.host_ipc.lock().await = Some(HostIpc {
+        port,
+        token: "tok-abc".to_string(),
+    });
+    let (_agent_id, auth) = signed_ui_auth(&state, "b1");
+    let mut body = auth;
+    body["selector"] = serde_json::json!("button");
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .uri("/api/v1/ui/query")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["data"]["matches"][0]["text"], "Sign in");
 }
 
 #[tokio::test]

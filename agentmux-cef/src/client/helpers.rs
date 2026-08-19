@@ -804,3 +804,91 @@ pub(crate) fn backend_update_block_meta(web_endpoint: &str, auth_key: &str, bloc
         }
     }
 }
+
+/// One-time push of this host process's own CDP-automation credentials
+/// (`ipc_port`, `ipc_token` — see `agentmux-cef/src/browser_api/mod.rs`)
+/// to srv, so srv can proxy `/api/v1/ui/*` (agent-facing screenshot/click/
+/// query tools) through to `/agentmux/browser/*` on this host's IPC server.
+/// srv never generates or otherwise learns these values itself — the host
+/// is the source of truth (same asymmetry as `auth_key`, just reversed:
+/// here the HOST pushes a credential IT owns to srv, mirroring how srv's
+/// own `auth_key` is already pushed the other way at spawn time via
+/// `sidecar.rs`'s `.env("AGENTMUX_AUTH_KEY", ...)`).
+///
+/// Called once from `lib.rs`, after `backend_endpoints.web_endpoint` is
+/// known (srv's address isn't resolved until then) — see
+/// `SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md` §"Architecture".
+/// Fire-and-forget in the sense that a failure here doesn't block startup
+/// (UI automation just won't work until the next successful call — there
+/// is currently no retry), but failures ARE logged loudly since a silent
+/// failure here would look like every future `UIScreenshot`/`UIClick`/
+/// `UIQuery` call mysteriously erroring with "host has not registered".
+pub(crate) fn register_ipc_with_backend(
+    web_endpoint: &str,
+    auth_key: &str,
+    ipc_port: u16,
+    ipc_token: &str,
+    host_reg_secret: &str,
+) {
+    use std::io::Write;
+
+    let Some(addr) = parse_web_endpoint(web_endpoint, "register_ipc_with_backend") else {
+        return;
+    };
+
+    let body = serde_json::json!({
+        "service": "host_ipc",
+        "method": "Register",
+        "args": [ipc_port, ipc_token, host_reg_secret],
+        "uicontext": null,
+    })
+    .to_string();
+    let request = format!(
+        "POST /agentmux/service HTTP/1.1\r\n\
+         Host: 127.0.0.1\r\n\
+         X-AuthKey: {}\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\
+         \r\n\
+         {}",
+        auth_key, body.len(), body
+    );
+
+    let timeout = std::time::Duration::from_millis(2000);
+    match std::net::TcpStream::connect_timeout(&addr, timeout) {
+        Ok(mut stream) => {
+            stream.set_write_timeout(Some(timeout)).ok();
+            stream.set_read_timeout(Some(timeout)).ok();
+            if let Err(e) = stream.write_all(request.as_bytes()) {
+                tracing::error!(
+                    error = %e,
+                    "[register_ipc_with_backend] write failed — srv will not be able to \
+                     proxy UI-automation calls to this host until a future retry succeeds"
+                );
+                return;
+            }
+            use std::io::Read;
+            let mut resp = String::new();
+            let _ = stream.read_to_string(&mut resp);
+            let first_line = resp.lines().next().unwrap_or("(empty)");
+            if first_line.contains(" 200 ") || first_line.starts_with("HTTP/1.1 200") {
+                dlog("register_ipc_with_backend: srv acknowledged host_ipc.Register");
+            } else {
+                tracing::error!(
+                    response = %first_line,
+                    "[register_ipc_with_backend] host_ipc.Register did not succeed — \
+                     srv will not be able to proxy UI-automation calls to this host"
+                );
+            }
+        }
+        Err(e) => {
+            tracing::error!(
+                addr = %addr,
+                error = %e,
+                "[register_ipc_with_backend] connect failed — srv will not be able to \
+                 proxy UI-automation calls to this host until a future retry succeeds"
+            );
+        }
+    }
+}

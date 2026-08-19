@@ -55,12 +55,55 @@
     };
   };
 
-  // Return viewport-space centroid of the first selector match, or
-  // null if no element matches. Used by /agentmux/browser/click_element
-  // to convert a CSS selector into Input.dispatchMouseEvent coords.
-  window.__amq_centroid_of = (selector) => {
-    let el;
-    try { el = document.querySelector(selector); } catch (e) { return null; }
+  // Build the `[data-blockid="..."]` selector for a pane's own DOM
+  // subtree wrapper (set by frontend/app/block/blockframe.tsx on every
+  // pane's root element). CSS.escape avoids selector-injection from a
+  // block_id containing quotes/special chars — this string is built here,
+  // in JS, rather than concatenated in Rust, specifically so it's safe by
+  // construction regardless of what block_id contains.
+  window.__amq_block_selector = (blockId) =>
+    blockId ? `[data-blockid="${CSS.escape(blockId)}"]` : null;
+
+  // Ownership check for click/query/focus (NOT screenshot — see
+  // __amq_rect_of below for why that one stays strictly pane-only).
+  // `blockId` falsy → no ownership concept applies (the browser-pane
+  // case, where the CDP target already IS that block's own isolated
+  // page). Otherwise: an element is allowed if it's either (a) inside
+  // blockId's OWN pane, or (b) shared app chrome (status bar, hamburger
+  // menu, window controls) — not owned by any one agent, so reaching it
+  // isn't the kind of privacy leak reaching another agent's pane would
+  // be. Never allowed: inside, OR CONTAINING, a DIFFERENT block's
+  // [data-blockid] wrapper.
+  //
+  // The "containing" half matters and was a real bug (Codex review,
+  // PR #2662, 2026-08-19): `body`/`#root`/a layout wrapper aren't
+  // themselves inside any pane's [data-blockid], so the naive "not
+  // inside a foreign pane → shared chrome" rule would wave them through
+  // as chrome — but querying one returns `textContent` spanning EVERY
+  // pane underneath it (every other agent's content), and clicking one
+  // dispatches at a centroid that could land inside any of those panes.
+  // A container is only genuinely "shared chrome" if none of its OWN
+  // descendants belong to a different block either.
+  window.__amq_allowed_for = (el, blockId) => {
+    if (!blockId) return true;
+    const owner = el.closest('[data-blockid]');
+    if (owner) {
+      return owner.getAttribute('data-blockid') === blockId;
+    }
+    for (const descendant of el.querySelectorAll('[data-blockid]')) {
+      if (descendant.getAttribute('data-blockid') !== blockId) return false;
+    }
+    return true;
+  };
+
+  // Return viewport-space centroid of the first ALLOWED selector match
+  // (see __amq_allowed_for), or null if no allowed element matches. Used
+  // by /agentmux/browser/click_element to convert a CSS selector into
+  // Input.dispatchMouseEvent coords.
+  window.__amq_centroid_of = (selector, blockId) => {
+    let nodes;
+    try { nodes = document.querySelectorAll(selector); } catch (e) { return null; }
+    const el = Array.from(nodes).find((e) => window.__amq_allowed_for(e, blockId));
     if (!el) return null;
     // Scroll into view so the centroid is actually clickable. Chromium
     // silently drops dispatchMouseEvent events that land outside the
@@ -71,17 +114,51 @@
     return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
   };
 
-  window.__amq_query = (selector, limit) => {
+  // getBoundingClientRect() of blockId's own pane wrapper — used to build
+  // a CDP Page.captureScreenshot `clip` so a screenshot only covers one
+  // pane's subtree, not the whole shared window. Deliberately does NOT
+  // get the same "shared chrome is fine" exception __amq_allowed_for
+  // gives click/query: a screenshot's clip is a single rectangle that
+  // can't punch a hole for another agent's pane sitting geometrically
+  // between the caller's pane and a chrome element, so unlike an
+  // element-level filter it can't safely be widened — it stays strictly
+  // pane-only, always. Returns null if the pane isn't found (caller
+  // falls back to full-viewport capture).
+  window.__amq_rect_of = (blockId) => {
+    const sel = window.__amq_block_selector(blockId);
+    if (!sel) return null;
+    let el;
+    try { el = document.querySelector(sel); } catch (e) { return null; }
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: r.x, y: r.y, width: r.width, height: r.height };
+  };
+
+  // Focus the first ALLOWED selector match (see __amq_allowed_for).
+  // Returns true/false, never throws — used by
+  // /agentmux/browser/focus_element and (to focus before typing)
+  // /agentmux/browser/dispatch_key.
+  window.__amq_focus = (selector, blockId) => {
+    let nodes;
+    try { nodes = document.querySelectorAll(selector); } catch (e) { return false; }
+    const el = Array.from(nodes).find((e) => window.__amq_allowed_for(e, blockId));
+    if (!el) return false;
+    el.focus();
+    return true;
+  };
+
+  window.__amq_query = (selector, limit, blockId) => {
     let nodes;
     try {
       nodes = document.querySelectorAll(selector);
     } catch (e) {
       return { error: String(e) };
     }
+    const allowed = Array.from(nodes).filter((e) => window.__amq_allowed_for(e, blockId));
     const out = [];
-    const n = limit > 0 ? Math.min(limit, nodes.length) : nodes.length;
+    const n = limit > 0 ? Math.min(limit, allowed.length) : allowed.length;
     for (let i = 0; i < n; i++) {
-      const el = nodes[i];
+      const el = allowed[i];
       const r = el.getBoundingClientRect();
       const attrs = {};
       for (const a of el.attributes) attrs[a.name] = a.value;

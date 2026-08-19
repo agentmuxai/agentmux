@@ -16,6 +16,7 @@
 //! (`crate::server::service::…`, `super::service::…`) unchanged.
 
 mod client;
+mod host_ipc;
 mod introspect;
 pub(crate) mod layout_helpers;
 mod misc;
@@ -117,6 +118,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
         "client" => client::handle_client_service(state, call).await,
         "window" => window::handle_window_service(state, call).await,
         "workspace" => workspace::handle_workspace_service(state, call).await,
+        "host_ipc" => host_ipc::handle_host_ipc_service(state, call).await,
         _ => misc::handle_misc_service(state, call).await,
     }
 }
