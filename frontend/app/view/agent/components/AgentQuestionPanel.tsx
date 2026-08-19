@@ -24,7 +24,7 @@
  * docs/specs/SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md.
  */
 
-import { createEffect, createMemo, createSignal, For, onCleanup, Show, type Accessor, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, type Accessor, type JSX } from "solid-js";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { getSettingsKeyAtom } from "@/app/store/global";
@@ -118,9 +118,22 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
     /** `agent:askquestiontimeoutms` if set to a positive number, else
      *  `DEFAULT_AUTO_TIMEOUT_MS`. Read fresh at every re-arm point below
      *  (not cached) so a mid-session settings change takes effect on the
-     *  next question rather than requiring a reload. */
+     *  next question rather than requiring a reload.
+     *
+     *  `untrack`ed deliberately: every call site below lives inside a
+     *  `createEffect` keyed on `tool_use_id`/`hidden()`, not on this
+     *  setting. Without `untrack`, Solid registers the settings read as a
+     *  dependency of whichever enclosing effect calls this — so the
+     *  question-reset effect (which unconditionally wipes `state`/
+     *  `minimized`/`hidden` — "keyed on tool_use_id so we never inherit a
+     *  prior question's selections") would ALSO re-run and discard an
+     *  in-progress answer whenever the user merely adjusted this setting
+     *  in Settings -> Advanced, unrelated to any new question arriving.
+     *  Confirmed independently by reagent (P1) and Codex (P2) on PR #2670.
+     *  `untrack` here still reads the CURRENT value at each call — it only
+     *  stops that read from being treated as a reactive trigger. */
     const autoTimeoutMs = (): number => {
-        const v = getSettingsKeyAtom("agent:askquestiontimeoutms")();
+        const v = untrack(() => getSettingsKeyAtom("agent:askquestiontimeoutms")());
         return typeof v === "number" && v > 0 ? v : DEFAULT_AUTO_TIMEOUT_MS;
     };
 
