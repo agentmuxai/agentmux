@@ -289,6 +289,12 @@ mod tests {
     /// existed to migrate onto.
     #[tokio::test]
     async fn settings_change_via_pool_reloads_config_watcher() {
+        // codex P2 on PR #2664: this test mutates the process-global
+        // AGENTMUX_SETTINGS_DIR — must hold the crate-wide env lock, the
+        // same one resolve_settings_dir's isolation tests below use, or
+        // the two can interleave and redirect each other's settings dir
+        // mid-test.
+        let _lock = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         let prev = std::env::var_os("AGENTMUX_SETTINGS_DIR");
         std::env::set_var("AGENTMUX_SETTINGS_DIR", tmp.path());
@@ -354,12 +360,19 @@ mod tests {
 
     // ── resolve_settings_dir isolation (SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md) ──
 
-    /// Serializes tests that mutate the process-global env vars
-    /// `resolve_settings_dir` reads. Mirrors `agentmux-common`'s
-    /// `TEST_ENV_LOCK` / `config.rs`'s `ENV_LOCK` pattern — recovers from
-    /// a poisoned lock so one panicking test doesn't cascade-fail every
-    /// test after it.
-    static SETTINGS_DIR_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    /// codex P2 on PR #2664: a module-local `Mutex<()>` here would only
+    /// serialize these tests against EACH OTHER — not against
+    /// `settings_change_via_pool_reloads_config_watcher` above (same file,
+    /// mutates `AGENTMUX_SETTINGS_DIR`) or `registry::paths`' tests
+    /// (mutate `AGENTMUX_CHANNEL` behind their own, different lock).
+    /// Cargo's default parallel test runner means those could still
+    /// interleave with these and redirect each other's resolved dir /
+    /// isolation state mid-test. Use the crate-wide lock instead — see
+    /// `test_support.rs`'s own doc comment, which documents exactly this
+    /// failure mode (reagent/codex on PR #2318) for the auth-isolation
+    /// tests this lock was introduced for; it's the crate's general
+    /// process-env-mutation lock, not auth-specific despite the name.
+    use crate::test_support::ISOLATED_AUTH_ENV_LOCK as SETTINGS_DIR_ENV_LOCK;
 
     fn lock_settings_dir_env() -> std::sync::MutexGuard<'static, ()> {
         SETTINGS_DIR_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())

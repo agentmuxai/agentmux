@@ -119,13 +119,21 @@ pub(crate) fn read_window_transparent_setting() -> bool {
             // AGENTMUX_CONFIG_HOME too, since bootstrap.rs re-exports the
             // same value under that legacy name and this function may run
             // in a process that only has one of the two set.
+            //
+            // No DataPaths::from_env() fallback here (reagentx P1 on
+            // #2664): from_env() itself requires AGENTMUX_CONFIG_DIR via
+            // `?` (data_paths.rs:307), so it can only ever succeed in
+            // exactly the case already handled above, and can only be
+            // reached here when that case already failed — i.e. it would
+            // always return None too. A branch that can never produce a
+            // value is worse than no branch: it reads as "there's a
+            // working fallback" when there isn't one. If both vars are
+            // genuinely absent, there is no isolated candidate to offer.
             if let Some(d) = std::env::var_os("AGENTMUX_CONFIG_DIR")
                 .or_else(|| std::env::var_os("AGENTMUX_CONFIG_HOME"))
                 .filter(|s| !s.is_empty())
             {
                 out.push(std::path::PathBuf::from(d).join("settings.json"));
-            } else if let Some(p) = agentmux_common::DataPaths::from_env().map(|p| p.config_dir) {
-                out.push(p.join("settings.json"));
             }
             return out;
         }
@@ -136,10 +144,13 @@ pub(crate) fn read_window_transparent_setting() -> bool {
                 out.push(root.join("settings.json"));
             }
         }
+        // No DataPaths::from_env() fallback here either (same dead-branch
+        // reasoning as above, pre-existing before this PR but the same
+        // bug: from_env() requires AGENTMUX_CONFIG_DIR, and this branch
+        // is only reached when AGENTMUX_CONFIG_DIR is already unset — so
+        // it could never have produced a value here either).
         if let Some(d) = std::env::var_os("AGENTMUX_CONFIG_DIR").filter(|s| !s.is_empty()) {
             out.push(std::path::PathBuf::from(d).join("settings.json"));
-        } else if let Some(p) = agentmux_common::DataPaths::from_env().map(|p| p.config_dir) {
-            out.push(p.join("settings.json"));
         }
         if let Some(home) = dirs::home_dir() {
             out.push(home.join(".agentmux").join("channels").join("settings.json"));
