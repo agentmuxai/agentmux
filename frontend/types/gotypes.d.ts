@@ -1698,6 +1698,7 @@ declare global {
         "dnd:enabled"?: boolean;
         "dnd:concurrency"?: number;
         "dnd:agentinserttoken"?: boolean;
+        "agent:askquestiontimeoutms"?: number;
     };
 
     // waveobj.StickerClickOptsType
