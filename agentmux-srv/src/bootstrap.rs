@@ -1550,6 +1550,7 @@ pub fn build_app_state(
                 reqwest::Client::new()
             }),
         host_ipc: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
+        host_reg_secret: config.host_reg_secret.clone(),
         process_tracker: net.process_tracker.clone(),
         process_broker: net.process_broker.clone(),
         dock_snapshots: std::sync::Arc::new(crate::backend::dock_snapshot::DockSnapshotCache::new()),

@@ -142,8 +142,9 @@ pub async fn restart_backend(state: Arc<AppState>) -> Result<serde_json::Value, 
         let auth_key = state.auth_key.lock().clone();
         let ipc_port = *state.ipc_port.lock();
         let ipc_token = state.ipc_token.clone();
+        let host_reg_secret = state.host_reg_secret.lock().clone();
         tokio::task::spawn_blocking(move || {
-            crate::client::register_ipc_with_backend(&web_endpoint, &auth_key, ipc_port, &ipc_token);
+            crate::client::register_ipc_with_backend(&web_endpoint, &auth_key, ipc_port, &ipc_token, &host_reg_secret);
         });
     }
 

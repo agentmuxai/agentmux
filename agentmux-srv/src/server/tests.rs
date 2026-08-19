@@ -56,6 +56,7 @@ pub(crate) fn test_state() -> AppState {
         messagebus: Arc::new(crate::backend::messagebus::MessageBus::new()),
         http_client: reqwest::Client::new(),
         host_ipc: Arc::new(tokio::sync::Mutex::new(None)),
+        host_reg_secret: Some("test-host-reg-secret".to_string()),
         local_web_url: String::new(),
         subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus.clone(), wstore.clone())),
         history_service: Arc::new(crate::backend::history::HistoryService::new()),
@@ -405,7 +406,7 @@ async fn host_ipc_register_sets_state() {
         .header("X-AuthKey", "test-secret-key")
         .header("Content-Type", "application/json")
         .body(Body::from(
-            r#"{"service":"host_ipc","method":"Register","args":[9999,"tok-123"]}"#,
+            r#"{"service":"host_ipc","method":"Register","args":[9999,"tok-123","test-host-reg-secret"]}"#,
         ))
         .unwrap();
     let resp = app.oneshot(req).await.unwrap();
@@ -415,6 +416,89 @@ async fn host_ipc_register_sets_state() {
         .unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(json["success"].as_bool().unwrap());
+}
+
+// Regression test for a P0 flagged in review (reagent, 2026-08-19, PR #2662,
+// second re-review round): the conflicting-registration liveness check
+// above only helps once `state.host_ipc` already holds something to probe.
+// At every srv startup — and the window after any `restart_backend` before
+// the host re-registers — `state.host_ipc` is `None`, so there was nothing
+// to compare against and ANY caller won the race outright. An attacker
+// agent could register first, then stand up its own always-200 `/health`
+// responder to permanently defeat the liveness check on every future
+// legitimate registration too. Fixed with `AGENTMUX_HOST_REG_SECRET`, a
+// credential never given to agents — this test proves a caller without it
+// cannot win even in the `None` state the earlier fix couldn't cover.
+#[tokio::test]
+async fn host_ipc_register_rejects_without_the_matching_secret_even_when_state_is_none() {
+    let app = test_router(); // state.host_ipc starts None, host_reg_secret = "test-host-reg-secret"
+    let no_secret = Request::builder()
+        .uri("/agentmux/service")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            r#"{"service":"host_ipc","method":"Register","args":[9999,"attacker-token"]}"#,
+        ))
+        .unwrap();
+    let resp = app.clone().oneshot(no_secret).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        !json["success"].as_bool().unwrap_or(false),
+        "a caller with no secret at all must be rejected, even against an empty state.host_ipc"
+    );
+
+    let wrong_secret = Request::builder()
+        .uri("/agentmux/service")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            r#"{"service":"host_ipc","method":"Register","args":[9999,"attacker-token","not-the-real-secret"]}"#,
+        ))
+        .unwrap();
+    let resp = app.oneshot(wrong_secret).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        !json["success"].as_bool().unwrap_or(false),
+        "a caller with the wrong secret must be rejected, even against an empty state.host_ipc"
+    );
+}
+
+// Companion to the above: if srv itself was never given a secret to check
+// against (a config/spawn bug rather than an attack), it must fail closed
+// — reject every registration — rather than silently accepting the first
+// caller as trusted.
+#[tokio::test]
+async fn host_ipc_register_rejects_everything_when_srv_has_no_secret_configured() {
+    let mut state = test_state();
+    state.host_reg_secret = None;
+    let app = build_router(state);
+
+    let req = Request::builder()
+        .uri("/agentmux/service")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            r#"{"service":"host_ipc","method":"Register","args":[9999,"tok-123","anything"]}"#,
+        ))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        !json["success"].as_bool().unwrap_or(false),
+        "srv with no host_reg_secret configured must reject every registration attempt"
+    );
 }
 
 // Regression test for a P0 flagged in review (reagent, 2026-08-19, PR #2662):
@@ -444,7 +528,7 @@ async fn host_ipc_register_rejects_a_conflicting_second_registration_while_old_h
         .header("X-AuthKey", "test-secret-key")
         .header("Content-Type", "application/json")
         .body(Body::from(format!(
-            r#"{{"service":"host_ipc","method":"Register","args":[{alive_port},"real-host-token"]}}"#
+            r#"{{"service":"host_ipc","method":"Register","args":[{alive_port},"real-host-token","test-host-reg-secret"]}}"#
         )))
         .unwrap();
     let resp = app.clone().oneshot(first).await.unwrap();
@@ -457,14 +541,17 @@ async fn host_ipc_register_rejects_a_conflicting_second_registration_while_old_h
 
     // A spoofed re-registration with DIFFERENT credentials, while the real
     // host (alive_port) is STILL alive and responding — the attack reagent
-    // flagged. Must be rejected, not silently accepted.
+    // flagged. Carries the correct secret (an agent could never actually
+    // supply this — see the secret-gate tests above; this test isolates the
+    // liveness-conflict check specifically) so it reaches that check and is
+    // rejected there, not merely at the secret gate.
     let spoof = Request::builder()
         .uri("/agentmux/service")
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
         .header("Content-Type", "application/json")
         .body(Body::from(
-            r#"{"service":"host_ipc","method":"Register","args":[6666,"attacker-token"]}"#,
+            r#"{"service":"host_ipc","method":"Register","args":[6666,"attacker-token","test-host-reg-secret"]}"#,
         ))
         .unwrap();
     let resp = app.clone().oneshot(spoof).await.unwrap();
@@ -486,7 +573,7 @@ async fn host_ipc_register_rejects_a_conflicting_second_registration_while_old_h
         .header("X-AuthKey", "test-secret-key")
         .header("Content-Type", "application/json")
         .body(Body::from(format!(
-            r#"{{"service":"host_ipc","method":"Register","args":[{alive_port},"real-host-token"]}}"#
+            r#"{{"service":"host_ipc","method":"Register","args":[{alive_port},"real-host-token","test-host-reg-secret"]}}"#
         )))
         .unwrap();
     let resp = app.oneshot(retry).await.unwrap();
@@ -530,7 +617,7 @@ async fn host_ipc_register_recovers_when_old_host_is_unreachable() {
         .header("X-AuthKey", "test-secret-key")
         .header("Content-Type", "application/json")
         .body(Body::from(
-            r#"{"service":"host_ipc","method":"Register","args":[7777,"relaunched-host-token"]}"#,
+            r#"{"service":"host_ipc","method":"Register","args":[7777,"relaunched-host-token","test-host-reg-secret"]}"#,
         ))
         .unwrap();
     let resp = app.oneshot(recovery).await.unwrap();

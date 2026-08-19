@@ -174,6 +174,13 @@ pub struct AppState {
     /// Backs the `/api/v1/ui/{screenshot,click,query}` proxy routes.
     /// See `docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md`.
     pub host_ipc: Arc<tokio::sync::Mutex<Option<HostIpc>>>,
+    /// Shared secret only the paired host (never an agent) is given —
+    /// gates `host_ipc.Register` so an agent process can't spoof the
+    /// host's own credential push (both share the general `auth_key`
+    /// already, so that alone can't distinguish them). `None` if nobody
+    /// configured one, in which case `handle_register` rejects every
+    /// registration. See `Config::host_reg_secret`'s doc comment.
+    pub host_reg_secret: Option<String>,
     /// Phase E.2c.2 — srv reducer's canonical state. Workspace HTTP/WS
     /// RPC handlers route through the reducer (dispatch
     /// `Command::Create/Delete/...Workspace` and read out of

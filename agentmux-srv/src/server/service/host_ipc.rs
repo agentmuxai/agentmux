@@ -12,6 +12,13 @@
 //! facing UI automation). See `AppState::host_ipc`,
 //! `agentmux-cef/src/client/helpers.rs::register_ipc_with_backend`, and
 //! `docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md`.
+//!
+//! `Register` requires a third argument, a shared secret
+//! (`AppState::host_reg_secret` / `AGENTMUX_HOST_REG_SECRET`) known only to
+//! srv and the paired host — never to any agent — proving the caller is
+//! really the host and not an agent process riding the same instance-wide
+//! `X-AuthKey`. See `handle_register`'s doc comments for the full threat
+//! model (reagent P0, PR #2662, 2026-08-19).
 
 use crate::backend::service::{WebCallType, WebReturnType};
 
@@ -22,6 +29,32 @@ pub(super) async fn handle_host_ipc_service(state: &AppState, call: &WebCallType
         "Register" => handle_register(state, call).await,
         _ => WebReturnType::error(format!("unknown host_ipc method: {}", call.method)),
     }
+}
+
+/// Constant-time comparison of the caller-supplied secret against
+/// `state.host_reg_secret`, via the same "HMAC then `Mac::verify_slice`"
+/// idiom already used for the WhatsApp webhook signature check
+/// (`messaging/whatsapp/webhook.rs`) rather than a manual `==`, so a
+/// mismatch can't leak timing information about how many leading bytes
+/// matched. Not signing anything meaningful — both sides already hold the
+/// same static secret out-of-band (spawn-time env), so this is just a
+/// constant-time equality check dressed as a one-shot MAC.
+fn secret_matches(known: &str, supplied: &str) -> bool {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    const NONCE: &[u8] = b"agentmux-host-ipc-register-secret-compare-v1";
+    let Ok(mut expected_mac) = Hmac::<Sha256>::new_from_slice(known.as_bytes()) else {
+        return false;
+    };
+    expected_mac.update(NONCE);
+    let expected = expected_mac.finalize().into_bytes();
+
+    let Ok(mut supplied_mac) = Hmac::<Sha256>::new_from_slice(supplied.as_bytes()) else {
+        return false;
+    };
+    supplied_mac.update(NONCE);
+    supplied_mac.verify_slice(&expected).is_ok()
 }
 
 async fn handle_register(state: &AppState, call: &WebCallType) -> WebReturnType {
@@ -44,6 +77,48 @@ async fn handle_register(state: &AppState, call: &WebCallType) -> WebReturnType 
     // endpoint for the rest of the session (reagent P0, PR #2662,
     // 2026-08-19).
     //
+    // First line of defense: `AGENTMUX_HOST_REG_SECRET`, a credential known
+    // only to srv and the paired host (launcher-mediated in launcher-managed
+    // mode, self-generated-and-passed-at-spawn in host-owned-spawn/dev mode
+    // — see `Config::host_reg_secret`'s doc comment) — never given to any
+    // agent. This is checked BEFORE the `state.host_ipc` None/Some branching
+    // below, so it closes the race reagent found in the same P0 re-review:
+    // when `state.host_ipc` is `None` (every srv startup, and the window
+    // after any `restart_backend` before the host re-registers), there is no
+    // existing registration to probe liveness against, so ANY caller used to
+    // win outright. An agent has no way to learn this secret, so it can never
+    // win that race regardless of `state.host_ipc`'s current value.
+    let supplied_secret = call.args.get(2).and_then(|v| v.as_str()).unwrap_or("");
+    match state.host_reg_secret.as_deref() {
+        None => {
+            tracing::error!(
+                "[host_ipc] REJECTED a Register call — this srv instance has no \
+                 AGENTMUX_HOST_REG_SECRET configured, so it cannot verify the caller \
+                 is really the paired host. This should never happen in a normal \
+                 launcher-managed or host-owned-spawn boot; check that whichever \
+                 process spawned this srv instance set that env var."
+            );
+            return WebReturnType::error(
+                "host_ipc.Register: srv has no host-registration secret configured — \
+                 refusing to accept any registration",
+            );
+        }
+        Some(known) if secret_matches(known, supplied_secret) => {}
+        Some(_) => {
+            tracing::error!(
+                "[host_ipc] REJECTED a Register call — args[2] did not match this srv \
+                 instance's AGENTMUX_HOST_REG_SECRET. Either a caller without this \
+                 credential (never an agent — always never given one) is attempting to \
+                 spoof the host, or the caller is a genuine host that's out of sync with \
+                 srv's current secret (e.g. after a srv recycle, which mints a fresh one)."
+            );
+            return WebReturnType::error(
+                "host_ipc.Register: args[2] does not match this srv instance's \
+                 host-registration secret",
+            );
+        }
+    }
+
     // A conflicting re-registration (different port/token than what's
     // stored) is NOT rejected outright, though — an earlier version of this
     // fix did that unconditionally, which broke a real, already-supported

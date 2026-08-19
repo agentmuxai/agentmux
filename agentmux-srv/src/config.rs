@@ -53,6 +53,18 @@ pub struct Config {
     /// docs/specs/SPEC_JEKT_LAN_WAN_TRUST_HARDENING_2026_08_13.md §2.1/§3
     /// LAN P0-1.
     pub lan_key: String,
+    /// Shared secret proving a `host_ipc.Register` caller is really the
+    /// paired CEF host, not an agent process (agents share `auth_key` too
+    /// — see `host_ipc.rs::handle_register`'s doc comment). `None` when
+    /// nobody set `AGENTMUX_HOST_REG_SECRET` — `handle_register` then
+    /// refuses every registration rather than accepting one unauthenticated,
+    /// since there's nothing to check the caller against. Sourced from the
+    /// launcher (`agentmux-launcher::srv_spawner::SrvSpawnResult::host_reg_secret`,
+    /// minted once and reused across host-only crash-restarts, exactly
+    /// like `auth_key`) or, in host-owned-spawn/dev mode, from the host
+    /// itself (`agentmux-cef/src/sidecar.rs::spawn_backend`, which
+    /// generates it alongside its own `auth_key`).
+    pub host_reg_secret: Option<String>,
     pub data_home: String,
     pub config_home: String,
     pub app_path: String,
@@ -107,9 +119,23 @@ impl Config {
         // HTTP header — never binary-serialized or HMAC-keyed.
         let lan_key = format!("{}{}", uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
 
+        // Optional — only set by a launcher/host that knows about this
+        // credential. Scrub it from the env the same way AGENTMUX_AUTH_KEY
+        // is scrubbed above, so it can't be read back out of this
+        // process's own environment later (e.g. by a shell tool an agent
+        // asks this process to run — not applicable to srv itself, but
+        // matching the auth_key precedent costs nothing).
+        let host_reg_secret = std::env::var("AGENTMUX_HOST_REG_SECRET")
+            .ok()
+            .filter(|s| !s.is_empty());
+        if host_reg_secret.is_some() {
+            std::env::remove_var("AGENTMUX_HOST_REG_SECRET");
+        }
+
         Ok(Config {
             auth_key,
             lan_key,
+            host_reg_secret,
             data_home,
             config_home,
             app_path,
@@ -149,6 +175,7 @@ mod tests {
             "AGENTMUX_APP_PATH",
             "AGENTMUX_RUNTIME_MODE",
             "AGENTMUX_DEV",
+            "AGENTMUX_HOST_REG_SECRET",
         ] {
             std::env::remove_var(k);
         }
@@ -207,6 +234,30 @@ mod tests {
         assert_eq!(config.config_home, "/config");
         assert_eq!(config.app_path, "/app");
         assert!(config.is_dev);
+        clear_env();
+    }
+
+    #[test]
+    fn host_reg_secret_defaults_to_none_when_unset() {
+        let _lock = lock();
+        clear_env();
+        std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-host-reg-1");
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None };
+        let config = Config::from_env_and_args(&args).unwrap();
+        assert_eq!(config.host_reg_secret, None);
+        clear_env();
+    }
+
+    #[test]
+    fn host_reg_secret_is_read_and_scrubbed_from_env() {
+        let _lock = lock();
+        clear_env();
+        std::env::set_var("AGENTMUX_AUTH_KEY", "test-key-host-reg-2");
+        std::env::set_var("AGENTMUX_HOST_REG_SECRET", "the-shared-secret");
+        let args = CliArgs { wavedata: None, instance: "default".to_string(), command: None };
+        let config = Config::from_env_and_args(&args).unwrap();
+        assert_eq!(config.host_reg_secret, Some("the-shared-secret".to_string()));
+        assert!(std::env::var("AGENTMUX_HOST_REG_SECRET").is_err());
         clear_env();
     }
 

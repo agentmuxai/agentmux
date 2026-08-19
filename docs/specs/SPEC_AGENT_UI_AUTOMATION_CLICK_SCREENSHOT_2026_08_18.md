@@ -36,13 +36,39 @@ independently on the same root cause for one of them):**
   only allowed if none of its own descendants belong to a different block
   either. Verified live: querying `body` now correctly returns zero
   matches instead of leaking all panes' content.
-- **Fixed, P0 (host_ipc.Register):** the registration handshake
-  unconditionally overwrote `state.host_ipc` with whatever the caller
-  supplied, over the same shared `X-AuthKey` every agent's environment
-  holds — any agent could permanently hijack the credential for the whole
-  session, with no self-heal. Fixed: rejects any re-registration whose
-  port/token differ from what's already stored (identical re-registration
-  is still a harmless no-op).
+- **Fixed for real, P0 (host_ipc.Register) — three review rounds:**
+  1. *Original bug:* the registration handshake unconditionally overwrote
+     `state.host_ipc` with whatever the caller supplied, over the same
+     shared `X-AuthKey` every agent's environment holds — any agent could
+     permanently hijack the credential for the whole session, with no
+     self-heal.
+  2. *First fix, then P1 re-review regression:* rejecting any conflicting
+     re-registration outright broke a real, already-supported recovery
+     path — srv survives a CEF host crash as a Job Object sibling, and the
+     launcher's crash-budget relaunch restarts just the host, which
+     legitimately gets a fresh `ipc_port`/`ipc_token` and needs to
+     overwrite the dead registration. Fixed: probe the currently-registered
+     host's own `/health` route before rejecting — still alive → reject
+     (hijack), unreachable → accept (crash-restart recovery).
+  3. *Second P0 re-review:* the liveness probe only helps once
+     `state.host_ipc` already holds something to compare against. At every
+     srv startup, and the window after any `restart_backend` before the
+     host re-registers, `state.host_ipc` is `None` — nothing to probe — so
+     any caller won that race outright, and could then stand up its own
+     always-200 `/health` responder to permanently defeat the liveness
+     check on every future legitimate registration too. Closed with a new
+     credential, `AGENTMUX_HOST_REG_SECRET` — a shared secret known only to
+     srv and the paired host, never to any agent process. Sourced from the
+     launcher (`agentmux-launcher::srv_spawner::SrvSpawnResult::host_reg_secret`,
+     minted once per `spawn_srv` call and given to both host and srv's
+     spawn env, so it survives every host-only crash-restart the same way
+     `auth_key` already does) or, in host-owned-spawn/dev mode, generated
+     by the host itself and passed to srv at `spawn_backend` time. Checked
+     BEFORE the `state.host_ipc` None/Some branching, via constant-time
+     comparison (`host_ipc.rs::secret_matches`, same "HMAC then
+     `Mac::verify_slice`" idiom as the WhatsApp webhook signature check) —
+     an agent has no way to learn this secret, so it can never win the
+     registration race regardless of `state.host_ipc`'s current value.
 - **Fixed for real, P0 (Codex P1, escalated to P0-blocking by reagent
   after an initial doc-only pass didn't close it):** `block_id` is no
   longer a request field on `/api/v1/ui/*` at all. Every request instead

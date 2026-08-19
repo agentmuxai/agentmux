@@ -745,8 +745,9 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
         let web_endpoint = app_state.backend_endpoints.lock().web_endpoint.clone();
         let auth_key = app_state.auth_key.lock().clone();
         let ipc_token = app_state.ipc_token.clone();
+        let host_reg_secret = app_state.host_reg_secret.lock().clone();
         runtime.spawn_blocking(move || {
-            client::register_ipc_with_backend(&web_endpoint, &auth_key, ipc_port, &ipc_token);
+            client::register_ipc_with_backend(&web_endpoint, &auth_key, ipc_port, &ipc_token, &host_reg_secret);
         });
     }
 

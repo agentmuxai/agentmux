@@ -828,6 +828,7 @@ pub(crate) fn register_ipc_with_backend(
     auth_key: &str,
     ipc_port: u16,
     ipc_token: &str,
+    host_reg_secret: &str,
 ) {
     use std::io::Write;
 
@@ -838,7 +839,7 @@ pub(crate) fn register_ipc_with_backend(
     let body = serde_json::json!({
         "service": "host_ipc",
         "method": "Register",
-        "args": [ipc_port, ipc_token],
+        "args": [ipc_port, ipc_token, host_reg_secret],
         "uicontext": null,
     })
     .to_string();
