@@ -529,6 +529,11 @@ export function update(
                         submittedAt: command.at,
                         pendingContent: command.content ?? "",
                     },
+                    // See pendingCompactTurn's doc comment (types.ts) — always
+                    // set explicitly (never left stale) so CompactionBoundary
+                    // can tell whether THIS pane's currently-working turn is
+                    // the synthetic one the "Compact now" button opened.
+                    pendingCompactTurn: (command.content ?? "").trim() === "/compact",
                     // Previously auto-collapsed the details panel on send (don't
                     // obscure the turn start). The panel now also hosts a live
                     // interactive shell (AgentShellSubblock) whose whole point is
@@ -1197,6 +1202,42 @@ export function update(
                 if (next.turnPhase.kind === "Streaming") {
                     next.turnPhase = { ...next.turnPhase, lastEventMs: command.at };
                 }
+            }
+            // codex P1 on PR #2659: a MANUAL compaction (the "Compact now"
+            // button / a user typing "/compact") is sent through the normal
+            // handleSendMessage path, which dispatches TurnStart the same as
+            // any real conversational turn — but the CLI's actual response
+            // to a standalone "/compact" is `system/status` + this boundary,
+            // never an assistant text frame or a `result` frame. Those are
+            // the ONLY two things claude-translator.ts's handleAssistantMessage
+            // ever uses to fire session_end → TurnEnd. Without this, the pane
+            // is left permanently "Working" after every successful manual
+            // compaction, holding every subsequent message behind a turn
+            // that will never naturally finish. (A FAILED manual compact
+            // does NOT need this: the CLI's "Not enough messages to compact."
+            // reply IS a real assistant text frame, so the existing
+            // session_end path already closes it out correctly.)
+            //
+            // Gated on `state.pendingCompactTurn`, NOT `command.trigger ===
+            // "manual"` alone (see that field's doc comment, types.ts) — a
+            // manual trigger by itself doesn't prove THIS pane's currently
+            // working turn is the synthetic one the compact action opened;
+            // compaction_started/compact_boundary travel over independent
+            // transports with no ordering guarantee against the primary
+            // stream, and the reducer's own CompactionStarted race-guard
+            // tests deliberately model a manual boundary landing on an
+            // unrelated already-streaming turn.
+            if (command.trigger === "manual" && state.pendingCompactTurn && workingFromPhase(next.turnPhase)) {
+                // Mirrors TurnEnd's own outcome selection: a user who hit
+                // Esc mid-compaction (Interrupting) gets "stopped", not a
+                // misleading "completed" — same dual-write this reducer
+                // already does for every other turn-ending case.
+                const outcome: TurnOutcome = next.turnPhase.kind === "Interrupting" ? "stopped" : "completed";
+                next.currentTool = null;
+                next.currentToolArg = null;
+                next.turnTokens = null;
+                next.pendingCompactTurn = false;
+                next.turnPhase = { kind: "Done", outcome, finishedAt: command.at };
             }
             return {
                 state: next,
