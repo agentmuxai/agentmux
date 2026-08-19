@@ -78,21 +78,58 @@ pub static SELECTED_OZONE_PLATFORM: std::sync::OnceLock<String> = std::sync::Onc
 pub(crate) fn read_window_transparent_setting() -> bool {
     // Candidate locations for the LIVE settings.json, in priority order —
     // mirrors srv's `config_watcher_fs::resolve_settings_dir()` (the file the
-    // settings UI actually edits), then legacy/per-instance fallbacks:
+    // settings UI actually edits). See
+    // docs/specs/SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md.
+    //
+    // Isolated (default for every channel except `stable` —
+    // agentmux_common::isolated_settings_enabled()):
+    //   1. $AGENTMUX_SETTINGS_DIR/settings.json (explicit override)
+    //   2. $AGENTMUX_CONFIG_DIR (or $AGENTMUX_CONFIG_HOME — pre-unification
+    //      name, same value)/settings.json — the channel-scoped config dir.
+    // Deliberately does NOT fall through to the shared/legacy candidates
+    // below: an isolated channel's own settings.json existing-but-lacking
+    // `window:transparent` must read the default (false), not silently
+    // inherit the shared file's value — that fallthrough would defeat
+    // isolation for exactly the surprise-carry-over case this spec exists
+    // to prevent, just for a different key.
+    //
+    // Global (`stable`, or an explicit AGENTMUX_ISOLATED_SETTINGS=0
+    // opt-out) — unchanged from before this spec:
     //   1. $AGENTMUX_SETTINGS_DIR/settings.json (explicit override)
     //   2. $AGENTMUX_CONFIG_HOME/../../settings.json (channels-root shared
     //      file — the modern location, e.g. ~/.agentmux/channels/settings.json)
     //   3. $AGENTMUX_CONFIG_DIR/settings.json (per-instance config dir)
     //   4. ~/.agentmux/channels/settings.json
     //   5. ~/.agentmux/settings.json (legacy)
-    // First file that exists wins. The old code checked ONLY (3), which is
-    // empty in every real deployment — so `window:transparent` silently read
-    // `false` for everyone on Linux/macOS.
+    // First file that exists wins. The old code (pre-dating this
+    // module's original fix) checked ONLY (3), which is empty in every
+    // real deployment — so `window:transparent` silently read `false`
+    // for everyone on Linux/macOS.
     fn candidates() -> Vec<std::path::PathBuf> {
         let mut out = Vec::new();
         if let Some(d) = std::env::var_os("AGENTMUX_SETTINGS_DIR").filter(|s| !s.is_empty()) {
             out.push(std::path::PathBuf::from(d).join("settings.json"));
         }
+
+        if agentmux_common::isolated_settings_enabled() {
+            // Isolated channel: the per-instance config dir IS the settings
+            // dir (no parent-walk to a shared location) — same value
+            // srv's resolve_settings_dir() uses on an isolated channel.
+            // Prefers AGENTMUX_CONFIG_DIR (the canonical var) but accepts
+            // AGENTMUX_CONFIG_HOME too, since bootstrap.rs re-exports the
+            // same value under that legacy name and this function may run
+            // in a process that only has one of the two set.
+            if let Some(d) = std::env::var_os("AGENTMUX_CONFIG_DIR")
+                .or_else(|| std::env::var_os("AGENTMUX_CONFIG_HOME"))
+                .filter(|s| !s.is_empty())
+            {
+                out.push(std::path::PathBuf::from(d).join("settings.json"));
+            } else if let Some(p) = agentmux_common::DataPaths::from_env().map(|p| p.config_dir) {
+                out.push(p.join("settings.json"));
+            }
+            return out;
+        }
+
         if let Some(d) = std::env::var_os("AGENTMUX_CONFIG_HOME").filter(|s| !s.is_empty()) {
             let p = std::path::PathBuf::from(d);
             if let Some(root) = p.parent().and_then(|p| p.parent()) {

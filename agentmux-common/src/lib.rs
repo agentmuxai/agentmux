@@ -16,7 +16,8 @@ pub mod toolchain_path;
 
 pub use cli::{make_cli_cmd, resolve_cli_spawn_target};
 pub use data_paths::{
-    ensure_history_link, isolated_auth_enabled, isolated_auth_reason, DataPaths, IsolatedAuthReason,
+    ensure_history_link, isolated_auth_enabled, isolated_auth_reason, isolated_settings_enabled,
+    isolated_settings_reason, DataPaths, IsolatedAuthReason, IsolatedSettingsReason,
 };
 pub use errors::{AgentMuxError, AmxCode};
 pub use layout_types::{

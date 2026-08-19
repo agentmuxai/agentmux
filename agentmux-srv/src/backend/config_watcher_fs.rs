@@ -25,20 +25,38 @@ use super::wconfig::{self, ConfigWatcher, SettingsType};
 ///
 /// Priority:
 /// 1. `AGENTMUX_SETTINGS_DIR` env var (set by Tauri host to app_config_dir)
-/// 2. `AGENTMUX_CONFIG_HOME` env var (backend's config root)
-/// 3. `~/.agentmux` (legacy fallback)
+/// 2. If [`agentmux_common::isolated_settings_enabled`] — the default for
+///    every channel except `stable`, see
+///    `docs/specs/SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md` —
+///    `AGENTMUX_CONFIG_HOME` used DIRECTLY, with no parent-walk. That var
+///    already carries the correctly channel-scoped `channels/<ch>/config/`
+///    directory (re-exported from `AGENTMUX_CONFIG_DIR`, see
+///    `data_paths.rs`'s own `channels/<ch>/config/ ← settings
+///    (channel-wide)` layout comment) — this is the fix, using that value
+///    as-is instead of walking past it.
+/// 3. Otherwise (global — `stable` channel, or an explicit
+///    `AGENTMUX_ISOLATED_SETTINGS=0` opt-out): `AGENTMUX_CONFIG_HOME`,
+///    walking up two parent directories — unchanged legacy behavior. That
+///    var's value is a channel-scoped `.../config` directory; walking up
+///    two levels lands one level ABOVE the channel root (on
+///    `~/.agentmux/channels/` itself, not inside any specific channel),
+///    which is what makes this the genuinely shared, cross-channel file.
+/// 4. `~/.agentmux` (legacy fallback — `AGENTMUX_CONFIG_HOME` unset)
 pub fn resolve_settings_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("AGENTMUX_SETTINGS_DIR") {
         if !dir.is_empty() {
             return PathBuf::from(dir);
         }
     }
-    // Fall back to config home parent (settings.json sits at app_config_dir root,
-    // not inside the instances subdir)
     if let Ok(dir) = std::env::var("AGENTMUX_CONFIG_HOME") {
         if !dir.is_empty() {
-            // AGENTMUX_CONFIG_HOME = .../instances/v0.31.XX — go up two levels
             let path = PathBuf::from(&dir);
+            if agentmux_common::isolated_settings_enabled() {
+                // Already channel-scoped — use directly, no parent-walk.
+                return path;
+            }
+            // AGENTMUX_CONFIG_HOME = channels/<ch>/config — go up two
+            // levels to the shared channels/ root.
             if let Some(root) = path.parent().and_then(|p| p.parent()) {
                 return root.to_path_buf();
             }
@@ -52,6 +70,17 @@ pub fn resolve_settings_dir() -> PathBuf {
 pub fn load_settings_from_disk(config_watcher: &ConfigWatcher) {
     let settings_dir = resolve_settings_dir();
     let settings_path = settings_dir.join(wconfig::SETTINGS_FILE);
+
+    // Boot-time diagnostic distinguishing all four resolvable isolation
+    // states — see docs/specs/SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md
+    // Phase 1. Logged here (not inside resolve_settings_dir itself) since
+    // this function is the one true "called once at startup" call site;
+    // the other two call sites (spawn_settings_watcher, the save path)
+    // would spam this on every watcher re-arm / every save.
+    tracing::info!(
+        reason = agentmux_common::isolated_settings_reason().as_str(),
+        "settings.json isolation"
+    );
 
     tracing::info!(
         path = %settings_path.display(),
@@ -321,5 +350,121 @@ mod tests {
         // would reset the live config and broadcast defaults to every client.
         assert!(!is_settings_file_event(&evt("/some/dir/settings.json", FsWatchEventKind::Removed)));
         assert!(!is_settings_file_event(&evt("/some/dir/settings.json", FsWatchEventKind::Other)));
+    }
+
+    // ── resolve_settings_dir isolation (SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md) ──
+
+    /// Serializes tests that mutate the process-global env vars
+    /// `resolve_settings_dir` reads. Mirrors `agentmux-common`'s
+    /// `TEST_ENV_LOCK` / `config.rs`'s `ENV_LOCK` pattern — recovers from
+    /// a poisoned lock so one panicking test doesn't cascade-fail every
+    /// test after it.
+    static SETTINGS_DIR_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn lock_settings_dir_env() -> std::sync::MutexGuard<'static, ()> {
+        SETTINGS_DIR_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Clears every env var `resolve_settings_dir` / `isolated_settings_*`
+    /// read, so each test starts from a known state regardless of
+    /// leakage from a prior test or from process env inherited from the
+    /// test runner itself.
+    fn clear_settings_dir_env() {
+        std::env::remove_var("AGENTMUX_SETTINGS_DIR");
+        std::env::remove_var("AGENTMUX_CONFIG_HOME");
+        std::env::remove_var("AGENTMUX_CHANNEL");
+        std::env::remove_var("AGENTMUX_ISOLATED_SETTINGS");
+    }
+
+    #[test]
+    fn resolve_settings_dir_stays_global_on_stable_channel() {
+        let _lock = lock_settings_dir_env();
+        clear_settings_dir_env();
+        std::env::set_var("AGENTMUX_CONFIG_HOME", "/home/user/.agentmux/channels/stable/config");
+        std::env::set_var("AGENTMUX_CHANNEL", "stable");
+
+        let dir = resolve_settings_dir();
+
+        assert_eq!(dir, PathBuf::from("/home/user/.agentmux/channels"));
+        clear_settings_dir_env();
+    }
+
+    #[test]
+    fn resolve_settings_dir_is_isolated_by_default_on_non_stable_channel() {
+        // The behavior change this spec introduces: no AGENTMUX_ISOLATED_SETTINGS
+        // set at all — a task-dev branch or task-package build's channel is
+        // enough on its own to get an isolated settings dir.
+        let _lock = lock_settings_dir_env();
+        clear_settings_dir_env();
+        let config_home = "/home/user/.agentmux/channels/local-main-abc123-1/config";
+        std::env::set_var("AGENTMUX_CONFIG_HOME", config_home);
+        std::env::set_var("AGENTMUX_CHANNEL", "local-main-abc123-1");
+
+        let dir = resolve_settings_dir();
+
+        assert_eq!(
+            dir,
+            PathBuf::from(config_home),
+            "isolated-by-default settings dir must be the channel-scoped config dir itself, not its shared parent"
+        );
+        clear_settings_dir_env();
+    }
+
+    #[test]
+    fn resolve_settings_dir_explicit_opt_out_restores_global_on_non_stable_channel() {
+        let _lock = lock_settings_dir_env();
+        clear_settings_dir_env();
+        std::env::set_var("AGENTMUX_CONFIG_HOME", "/home/user/.agentmux/channels/dev-some-branch/config");
+        std::env::set_var("AGENTMUX_CHANNEL", "dev-some-branch");
+        std::env::set_var("AGENTMUX_ISOLATED_SETTINGS", "0");
+
+        let dir = resolve_settings_dir();
+
+        assert_eq!(dir, PathBuf::from("/home/user/.agentmux/channels"));
+        clear_settings_dir_env();
+    }
+
+    #[test]
+    fn resolve_settings_dir_explicit_opt_in_isolates_even_the_stable_channel() {
+        let _lock = lock_settings_dir_env();
+        clear_settings_dir_env();
+        std::env::set_var("AGENTMUX_CONFIG_HOME", "/home/user/.agentmux/channels/stable/config");
+        std::env::set_var("AGENTMUX_CHANNEL", "stable");
+        std::env::set_var("AGENTMUX_ISOLATED_SETTINGS", "1");
+
+        let dir = resolve_settings_dir();
+
+        assert_eq!(dir, PathBuf::from("/home/user/.agentmux/channels/stable/config"));
+        clear_settings_dir_env();
+    }
+
+    #[test]
+    fn resolve_settings_dir_stays_global_when_channel_unset() {
+        // Conservative fallback: no AGENTMUX_CHANNEL in the process env at
+        // all — stay global rather than guess, same as isolated_auth's
+        // equivalent case.
+        let _lock = lock_settings_dir_env();
+        clear_settings_dir_env();
+        std::env::set_var("AGENTMUX_CONFIG_HOME", "/home/user/.agentmux/channels/dev-some-branch/config");
+        // AGENTMUX_CHANNEL deliberately left unset.
+
+        let dir = resolve_settings_dir();
+
+        assert_eq!(dir, PathBuf::from("/home/user/.agentmux/channels"));
+        clear_settings_dir_env();
+    }
+
+    #[test]
+    fn resolve_settings_dir_settings_dir_override_wins_regardless_of_isolation() {
+        let _lock = lock_settings_dir_env();
+        clear_settings_dir_env();
+        std::env::set_var("AGENTMUX_SETTINGS_DIR", "/explicit/override");
+        std::env::set_var("AGENTMUX_CONFIG_HOME", "/home/user/.agentmux/channels/local-main-abc123-1/config");
+        std::env::set_var("AGENTMUX_CHANNEL", "local-main-abc123-1");
+
+        let dir = resolve_settings_dir();
+
+        assert_eq!(dir, PathBuf::from("/explicit/override"));
+        clear_settings_dir_env();
     }
 }
