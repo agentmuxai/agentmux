@@ -269,8 +269,8 @@
           "type": "number",
           "minimum": 0,
           "maximum": 1,
-          "default": 0.15,
-          "description": "Independent gain for tool-call tones, 0.0 (silent) to 1.0. Layered below the shared master gain — turning the master off silences both. Default 0.15."
+          "default": 1.0,
+          "description": "Independent gain for tool-call tones, 0.0 (silent) to 1.0. Layered below the shared master gain — turning the master off silences both. Default 1.0."
         },
         "notify:tooltones:scope": {
           "type": "string",

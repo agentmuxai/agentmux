@@ -73,7 +73,7 @@
 
     // -- Tool-call tones (subliminal per-tool "voice") --
     // "notify:tooltones:enabled":               true,
-    // "notify:tooltones:volume":                0.15,
+    // "notify:tooltones:volume":                1.0,
     // "notify:tooltones:scope":                 "all",  // "all" or "focused"
 
     // -- Voice input (speech-to-text) --

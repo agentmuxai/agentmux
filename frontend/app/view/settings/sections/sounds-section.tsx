@@ -5,6 +5,7 @@ import { Show, type JSX } from "solid-js";
 
 import { settingsAtom } from "@/app/store/global";
 import { SectionHeader, set, SettingRow, SliderControl, ToggleControl } from "../settings-controls";
+import { DEFAULT_MASTER_VOLUME, DEFAULT_TOOLTONES_VOLUME } from "@/app/notification/sound/sound-defaults";
 
 // ── Section: Sounds & Notifications ───────────────────────────────────────────
 
@@ -27,7 +28,7 @@ export function SoundsSection(): JSX.Element {
                     control={
                         <SliderControl
                             min={0} max={1} step={0.05}
-                            value={(s()["notify:sounds:volume"] as number) ?? 0.6}
+                            value={(s()["notify:sounds:volume"] as number) ?? DEFAULT_MASTER_VOLUME}
                             onChange={(v) => set("notify:sounds:volume", v)}
                         />
                     }
@@ -112,7 +113,7 @@ export function SoundsSection(): JSX.Element {
                     control={
                         <SliderControl
                             min={0} max={1} step={0.05}
-                            value={(s()["notify:tooltones:volume"] as number) ?? 0.15}
+                            value={(s()["notify:tooltones:volume"] as number) ?? DEFAULT_TOOLTONES_VOLUME}
                             onChange={(v) => set("notify:tooltones:volume", v)}
                         />
                     }
