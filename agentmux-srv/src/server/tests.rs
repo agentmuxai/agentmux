@@ -417,6 +417,85 @@ async fn host_ipc_register_sets_state() {
     assert!(json["success"].as_bool().unwrap());
 }
 
+// Regression test for a P0 flagged in review (reagent, 2026-08-19, PR #2662):
+// `host_ipc.Register` unconditionally overwrote `state.host_ipc` with
+// whatever the caller supplied. Every route on `/agentmux/service` shares
+// ONE instance-wide `X-AuthKey` — including agent-spawned processes, which
+// can read that key from their own environment via a shell command — so
+// any agent could re-register a fake port/token and silently redirect
+// every other agent's UIScreenshot/UIClick/UIQuery to an attacker-controlled
+// endpoint for the rest of the session, with no self-heal (the real host
+// only registers once, at startup). Fixed: once registered, a DIFFERENT
+// port/token is rejected outright (closing the hijack to, at most, an
+// unwinnable race against the real host's own startup registration); an
+// IDENTICAL re-registration (a legitimate retry) is still accepted as a
+// harmless no-op.
+#[tokio::test]
+async fn host_ipc_register_rejects_a_conflicting_second_registration() {
+    let app = test_router();
+
+    let first = Request::builder()
+        .uri("/agentmux/service")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            r#"{"service":"host_ipc","method":"Register","args":[9999,"real-host-token"]}"#,
+        ))
+        .unwrap();
+    let resp = app.clone().oneshot(first).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(json["success"].as_bool().unwrap(), "first registration should succeed");
+
+    // A spoofed re-registration with DIFFERENT credentials — the attack
+    // reagent flagged — must be rejected, not silently accepted.
+    let spoof = Request::builder()
+        .uri("/agentmux/service")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            r#"{"service":"host_ipc","method":"Register","args":[6666,"attacker-token"]}"#,
+        ))
+        .unwrap();
+    let resp = app.clone().oneshot(spoof).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        !json["success"].as_bool().unwrap_or(false),
+        "a conflicting re-registration must be rejected"
+    );
+
+    // An IDENTICAL re-registration (e.g. a legitimate retry) is still a
+    // harmless no-op, not an error.
+    let retry = Request::builder()
+        .uri("/agentmux/service")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            r#"{"service":"host_ipc","method":"Register","args":[9999,"real-host-token"]}"#,
+        ))
+        .unwrap();
+    let resp = app.oneshot(retry).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        json["success"].as_bool().unwrap(),
+        "an identical re-registration should be accepted as a no-op"
+    );
+}
+
 #[tokio::test]
 async fn ui_click_requires_host_registration_first() {
     let app = test_router();

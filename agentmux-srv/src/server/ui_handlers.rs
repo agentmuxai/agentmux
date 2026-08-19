@@ -63,6 +63,33 @@ fn err_response(status: StatusCode, e: String) -> Response {
     (status, Json(json!({ "ok": false, "error": e }))).into_response()
 }
 
+/// Delete `*.png` files in `dir` older than [`SCREENSHOT_RETENTION`]. Called
+/// on every `UIScreenshot` write since this directory only ever grows
+/// otherwise (reagent P2, PR #2662) — no background scheduler needed for a
+/// directory nothing else writes to. Best-effort: any I/O error for an
+/// individual entry (permissions, a concurrent delete, a non-UTF8 name) is
+/// skipped rather than failing the screenshot request that triggered it.
+const SCREENSHOT_RETENTION: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
+fn prune_old_screenshots(dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("png") {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else { continue };
+        let Ok(modified) = metadata.modified() else { continue };
+        let Ok(age) = now.duration_since(modified) else { continue };
+        if age > SCREENSHOT_RETENTION {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
 /// `POST /api/v1/ui/screenshot` — backs the `UIScreenshot` MCP tool.
 /// Captures a PNG clipped to the caller's own pane, writes it to
 /// `<wave_data_dir>/tmp/ui-screenshots/<uuid>.png`, and returns both the
@@ -129,6 +156,11 @@ pub(crate) async fn handle_ui_screenshot(
             format!("write screenshot: {e}"),
         );
     }
+    // Unbounded growth over repeated/looped verification calls otherwise
+    // (reagent P2, PR #2662, 2026-08-19) — no expiry mechanism existed at
+    // all. Best-effort, on the write path rather than a background task:
+    // simple and sufficient for a directory that's only ever written here.
+    prune_old_screenshots(&dir);
 
     tracing::info!(
         block_id = %req.block_id,
@@ -221,4 +253,37 @@ pub(crate) async fn handle_ui_query(
     tracing::info!(block_id = %req.block_id, selector = %req.selector, "[ui-automation] query");
     let data = host_resp.get("data").cloned().unwrap_or(json!({ "matches": [] }));
     (StatusCode::OK, Json(json!({ "ok": true, "data": data }))).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{prune_old_screenshots, SCREENSHOT_RETENTION};
+
+    #[test]
+    fn prune_old_screenshots_deletes_only_stale_pngs() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let fresh = dir.path().join("fresh.png");
+        std::fs::write(&fresh, b"png").unwrap();
+
+        let stale = dir.path().join("stale.png");
+        std::fs::write(&stale, b"png").unwrap();
+        let old_time = std::time::SystemTime::now() - (SCREENSHOT_RETENTION * 2);
+        let file = std::fs::File::options().write(true).open(&stale).unwrap();
+        file.set_times(std::fs::FileTimes::new().set_modified(old_time))
+            .unwrap();
+
+        // Non-PNG files must never be touched, however old.
+        let other = dir.path().join("notes.txt");
+        std::fs::write(&other, b"keep me").unwrap();
+        let file = std::fs::File::options().write(true).open(&other).unwrap();
+        file.set_times(std::fs::FileTimes::new().set_modified(old_time))
+            .unwrap();
+
+        prune_old_screenshots(dir.path());
+
+        assert!(fresh.exists(), "fresh screenshot must survive pruning");
+        assert!(!stale.exists(), "stale screenshot must be pruned");
+        assert!(other.exists(), "non-png files must never be pruned");
+    }
 }
