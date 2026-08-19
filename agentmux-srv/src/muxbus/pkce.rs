@@ -64,6 +64,27 @@ pub fn cancel_active_login() -> bool {
     let mut guard = ACTIVE_LOGIN.lock().unwrap();
     match guard.take() {
         Some((id, handle)) => {
+            // ACTIVE_LOGIN is only ever overwritten by the NEXT login's
+            // critical section — nothing clears it when a flow resolves
+            // naturally (`Ok` or a real, non-cancelled `Err`). So this can
+            // find a stale entry whose task already finished on its own,
+            // possibly long ago; `AbortHandle::abort()` on a finished task
+            // is a documented no-op. Reporting `true` here for that case
+            // would tell the caller "cancelled" for a login that actually
+            // succeeded/failed by itself, and would push `id` into
+            // CANCELLED_IDS, which nothing on the natural-completion path
+            // in `run_pkce_login` ever pops — leaking one entry per
+            // occurrence for the life of the process (reagent P1, PR
+            // #2661, re-review 2026-08-19). Checking `is_finished()` first
+            // closes the common case (a stale entry sitting there for any
+            // length of time before this call). A narrower race remains —
+            // the task can still finish in the gap between this check and
+            // `abort()` below taking effect — closed instead by
+            // `run_pkce_login` cleaning up its own id on every resolution
+            // path, not just the cancelled one.
+            if handle.is_finished() {
+                return false;
+            }
             CANCELLED_IDS.lock().unwrap().push(id);
             handle.abort();
             true
@@ -98,7 +119,19 @@ pub async fn run_pkce_login(
         task
     };
     match task.await {
-        Ok(r) => r,
+        Ok(r) => {
+            // The flow resolved naturally. `cancel_active_login()`'s
+            // `is_finished()` guard closes the common case, but a narrow
+            // race remains: the task can complete in the gap between that
+            // check and its `abort()` call taking effect (tokio: an abort
+            // request against an already-completing task is ignored, the
+            // task "will run to completion" per its own docs), which would
+            // have pushed `my_id` into CANCELLED_IDS just before this arm
+            // runs. Nothing else on this path ever pops it — clean it up
+            // here so it can't leak.
+            CANCELLED_IDS.lock().unwrap().retain(|&id| id != my_id);
+            r
+        }
         Err(e) if e.is_cancelled() => {
             let mut cancelled = CANCELLED_IDS.lock().unwrap();
             if let Some(pos) = cancelled.iter().position(|&id| id == my_id) {
@@ -108,7 +141,12 @@ pub async fn run_pkce_login(
                 Err("this login attempt was superseded by a newer one".to_string())
             }
         }
-        Err(e) => Err(format!("login task failed: {e}")),
+        Err(e) => {
+            // Same residual-race cleanup as the Ok(r) arm above, for a
+            // flow that failed on its own (not via cancellation).
+            CANCELLED_IDS.lock().unwrap().retain(|&id| id != my_id);
+            Err(format!("login task failed: {e}"))
+        }
     }
 }
 
@@ -448,6 +486,42 @@ Connection: close
         format!("http://{addr}")
     }
 
+    /// Like `spawn_fake_relay`, but GET polls report `"failed"` immediately
+    /// — lets a test drive a flow to a *natural* (non-cancelled) resolution
+    /// quickly, instead of waiting out the real 5-minute timeout.
+    async fn spawn_fake_failing_relay() -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else { return };
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 2048];
+                    let Ok(n) = stream.read(&mut buf).await else { return };
+                    let req = std::str::from_utf8(&buf[..n]).unwrap_or("");
+                    let body = if req.starts_with("POST /api/login-relay") {
+                        r#"{"status":"pending","ttl_seconds":300}"#
+                    } else {
+                        r#"{"status":"failed","error":"access_denied"}"#
+                    };
+                    let resp = format!(
+                        "HTTP/1.1 {}
+Content-Type: application/json
+Content-Length: {}
+Connection: close
+
+{}",
+                        if req.starts_with("POST") { "201 Created" } else { "200 OK" },
+                        body.len(),
+                        body
+                    );
+                    let _ = stream.write_all(resp.as_bytes()).await;
+                });
+            }
+        });
+        format!("http://{addr}")
+    }
+
     // ACTIVE_LOGIN / CANCELLED_IDS are process-global statics — by
     // design, only one login flow may exist per process. Cargo runs tests
     // in this file on parallel threads of the same process by default, so
@@ -605,6 +679,45 @@ Connection: close
             h.abort();
         }
         flow_c.abort();
+        std::env::remove_var("AGENTMUX_MUXBUS_REST_URL");
+    }
+
+    // Regression test for reagent's P1 re-review (PR #2661, 2026-08-19):
+    // ACTIVE_LOGIN was never cleared when a flow resolved naturally (`Ok`
+    // or a real, non-cancelled `Err`), so a `muxbus.login.cancel` call any
+    // time afterward found a stale entry pointing at a finished task's
+    // (harmless, no-op) AbortHandle — reporting a misleading "cancelled"
+    // success for a login that had already succeeded/failed on its own,
+    // and leaking one u64 into CANCELLED_IDS forever (nothing on the
+    // natural-completion path ever popped it). Fixed by having
+    // cancel_active_login() check AbortHandle::is_finished() before
+    // treating a take() as a real cancellation, plus having run_pkce_login
+    // clean up its own id from CANCELLED_IDS on every resolution path, not
+    // just the cancelled one.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cancelling_after_natural_completion_is_a_noop_and_does_not_leak() {
+        let _serial = TEST_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let relay = spawn_fake_failing_relay().await;
+        std::env::set_var("AGENTMUX_MUXBUS_REST_URL", &relay);
+
+        let http = reqwest::Client::new();
+        let result = run_pkce_login("http://127.0.0.1:1", "test-client", &http).await;
+        assert!(
+            result.as_ref().is_err_and(|e| e.contains("Cognito returned error")),
+            "expected the flow to fail on its own via the relay's failed status, got: {result:?}"
+        );
+
+        // The flow already resolved naturally — a cancel call now must be a
+        // no-op, not a misleading "cancelled" success.
+        assert!(
+            !cancel_active_login(),
+            "cancelling an already-resolved login must report nothing to cancel"
+        );
+        assert!(
+            CANCELLED_IDS.lock().unwrap().is_empty(),
+            "a naturally-resolved flow must never leave a CANCELLED_IDS entry behind"
+        );
+
         std::env::remove_var("AGENTMUX_MUXBUS_REST_URL");
     }
 }
