@@ -43,24 +43,28 @@ fn relay_base_url() -> String {
 // a port another live socket already holds) the browser's redirect lands on
 // whichever listener the OS picks — a 400 state-mismatch coin flip. The newest
 // attempt is the one the user actually wants: abort the predecessor.
-static ACTIVE_LOGIN: std::sync::Mutex<Option<tokio::task::AbortHandle>> =
+//
+// Each flow gets a monotonic generation id (NEXT_LOGIN_ID), stored alongside
+// its abort handle. A prior design tracked "was this abort a user Cancel?"
+// in a single shared CANCELLED_BY_USER flag instead of per-attempt — that
+// was a real bug (Codex + reagent review, PR #2661, 2026-08-19): if flow A
+// is cancelled but a *different* flow B starts and is itself superseded by
+// C before A's own `task.await` resumes, nothing guarantees which of A/B
+// reads the shared flag first — the two flows' error messages could swap.
+// Keying the cancellation record on the generation id makes that
+// structurally impossible: each flow only ever looks up its OWN id.
+static NEXT_LOGIN_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+static ACTIVE_LOGIN: std::sync::Mutex<Option<(u64, tokio::task::AbortHandle)>> =
     std::sync::Mutex::new(None);
-
-// Set immediately before cancel_active_login() aborts the task, so the
-// aborted flow's own `Err(e) if e.is_cancelled()` branch can tell "the user
-// clicked Cancel" apart from "a newer muxbus.login call superseded this one"
-// — same underlying tokio abort, different message the frontend needs to
-// react to differently (see HostPopover.tsx's Cancel button).
-static CANCELLED_BY_USER: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+static CANCELLED_IDS: std::sync::Mutex<Vec<u64>> = std::sync::Mutex::new(Vec::new());
 
 /// Abort the in-flight login flow, if any. Returns false if there was none
 /// (a harmless no-op — the UI can call this without checking state first).
 pub fn cancel_active_login() -> bool {
     let mut guard = ACTIVE_LOGIN.lock().unwrap();
     match guard.take() {
-        Some(handle) => {
-            CANCELLED_BY_USER.store(true, std::sync::atomic::Ordering::SeqCst);
+        Some((id, handle)) => {
+            CANCELLED_IDS.lock().unwrap().push(id);
             handle.abort();
             true
         }
@@ -73,6 +77,8 @@ pub async fn run_pkce_login(
     client_id: &str,
     http_client: &reqwest::Client,
 ) -> Result<PkceResult, String> {
+    let my_id = NEXT_LOGIN_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
     // Abort-predecessor and register-successor must be one critical section:
     // with separate lock acquisitions, two concurrent muxbus.login RPCs can
     // both take() None and neither aborts the other (reagent P1 on this PR).
@@ -80,7 +86,7 @@ pub async fn run_pkce_login(
     // across it is fine — the guard never spans an await.
     let task = {
         let mut guard = ACTIVE_LOGIN.lock().unwrap();
-        if let Some(prev) = guard.take() {
+        if let Some((_, prev)) = guard.take() {
             prev.abort();
         }
         let task = tokio::spawn(run_pkce_login_inner(
@@ -88,13 +94,15 @@ pub async fn run_pkce_login(
             client_id.to_string(),
             http_client.clone(),
         ));
-        *guard = Some(task.abort_handle());
+        *guard = Some((my_id, task.abort_handle()));
         task
     };
     match task.await {
         Ok(r) => r,
         Err(e) if e.is_cancelled() => {
-            if CANCELLED_BY_USER.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            let mut cancelled = CANCELLED_IDS.lock().unwrap();
+            if let Some(pos) = cancelled.iter().position(|&id| id == my_id) {
+                cancelled.remove(pos);
                 Err("sign-in cancelled".to_string())
             } else {
                 Err("this login attempt was superseded by a newer one".to_string())
@@ -483,7 +491,7 @@ Connection: close
         assert!(!flow_b.is_finished(), "flow B should still be polling the relay");
 
         // Cleanup: abort B's inner flow via the registry.
-        if let Some(h) = ACTIVE_LOGIN.lock().unwrap().take() {
+        if let Some((_, h)) = ACTIVE_LOGIN.lock().unwrap().take() {
             h.abort();
         }
         flow_b.abort();
@@ -530,5 +538,73 @@ Connection: close
     async fn cancel_with_no_active_login_is_a_noop() {
         let _serial = TEST_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         assert!(!cancel_active_login());
+    }
+
+    // Regression test for a real bug caught in code review (Codex + reagent,
+    // 2026-08-19, PR #2661): the original fix tracked "was this abort a user
+    // Cancel?" in a single process-global flag. Flow A gets cancelled by the
+    // user (flag set), then — before A's own `task.await` resumes and reads
+    // the flag — flow B starts and is itself superseded by flow C. Nothing
+    // guarantees which task's continuation the executor resumes first, so
+    // whichever of A/B checks the flag first "steals" it: the two flows'
+    // error messages ("cancelled" vs "superseded") can end up swapped. Fixed
+    // by keying the cancellation record on a per-attempt generation id
+    // instead of a single shared flag, so each flow can only ever observe
+    // its OWN cancellation record — this test asserts that invariant
+    // directly rather than trying to force a specific race outcome (which
+    // isn't reliably controllable from a test).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cancelling_one_flow_never_leaks_into_a_concurrent_unrelated_flow() {
+        let _serial = TEST_SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let relay = spawn_fake_relay().await;
+        std::env::set_var("AGENTMUX_MUXBUS_REST_URL", &relay);
+        let http = reqwest::Client::new();
+
+        // Flow A: the user-cancel path.
+        let flow_a = tokio::spawn({
+            let http = http.clone();
+            async move { run_pkce_login("http://127.0.0.1:1", "test-client", &http).await }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        assert!(cancel_active_login(), "expected flow A to be active and cancellable");
+
+        // Flow B, then C superseding B — the "superseded" path, unrelated to
+        // A's cancel. Started immediately after A's cancel so A's own
+        // task.await may not have resumed yet when B/C run.
+        let flow_b = tokio::spawn({
+            let http = http.clone();
+            async move { run_pkce_login("http://127.0.0.1:1", "test-client", &http).await }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let flow_c = tokio::spawn({
+            let http = http.clone();
+            async move { run_pkce_login("http://127.0.0.1:1", "test-client", &http).await }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+        let a = tokio::time::timeout(std::time::Duration::from_secs(2), flow_a)
+            .await
+            .expect("flow A should resolve promptly")
+            .expect("flow A task must not panic");
+        let b = tokio::time::timeout(std::time::Duration::from_secs(2), flow_b)
+            .await
+            .expect("flow B should resolve promptly after being superseded by C")
+            .expect("flow B task must not panic");
+
+        assert!(
+            a.as_ref().is_err_and(|e| e.contains("cancelled")),
+            "flow A was user-cancelled, got: {a:?}"
+        );
+        assert!(
+            b.as_ref().is_err_and(|e| e.contains("superseded")),
+            "flow B was superseded by C (never cancelled), got: {b:?}"
+        );
+
+        // Cleanup: abort C's inner flow via the registry.
+        if let Some((_, h)) = ACTIVE_LOGIN.lock().unwrap().take() {
+            h.abort();
+        }
+        flow_c.abort();
+        std::env::remove_var("AGENTMUX_MUXBUS_REST_URL");
     }
 }
