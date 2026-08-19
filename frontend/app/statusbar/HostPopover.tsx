@@ -288,10 +288,14 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                                     type="button"
                                     class="muxbus-login-chip muxbus-login-chip-signin"
                                     style={{ "margin-left": "auto", height: "auto", padding: "1px 8px" }}
-                                    disabled={muxbus.loading()}
-                                    onClick={() => void muxbus.connect()}
+                                    title={muxbus.loading() ? "Cancel sign-in" : undefined}
+                                    onClick={() => void (muxbus.loading() ? muxbus.cancel() : muxbus.connect())}
                                 >
-                                    {muxbus.loading() ? "●···" : muxbus.status()?.connected ? "Expired — re-login" : "Sign in"}
+                                    {muxbus.loading()
+                                        ? "Cancel"
+                                        : muxbus.status()?.connected
+                                          ? "Expired — re-login"
+                                          : "Sign in"}
                                 </button>
                             }
                         >
