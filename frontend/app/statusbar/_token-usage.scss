@@ -128,6 +128,13 @@
         color: var(--main-text-color);
     }
 
+    .token-usage-breakdown-cache-rate {
+        padding: 2px var(--space-3) 0;
+        color: var(--secondary-text-color);
+        font-size: 10px;
+        text-align: right;
+    }
+
     .token-usage-breakdown-empty {
         padding: var(--space-3) var(--space-3);
         color: var(--secondary-text-color);
