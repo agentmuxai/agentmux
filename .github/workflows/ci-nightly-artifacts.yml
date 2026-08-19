@@ -10,6 +10,16 @@ name: CI — nightly artifacts (all platforms)
 #          agentmuxai/cef releases via CEF_RUNTIME_TOKEN + cached by CEF tag.
 #
 # Standard runners only (free on public repos for any workload; CI-1).
+#
+# Each platform's build (CEF-runtime provisioning + packaging) is delegated
+# to that platform's own build-*.yml as a reusable workflow_call, the same
+# composition release.yml already uses (release-tag left blank here — nightly
+# artifacts upload to Actions artifacts only, never to a GitHub Release).
+# This used to inline a full copy of each platform's CEF-provisioning block
+# (~100+ lines per platform, including CEF_RUNTIME_TOKEN handling and the
+# "gh release list order isn't publish-time-descending" workaround) — that
+# logic now exists exactly once per platform, in build-*.yml.
+# Flagged by the weekly architecture analyst (ARCH-003, 2026-08-18 report).
 
 on:
   schedule:
@@ -18,353 +28,34 @@ on:
 
 jobs:
   windows:
-    name: Windows portable + installer
-    runs-on: windows-latest
-    env:
-      CEF_RUNTIME_DIR_WINDOWS: ${{ github.workspace }}/cef-runtime-windows
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-
-      # Ninja: CEF's C wrapper (cef-dll-sys) needs CMake + Ninja; CMake ships
-      # with VS on this runner. go-task: scripts/package.sh delegates build
-      # steps to `task`. innosetup: package-installer.ps1 needs ISCC.
-      - name: Install build tools (Ninja, go-task, Inno Setup)
-        shell: pwsh
-        run: choco install ninja go-task innosetup -y
-
-      - uses: Swatinem/rust-cache@v2
-
-      # Codec-enabled CEF runtime — same pattern as the linux job's patched
-      # libcef.so provisioning below, adapted for Windows (libcef.dll, .zip,
-      # AGENTMUX_CEF_RUNTIME_DIR_WINDOWS). See
-      # docs/specs/SPEC_CEF_PROPRIETARY_CODECS_ALL_PLATFORMS_2026_07_26.md.
-      - name: Resolve codec-enabled CEF runtime tag
-        id: cef
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.CEF_RUNTIME_TOKEN }}
-        run: |
-          # gh release list's default order is NOT reliably publish-time-descending on
-          # this fork — sort by publishedAt explicitly rather than trusting [0]. See
-          # docs/specs/STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md.
-          TAG=$(gh release list --repo agentmuxai/cef --limit 30 \
-                  --json tagName,publishedAt \
-                  --jq '[.[] | select(.tagName | startswith("cef-windows-x86_64-"))] | sort_by(.publishedAt) | reverse | .[0].tagName')
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-
-      - name: Cache codec-enabled CEF runtime
-        id: cef-cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.CEF_RUNTIME_DIR_WINDOWS }}
-          key: cef-runtime-windows-${{ steps.cef.outputs.tag }}
-
-      # `Expand-Archive`, not bash `unzip`: the release zip is produced by
-      # PowerShell's `Compress-Archive` (docs/cef-build/build-patched-cef-windows.md
-      # §7), which stores internal entries with backslash path separators.
-      # Info-ZIP's `unzip` (the bash job's prior tool here) can't parse those
-      # as nested directories — it silently flattens/mangles them, so the
-      # libcef.dll lookup below always failed with "not found in zip" on any
-      # cache miss. Extracting with the same .NET zip implementation that
-      # created the archive round-trips correctly. See
-      # docs/retro/retro-nightly-windows-cef-zip-backslash-paths-2026-07-29.md.
-      - name: Download codec-enabled CEF runtime
-        if: steps.cef-cache.outputs.cache-hit != 'true'
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.CEF_RUNTIME_TOKEN }}
-        run: |
-          $extractDir = "$env:RUNNER_TEMP\cef-extract"
-          New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
-          New-Item -ItemType Directory -Force -Path $env:CEF_RUNTIME_DIR_WINDOWS | Out-Null
-          gh release download "${{ steps.cef.outputs.tag }}" `
-            --repo agentmuxai/cef --pattern "*.zip" `
-            --dir $extractDir --clobber
-          $zip = Get-ChildItem "$extractDir\*.zip" | Select-Object -First 1
-          if (-not $zip) { Write-Error "ERROR: no .zip downloaded from release"; exit 1 }
-          Expand-Archive -Path $zip.FullName -DestinationPath "$extractDir\unpacked" -Force
-          $libcef = Get-ChildItem -Path "$extractDir\unpacked" -Filter "libcef.dll" -Recurse | Select-Object -First 1
-          if (-not $libcef) { Write-Error "ERROR: libcef.dll not found in zip"; exit 1 }
-          Copy-Item -Path "$($libcef.DirectoryName)\*" -Destination $env:CEF_RUNTIME_DIR_WINDOWS -Recurse -Force
-          Remove-Item -Recurse -Force $extractDir
-
-      - name: Set AGENTMUX_CEF_RUNTIME_DIR_WINDOWS
-        shell: bash
-        run: echo "AGENTMUX_CEF_RUNTIME_DIR_WINDOWS=$CEF_RUNTIME_DIR_WINDOWS" >> "$GITHUB_ENV"
-
-      # Full build + assemble portable. Outputs:
-      #   artifacts/agentmux-<LABEL>-x64-portable/   ← unpacked tree
-      #   artifacts/agentmux-<LABEL>-x64-portable.zip
-      # RELEASE_CHANNEL=stable so the artifact opens the user's real data dir.
-      # STRIP_MAPS=1 removes ~28 MB of source maps (release build).
-      # rcedit is self-downloading (curl in scripts/inject-exe-icon.sh).
-      - name: Build portable (task package:release)
-        shell: bash
-        run: |
-          mkdir -p "$GITHUB_WORKSPACE/artifacts"
-          STRIP_MAPS=1 RELEASE_CHANNEL=stable bash scripts/package.sh "$GITHUB_WORKSPACE/artifacts"
-
-      # Inno Setup installer. package-installer.ps1 defaults to picking the
-      # newest portable on the Desktop; we discover it in artifacts/ instead.
-      # Output: artifacts/AgentMux-<ver>-x64-setup.exe
-      - name: Build installer (task package:installer)
-        shell: pwsh
-        run: |
-          $artifacts = Join-Path $env:GITHUB_WORKSPACE "artifacts"
-          $portableDir = Get-ChildItem $artifacts -Directory -Filter "agentmux-*-x64-portable" |
-                         Sort-Object LastWriteTime -Descending |
-                         Select-Object -First 1 -ExpandProperty FullName
-          if (-not $portableDir) { throw "portable dir not found in $artifacts" }
-          Write-Host "Portable: $portableDir"
-          & (Join-Path $env:GITHUB_WORKSPACE "scripts\package-installer.ps1") `
-            -PortableDir $portableDir `
-            -OutputDir $artifacts
-
-      # MSIX for Microsoft Store submission. makeappx.exe ships with the
-      # Windows 10 SDK pre-installed on windows-latest. Microsoft re-signs
-      # on ingest so no cert is needed here (-Sign omitted).
-      - name: Build MSIX (Store package)
-        shell: pwsh
-        run: |
-          $artifacts = Join-Path $env:GITHUB_WORKSPACE "artifacts"
-          $msixOut   = Join-Path $artifacts "msix"
-          New-Item -ItemType Directory -Force -Path $msixOut | Out-Null
-          $portableDir = Get-ChildItem $artifacts -Directory -Filter "agentmux-*-x64-portable" |
-                         Sort-Object LastWriteTime -Descending |
-                         Select-Object -First 1 -ExpandProperty FullName
-          if (-not $portableDir) { throw "portable dir not found in $artifacts" }
-          Write-Host "Portable: $portableDir"
-          & (Join-Path $env:GITHUB_WORKSPACE "scripts\package-msix.ps1") `
-            -PortableDir $portableDir `
-            -OutputDir   $msixOut `
-            -SkipBuild
-
-      - name: Upload portable ZIP
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-portable
-          path: ${{ github.workspace }}/artifacts/agentmux-*-x64-portable.zip
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Upload installer EXE
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-installer
-          path: ${{ github.workspace }}/artifacts/AgentMux-*-x64-setup.exe
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Upload MSIX
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-msix
-          path: ${{ github.workspace }}/artifacts/msix/AgentMux_*_x64.msix
-          if-no-files-found: error
-          retention-days: 7
+    name: Windows portable + installer + MSIX
+    permissions:
+      contents: write
+    uses: ./.github/workflows/build-windows.yml
+    with:
+      ref: ${{ github.ref }}
+      release-tag: ""
+      cef-runtime-tag: ""
+    secrets: inherit
 
   macos:
     name: macOS arm64 — sign + notarize DMG
-    runs-on: macos-latest
     permissions:
       contents: write
-    env:
-      OUT: ${{ github.workspace }}/artifacts
-      CEF_RUNTIME_DIR_DARWIN: ${{ github.workspace }}/cef-runtime-darwin
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - name: Auth npm for @a5af GitHub Packages
-        run: |
-          {
-            echo "@a5af:registry=https://npm.pkg.github.com"
-            echo "//npm.pkg.github.com/:_authToken=${{ secrets.A5AF_PACKAGES_TOKEN }}"
-          } >> .npmrc
-      - run: npm install
-      - name: Install go-task
-        run: brew install go-task
-      # Patched CEF framework (BeginWindowDrag). Mirrors the Linux block below;
-      # see docs/specs/SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md
-      # Piece 2. Without this, task bundle:darwin falls through to the
-      # cef-dll-sys cargo-cache fallback (stock upstream CEF), which
-      # verify-cef-framework-darwin.sh correctly refuses to package.
-      - name: Resolve patched macOS CEF framework tag
-        id: cef
-        env:
-          GH_TOKEN: ${{ secrets.CEF_RUNTIME_TOKEN }}
-        run: |
-          # gh release list's default order is NOT reliably publish-time-descending on
-          # this fork — sort by publishedAt explicitly rather than trusting [0]. See
-          # docs/specs/STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md.
-          TAG=$(gh release list --repo agentmuxai/cef --limit 30 \
-                  --json tagName,publishedAt \
-                  --jq '[.[] | select(.tagName | startswith("cef-macos-arm64-"))] | sort_by(.publishedAt) | reverse | .[0].tagName')
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-      - name: Cache patched macOS CEF framework
-        id: cef-cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.CEF_RUNTIME_DIR_DARWIN }}
-          key: cef-runtime-darwin-${{ steps.cef.outputs.tag }}
-      - name: Download patched macOS CEF framework
-        if: steps.cef-cache.outputs.cache-hit != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.CEF_RUNTIME_TOKEN }}
-        run: |
-          mkdir -p /tmp/cef-x "$CEF_RUNTIME_DIR_DARWIN"
-          gh release download "${{ steps.cef.outputs.tag }}" \
-            --repo agentmuxai/cef --pattern "*.tar.gz" --dir /tmp/cef-x --clobber
-          tar -xzf /tmp/cef-x/*.tar.gz -C /tmp/cef-x
-          FW=$(find /tmp/cef-x -name "Chromium Embedded Framework.framework" -maxdepth 3 | head -1)
-          if [ -z "$FW" ]; then echo "ERROR: framework not found in tarball"; exit 1; fi
-          ditto "$FW" "$CEF_RUNTIME_DIR_DARWIN/Chromium Embedded Framework.framework"
-          rm -rf /tmp/cef-x
-      - name: Set AGENTMUX_CEF_RUNTIME_DIR_DARWIN
-        run: echo "AGENTMUX_CEF_RUNTIME_DIR_DARWIN=$CEF_RUNTIME_DIR_DARWIN" >> "$GITHUB_ENV"
-      - name: Import Developer ID certificate into temp keychain
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-        run: |
-          KEYCHAIN_PATH="$RUNNER_TEMP/build-${{ github.run_id }}.keychain"
-          KEYCHAIN_PASS="$(uuidgen)"
-          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
-          echo "KEYCHAIN_PASS=$KEYCHAIN_PASS" >> "$GITHUB_ENV"
-          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
-          security default-keychain -s "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
-          security set-keychain-settings -t 3600 -u "$KEYCHAIN_PATH"
-          echo "$APPLE_CERTIFICATE" | base64 --decode > /tmp/cert.p12
-          security import /tmp/cert.p12 \
-            -k "$KEYCHAIN_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" \
-            -T /usr/bin/codesign -T /usr/bin/security
-          rm -f /tmp/cert.p12
-          security set-key-partition-list \
-            -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
-      - name: Store notarytool credentials
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          xcrun notarytool store-credentials "notarytool" \
-            --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" --keychain "$KEYCHAIN_PATH" --no-validate
-      - name: Build, sign, and notarize DMG
-        run: |
-          mkdir -p "$OUT"
-          task package:macos -- "$OUT"
-      - name: Upload DMG
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-dmg
-          path: ${{ env.OUT }}/AgentMux_*_arm64.dmg
-          if-no-files-found: error
-          retention-days: 7
-      - name: Delete temp keychain
-        if: always()
-        run: security delete-keychain "$KEYCHAIN_PATH" 2>/dev/null || true
+    uses: ./.github/workflows/build-macos.yml
+    with:
+      ref: ${{ github.ref }}
+      release-tag: ""
+      cef-runtime-tag: ""
+    secrets: inherit
 
   linux:
     name: Linux x86_64 — AppImage
-    runs-on: ubuntu-22.04
     permissions:
       contents: write
-    env:
-      OUT: ${{ github.workspace }}/artifacts
-      CEF_RUNTIME_DIR: ${{ github.workspace }}/cef-runtime
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          prefix-key: "v1-ubuntu22"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - name: Auth npm for @a5af GitHub Packages
-        run: |
-          {
-            echo "@a5af:registry=https://npm.pkg.github.com"
-            echo "//npm.pkg.github.com/:_authToken=${{ secrets.A5AF_PACKAGES_TOKEN }}"
-          } >> .npmrc
-      - run: npm install
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build \
-            libwayland-dev libxkbcommon-dev libgtk-3-dev \
-            libglib2.0-dev libpango1.0-dev libcairo2-dev \
-            libgdk-pixbuf2.0-dev libatk1.0-dev
-      - name: Install go-task
-        run: sh -c "$(curl --location https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
-      - name: Resolve patched libcef.so tag
-        id: cef
-        env:
-          GH_TOKEN: ${{ secrets.CEF_RUNTIME_TOKEN }}
-        run: |
-          # agentmuxai/cef holds both platforms' releases interleaved by date —
-          # filter by the Linux prefix so a newer macOS tag can't shadow it
-          # (this bit us: the unfiltered --limit 1 grabbed a macOS tarball with
-          # no libcef.so inside, see docs/specs/SPEC_PATCHED_MACOS_CEF_FRAMEWORK_RELEASE_2026_06_29.md).
-          #
-          # gh release list's default order is ALSO not reliably publish-time-descending
-          # on this fork even after filtering to one platform — sort by publishedAt
-          # explicitly rather than trusting [0]. See
-          # docs/specs/STATUS_CEF_PROPRIETARY_CODECS_MACOS_2026_07_27.md.
-          TAG=$(gh release list --repo agentmuxai/cef --limit 30 \
-                  --json tagName,publishedAt \
-                  --jq '[.[] | select(.tagName | startswith("cef-linux-x86_64-"))] | sort_by(.publishedAt) | reverse | .[0].tagName')
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-      - name: Cache patched libcef.so
-        id: cef-cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.CEF_RUNTIME_DIR }}
-          key: cef-runtime-${{ steps.cef.outputs.tag }}
-      - name: Download patched libcef.so
-        if: steps.cef-cache.outputs.cache-hit != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.CEF_RUNTIME_TOKEN }}
-        run: |
-          mkdir -p /tmp/cef-extract "$CEF_RUNTIME_DIR"
-          gh release download "${{ steps.cef.outputs.tag }}" \
-            --repo agentmuxai/cef --pattern "*.tar.gz" \
-            --dir /tmp/cef-extract --clobber
-          tar -xzf /tmp/cef-extract/*.tar.gz -C /tmp/cef-extract
-          LIBCEF=$(find /tmp/cef-extract -name "libcef.so" | head -1)
-          if [ -z "$LIBCEF" ]; then echo "ERROR: libcef.so not found in tarball"; exit 1; fi
-          cp -r "$(dirname "$LIBCEF")/." "$CEF_RUNTIME_DIR/"
-          rm -rf /tmp/cef-extract
-      - name: Set AGENTMUX_CEF_RUNTIME_DIR
-        run: echo "AGENTMUX_CEF_RUNTIME_DIR=$CEF_RUNTIME_DIR" >> "$GITHUB_ENV"
-      - name: Install appimagetool
-        run: |
-          mkdir -p "$HOME/.local/bin"
-          curl -fsSL -o "$HOME/.local/bin/appimagetool" \
-            "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
-          chmod +x "$HOME/.local/bin/appimagetool"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "$GITHUB_ENV"
-      - name: Build AppImage
-        run: |
-          mkdir -p "$OUT"
-          RELEASE_CHANNEL=stable bash scripts/package-linux.sh "$OUT"
-      - name: Upload AppImage
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-appimage
-          path: ${{ env.OUT }}/AgentMux_*_amd64.AppImage
-          if-no-files-found: error
-          retention-days: 7
+    uses: ./.github/workflows/build-linux.yml
+    with:
+      ref: ${{ github.ref }}
+      release-tag: ""
+      cef-runtime-tag: ""
+    secrets: inherit
