@@ -694,6 +694,9 @@ export function update(
             const next = {
                 input: command.input,
                 output: state.turnTokens?.output ?? 0,
+                freshInput: command.freshInput,
+                cacheCreation: command.cacheCreation,
+                cacheRead: command.cacheRead,
             };
             // Learn the context window from the resolved model + observed fill
             // (seed-then-high-water-upgrade); null until a recognised model is
@@ -752,6 +755,11 @@ export function update(
             const next = {
                 input: state.turnTokens?.input ?? 0,
                 output: command.output,
+                // Preserve the breakdown from the last TokensIn — TokensOut
+                // never carries its own, only replaces `output`.
+                freshInput: state.turnTokens?.freshInput,
+                cacheCreation: state.turnTokens?.cacheCreation,
+                cacheRead: state.turnTokens?.cacheRead,
             };
             const nextState = bumpEvent(
                 { ...state, turnTokens: next },
@@ -1371,10 +1379,22 @@ function mergeStats(
             ...stats,
             input_tokens: stats.input_tokens || tokens?.input,
             output_tokens: stats.output_tokens || tokens?.output,
+            // Same fallback logic as input_tokens/output_tokens above,
+            // applied to the cache breakdown — prefer the result event's
+            // own breakdown, fall back to the live turn-tokens' breakdown.
+            fresh_input_tokens: stats.fresh_input_tokens ?? tokens?.freshInput,
+            cache_creation_input_tokens: stats.cache_creation_input_tokens ?? tokens?.cacheCreation,
+            cache_read_input_tokens: stats.cache_read_input_tokens ?? tokens?.cacheRead,
         };
     }
     if (tokens) {
-        return { input_tokens: tokens.input, output_tokens: tokens.output };
+        return {
+            input_tokens: tokens.input,
+            output_tokens: tokens.output,
+            fresh_input_tokens: tokens.freshInput,
+            cache_creation_input_tokens: tokens.cacheCreation,
+            cache_read_input_tokens: tokens.cacheRead,
+        };
     }
     return null;
 }
@@ -1396,6 +1416,13 @@ function accumulateStats(
         duration_ms: (totals?.duration_ms ?? 0) + (merged.duration_ms ?? 0),
         input_tokens: (totals?.input_tokens ?? 0) + (merged.input_tokens ?? 0),
         output_tokens: (totals?.output_tokens ?? 0) + (merged.output_tokens ?? 0),
+        // Same accumulate-not-replace treatment as input_tokens/output_tokens
+        // above, for the cache breakdown. See fresh_input_tokens' doc comment
+        // in view/agent/types.ts for why this split matters.
+        fresh_input_tokens: (totals?.fresh_input_tokens ?? 0) + (merged.fresh_input_tokens ?? 0),
+        cache_creation_input_tokens:
+            (totals?.cache_creation_input_tokens ?? 0) + (merged.cache_creation_input_tokens ?? 0),
+        cache_read_input_tokens: (totals?.cache_read_input_tokens ?? 0) + (merged.cache_read_input_tokens ?? 0),
         num_turns: (totals?.num_turns ?? 0) + (merged.num_turns ?? 1),
     };
 }
