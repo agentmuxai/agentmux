@@ -32,7 +32,7 @@ export const SERVICE_CATALOG: ServiceTile[] = [
     // PKCE), not a per-credential OAuth/Key account: the gallery intercepts its
     // tile click to open a dedicated connect panel, so `authModes`/`keyKind`
     // below are inert placeholders kept only to satisfy the ServiceTile shape.
-    { id: "agentmux", displayName: "AgentMux", authModes: ["oauth"], keyKind: "api_key", blurb: "AgentMux Cloud sign-in" },
+    { id: "agentmux", displayName: "AgentMux", authModes: ["oauth"], keyKind: "api_key", blurb: "AmuxWS" },
     { id: "github", displayName: "GitHub", authModes: ["oauth", "key"], keyKind: "pat", blurb: "Repos, Actions, PRs" },
     { id: "google", displayName: "Google", authModes: ["oauth"], keyKind: "api_key", blurb: "Workspace, Cloud" },
     // AWS OAuth (IAM Identity Center / OIDC device) isn't wired in the backend

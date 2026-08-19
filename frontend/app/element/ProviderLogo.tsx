@@ -20,26 +20,27 @@ import githubSvg from "@lobehub/icons-static-svg/icons/github.svg?raw";
 import awsSvg from "@lobehub/icons-static-svg/icons/aws-color.svg?raw";
 import plandexUrl from "@/app/element/icons/plandex.png?url";
 import brainSvg from "@/app/asset/logo-brain.svg?raw";
+import blocksLogoUrl from "@/app/asset/logo-blocks.png?url";
 import type { JSX } from "solid-js";
 
 // Several of the raw SVGs above (notably logo-brain.svg, whose 16-stop
-// gradient illustration renders AgentMux's brand mark) define internal
+// gradient illustration renders the "muxcode" brand mark) define internal
 // `<linearGradient id="...">`s with plain, non-unique ids and reference
 // them via `fill="url(#...)"`. `innerHTML`-mounting the SAME raw markup
-// more than once on one page (e.g. the Armory Accounts gallery tile AND
-// the connected-accounts row both showing the AgentMux icon at once)
-// creates duplicate ids — the browser resolves every `url(#id)` reference
-// to whichever element with that id appears FIRST in the document,
-// regardless of which copy defined it. Since these are userSpace-style
-// gradients positioned relative to their OWN originally-inlined copy's
-// geometry, every instance after the first paints with a gradient
-// positioned for a shape it doesn't belong to — in practice, invisible
-// (live-confirmed via CDP: a second inlined copy's path resolved its
-// gradient fill to the FIRST copy's element). Live symptom: the AgentMux
-// icon renders blank in Armory Accounts once both the tile and the
-// connected row are visible together (post-`SPEC_ARMORY_RESPONSIVE_SINGLE_PANE_LAYOUT`,
-// both are now always in the same continuous scroll, not hidden in a
-// separate scroll region).
+// more than once on one page (e.g. a gallery tile AND a connected-accounts
+// row both showing the same gradient-SVG icon at once) creates duplicate
+// ids — the browser resolves every `url(#id)` reference to whichever
+// element with that id appears FIRST in the document, regardless of which
+// copy defined it. Since these are userSpace-style gradients positioned
+// relative to their OWN originally-inlined copy's geometry, every instance
+// after the first paints with a gradient positioned for a shape it doesn't
+// belong to — in practice, invisible (live-confirmed via CDP: a second
+// inlined copy's path resolved its gradient fill to the FIRST copy's
+// element). This is why the `agentmux` provider below renders from a flat
+// PNG (`logo-blocks.png`) rather than an inline gradient SVG — it sidesteps
+// the collision entirely, in addition to matching the app's primary icon
+// (the stacked-rectangles mark, not the brain alternate — see
+// `docs/specs/linux-icon-and-desktop-2026-05-03.md`).
 //
 // Fix: give every mounted instance's internal ids a unique suffix before
 // setting innerHTML, so each copy's gradients/references only ever
@@ -100,10 +101,9 @@ export const ProviderLogo = (props: ProviderLogoProps): JSX.Element => {
 
         if (p === "muxcode" || p === "mux-code" || p === "mux_code") return { html: brainSvg };
 
-        // AgentMux's own brand mark — the brain-alternate logo. `brainSvg`
-        // (@/app/asset/logo-brain.svg) is byte-identical to the source
-        // frontend/logos/agentmux-logo-brain-alternate.svg.
-        if (p === "agentmux") return { html: brainSvg };
+        // AgentMux's own brand mark — the primary stacked-rectangles app
+        // icon (`assets/favicon-300x300.png`), not the brain-alternate logo.
+        if (p === "agentmux") return { png: blocksLogoUrl };
 
         // Handcrafted multi-color Slack mark (the package ships only a mono
         // variant; the brand is recognized by its four colors).
