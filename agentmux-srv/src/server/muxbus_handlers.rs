@@ -3,10 +3,11 @@
 
 //! MuxBus cloud connectivity RPC handlers.
 //!
-//! Three commands:
-//!   * `muxbus.login`      — PKCE browser flow (blocks until complete or timeout)
-//!   * `muxbus.status`     — current credential status
-//!   * `muxbus.disconnect` — clear stored credentials
+//! Four commands:
+//!   * `muxbus.login`        — PKCE browser flow (blocks until complete or timeout)
+//!   * `muxbus.login.cancel` — abort an in-flight `muxbus.login` (e.g. user closed the browser)
+//!   * `muxbus.status`       — current credential status
+//!   * `muxbus.disconnect`   — clear stored credentials
 
 use std::sync::Arc;
 
@@ -17,6 +18,7 @@ use crate::backend::rpc::engine::WshRpcEngine;
 use super::AppState;
 
 pub const COMMAND_MUXBUS_LOGIN: &str = "muxbus.login";
+pub const COMMAND_MUXBUS_LOGIN_CANCEL: &str = "muxbus.login.cancel";
 pub const COMMAND_MUXBUS_STATUS: &str = "muxbus.status";
 pub const COMMAND_MUXBUS_DISCONNECT: &str = "muxbus.disconnect";
 
@@ -34,6 +36,14 @@ struct MuxBusLoginResp {
     email: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MuxBusLoginCancelResp {
+    /// False when there was no in-flight login to cancel (already resolved,
+    /// or never started) — not an error, just nothing to do.
+    cancelled: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -116,6 +126,22 @@ pub fn register_muxbus_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         Ok(Some(serde_json::to_value(resp).unwrap()))
                     }
                 }
+            })
+        }),
+    );
+
+    // muxbus.login.cancel — abort an in-flight muxbus.login. The aborted
+    // flow's own task.await (in run_pkce_login) is what actually resolves
+    // the original muxbus.login RPC call with a "sign-in cancelled" error —
+    // this handler just fires the abort and returns immediately, it does
+    // not wait for that resolution.
+    engine.register_handler(
+        COMMAND_MUXBUS_LOGIN_CANCEL,
+        Box::new(move |_data, _ctx| {
+            Box::pin(async move {
+                let cancelled = crate::muxbus::pkce::cancel_active_login();
+                let resp = MuxBusLoginCancelResp { cancelled };
+                Ok(Some(serde_json::to_value(resp).unwrap()))
             })
         }),
     );
