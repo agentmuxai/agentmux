@@ -1,5 +1,12 @@
 # AgentMux Version History
 
+## 0.55.16 — 2026-08-19
+
+- fix(ci): nightly artifacts build delegates to reusable build-*.yml workflows
+- fix(agent-pane): preserve cache-read/cache-creation token breakdown instead of collapsing it into input_tokens
+- feat(agent-pane): add manual 'Compact now' trigger for Claude sessions
+
+
 ## 0.55.15 — 2026-08-18
 
 - fix(agent-pane): stop the CLI's own tool_result echo from clobbering an answered AskUserQuestion's answerText
