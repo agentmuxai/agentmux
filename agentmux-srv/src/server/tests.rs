@@ -424,24 +424,28 @@ async fn host_ipc_register_sets_state() {
 // can read that key from their own environment via a shell command — so
 // any agent could re-register a fake port/token and silently redirect
 // every other agent's UIScreenshot/UIClick/UIQuery to an attacker-controlled
-// endpoint for the rest of the session, with no self-heal (the real host
-// only registers once, at startup). Fixed: once registered, a DIFFERENT
-// port/token is rejected outright (closing the hijack to, at most, an
-// unwinnable race against the real host's own startup registration); an
-// IDENTICAL re-registration (a legitimate retry) is still accepted as a
-// harmless no-op.
+// endpoint for the rest of the session. Fixed: a conflicting re-registration
+// is rejected UNLESS the currently-registered host is unreachable at its
+// own /health route (see host_ipc.rs's handle_register for why an
+// unconditional reject was ALSO wrong — it broke real crash-restart
+// recovery, reagent P1 re-review same PR). This test uses a live fake
+// server for the first registration so the liveness probe genuinely finds
+// it alive; `host_ipc_register_recovers_when_old_host_is_unreachable`
+// below covers the opposite (dead old host) case.
 #[tokio::test]
-async fn host_ipc_register_rejects_a_conflicting_second_registration() {
-    let app = test_router();
+async fn host_ipc_register_rejects_a_conflicting_second_registration_while_old_host_is_alive() {
+    let state = test_state();
+    let alive_port = spawn_fake_browser_api(r#"{"ok":true,"data":{}}"#, "irrelevant").await;
+    let app = build_router(state);
 
     let first = Request::builder()
         .uri("/agentmux/service")
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
         .header("Content-Type", "application/json")
-        .body(Body::from(
-            r#"{"service":"host_ipc","method":"Register","args":[9999,"real-host-token"]}"#,
-        ))
+        .body(Body::from(format!(
+            r#"{{"service":"host_ipc","method":"Register","args":[{alive_port},"real-host-token"]}}"#
+        )))
         .unwrap();
     let resp = app.clone().oneshot(first).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -451,8 +455,9 @@ async fn host_ipc_register_rejects_a_conflicting_second_registration() {
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(json["success"].as_bool().unwrap(), "first registration should succeed");
 
-    // A spoofed re-registration with DIFFERENT credentials — the attack
-    // reagent flagged — must be rejected, not silently accepted.
+    // A spoofed re-registration with DIFFERENT credentials, while the real
+    // host (alive_port) is STILL alive and responding — the attack reagent
+    // flagged. Must be rejected, not silently accepted.
     let spoof = Request::builder()
         .uri("/agentmux/service")
         .method("POST")
@@ -470,19 +475,19 @@ async fn host_ipc_register_rejects_a_conflicting_second_registration() {
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(
         !json["success"].as_bool().unwrap_or(false),
-        "a conflicting re-registration must be rejected"
+        "a conflicting re-registration must be rejected while the old host is still alive"
     );
 
     // An IDENTICAL re-registration (e.g. a legitimate retry) is still a
-    // harmless no-op, not an error.
+    // harmless no-op, not an error — no liveness probe needed for this case.
     let retry = Request::builder()
         .uri("/agentmux/service")
         .method("POST")
         .header("X-AuthKey", "test-secret-key")
         .header("Content-Type", "application/json")
-        .body(Body::from(
-            r#"{"service":"host_ipc","method":"Register","args":[9999,"real-host-token"]}"#,
-        ))
+        .body(Body::from(format!(
+            r#"{{"service":"host_ipc","method":"Register","args":[{alive_port},"real-host-token"]}}"#
+        )))
         .unwrap();
     let resp = app.oneshot(retry).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -493,6 +498,50 @@ async fn host_ipc_register_rejects_a_conflicting_second_registration() {
     assert!(
         json["success"].as_bool().unwrap(),
         "an identical re-registration should be accepted as a no-op"
+    );
+}
+
+// The crash-restart recovery path reagent's re-review specifically called
+// out: the OLD registration points at a host that's no longer reachable
+// (crashed; the launcher relaunched just the host per its Job Object
+// sibling design, with a fresh ipc_port/ipc_token). The new registration
+// must be accepted, not permanently rejected.
+#[tokio::test]
+async fn host_ipc_register_recovers_when_old_host_is_unreachable() {
+    // A port nothing is listening on: bind then immediately drop the
+    // listener, so the OS won't hand this port to anything else for the
+    // duration of this fast test, and a connection attempt reliably fails
+    // fast (loopback connection-refused) rather than hanging.
+    let dead_port = {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        listener.local_addr().unwrap().port()
+    };
+
+    let state = test_state();
+    *state.host_ipc.lock().await = Some(HostIpc {
+        port: dead_port,
+        token: "stale-token".to_string(),
+    });
+    let app = build_router(state);
+
+    let recovery = Request::builder()
+        .uri("/agentmux/service")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            r#"{"service":"host_ipc","method":"Register","args":[7777,"relaunched-host-token"]}"#,
+        ))
+        .unwrap();
+    let resp = app.oneshot(recovery).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        json["success"].as_bool().unwrap(),
+        "a re-registration must be accepted once the previously-registered host is unreachable"
     );
 }
 
