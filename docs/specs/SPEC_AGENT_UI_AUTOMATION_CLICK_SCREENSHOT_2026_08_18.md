@@ -43,23 +43,26 @@ independently on the same root cause for one of them):**
   session, with no self-heal. Fixed: rejects any re-registration whose
   port/token differ from what's already stored (identical re-registration
   is still a harmless no-op).
-- **Acknowledged, not fixed — genuine open gap (Codex P1):** `block_id` on
-  `/api/v1/ui/*` is trusted from the request body. The MCP tool schema
-  never exposes it as an agent-settable argument, so a *well-behaved*
-  caller going through the sanctioned MCP path is scoped to its own pane —
-  but an agent that bypasses the MCP wrapper and calls the HTTP route
-  directly (it holds the same shared `X-AuthKey`) can supply a *different*
-  pane's real `block_id`, and nothing here can tell it doesn't actually
-  belong to the caller. This is not unique to UI automation — it's how
-  every existing App-API MCP-bound route's identity-stamping already
-  works (`SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28.md`'s S1) — but this
-  spec's own §6 language ("holds by construction," "never
-  agent-suppliable") overclaimed it as airtight, which review correctly
-  called out. Fully closing it needs a per-agent credential distinguishing
-  individual agents at the HTTP layer, which doesn't exist anywhere in the
-  App-API surface today; that's a genuinely separate, larger piece of work
-  than this PR, tracked as follow-up rather than silently left
-  undocumented.
+- **Fixed for real, P0 (Codex P1, escalated to P0-blocking by reagent
+  after an initial doc-only pass didn't close it):** `block_id` is no
+  longer a request field on `/api/v1/ui/*` at all. Every request instead
+  carries an HMAC-SHA256 signature (`UiAutomationAuth`) over the caller's
+  own `agent_id`, using that agent's own `AGENTMUX_JEKT_KEY` — the SAME
+  per-agent signing key already shipped for jekt sender authentication
+  (`agentmux_common::jekt_sign`), reused rather than inventing a parallel
+  credential system. srv verifies the signature against the claimed
+  agent's key on file, and only THEN derives that agent's actual current
+  block_id server-side, from the global `ReactiveHandler` registry — never
+  from the client. An agent without agent X's key cannot produce a valid
+  signature claiming to be X, regardless of what it puts in the request
+  body; the earlier "not a server-side enforcement boundary" caveat no
+  longer applies to these three routes (see
+  `agentmux-srv/src/server/ui_handlers.rs`'s module doc comment for the
+  mechanism, and its regression test for the exact attack this closes:
+  signing correctly as agent Z while claiming to be agent X). This IS a
+  genuine, narrower instance of the broader systemic gap noted below —
+  it doesn't retrofit the fix onto any OTHER existing App-API MCP-bound
+  route, only these three.
 
 ## 0. Origin
 
