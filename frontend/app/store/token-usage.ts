@@ -66,11 +66,32 @@ export function recordTurn(provider: string, tokens: ServiceUsage | null | undef
     // service, the running total is exact from that point on.
     const hasBreakdown =
         tokens.freshInput != null || tokens.cacheCreation != null || tokens.cacheRead != null;
+    // reagentx/codex P2 on PR #2658: two incompatible wire shapes reach
+    // this function under the same field names. claude-translator.ts /
+    // useAgentStream.ts (via useTurnLifecycle.ts) pass `input` as the
+    // COLLAPSED total (freshInput + cacheCreation + cacheRead) with a
+    // separate `freshInput` for the fresh-only count. The backend
+    // TokenCounts shape — gotypes.d.ts's `{input, output, cacheCreation,
+    // cacheRead}`, no `freshInput` field at all, reaching recordTurn via
+    // useNextPromptSuggestion/useAgentActivitySummary/ActivityDock/
+    // swarm-view's ambient `result.tokens` — uses `input` to mean
+    // fresh-only directly. Without this normalization, getCacheHitRate's
+    // denominator silently drops that caller's fresh tokens (cacheCreation/
+    // cacheRead are present, freshInput isn't), inflating the reported
+    // hit rate — e.g. 100 fresh + 900 cache-read reads as 100%, not 90%.
+    // Distinguishing rule: our own path always sets freshInput whenever it
+    // sets cacheCreation/cacheRead (see useAgentStream.ts/reducer.ts — all
+    // three are sourced together or not at all), so "cache fields present,
+    // freshInput absent" unambiguously means the TokenCounts shape, where
+    // `input` IS the fresh count.
+    const freshContribution =
+        tokens.freshInput
+        ?? ((tokens.cacheCreation != null || tokens.cacheRead != null) ? input : undefined);
     setState("byService", id, {
         input: current.input + input,
         output: current.output + output,
         freshInput: hasBreakdown
-            ? (current.freshInput ?? 0) + (tokens.freshInput ?? 0)
+            ? (current.freshInput ?? 0) + (freshContribution ?? 0)
             : current.freshInput,
         cacheCreation: hasBreakdown
             ? (current.cacheCreation ?? 0) + (tokens.cacheCreation ?? 0)
