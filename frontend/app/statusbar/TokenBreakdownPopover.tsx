@@ -20,6 +20,7 @@ import { getCliCatalogEntry } from "@/app/view/agent/defaults/cli-catalog";
 import { formatCompactNumber } from "@/util/format-count";
 import {
     getBreakdown,
+    getCacheHitRate,
     getSessionStartAt,
     getTotal,
     resetSession,
@@ -64,6 +65,13 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
     const total = createMemo(() => {
         void tokenUsageState.byService;
         return getTotal();
+    });
+    // null until at least one turn has reported a cache breakdown (see
+    // getCacheHitRate's doc comment) — render nothing rather than a
+    // misleading "0%" in that window.
+    const cacheHitRate = createMemo(() => {
+        void tokenUsageState.byService;
+        return getCacheHitRate();
     });
 
     // Positioning routes through the shared primitive (Phase 3): anchored to
@@ -168,6 +176,14 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                                 {formatCompactNumber(total().output)}
                             </span>
                         </div>
+                        <Show when={cacheHitRate() != null}>
+                            <div
+                                class="token-usage-breakdown-cache-rate"
+                                title="Share of input tokens served from Claude's prompt cache this session (~0.1x the cost of a fresh token). Only available for providers that report a cache breakdown."
+                            >
+                                {Math.round((cacheHitRate() as number) * 100)}% of input served from cache
+                            </div>
+                        </Show>
                     </div>
                 </Show>
                 <div class="token-usage-breakdown-footer">

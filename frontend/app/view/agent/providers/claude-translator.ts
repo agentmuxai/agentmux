@@ -108,15 +108,21 @@ export class ClaudeTranslator implements OutputTranslator {
             if (typeof rawEvent.duration_ms === "number") stats.duration_ms = rawEvent.duration_ms;
             if (typeof rawEvent.num_turns === "number") stats.num_turns = rawEvent.num_turns;
             // input_tokens is only the uncached prompt; cache_creation/cache_read
-            // carry the rest of the real prompt size.
+            // carry the rest of the real prompt size. Preserve the split (not
+            // just the sum) — see SessionStats' fresh_input_tokens doc comment.
             const usage = rawEvent.usage;
             if (usage && typeof usage === "object") {
-                const input =
-                    (usage.input_tokens ?? 0) +
-                    (usage.cache_creation_input_tokens ?? 0) +
-                    (usage.cache_read_input_tokens ?? 0);
+                const freshInput = usage.input_tokens ?? 0;
+                const cacheCreation = usage.cache_creation_input_tokens ?? 0;
+                const cacheRead = usage.cache_read_input_tokens ?? 0;
+                const input = freshInput + cacheCreation + cacheRead;
                 const output = usage.output_tokens ?? 0;
-                if (input > 0) stats.input_tokens = input;
+                if (input > 0) {
+                    stats.input_tokens = input;
+                    stats.fresh_input_tokens = freshInput;
+                    stats.cache_creation_input_tokens = cacheCreation;
+                    stats.cache_read_input_tokens = cacheRead;
+                }
                 if (output > 0) stats.output_tokens = output;
             }
             events.push({ type: "session_end", stats });

@@ -504,7 +504,11 @@ export type AgentPaneCommand =
     | { type: "ToolStart"; name: string; arg?: string }
     | { type: "ToolEnd" }
 
-    | { type: "TokensIn"; input: number; model?: string }
+    // freshInput/cacheCreation/cacheRead: optional breakdown of `input` by
+    // cache status (fresh + cacheCreation + cacheRead === input). See
+    // TurnTokens'/SessionStats' matching doc comments in view/agent/types.ts —
+    // this is the same split, just on the dispatched command.
+    | { type: "TokensIn"; input: number; model?: string; freshInput?: number; cacheCreation?: number; cacheRead?: number }
     | { type: "TokensOut"; output: number }
 
     /** User pressed Esc / clicked Stop. */

@@ -90,7 +90,15 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
         const liveTokens = paneSnapshot(opts.blockId)?.turnTokens ?? null;
         const statsTokens =
             stats && (stats.input_tokens != null || stats.output_tokens != null)
-                ? { input: stats.input_tokens ?? 0, output: stats.output_tokens ?? 0 }
+                ? {
+                    input: stats.input_tokens ?? 0,
+                    output: stats.output_tokens ?? 0,
+                    // Same breakdown carried alongside input/output — see
+                    // TurnTokens'/SessionStats' doc comments in ../types.ts.
+                    freshInput: stats.fresh_input_tokens,
+                    cacheCreation: stats.cache_creation_input_tokens,
+                    cacheRead: stats.cache_read_input_tokens,
+                }
                 : null;
         const tokens = statsTokens ?? liveTokens;
         // Aggregate the completed turn's tokens into the global

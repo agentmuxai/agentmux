@@ -523,16 +523,36 @@ export interface SessionStats {
     input_tokens?: number;
     /** Snapshot of TurnTokens.output at finalizeTurn (see above). */
     output_tokens?: number;
+    /**
+     * Breakdown of input_tokens by cache status:
+     * fresh_input_tokens + cache_creation_input_tokens + cache_read_input_tokens
+     * == input_tokens. These previously reached this codebase off the wire
+     * and were summed into input_tokens at parse time, discarding the split —
+     * cache_read tokens cost ~0.1x a fresh token, so the breakdown is what
+     * actually explains whether a given turn's input size was cheap or
+     * expensive. See docs/reports/REPORT_TOKEN_ACCOUNTING_AND_COMPACTION_CONTROL_2026_08_18.md
+     * §2.2/§5.2. Optional because older/other providers (codex/gemini) never
+     * report a cache split at all.
+     */
+    fresh_input_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
 }
 
 /**
  * Live token counts accumulated during the current turn.
  * input is set from message_start.message.usage.input_tokens.
  * output accumulates from message_delta.usage.output_tokens.
+ * freshInput/cacheCreation/cacheRead: see SessionStats' matching fields —
+ * same breakdown, carried on the live per-turn signal instead of the
+ * finalized one.
  */
 export interface TurnTokens {
     input: number;
     output: number;
+    freshInput?: number;
+    cacheCreation?: number;
+    cacheRead?: number;
 }
 
 /**
