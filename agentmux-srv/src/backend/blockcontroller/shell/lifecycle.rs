@@ -848,6 +848,157 @@ impl Controller for ShellController {
             });
         }
 
+        // A declared-background descendant (bashwrap, and transitively
+        // whatever it PTY-spawned, e.g. `task dev`) deliberately detaches
+        // into its OWN session at startup (`setsid()` in bash_wrap.rs's
+        // `detach_declared_background_session`), specifically so a
+        // session-RESTART's narrower kill (`stop_for_replace`, above)
+        // can't reach it via PTY-hangup/session-leader-death SIGHUP. But
+        // that same detachment also removes it from THIS process's group
+        // — so the group-wide kill just above (intended to reach it on a
+        // genuine STOP, e.g. pane close) no longer can either. On
+        // non-Windows, nothing else fills that gap:
+        // `process_tracker::new_tracker` returns the no-op `StubTracker`
+        // there (no real cgroup/pgrp tracker is implemented — see
+        // `detach_declared_background_session`'s doc comment), so
+        // `delete_controller`'s `registry.remove()` was never doing
+        // anything for it either. Without this step, `stop()` (the real,
+        // unmodified deletion path — used by `delete_tab`/`delete_block`/
+        // `wcore::tab`) would leak it forever on Linux/macOS (reagentx
+        // finding, PR #2683). Kill each `Running`, known-pid declared-
+        // background task's own (detached) process group explicitly, by
+        // pid from the durable registry — the one piece of state that
+        // still knows about it once it's escaped this controller's own
+        // process tree. Windows is unaffected: Job Object membership
+        // isn't process-group-based, so `delete_controller`'s existing
+        // whole-job close already reaches it there, unchanged.
+        #[cfg(unix)]
+        if let Some(store) = &self.wstore {
+            match store.background_task_list_for_block(&self.block_id) {
+                Ok(tasks) => {
+                    for task in tasks {
+                        if task.status != crate::backend::storage::background_tasks::BackgroundTaskStatus::Running {
+                            continue;
+                        }
+                        let Some(pid) = task.pid else { continue };
+                        let pid = pid as libc::pid_t;
+                        // SAFETY: kill() is a well-defined POSIX syscall.
+                        unsafe { libc::kill(-pid, libc::SIGTERM) };
+                        tokio::spawn(async move {
+                            tokio::time::sleep(tokio::time::Duration::from_secs(KILL_GRACE_SECS)).await;
+                            unsafe { libc::kill(-pid, libc::SIGKILL) };
+                        });
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        block_id = %self.block_id,
+                        error = %e,
+                        "stop(): failed to list declared-background tasks for cleanup",
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn stop_for_replace(&self, new_status: &str) -> Result<(), String> {
+        // Same extraction as stop() — but the kill below targets ONLY this
+        // one pid, never the process group/job, so a declared-background
+        // descendant (e.g. `task dev`) survives. See
+        // docs/specs/SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md.
+        #[allow(unused_variables)] // used under #[cfg(unix)] only
+        let pid_to_kill = {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.proc_status == new_status {
+                return Ok(());
+            }
+            let pid = inner.child_pid;
+            inner.input_tx = None;
+            Self::set_status(&mut inner, new_status);
+            pid
+        };
+
+        let Some(pid) = pid_to_kill else { return Ok(()) };
+
+        // Prefer the tracked kill (Windows: OpenProcess+TerminateProcess,
+        // with a membership check against the block's job first — see
+        // `process_tracker::registry::kill_pid`). This is expected to
+        // succeed in every real production case: `track_spawned` already
+        // ran for this exact pid right after this controller's own spawn.
+        if let Some(registry) = crate::backend::process_tracker::registry::global() {
+            if registry.kill_pid(&self.block_id, pid) {
+                return Ok(());
+            }
+        }
+
+        // Fallback — reached when the registry global isn't set (tests;
+        // same "silently skip tracker registration" convention
+        // `track_spawned`'s own doc comment describes), OR `kill_pid`
+        // itself returned `false` because this pid isn't (yet, or ever)
+        // a recognized member of the block's tracker — e.g.
+        // `track_spawned`'s own `assign_process` call failed at spawn
+        // time (a real, already-logged non-fatal warning path in
+        // `registry::track_spawned`). Unlike `stop()`, where a failed
+        // direct kill is backstopped by `delete_controller`'s whole-job
+        // teardown, `stop_for_replace` deliberately never touches the
+        // job — so without a fallback here, that failure mode would leak
+        // the old CLI process forever once resync_controller replaces it
+        // (reagentx P1, PR #2683). A direct, single-PID (not group,
+        // not job) kill on both platforms, so this can't reach a
+        // declared-background descendant the way stop()'s `-(pid)` /
+        // a whole-job close would.
+        //
+        // On Unix this is ALSO the primary (not just fallback) path in
+        // production today: `process_tracker::new_tracker` currently
+        // returns the no-op `StubTracker` on every non-Windows platform
+        // (no real cgroup/pgrp tracker is implemented yet, despite the
+        // aspirational table in `process_tracker/mod.rs`'s module doc
+        // comment), so `kill_pid` unconditionally returns `false` there.
+        #[cfg(unix)]
+        {
+            // SAFETY: kill() is a well-defined POSIX syscall.
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+            tokio::spawn(async move {
+                tokio::time::sleep(tokio::time::Duration::from_secs(KILL_GRACE_SECS)).await;
+                unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+            });
+        }
+        #[cfg(windows)]
+        {
+            // Mirrors process_tracker::windows::JobObjectTracker::kill_pid's
+            // own kill step exactly, minus its job-membership pre-check
+            // (which is precisely what already failed to get us here) —
+            // a plain OpenProcess(PROCESS_TERMINATE) + TerminateProcess on
+            // the raw pid, best-effort (the process may have already
+            // exited on its own).
+            use windows_sys::Win32::Foundation::CloseHandle;
+            use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+            unsafe {
+                let h = OpenProcess(PROCESS_TERMINATE, 0, pid);
+                if !h.is_null() {
+                    let ok = TerminateProcess(h, 1);
+                    CloseHandle(h);
+                    if ok == 0 {
+                        tracing::warn!(
+                            block_id = %self.block_id,
+                            pid,
+                            error = %std::io::Error::last_os_error(),
+                            "stop_for_replace: fallback TerminateProcess failed"
+                        );
+                    }
+                } else {
+                    tracing::warn!(
+                        block_id = %self.block_id,
+                        pid,
+                        error = %std::io::Error::last_os_error(),
+                        "stop_for_replace: fallback OpenProcess failed — old CLI process may be leaked"
+                    );
+                }
+            }
+        }
+
         Ok(())
     }
 

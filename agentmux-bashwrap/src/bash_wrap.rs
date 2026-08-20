@@ -327,6 +327,69 @@ fn effective_idle_timeout(args: &Args) -> Duration {
     }
 }
 
+/// For a `--declared-background` invocation, detach this process into a
+/// brand-new session (`setsid()`) before doing anything else, so it has no
+/// controlling terminal at all.
+///
+/// Without this, this process (and anything it spawns — the wrapped
+/// command's own PTY-hosted child, e.g. `task dev`) stays in the SAME
+/// session as the `claude` CLI process that invoked it (an ordinary child
+/// inherits its parent's session/process group unless it explicitly
+/// detaches). Two independent POSIX mechanisms then both threaten it the
+/// moment that session's leader (`claude`) is killed for ANY reason,
+/// including a clean single-PID kill that never touches this process
+/// directly:
+/// 1. If `claude`'s own PTY master is closed (agentmux-srv's normal
+///    stop/replace path drops its input channel, which drops the PTY
+///    writer+master — see `blockcontroller/shell/lifecycle.rs`), the
+///    kernel hangs up the terminal, sending SIGHUP to the whole foreground
+///    process group of that terminal.
+/// 2. Independently of (1): POSIX also sends SIGHUP to a session's
+///    foreground process group when the session LEADER terminates — this
+///    fires purely from `claude` exiting, with no PTY-close step required
+///    at all.
+/// Either one, by default, terminates this process (SIGHUP's default
+/// disposition) — and if this process is what's directly holding open the
+/// wrapped command's own PTY master (the common case, via `run_via_pty`),
+/// this process dying closes that PTY too, cascading the exact same
+/// hangup one level deeper to the wrapped command itself. `setsid()`
+/// makes this process (and, transitively, anything it PTY-spawns
+/// afterward, which becomes associated with THIS new session rather than
+/// `claude`'s) immune to both — a session with no controlling terminal at
+/// all has no foreground process group for the kernel to signal. See
+/// docs/specs/SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md and the
+/// Codex finding on PR #2683 this was written to address.
+///
+/// A plain child (not already a process group leader — always true here,
+/// since this process was just `exec`'d as an ordinary child of `claude`)
+/// can always call `setsid()` successfully; a failure would be a genuine
+/// platform anomaly, logged but not fatal — worst case this invocation
+/// keeps the pre-existing (already-buggy, already being fixed elsewhere in
+/// this same PR) exposure, rather than losing the command's actual output.
+/// No-op on Windows (no session/controlling-terminal concept to detach
+/// from) and for an ordinary, non-backgrounded invocation.
+#[cfg(unix)]
+fn detach_declared_background_session(args: &Args) {
+    if !args.declared_background {
+        return;
+    }
+    // SAFETY: setsid() is a well-defined POSIX syscall; this process is
+    // not a process group leader (an ordinary freshly-exec'd child never
+    // is), so EPERM (the only failure mode) cannot occur in practice.
+    let rc = unsafe { libc::setsid() };
+    if rc == -1 {
+        tracing::warn!(
+            target: "bashwrap",
+            tool_id = %args.tool_id,
+            error = %std::io::Error::last_os_error(),
+            "setsid() failed for a declared-background invocation — this task remains exposed to SIGHUP if the owning agent session is torn down",
+        );
+    }
+}
+
+#[cfg(not(unix))]
+fn detach_declared_background_session(_args: &Args) {}
+
 /// Kill `pid` AND every descendant it spawned, not just the one process.
 /// Supplements `ChildKiller::kill()` (portable-pty's Windows impl is a bare
 /// `TerminateProcess` on a single handle, no job object — see the caller's
@@ -441,6 +504,7 @@ struct LineEvent {
 /// tool would see success for every wrapped command regardless of the
 /// actual outcome.
 pub async fn run(mut args: Args) -> Result<i32> {
+    detach_declared_background_session(&args);
     log_relevant_env();
     let command = decode_command(&args.b64_cmd)?;
 

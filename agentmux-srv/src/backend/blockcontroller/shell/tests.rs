@@ -500,6 +500,71 @@ use std::sync::Arc;
         handle_truncate_block_file(&broker, "block-1", "term");
     }
 
+    /// reagentx finding on PR #2683: a declared-background task detaches
+    /// into its own session (`setsid()` in bash_wrap.rs), which means it's
+    /// no longer a member of the CLI process's own group — so `stop()`'s
+    /// existing group-wide kill can no longer reach it either, on
+    /// non-Windows (where `process_tracker` is a no-op stub and was never
+    /// the enforcement mechanism to begin with). `stop()`'s new step
+    /// queries `db_background_tasks` and kills each `Running` task's own
+    /// group by its recorded pid — this proves that step actually reaches
+    /// a real, isolated-process-group child, not just that the query runs.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stop_kills_a_declared_background_tasks_own_detached_process_group() {
+        use std::os::unix::process::CommandExt as _;
+
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let store = Arc::new(Store::open(tmp.path()).unwrap());
+
+        // A real, disposable child, explicitly made its own process group
+        // leader (`process_group(0)`) — mirrors what `setsid()` does for a
+        // real declared-background bashwrap invocation (session leader
+        // implies group leader too). Without this, `-(pid)` below would
+        // target a nonexistent group (safe no-op) rather than actually
+        // proving the kill reaches an isolated group the way it must in
+        // production.
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .expect("spawn a disposable `sleep 30` child");
+        let pid = child.id();
+
+        store
+            .background_task_observe("bg-task-1", "test-stop-kills-bg-block", "sleep 30", 1000, 1000)
+            .unwrap();
+        store.background_task_set_pid("bg-task-1", pid as i64).unwrap();
+
+        let ctrl = ShellController::new(
+            "shell".to_string(),
+            "tab-1".to_string(),
+            "test-stop-kills-bg-block".to_string(),
+            None,
+            None,
+            Some(store),
+            None,
+        );
+
+        Controller::stop(&ctrl, true, STATUS_DONE).unwrap();
+
+        // Bounded wait for the SIGTERM (or the KILL_GRACE_SECS SIGKILL
+        // backstop, in the unlikely event `sleep` ignored SIGTERM) to
+        // actually land — this is real async process teardown, not
+        // instantaneous.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            if let Ok(Some(_)) = child.try_wait() {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the declared-background task's process group should have been killed by stop(), but the child is still alive"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
+
     #[test]
     fn test_register_and_get_controller() {
         let ctrl: Arc<dyn Controller> = Arc::new(ShellController::new(
