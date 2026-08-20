@@ -937,6 +937,33 @@ pub(crate) fn memory_write_impl(
         return Err(format!("memory.write: rename: {e}"));
     }
 
+    // reagent P1 on PR #2674 (found on memory_revert_impl, same gap exists
+    // here): this App-API path backing the `MemoryWrite` MCP tool never
+    // updated the `db_agent_native_memory` mirror row, unlike its WS-RPC
+    // sibling `agent:memory:write_file` in native_memory_handlers.rs. Per
+    // `read_file`'s own fallback logic, a channel with no live copy of the
+    // file falls back to the mirror and treats a stale row as permanent —
+    // so a write issued through the MCP tool never propagated cross-channel.
+    let metadata_type = crate::server::native_memory_handlers::parse_memory_frontmatter_type(content);
+    let dest_meta = std::fs::metadata(&dest).ok();
+    let size_bytes = dest_meta.as_ref().map(|m| m.len() as i64).unwrap_or(content.len() as i64);
+    let mtime_ms = dest_meta
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    if let Err(e) = state.id_store.agent_native_memory_upsert(
+        &version_agent_id,
+        filename,
+        content,
+        metadata_type.as_deref(),
+        &dest.to_string_lossy(),
+        size_bytes,
+        mtime_ms,
+    ) {
+        tracing::warn!(agent_id, filename, error = %e, "memory.write: mirror upsert failed (non-fatal)");
+    }
+
     state.broker.publish(crate::backend::wps::WaveEvent {
         event: format!("agent:memory:changed:{agent_id}"),
         scopes: vec![], sender: String::new(), persist: 0, data: None,
@@ -1063,6 +1090,36 @@ pub(crate) fn memory_revert_impl(
         return Err(format!("memory.revert: rename: {e}"));
     }
 
+    // reagent P1 on PR #2674: this App-API path backing the `MemoryRevert`
+    // MCP tool reverted the live file but never updated the
+    // `db_agent_native_memory` mirror row, unlike its WS-RPC sibling
+    // `agent:memory:revert` in native_memory_handlers.rs. Per `read_file`'s
+    // own fallback logic, a channel with no live copy of the file falls
+    // back to the mirror and treats a stale mirror row as permanent, not
+    // briefly stale — so a revert issued through the actual `MemoryRevert`
+    // tool silently failed to propagate cross-channel, leaving other
+    // channels still showing the pre-revert (fabricated) content
+    // indefinitely.
+    let metadata_type = crate::server::native_memory_handlers::parse_memory_frontmatter_type(&target.content);
+    let dest_meta = std::fs::metadata(&dest).ok();
+    let size_bytes = dest_meta.as_ref().map(|m| m.len() as i64).unwrap_or(target.content.len() as i64);
+    let mtime_ms = dest_meta
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    if let Err(e) = state.id_store.agent_native_memory_upsert(
+        &version_agent_id,
+        filename,
+        &target.content,
+        metadata_type.as_deref(),
+        &dest.to_string_lossy(),
+        size_bytes,
+        mtime_ms,
+    ) {
+        tracing::warn!(agent_id, filename, error = %e, "memory.revert: mirror upsert failed (non-fatal)");
+    }
+
     state.broker.publish(crate::backend::wps::WaveEvent {
         event: format!("agent:memory:changed:{agent_id}"),
         scopes: vec![], sender: String::new(), persist: 0, data: None,
@@ -1175,6 +1232,23 @@ mod memory_version_impl_tests {
         assert_eq!(versions[0].get("source").and_then(|v| v.as_str()), Some("jekt"));
     }
 
+    /// Regression for reagent P1 on PR #2674: memory_write_impl (the
+    /// App-API path backing the `MemoryWrite` MCP tool) must keep
+    /// `db_agent_native_memory` in sync, same as its WS-RPC sibling
+    /// `agent:memory:write_file` already does — otherwise `read_file` in a
+    /// channel with no live copy of the file falls back to a permanently
+    /// stale mirror row.
+    #[tokio::test]
+    async fn write_updates_the_native_memory_mirror_row() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = state_with_agent("agent-app-mirror-1", tmp.path());
+
+        memory_write_impl(&state, "agent-app-mirror-1", "MEMORY.md", "hello mirror", None).unwrap();
+
+        let mirrored = state.id_store.agent_native_memory_read("agent-app-mirror-1", "MEMORY.md").unwrap();
+        assert_eq!(mirrored, Some("hello mirror".to_string()));
+    }
+
     #[tokio::test]
     async fn diff_reflects_two_writes() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1250,6 +1324,30 @@ mod memory_version_impl_tests {
         let history_after = memory_history_impl(&state, "agent-app-4", "MEMORY.md").unwrap();
         let versions_after = history_after.get("versions").and_then(|v| v.as_array()).unwrap();
         assert_eq!(versions_after.len(), 3, "revert must not delete or rewrite prior versions");
+    }
+
+    /// Regression for reagent P1 on PR #2674: memory_revert_impl (the
+    /// App-API path backing the `MemoryRevert` MCP tool) reverted the live
+    /// file but never updated `db_agent_native_memory`, unlike its WS-RPC
+    /// sibling `agent:memory:revert` — a revert issued through the actual
+    /// `MemoryRevert` tool silently failed to propagate cross-channel,
+    /// leaving other channels' `read_file` fallback still showing the
+    /// pre-revert (fabricated) content indefinitely.
+    #[tokio::test]
+    async fn revert_updates_the_native_memory_mirror_row() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = state_with_agent("agent-app-mirror-2", tmp.path());
+
+        memory_write_impl(&state, "agent-app-mirror-2", "MEMORY.md", "good", None).unwrap();
+        memory_write_impl(&state, "agent-app-mirror-2", "MEMORY.md", "fabricated", None).unwrap();
+        let history = memory_history_impl(&state, "agent-app-mirror-2", "MEMORY.md").unwrap();
+        let versions = history.get("versions").and_then(|v| v.as_array()).unwrap();
+        let good_id = versions[1].get("id").and_then(|v| v.as_str()).unwrap().to_string();
+
+        memory_revert_impl(&state, "agent-app-mirror-2", "MEMORY.md", &good_id).unwrap();
+
+        let mirrored = state.id_store.agent_native_memory_read("agent-app-mirror-2", "MEMORY.md").unwrap();
+        assert_eq!(mirrored, Some("good".to_string()), "mirror must reflect the reverted content, not the fabricated one");
     }
 
     #[tokio::test]
