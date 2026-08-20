@@ -103,11 +103,12 @@ separate follow-up.
 
 ## 6. Follow-up
 
-- Add a bounded timeout around `secret_store` keychain reads (and
-  `muxbus_save_lock`-guarded call sites specifically) so an unanswered
-  interactive consent prompt degrades to a graceful "couldn't read"
-  instead of hanging the calling path indefinitely. Not started — needs
-  its own scoping pass given the shared-plumbing blast radius.
+- ~~Add a bounded timeout around `secret_store` keychain reads...~~ **Done
+  2026-08-20** — see
+  [retro-secret-store-keychain-read-timeout-2026-08-20.md](retro-secret-store-keychain-read-timeout-2026-08-20.md).
+  This machine's own stuck read (the one that prevented the self-heal in
+  this retro's §5 from completing during manual verification) was used as
+  the live reproduction case for that fix.
 - The still-unexplained hash-suffixed `Claude Code-credentials-<hash>`
   Keychain entries from
   [retro-macos-keychain-credential-isolation-gap-2026-08-17.md](retro-macos-keychain-credential-isolation-gap-2026-08-17.md)
