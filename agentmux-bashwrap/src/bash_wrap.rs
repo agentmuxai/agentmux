@@ -491,7 +491,21 @@ pub async fn run(mut args: Args) -> Result<i32> {
             Err(e) => tracing::warn!(target: "bashwrap", tool_id = %args.tool_id, error = %e, "initial publish failed"),
         }
         if args.declared_background {
-            publish_pid(client, &args.tool_id, args.block_id.as_deref(), std::process::id()).await;
+            // Fire-and-forget, NOT awaited: publish_pid's own doc comment
+            // promises best-effort semantics, but awaiting it inline here
+            // (as an earlier version of this code did) put its up-to-~10s
+            // worst case (two publish_chunk attempts, each up to the 5s
+            // WpsClient::from_env default, plus the retry's own 250ms
+            // sleep) directly on this declared-background command's
+            // startup path — measurably delaying the actual work (e.g.
+            // `task dev`) behind a degraded WPS endpoint, exactly what
+            // "best-effort" is supposed to avoid (reagentx P1, PR #2681).
+            let client = client.clone();
+            let tool_id = args.tool_id.clone();
+            let block_id = args.block_id.clone();
+            tokio::spawn(async move {
+                publish_pid(&client, &tool_id, block_id.as_deref(), std::process::id()).await;
+            });
         }
     }
 
@@ -575,16 +589,22 @@ async fn publish_system(
 }
 
 /// Publish this process's own pid, once, for a declared-background
-/// invocation. Best-effort with a single retry: the frontend's
-/// "accepted background launch" signal (which is what creates the
-/// `db_background_tasks` row this pid attaches to — see
-/// `websocket.rs`'s `docknodestatus` handler) and this publish are two
-/// independent async paths with no ordering guarantee between them. A
-/// single short retry is cheap insurance against the rare case where
-/// this publish's WPS round-trip lands before that row exists yet;
-/// see docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md §3.3
-/// for why this doesn't need to be fully reliable (Phase B does not
-/// depend on the pid always landing).
+/// invocation. Called via `tokio::spawn` (never awaited inline) — see the
+/// call site's comment for why blocking startup on this was a real
+/// latency bug (reagentx P1, PR #2681).
+///
+/// The single retry here is insurance against a transient WPS/HTTP
+/// publish failure ONLY — it does not, and cannot, wait for
+/// `db_background_tasks`'s row to exist first (this function has no
+/// visibility into srv's database state). This publish routinely arrives
+/// at srv before that row exists at all (this call fires at process
+/// start, before the frontend has even seen an accepted-background tool
+/// result to create the row from) — that ordering race is handled
+/// entirely server-side, by stashing an early pid and applying it once
+/// the row is created (`pending_background_pids.rs`,
+/// `websocket.rs`'s `COMMAND_BACKGROUND_TASK_PID`/`COMMAND_DOCK_NODE_STATUS`
+/// handlers). An earlier version of this comment claimed this retry
+/// covered that race — it never did (Codex P1, reagentx P2, PR #2681).
 async fn publish_pid(client: &WpsClient, tool_id: &str, block_id: Option<&str>, pid: u32) {
     let msg = PidMessage {
         op: "pid",

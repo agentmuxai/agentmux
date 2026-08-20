@@ -10,6 +10,7 @@ pub mod bundle_export;
 pub mod bundle_import;
 pub mod bundle_validate;
 pub mod dock_snapshot;
+pub mod pending_background_pids;
 pub mod mcp_probe;
 pub mod mcp_seed;
 /// Phase E.4.B Phase 4 — pure layout-tree helpers (Rust port of layoutTree.ts).
