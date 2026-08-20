@@ -16,9 +16,10 @@
  * Spec: SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md §5.
  */
 
-import { createSignal, For, onCleanup, Show, type JSX } from "solid-js";
+import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { PrimitiveListDetail } from "@/app/element/primitive-list-detail";
 import { AgentNativeMemoryModel, normalizeMemoryFilename, validateMemoryFilename } from "../agent-native-memory-model";
+import { NativeMemoryHistoryPanel } from "./NativeMemoryHistoryPanel";
 import "./AgentNativeMemoryModal.scss";
 
 interface AgentNativeMemoryModalProps {
@@ -90,6 +91,17 @@ export const AgentNativeMemoryModal = (props: AgentNativeMemoryModalProps): JSX.
     // adopted here per SPEC_AGENT_PANE_ARMORY_HEADER_ICON_2026_07_20.md §7.2.
     const inDetail = () => model.selectedFilenameAtom() !== null;
     const [creatingIndex, setCreatingIndex] = createSignal(false);
+
+    // Version history toggle (SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md
+    // §4.3) — a third view alongside "read" and "edit" within the same
+    // detail pane, not a separate modal/route. Reset whenever the selected
+    // file changes so switching files doesn't leave a stale file's history
+    // showing under a new filename.
+    const [showHistory, setShowHistory] = createSignal(false);
+    createEffect(() => {
+        model.selectedFilenameAtom();
+        setShowHistory(false);
+    });
 
     const listView = (
         <div class="agent-memory-modal-list">
@@ -191,45 +203,77 @@ export const AgentNativeMemoryModal = (props: AgentNativeMemoryModalProps): JSX.
     const detailView = (
         <div class="agent-memory-modal-detail">
             <Show
-                when={model.editingAtom()}
+                when={showHistory()}
                 fallback={
-                    <div class="agent-memory-modal-view">
-                        <pre class="agent-memory-modal-content">
-                            {model.contentAtom() ?? "Loading…"}
-                        </pre>
-                        <div class="agent-memory-modal-detail-actions">
-                            <button
-                                class="agent-memory-modal-btn"
-                                disabled={model.contentAtom() === null}
-                                onClick={() => model.startEdit()}
-                            >
-                                Edit
-                            </button>
+                    <Show
+                        when={model.editingAtom()}
+                        fallback={
+                            <div class="agent-memory-modal-view">
+                                <pre class="agent-memory-modal-content">
+                                    {model.contentAtom() ?? "Loading…"}
+                                </pre>
+                                <div class="agent-memory-modal-detail-actions">
+                                    <button
+                                        class="agent-memory-modal-btn"
+                                        disabled={model.contentAtom() === null}
+                                        onClick={() => setShowHistory(true)}
+                                    >
+                                        History
+                                    </button>
+                                    <button
+                                        class="agent-memory-modal-btn"
+                                        disabled={model.contentAtom() === null}
+                                        onClick={() => model.startEdit()}
+                                    >
+                                        Edit
+                                    </button>
+                                </div>
+                            </div>
+                        }
+                    >
+                        <div class="agent-memory-modal-edit">
+                            <textarea
+                                class="agent-memory-modal-textarea"
+                                value={model.draftContentAtom()}
+                                onInput={(e) => model.setDraftContent(e.currentTarget.value)}
+                                spellcheck={false}
+                            />
+                            <div class="agent-memory-modal-detail-actions">
+                                <button
+                                    class="agent-memory-modal-btn"
+                                    disabled={model.savingAtom()}
+                                    onClick={() => model.cancelEdit()}
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    class="agent-memory-modal-btn agent-memory-modal-btn-primary"
+                                    disabled={model.savingAtom()}
+                                    onClick={() => void model.saveEdit()}
+                                >
+                                    {model.savingAtom() ? "Saving…" : "Save"}
+                                </button>
+                            </div>
                         </div>
-                    </div>
+                    </Show>
                 }
             >
-                <div class="agent-memory-modal-edit">
-                    <textarea
-                        class="agent-memory-modal-textarea"
-                        value={model.draftContentAtom()}
-                        onInput={(e) => model.setDraftContent(e.currentTarget.value)}
-                        spellcheck={false}
-                    />
+                <div class="agent-memory-modal-view">
+                    <Show when={model.selectedFilenameAtom()} keyed>
+                        {(filename) => (
+                            <NativeMemoryHistoryPanel
+                                agentId={props.agentId}
+                                filename={filename}
+                                onContentReverted={(content) => {
+                                    model.setContent(content);
+                                    void model.loadFiles();
+                                }}
+                            />
+                        )}
+                    </Show>
                     <div class="agent-memory-modal-detail-actions">
-                        <button
-                            class="agent-memory-modal-btn"
-                            disabled={model.savingAtom()}
-                            onClick={() => model.cancelEdit()}
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            class="agent-memory-modal-btn agent-memory-modal-btn-primary"
-                            disabled={model.savingAtom()}
-                            onClick={() => void model.saveEdit()}
-                        >
-                            {model.savingAtom() ? "Saving…" : "Save"}
+                        <button class="agent-memory-modal-btn" onClick={() => setShowHistory(false)}>
+                            Back to content
                         </button>
                     </div>
                 </div>

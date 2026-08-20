@@ -1523,7 +1523,7 @@ declare global {
         "subagent:session"?: string;
         // Selected rail section, meta-backed so it survives a block remount
         // and the view model can react to it (armory-model.ts/warden-model.ts).
-        "armory:section"?: "accounts" | "memory" | "skills" | "mcp" | "bundles";
+        "armory:section"?: "accounts" | "memory" | "skills" | "mcp" | "bundles" | "native_memory";
         "warden:section"?: "host" | "lan" | "internet" | "audit" | "supervisor";
     };
 
@@ -2517,6 +2517,41 @@ declare global {
     // wshrpc.NativeMemoryReadFileResult
     type NativeMemoryReadFileResult = {
         content: string;
+    };
+
+    // wshrpc.NativeMemoryWriteProvenance — optional caller-supplied context
+    // for a memory write, see SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.1.
+    type NativeMemoryWriteProvenance = {
+        source: string; // "human" | "agent_inferred" | "jekt" | ...
+        detail?: unknown;
+    };
+
+    // wshrpc.NativeMemoryVersionMeta — one recorded version's metadata,
+    // without its full content (list-view shape).
+    type NativeMemoryVersionMeta = {
+        id: string;
+        content_hash: string;
+        parent_version_id: string | null;
+        source: string; // "human" | "agent_inferred" | "jekt" | "external_fs_write" | "revert"
+        source_detail: string; // JSON string
+        session_id: string;
+        created_at: number; // unix ms
+    };
+
+    // wshrpc.NativeMemoryHistoryResult — newest first.
+    type NativeMemoryHistoryResult = {
+        versions: NativeMemoryVersionMeta[];
+    };
+
+    // wshrpc.NativeMemoryDiffResult — a minimal line-based diff: each line
+    // prefixed "  " (context), "- " (removed), or "+ " (added).
+    type NativeMemoryDiffResult = {
+        diff: string;
+    };
+
+    // wshrpc.NativeMemoryRevertResult
+    type NativeMemoryRevertResult = {
+        version: NativeMemoryVersionMeta;
     };
 
     // wshrpc.CommandActivitySummaryData
