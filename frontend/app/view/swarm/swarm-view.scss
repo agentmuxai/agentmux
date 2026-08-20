@@ -60,6 +60,31 @@
     padding: 6px 0 12px;
 }
 
+// Bulk "Clear completed" action (SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.3)
+// — only rendered at all when there's at least one clearable row.
+.swarm-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    padding: 4px 8px 0;
+}
+
+.swarm-clear-completed-btn {
+    appearance: none;
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+    background: transparent;
+    color: var(--secondary-text-color);
+    border-radius: 4px;
+    font-size: 11px;
+    padding: 3px 8px;
+    cursor: default;
+
+    &:hover {
+        color: var(--main-text-color);
+        border-color: var(--secondary-text-color);
+        background: var(--highlight-bg);
+    }
+}
+
 // ── Agent group (root + its children) ───────────────────────────────────
 
 .swarm-agent-group {

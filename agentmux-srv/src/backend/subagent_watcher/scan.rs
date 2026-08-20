@@ -7,6 +7,7 @@
 //! parent's turn is confirmed idle), `broadcast_subagents_abandoned`, and
 //! `scan_subagents_dir` (the capped cold-backfill file walk).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use serde_json::json;
@@ -86,41 +87,89 @@ impl SubagentWatcher {
     /// started yet, so every subagent found on disk predates this process
     /// and is unambiguously history, not in-flight.
     ///
-    /// Only reconciles on a *confirmed-idle* read (`Some(false)`) —
-    /// `unwrap_or(true)` treats "no controller registered yet" or any
-    /// other uncertainty as "assume active, don't touch it," matching the
-    /// same conservative bias `ReconcileTurnActive` uses on the frontend
-    /// (only ever promote/correct on positive evidence, never guess).
+    /// Only reconciles on a *confirmed-idle* read (`Some(false)`).
+    /// `Some(true)` (confirmed active) skips with no follow-up — correct,
+    /// nothing to reconcile. `None` ("no controller registered yet") used
+    /// to be folded into the same "assume active, don't touch it" bucket as
+    /// confirmed-active, permanently — a previously-flagged, unconfirmed
+    /// race (`SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20.md`
+    /// §5 Open Question 2) where this call site, reached from
+    /// `scan_session_subagents` at pane-reopen backfill time, can run
+    /// before the freshly-spawned controller has registered in
+    /// `CONTROLLER_REGISTRY`. Left unresolved, an entry hitting that race
+    /// stayed `Active`-looking forever, since nothing else ever revisits it
+    /// (see `SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md`
+    /// §2, mechanism 4). Fixed by treating `None` as "retry once, don't
+    /// give up silently" (`retry_reconcile_once`) instead of a terminal
+    /// no-op — still conservative (a genuine `Some(true)` never retries;
+    /// only the single ambiguous case does, and only once).
     /// Called from two places as of SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_
     /// RETIRE_2026_07_20 Phase A: `scan_session_subagents` (reopen/backfill,
     /// unchanged) and `blockcontroller::persistent`'s turn-end hook (live —
     /// closes docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md
     /// Open Question 1, which deliberately deferred real-time wiring).
     /// `pub(crate)` so the live call site (a different module) can reach it.
+    /// Thin entry point — always allows the one `None`-case retry described
+    /// above. The retry itself calls `reconcile_stale_subagents_impl`
+    /// directly with `allow_retry: false`, so a still-`None` second attempt
+    /// gives up rather than chaining into an unbounded retry loop.
     pub(crate) fn reconcile_stale_subagents(&self, parent_block_id: &str, session_id: &str) {
-        let parent_turn_active =
-            crate::backend::blockcontroller::get_block_controller_status(parent_block_id)
-                .map(|s| s.turn_active)
-                .unwrap_or(true);
-        if parent_turn_active {
-            // reagent (PR #2143 round 1): info!, not debug! — see the note on
-            // the backfill log above; the default production filter drops
-            // debug-level lines, which would make this and the pass-summary
-            // log below invisible in a normally-running srv.
-            tracing::info!(
-                parent_block_id = %parent_block_id,
-                session_id = %session_id,
-                "reconcile_stale_subagents: parent turn active (or unknown) — nothing to reconcile"
-            );
-            return;
+        self.reconcile_stale_subagents_impl(parent_block_id, session_id, true);
+    }
+
+    // pub(super), not private — `tests.rs` (a sibling module, not a
+    // descendant of `scan`) needs to call this directly with
+    // `allow_retry: false` to test the exhausted-retry path without
+    // depending on a real spawned watcher's tokio::spawn actually firing.
+    pub(super) fn reconcile_stale_subagents_impl(&self, parent_block_id: &str, session_id: &str, allow_retry: bool) {
+        let turn_active = crate::backend::blockcontroller::get_block_controller_status(parent_block_id)
+            .map(|s| s.turn_active);
+        match turn_active {
+            Some(true) => {
+                tracing::info!(
+                    parent_block_id = %parent_block_id,
+                    session_id = %session_id,
+                    "reconcile_stale_subagents: parent turn active — nothing to reconcile"
+                );
+                return;
+            }
+            None if allow_retry => {
+                tracing::info!(
+                    parent_block_id = %parent_block_id,
+                    session_id = %session_id,
+                    "reconcile_stale_subagents: controller not yet registered — retrying once, not skipping silently"
+                );
+                self.retry_reconcile_once(parent_block_id, session_id);
+                return;
+            }
+            None => {
+                tracing::info!(
+                    parent_block_id = %parent_block_id,
+                    session_id = %session_id,
+                    "reconcile_stale_subagents: controller still not registered after retry — giving up (bounded to one retry)"
+                );
+                return;
+            }
+            Some(false) => {} // confirmed idle — proceed below
         }
 
-        // Scoped so the `sessions` lock is released before broadcasting
-        // below — `broadcast_subagents_abandoned` doesn't need it, and this
-        // call site can now run live (Phase A), not just at reopen, so
-        // holding the lock any longer than the mutation itself is
-        // unnecessary contention against the live filesystem watcher.
-        let reconciled_agent_ids: Vec<String> = {
+        // Scoped so the `sessions` lock is released before broadcasting (or
+        // touching `self.dispatches`, a separate mutex — never held at the
+        // same time as `sessions` anywhere in this function, to avoid any
+        // lock-ordering deadlock risk against other call sites) below —
+        // `broadcast_subagents_abandoned` doesn't need it, and this call
+        // site can now run live (Phase A), not just at reopen, so holding
+        // the lock any longer than the mutation itself is unnecessary
+        // contention against the live filesystem watcher.
+        //
+        // Alongside `reconciled_agent_ids`, also snapshot every member's
+        // (dispatch_id, status) for this block — not just the ones just
+        // reconciled — so the Workflow-dispatch aggregation pass below has
+        // the full picture per dispatch_id, not just this pass's deltas.
+        let (reconciled_agent_ids, member_statuses_by_dispatch): (
+            Vec<String>,
+            HashMap<String, Vec<SubAgentStatus>>,
+        ) = {
             let mut sessions = self.sessions.lock().unwrap();
             let Some(session) = sessions.get_mut(session_id) else { return };
             // A session's subagent map can hold entries from a DIFFERENT block —
@@ -134,6 +183,8 @@ impl SubagentWatcher {
             // owns (mirrors unwatch_agent's own parent-scoped filter). Reagent
             // P1 on PR #2131.
             let mut reconciled_agent_ids = Vec::new();
+            let mut member_statuses_by_dispatch: HashMap<String, Vec<SubAgentStatus>> =
+                std::collections::HashMap::new();
             for state in session.subagents.values_mut() {
                 if state.info.parent_block_id != parent_block_id {
                     continue;
@@ -155,8 +206,12 @@ impl SubagentWatcher {
                         "subagent reconciled: active -> abandoned (parent turn ended)"
                     );
                 }
+                member_statuses_by_dispatch
+                    .entry(state.info.dispatch_id.clone())
+                    .or_default()
+                    .push(state.info.status.clone());
             }
-            reconciled_agent_ids
+            (reconciled_agent_ids, member_statuses_by_dispatch)
         };
         if !reconciled_agent_ids.is_empty() {
             tracing::info!(
@@ -167,6 +222,92 @@ impl SubagentWatcher {
             );
             self.broadcast_subagents_abandoned(parent_block_id, &reconciled_agent_ids);
         }
+
+        // Propagate to the owning Workflow-kind `AgentDispatch` aggregate —
+        // a Solo dispatch needs no separate step (its status is synthesized
+        // directly from its one member's status, see `solo_dispatch`).
+        // SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.2:
+        // Abandoned iff every member is Completed|Abandoned and at least one
+        // is Abandoned — otherwise leave the existing counts-based Running/
+        // Completed status (set by `refresh_dispatch_status`) alone.
+        let abandoned_dispatch_infos: Vec<AgentDispatch> = {
+            let mut dispatches = self.dispatches.lock().unwrap();
+            let mut updated = Vec::new();
+            for (dispatch_id, statuses) in &member_statuses_by_dispatch {
+                if dispatch_id.starts_with("solo:") {
+                    continue;
+                }
+                let Some(state) = dispatches.get_mut(dispatch_id) else { continue };
+                // reagent P2 on PR #2677: `statuses` only reflects members
+                // currently visible in `session.subagents` — a member whose
+                // JSONL file the filesystem watcher hasn't picked up yet
+                // (an async notify/debounce lag racing this exact
+                // reconciliation pass) is invisible here, so `all_done`
+                // could be true against an INCOMPLETE member set. Cross-
+                // check against the dispatch's own authoritative
+                // `member_count` (tracked separately via journal_started/
+                // member_files) — only trust `all_done` when we've actually
+                // seen status for every member the dispatch itself believes
+                // exist. Under-counting here is safe (skip this round, the
+                // next new-evidence event or reconciliation pass reruns
+                // this check with a fuller picture) — over-counting would
+                // risk abandoning a dispatch with a member reconciliation
+                // hasn't even observed yet.
+                if statuses.len() < state.info.member_count {
+                    continue;
+                }
+                let all_done = statuses
+                    .iter()
+                    .all(|s| matches!(s, SubAgentStatus::Completed | SubAgentStatus::Abandoned));
+                let any_abandoned = statuses.iter().any(|s| *s == SubAgentStatus::Abandoned);
+                if !(all_done && any_abandoned) {
+                    continue;
+                }
+                if state.info.status != DispatchStatus::Abandoned {
+                    state.info.status = DispatchStatus::Abandoned;
+                    tracing::info!(
+                        dispatch_id = %dispatch_id,
+                        parent_block_id = %parent_block_id,
+                        session_id = %session_id,
+                        member_count = statuses.len(),
+                        "dispatch reconciled: -> abandoned (all members done, at least one abandoned)"
+                    );
+                    updated.push(state.info.clone());
+                }
+            }
+            updated
+        };
+        for info in &abandoned_dispatch_infos {
+            self.broadcast_dispatch_updated(info);
+        }
+    }
+
+    /// Bounded one-shot retry for `reconcile_stale_subagents`'s `None`
+    /// (controller-not-yet-registered) case — see that function's doc
+    /// comment. Exactly one retry, not a loop: if the controller genuinely
+    /// never registers (e.g. the block was deleted in the meantime), a
+    /// single delayed re-check is enough to stop treating "unknown" as a
+    /// permanent no-op without risking an unbounded retry chain chasing a
+    /// block that's never coming back. 2s is long enough to clear the
+    /// observed registration race without meaningfully delaying the
+    /// correction a user would notice.
+    ///
+    /// Mirrors `trigger_eager_naming`'s `self_ref` upgrade-to-`Arc` pattern
+    /// for spawning a task that outlives this sync call; silently no-ops
+    /// for a bare `new()` watcher (most unit tests), same "untracked ->
+    /// safe no-op" convention as that method.
+    fn retry_reconcile_once(&self, parent_block_id: &str, session_id: &str) {
+        let Some(watcher) = self.self_ref.lock().unwrap().as_ref().and_then(|w| w.upgrade()) else {
+            return;
+        };
+        let parent_block_id = parent_block_id.to_string();
+        let session_id = session_id.to_string();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            // allow_retry: false — this IS the one retry; a second `None`
+            // here gives up rather than spawning another.
+            watcher.reconcile_stale_subagents_impl(&parent_block_id, &session_id, false);
+        });
     }
 
     /// One batched broadcast per reconciliation pass (not one per
