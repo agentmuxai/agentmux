@@ -78,6 +78,24 @@ export function correlateDispatchesForBlock(
     if (toolNodes.length !== orderable.length) return result;
 
     const sorted = [...orderable].sort((a, b) => spawnOrderOf.get(a.dispatch_id)! - spawnOrderOf.get(b.dispatch_id)!);
+
+    // Kind-compatibility check (reagent P1, PR #2676 review) — count
+    // equality alone doesn't guarantee a CORRECT pairing: if a turn spawns
+    // an Agent/Task call and a Workflow call in parallel, and the
+    // workflow's first member happens to sort earlier by spawned_at than
+    // the task's own subagent, the counts still match but a zip-by-index
+    // would swap kinds — pairing the Task's tool node with the Workflow
+    // dispatch and vice versa, rendering the wrong card (member-count
+    // progress on a solo call, or a solo "done" pill on a workflow).
+    // Verify every pair's tool kind agrees with its dispatch's kind before
+    // committing to ANY of them — one mismatch invalidates the whole pane,
+    // same all-or-nothing policy as the count checks above.
+    for (let i = 0; i < toolNodes.length; i++) {
+        const expectsWorkflow = toolNodes[i].tool === "Workflow";
+        const isWorkflow = sorted[i].kind === "workflow";
+        if (expectsWorkflow !== isWorkflow) return result;
+    }
+
     for (let i = 0; i < toolNodes.length; i++) {
         result.set(toolNodes[i].id, sorted[i]);
     }

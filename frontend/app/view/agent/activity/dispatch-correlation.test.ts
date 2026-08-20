@@ -121,4 +121,46 @@ describe("correlateDispatchesForBlock", () => {
         const result = correlateDispatchesForBlock("block-1", nodes, [], []);
         expect(result.size).toBe(0);
     });
+
+    // Reagent P1 (PR #2676 review): count equality alone doesn't guarantee a
+    // CORRECT pairing. A Task call and a Workflow call spawned in the same
+    // turn can have counts line up while their spawn-order position doesn't
+    // match their transcript-order position, silently swapping which node
+    // gets which dispatch's kind.
+    it("falls back to an empty map when a mixed Agent/Task + Workflow spawn's transcript order disagrees with spawn order (kind-mismatch guard)", () => {
+        // Transcript order: Task node first, Workflow node second.
+        const nodes: DocumentNode[] = [mkToolNode("tu_task", "Task"), mkToolNode("tu_wf", "Workflow")];
+        // Spawn order: the Workflow's first member (spawned_at 100) actually
+        // started BEFORE the Task's own subagent (spawned_at 200) — the
+        // opposite of transcript order.
+        const subagents = [
+            mkSub({ agent_id: "task-agent", dispatch_id: "solo:task-agent", spawned_at: 200 }),
+            mkSub({ agent_id: "wf-member", dispatch_id: "wf_1", spawned_at: 100 }),
+        ];
+        const dispatches = [
+            mkDispatch({ dispatch_id: "solo:task-agent", kind: "solo" }),
+            mkDispatch({ dispatch_id: "wf_1", kind: "workflow" }),
+        ];
+
+        const result = correlateDispatchesForBlock("block-1", nodes, subagents, dispatches);
+
+        expect(result.size).toBe(0);
+    });
+
+    it("matches a mixed Agent/Task + Workflow spawn correctly when transcript order DOES agree with spawn order", () => {
+        const nodes: DocumentNode[] = [mkToolNode("tu_task", "Task"), mkToolNode("tu_wf", "Workflow")];
+        const subagents = [
+            mkSub({ agent_id: "task-agent", dispatch_id: "solo:task-agent", spawned_at: 100 }),
+            mkSub({ agent_id: "wf-member", dispatch_id: "wf_1", spawned_at: 200 }),
+        ];
+        const dispatches = [
+            mkDispatch({ dispatch_id: "solo:task-agent", kind: "solo", dispatch_name: "Task dispatch" }),
+            mkDispatch({ dispatch_id: "wf_1", kind: "workflow", dispatch_name: "Workflow dispatch" }),
+        ];
+
+        const result = correlateDispatchesForBlock("block-1", nodes, subagents, dispatches);
+
+        expect(result.get("tu_task")?.dispatch_name).toBe("Task dispatch");
+        expect(result.get("tu_wf")?.dispatch_name).toBe("Workflow dispatch");
+    });
 });
