@@ -904,17 +904,25 @@ pub(crate) fn memory_write_impl(
     // Version history recorded BEFORE the live-file write below — reagent
     // P1: closes the same fs-watch race described in
     // native_memory_handlers.rs's write_file handler. This is the path the
-    // MemoryWrite MCP tool actually calls in production (agent_id here is
-    // the slug, resolved the same way memory_dir_for_agent resolves it) —
-    // instrumenting it matters at least as much as the WebSocket RPC path,
-    // since it's what an agent's own MemoryWrite tool call hits. Non-fatal
-    // on failure — a durability/review layer on top of the write, not the
-    // write itself.
+    // MemoryWrite MCP tool actually calls in production — instrumenting it
+    // matters at least as much as the WebSocket RPC path, since it's what
+    // an agent's own MemoryWrite tool call hits. Non-fatal on failure — a
+    // durability/review layer on top of the write, not the write itself.
+    //
+    // Keyed by the RESOLVED canonical id, not the raw `agent_id` (slug)
+    // parameter — reagent P1: this surface previously stored versions
+    // slug-keyed while the WS RPC surface stores them keyed by the
+    // resolved `AgentDefinition.id`, so a version written here was
+    // invisible to a WS-RPC-based history/diff/revert call for the same
+    // logical agent whenever slug != id. See `resolve_agent_uuid`'s own
+    // doc for the full resolution-order rationale.
+    let version_agent_id = crate::server::native_memory_handlers::resolve_agent_uuid(&state.wstore, agent_id)
+        .unwrap_or_else(|_| agent_id.to_string());
     let (source, detail) = match &provenance {
         Some(p) => (p.source, p.detail),
         None => ("agent_inferred", "{}"),
     };
-    if let Err(e) = state.id_store.agent_native_memory_version_insert(agent_id, filename, content, source, detail, "") {
+    if let Err(e) = state.id_store.agent_native_memory_version_insert(&version_agent_id, filename, content, source, detail, "") {
         tracing::warn!(agent_id, filename, error = %e, "memory.write: version insert failed (non-fatal)");
     }
 
@@ -943,9 +951,13 @@ pub(crate) fn memory_history_impl(
 ) -> Result<serde_json::Value, String> {
     crate::server::native_memory_handlers::validate_memory_filename(filename)
         .map_err(|e| format!("memory.history: {e}"))?;
+    // See memory_write_impl's own comment — must key by the same resolved
+    // canonical id that write used, not the raw slug.
+    let version_agent_id = crate::server::native_memory_handlers::resolve_agent_uuid(&state.wstore, agent_id)
+        .map_err(|e| format!("memory.history: {e}"))?;
     let versions: Vec<crate::backend::rpc_types::NativeMemoryVersionMeta> = state
         .id_store
-        .agent_native_memory_version_list(agent_id, filename)
+        .agent_native_memory_version_list(&version_agent_id, filename)
         .map_err(|e| format!("memory.history: store: {e}"))?
         .into_iter()
         .map(|v| crate::backend::rpc_types::NativeMemoryVersionMeta {
@@ -968,6 +980,10 @@ pub(crate) fn memory_diff_impl(
     from_version_id: &str,
     to_version_id: &str,
 ) -> Result<serde_json::Value, String> {
+    // See memory_write_impl's own comment — must compare against the same
+    // resolved canonical id that write used, not the raw slug.
+    let version_agent_id = crate::server::native_memory_handlers::resolve_agent_uuid(&state.wstore, agent_id)
+        .map_err(|e| format!("memory.diff: {e}"))?;
     let from = state
         .id_store
         .agent_native_memory_version_get(from_version_id)
@@ -980,7 +996,7 @@ pub(crate) fn memory_diff_impl(
         .ok_or_else(|| format!("memory.diff: version {to_version_id} not found"))?;
     // reagent P1 — see the identical check in native_memory_handlers.rs's
     // WS RPC handler for the full rationale.
-    if from.agent_id != agent_id || to.agent_id != agent_id {
+    if from.agent_id != version_agent_id || to.agent_id != version_agent_id {
         return Err(format!("memory.diff: one or both versions do not belong to {agent_id}"));
     }
     let diff = crate::server::native_memory_handlers::line_diff(&from.content, &to.content);
@@ -996,12 +1012,17 @@ pub(crate) fn memory_revert_impl(
     crate::server::native_memory_handlers::validate_memory_filename(filename)
         .map_err(|e| format!("memory.revert: {e}"))?;
 
+    // See memory_write_impl's own comment — must key/compare against the
+    // same resolved canonical id that write used, not the raw slug.
+    let version_agent_id = crate::server::native_memory_handlers::resolve_agent_uuid(&state.wstore, agent_id)
+        .map_err(|e| format!("memory.revert: {e}"))?;
+
     let target = state
         .id_store
         .agent_native_memory_version_get(target_version_id)
         .map_err(|e| format!("memory.revert: store: {e}"))?
         .ok_or_else(|| format!("memory.revert: version {target_version_id} not found"))?;
-    if target.agent_id != agent_id || target.filename != filename {
+    if target.agent_id != version_agent_id || target.filename != filename {
         return Err(format!(
             "memory.revert: version {target_version_id} does not belong to {agent_id}/{filename}"
         ));
@@ -1020,7 +1041,7 @@ pub(crate) fn memory_revert_impl(
     let detail = json!({ "reverted_to": target_version_id }).to_string();
     let new_version = state
         .id_store
-        .agent_native_memory_version_insert(agent_id, filename, &target.content, "revert", &detail, "")
+        .agent_native_memory_version_insert(&version_agent_id, filename, &target.content, "revert", &detail, "")
         .map_err(|e| format!("memory.revert: version insert: {e}"))?;
 
     let dest = dir.join(filename);
@@ -1254,6 +1275,59 @@ mod memory_version_impl_tests {
 
         let err = memory_revert_impl(&state, "agent-app-5b", "MEMORY.md", &version_id).unwrap_err();
         assert!(err.contains("does not belong to"), "unexpected error: {err}");
+    }
+
+    /// Regression for reagent P1 (re-review of PR #2674): this App-API
+    /// surface receives the agent SLUG (per `memory_dir_for_agent`'s own
+    /// doc), but must key `db_agent_native_memory_versions` by the same
+    /// canonical `AgentDefinition.id` the WS RPC surface uses — otherwise
+    /// a version written here is invisible to a WS-RPC-based history/diff/
+    /// revert call for the same logical agent whenever slug != id. Uses a
+    /// deliberately DIFFERENT id and slug (existing test fixtures elsewhere
+    /// in this file always set them equal, so they can't catch this class
+    /// of bug at all).
+    #[tokio::test]
+    async fn write_impl_keys_versions_by_the_resolved_id_not_the_raw_slug() {
+        let tmp = tempfile::tempdir().unwrap();
+        let state = crate::server::tests::test_state();
+        let mut def = agent_def("agent-real-uuid-999", &tmp.path().to_string_lossy());
+        def.slug = "agent-friendly-slug".to_string();
+        state.wstore.agent_def_insert(&mut def).unwrap();
+        state
+            .wstore
+            .agent_content_set(&crate::backend::storage::AgentContent {
+                agent_id: def.id.clone(),
+                content_type: "env".to_string(),
+                content: format!("CLAUDE_CONFIG_DIR={}\n", tmp.path().display()),
+                updated_at: 0,
+            })
+            .unwrap();
+
+        // Write via the slug (what the MemoryWrite MCP tool actually sends).
+        memory_write_impl(&state, "agent-friendly-slug", "MEMORY.md", "content", None).unwrap();
+
+        // The version must be discoverable under the RESOLVED id — the
+        // same id a WS-RPC-based history/diff/revert call would use (it
+        // receives AgentDefinition.id directly, per the frontend's own
+        // contract) — not under the raw slug string.
+        let by_resolved_id = state
+            .id_store
+            .agent_native_memory_version_list("agent-real-uuid-999", "MEMORY.md")
+            .unwrap();
+        assert_eq!(by_resolved_id.len(), 1, "version must be keyed by the resolved AgentDefinition.id");
+
+        let by_raw_slug = state
+            .id_store
+            .agent_native_memory_version_list("agent-friendly-slug", "MEMORY.md")
+            .unwrap();
+        assert_eq!(by_raw_slug.len(), 0, "version must NOT be keyed by the raw, unresolved slug");
+
+        // And memory_history_impl (called with the slug, same as write)
+        // must still find it, proving read-your-own-write consistency
+        // through this surface's own resolution.
+        let history = memory_history_impl(&state, "agent-friendly-slug", "MEMORY.md").unwrap();
+        let versions = history.get("versions").and_then(|v| v.as_array()).unwrap();
+        assert_eq!(versions.len(), 1);
     }
 }
 

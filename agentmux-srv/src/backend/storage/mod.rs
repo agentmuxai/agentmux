@@ -31,7 +31,7 @@ pub mod snapshot;
 pub mod store;
 
 pub use agent_credentials::AgentCredential;
-pub use agent_native_memory::NativeMemoryMirrorRow;
+pub use agent_native_memory::{NativeMemoryMirrorRow, NativeMemoryMirrorRowWithAgent};
 pub use agent_native_memory_versions::{NativeMemoryVersion, NativeMemoryVersionSummary};
 pub use agents::{AgentDefinition, AgentInstance, InstanceStatus, InstanceUpdate};
 pub use content::AgentContent;

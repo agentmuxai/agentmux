@@ -134,6 +134,46 @@ pub(crate) fn memory_dir_for_agent(
         .ok_or_else(|| format!("memory: agent {agent_id} not found"))
 }
 
+/// Resolve `agent_id` — the agent SLUG, per the App-API convention (see
+/// [`memory_dir_for_agent`]'s own doc comment) — to the same stable,
+/// canonical identifier (`AgentDefinition.id` / `db_agents.id`) the
+/// WebSocket RPC surface (`agent:memory:write_file` et al., which receives
+/// this id directly from the caller and resolves it via `agent_def_get`)
+/// already keys `db_agent_native_memory_versions` by.
+///
+/// reagent P1: without this, a version written through this App-API/MCP
+/// surface (previously slug-keyed, verbatim) lived in a disjoint keyspace
+/// from one written through the WS RPC surface for the exact same logical
+/// agent whenever `slug != id` — a version written via the `MemoryWrite`
+/// MCP tool was invisible to a WS-RPC-based `MemoryHistory`/`MemoryDiff`/
+/// `MemoryRevert` call and vice versa, silently defeating the point of
+/// having version history at all.
+///
+/// Mirrors `memory_dir_for_agent`'s own slug → instance → registry
+/// resolution order, but returns the id instead of a filesystem path:
+/// - Primary path (`instance_get_by_slug`): `db_agents` is the
+///   consolidated definition+instance table (Phase 3a) — its own query
+///   selects `id, id AS def_id`, i.e. the row's `id` already IS the
+///   definition id in this model, not a separate instance-only identity.
+/// - Registry fallback (a live agent not yet persisted to `db_agents`):
+///   the registry record's `definition_id` field is the one that matches
+///   `agent_def_get`'s namespace — its sibling `instance_id` is a
+///   different, launch-scoped identity, not what `write_file` keys by.
+pub(crate) fn resolve_agent_uuid(
+    wstore: &crate::backend::storage::store::Store,
+    agent_id: &str,
+) -> Result<String, String> {
+    if let Some(instance) = wstore
+        .instance_get_by_slug(agent_id)
+        .map_err(|e| format!("resolve_agent_uuid: store: {e}"))?
+    {
+        return Ok(instance.id);
+    }
+    find_active_registry_record_by_slug(agent_id)
+        .map(|rec| rec.data.definition_id)
+        .ok_or_else(|| format!("resolve_agent_uuid: agent {agent_id} not found"))
+}
+
 /// Find the global named-agent registry's active record for `agent_id` —
 /// the `AGENTMUX_AGENT_ID` routing slug (`derive_slug(display_name)`),
 /// NOT the record's own `instance_name` (which keeps the original
@@ -991,10 +1031,12 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
         }),
     );
 
+    let wstore_history = state.wstore.clone();
     let id_store_history = state.id_store.clone();
     engine.register_handler(
         COMMAND_NATIVE_MEMORY_HISTORY,
         Box::new(move |data, _ctx| {
+            let wstore = wstore_history.clone();
             let id_store = id_store_history.clone();
             Box::pin(async move {
                 let cmd: CommandNativeMemoryHistoryData = serde_json::from_value(data)
@@ -1003,8 +1045,21 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 validate_filename(&cmd.filename)
                     .map_err(|e| format!("agent:memory:history: {e}"))?;
 
+                // Resolve to the same canonical agent.id write_file keys
+                // by, for the same reason app_api::memory_history_impl
+                // does (reagent P1) — cmd.agent_id is expected to already
+                // be that id for this surface (the frontend passes
+                // AgentDefinition.id), but resolving explicitly here
+                // rather than trusting it verbatim matches write_file's
+                // own validation and closes the gap if that assumption
+                // ever stops holding for some caller.
+                let agent = wstore
+                    .agent_def_get(&cmd.agent_id)
+                    .map_err(|e| format!("agent:memory:history: store: {e}"))?
+                    .ok_or_else(|| format!("agent:memory:history: agent {} not found", cmd.agent_id))?;
+
                 let versions = id_store
-                    .agent_native_memory_version_list(&cmd.agent_id, &cmd.filename)
+                    .agent_native_memory_version_list(&agent.id, &cmd.filename)
                     .map_err(|e| format!("agent:memory:history: store: {e}"))?
                     .into_iter()
                     .map(version_summary_to_meta)
@@ -1015,14 +1070,23 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
         }),
     );
 
+    let wstore_diff = state.wstore.clone();
     let id_store_diff = state.id_store.clone();
     engine.register_handler(
         COMMAND_NATIVE_MEMORY_DIFF,
         Box::new(move |data, _ctx| {
+            let wstore = wstore_diff.clone();
             let id_store = id_store_diff.clone();
             Box::pin(async move {
                 let cmd: CommandNativeMemoryDiffData = serde_json::from_value(data)
                     .map_err(|e| format!("agent:memory:diff: {e}"))?;
+
+                // Resolve to the same canonical agent.id write_file keys by
+                // — see the identical comment on the history handler above.
+                let agent = wstore
+                    .agent_def_get(&cmd.agent_id)
+                    .map_err(|e| format!("agent:memory:diff: store: {e}"))?
+                    .ok_or_else(|| format!("agent:memory:diff: agent {} not found", cmd.agent_id))?;
 
                 let from = id_store
                     .agent_native_memory_version_get(&cmd.from_version_id)
@@ -1037,7 +1101,7 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 // one instance-wide X-AuthKey, so without this check any
                 // caller could read any other agent's memory content by
                 // version id.
-                if from.agent_id != cmd.agent_id || to.agent_id != cmd.agent_id {
+                if from.agent_id != agent.id || to.agent_id != agent.id {
                     return Err(format!(
                         "agent:memory:diff: one or both versions do not belong to {}",
                         cmd.agent_id
@@ -1064,11 +1128,22 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 validate_filename(&cmd.filename)
                     .map_err(|e| format!("agent:memory:revert: {e}"))?;
 
+                // Resolve to the same canonical agent.id write_file keys by
+                // — see the identical comment on the history handler above.
+                // Resolved BEFORE the ownership check below (not after, as
+                // an earlier revision of this handler did) so that check
+                // compares against the same id the version was actually
+                // stored under, not the raw, possibly-different cmd.agent_id.
+                let agent = wstore
+                    .agent_def_get(&cmd.agent_id)
+                    .map_err(|e| format!("agent:memory:revert: store: {e}"))?
+                    .ok_or_else(|| format!("agent:memory:revert: agent {} not found", cmd.agent_id))?;
+
                 let target = id_store
                     .agent_native_memory_version_get(&cmd.target_version_id)
                     .map_err(|e| format!("agent:memory:revert: store: {e}"))?
                     .ok_or_else(|| format!("agent:memory:revert: version {} not found", cmd.target_version_id))?;
-                if target.agent_id != cmd.agent_id || target.filename != cmd.filename {
+                if target.agent_id != agent.id || target.filename != cmd.filename {
                     return Err(format!(
                         "agent:memory:revert: version {} does not belong to {}/{}",
                         cmd.target_version_id, cmd.agent_id, cmd.filename
@@ -1079,10 +1154,6 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 // path as agent:memory:write_file (live file + mirror +
                 // version), not a rewrite of history — this is the
                 // git-revert-not-git-reset guarantee from the spec's §4.3.
-                let agent = wstore
-                    .agent_def_get(&cmd.agent_id)
-                    .map_err(|e| format!("agent:memory:revert: store: {e}"))?
-                    .ok_or_else(|| format!("agent:memory:revert: agent {} not found", cmd.agent_id))?;
                 if agent.working_directory.is_empty() {
                     return Err(format!("agent:memory:revert: agent {} has no configured working directory", cmd.agent_id));
                 }
