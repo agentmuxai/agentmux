@@ -20,14 +20,28 @@
  *   - two dispatches spawned within the same millisecond (tie-guarded
  *     below — bails rather than trust an arbitrary tiebreak).
  *
- * Residual, NOT fully closeable without an exact id (deferred by design —
- * see the spec above): two SAME-kind calls (e.g. two parallel Agent-tool
- * spawns) with distinct, non-tied `spawned_at` values but whose relative
- * order still doesn't match their transcript position. The kind-
- * compatibility check below can't catch this — both sides read the same
- * kind. In practice this needs spawn order to disagree with array order for
- * calls issued in one turn, which the CLI processes sequentially even when
- * the calls then run concurrently — believed rare, not provably impossible.
+ * Closed (reagent flagged this same residual gap across three consecutive
+ * review rounds on PR #2676 — the prior "believed rare" framing wasn't a
+ * sufficient answer, and parallel same-turn spawns are actually a common
+ * usage pattern, not an edge case): two SAME-kind calls issued in one turn
+ * (e.g. two parallel Agent-tool spawns) can have distinct, non-tied
+ * `spawned_at` values whose relative order still doesn't match transcript
+ * position — the kind-compatibility check can't catch this, both sides
+ * read the same kind, and even a `ToolNode.timestamp` comparison isn't a
+ * reliable secondary signal (it's the FRONTEND's own receive-time during
+ * SSE parsing, not the CLI's dispatch time — two truly parallel tool_use
+ * blocks can still land microseconds apart there). The one signal that
+ * actually IS documented and reliable in this codebase: Claude Code's own
+ * `slug` is a per-CONCURRENT-BATCH codename — "one shared slug = one
+ * legitimate concurrent spawn" (REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md
+ * Finding 3). Two solo dispatches sharing a slug (or both missing one) are
+ * from the same batch and their relative order is unverifiable — bail.
+ * Distinct slugs mean distinct batches/turns, safely orderable by position
+ * (a turn's own tool_uses always resolve before the next turn's begin).
+ * Workflow dispatches have no equivalent per-run batch signal, so more
+ * than one Workflow-kind dispatch in a single pane's match always bails —
+ * a real, accepted coverage loss for that specific (rarer) case, not a
+ * silent gap.
  */
 
 import type { AgentDispatch, ActiveSubagent } from "../../swarm/swarm-model";
@@ -73,6 +87,23 @@ export function correlateDispatchesForBlock(
 
     const blockDispatches = dispatches.filter((d) => d.parent_block_id === blockId);
     const orderable = blockDispatches.filter((d) => spawnOrderOf.has(d.dispatch_id));
+
+    // Same-batch ambiguity guard (see the module doc comment above) — must
+    // run before trusting ANY ordering, including the tie/kind checks
+    // below, since a same-batch pair can have distinct spawned_at values
+    // and matching kinds yet still be unverifiably ordered.
+    const NO_SLUG = "\0no-slug";
+    const soloSlugCounts = new Map<string, number>();
+    for (const d of orderable) {
+        if (d.kind !== "solo") continue;
+        const slug = subagents.find((s) => s.dispatch_id === d.dispatch_id)?.slug || NO_SLUG;
+        soloSlugCounts.set(slug, (soloSlugCounts.get(slug) ?? 0) + 1);
+    }
+    for (const count of soloSlugCounts.values()) {
+        if (count > 1) return result;
+    }
+    const workflowCount = orderable.filter((d) => d.kind === "workflow").length;
+    if (workflowCount > 1) return result;
 
     // Confidence gate — disqualifies the WHOLE pane:
     //  - a dispatch exists for this pane but isn't orderable (its member

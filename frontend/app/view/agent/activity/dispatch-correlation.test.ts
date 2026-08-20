@@ -8,7 +8,12 @@ import { correlateDispatchesForBlock } from "./dispatch-correlation";
 
 function mkSub(overrides: Partial<ActiveSubagent> & Pick<ActiveSubagent, "agent_id" | "dispatch_id">): ActiveSubagent {
     return {
-        slug: "some-slug",
+        // Unique per call by default (not a fixed literal) — a shared slug
+        // means "same concurrent batch" to correlateDispatchesForBlock's
+        // same-batch ambiguity guard, so two DISTINCT test subagents must
+        // default to distinct slugs unless a test deliberately wants to
+        // exercise that guard (pass slug explicitly to share one).
+        slug: `slug-${overrides.agent_id}`,
         parent_agent: "parent",
         parent_block_id: "block-1",
         session_id: "session-1",
@@ -110,6 +115,70 @@ describe("correlateDispatchesForBlock", () => {
             mkSub({ agent_id: "a2", dispatch_id: "solo:a2", spawned_at: 100 }),
         ];
         const dispatches = [mkDispatch({ dispatch_id: "solo:a1" }), mkDispatch({ dispatch_id: "solo:a2" })];
+
+        const result = correlateDispatchesForBlock("block-1", nodes, subagents, dispatches);
+
+        expect(result.size).toBe(0);
+    });
+
+    // Same-batch ambiguity guard — closes the residual gap reagent flagged
+    // across three review rounds: two same-kind calls with DISTINCT,
+    // non-tied spawned_at values, correctly kind-matched, but from the
+    // same concurrent batch (shared slug) — their relative order is not
+    // verifiable even though every other check passes.
+    it("falls back to an empty map when two solo dispatches share the same slug (same concurrent batch), even with distinct non-tied spawned_at", () => {
+        const nodes: DocumentNode[] = [mkToolNode("tu_1"), mkToolNode("tu_2")];
+        const subagents = [
+            mkSub({ agent_id: "a1", dispatch_id: "solo:a1", spawned_at: 100, slug: "shared-batch" }),
+            mkSub({ agent_id: "a2", dispatch_id: "solo:a2", spawned_at: 200, slug: "shared-batch" }),
+        ];
+        const dispatches = [mkDispatch({ dispatch_id: "solo:a1" }), mkDispatch({ dispatch_id: "solo:a2" })];
+
+        const result = correlateDispatchesForBlock("block-1", nodes, subagents, dispatches);
+
+        expect(result.size).toBe(0);
+    });
+
+    it("falls back to an empty map when two solo dispatches BOTH have no slug at all", () => {
+        const nodes: DocumentNode[] = [mkToolNode("tu_1"), mkToolNode("tu_2")];
+        const subagents = [
+            mkSub({ agent_id: "a1", dispatch_id: "solo:a1", spawned_at: 100, slug: "" }),
+            mkSub({ agent_id: "a2", dispatch_id: "solo:a2", spawned_at: 200, slug: "" }),
+        ];
+        const dispatches = [mkDispatch({ dispatch_id: "solo:a1" }), mkDispatch({ dispatch_id: "solo:a2" })];
+
+        const result = correlateDispatchesForBlock("block-1", nodes, subagents, dispatches);
+
+        expect(result.size).toBe(0);
+    });
+
+    it("matches two solo dispatches with DIFFERENT slugs — distinct batches are safely orderable", () => {
+        const nodes: DocumentNode[] = [mkToolNode("tu_1"), mkToolNode("tu_2")];
+        const subagents = [
+            mkSub({ agent_id: "a1", dispatch_id: "solo:a1", spawned_at: 100, slug: "batch-one" }),
+            mkSub({ agent_id: "a2", dispatch_id: "solo:a2", spawned_at: 200, slug: "batch-two" }),
+        ];
+        const dispatches = [
+            mkDispatch({ dispatch_id: "solo:a1", dispatch_name: "First" }),
+            mkDispatch({ dispatch_id: "solo:a2", dispatch_name: "Second" }),
+        ];
+
+        const result = correlateDispatchesForBlock("block-1", nodes, subagents, dispatches);
+
+        expect(result.get("tu_1")?.dispatch_name).toBe("First");
+        expect(result.get("tu_2")?.dispatch_name).toBe("Second");
+    });
+
+    it("falls back to an empty map when more than one Workflow dispatch needs ordering in the same pane (no per-run batch signal exists)", () => {
+        const nodes: DocumentNode[] = [mkToolNode("tu_1", "Workflow"), mkToolNode("tu_2", "Workflow")];
+        const subagents = [
+            mkSub({ agent_id: "m1", dispatch_id: "wf_1", spawned_at: 100 }),
+            mkSub({ agent_id: "m2", dispatch_id: "wf_2", spawned_at: 200 }),
+        ];
+        const dispatches = [
+            mkDispatch({ dispatch_id: "wf_1", kind: "workflow" }),
+            mkDispatch({ dispatch_id: "wf_2", kind: "workflow" }),
+        ];
 
         const result = correlateDispatchesForBlock("block-1", nodes, subagents, dispatches);
 
