@@ -26,7 +26,7 @@ mod cron;
 mod messaging_handlers;
 mod muxbus_handlers;
 mod muxspect_handlers;
-mod native_memory_handlers;
+pub(crate) mod native_memory_handlers;
 mod ui_handlers;
 
 #[cfg(test)]

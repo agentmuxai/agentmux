@@ -206,11 +206,19 @@ pub(crate) fn find_active_registry_record_by_slug(
 /// when the registry is unavailable or no active record matches the slug.
 fn memory_dir_from_registry(agent_id: &str) -> Option<std::path::PathBuf> {
     let rec = find_active_registry_record_by_slug(agent_id)?;
+    memory_dir_for_registry_record(&rec)
+}
 
-    // Reconstruct the absolute working directory: source_agents_base joined with
-    // the relative working_dir. Legacy (v1/v2) records without a base fall back
-    // to the current channel's agents dir (AGENTMUX_AGENTS_DIR), matching the
-    // registry's own pre-P0.4 reconstruction rule.
+/// Reconstruct one registry record's absolute memory dir directly (no slug
+/// lookup) — shared by [`memory_dir_from_registry`] (single record, found by
+/// slug) and [`list_all_memory_targets`] (every active record, for the
+/// fs-watch drift detector's enumeration).
+///
+/// Reconstructs the absolute working directory: `source_agents_base` joined
+/// with the relative `working_dir`. Legacy (v1/v2) records without a base
+/// fall back to the current channel's agents dir (`AGENTMUX_AGENTS_DIR`),
+/// matching the registry's own pre-P0.4 reconstruction rule.
+fn memory_dir_for_registry_record(rec: &crate::registry::NamedAgentRecord) -> Option<std::path::PathBuf> {
     let base = rec
         .data
         .source_agents_base
@@ -223,6 +231,56 @@ fn memory_dir_from_registry(agent_id: &str) -> Option<std::path::PathBuf> {
 
     let config_dir = claude_config_dir_for_identity(rec.data.identity_id.as_deref());
     Some(memory_dir_for_cwd(&config_dir, &working_directory))
+}
+
+/// Every agent with a resolvable memory directory right now — both agents
+/// persisted to `db_agents` and live, registry-only agents that haven't
+/// been (or never will be) written back there. Deduped by canonical agent
+/// id; a `db_agents` row wins over its own registry record when both exist
+/// (the row is the more authoritative, complete source, and matches what
+/// `agent:memory:*` RPCs already key by).
+///
+/// reagent P1 on PR #2675: the fs-watch drift detector's enumeration
+/// (`reconciliation_sweep_once`/`refresh_subscriptions` in
+/// `native_memory_drift.rs`) originally used only `wstore.agent_def_list()`
+/// — the same gap [`memory_dir_for_agent`] itself already had to work
+/// around for the App-API surface (see its own doc comment / issue #1836):
+/// a live agent spawned but not yet persisted to `db_agents` has no row
+/// there at all, so the detector silently skipped it, contradicting the
+/// spec's (§4.5) "every agent with an active session" contract.
+pub(crate) fn list_all_memory_targets(
+    wstore: &crate::backend::storage::store::Store,
+) -> Vec<(String, std::path::PathBuf)> {
+    let mut seen = std::collections::HashSet::new();
+    let mut targets = Vec::new();
+
+    if let Ok(agents) = wstore.agent_def_list() {
+        for agent in &agents {
+            if let Some(dir) = memory_dir_for_agent_by_id(wstore, agent) {
+                if seen.insert(agent.id.clone()) {
+                    targets.push((agent.id.clone(), dir));
+                }
+            }
+        }
+    }
+
+    if let Some(registry_dir) = crate::registry::resolve_shared_registry_dir() {
+        if let Ok(registry) = crate::registry::Registry::open(registry_dir) {
+            if let Ok(records) = registry.list_active() {
+                for rec in &records {
+                    let agent_id = rec.data.definition_id.clone();
+                    if agent_id.is_empty() || !seen.insert(agent_id.clone()) {
+                        continue;
+                    }
+                    if let Some(dir) = memory_dir_for_registry_record(rec) {
+                        targets.push((agent_id, dir));
+                    }
+                }
+            }
+        }
+    }
+
+    targets
 }
 
 /// Compute the `CLAUDE_CONFIG_DIR` root for an agent bound to `identity_id`,
@@ -2039,6 +2097,144 @@ mod tests {
     fn line_diff_handles_a_lopsided_shape_in_both_directions() {
         assert_eq!(line_diff("a\nb\nc\nd\ne", "c"), "- a\n- b\n  c\n- d\n- e\n");
         assert_eq!(line_diff("c", "a\nb\nc\nd\ne"), "+ a\n+ b\n  c\n+ d\n+ e\n");
+    }
+
+    // reagent P1 on PR #2675: the fs-watch drift detector's enumeration
+    // originally used only `wstore.agent_def_list()`, which misses a live
+    // agent spawned but never (or not yet) persisted to `db_agents` —
+    // contradicting spec §4.5's "every agent with an active session".
+    #[tokio::test]
+    async fn list_all_memory_targets_includes_registry_only_live_agents() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var_os("AGENTMUX_SHARED_DIR");
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("AGENTMUX_SHARED_DIR", tmp.path());
+
+        let registry_dir = tmp.path().join("agents").join("registry");
+        let registry = crate::registry::Registry::open(registry_dir).unwrap();
+        registry
+            .upsert(&crate::registry::NamedAgentRecord {
+                schema_version: 1,
+                data: crate::registry::NamedAgentRecordV1 {
+                    instance_id: "inst-live-only".to_string(),
+                    instance_name: "LiveOnly".to_string(),
+                    definition_id: "def-live-only".to_string(),
+                    identity_id: None,
+                    memory_id: None,
+                    session_id: None,
+                    working_dir: "live-only-proj".to_string(),
+                    source_agents_base: Some(tmp.path().join("agents").to_string_lossy().to_string()),
+                    created_at_ms: 1,
+                    last_launched_at_ms: 1,
+                    created_by_version: "test".to_string(),
+                    last_launched_by_version: "test".to_string(),
+                },
+            })
+            .unwrap();
+
+        let state = crate::server::tests::test_state();
+        let targets = list_all_memory_targets(&state.wstore);
+        assert!(
+            targets.iter().any(|(id, _)| id == "def-live-only"),
+            "a registry-only agent with no db_agents row must still be enumerated: {targets:?}"
+        );
+
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SHARED_DIR"),
+        }
+    }
+
+    // A db_agents row is the more authoritative, complete source for an
+    // agent that has one — its own memory dir resolution must win over a
+    // registry-reconstructed guess for the same logical agent, and the
+    // agent must be enumerated exactly once, not twice.
+    #[tokio::test]
+    async fn list_all_memory_targets_dedupes_an_agent_present_in_both_db_agents_and_the_registry() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var_os("AGENTMUX_SHARED_DIR");
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("AGENTMUX_SHARED_DIR", tmp.path());
+
+        let state = crate::server::tests::test_state();
+        let config_dir = tempfile::tempdir().unwrap();
+        let mut def = crate::backend::storage::AgentDefinition {
+            id: "dup-agent".to_string(),
+            slug: "dup-agent".to_string(),
+            name: "Test".to_string(),
+            icon: String::new(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: "/work/dup-agent".to_string(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            memory_id: String::new(),
+        };
+        state.wstore.agent_def_insert(&mut def).unwrap();
+        state
+            .wstore
+            .agent_content_set(&crate::backend::storage::AgentContent {
+                agent_id: "dup-agent".to_string(),
+                content_type: "env".to_string(),
+                content: format!("CLAUDE_CONFIG_DIR={}\n", config_dir.path().display()),
+                updated_at: 0,
+            })
+            .unwrap();
+        let expected_dir = memory_dir_for_agent_by_id(&state.wstore, &def).unwrap();
+
+        let registry_dir = tmp.path().join("agents").join("registry");
+        let registry = crate::registry::Registry::open(registry_dir).unwrap();
+        registry
+            .upsert(&crate::registry::NamedAgentRecord {
+                schema_version: 1,
+                data: crate::registry::NamedAgentRecordV1 {
+                    instance_id: "inst-dup".to_string(),
+                    instance_name: "dup-agent".to_string(),
+                    definition_id: "dup-agent".to_string(),
+                    identity_id: None,
+                    memory_id: None,
+                    session_id: None,
+                    // Deliberately a different working dir than db_agents'
+                    // own row — proves the db_agents-derived entry wins
+                    // rather than being silently overwritten.
+                    working_dir: "different-registry-guess".to_string(),
+                    source_agents_base: Some(tmp.path().join("agents").to_string_lossy().to_string()),
+                    created_at_ms: 1,
+                    last_launched_at_ms: 1,
+                    created_by_version: "test".to_string(),
+                    last_launched_by_version: "test".to_string(),
+                },
+            })
+            .unwrap();
+
+        let targets = list_all_memory_targets(&state.wstore);
+        let matches: Vec<_> = targets.iter().filter(|(id, _)| id == "dup-agent").collect();
+        assert_eq!(matches.len(), 1, "must not enumerate the same agent twice: {targets:?}");
+        assert_eq!(matches[0].1, expected_dir, "the db_agents-derived dir must win over the registry's");
+
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SHARED_DIR"),
+        }
     }
 
     #[test]
