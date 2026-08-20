@@ -168,6 +168,94 @@ impl Store {
         })
     }
 
+    /// Atomic compare-and-insert: within a SINGLE connection-lock
+    /// acquisition, reads the latest version's hash for `(agent_id,
+    /// filename)` and inserts a new version only if `content`'s hash
+    /// differs (or no version exists yet). Returns `Ok(None)` when nothing
+    /// was inserted (content unchanged).
+    ///
+    /// Exists specifically for `native_memory_drift.rs`'s two concurrent
+    /// detectors (fast fs-watch path, slow reconciliation sweep) — reagent
+    /// P2 on PR #2675: a separate `agent_native_memory_version_latest`
+    /// call followed by a separate `agent_native_memory_version_insert`
+    /// call (each independently acquiring and releasing the connection
+    /// lock) is NOT atomic as a *compound* operation, even though each
+    /// individual call is serialized — two concurrent callers can both
+    /// observe the same stale "latest" between their own read and write,
+    /// producing duplicate version rows for one actual out-of-band change.
+    /// A caller that doesn't need this compare-and-swap guarantee (e.g. an
+    /// explicit RPC write, where every call is expected to record a new
+    /// version regardless — see `agent_native_memory_version_insert`'s own
+    /// doc) should keep using the plain method above instead.
+    pub fn agent_native_memory_version_insert_if_changed(
+        &self,
+        agent_id: &str,
+        filename: &str,
+        content: &str,
+        source: &str,
+        source_detail: &str,
+        session_id: &str,
+    ) -> Result<Option<NativeMemoryVersion>, StoreError> {
+        let hash = content_hash(content);
+        let conn = self.conn.lock().unwrap();
+
+        let latest: Option<(String, String)> = {
+            let mut stmt = conn.prepare(
+                "SELECT id, content_hash FROM db_agent_native_memory_versions
+                 WHERE agent_id = ?1 AND filename = ?2
+                 ORDER BY created_at DESC, rowid DESC
+                 LIMIT 1",
+            )?;
+            match stmt.query_row(params![agent_id, filename], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            }) {
+                Ok(v) => Some(v),
+                Err(rusqlite::Error::QueryReturnedNoRows) => None,
+                Err(e) => return Err(e.into()),
+            }
+        };
+
+        if let Some((_, latest_hash)) = &latest {
+            if *latest_hash == hash {
+                return Ok(None);
+            }
+        }
+
+        let id = uuid::Uuid::new_v4().to_string();
+        let parent_version_id = latest.map(|(id, _)| id);
+        let created_at = now_ms();
+        conn.execute(
+            "INSERT INTO db_agent_native_memory_versions
+                 (id, agent_id, filename, content, content_hash, parent_version_id, source, source_detail, session_id, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                id,
+                agent_id,
+                filename,
+                content,
+                hash,
+                parent_version_id,
+                source,
+                source_detail,
+                session_id,
+                created_at,
+            ],
+        )?;
+
+        Ok(Some(NativeMemoryVersion {
+            id,
+            agent_id: agent_id.to_string(),
+            filename: filename.to_string(),
+            content: content.to_string(),
+            content_hash: hash,
+            parent_version_id,
+            source: source.to_string(),
+            source_detail: source_detail.to_string(),
+            session_id: session_id.to_string(),
+            created_at,
+        }))
+    }
+
     /// List every version of `(agent_id, filename)`, newest first — no
     /// content (list-view; see [`NativeMemoryVersionSummary`]'s own doc).
     pub fn agent_native_memory_version_list(
@@ -467,5 +555,60 @@ mod tests {
         let list = store.agent_native_memory_version_list("agent-1", "MEMORY.md").unwrap();
         assert_eq!(list[0].source, "jekt");
         assert_eq!(list[0].source_detail, detail);
+    }
+
+    #[test]
+    fn insert_if_changed_inserts_on_first_observation() {
+        let store = shared_store();
+        let v = store
+            .agent_native_memory_version_insert_if_changed("agent-1", "MEMORY.md", "content", "external_fs_write", "{}", "")
+            .unwrap();
+        assert!(v.is_some());
+    }
+
+    #[test]
+    fn insert_if_changed_is_a_no_op_for_identical_content() {
+        let store = shared_store();
+        store
+            .agent_native_memory_version_insert("agent-1", "MEMORY.md", "same", "human", "{}", "")
+            .unwrap();
+        let result = store
+            .agent_native_memory_version_insert_if_changed("agent-1", "MEMORY.md", "same", "external_fs_write", "{}", "")
+            .unwrap();
+        assert_eq!(result, None);
+        assert_eq!(store.agent_native_memory_version_list("agent-1", "MEMORY.md").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn insert_if_changed_inserts_for_different_content() {
+        let store = shared_store();
+        let v1 = store
+            .agent_native_memory_version_insert("agent-1", "MEMORY.md", "v1", "human", "{}", "")
+            .unwrap();
+        let v2 = store
+            .agent_native_memory_version_insert_if_changed("agent-1", "MEMORY.md", "v2", "external_fs_write", "{}", "")
+            .unwrap()
+            .expect("different content must insert");
+        assert_eq!(v2.parent_version_id, Some(v1.id));
+    }
+
+    #[test]
+    fn insert_if_changed_only_the_first_of_two_racing_identical_calls_inserts() {
+        // Regression for reagent P2 on PR #2675: the fast path and slow path
+        // can both observe the same drift concurrently. Simulating that
+        // race directly (rather than with real concurrency, which SQLite's
+        // single-writer-lock would serialize anyway) — the point of this
+        // test is the *logical* compare-and-swap: two sequential calls with
+        // the SAME new content must produce exactly one version, not two.
+        let store = shared_store();
+        let first = store
+            .agent_native_memory_version_insert_if_changed("agent-1", "MEMORY.md", "drifted content", "external_fs_write", "{}", "")
+            .unwrap();
+        let second = store
+            .agent_native_memory_version_insert_if_changed("agent-1", "MEMORY.md", "drifted content", "external_fs_write", "{}", "")
+            .unwrap();
+        assert!(first.is_some());
+        assert_eq!(second, None, "a second call observing the same already-recorded content must be a no-op");
+        assert_eq!(store.agent_native_memory_version_list("agent-1", "MEMORY.md").unwrap().len(), 1);
     }
 }

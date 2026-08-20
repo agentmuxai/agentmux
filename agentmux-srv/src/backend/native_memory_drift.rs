@@ -38,7 +38,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::backend::fs_watch::{FsWatchEventKind, FsWatchPool};
-use crate::backend::storage::agent_native_memory_versions::content_hash;
 use crate::backend::storage::store::Store;
 use crate::server::native_memory_handlers::memory_dir_for_agent_by_id;
 
@@ -67,20 +66,21 @@ pub(crate) fn check_and_record_drift(
     live_content: &str,
     detected_via: &str,
 ) -> Result<bool, String> {
-    let hash = content_hash(live_content);
-    let latest = id_store
-        .agent_native_memory_version_latest(agent_id, filename)
-        .map_err(|e| e.to_string())?;
-    if let Some(latest) = &latest {
-        if latest.content_hash == hash {
-            return Ok(false);
-        }
-    }
     let detail = serde_json::json!({ "detected_via": detected_via }).to_string();
+    // reagent P2 on PR #2675: the fast path (per fs-watch event) and slow
+    // path (30s sweep) run as concurrent, independent tokio tasks and can
+    // both observe the same file change — a plain "read latest, then
+    // separately insert" here (two Store calls, each independently
+    // locking/unlocking) is not atomic as a compound operation, so both
+    // could read the same stale "latest" and insert duplicate
+    // external_fs_write rows for one actual change.
+    // `agent_native_memory_version_insert_if_changed` does the compare
+    // AND the insert under a single connection-lock acquisition, closing
+    // that race — see its own doc comment for the full rationale.
     id_store
-        .agent_native_memory_version_insert(agent_id, filename, live_content, "external_fs_write", &detail, "")
-        .map_err(|e| e.to_string())?;
-    Ok(true)
+        .agent_native_memory_version_insert_if_changed(agent_id, filename, live_content, "external_fs_write", &detail, "")
+        .map_err(|e| e.to_string())
+        .map(|v| v.is_some())
 }
 
 /// Read one `.md` file's content the same way the rest of the native-memory
