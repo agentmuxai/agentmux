@@ -1057,11 +1057,13 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // changes again after acceptance).
     let dock_snapshots_dns = state.dock_snapshots.clone();
     let wstore_dns = state.wstore.clone();
+    let pending_pids_dns = state.pending_background_pids.clone();
     engine.register_handler(
         COMMAND_DOCK_NODE_STATUS,
         Box::new(move |data, _ctx| {
             let dock_snapshots = dock_snapshots_dns.clone();
             let wstore = wstore_dns.clone();
+            let pending_pids = pending_pids_dns.clone();
             Box::pin(async move {
                 let cmd: CommandDockNodeStatusData = serde_json::from_value(data)
                     .map_err(|e| format!("docknodestatus: {e}"))?;
@@ -1071,19 +1073,41 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     .as_millis() as i64;
 
                 if cmd.run_in_background == Some(true) {
-                    if let Err(e) = wstore.background_task_observe(
+                    match wstore.background_task_observe(
                         &cmd.node_id,
                         &cmd.blockid,
                         &cmd.tool_name,
                         observed_at,
                         observed_at,
                     ) {
-                        tracing::warn!(
-                            target: "background_tasks",
-                            node_id = %cmd.node_id,
-                            error = %e,
-                            "failed to observe declared-background task in the durable registry",
-                        );
+                        Ok(()) => {
+                            // bashwrap's own pid publish (COMMAND_BACKGROUND_TASK_PID
+                            // below) routinely races ahead of this observe call —
+                            // it fires at bashwrap's process start, before the
+                            // frontend even sees an accepted-background tool result.
+                            // If it already arrived and got stashed, apply it now
+                            // that the row exists. See
+                            // docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md
+                            // and the Codex/reagentx findings on PR #2681.
+                            if let Some(pid) = pending_pids.take(&cmd.node_id, observed_at) {
+                                if let Err(e) = wstore.background_task_set_pid(&cmd.node_id, pid) {
+                                    tracing::warn!(
+                                        target: "background_tasks",
+                                        node_id = %cmd.node_id,
+                                        error = %e,
+                                        "failed to apply a pid stashed ahead of this task's registry row",
+                                    );
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                target: "background_tasks",
+                                node_id = %cmd.node_id,
+                                error = %e,
+                                "failed to observe declared-background task in the durable registry",
+                            );
+                        }
                     }
                 }
 
@@ -1153,21 +1177,41 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // same as the two handlers above: a write failure here doesn't block
     // anything else and is only ever a diagnostic/teardown-survival input,
     // never something the model-visible tool_result depends on.
+    //
+    // bashwrap publishes this essentially at process start — routinely
+    // BEFORE `COMMAND_DOCK_NODE_STATUS` above has created this task's
+    // `db_background_tasks` row (that requires a full round-trip through
+    // the frontend recognizing an accepted background launch first).
+    // `background_task_set_pid` silently no-ops on a missing row
+    // (`Ok(false)`), which would lose the pid permanently with no way to
+    // retry a write that will never succeed — stash it instead, and
+    // `COMMAND_DOCK_NODE_STATUS`'s handler applies it the moment the row
+    // exists. See Codex/reagentx findings on PR #2681.
     let wstore_btp = state.wstore.clone();
+    let pending_pids_btp = state.pending_background_pids.clone();
     engine.register_handler(
         COMMAND_BACKGROUND_TASK_PID,
         Box::new(move |data, _ctx| {
             let wstore = wstore_btp.clone();
+            let pending_pids = pending_pids_btp.clone();
             Box::pin(async move {
                 let cmd: CommandBackgroundTaskPidData = serde_json::from_value(data)
                     .map_err(|e| format!("backgroundtaskpid: {e}"))?;
-                if let Err(e) = wstore.background_task_set_pid(&cmd.node_id, cmd.pid as i64) {
-                    tracing::warn!(
-                        target: "background_tasks",
-                        node_id = %cmd.node_id,
-                        error = %e,
-                        "failed to record background task pid in the durable registry",
-                    );
+                let now_ms = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as i64;
+                match wstore.background_task_set_pid(&cmd.node_id, cmd.pid as i64) {
+                    Ok(true) => {}
+                    Ok(false) => pending_pids.stash(&cmd.node_id, cmd.pid as i64, now_ms),
+                    Err(e) => {
+                        tracing::warn!(
+                            target: "background_tasks",
+                            node_id = %cmd.node_id,
+                            error = %e,
+                            "failed to record background task pid in the durable registry",
+                        );
+                    }
                 }
                 Ok(None)
             })
