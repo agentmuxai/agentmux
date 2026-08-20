@@ -1,11 +1,22 @@
 # Spec: Background Task Teardown Survival (Phase B)
 
-**Date:** 2026-08-20
+**Date:** 2026-08-20 (revised same day — see §0)
 **Author:** AgentA
 **Status:** Proposed
 **Depends on:** `SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md` (Phase A)
 **Addresses:** Issue #2492, rung 4 of `docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md`
-**Isolation-invariant review required:** yes — this spec adds a new OS-level process-lifetime container and a Windows Job Object breakaway flag. Must be checked against `CLAUDE.md`'s I1–I6 before merge (see §7).
+
+## 0. Revision note
+
+The first version of this spec proposed a Windows Job Object breakaway mechanism (a new `JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK` flag + a per-task "Background Task Container"). While starting implementation, `process_tracker/windows.rs`'s existing per-block job was found to already carry a deliberate, documented decision **against** allowing breakaway:
+
+```rust
+// - BREAKAWAY_OK is NOT set: descendants can't opt out of the
+//   job. (Some CLIs try CREATE_BREAKAWAY_FROM_JOB; we want
+//   those attempts to fail so the child stays tracked.)
+```
+
+Breakaway permission is a per-job flag, not a per-spawn one — there is no way to let only bashwrap's own controlled breakaway succeed while keeping everything else's attempts blocked. Enabling it would have weakened that existing, intentional containment guarantee for every process in a block's tree, not just the one task this spec cares about. That version is abandoned; this revision uses a fundamentally simpler mechanism found by re-reading `AgentProcessRegistry` more carefully (credit: user's own observation, "the job object stays open as long as the app is open," prompted re-checking this).
 
 ## 1. Problem, precisely
 
@@ -13,95 +24,122 @@ Issue #2492's observed symptom: a declared long-running background task (`task d
 
 Traced to an exact call chain, verified against current code:
 
-1. A session restart (reconnect with a different connection, an explicit force-restart, or a controller-type change — e.g. resuming a conversation under a new spawn generation) reaches `resync_controller` (`agentmux-srv/src/backend/blockcontroller/mod.rs`), the documented "main entry point for starting/restarting blocks."
-2. When `needs_replace` is true, `resync_controller` calls `delete_controller(block_id)` (`mod.rs:413-415`) — the exact same function real pane/tab/workspace deletion sagas call (`delete_tab.rs:148`, `delete_block.rs:137`, `wcore/tab.rs:103`, `websocket.rs:944`). **There is currently no distinction in code between "this block's session is restarting" and "this block is being permanently deleted."**
-3. `delete_controller` (`mod.rs:239-257`) stops the old controller, then unconditionally does:
-   ```rust
-   if let Some(registry) = crate::backend::process_tracker::registry::global() {
-       registry.remove(block_id);
-   }
-   ```
-4. `AgentProcessRegistry::remove` (`process_tracker/registry.rs:104-112`) drops the block's tracker, and by design ("tracked ⇒ dies with the pane") this kills the **whole descendant tree**:
-   - Windows (`JobObjectTracker`): `TerminateJobObject`/`Drop` closes the per-block Job Object. `KILL_ON_JOB_CLOSE` is set with no `BREAKAWAY_OK`/`SILENT_BREAKAWAY_OK` (confirmed absent from `process_tracker/windows.rs` and `job_object.rs`), and Windows job membership is inherited transitively through every `CreateProcess` in the tree (`claude` → `agentmux-bashwrap exec` → `bash -c` via PTY → `task.exe`/`node`/`cargo`) with no opt-out available after the fact.
-   - Linux (`Cgroupv2Tracker`): `cgroup.kill` on the scope. Cgroup membership is inherited by fork/exec regardless of process-group/session boundaries — a `setsid()`'d descendant is **still** in the same cgroup and **still** dies.
-   - macOS (`ProcessGroupTracker`): `killpg` on the tracked pgid — this one *is* process-group scoped, so a descendant that already escaped into its own session (e.g. via a PTY spawn's implicit `setsid`) may already be structurally exempt today, inconsistently with the other two platforms. Not something to rely on; see §3.3.
-5. Only `AgentProcessRegistry::track_spawned(block_id, pid)` is ever called explicitly (`shell/lifecycle.rs:466`, for the `claude` CLI's own PTY spawn) — bashwrap and everything under it are never deliberately tracked; they are swept in purely by OS-level inheritance from being a descendant of a tracked process. **No code anywhere treats a declared-background task as special during teardown.** `db_background_tasks` (Phase A) is a bystander — durable bookkeeping with no enforcement power over what actually happens to the process.
+1. A session restart (reconnect with a different connection, an explicit force-restart, or a controller-type change) reaches `resync_controller` (`agentmux-srv/src/backend/blockcontroller/mod.rs`), the documented "main entry point for starting/restarting blocks."
+2. When `needs_replace` is true, `resync_controller` calls `delete_controller(block_id)` (`mod.rs:413-415`) — the **exact same function** real pane/tab/workspace deletion sagas call (`delete_tab.rs:148`, `delete_block.rs:137`, `wcore/tab.rs:103`, `websocket.rs:944`). There is currently no distinction in code between "this block's session is restarting" and "this block is being permanently deleted."
+3. `delete_controller` (`mod.rs:239-257`) stops the old controller, then unconditionally does `process_tracker::registry::global().remove(block_id)`, which drops the block's tracker — and by design ("tracked ⇒ dies with the pane") this kills the whole descendant tree (Windows `KILL_ON_JOB_CLOSE`, Linux `cgroup.kill`, macOS `killpg`) — including bashwrap and anything it spawned, since Windows job membership / Linux cgroup membership are both inherited transitively through the whole `claude → agentmux-bashwrap exec → bash -c → task.exe/node/cargo` chain regardless of process-group/session boundaries.
 
-## 2. Why "just don't call `registry.remove()` on restart" is not sufficient
+## 2. The actual fix: the registry already supports this — the bug is calling the wrong cleanup function
 
-The naive fix — skip the `process_tracker::registry::global().remove(block_id)` call specifically on the `resync_controller` replace path — is necessary but not sufficient, because:
+`AgentProcessRegistry::ensure_tracker` (`process_tracker/registry.rs:80-102`) is **already idempotent**, with its own doc comment stating the intended design directly:
 
-- The per-block registry entry (Job Object / cgroup scope) is keyed by `block_id`, one entry per block, not per-process. If the old controller's `claude` PID is about to be replaced by a *new* `claude` PID under the same `block_id`, and the tracker isn't cleared, the new controller's own `track_spawned` call would need to either reuse the same OS container (fine for the new `claude` process, but the old `claude` process — now genuinely dead, stopped intentionally — would sit in the same job/cgroup as a zombie until whenever the container is eventually closed) or create a second one (Windows: `AssignProcessToJobObject` semantics around re-assignment need checking; simplest is to always create a fresh tracker per controller generation and only defer the *old* one's teardown).
-- More fundamentally: even if the per-block container survives the restart unclosed, it **will** eventually be closed by a *later*, genuine pane-close — at which point the background task dies anyway, just later than #2492 originally observed. That only turns "dies on every restart" into "dies on the next pane close," which is not what "survive session teardown" means (a user closing an unrelated tab shouldn't kill their dev server either).
+> Idempotent — calling twice for the same block returns the existing tracker so **the job survives controller re-creation (e.g. on `/clear`)**.
 
-**The declared-background task's process must never be a member of the per-block container in the first place.** Trying to surgically extract it after the fact isn't supported by any of the three platforms' primitives (Job Objects have no "remove one member" operation short of breakaway-at-spawn; cgroups likewise; only pgrp-based killpg is removable after the fact, and only macOS uses that).
+The module doc comment says the same thing at a higher level: *"the lifetime of the tracker matches the lifetime of the pane — multiple turns on the same block share the same job, so descendants from turn N are still visible on turn N+1."*
 
-## 3. Design
+So the registry was **already designed** for "tracker lifetime == pane lifetime, not controller-generation lifetime." The bug is narrower than the original version of this spec assumed: `resync_controller`'s replace path simply calls `delete_controller` — the function meant for *permanent* pane closure — instead of a lighter path that only swaps the `Controller` implementation and leaves the process tracker alone. No new OS-level container, no breakaway, no Job Object flag changes are needed at all.
 
-### 3.1 A separate, srv-owned container per background task
+### 2.1 The remaining wrinkle: the old CLI process still needs to actually die
 
-Introduce a **Background Task Container** — one new OS-level process-lifetime container (Job Object / cgroup scope / process group, using the exact same three-platform abstraction `AgentProcessRegistry` already implements) created the moment a task is confirmed `declared_background` and its PID is known (Phase A's `background_task_set_pid` call landing). Key differences from the existing per-block registry:
+Simply skipping `registry.remove()` on replace isn't sufficient on its own — the *old* `claude` process legitimately needs to terminate (it's being replaced by a new spawn), just without taking the rest of the job/cgroup down with it. Two existing mechanisms matter here, and neither is currently scoped correctly for this case:
 
-- Keyed by the background task's own `id` (== `tool_use_id`, matching `db_background_tasks.id`), not `block_id`. One container per task, not shared across a block's other activity — this keeps blast-radius bounded to exactly one declared task (consistent with I3's "bounded blast radius" spirit even though this container is a new concept, not the launcher's own J0).
-- Owned by **srv's own process lifetime**, not any block's controller. It is only closed by:
-  1. The task's own natural completion (bashwrap's process exits on its own — the container becomes empty, nothing to clean up beyond dropping the now-inert handle).
-  2. An explicit stop request (a future `muxspect`/UI "stop this background task" action — out of scope for this phase to build UI for, but the container should support being closed for exactly this action).
-  3. `db_background_tasks`-driven cleanup on *real* block/tab/workspace deletion (§3.4) — never on restart.
+- **`ShellController::stop()`** (`shell/lifecycle.rs:820-852`) is `#[cfg(unix)]`-gated for its actual kill logic: `libc::kill(-(pid as libc::pid_t), SIGTERM)` — a **negative** pid, targeting the whole process group. This is intentional for a genuine user-initiated stop (the comment: "so that child processes spawned by the shell... are also signalled" — you want a build process the agent kicked off to die when you stop the agent). But for a *replace*, this would still kill bashwrap (a plain, non-`setsid`'d child of `claude`, inheriting the same process group) even if the job/cgroup itself is left alone. **On Windows, `stop()`'s kill branch doesn't exist at all** — today, the old `claude` process on Windows is only ever actually terminated as a side effect of `delete_controller`'s whole-job close. If replace stops calling that, Windows would leak the old `claude` process with nothing to kill it.
+- **`AgentProcessRegistry::kill_pid(block_id, pid)`** (`registry.rs:151-157`) already exists and does exactly what's needed instead: kill one specific tracked PID without touching the container. This works on all three platforms via the existing `TrackerHandle::kill_pid` implementations.
 
-### 3.2 Getting the process into its own container: breakaway, not adoption
+### 2.2 Design
 
-Because none of the three platforms support removing a live process from an existing container, the process must be spawned so it **never enters** the per-block container to begin with.
+Add a new `Controller` trait method for the replace case, distinct from the existing `stop()` (which stays exactly as-is for real user-initiated stops and real deletion):
 
-**Windows:**
-1. `process_tracker/windows.rs`'s `JobObjectTracker::new` adds `JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK` to the per-block job's limit flags (alongside the existing `KILL_ON_JOB_CLOSE`) — this is what *permits* a descendant to request breakaway; it does not, by itself, weaken any existing containment guarantee (nothing breaks away unless it explicitly asks to, and only AgentMux's own bashwrap binary will ever ask).
-2. `bash_wrap.rs`, when `args.declared_background` is true, does **not** spawn the actual work via `pair.slave.spawn_command(cmd)` (portable-pty's ConPTY spawn, which does not expose Win32 creation flags) as it does for ordinary invocations. Instead it re-spawns itself as a detached child using `std::os::windows::process::CommandExt::creation_flags(CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW)`, passing all the same arguments plus an internal `--already-detached` marker, and the detached child performs the actual PTY-hosted bash spawn + streaming as today. The original (still-in-job) bashwrap process becomes a thin, short-lived shim: it launches the detached child, publishes the child's PID (not its own — supersedes Phase A's "bashwrap's own PID" default for this specific case, since the detached child is now the real root) via the same WPS PID-publish path, and exits once the child has confirmed it's running (avoiding the original invocation hanging around inside the doomed per-block job any longer than necessary). **Open implementation risk, flagged rather than hand-waved:** whether `portable-pty`'s PTY allocation works correctly when opened from the detached (breakaway) child rather than the original process needs a spike before this is assumed to work — if PTY handle inheritance across the breakaway boundary is a problem, the fallback is to have the *original* process open the PTY pair first and pass the slave handle to the detached child, or accept the `run_via_pipes` fallback path unconditionally for declared-background tasks (losing live PTY streaming for backgrounded tasks specifically is an acceptable degradation — dev-server output is already captured via WPS chunk streaming either way, and a backgrounded task's whole point is that nobody's watching it live in real time).
+```rust
+/// Stop this controller because it's being REPLACED by a new one for the
+/// same block (session restart / resync), not because the block is being
+/// closed. Must terminate this controller's own CLI process so it doesn't
+/// linger, but must NOT touch the block's shared process tracker/job —
+/// any declared-background descendant (bashwrap, a `task dev` instance)
+/// must survive. Default implementation delegates to `stop()` for
+/// controller types with no subprocess tree of their own to be careful
+/// about (nothing to preserve, so the distinction doesn't matter).
+fn stop_for_replace(&self, new_status: &str) -> Result<(), String> {
+    self.stop(true, new_status)
+}
+```
 
-**Linux:** the detached-respawn shim does the same job at the process level, but the *container* side must move the PID to a **new** `systemd-run --user --scope` cgroup (Background Task Container, not the per-block one) at spawn time — since cgroup migration via `cgroup.procs` write is itself supported for a live process, an alternative simpler-than-Windows path exists: skip the re-spawn shim entirely and instead have `bash_wrap.rs` call `setsid()` (already necessary — see below) then, once its own PID is known, write it into a freshly-created scope's `cgroup.procs`. This migrates it OUT of the per-block cgroup without needing a breakaway re-exec. Confirm this migration is unaffected by later cgroup-freezer/kill operations on the *source* cgroup, i.e. moving a PID out of cgroup A into cgroup B before A is killed genuinely exempts it — this is standard cgroup v2 behavior (a killed cgroup only affects processes still resident in it at kill time) but should be verified against the actual `Cgroupv2Tracker` implementation during implementation, not assumed.
+`ShellController` overrides it:
 
-**macOS:** `setsid()` (new session + process group) is suffient on its own, since `ProcessGroupTracker`'s `killpg` is pgrp-scoped — no additional container-migration step needed, consistent with §2's observation that macOS may already be closer to correct than the other two platforms.
+```rust
+fn stop_for_replace(&self, new_status: &str) -> Result<(), String> {
+    let pid_to_kill = { /* same lock-and-extract as stop() */ };
+    if let Some(pid) = pid_to_kill {
+        // Single tracked PID, not the group and not the job — this is the
+        // whole point: kill exactly the old CLI process, leave everything
+        // else in the block's tracker (declared-background descendants)
+        // alone. Works on all three platforms via the existing
+        // AgentProcessRegistry::kill_pid.
+        if let Some(registry) = crate::backend::process_tracker::registry::global() {
+            if !registry.kill_pid(&self.block_id, pid) {
+                // Not tracked (e.g. registry global unset in tests, or a
+                // race before track_spawned landed) — fall back to a
+                // direct single-process kill so the old process still
+                // dies even without tracker involvement.
+                #[cfg(unix)]
+                unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+                #[cfg(windows)]
+                { /* OpenProcess + TerminateProcess on just this pid */ }
+            }
+        }
+    }
+    Ok(())
+}
+```
 
-**Shared requirement, all platforms:** `bash_wrap.rs` calls `setsid()`/creates a new process group for a `declared_background` invocation's actual work, in all cases — even on Windows, where it has no direct bearing on Job Object membership, for two reasons: (1) defense in depth — don't rely on a single platform-specific mechanism per platform when a cheap second one is available, (2) consistency — the Unix migration design above depends on it, and having Windows/Linux/macOS all establish a fresh session at the same point in the code keeps the three platform branches structurally parallel rather than diverging in surprising ways.
+`resync_controller`'s replace branch (`mod.rs:413-415`) changes from:
 
-### 3.3 `resync_controller`'s replace path
+```rust
+if needs_replace {
+    let _ = ctrl.stop(true, STATUS_DONE);
+    delete_controller(block_id);
+}
+```
 
-With §3.2 in place, the naive fix from §2 becomes correct rather than merely necessary: `resync_controller`'s `needs_replace` branch (`mod.rs:413-415`) can safely call the **existing, unmodified** `delete_controller(block_id)` — because by the time a background task exists, its process is no longer a member of the per-block container at all. No new "preserving" variant of `delete_controller` is needed; the fix lives entirely in §3.2's spawn-time behavior, not in the teardown call site. This is a meaningfully smaller, lower-risk change to the teardown path itself than originally scoped — the complexity moved to "spawn it correctly the first time," which is the more tractable half.
+to:
 
-### 3.4 Real deletion must still clean up
+```rust
+if needs_replace {
+    let _ = ctrl.stop_for_replace(STATUS_DONE);
+    // Remove from CONTROLLER_REGISTRY only — NOT the process tracker.
+    // The new controller created below reuses the same block's tracker
+    // via its own track_spawned call (ensure_tracker is idempotent).
+    remove_controller_entry_only(block_id);
+}
+```
 
-Because a declared-background task's process is now **outside** the per-block container by design, genuine pane/tab/workspace deletion (`delete_tab.rs`, `delete_block.rs`, `wcore/tab.rs`, `websocket.rs:944`) no longer kills it as a side effect — this must become an explicit step, or deleting a pane silently leaks the background task forever (a regression in the opposite direction from #2492).
+(`remove_controller_entry_only` is a new, small function alongside `delete_controller` — just the `CONTROLLER_REGISTRY.write().remove(block_id)` step, none of `delete_controller`'s process-tracker/broker cleanup.)
 
-Add one step to `delete_controller` itself (so every existing call site gets this for free, no per-caller changes needed): before returning, query `db_background_tasks::list_for_block(block_id)` for `Running` entries with a known `pid`, and for each, close its Background Task Container (§3.1's container-close path — same mechanism the future explicit-stop UI action will use). This makes `delete_controller`'s contract exactly what every existing caller already assumes ("this block's processes are gone after this call returns"), just now covering two containers (the per-block one, always; each background task's own, only if any exist) instead of one.
+**Real deletion paths are unaffected** — `delete_tab.rs`, `delete_block.rs`, `wcore/tab.rs`, `websocket.rs:944` all keep calling the existing, unmodified `delete_controller`, which still tears down the whole tracker (including any declared-background descendant) on genuine pane/tab/workspace close. This matches the scope implied by #2492's own title ("session restarted," not "pane closed") and by the registry's own pre-existing design intent — a background task surviving *indefinitely*, even past its owning pane being closed, was never actually promised by anything in the current architecture, and isn't required to close this issue.
 
-### 3.5 Reconnection / adoption bookkeeping
+## 3. Why this supersedes the original breakaway design entirely
 
-Once a background task's process genuinely survives a restart, the **new** controller (created after `resync_controller`'s replace) has no in-memory knowledge that a task from the *previous* generation is still running attached to this block — that knowledge lives only in `db_background_tasks` (durable) and the OS (the process itself). No process-adoption code is needed here (nothing was ever un-adopted — the process kept running the whole time, untouched) — this is purely a bookkeeping/UI concern: the new controller (or whatever assembles the block's initial state on (re)start) should query `db_background_tasks::list_for_block(block_id)` for `Running` entries and feed them into the frontend's `attachedTask` axis on load, so the UI reflects "yes, this is still running" immediately rather than waiting for a stray transcript event. This is Phase C's concern (the registry-reader design) — noted here only so Phase B's design doesn't accidentally block it.
+- **No isolation-invariant risk.** No Job Object flags change, no cgroup migration, no new OS-level container. The per-block tracker's containment guarantee is identical to today's — it's just not invoked as *often* (only on real deletion, which is its documented, intended trigger already).
+- **No platform-specific spike needed.** `kill_pid` already exists and is already implemented for Windows/Linux/macOS (`process_tracker/{windows,cgroup_linux,macos}.rs` — whatever the concrete `TrackerHandle` impls are named). No PTY-across-breakaway risk, no cgroup-migration-ordering risk.
+- **Smaller diff, smaller review surface.** One new trait method + one override + one small registry-adjacent helper, versus a new container type, spawn-path rewrite, and three divergent platform mechanisms.
+- **Directly explains the observed bug**, rather than requiring a new mechanism to route around it: the registry already intended for this to work: `resync_controller` just wasn't using the right cleanup call.
 
-## 4. Phasing (independently shippable, per this repo's own norm)
+## 4. Phasing
 
-1. **B.1 — plumbing only, no behavior change.** Add `delete_controller`'s new cleanup step (§3.4) as dead code today (queries `db_background_tasks`, finds nothing because Phase B.2 hasn't shipped, no-ops). Land the `JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK` flag addition to the per-block job (§3.2) — inert on its own (nothing requests breakaway yet), but isolated and easy to review/revert independently of the riskier spawn-path change. **Isolation-invariant check applies to this PR** (touches Job Object creation flags — CLAUDE.md's explicit gate list).
-2. **B.2 — the actual breakaway/migration mechanism.** `bash_wrap.rs`'s detached-respawn (Windows) / cgroup-migration (Linux) / setsid (macOS) changes, per §3.2. Highest-risk, most platform-specific phase — needs the Windows PTY-across-breakaway spike resolved or the pipe-fallback decision made explicitly (§3.2's flagged open question) before this is considered done, not after.
-3. **B.3 — reconnection bookkeeping.** The new-controller-queries-registry-on-start piece from §3.5, feeding Phase C.
+Given the reduced scope, this no longer needs the original B.1/B.2/B.3 split — it's a single, coherent, low-risk change:
+
+1. Add `Controller::stop_for_replace` (default delegates to `stop()`) and `ShellController`'s override.
+2. Add `remove_controller_entry_only` alongside `delete_controller` in `blockcontroller/mod.rs`.
+3. Change `resync_controller`'s replace branch to use both.
+4. (Optional, can follow as a fast-follow rather than blocking this PR): apply the same `stop_for_replace` override to any other `Controller` impl that manages its own subprocess tree the same way `ShellController` does, if one exists (`SubprocessController`/`PersistentSubprocessController` — check whether either has an independently-spawned descendant class worth preserving the same way; if their subprocess model doesn't support declared-background tasks at all, the default delegating implementation is already correct and no override is needed).
 
 ## 5. Testing
 
-- B.1: unit tests for `delete_controller`'s new cleanup branch (mock `db_background_tasks` with a `Running` entry with a PID, confirm the container-close call fires; confirm it's a no-op when no such entry exists — the common case must stay a true no-op, not add latency to every pane close).
-- B.2: this is the phase that most needs the live-verify pass from `SPEC_..._DASHBOARD...`'s §9 / the original ladder doc's proposed smoke test — unit tests alone cannot prove Windows Job Object breakaway actually works end-to-end (Job Object behavior is only observable against the real kernel, not mockable meaningfully). Plan: a `task dev`-style long-running command, backgrounded, followed by a deliberate session restart (force-resync a block via the same code path `resync_controller` uses), confirmed via `tasklist`/`Get-Process` (Windows) or `ps`/`/proc` (Unix) that the process is still alive and no longer a member of the per-block container.
-- B.3: reducer/UI-adjacent — covered by Phase C's own test plan.
+- Unit: `resync_controller`'s replace path now calls `stop_for_replace` + `remove_controller_entry_only`, not `stop` + `delete_controller` — assert the process tracker entry for a block survives a simulated replace (mock/stub controller + a `AgentProcessRegistry` with a real or fake tracker, confirm `ensure_tracker` returns the SAME tracker instance before and after a replace cycle).
+- Unit: `remove_controller_entry_only` removes exactly the `CONTROLLER_REGISTRY` entry and nothing else (no process-tracker call, no broker `forget` call) — contrast with a `delete_controller` test confirming it still does all three.
+- Live-verify (see the dashboard spec's end-to-end pass): background `task dev` in a real portable build, force a session restart on that same block (e.g. via whatever UI action drives `resync_controller`'s `force: true` path — whatever recreates the controller, such as switching agent/model or an explicit "restart" action), confirm via `tasklist`/`ps` that the `task dev` process tree is still alive and still shows up in `AgentProcessRegistry::list_block` for that block id afterward. Then close the pane entirely and confirm it now *does* die — proving both halves (survives restart, dies on real close) actually hold.
 
 ## 6. Non-goals
 
-- No UI for explicitly stopping a background task from outside its owning pane (Phase C may want this eventually — not required to close #2492).
-- No change to bashwrap's idle-timeout (#2491, already shipped).
-- No attempt to survive `agentmux-srv` itself crashing or being force-killed (`SIGKILL`/Task Manager "End Process") — only graceful teardown paths (`delete_controller`'s two flavors) are in scope. A hard srv crash orphaning a Background Task Container is an accepted, pre-existing risk class (same as today's `PR_SET_PDEATHSIG`-guarded srv-under-launcher relationship) — out of scope here.
-
-## 7. Isolation-invariant review checklist (CLAUDE.md I1–I6)
-
-This spec's changes are localized to per-block/per-task Job Objects — never the launcher's own J0, never a named/shared OS object:
-
-- **I1 (pipe uniqueness):** unaffected — no pipes involved.
-- **I2 (no global lifecycle handles):** the new Background Task Container is created and owned exclusively by srv, for exactly the processes srv itself spawns (transitively) — same ownership discipline as the existing per-block registry, just a second container per task instead of one per block. No handle to any process/job this code didn't create is ever opened.
-- **I3 (bounded blast radius):** improves on the status quo — a background task's container is now scoped to exactly one task, not shared with the rest of its block's activity, and killing it (§3.4/explicit stop) cannot reach anything outside that one task's own descendant tree.
-- **I4/I5 (cross-instance contact, keyed shared objects):** the new Job Objects/cgroup scopes are unnamed/uniquely-scoped (Windows: `CreateJobObjectW(null, null)`, same pattern as J0 and the existing per-block job; Linux: `systemd-run --user --scope` with a unique scope name derived from the task id) — no new named/shared OS object is introduced.
-- **I6 (data isolation):** unaffected — no data/logs/cef-cache directory changes.
-
-The one genuinely new primitive is `JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK` on the per-block job (§3.2/B.1) — this *loosens* a containment guarantee (a member can now leave the job under its own request), which is exactly the class of change CLAUDE.md's gate calls out explicitly. The mitigation is that breakaway is opt-in per-process (nothing breaks away unless it calls `CreateProcess` with `CREATE_BREAKAWAY_FROM_JOB` itself) and only AgentMux's own `agentmux-bashwrap` binary, and only for `declared_background` invocations specifically, will ever do so — this must be re-confirmed by a human/reagent isolation-invariant review before B.1 merges, not assumed from this writeup alone.
+- No UI for explicitly stopping a background task independent of its owning pane (unaffected by this design either way — `kill_pid`/`kill_tree` already exist and could back such a UI later; not required to close #2492).
+- No change to bashwrap's idle-timeout (#2491, already shipped) or to PID capture (Phase A, already shipped).
+- No attempt to survive the declared-background task's own pane being permanently closed, or `agentmux-srv` itself crashing/being force-killed — both remain out of scope, matching the registry's existing "tracked ⇒ dies with the pane" contract for anything short of a session restart specifically.
