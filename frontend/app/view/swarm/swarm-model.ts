@@ -1329,11 +1329,21 @@ export class SwarmViewModel implements ViewModel {
      *  backlog. The persisted-retire fix (`_retiredRowKeys` now surviving
      *  reload) makes this genuinely useful — a bulk clear that reset itself
      *  every reload wouldn't have been worth adding.
+     *
+     *  One batched `setRetiredRowKeys` write (and one countdown-clear pass)
+     *  for the whole set, not N calls into `retireRow` — reagent P2 on
+     *  PR #2677: N sequential calls meant N full JSON.stringify +
+     *  localStorage.setItem round-trips for what's conceptually one action.
      *  See SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.3. */
     retireAllCompleted(): void {
-        for (const { rowKey, lastEventAt } of collectClearableRows(this.buildTree())) {
-            this.retireRow(rowKey, lastEventAt);
-        }
+        const rows = collectClearableRows(this.buildTree());
+        if (rows.length === 0) return;
+        this.setRetiredRowKeys((prev) => {
+            const next = new Map(prev);
+            for (const { rowKey, lastEventAt } of rows) next.set(rowKey, lastEventAt);
+            return next;
+        });
+        for (const { rowKey } of rows) this.clearCountdown(rowKey);
     }
 
     // ── Auto-linger countdown (SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06) ──
