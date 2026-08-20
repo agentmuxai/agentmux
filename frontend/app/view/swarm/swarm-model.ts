@@ -1107,14 +1107,23 @@ export class SwarmViewModel implements ViewModel {
     loadAll = async (): Promise<void> => {
         this.setLoading(true);
         try {
-            await Promise.all([
+            const [, subagentsOk, dispatchesOk] = await Promise.all([
                 this.loadTrackedBlocks(),
                 this.loadSubagents(),
                 this.loadDispatches(),
                 this.loadShells(),
                 this.loadCrons(),
             ]);
-            this.pruneRetiredRowKeys();
+            // codex P2 on PR #2677: a transient ListActive/ListDispatches
+            // failure is swallowed by its own loader (silent catch below),
+            // leaving the corresponding atom stale/empty — pruning against
+            // that would treat "not loaded yet" as "genuinely gone,"
+            // permanently deleting persisted retire entries for rows that
+            // are actually just not loaded yet. Only prune once BOTH
+            // sources this pass actually reflect real backend state.
+            if (subagentsOk && dispatchesOk) {
+                this.pruneRetiredRowKeys();
+            }
             this.reconcileCountdowns();
         } finally {
             this.setLoading(false);
@@ -1132,22 +1141,32 @@ export class SwarmViewModel implements ViewModel {
         }
     };
 
-    loadSubagents = async (): Promise<void> => {
+    /** @returns whether the RPC actually succeeded — callers use this to
+     *  decide whether it's safe to prune retired-row keys against the
+     *  resulting atom (codex P2 on PR #2677 — see `loadAll`/
+     *  `scheduleLoadSubagents`). */
+    loadSubagents = async (): Promise<boolean> => {
         try {
             const result = await callBackendService("subagent", "ListActive", []);
             const list = (result as ActiveSubagent[]) ?? [];
             this.setSubagents((prev) => mergeSubagentsPreservingIdentity(prev, list));
+            return true;
         } catch {
             // silently ignore
+            return false;
         }
     };
 
-    loadDispatches = async (): Promise<void> => {
+    /** @returns whether the RPC actually succeeded — see `loadSubagents`'s
+     *  doc comment. */
+    loadDispatches = async (): Promise<boolean> => {
         try {
             const result = await callBackendService("subagent", "ListDispatches", []);
             this.setDispatches((result as AgentDispatch[]) ?? []);
+            return true;
         } catch {
             // silently ignore
+            return false;
         }
     };
 
@@ -1180,8 +1199,12 @@ export class SwarmViewModel implements ViewModel {
         }
         this.loadSubagentsDebounceTimer = setTimeout(() => {
             this.loadSubagentsDebounceTimer = undefined;
-            void Promise.all([this.loadSubagents(), this.loadDispatches()]).then(() => {
-                this.pruneRetiredRowKeys();
+            void Promise.all([this.loadSubagents(), this.loadDispatches()]).then(([subagentsOk, dispatchesOk]) => {
+                // See loadAll's identical guard — don't prune against a
+                // transiently-failed fetch.
+                if (subagentsOk && dispatchesOk) {
+                    this.pruneRetiredRowKeys();
+                }
                 this.reconcileCountdowns();
             });
         }, SwarmViewModel.LOAD_SUBAGENTS_DEBOUNCE_MS);
@@ -1220,9 +1243,29 @@ export class SwarmViewModel implements ViewModel {
      *  `retiredRowKeysAtom`, which would be a reactive write-during-read). */
     private pruneRetiredRowKeys(): void {
         const liveKeys = new Set<string>();
-        for (const s of this.subagentsAtom()) liveKeys.add(subagentRowKey(s.agent_id));
-        for (const d of this.dispatchesAtom()) {
-            if (d.kind === "workflow") liveKeys.add(d.dispatch_id);
+        const subagents = this.subagentsAtom();
+        const dispatches = this.dispatchesAtom();
+        for (const s of subagents) liveKeys.add(subagentRowKey(s.agent_id));
+        const knownWorkflowDispatchIds = new Set<string>();
+        for (const d of dispatches) {
+            if (d.kind === "workflow") {
+                liveKeys.add(d.dispatch_id);
+                knownWorkflowDispatchIds.add(d.dispatch_id);
+            }
+        }
+        // codex P2 on PR #2677: a placeholder WorkflowDispatch row
+        // (`buildDispatchBuckets`'s `orphanedWorkflowMembers` fallback,
+        // rendered exactly when `dispatchesAtom` is lagging/missing this
+        // dispatch_id) is retired under its own `dispatch_id`, same as a
+        // real one. Without also treating an orphaned member's dispatch_id
+        // as live here, that key was never in `liveKeys` — the pruning pass
+        // judged it dead on the very next refresh and deleted the
+        // dismissal, resurrecting the row this same lag was already
+        // showing. Mirrors buildDispatchBuckets's own orphan detection.
+        for (const s of subagents) {
+            if (!s.dispatch_id.startsWith("solo:") && !knownWorkflowDispatchIds.has(s.dispatch_id)) {
+                liveKeys.add(s.dispatch_id);
+            }
         }
         this.setRetiredRowKeys((prev) => pruneRetiredEntries(prev, liveKeys));
     }

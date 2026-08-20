@@ -627,26 +627,24 @@ impl SubagentWatcher {
         state.info.member_count = state.journal_started.max(state.member_files);
         state.info.members_done = state.journal_results.max(state.members_completed);
         state.info.last_event_at = now_millis();
-        Self::refresh_dispatch_status(state);
+        // Called only in response to genuinely NEW member evidence (a spawn
+        // or a completion just landed) — always allowed to recompute, even
+        // overriding a prior Abandoned, mirroring the existing SubAgent-level
+        // precedent that a late-arriving Result always wins
+        // (`reconcile_stale_subagents_then_late_result_line_ends_completed_
+        // not_stuck_abandoned`). Codex P2 on PR #2677: an earlier version of
+        // this guard was unconditional (also applied here), permanently
+        // stranding a dispatch at Abandoned even once every member had
+        // actually finished. See `refresh_dispatch_status`'s own doc comment
+        // for why the READ-ONLY path (list_dispatches) still needs the guard.
+        Self::recompute_dispatch_status(state);
     }
 
     /// Counts-complete + 60s quiet ⇒ Completed. There is no timer: the flip
     /// happens lazily at the next event or ListDispatches read. `started ==
     /// results` alone is not terminal — it also holds between phases of a
     /// still-running workflow, hence the quiet window.
-    ///
-    /// `Abandoned` is terminal and never recomputed here — early return.
-    /// `reconcile_stale_subagents` is the ONLY writer of `Abandoned`
-    /// (SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.2),
-    /// and `list_dispatches()` calls this function on every single read
-    /// (not just on new events) — without this guard, the very next
-    /// `ListDispatches` RPC after a reconciliation pass would silently
-    /// overwrite Abandoned back to Running/Completed based on counts alone,
-    /// discarding the reconciliation before any client ever observed it.
-    pub(super) fn refresh_dispatch_status(state: &mut DispatchState) {
-        if state.info.status == DispatchStatus::Abandoned {
-            return;
-        }
+    pub(super) fn recompute_dispatch_status(state: &mut DispatchState) {
         let counts_complete = state.info.member_count > 0
             && state.info.members_done >= state.info.member_count;
         let quiet = now_millis().saturating_sub(state.info.last_event_at) > 60_000;
@@ -655,6 +653,24 @@ impl SubagentWatcher {
         } else {
             DispatchStatus::Running
         };
+    }
+
+    /// Read-only variant for `list_dispatches()` — `Abandoned` is terminal
+    /// and never recomputed here, since this call has no new evidence
+    /// (unlike `refresh_dispatch_info`'s call to `recompute_dispatch_status`
+    /// above, triggered by a genuinely new member event). `reconcile_stale_
+    /// subagents` is the ONLY writer of `Abandoned`
+    /// (SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.2),
+    /// and `list_dispatches()` calls this on every single read (not just on
+    /// new events) — without this guard, the very next `ListDispatches` RPC
+    /// after a reconciliation pass would silently overwrite Abandoned back
+    /// to Running/Completed based on counts alone, discarding the
+    /// reconciliation before any client ever observed it.
+    pub(super) fn refresh_dispatch_status(state: &mut DispatchState) {
+        if state.info.status == DispatchStatus::Abandoned {
+            return;
+        }
+        Self::recompute_dispatch_status(state);
     }
 
     pub(super) fn broadcast_dispatch_updated(&self, info: &AgentDispatch) {

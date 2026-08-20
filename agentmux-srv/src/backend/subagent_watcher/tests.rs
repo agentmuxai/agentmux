@@ -1572,6 +1572,55 @@ fn reconcile_stale_subagents_then_late_result_line_ends_completed_not_stuck_aban
     std::fs::remove_dir_all(&dir).ok();
 }
 
+/// Dispatch-level counterpart (codex P2 on PR #2677): a Workflow dispatch
+/// manually forced into `Abandoned` must NOT be stuck there once new member
+/// evidence (a completing member) genuinely lands — `refresh_dispatch_info`
+/// (triggered by that new evidence, via `update_dispatch_membership`) must
+/// recompute, unlike the read-only `list_dispatches()` path which must NOT.
+/// Recomputing immediately after fresh evidence yields `Running`, not
+/// `Completed` (the 60s quiet window hasn't elapsed) — same lazy-completion
+/// behavior a normal, never-abandoned dispatch already has; the point of
+/// this test is only that it's no longer PERMANENTLY stuck at `Abandoned`.
+#[test]
+fn dispatch_marked_abandoned_is_not_stuck_once_new_member_evidence_lands() {
+    let dir = std::env::temp_dir().join(format!("amx-dispatch-late-evidence-{}", now_millis()));
+    let run_dir = dir.join("subagents").join("workflows").join("wf_late1");
+    std::fs::create_dir_all(&run_dir).unwrap();
+    let jsonl_path = run_dir.join("agent-member-a.jsonl");
+    std::fs::write(
+        &jsonl_path,
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"working\"}]}}\n",
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+
+    // Force the dispatch into Abandoned, simulating a completed reconcile pass.
+    {
+        let mut dispatches = watcher.dispatches.lock().unwrap();
+        let state = dispatches.get_mut("wf_late1").expect("dispatch should be tracked");
+        state.info.status = DispatchStatus::Abandoned;
+    }
+    let abandoned = watcher.list_dispatches();
+    let d = abandoned.iter().find(|d| d.dispatch_id == "wf_late1").unwrap();
+    assert_eq!(d.status, DispatchStatus::Abandoned, "read-only list_dispatches() must never clobber Abandoned");
+
+    // New member evidence lands: the member's own Result line.
+    {
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new().append(true).open(&jsonl_path).unwrap();
+        f.write_all(b"{\"type\":\"result\",\"result\":\"done\"}\n").unwrap();
+    }
+    watcher.process_jsonl_change("parent-1", "block-1", &jsonl_path, true);
+
+    let dispatches = watcher.list_dispatches();
+    let d = dispatches.iter().find(|d| d.dispatch_id == "wf_late1").unwrap();
+    assert_ne!(d.status, DispatchStatus::Abandoned, "new member evidence must be allowed to move the dispatch off Abandoned, not leave it permanently stuck");
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 /// End-to-end: a subagent JSONL with no terminal `result` line, backfilled
 /// via a real `scan_session_subagents` call while the parent's turn is
 /// confirmed idle, comes out `Abandoned` — not `Active` forever. This is
