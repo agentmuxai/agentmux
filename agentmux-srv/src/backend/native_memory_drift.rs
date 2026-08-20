@@ -39,7 +39,7 @@ use std::time::Duration;
 
 use crate::backend::fs_watch::{FsWatchEventKind, FsWatchPool};
 use crate::backend::storage::store::Store;
-use crate::server::native_memory_handlers::memory_dir_for_agent_by_id;
+use crate::server::native_memory_handlers::{list_all_memory_targets, memory_dir_for_agent_by_id};
 
 /// Same cadence class as `FsWatchPool::HEALTH_SWEEP_INTERVAL`
 /// (`backend/fs_watch/recovery.rs`) — chosen for the same reason: frequent
@@ -84,11 +84,29 @@ pub(crate) fn check_and_record_drift(
 }
 
 /// Read one `.md` file's content the same way the rest of the native-memory
-/// code does: lossy UTF-8, capped at [`MAX_MEMORY_FILE_BYTES`].
+/// code does: lossy UTF-8. Unlike `native_memory_handlers.rs`'s own
+/// mirror-refresh path — which truncates an oversized file and separately
+/// reports the filename so an interactive caller (`bundle.export_for_agent`)
+/// can surface a warning — the drift detector has no interactive caller to
+/// warn. Silently truncating here would instead record the truncated tail
+/// as a new *version*, permanently misrepresenting content the file never
+/// actually contained as if it were authoritative (reagent P2 on PR
+/// #2675). So an oversized file is refused outright (`ErrorKind::
+/// InvalidData`, distinguishable from a transient I/O error) rather than
+/// read partially; callers log and skip it, same treatment as any other
+/// per-file read failure.
 fn read_memory_file_lossy(path: &Path) -> std::io::Result<String> {
     use std::io::Read;
     let mut buf = Vec::new();
-    std::fs::File::open(path)?.take(MAX_MEMORY_FILE_BYTES).read_to_end(&mut buf)?;
+    let read = std::fs::File::open(path)?
+        .take(MAX_MEMORY_FILE_BYTES + 1)
+        .read_to_end(&mut buf)?;
+    if read as u64 > MAX_MEMORY_FILE_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("file exceeds the {MAX_MEMORY_FILE_BYTES}-byte cap — refusing to record truncated content as authoritative"),
+        ));
+    }
     Ok(String::from_utf8_lossy(&buf).into_owned())
 }
 
@@ -99,18 +117,9 @@ fn read_memory_file_lossy(path: &Path) -> std::io::Result<String> {
 /// logged and swallowed — one agent's bad state (e.g. a permissions issue)
 /// must not stop the sweep from covering every other agent.
 pub(crate) fn reconciliation_sweep_once(wstore: &Store, id_store: &Store) -> usize {
-    let agents = match wstore.agent_def_list() {
-        Ok(a) => a,
-        Err(e) => {
-            tracing::warn!(error = %e, "native_memory_drift: sweep: agent_def_list failed");
-            return 0;
-        }
-    };
-
     let mut drifted = 0;
-    for agent in &agents {
-        let Some(memory_dir) = memory_dir_for_agent_by_id(wstore, agent) else { continue };
-        drifted += sweep_one_agent_dir(id_store, &agent.id, &memory_dir, "reconciliation_sweep");
+    for (agent_id, memory_dir) in list_all_memory_targets(wstore) {
+        drifted += sweep_one_agent_dir(id_store, &agent_id, &memory_dir, "reconciliation_sweep");
     }
     drifted
 }
@@ -137,6 +146,10 @@ fn sweep_one_agent_dir(id_store: &Store, agent_id: &str, memory_dir: &Path, dete
         }
         let content = match read_memory_file_lossy(&entry.path()) {
             Ok(c) => c,
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                tracing::warn!(agent_id, filename = %name, error = %e, "native_memory_drift: sweep: file exceeds size cap, skipping (not recording truncated content)");
+                continue;
+            }
             Err(e) => {
                 tracing::warn!(agent_id, filename = %name, error = %e, "native_memory_drift: sweep: read failed, retrying next sweep");
                 continue;
@@ -220,6 +233,10 @@ fn spawn_fast_path(fs_watch_pool: Arc<FsWatchPool>, wstore: Arc<Store>, id_store
 
                     let content = match read_memory_file_lossy(&event.path) {
                         Ok(c) => c,
+                        Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                            tracing::warn!(agent_id, filename, error = %e, "native_memory_drift: fast path: file exceeds size cap, skipping (not recording truncated content)");
+                            continue;
+                        }
                         // TOCTOU-deleted or transient I/O between the event
                         // and this read — non-fatal, the reconciliation
                         // sweep covers it if the write actually stuck.
@@ -242,15 +259,7 @@ fn refresh_subscriptions(
     watched_dirs: &mut HashSet<PathBuf>,
     dir_to_agent: &mut std::collections::HashMap<PathBuf, String>,
 ) {
-    let agents = match wstore.agent_def_list() {
-        Ok(a) => a,
-        Err(e) => {
-            tracing::warn!(error = %e, "native_memory_drift: fast path: agent_def_list failed");
-            return;
-        }
-    };
-    for agent in &agents {
-        let Some(memory_dir) = memory_dir_for_agent_by_id(wstore, agent) else { continue };
+    for (agent_id, memory_dir) in list_all_memory_targets(wstore) {
         // subscribe_dir canonicalizes internally; canonicalize here too so
         // watched_dirs/dir_to_agent key on the same form an incoming
         // event's path will actually have (events report canonical paths —
@@ -258,7 +267,7 @@ fn refresh_subscriptions(
         let canonical = memory_dir.canonicalize().unwrap_or_else(|_| memory_dir.clone());
         if watched_dirs.insert(canonical.clone()) {
             fs_watch_pool.subscribe_dir(&memory_dir);
-            dir_to_agent.insert(canonical, agent.id.clone());
+            dir_to_agent.insert(canonical, agent_id);
         }
     }
 }
@@ -329,6 +338,47 @@ mod tests {
         assert_eq!(history[0].source, "external_fs_write");
     }
 
+    // reagent P2 on PR #2675: read_memory_file_lossy previously truncated
+    // an oversized file and returned the truncated bytes as if they were
+    // the whole file — the sweep would then record that truncated content
+    // as a new, authoritative version. It must instead refuse to read the
+    // file at all, so no version (correct or corrupted) is recorded.
+    #[test]
+    fn sweep_refuses_to_record_an_oversized_file_as_authoritative() {
+        let store = shared_store();
+        let tmp = tempfile::tempdir().unwrap();
+        let oversized = "x".repeat((MAX_MEMORY_FILE_BYTES + 1) as usize);
+        std::fs::write(tmp.path().join("MEMORY.md"), &oversized).unwrap();
+
+        let drifted = sweep_one_agent_dir(&store, "agent-1", tmp.path(), "reconciliation_sweep");
+        assert_eq!(drifted, 0, "an oversized file must not be recorded as drift");
+
+        let history = store.agent_native_memory_version_list("agent-1", "MEMORY.md").unwrap();
+        assert!(history.is_empty(), "no truncated content may be recorded as a version");
+    }
+
+    #[test]
+    fn read_memory_file_lossy_reads_a_file_at_exactly_the_cap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("MEMORY.md");
+        let at_cap = "x".repeat(MAX_MEMORY_FILE_BYTES as usize);
+        std::fs::write(&path, &at_cap).unwrap();
+
+        let content = read_memory_file_lossy(&path).unwrap();
+        assert_eq!(content.len(), MAX_MEMORY_FILE_BYTES as usize);
+    }
+
+    #[test]
+    fn read_memory_file_lossy_rejects_a_file_one_byte_over_the_cap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("MEMORY.md");
+        let over_cap = "x".repeat((MAX_MEMORY_FILE_BYTES + 1) as usize);
+        std::fs::write(&path, &over_cap).unwrap();
+
+        let err = read_memory_file_lossy(&path).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
     #[test]
     fn sweep_ignores_non_md_files_and_missing_directories() {
         let store = shared_store();
@@ -356,6 +406,16 @@ mod tests {
 
     #[tokio::test]
     async fn reconciliation_sweep_once_covers_every_agent_with_a_working_directory() {
+        // list_all_memory_targets also consults the global named-agent
+        // registry (added for reagent P1 on PR #2675) — without isolating
+        // AGENTMUX_SHARED_DIR here, this test would sweep whatever real
+        // live agents happen to be registered on the machine running the
+        // suite, not just the two synthetic ones it sets up below.
+        let _guard = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev_shared_dir = std::env::var_os("AGENTMUX_SHARED_DIR");
+        let shared = tempfile::tempdir().unwrap();
+        std::env::set_var("AGENTMUX_SHARED_DIR", shared.path());
+
         let tmp = tempfile::NamedTempFile::new().unwrap();
         let id_store = Store::open_shared(tmp.path()).unwrap();
         let state = crate::server::tests::test_state();
@@ -414,5 +474,10 @@ mod tests {
         assert_eq!(drifted, 2, "sweep must cover every agent with a working directory");
         assert_eq!(id_store.agent_native_memory_version_list("sweep-agent-a", "MEMORY.md").unwrap().len(), 1);
         assert_eq!(id_store.agent_native_memory_version_list("sweep-agent-b", "MEMORY.md").unwrap().len(), 1);
+
+        match prev_shared_dir {
+            Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SHARED_DIR"),
+        }
     }
 }
