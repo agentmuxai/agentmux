@@ -17,8 +17,25 @@ import { Show, type JSX } from "solid-js";
 import { createBlock } from "@/app/store/global";
 import type { AgentDispatch } from "../../../swarm/swarm-model";
 import type { ToolNode } from "../../types";
-import { CompactResult } from "../CompactResult";
+import { renderAgent, renderTask, renderWorkflow } from "../ToolOverlayLog";
 import { byKind, registerToolRenderer, type ToolRenderContext } from "./registry";
+
+// No-match fallback must reproduce the SAME per-kind rendering the
+// priority-0 builtins give every OTHER Agent/Task/Workflow call (description
+// shown while running, CompactResult only once a result exists) — not a bare
+// CompactResult, which loses both (reagent/codex P1 on PR #2676; hits the
+// Agent History tab unconditionally, since correlation is designed to never
+// match there).
+function renderFallback(node: ToolNode): JSX.Element {
+    switch (node.tool) {
+        case "Workflow":
+            return renderWorkflow(node);
+        case "Task":
+            return renderTask(node);
+        default:
+            return renderAgent(node);
+    }
+}
 
 function openSwarmPane(): void {
     createBlock({ meta: { view: "swarm" } });
@@ -57,12 +74,7 @@ function DispatchCardView(props: { dispatch: AgentDispatch }): JSX.Element {
 
 export function DispatchCard(props: { node: ToolNode; ctx?: ToolRenderContext }): JSX.Element {
     return (
-        <Show
-            when={props.ctx?.dispatchMatch}
-            fallback={
-                <CompactResult tool={props.node.tool} params={props.node.params as any} result={props.node.result} />
-            }
-        >
+        <Show when={props.ctx?.dispatchMatch} fallback={renderFallback(props.node)}>
             {(d) => <DispatchCardView dispatch={d()} />}
         </Show>
     );

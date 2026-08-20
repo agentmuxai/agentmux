@@ -549,7 +549,14 @@ function renderSearch(node: ToolNode): JSX.Element {
     );
 }
 
-function renderAgent(node: ToolNode): JSX.Element {
+// Exported (not just module-local) so `DispatchCard.tsx`'s no-match fallback
+// can delegate to the SAME per-kind rendering these built-ins already do
+// (description-while-running, no-result gating) instead of a bare
+// `CompactResult` call that loses both — reagent/codex P1 on PR #2676: a
+// still-running unmatched Agent/Task call was showing raw "No output" and a
+// completed one was losing its description entirely, guaranteed to trigger
+// on the Agent History tab (which always falls back to CompactResult there).
+export function renderAgent(node: ToolNode): JSX.Element {
     return (
         <div class="agent-tool-agent">
             <Show when={(node.params as any).description}>
@@ -562,7 +569,7 @@ function renderAgent(node: ToolNode): JSX.Element {
     );
 }
 
-function renderTask(node: ToolNode): JSX.Element {
+export function renderTask(node: ToolNode): JSX.Element {
     return (
         <div class="agent-tool-task">
             <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
@@ -570,7 +577,7 @@ function renderTask(node: ToolNode): JSX.Element {
     );
 }
 
-function renderWorkflow(node: ToolNode): JSX.Element {
+export function renderWorkflow(node: ToolNode): JSX.Element {
     return (
         <div class="agent-tool-workflow">
             <Show when={(node.params as any).description ?? (node.params as any).title}>

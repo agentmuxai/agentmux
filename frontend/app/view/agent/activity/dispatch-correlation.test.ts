@@ -99,6 +99,23 @@ describe("correlateDispatchesForBlock", () => {
         expect(result.size).toBe(0);
     });
 
+    // Reagent/codex P1 (PR #2676 review): two dispatches spawned within the
+    // same millisecond produce an unstable sort — bail rather than trust an
+    // arbitrary tiebreak, since this could silently swap two same-kind
+    // calls (which the kind-compatibility check can't catch either).
+    it("falls back to an empty map when two dispatches share the exact same spawned_at (tie guard)", () => {
+        const nodes: DocumentNode[] = [mkToolNode("tu_1"), mkToolNode("tu_2")];
+        const subagents = [
+            mkSub({ agent_id: "a1", dispatch_id: "solo:a1", spawned_at: 100 }),
+            mkSub({ agent_id: "a2", dispatch_id: "solo:a2", spawned_at: 100 }),
+        ];
+        const dispatches = [mkDispatch({ dispatch_id: "solo:a1" }), mkDispatch({ dispatch_id: "solo:a2" })];
+
+        const result = correlateDispatchesForBlock("block-1", nodes, subagents, dispatches);
+
+        expect(result.size).toBe(0);
+    });
+
     it("ignores subagents/dispatches from other blocks", () => {
         const nodes: DocumentNode[] = [mkToolNode("tu_1")];
         const subagents = [

@@ -14,11 +14,20 @@
  * the wrong dispatch's status next to a tool call) is worse than no card,
  * so any ambiguity for ANY node in the pane blanks the whole pane's map
  * rather than guessing. Known, accepted gaps that fall back this way:
- *   - multiple Agent/Task calls spawned in parallel within a single
- *     assistant turn (array order isn't guaranteed to equal spawn order);
  *   - a dispatch whose member data has aged out of `ListActive` (no
  *     `spawned_at` to order by);
- *   - older transcript history not yet paginated into `documentNodes`.
+ *   - older transcript history not yet paginated into `documentNodes`;
+ *   - two dispatches spawned within the same millisecond (tie-guarded
+ *     below — bails rather than trust an arbitrary tiebreak).
+ *
+ * Residual, NOT fully closeable without an exact id (deferred by design —
+ * see the spec above): two SAME-kind calls (e.g. two parallel Agent-tool
+ * spawns) with distinct, non-tied `spawned_at` values but whose relative
+ * order still doesn't match their transcript position. The kind-
+ * compatibility check below can't catch this — both sides read the same
+ * kind. In practice this needs spawn order to disagree with array order for
+ * calls issued in one turn, which the CLI processes sequentially even when
+ * the calls then run concurrently — believed rare, not provably impossible.
  */
 
 import type { AgentDispatch, ActiveSubagent } from "../../swarm/swarm-model";
@@ -78,6 +87,20 @@ export function correlateDispatchesForBlock(
     if (toolNodes.length !== orderable.length) return result;
 
     const sorted = [...orderable].sort((a, b) => spawnOrderOf.get(a.dispatch_id)! - spawnOrderOf.get(b.dispatch_id)!);
+
+    // Tie guard (reagent/codex P1, PR #2676 review) — two dispatches
+    // spawned within the same millisecond produce an unstable sort (falls
+    // back to whichever order `dispatches`/`orderable` happened to arrive
+    // in, unrelated to either transcript or true spawn order). This is
+    // exactly the scenario that could silently swap TWO SAME-KIND calls
+    // (e.g. two parallel Agent-tool spawns) even though the kind-
+    // compatibility check below can't catch it — both sides read "Agent".
+    // Bail on any tie rather than trust an arbitrary tiebreak.
+    for (let i = 1; i < sorted.length; i++) {
+        if (spawnOrderOf.get(sorted[i].dispatch_id) === spawnOrderOf.get(sorted[i - 1].dispatch_id)) {
+            return result;
+        }
+    }
 
     // Kind-compatibility check (reagent P1, PR #2676 review) — count
     // equality alone doesn't guarantee a CORRECT pairing: if a turn spawns
