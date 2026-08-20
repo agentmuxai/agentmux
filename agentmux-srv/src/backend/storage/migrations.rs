@@ -201,7 +201,19 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 8;
 ///        native memory content, mirroring the v14 table's own dual-
 ///        schema duplication (id_store per-channel fallback). See
 ///        docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md.
-pub const OBJECT_SCHEMA_VERSION: i64 = 24;
+///   v25 — db_agent_groups: saved, named target sets for the fleet-control
+///        feature (broadcast/bulk-stop across many agent panes at once —
+///        docs/specs/SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md). A
+///        group is just a durable list of block ids under a name — the
+///        Ansible-inventory-group lesson from that spec's research: a
+///        saved group, not raw ephemeral selection, is the abstraction
+///        that scales as a fleet grows. Per-channel (block ids are only
+///        meaningful within their own channel), not the shared store.
+///        Renumbered from an earlier v24 — merged alongside the native-
+///        memory-version-history PR, which independently claimed v24 for
+///        an unrelated table (see that entry above for the same class of
+///        collision this codebase has hit before, e.g. v20→v22).
+pub const OBJECT_SCHEMA_VERSION: i64 = 25;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -782,7 +794,20 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         CREATE INDEX IF NOT EXISTS idx_background_tasks_block
             ON db_background_tasks(block_id);
         CREATE INDEX IF NOT EXISTS idx_background_tasks_status
-            ON db_background_tasks(status);",
+            ON db_background_tasks(status);
+
+        -- v25: saved fleet-control target groups — see OBJECT_SCHEMA_VERSION's
+        -- v25 doc comment above. member_ids is a JSON array of block ids
+        -- (Swarm's native per-agent selection unit); resolved to concrete
+        -- ids by the frontend before either fleet.broadcast or
+        -- fleet.bulk-stop executes, so a group's membership can't drift
+        -- between when a bulk action is confirmed and when it runs.
+        CREATE TABLE IF NOT EXISTS db_agent_groups (
+            id         TEXT PRIMARY KEY,
+            name       TEXT NOT NULL,
+            member_ids TEXT NOT NULL DEFAULT '[]',
+            created_at INTEGER NOT NULL DEFAULT 0
+        );",
     )?;
 
     // ---- Additive column migrations (schema v2+) ----

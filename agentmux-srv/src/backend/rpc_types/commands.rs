@@ -320,6 +320,19 @@ pub const COMMAND_AGENT_KILL_TREE: &str = "agent.kill-tree";
 /// success so all open frontends refresh My Agents without a restart.
 pub const COMMAND_AGENT_DEFINE: &str = "agent.define";
 
+// Fleet control — select/broadcast/bulk-act on many agents at once. See
+// docs/specs/SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md. Both action
+// commands loop the existing single-target `agent.send`/`agent.stop`
+// primitives per resolved target and return `FleetActionResult`
+// (succeeded/failed, never a single bool) rather than adding any new
+// transport.
+pub const COMMAND_FLEET_BROADCAST: &str = "fleet.broadcast";
+pub const COMMAND_FLEET_BULK_STOP: &str = "fleet.bulk-stop";
+pub const COMMAND_FLEET_GROUP_CREATE: &str = "fleet.group.create";
+pub const COMMAND_FLEET_GROUP_LIST: &str = "fleet.group.list";
+pub const COMMAND_FLEET_GROUP_UPDATE: &str = "fleet.group.update";
+pub const COMMAND_FLEET_GROUP_DELETE: &str = "fleet.group.delete";
+
 // App API Tier 2 — pane lifecycle commands
 pub const COMMAND_PANE_OPEN: &str = "pane.open";
 

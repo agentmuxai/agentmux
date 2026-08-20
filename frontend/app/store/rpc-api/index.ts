@@ -15,6 +15,7 @@ import { AgentApi } from "./agent";
 import { BlockApi } from "./block";
 import { BundleImportApi } from "./bundle";
 import { FileApi } from "./file";
+import { FleetApi } from "./fleet";
 import { IdentityApi } from "./identity";
 import { McpApi } from "./mcp";
 import { MemoryApi } from "./memory";
@@ -24,6 +25,7 @@ import { SkillApi } from "./skill";
 import { WorkspaceApi } from "./workspace";
 
 export type { OAuthFlowStatus } from "./types";
+export type { FleetActionFailure, FleetActionResult, FleetGroup, FleetStagePlan } from "./fleet";
 
 // WshServerCommandToDeclMap
 export const RpcApi = {
@@ -38,4 +40,5 @@ export const RpcApi = {
     ...McpApi,
     ...SkillApi,
     ...BundleImportApi,
+    ...FleetApi,
 };

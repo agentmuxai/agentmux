@@ -222,6 +222,62 @@ const UI_QUERY_TOOL: &str = r#"{
   }
 }"#;
 
+// Fleet control (SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md) — select,
+// broadcast, and bulk-act on many agents at once, from an agent's own
+// perspective. FleetList is a thin, fleet-framed alias of DiscoverAgents
+// (same `/agentmux/discovery` call — its response already carries each
+// reachable agent's `block_id`, exactly what FleetBroadcast/FleetBulkStop
+// need as `targets`). FleetBroadcast loops the SAME signed single-target
+// delivery path SendMessage uses, once per target, entirely client-side —
+// only this process holds AGENTMUX_JEKT_KEY, so per-message signing can
+// only happen here, never in a server-side batch RPC. FleetBulkStop calls
+// the one fleet action that genuinely IS a server-side batch RPC
+// (`POST /api/v1/fleet/bulk-stop`) since stopping a controller involves no
+// jekt signing at all.
+const FLEET_LIST_TOOL: &str = r#"{
+  "name": "FleetList",
+  "description": "List every agent reachable from here (same data as DiscoverAgents), framed for fleet targeting: each entry's block_id is what FleetBroadcast/FleetBulkStop expect in their `targets` array. Use this before either of those to build your target list. Read-only. Takes no arguments.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
+  }
+}"#;
+
+const FLEET_BROADCAST_TOOL: &str = r#"{
+  "name": "FleetBroadcast",
+  "description": "Send the SAME message to many agents at once by block_id (get these from FleetList). Delivers each one individually and signed, exactly like SendMessage would — this is a convenience loop, not a new delivery mechanism. Returns JSON {succeeded: [block_id...], failed: [{id, error}...]} — always check `failed`, a partial failure is common (e.g. one target went offline) and is never silently dropped.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "targets": { "type": "array", "items": { "type": "string" }, "description": "block_id values to send to (from FleetList)" },
+      "message": { "type": "string", "description": "Message text to inject into each target's conversation" }
+    },
+    "required": ["targets", "message"]
+  }
+}"#;
+
+const FLEET_BULK_STOP_TOOL: &str = r#"{
+  "name": "FleetBulkStop",
+  "description": "Stop many agent panes at once by block_id (get these from FleetList). Destructive — double-check your target list first. Returns JSON {succeeded, failed: [{id, error}...], aborted_early}. Optionally pass `staged` to cap blast radius on a bad selection: stops `batch_size` targets at a time, and if a batch's failure rate exceeds `max_fail_percentage`, the remaining targets are recorded as failed (untried) instead of being attempted — `aborted_early` will be true. Without `staged`, every target is attempted as one batch.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "targets": { "type": "array", "items": { "type": "string" }, "description": "block_id values to stop (from FleetList)" },
+      "signal": { "type": "string", "description": "Optional: SIGKILL or SIGTERM for a forceful stop; default is a graceful stop" },
+      "staged": {
+        "type": "object",
+        "description": "Optional staged rollout to cap blast radius",
+        "properties": {
+          "batch_size": { "type": "integer", "description": "How many targets to stop per batch" },
+          "max_fail_percentage": { "type": "integer", "description": "Abort remaining batches if a completed batch's failure rate exceeds this (0-100)" }
+        },
+        "required": ["batch_size", "max_fail_percentage"]
+      }
+    },
+    "required": ["targets"]
+  }
+}"#;
+
 // Consolidated read/introspection verb — replaces the former GetLayout /
 // ListWindows / ListWorkspaces / ListTabs tools (one tool, `query` selects the
 // view). `WhoAmI` stays its own no-arg tool (the spec's "foundation" self-context
@@ -621,6 +677,11 @@ async fn main() {
                     serde_json::from_str(UI_SCREENSHOT_TOOL).expect("static json");
                 let ui_click: Value = serde_json::from_str(UI_CLICK_TOOL).expect("static json");
                 let ui_query: Value = serde_json::from_str(UI_QUERY_TOOL).expect("static json");
+                let fleet_list: Value = serde_json::from_str(FLEET_LIST_TOOL).expect("static json");
+                let fleet_broadcast: Value =
+                    serde_json::from_str(FLEET_BROADCAST_TOOL).expect("static json");
+                let fleet_bulk_stop: Value =
+                    serde_json::from_str(FLEET_BULK_STOP_TOOL).expect("static json");
                 let loop_tool: Value = serde_json::from_str(LOOP_TOOL).expect("static json");
                 let loop_stop: Value = serde_json::from_str(LOOP_STOP_TOOL).expect("static json");
                 let loop_list: Value = serde_json::from_str(LOOP_LIST_TOOL).expect("static json");
@@ -644,7 +705,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, open_media, send_message, discover_agents, get_agent_transcript, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, open_media, send_message, discover_agents, get_agent_transcript, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, fleet_list, fleet_broadcast, fleet_bulk_stop, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {
@@ -1268,6 +1329,242 @@ async fn call_tool(
                 let status = resp.status();
                 let text = resp.text().await.unwrap_or_default();
                 anyhow::bail!("discovery failed: HTTP {status} — {text}");
+            }
+
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+
+            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+        }
+        "FleetList" => {
+            // Thin fleet-framed alias of DiscoverAgents — identical call,
+            // see this tool's own doc comment for why a separate tool
+            // exists despite reusing the exact same endpoint.
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            let url = format!("{}/agentmux/discovery", local_url.trim_end_matches('/'));
+            let resp = client
+                .get(&url)
+                .header("X-AuthKey", auth_key)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("discovery failed: HTTP {status} — {text}");
+            }
+
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+
+            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+        }
+        "FleetBroadcast" => {
+            let targets = arguments
+                .get("targets")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: targets"))?
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect::<Vec<_>>();
+            if targets.is_empty() {
+                anyhow::bail!("targets must be a non-empty array of block_id strings");
+            }
+            let message = arguments
+                .get("message")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: message"))?;
+
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+            let source_agent = std::env::var("AGENTMUX_AGENT_ID")
+                .ok()
+                .filter(|s| !s.is_empty());
+
+            // `/agentmux/reactive/inject`'s `target_agent` resolves by
+            // registered AGENT NAME only (`agent_to_block`,
+            // agentmux-srv/src/backend/reactive/handler.rs) — never by
+            // block_id, even though this tool's own advertised contract
+            // (FLEET_BROADCAST_TOOL) is block_id values from FleetList, to
+            // stay consistent with FleetBulkStop's targeting scheme. The
+            // WS-RPC path (`fleet_broadcast_impl`, agentmux-srv) already
+            // resolves block_id -> agent_id via `get_agent_by_block` before
+            // injecting; this MCP path talks to srv over plain HTTP with no
+            // access to that in-process registry, so it resolves the same
+            // way DiscoverAgents/FleetList already do: read
+            // `/agentmux/discovery`'s `host.addressable` (each entry already
+            // carries both `agent_id` and a live `block_id`) and map through
+            // it before signing/injecting (Codex P1 + reagent P0, PR #2687
+            // review — every advertised call failed "agent not found"
+            // without this).
+            let discovery_url = format!("{}/agentmux/discovery", local_url.trim_end_matches('/'));
+            let discovery_resp = client
+                .get(&discovery_url)
+                .header("X-AuthKey", auth_key)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("discovery request failed: {e}"))?;
+            if !discovery_resp.status().is_success() {
+                let status = discovery_resp.status();
+                let text = discovery_resp.text().await.unwrap_or_default();
+                anyhow::bail!("discovery failed: HTTP {status} — {text}");
+            }
+            let discovery: Value = discovery_resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("discovery response parse failed: {e}"))?;
+            let block_to_agent: std::collections::HashMap<String, String> = discovery
+                .get("host")
+                .and_then(|h| h.get("addressable"))
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|e| {
+                            let agent_id = e.get("agent_id")?.as_str()?.to_string();
+                            let block_id = e.get("block_id")?.as_str()?.to_string();
+                            Some((block_id, agent_id))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            // Same signed single-target delivery SendMessage uses, looped
+            // once per target — only this process holds AGENTMUX_JEKT_KEY,
+            // so per-message signing can only happen here (see this
+            // tool's own doc comment). Never a single aggregate result:
+            // per-target success/failure is collected below regardless of
+            // how many targets fail. Sent in chunks with a pause between
+            // them — `/agentmux/reactive/inject` shares ReactiveHandler's
+            // global rate limiter (10/sec, hard reset per second, not a
+            // smooth refill — agentmux-srv/src/backend/reactive/mod.rs's
+            // RATE_LIMIT_MAX), and a tight loop past ~10 targets would
+            // otherwise deterministically fail the tail of any larger
+            // broadcast with "rate limit exceeded" (Codex P1, same review).
+            // Mirrors `fleet_broadcast_impl`'s own chunking constants —
+            // kept in sync by hand since this is a separate process/crate
+            // with no dependency on agentmux-srv internals.
+            const BROADCAST_CHUNK_SIZE: usize = 10;
+            const BROADCAST_CHUNK_PAUSE: std::time::Duration = std::time::Duration::from_millis(1100);
+
+            let url = format!("{}/agentmux/reactive/inject", local_url.trim_end_matches('/'));
+            let mut succeeded: Vec<String> = Vec::new();
+            let mut failed: Vec<serde_json::Value> = Vec::new();
+            for (chunk_idx, chunk) in targets.chunks(BROADCAST_CHUNK_SIZE).enumerate() {
+                if chunk_idx > 0 {
+                    tokio::time::sleep(BROADCAST_CHUNK_PAUSE).await;
+                }
+                for target in chunk {
+                    let target = target.clone();
+                    let Some(target_agent) = block_to_agent.get(&target).cloned() else {
+                        failed.push(json!({
+                            "id": target,
+                            "error": "no registered agent for this block (not a live agent pane, or not yet registered)"
+                        }));
+                        continue;
+                    };
+                    let (request_id, ts_secs, jekt_sig, lan_sig) =
+                        sign_outgoing_jekt(source_agent.as_deref(), &target_agent, message);
+                    let req = InjectRequest {
+                        target_agent,
+                        message: message.to_string(),
+                        source_agent: source_agent.clone(),
+                        request_id: Some(request_id),
+                        ts_secs: Some(ts_secs),
+                        jekt_sig,
+                        lan_sig,
+                    };
+                    let outcome = async {
+                        let resp = client
+                            .post(&url)
+                            .header("X-AuthKey", auth_key)
+                            .json(&req)
+                            .send()
+                            .await
+                            .map_err(|e| format!("request failed: {e}"))?;
+                        if !resp.status().is_success() {
+                            let status = resp.status();
+                            let text = resp.text().await.unwrap_or_default();
+                            return Err(format!("HTTP {status} — {text}"));
+                        }
+                        let result: Value = resp
+                            .json()
+                            .await
+                            .map_err(|e| format!("response parse failed: {e}"))?;
+                        if result.get("success").and_then(|v| v.as_bool()) == Some(true) {
+                            Ok(())
+                        } else {
+                            Err(result
+                                .get("error")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unknown error")
+                                .to_string())
+                        }
+                    }
+                    .await;
+                    match outcome {
+                        Ok(()) => succeeded.push(target),
+                        Err(error) => failed.push(json!({ "id": target, "error": error })),
+                    }
+                }
+            }
+
+            let result = json!({ "succeeded": succeeded, "failed": failed });
+            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+        }
+        "FleetBulkStop" => {
+            let targets = arguments
+                .get("targets")
+                .and_then(|v| v.as_array())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: targets"))?
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect::<Vec<_>>();
+            if targets.is_empty() {
+                anyhow::bail!("targets must be a non-empty array of block_id strings");
+            }
+            let signal = arguments.get("signal").and_then(|v| v.as_str()).map(str::to_string);
+            let staged = arguments.get("staged").cloned();
+
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            let url = format!("{}/api/v1/fleet/bulk-stop", local_url.trim_end_matches('/'));
+            let mut body = json!({ "targets": targets, "signal": signal });
+            if let Some(staged) = staged {
+                body["staged"] = staged;
+            }
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("fleet bulk-stop failed: HTTP {status} — {text}");
             }
 
             let result: Value = resp
@@ -2388,8 +2685,20 @@ mod tests {
             PRESET_GET_TOOL,
             IDENTITY_ACCOUNTS_TOOL,
             IDENTITY_VALIDATE_TOOL,
+            FLEET_LIST_TOOL,
+            FLEET_BROADCAST_TOOL,
+            FLEET_BULK_STOP_TOOL,
         ];
-        assert_eq!(defs.len(), 30, "tools/list advertises 30 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API + 3 memory-version-history)");
+        // This array (and its count) has drifted from the real `tools/list`
+        // response before this change too — SHELL_INPUT/STATUS, the three
+        // UI_* tools, GET_AGENT_TRANSCRIPT, and SUPERVISOR_NUDGE are all
+        // live tools missing from it. Not fixed here (out of scope for
+        // this feature) — just adding the 3 new fleet-control tools
+        // (SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md) alongside the 3
+        // memory-version-history tools merged in from a concurrent PR, on
+        // top of whatever this test already covered, so at least those
+        // don't silently join the drift.
+        assert_eq!(defs.len(), 33, "tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools");
         for d in defs {
             let v: Value = serde_json::from_str(d).expect("tool def must be valid JSON");
             assert!(
