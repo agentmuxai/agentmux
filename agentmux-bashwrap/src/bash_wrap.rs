@@ -409,6 +409,20 @@ struct TerminalMessage<'a> {
     timestamp: u64,
 }
 
+/// Published once, only for a `--declared-background` invocation, so srv can
+/// record a real OS pid in `db_background_tasks` (that column exists today
+/// but nothing in production ever writes it — see
+/// docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md). Carries THIS
+/// process's own pid (the wrapper), not the inner `bash -c` child's — see
+/// that spec §2 for why the wrapper is the correct attachment point.
+#[derive(Serialize)]
+struct PidMessage<'a> {
+    op: &'static str, // "pid"
+    tool_id: &'a str,
+    pid: u32,
+    timestamp: u64,
+}
+
 /// Internal channel payload: a single line tagged with its source.
 /// Bytes are raw — UTF-8 conversion is deferred to the publish /
 /// aggregation site so non-UTF-8 output (binary `cat`, Windows
@@ -457,6 +471,22 @@ pub async fn run(mut args: Args) -> Result<i32> {
         "exec start"
     );
 
+    // Join handle for the fire-and-forget pid publish below, if spawned.
+    // `main.rs` calls `std::process::exit()` immediately once `run()`
+    // returns — which tears down every still-in-flight spawned task with
+    // no Drop glue, silently. Every OTHER spawned task in this file
+    // (`idle_watcher`, `publisher_handle`, `wait_task`, the
+    // `kill_process_tree` spawn_blocking) is explicitly joined with a
+    // bounded timeout before `run()` returns for exactly this reason; this
+    // one must be too (reagentx P1, PR #2681) — joined below, after
+    // `run_proc` completes, so it still doesn't block a genuinely
+    // long-running declared-background command's own startup (by the time
+    // a long-running command's `run_proc` finally returns, this task has
+    // long since finished on its own — the join below is only ever a real
+    // wait in the narrow case `run_proc` returns quickly, e.g. the wrapped
+    // command fails fast).
+    let mut pid_publish: Option<tokio::task::JoinHandle<()>> = None;
+
     if degraded {
         // Surface degradation as a real chunk on stdout (we'll prefix
         // it on the model side too) so the user sees a clear "no
@@ -476,11 +506,54 @@ pub async fn run(mut args: Args) -> Result<i32> {
             Ok(()) => tracing::info!(target: "bashwrap", tool_id = %args.tool_id, "initial publish ok"),
             Err(e) => tracing::warn!(target: "bashwrap", tool_id = %args.tool_id, error = %e, "initial publish failed"),
         }
+        if args.declared_background {
+            // Fire-and-forget, NOT awaited inline: publish_pid's own doc
+            // comment promises best-effort semantics, and awaiting it
+            // right here (as an earlier version of this code did) put its
+            // up-to-~10s worst case (two publish_chunk attempts, each up
+            // to the 5s WpsClient::from_env default, plus the retry's own
+            // 250ms sleep) directly on this declared-background command's
+            // startup path — measurably delaying the actual work (e.g.
+            // `task dev`) behind a degraded WPS endpoint, exactly what
+            // "best-effort" is supposed to avoid (reagentx P1, PR #2681).
+            // Still joined (bounded) below before `run()` returns, so a
+            // fast-exiting wrapped command can't silently abandon it.
+            let client = client.clone();
+            let tool_id = args.tool_id.clone();
+            let block_id = args.block_id.clone();
+            pid_publish = Some(tokio::spawn(async move {
+                publish_pid(&client, &tool_id, block_id.as_deref(), std::process::id()).await;
+            }));
+        }
     }
 
     let start = std::time::Instant::now();
-    let status = run_proc(&args, &command, wps.as_ref(), buffered.clone()).await?;
+    // NOT `?` here — captured instead of propagated immediately. `run_proc`
+    // can fail fast (e.g. `locate_bash()`/PTY-or-pipe spawn failure) and an
+    // early `?`-return would skip the pid_publish join below entirely,
+    // reproducing the exact abandonment bug the join exists to prevent, just
+    // via the Err path instead of a fast Ok exit (reagentx P1, round 3 on
+    // this PR — the round-2 fix only covered the Ok(status) fast-exit case).
+    let run_result = run_proc(&args, &command, wps.as_ref(), buffered.clone()).await;
     let elapsed = start.elapsed();
+
+    if let Some(handle) = pid_publish {
+        // Bound slightly above publish_pid's own worst case (~10.25s: two
+        // publish attempts at up to 5s each + the 250ms retry sleep) so
+        // this only ever cuts it short in a genuinely wedged case, not a
+        // normal slow-but-still-within-its-own-bounds one.
+        match tokio::time::timeout(Duration::from_secs(11), handle).await {
+            Ok(Ok(())) => {}
+            Ok(Err(join_err)) => {
+                tracing::warn!(target: "bashwrap", tool_id = %args.tool_id, error = %join_err, "pid publish task panicked");
+            }
+            Err(_elapsed) => {
+                tracing::warn!(target: "bashwrap", tool_id = %args.tool_id, "pid publish task still running after its own bound — abandoning rather than delaying exit further");
+            }
+        }
+    }
+
+    let status = run_result?;
 
     if let Some(client) = wps.as_ref() {
         let _ = client
@@ -555,6 +628,39 @@ async fn publish_system(
             },
         )
         .await
+}
+
+/// Publish this process's own pid, once, for a declared-background
+/// invocation. Called via `tokio::spawn` (never awaited inline) — see the
+/// call site's comment for why blocking startup on this was a real
+/// latency bug (reagentx P1, PR #2681).
+///
+/// The single retry here is insurance against a transient WPS/HTTP
+/// publish failure ONLY — it does not, and cannot, wait for
+/// `db_background_tasks`'s row to exist first (this function has no
+/// visibility into srv's database state). This publish routinely arrives
+/// at srv before that row exists at all (this call fires at process
+/// start, before the frontend has even seen an accepted-background tool
+/// result to create the row from) — that ordering race is handled
+/// entirely server-side, by stashing an early pid and applying it once
+/// the row is created (`pending_background_pids.rs`,
+/// `websocket.rs`'s `COMMAND_BACKGROUND_TASK_PID`/`COMMAND_DOCK_NODE_STATUS`
+/// handlers). An earlier version of this comment claimed this retry
+/// covered that race — it never did (Codex P1, reagentx P2, PR #2681).
+async fn publish_pid(client: &WpsClient, tool_id: &str, block_id: Option<&str>, pid: u32) {
+    let msg = PidMessage {
+        op: "pid",
+        tool_id,
+        pid,
+        timestamp: now_ms(),
+    };
+    if client.publish_chunk(block_id, &msg).await.is_ok() {
+        return;
+    }
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    if let Err(e) = client.publish_chunk(block_id, &msg).await {
+        tracing::warn!(target: "bashwrap", tool_id, pid, error = %e, "pid publish failed after retry");
+    }
 }
 
 async fn publish_line(
