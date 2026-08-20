@@ -8,11 +8,6 @@ import { correlateDispatchesForBlock } from "./dispatch-correlation";
 
 function mkSub(overrides: Partial<ActiveSubagent> & Pick<ActiveSubagent, "agent_id" | "dispatch_id">): ActiveSubagent {
     return {
-        // Unique per call by default (not a fixed literal) — a shared slug
-        // means "same concurrent batch" to correlateDispatchesForBlock's
-        // same-batch ambiguity guard, so two DISTINCT test subagents must
-        // default to distinct slugs unless a test deliberately wants to
-        // exercise that guard (pass slug explicitly to share one).
         slug: `slug-${overrides.agent_id}`,
         parent_agent: "parent",
         parent_block_id: "block-1",
@@ -42,13 +37,20 @@ function mkDispatch(overrides: Partial<AgentDispatch> & Pick<AgentDispatch, "dis
     } as AgentDispatch;
 }
 
-function mkToolNode(id: string, tool: ToolNode["tool"] = "Agent"): ToolNode {
-    return { type: "tool", id, tool } as unknown as ToolNode;
+// `timestamp` defaults to `undefined` — deliberately, NOT a shared literal.
+// correlateDispatchesForBlock's same-turn guard treats a missing timestamp
+// as unverifiable (bail), so any test with 2+ same-category dispatch-kind
+// nodes that expects a SUCCESSFUL match must pass explicit, well-separated
+// timestamps (>= SAME_TURN_THRESHOLD_MS apart). A test with only one
+// dispatch-kind node, or one deliberately exercising the same-turn guard
+// itself, can omit it.
+function mkToolNode(id: string, tool: ToolNode["tool"] = "Agent", timestamp?: number): ToolNode {
+    return { type: "tool", id, tool, timestamp } as unknown as ToolNode;
 }
 
 describe("correlateDispatchesForBlock", () => {
     it("returns an exact 1:1 match when counts and order line up", () => {
-        const nodes: DocumentNode[] = [mkToolNode("tu_1"), mkToolNode("tu_2")];
+        const nodes: DocumentNode[] = [mkToolNode("tu_1", "Agent", 0), mkToolNode("tu_2", "Agent", 10_000)];
         const subagents = [
             mkSub({ agent_id: "a1", dispatch_id: "solo:a1", spawned_at: 100 }),
             mkSub({ agent_id: "a2", dispatch_id: "solo:a2", spawned_at: 200 }),
@@ -65,7 +67,7 @@ describe("correlateDispatchesForBlock", () => {
     });
 
     it("orders by spawn time, not by ListDispatches' own (last_event_at-sorted) order", () => {
-        const nodes: DocumentNode[] = [mkToolNode("tu_1"), mkToolNode("tu_2")];
+        const nodes: DocumentNode[] = [mkToolNode("tu_1", "Agent", 0), mkToolNode("tu_2", "Agent", 10_000)];
         const subagents = [
             mkSub({ agent_id: "a1", dispatch_id: "solo:a1", spawned_at: 100 }),
             mkSub({ agent_id: "a2", dispatch_id: "solo:a2", spawned_at: 200 }),
@@ -84,7 +86,7 @@ describe("correlateDispatchesForBlock", () => {
     });
 
     it("falls back to an empty map on a tool-node/dispatch count mismatch", () => {
-        const nodes: DocumentNode[] = [mkToolNode("tu_1"), mkToolNode("tu_2")];
+        const nodes: DocumentNode[] = [mkToolNode("tu_1", "Agent", 0), mkToolNode("tu_2", "Agent", 10_000)];
         const subagents = [mkSub({ agent_id: "a1", dispatch_id: "solo:a1", spawned_at: 100 })];
         const dispatches = [mkDispatch({ dispatch_id: "solo:a1" })];
 
@@ -94,7 +96,7 @@ describe("correlateDispatchesForBlock", () => {
     });
 
     it("falls back to an empty map when a dispatch has no orderable member (aged out of ListActive)", () => {
-        const nodes: DocumentNode[] = [mkToolNode("tu_1"), mkToolNode("tu_2")];
+        const nodes: DocumentNode[] = [mkToolNode("tu_1", "Agent", 0), mkToolNode("tu_2", "Agent", 10_000)];
         // Only one of the two dispatches has any subagent data to order by.
         const subagents = [mkSub({ agent_id: "a1", dispatch_id: "solo:a1", spawned_at: 100 })];
         const dispatches = [mkDispatch({ dispatch_id: "solo:a1" }), mkDispatch({ dispatch_id: "solo:a2" })];
@@ -107,9 +109,11 @@ describe("correlateDispatchesForBlock", () => {
     // Reagent/codex P1 (PR #2676 review): two dispatches spawned within the
     // same millisecond produce an unstable sort — bail rather than trust an
     // arbitrary tiebreak, since this could silently swap two same-kind
-    // calls (which the kind-compatibility check can't catch either).
+    // calls (which the kind-compatibility check can't catch either). Node
+    // timestamps are deliberately far apart so the SAME-TURN guard doesn't
+    // also fire here — this test is specifically about the spawned_at tie.
     it("falls back to an empty map when two dispatches share the exact same spawned_at (tie guard)", () => {
-        const nodes: DocumentNode[] = [mkToolNode("tu_1"), mkToolNode("tu_2")];
+        const nodes: DocumentNode[] = [mkToolNode("tu_1", "Agent", 0), mkToolNode("tu_2", "Agent", 10_000)];
         const subagents = [
             mkSub({ agent_id: "a1", dispatch_id: "solo:a1", spawned_at: 100 }),
             mkSub({ agent_id: "a2", dispatch_id: "solo:a2", spawned_at: 100 }),
@@ -121,16 +125,18 @@ describe("correlateDispatchesForBlock", () => {
         expect(result.size).toBe(0);
     });
 
-    // Same-batch ambiguity guard — closes the residual gap reagent flagged
-    // across three review rounds: two same-kind calls with DISTINCT,
-    // non-tied spawned_at values, correctly kind-matched, but from the
-    // same concurrent batch (shared slug) — their relative order is not
-    // verifiable even though every other check passes.
-    it("falls back to an empty map when two solo dispatches share the same slug (same concurrent batch), even with distinct non-tied spawned_at", () => {
-        const nodes: DocumentNode[] = [mkToolNode("tu_1"), mkToolNode("tu_2")];
+    // Same-turn ambiguity guard (the ACTUAL fix, after two prior attempts —
+    // a slug-based guard was flagged by reagent as not covering this exact
+    // scenario: two separate solo Agent-tool calls, each with its own
+    // unique dispatch_id/slug, issued in one turn). Distinct, non-tied
+    // spawned_at + matching kinds still isn't enough; if the transcript's
+    // own tool_use timestamps are within SAME_TURN_THRESHOLD_MS of each
+    // other, treat the pair as unverifiably ordered.
+    it("falls back to an empty map when two same-category tool nodes' own timestamps are within the same-turn threshold, even with distinct non-tied spawned_at and matching kinds", () => {
+        const nodes: DocumentNode[] = [mkToolNode("tu_1", "Agent", 5000), mkToolNode("tu_2", "Agent", 5001)];
         const subagents = [
-            mkSub({ agent_id: "a1", dispatch_id: "solo:a1", spawned_at: 100, slug: "shared-batch" }),
-            mkSub({ agent_id: "a2", dispatch_id: "solo:a2", spawned_at: 200, slug: "shared-batch" }),
+            mkSub({ agent_id: "a1", dispatch_id: "solo:a1", spawned_at: 100 }),
+            mkSub({ agent_id: "a2", dispatch_id: "solo:a2", spawned_at: 200 }),
         ];
         const dispatches = [mkDispatch({ dispatch_id: "solo:a1" }), mkDispatch({ dispatch_id: "solo:a2" })];
 
@@ -139,11 +145,11 @@ describe("correlateDispatchesForBlock", () => {
         expect(result.size).toBe(0);
     });
 
-    it("falls back to an empty map when two solo dispatches BOTH have no slug at all", () => {
-        const nodes: DocumentNode[] = [mkToolNode("tu_1"), mkToolNode("tu_2")];
+    it("falls back to an empty map when either same-category tool node is missing a timestamp", () => {
+        const nodes: DocumentNode[] = [mkToolNode("tu_1", "Agent", undefined), mkToolNode("tu_2", "Agent", 10_000)];
         const subagents = [
-            mkSub({ agent_id: "a1", dispatch_id: "solo:a1", spawned_at: 100, slug: "" }),
-            mkSub({ agent_id: "a2", dispatch_id: "solo:a2", spawned_at: 200, slug: "" }),
+            mkSub({ agent_id: "a1", dispatch_id: "solo:a1", spawned_at: 100 }),
+            mkSub({ agent_id: "a2", dispatch_id: "solo:a2", spawned_at: 200 }),
         ];
         const dispatches = [mkDispatch({ dispatch_id: "solo:a1" }), mkDispatch({ dispatch_id: "solo:a2" })];
 
@@ -152,11 +158,11 @@ describe("correlateDispatchesForBlock", () => {
         expect(result.size).toBe(0);
     });
 
-    it("matches two solo dispatches with DIFFERENT slugs — distinct batches are safely orderable", () => {
-        const nodes: DocumentNode[] = [mkToolNode("tu_1"), mkToolNode("tu_2")];
+    it("matches two same-category tool nodes whose own timestamps are far enough apart to be distinct turns", () => {
+        const nodes: DocumentNode[] = [mkToolNode("tu_1", "Agent", 0), mkToolNode("tu_2", "Agent", 10_000)];
         const subagents = [
-            mkSub({ agent_id: "a1", dispatch_id: "solo:a1", spawned_at: 100, slug: "batch-one" }),
-            mkSub({ agent_id: "a2", dispatch_id: "solo:a2", spawned_at: 200, slug: "batch-two" }),
+            mkSub({ agent_id: "a1", dispatch_id: "solo:a1", spawned_at: 100 }),
+            mkSub({ agent_id: "a2", dispatch_id: "solo:a2", spawned_at: 200 }),
         ];
         const dispatches = [
             mkDispatch({ dispatch_id: "solo:a1", dispatch_name: "First" }),
@@ -169,8 +175,8 @@ describe("correlateDispatchesForBlock", () => {
         expect(result.get("tu_2")?.dispatch_name).toBe("Second");
     });
 
-    it("falls back to an empty map when more than one Workflow dispatch needs ordering in the same pane (no per-run batch signal exists)", () => {
-        const nodes: DocumentNode[] = [mkToolNode("tu_1", "Workflow"), mkToolNode("tu_2", "Workflow")];
+    it("falls back to an empty map when more than one Workflow tool node's timestamps are within the same-turn threshold", () => {
+        const nodes: DocumentNode[] = [mkToolNode("tu_1", "Workflow", 0), mkToolNode("tu_2", "Workflow", 1)];
         const subagents = [
             mkSub({ agent_id: "m1", dispatch_id: "wf_1", spawned_at: 100 }),
             mkSub({ agent_id: "m2", dispatch_id: "wf_2", spawned_at: 200 }),
@@ -183,6 +189,23 @@ describe("correlateDispatchesForBlock", () => {
         const result = correlateDispatchesForBlock("block-1", nodes, subagents, dispatches);
 
         expect(result.size).toBe(0);
+    });
+
+    it("matches two Workflow tool nodes far enough apart to be distinct turns", () => {
+        const nodes: DocumentNode[] = [mkToolNode("tu_1", "Workflow", 0), mkToolNode("tu_2", "Workflow", 10_000)];
+        const subagents = [
+            mkSub({ agent_id: "m1", dispatch_id: "wf_1", spawned_at: 100 }),
+            mkSub({ agent_id: "m2", dispatch_id: "wf_2", spawned_at: 200 }),
+        ];
+        const dispatches = [
+            mkDispatch({ dispatch_id: "wf_1", kind: "workflow", dispatch_name: "First run" }),
+            mkDispatch({ dispatch_id: "wf_2", kind: "workflow", dispatch_name: "Second run" }),
+        ];
+
+        const result = correlateDispatchesForBlock("block-1", nodes, subagents, dispatches);
+
+        expect(result.get("tu_1")?.dispatch_name).toBe("First run");
+        expect(result.get("tu_2")?.dispatch_name).toBe("Second run");
     });
 
     it("ignores subagents/dispatches from other blocks", () => {
@@ -212,10 +235,11 @@ describe("correlateDispatchesForBlock", () => {
     // CORRECT pairing. A Task call and a Workflow call spawned in the same
     // turn can have counts line up while their spawn-order position doesn't
     // match their transcript-order position, silently swapping which node
-    // gets which dispatch's kind.
+    // gets which dispatch's kind. Timestamps are far apart (different
+    // categories anyway, so the same-turn guard wouldn't fire regardless).
     it("falls back to an empty map when a mixed Agent/Task + Workflow spawn's transcript order disagrees with spawn order (kind-mismatch guard)", () => {
         // Transcript order: Task node first, Workflow node second.
-        const nodes: DocumentNode[] = [mkToolNode("tu_task", "Task"), mkToolNode("tu_wf", "Workflow")];
+        const nodes: DocumentNode[] = [mkToolNode("tu_task", "Task", 0), mkToolNode("tu_wf", "Workflow", 10_000)];
         // Spawn order: the Workflow's first member (spawned_at 100) actually
         // started BEFORE the Task's own subagent (spawned_at 200) — the
         // opposite of transcript order.
@@ -234,7 +258,7 @@ describe("correlateDispatchesForBlock", () => {
     });
 
     it("matches a mixed Agent/Task + Workflow spawn correctly when transcript order DOES agree with spawn order", () => {
-        const nodes: DocumentNode[] = [mkToolNode("tu_task", "Task"), mkToolNode("tu_wf", "Workflow")];
+        const nodes: DocumentNode[] = [mkToolNode("tu_task", "Task", 0), mkToolNode("tu_wf", "Workflow", 10_000)];
         const subagents = [
             mkSub({ agent_id: "task-agent", dispatch_id: "solo:task-agent", spawned_at: 100 }),
             mkSub({ agent_id: "wf-member", dispatch_id: "wf_1", spawned_at: 200 }),
