@@ -32,6 +32,7 @@ import { batch, createEffect, createMemo, createSignal, onCleanup, onMount, Show
 import { trail } from "@/log/render-trail";
 import { Key } from "@solid-primitives/keyed";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
+import type { AgentDispatch } from "../../swarm/swarm-model";
 import type { DocumentNode, DocumentState } from "../types";
 import { agentPerfStore, startAgentLayoutShiftObserver } from "./perf-probe";
 import {
@@ -128,6 +129,9 @@ export interface AgentDocumentVirtualListProps {
      * covering the previously-visible tail of the message list.
      */
     workingRowHeight?: Accessor<number>;
+    /** Ordinal-matched tool_use_id -> live dispatch, for this pane's
+     *  Agent/Task/Workflow tool nodes. See `activity/dispatch-correlation.ts`. */
+    dispatchMatches?: Accessor<Map<string, AgentDispatch>>;
 }
 
 export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): JSX.Element {
@@ -966,6 +970,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                         onHoldToolOpen={props.onHoldToolOpen}
                                         onAgentErrorLogin={props.onAgentErrorLogin}
                                         onOpenHistory={props.onOpenHistory}
+                                        dispatchMatches={props.dispatchMatches}
                                         ref={(el) => { rowEl = el; observeRow(el, row().nodeId); }}
                                         style={{
                                             position: "absolute",
@@ -1032,6 +1037,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                                     onHoldToolOpen={props.onHoldToolOpen}
                                     onAgentErrorLogin={props.onAgentErrorLogin}
                                     onOpenHistory={props.onOpenHistory}
+                                    dispatchMatches={props.dispatchMatches}
                                 />
                             )}
                         </Key>

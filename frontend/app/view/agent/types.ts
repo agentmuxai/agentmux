@@ -225,7 +225,7 @@ export interface ToolStreamingLog {
 export interface ToolNode {
     type: "tool";
     id: string;
-    tool: "Read" | "Edit" | "Bash" | "Write" | "Grep" | "Glob" | "Task" | "Agent" | "Other";
+    tool: "Read" | "Edit" | "Bash" | "Write" | "Grep" | "Glob" | "Task" | "Agent" | "Workflow" | "Other";
     /**
      * The raw provider tool name (e.g. "WebSearch", "TodoWrite",
      * "mcp__github__search_issues"). `tool` above is the coarse, closed "kind"
@@ -817,6 +817,7 @@ export const TOOL_ICONS: Record<string, string> = {
     Glob: "📁",
     Task: "🛠️",
     Agent: "🤖",
+    Workflow: "🕸️",
     WebSearch: "🌐",
     web_search: "🌐",
     WebFetch: "🌐",

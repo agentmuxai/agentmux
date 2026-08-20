@@ -15,6 +15,7 @@
  */
 
 import { onMount, Show, type Accessor, type JSX } from "solid-js";
+import type { AgentDispatch } from "../../swarm/swarm-model";
 import { AgentMessageBlock } from "../components/AgentMessageBlock";
 import { JektBubble } from "../components/JektBubble";
 import { MarkdownBlock } from "../components/MarkdownBlock";
@@ -55,6 +56,9 @@ export interface DocumentRowProps {
     /** Ref forwarded to the wrapper element. Virtualized parent passes the
      *  measure-RO observer (keyed by nodeId); streaming parent omits. */
     ref?: (el: HTMLElement) => void;
+    /** Ordinal-matched tool_use_id -> live dispatch, for this pane's
+     *  Agent/Task/Workflow tool nodes. See `activity/dispatch-correlation.ts`. */
+    dispatchMatches?: Accessor<Map<string, AgentDispatch>>;
 }
 
 // Kinds whose hover-strip surfaces an Expand/Collapse control.
@@ -126,6 +130,7 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
                 onHoldToolOpen={props.onHoldToolOpen}
                 onAgentErrorLogin={props.onAgentErrorLogin}
                 onOpenHistory={props.onOpenHistory}
+                dispatchMatches={props.dispatchMatches}
             />
         </div>
     );
@@ -141,6 +146,9 @@ interface DocumentNodeBodyProps {
     onAgentErrorLogin?: () => void;
     /** Open/focus the Agent History tab — drives the `history_link` row's click. */
     onOpenHistory?: () => void;
+    /** Ordinal-matched tool_use_id -> live dispatch, for this pane's
+     *  Agent/Task/Workflow tool nodes. See `activity/dispatch-correlation.ts`. */
+    dispatchMatches?: Accessor<Map<string, AgentDispatch>>;
 }
 
 /**
@@ -184,6 +192,7 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     heldOpen={props.documentState().expandedTools.has(props.node().id)}
                     onTogglePin={() => props.onTogglePin(props.node().id)}
                     onHoldOpen={() => props.onHoldToolOpen?.(props.node().id)}
+                    dispatchMatch={props.dispatchMatches?.().get(props.node().id)}
                 />
             </Show>
             <Show when={props.node() && props.node().type === "agent_message"}>
