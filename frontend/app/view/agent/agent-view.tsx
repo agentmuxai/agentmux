@@ -624,6 +624,7 @@ const AgentPresentationView = ({
                 failure: a.failureAtom[1],
                 compacting: a.compactingAtom[1],
                 attachedTask: a.attachedTaskAtom[1],
+                registryAttachedTaskSince: a.registryAttachedTaskSinceAtom[1],
             },
         });
         registerAgentActivity(model.blockId, a.turnPhaseAtom[0]);
@@ -1496,7 +1497,25 @@ const AgentPresentationView = ({
         // already-running shell must not restart the elapsed counter at 0
         // (reagent P1 on PR #2489; matches AttachedTaskState.since's
         // "when this episode began" contract).
-        const startMs = earliestLiveAttachedStartMs(nodes, subs, model.blockId, now);
+        const transcriptStartMs = earliestLiveAttachedStartMs(nodes, subs, model.blockId, now);
+        // Combine with the registry-derived floor (Phase C of
+        // SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md) —
+        // attached if EITHER source says so, earliest start wins when both
+        // do. Reading this atom here makes it a tracked dependency of this
+        // effect too, same as documentAtom/allSubagentsAtom above, so a
+        // registry-only update (no transcript change) still re-triggers
+        // this recompute. Codex P1 on PR #2685: an earlier version had
+        // useBackgroundTaskRegistry dispatch AttachedTaskObserved directly
+        // into the SAME state this effect independently recomputes and
+        // clears from transcript alone — that dispatch was immediately
+        // undone the next time this effect ran and saw no transcript
+        // evidence. Routing the registry signal through its own axis
+        // instead of the shared one this effect owns fixes that.
+        const registryStartMs = agentAtoms().registryAttachedTaskSinceAtom[0]();
+        const startMs =
+            transcriptStartMs != null && registryStartMs != null
+                ? Math.min(transcriptStartMs, registryStartMs)
+                : (transcriptStartMs ?? registryStartMs);
         const current = agentAtoms().attachedTaskAtom[0]() != null;
         if ((startMs != null) !== current) {
             dispatchPaneIfRegistered(

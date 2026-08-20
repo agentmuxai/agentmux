@@ -46,4 +46,10 @@ export const WpsEvent = {
     // `{ node_id }`. See
     // docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md §3.2.
     DockClear: "dock:clear",
+    // Published whenever a block's db_background_tasks state changes
+    // (observed, pid recorded, or completed) — an invalidation signal
+    // only, no task data (see `publish_background_task_updated` in
+    // websocket.rs). Handlers re-fetch via ListBackgroundTasksCommand.
+    // See docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.2.
+    BackgroundTaskUpdated: "background-task-updated",
 } as const;

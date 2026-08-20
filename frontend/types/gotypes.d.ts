@@ -238,6 +238,28 @@ declare global {
         pid: number;
     };
 
+    // wshrpc.CommandListBackgroundTasksData — request/response, returns
+    // this block's current db_background_tasks rows (BackgroundTaskView[]
+    // below) so the frontend can seed its attachedTask axis from the
+    // durable registry on mount/reconnect. See
+    // docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.1.
+    type CommandListBackgroundTasksData = {
+        blockid: string;
+    };
+
+    // server::muxspect_handlers::BackgroundTaskView — one db_background_tasks
+    // row, as returned by ListBackgroundTasksCommand.
+    type BackgroundTaskView = {
+        id: string;
+        block_id: string;
+        label: string;
+        pid: number | null;
+        started_at_ms: number;
+        status: "running" | "done" | "error" | "stopped";
+        last_seen_ms: number;
+        ended_at_ms: number | null;
+    };
+
     // CommandAgentAnswerData — AskUserQuestion answer, delivered to the running
     // agent CLI via the Agent SDK control protocol (a control_response carrying
     // updatedInput.answers). Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.

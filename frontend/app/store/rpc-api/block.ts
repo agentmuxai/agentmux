@@ -59,6 +59,12 @@ export const BlockApi = {
         return client.rpcCall("backgroundtaskpid", data, opts);
     },
 
+    // Request/response — this block's current db_background_tasks rows.
+    // Spec: docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.1.
+    ListBackgroundTasksCommand(client: RpcClient, data: CommandListBackgroundTasksData, opts?: RpcOpts): Promise<BackgroundTaskView[]> {
+        return client.rpcCall("listbackgroundtasks", data, opts);
+    },
+
     // Deliver an AskUserQuestion answer to the running agent CLI as a
     // tool_result. Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
     AgentAnswerCommand(client: RpcClient, data: CommandAgentAnswerData, opts?: RpcOpts): Promise<void> {

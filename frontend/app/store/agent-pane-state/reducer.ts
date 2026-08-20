@@ -1299,6 +1299,25 @@ export function update(
                 events: [{ type: "attached-task-cleared" }],
             };
         }
+
+        // ── Registry-derived attached-task floor (Phase C of
+        // SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md) — see
+        // registryAttachedTaskSince's doc comment in types.ts for why this
+        // is a separate axis, exclusively owned by these two commands. ──
+        case "RegistryAttachedTaskObserved": {
+            if (state.registryAttachedTaskSince === command.at) return { state, events: [] };
+            return {
+                state: { ...state, registryAttachedTaskSince: command.at },
+                events: [{ type: "registry-attached-task-observed", at: command.at }],
+            };
+        }
+        case "RegistryAttachedTaskCleared": {
+            if (state.registryAttachedTaskSince == null) return { state, events: [] };
+            return {
+                state: { ...state, registryAttachedTaskSince: null },
+                events: [{ type: "registry-attached-task-cleared" }],
+            };
+        }
     }
 }
 
