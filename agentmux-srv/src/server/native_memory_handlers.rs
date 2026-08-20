@@ -25,16 +25,27 @@ use std::path::PathBuf;
 use crate::backend::base::expand_home_dir_safe;
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
+    COMMAND_NATIVE_MEMORY_DIFF,
+    COMMAND_NATIVE_MEMORY_HISTORY,
     COMMAND_NATIVE_MEMORY_LIST,
     COMMAND_NATIVE_MEMORY_READ_FILE,
+    COMMAND_NATIVE_MEMORY_REVERT,
     COMMAND_NATIVE_MEMORY_WRITE_FILE,
+    CommandNativeMemoryDiffData,
+    CommandNativeMemoryHistoryData,
     CommandNativeMemoryListData,
     CommandNativeMemoryReadFileData,
+    CommandNativeMemoryRevertData,
     CommandNativeMemoryWriteFileData,
+    NativeMemoryDiffResult,
     NativeMemoryFileMeta,
+    NativeMemoryHistoryResult,
     NativeMemoryListResult,
     NativeMemoryReadFileResult,
+    NativeMemoryRevertResult,
+    NativeMemoryVersionMeta,
 };
+use crate::backend::storage::NativeMemoryVersion;
 
 use super::AppState;
 
@@ -121,6 +132,46 @@ pub(crate) fn memory_dir_for_agent(
     // See issue #1836.
     memory_dir_from_registry(agent_id)
         .ok_or_else(|| format!("memory: agent {agent_id} not found"))
+}
+
+/// Resolve `agent_id` — the agent SLUG, per the App-API convention (see
+/// [`memory_dir_for_agent`]'s own doc comment) — to the same stable,
+/// canonical identifier (`AgentDefinition.id` / `db_agents.id`) the
+/// WebSocket RPC surface (`agent:memory:write_file` et al., which receives
+/// this id directly from the caller and resolves it via `agent_def_get`)
+/// already keys `db_agent_native_memory_versions` by.
+///
+/// reagent P1: without this, a version written through this App-API/MCP
+/// surface (previously slug-keyed, verbatim) lived in a disjoint keyspace
+/// from one written through the WS RPC surface for the exact same logical
+/// agent whenever `slug != id` — a version written via the `MemoryWrite`
+/// MCP tool was invisible to a WS-RPC-based `MemoryHistory`/`MemoryDiff`/
+/// `MemoryRevert` call and vice versa, silently defeating the point of
+/// having version history at all.
+///
+/// Mirrors `memory_dir_for_agent`'s own slug → instance → registry
+/// resolution order, but returns the id instead of a filesystem path:
+/// - Primary path (`instance_get_by_slug`): `db_agents` is the
+///   consolidated definition+instance table (Phase 3a) — its own query
+///   selects `id, id AS def_id`, i.e. the row's `id` already IS the
+///   definition id in this model, not a separate instance-only identity.
+/// - Registry fallback (a live agent not yet persisted to `db_agents`):
+///   the registry record's `definition_id` field is the one that matches
+///   `agent_def_get`'s namespace — its sibling `instance_id` is a
+///   different, launch-scoped identity, not what `write_file` keys by.
+pub(crate) fn resolve_agent_uuid(
+    wstore: &crate::backend::storage::store::Store,
+    agent_id: &str,
+) -> Result<String, String> {
+    if let Some(instance) = wstore
+        .instance_get_by_slug(agent_id)
+        .map_err(|e| format!("resolve_agent_uuid: store: {e}"))?
+    {
+        return Ok(instance.id);
+    }
+    find_active_registry_record_by_slug(agent_id)
+        .map(|rec| rec.data.definition_id)
+        .ok_or_else(|| format!("resolve_agent_uuid: agent {agent_id} not found"))
 }
 
 /// Find the global named-agent registry's active record for `agent_id` —
@@ -451,6 +502,117 @@ pub(crate) fn memory_dir_for_agent_by_id(
         .map(|c| parse_claude_config_dir(&c.content))
         .unwrap_or_default();
     Some(memory_dir_for_cwd(&config_dir, &agent.working_directory))
+}
+
+fn version_summary_to_meta(v: crate::backend::storage::NativeMemoryVersionSummary) -> NativeMemoryVersionMeta {
+    NativeMemoryVersionMeta {
+        id: v.id,
+        content_hash: v.content_hash,
+        parent_version_id: v.parent_version_id,
+        source: v.source,
+        source_detail: v.source_detail,
+        session_id: v.session_id,
+        created_at: v.created_at,
+    }
+}
+
+fn version_to_meta(v: &NativeMemoryVersion) -> NativeMemoryVersionMeta {
+    NativeMemoryVersionMeta {
+        id: v.id.clone(),
+        content_hash: v.content_hash.clone(),
+        parent_version_id: v.parent_version_id.clone(),
+        source: v.source.clone(),
+        source_detail: v.source_detail.clone(),
+        session_id: v.session_id.clone(),
+        created_at: v.created_at,
+    }
+}
+
+/// Cap on the LCS table's cell COUNT (from_lines.len() * to_lines.len()),
+/// not on either side's line count independently — reagent P1: the
+/// original per-side-only cap (20,000 lines each) bounded neither
+/// dimension against the other, so two files each under that cap could
+/// still produce a ~3.2GB `usize` table (20_000 * 20_000 * 8 bytes) in the
+/// shared agentmux-srv process. 4,000,000 cells keeps the table under
+/// ~32MB (`* size_of::<usize>()`) regardless of how the two side lengths
+/// are distributed — generous for memory files (markdown notes, not logs)
+/// while still bounded for any combination of sizes.
+const MAX_DIFF_CELLS: usize = 4_000_000;
+
+/// A minimal unified-diff-style line comparison: longest-common-subsequence
+/// based, output lines prefixed `"  "` (context), `"- "` (removed, `from`
+/// only), or `"+ "` (added, `to` only). No `@@` hunk headers or context
+/// trimming in v1 — every line is included, which is fine for memory files.
+pub(crate) fn line_diff(from: &str, to: &str) -> String {
+    let from_lines: Vec<&str> = from.lines().collect();
+    let to_lines: Vec<&str> = to.lines().collect();
+
+    if from_lines.len().saturating_mul(to_lines.len()) > MAX_DIFF_CELLS {
+        return format!(
+            "(diff omitted: {} x {} lines exceeds the {MAX_DIFF_CELLS}-cell comparison cap)",
+            from_lines.len(),
+            to_lines.len(),
+        );
+    }
+
+    let n = from_lines.len();
+    let m = to_lines.len();
+    let cols = m + 1;
+    // A single flat allocation, not `n + 1` separate `Vec<usize>` rows —
+    // reagent P2: MAX_DIFF_CELLS bounds the cell COUNT (n * m), but a
+    // maximally lopsided diff (e.g. ~4,000,000 short lines vs. 1 line)
+    // stays under that cap while `vec![vec![...]; n + 1]` would still
+    // perform ~4,000,001 individual heap allocations — one per row — whose
+    // allocator overhead and allocation-count latency dwarf the actual
+    // cell-data cost the cap was meant to bound. lcs[i][j] (length of the
+    // longest common subsequence of from_lines[i..] and to_lines[j..])
+    // lives at flat index i * cols + j.
+    let mut lcs = vec![0usize; (n + 1) * cols];
+    let idx = |i: usize, j: usize| i * cols + j;
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            lcs[idx(i, j)] = if from_lines[i] == to_lines[j] {
+                lcs[idx(i + 1, j + 1)] + 1
+            } else {
+                lcs[idx(i + 1, j)].max(lcs[idx(i, j + 1)])
+            };
+        }
+    }
+
+    let mut out = String::new();
+    let (mut i, mut j) = (0, 0);
+    while i < n && j < m {
+        if from_lines[i] == to_lines[j] {
+            out.push_str("  ");
+            out.push_str(from_lines[i]);
+            out.push('\n');
+            i += 1;
+            j += 1;
+        } else if lcs[idx(i + 1, j)] >= lcs[idx(i, j + 1)] {
+            out.push_str("- ");
+            out.push_str(from_lines[i]);
+            out.push('\n');
+            i += 1;
+        } else {
+            out.push_str("+ ");
+            out.push_str(to_lines[j]);
+            out.push('\n');
+            j += 1;
+        }
+    }
+    while i < n {
+        out.push_str("- ");
+        out.push_str(from_lines[i]);
+        out.push('\n');
+        i += 1;
+    }
+    while j < m {
+        out.push_str("+ ");
+        out.push_str(to_lines[j]);
+        out.push('\n');
+        j += 1;
+    }
+    out
 }
 
 pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -796,6 +958,36 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 std::fs::create_dir_all(&dir)
                     .map_err(|e| format!("agent:memory:write_file: mkdir: {e}"))?;
 
+                // Version history — recorded BEFORE the live-file write below,
+                // not after. reagent P1: the drift detector's fast path
+                // (native_memory_drift.rs) subscribes to fs-watch events on
+                // this same directory; if the version row were inserted AFTER
+                // the write (as an earlier revision of this handler did), a
+                // fs-watch event for the write below can be processed before
+                // this version exists, see a hash that doesn't match anything
+                // recorded yet, and log this legitimate RPC write as a
+                // spurious "external_fs_write". Recording the version first
+                // establishes a real happens-before: the file-modify event
+                // that write can possibly generate cannot fire until the
+                // write below actually executes, by which point this version
+                // already exists to match against. Non-fatal on failure — a
+                // durability/review layer on top of the write, not the write
+                // itself (mirrors the mirror-upsert failure handling below).
+                let (version_source, version_detail) = match &cmd.provenance {
+                    Some(p) => (p.source.as_str(), p.detail.to_string()),
+                    None => ("agent_inferred", "{}".to_string()),
+                };
+                if let Err(e) = id_store.agent_native_memory_version_insert(
+                    &agent.id,
+                    &cmd.filename,
+                    &cmd.content,
+                    version_source,
+                    &version_detail,
+                    "",
+                ) {
+                    tracing::warn!(agent_id = %agent.id, filename = %cmd.filename, error = %e, "agent:memory:write_file: version insert failed (non-fatal)");
+                }
+
                 let dest = dir.join(&cmd.filename);
                 // Per-write UUID suffix prevents concurrent writes to the same
                 // filename from sharing a tmp path and silently corrupting each
@@ -844,6 +1036,205 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     "agent:memory:write_file"
                 );
                 Ok(None)
+            })
+        }),
+    );
+
+    let wstore_history = state.wstore.clone();
+    let id_store_history = state.id_store.clone();
+    engine.register_handler(
+        COMMAND_NATIVE_MEMORY_HISTORY,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_history.clone();
+            let id_store = id_store_history.clone();
+            Box::pin(async move {
+                let cmd: CommandNativeMemoryHistoryData = serde_json::from_value(data)
+                    .map_err(|e| format!("agent:memory:history: {e}"))?;
+
+                validate_filename(&cmd.filename)
+                    .map_err(|e| format!("agent:memory:history: {e}"))?;
+
+                // Resolve to the same canonical agent.id write_file keys
+                // by, for the same reason app_api::memory_history_impl
+                // does (reagent P1) — cmd.agent_id is expected to already
+                // be that id for this surface (the frontend passes
+                // AgentDefinition.id), but resolving explicitly here
+                // rather than trusting it verbatim matches write_file's
+                // own validation and closes the gap if that assumption
+                // ever stops holding for some caller.
+                let agent = wstore
+                    .agent_def_get(&cmd.agent_id)
+                    .map_err(|e| format!("agent:memory:history: store: {e}"))?
+                    .ok_or_else(|| format!("agent:memory:history: agent {} not found", cmd.agent_id))?;
+
+                let versions = id_store
+                    .agent_native_memory_version_list(&agent.id, &cmd.filename)
+                    .map_err(|e| format!("agent:memory:history: store: {e}"))?
+                    .into_iter()
+                    .map(version_summary_to_meta)
+                    .collect();
+
+                Ok(Some(serde_json::to_value(NativeMemoryHistoryResult { versions }).map_err(|e| e.to_string())?))
+            })
+        }),
+    );
+
+    let wstore_diff = state.wstore.clone();
+    let id_store_diff = state.id_store.clone();
+    engine.register_handler(
+        COMMAND_NATIVE_MEMORY_DIFF,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_diff.clone();
+            let id_store = id_store_diff.clone();
+            Box::pin(async move {
+                let cmd: CommandNativeMemoryDiffData = serde_json::from_value(data)
+                    .map_err(|e| format!("agent:memory:diff: {e}"))?;
+
+                // Resolve to the same canonical agent.id write_file keys by
+                // — see the identical comment on the history handler above.
+                let agent = wstore
+                    .agent_def_get(&cmd.agent_id)
+                    .map_err(|e| format!("agent:memory:diff: store: {e}"))?
+                    .ok_or_else(|| format!("agent:memory:diff: agent {} not found", cmd.agent_id))?;
+
+                let from = id_store
+                    .agent_native_memory_version_get(&cmd.from_version_id)
+                    .map_err(|e| format!("agent:memory:diff: store: {e}"))?
+                    .ok_or_else(|| format!("agent:memory:diff: version {} not found", cmd.from_version_id))?;
+                let to = id_store
+                    .agent_native_memory_version_get(&cmd.to_version_id)
+                    .map_err(|e| format!("agent:memory:diff: store: {e}"))?
+                    .ok_or_else(|| format!("agent:memory:diff: version {} not found", cmd.to_version_id))?;
+                // reagent P1: unlike list/read/write/history/revert, this
+                // handler has no other agent-scoping — every caller shares
+                // one instance-wide X-AuthKey, so without this check any
+                // caller could read any other agent's memory content by
+                // version id.
+                if from.agent_id != agent.id || to.agent_id != agent.id {
+                    return Err(format!(
+                        "agent:memory:diff: one or both versions do not belong to {}",
+                        cmd.agent_id
+                    ));
+                }
+                // reagent P2: ownership alone isn't enough — from/to must
+                // also be versions of the SAME file, or the "diff" is a
+                // meaningless line-by-line comparison of two unrelated
+                // files with no error to signal that.
+                if from.filename != to.filename {
+                    return Err(format!(
+                        "agent:memory:diff: from_version_id and to_version_id are versions of different files ({} vs {})",
+                        from.filename, to.filename
+                    ));
+                }
+
+                let diff = line_diff(&from.content, &to.content);
+                Ok(Some(serde_json::to_value(NativeMemoryDiffResult { diff }).map_err(|e| e.to_string())?))
+            })
+        }),
+    );
+
+    let wstore_revert = state.wstore.clone();
+    let id_store_revert = state.id_store.clone();
+    engine.register_handler(
+        COMMAND_NATIVE_MEMORY_REVERT,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_revert.clone();
+            let id_store = id_store_revert.clone();
+            Box::pin(async move {
+                let cmd: CommandNativeMemoryRevertData = serde_json::from_value(data)
+                    .map_err(|e| format!("agent:memory:revert: {e}"))?;
+
+                validate_filename(&cmd.filename)
+                    .map_err(|e| format!("agent:memory:revert: {e}"))?;
+
+                // Resolve to the same canonical agent.id write_file keys by
+                // — see the identical comment on the history handler above.
+                // Resolved BEFORE the ownership check below (not after, as
+                // an earlier revision of this handler did) so that check
+                // compares against the same id the version was actually
+                // stored under, not the raw, possibly-different cmd.agent_id.
+                let agent = wstore
+                    .agent_def_get(&cmd.agent_id)
+                    .map_err(|e| format!("agent:memory:revert: store: {e}"))?
+                    .ok_or_else(|| format!("agent:memory:revert: agent {} not found", cmd.agent_id))?;
+
+                let target = id_store
+                    .agent_native_memory_version_get(&cmd.target_version_id)
+                    .map_err(|e| format!("agent:memory:revert: store: {e}"))?
+                    .ok_or_else(|| format!("agent:memory:revert: version {} not found", cmd.target_version_id))?;
+                if target.agent_id != agent.id || target.filename != cmd.filename {
+                    return Err(format!(
+                        "agent:memory:revert: version {} does not belong to {}/{}",
+                        cmd.target_version_id, cmd.agent_id, cmd.filename
+                    ));
+                }
+
+                // Revert is implemented as a NEW write through the same
+                // path as agent:memory:write_file (live file + mirror +
+                // version), not a rewrite of history — this is the
+                // git-revert-not-git-reset guarantee from the spec's §4.3.
+                if agent.working_directory.is_empty() {
+                    return Err(format!("agent:memory:revert: agent {} has no configured working directory", cmd.agent_id));
+                }
+                let config_dir = wstore
+                    .agent_content_get(&agent.id, "env")
+                    .ok().flatten()
+                    .map(|c| parse_claude_config_dir(&c.content))
+                    .unwrap_or_default();
+                let dir = memory_dir_for_cwd(&config_dir, &agent.working_directory);
+                std::fs::create_dir_all(&dir)
+                    .map_err(|e| format!("agent:memory:revert: mkdir: {e}"))?;
+
+                // Version recorded BEFORE the live-file write below — same
+                // fs-watch-race rationale as agent:memory:write_file's own
+                // handler above (reagent P1). Unlike that handler, a failure
+                // here IS fatal: the RPC's whole contract is "return the new
+                // version," so silently reverting the file but not returning
+                // a version would leave the caller with no way to know what
+                // they just reverted to.
+                let detail = serde_json::json!({ "reverted_to": cmd.target_version_id }).to_string();
+                let new_version = id_store
+                    .agent_native_memory_version_insert(&agent.id, &cmd.filename, &target.content, "revert", &detail, "")
+                    .map_err(|e| format!("agent:memory:revert: version insert: {e}"))?;
+
+                let dest = dir.join(&cmd.filename);
+                let tmp = dir.join(format!(".{}.{}.tmp", cmd.filename, uuid::Uuid::new_v4()));
+                if let Err(e) = std::fs::write(&tmp, &target.content) {
+                    let _ = std::fs::remove_file(&tmp);
+                    return Err(format!("agent:memory:revert: write tmp: {e}"));
+                }
+                if let Err(e) = std::fs::rename(&tmp, &dest) {
+                    let _ = std::fs::remove_file(&tmp);
+                    return Err(format!("agent:memory:revert: rename: {e}"));
+                }
+
+                let metadata_type = parse_frontmatter_type(&target.content);
+                let dest_meta = std::fs::metadata(&dest).ok();
+                let size_bytes = dest_meta.as_ref().map(|m| m.len() as i64).unwrap_or(target.content.len() as i64);
+                let mtime_ms = dest_meta
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
+                if let Err(e) = id_store.agent_native_memory_upsert(
+                    &agent.id,
+                    &cmd.filename,
+                    &target.content,
+                    metadata_type.as_deref(),
+                    &dest.to_string_lossy(),
+                    size_bytes,
+                    mtime_ms,
+                ) {
+                    tracing::warn!(agent_id = %agent.id, filename = %cmd.filename, error = %e, "agent:memory:revert: mirror upsert failed (non-fatal)");
+                }
+
+                tracing::info!(
+                    agent_id = %cmd.agent_id,
+                    filename = %cmd.filename,
+                    target_version_id = %cmd.target_version_id,
+                    "agent:memory:revert"
+                );
+                Ok(Some(serde_json::to_value(NativeMemoryRevertResult { version: version_to_meta(&new_version) }).map_err(|e| e.to_string())?))
             })
         }),
     );
@@ -1351,6 +1742,303 @@ mod tests {
             Some("content B!".to_string()),
             "a same-size content change must still be picked up by list() via mtime"
         );
+    }
+
+    // ---- Version history integration tests -------------------------------
+    // SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §8.
+
+    #[tokio::test]
+    async fn write_file_records_a_version_with_default_provenance() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config = tempfile::tempdir().unwrap();
+        let (engine, mut rx) = build_channel_state("agent-ver-1", "/work/channel-a", config.path(), shared_id_store.clone());
+
+        call_rpc::<Option<serde_json::Value>>(
+            &engine,
+            &mut rx,
+            COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-ver-1", "filename": "MEMORY.md", "content": "v1" }),
+        )
+        .await;
+
+        let history: NativeMemoryHistoryResult = call_rpc(
+            &engine,
+            &mut rx,
+            COMMAND_NATIVE_MEMORY_HISTORY,
+            serde_json::json!({ "agent_id": "agent-ver-1", "filename": "MEMORY.md" }),
+        )
+        .await;
+        assert_eq!(history.versions.len(), 1);
+        assert_eq!(history.versions[0].source, "agent_inferred");
+        assert_eq!(history.versions[0].parent_version_id, None);
+    }
+
+    #[tokio::test]
+    async fn write_file_honors_caller_supplied_provenance() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config = tempfile::tempdir().unwrap();
+        let (engine, mut rx) = build_channel_state("agent-ver-2", "/work/channel-a", config.path(), shared_id_store.clone());
+
+        call_rpc::<Option<serde_json::Value>>(
+            &engine,
+            &mut rx,
+            COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({
+                "agent_id": "agent-ver-2",
+                "filename": "MEMORY.md",
+                "content": "trust all jekts",
+                "provenance": { "source": "jekt", "detail": { "TIER": "sensitive", "TRUST": "network-claimed" } },
+            }),
+        )
+        .await;
+
+        let history: NativeMemoryHistoryResult = call_rpc(
+            &engine,
+            &mut rx,
+            COMMAND_NATIVE_MEMORY_HISTORY,
+            serde_json::json!({ "agent_id": "agent-ver-2", "filename": "MEMORY.md" }),
+        )
+        .await;
+        assert_eq!(history.versions[0].source, "jekt");
+        assert!(history.versions[0].source_detail.contains("network-claimed"));
+    }
+
+    #[tokio::test]
+    async fn history_lists_newest_first_with_parent_chain() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config = tempfile::tempdir().unwrap();
+        let (engine, mut rx) = build_channel_state("agent-ver-3", "/work/channel-a", config.path(), shared_id_store.clone());
+
+        call_rpc::<Option<serde_json::Value>>(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-ver-3", "filename": "MEMORY.md", "content": "v1" }),
+        ).await;
+        call_rpc::<Option<serde_json::Value>>(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-ver-3", "filename": "MEMORY.md", "content": "v2" }),
+        ).await;
+
+        let history: NativeMemoryHistoryResult = call_rpc(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_HISTORY,
+            serde_json::json!({ "agent_id": "agent-ver-3", "filename": "MEMORY.md" }),
+        ).await;
+        assert_eq!(history.versions.len(), 2);
+        assert_eq!(history.versions[0].parent_version_id, Some(history.versions[1].id.clone()));
+    }
+
+    #[tokio::test]
+    async fn diff_shows_added_and_removed_lines() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config = tempfile::tempdir().unwrap();
+        let (engine, mut rx) = build_channel_state("agent-ver-4", "/work/channel-a", config.path(), shared_id_store.clone());
+
+        call_rpc::<Option<serde_json::Value>>(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-ver-4", "filename": "MEMORY.md", "content": "line a\nline b" }),
+        ).await;
+        call_rpc::<Option<serde_json::Value>>(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-ver-4", "filename": "MEMORY.md", "content": "line a\nline c" }),
+        ).await;
+
+        let history: NativeMemoryHistoryResult = call_rpc(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_HISTORY,
+            serde_json::json!({ "agent_id": "agent-ver-4", "filename": "MEMORY.md" }),
+        ).await;
+        let (newest, oldest) = (&history.versions[0], &history.versions[1]);
+
+        let diff: NativeMemoryDiffResult = call_rpc(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_DIFF,
+            serde_json::json!({ "agent_id": "agent-ver-4", "from_version_id": oldest.id, "to_version_id": newest.id }),
+        ).await;
+        assert!(diff.diff.contains("  line a"), "unexpected diff: {}", diff.diff);
+        assert!(diff.diff.contains("- line b"), "unexpected diff: {}", diff.diff);
+        assert!(diff.diff.contains("+ line c"), "unexpected diff: {}", diff.diff);
+    }
+
+    #[tokio::test]
+    async fn diff_errors_for_an_unknown_version_id() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config = tempfile::tempdir().unwrap();
+        let (engine, mut rx) = build_channel_state("agent-ver-5", "/work/channel-a", config.path(), shared_id_store.clone());
+
+        let err = call_rpc_expect_error(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_DIFF,
+            serde_json::json!({ "agent_id": "agent-ver-5", "from_version_id": "nope", "to_version_id": "also-nope" }),
+        ).await;
+        assert!(err.contains("not found"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn diff_rejects_a_version_from_a_different_agent() {
+        // reagent P1: from/to must both belong to the calling agent_id —
+        // this is the regression test for that fix.
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config_a = tempfile::tempdir().unwrap();
+        let config_b = tempfile::tempdir().unwrap();
+        let (engine_a, mut rx_a) = build_channel_state("agent-diff-a", "/work/channel-a", config_a.path(), shared_id_store.clone());
+        let (engine_b, mut rx_b) = build_channel_state("agent-diff-b", "/work/channel-b", config_b.path(), shared_id_store.clone());
+
+        call_rpc::<Option<serde_json::Value>>(
+            &engine_a, &mut rx_a, COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-diff-a", "filename": "MEMORY.md", "content": "v1" }),
+        ).await;
+        call_rpc::<Option<serde_json::Value>>(
+            &engine_a, &mut rx_a, COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-diff-a", "filename": "MEMORY.md", "content": "v2" }),
+        ).await;
+        let history_a: NativeMemoryHistoryResult = call_rpc(
+            &engine_a, &mut rx_a, COMMAND_NATIVE_MEMORY_HISTORY,
+            serde_json::json!({ "agent_id": "agent-diff-a", "filename": "MEMORY.md" }),
+        ).await;
+
+        let err = call_rpc_expect_error(
+            &engine_b, &mut rx_b, COMMAND_NATIVE_MEMORY_DIFF,
+            serde_json::json!({
+                "agent_id": "agent-diff-b",
+                "from_version_id": history_a.versions[1].id,
+                "to_version_id": history_a.versions[0].id,
+            }),
+        ).await;
+        assert!(err.contains("do not belong to"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn diff_rejects_two_versions_of_different_files() {
+        // reagent P2: ownership alone isn't enough — from/to must also be
+        // versions of the SAME file, or the "diff" is a meaningless
+        // line-by-line comparison of two unrelated files.
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config = tempfile::tempdir().unwrap();
+        let (engine, mut rx) = build_channel_state("agent-diff-files", "/work/channel-a", config.path(), shared_id_store.clone());
+
+        call_rpc::<Option<serde_json::Value>>(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-diff-files", "filename": "a.md", "content": "content a" }),
+        ).await;
+        call_rpc::<Option<serde_json::Value>>(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-diff-files", "filename": "b.md", "content": "content b" }),
+        ).await;
+        let history_a: NativeMemoryHistoryResult = call_rpc(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_HISTORY,
+            serde_json::json!({ "agent_id": "agent-diff-files", "filename": "a.md" }),
+        ).await;
+        let history_b: NativeMemoryHistoryResult = call_rpc(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_HISTORY,
+            serde_json::json!({ "agent_id": "agent-diff-files", "filename": "b.md" }),
+        ).await;
+
+        let err = call_rpc_expect_error(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_DIFF,
+            serde_json::json!({
+                "agent_id": "agent-diff-files",
+                "from_version_id": history_a.versions[0].id,
+                "to_version_id": history_b.versions[0].id,
+            }),
+        ).await;
+        assert!(err.contains("different files"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn revert_writes_a_new_version_and_restores_live_content_without_deleting_history() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config = tempfile::tempdir().unwrap();
+        let (engine, mut rx) = build_channel_state("agent-ver-6", "/work/channel-a", config.path(), shared_id_store.clone());
+
+        call_rpc::<Option<serde_json::Value>>(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-ver-6", "filename": "MEMORY.md", "content": "good content" }),
+        ).await;
+        call_rpc::<Option<serde_json::Value>>(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-ver-6", "filename": "MEMORY.md", "content": "fabricated content" }),
+        ).await;
+
+        let history_before: NativeMemoryHistoryResult = call_rpc(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_HISTORY,
+            serde_json::json!({ "agent_id": "agent-ver-6", "filename": "MEMORY.md" }),
+        ).await;
+        assert_eq!(history_before.versions.len(), 2);
+        let good_version_id = history_before.versions[1].id.clone(); // oldest = "good content"
+
+        let revert: NativeMemoryRevertResult = call_rpc(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_REVERT,
+            serde_json::json!({ "agent_id": "agent-ver-6", "filename": "MEMORY.md", "target_version_id": good_version_id }),
+        ).await;
+        assert_eq!(revert.version.source, "revert");
+
+        // Live content (and mirror) must now read "good content" again.
+        let read: NativeMemoryReadFileResult = call_rpc(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_READ_FILE,
+            serde_json::json!({ "agent_id": "agent-ver-6", "filename": "MEMORY.md" }),
+        ).await;
+        assert_eq!(read.content, "good content");
+
+        // History must now have 3 rows (append-only — the fabricated
+        // version is still there, just no longer latest), not 2.
+        let history_after: NativeMemoryHistoryResult = call_rpc(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_HISTORY,
+            serde_json::json!({ "agent_id": "agent-ver-6", "filename": "MEMORY.md" }),
+        ).await;
+        assert_eq!(history_after.versions.len(), 3, "revert must never delete or rewrite prior versions");
+    }
+
+    #[tokio::test]
+    async fn revert_rejects_a_version_belonging_to_a_different_agent() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config_a = tempfile::tempdir().unwrap();
+        let config_b = tempfile::tempdir().unwrap();
+        let (engine_a, mut rx_a) = build_channel_state("agent-ver-7a", "/work/channel-a", config_a.path(), shared_id_store.clone());
+        let (engine_b, mut rx_b) = build_channel_state("agent-ver-7b", "/work/channel-b", config_b.path(), shared_id_store.clone());
+
+        call_rpc::<Option<serde_json::Value>>(
+            &engine_a, &mut rx_a, COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-ver-7a", "filename": "MEMORY.md", "content": "agent a's content" }),
+        ).await;
+        let history_a: NativeMemoryHistoryResult = call_rpc(
+            &engine_a, &mut rx_a, COMMAND_NATIVE_MEMORY_HISTORY,
+            serde_json::json!({ "agent_id": "agent-ver-7a", "filename": "MEMORY.md" }),
+        ).await;
+
+        let err = call_rpc_expect_error(
+            &engine_b, &mut rx_b, COMMAND_NATIVE_MEMORY_REVERT,
+            serde_json::json!({ "agent_id": "agent-ver-7b", "filename": "MEMORY.md", "target_version_id": history_a.versions[0].id }),
+        ).await;
+        assert!(err.contains("does not belong to"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn line_diff_marks_context_removed_and_added_lines() {
+        let diff = line_diff("a\nb\nc", "a\nx\nc");
+        assert_eq!(diff, "  a\n- b\n+ x\n  c\n");
+    }
+
+    #[test]
+    fn line_diff_handles_identical_content() {
+        assert_eq!(line_diff("same", "same"), "  same\n");
+    }
+
+    // reagent P2 on PR #2674 (re-review): line_diff was rewritten from
+    // vec![vec![0usize; m + 1]; n + 1] (n+1 separate heap allocations) to a
+    // single flat Vec indexed manually via `i * cols + j` — a lopsided
+    // shape (one side much longer than the other) exercises exactly the
+    // index arithmetic that refactor could get wrong, so cover it with an
+    // asymmetric case in both directions rather than only the roughly
+    // square cases above.
+    #[test]
+    fn line_diff_handles_a_lopsided_shape_in_both_directions() {
+        assert_eq!(line_diff("a\nb\nc\nd\ne", "c"), "- a\n- b\n  c\n- d\n- e\n");
+        assert_eq!(line_diff("c", "a\nb\nc\nd\ne"), "+ a\n+ b\n  c\n+ d\n+ e\n");
     }
 
     #[test]
