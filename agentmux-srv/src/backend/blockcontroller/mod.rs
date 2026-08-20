@@ -190,6 +190,23 @@ pub trait Controller: Send + Sync {
     /// `graceful` waits for process to exit; `new_status` is the target state.
     fn stop(&self, graceful: bool, new_status: &str) -> Result<(), String>;
 
+    /// Stop this controller because it's being REPLACED by a new one for
+    /// the same block (session restart / resync's `needs_replace` path),
+    /// NOT because the block itself is being closed. Must terminate this
+    /// controller's own CLI process so it doesn't linger, but — unlike
+    /// `stop()` — must NOT reach any declared-background descendant the
+    /// process may have spawned (e.g. a `task dev` instance launched via
+    /// `run_in_background: true`); those must survive the replace. See
+    /// docs/specs/SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md.
+    ///
+    /// Default delegates to `stop()` — correct for any controller type
+    /// with no subprocess tree of its own to be careful about (nothing to
+    /// preserve, so the two calls are equivalent). Only `ShellController`
+    /// overrides this today.
+    fn stop_for_replace(&self, new_status: &str) -> Result<(), String> {
+        self.stop(true, new_status)
+    }
+
     /// Get the current runtime status.
     fn get_runtime_status(&self) -> BlockControllerRuntimeStatus;
 
@@ -232,6 +249,24 @@ pub fn register_controller(block_id: &str, controller: Arc<dyn Controller>) {
         let _ = old.stop(true, STATUS_DONE);
     }
     registry.insert(block_id.to_string(), controller);
+}
+
+/// Remove a controller from `CONTROLLER_REGISTRY` only — does NOT touch the
+/// process tracker or the Process Broker's cached status, unlike
+/// `delete_controller` below. For `resync_controller`'s replace path
+/// (session restart), where a NEW controller for the same block is about
+/// to be registered right after this call: `AgentProcessRegistry::
+/// ensure_tracker` is idempotent by design ("the job survives controller
+/// re-creation" — its own doc comment), so leaving the tracker alone here
+/// means any declared-background descendant (e.g. `task dev`) the old
+/// controller's process spawned stays alive and gets reattached to the new
+/// controller's own `track_spawned` call, instead of dying with the old
+/// one. The caller is responsible for actually terminating the OLD
+/// controller's own process first (via `stop_for_replace`, not `stop`) —
+/// this function only ever touches the registry map. See
+/// docs/specs/SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md.
+fn remove_controller_entry_only(block_id: &str) {
+    CONTROLLER_REGISTRY.write().unwrap().remove(block_id);
 }
 
 /// Unregister (delete) a controller by block ID, stopping it first.
@@ -411,8 +446,13 @@ pub fn resync_controller(
         };
 
         if needs_replace {
-            let _ = ctrl.stop(true, STATUS_DONE);
-            delete_controller(block_id);
+            // stop_for_replace + remove_controller_entry_only, NOT stop +
+            // delete_controller: a session restart/resync must not tear
+            // down the block's shared process tracker — only the old
+            // controller's own CLI process should die. See
+            // docs/specs/SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md.
+            let _ = ctrl.stop_for_replace(STATUS_DONE);
+            remove_controller_entry_only(block_id);
         } else {
             // Existing controller is fine, just check if it needs starting
             let status = ctrl.get_runtime_status();
@@ -527,6 +567,152 @@ pub fn publish_controller_status(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Test double for the stop_for_replace/remove_controller_entry_only
+    /// tests below. Counts calls to `stop()` vs `stop_for_replace()`
+    /// separately so a test can assert exactly one of them fired.
+    struct CountingController {
+        block_id: String,
+        controller_type: String,
+        stop_calls: std::sync::atomic::AtomicU32,
+        stop_for_replace_calls: std::sync::atomic::AtomicU32,
+    }
+
+    impl CountingController {
+        fn new(block_id: &str, controller_type: &str) -> Self {
+            Self {
+                block_id: block_id.to_string(),
+                controller_type: controller_type.to_string(),
+                stop_calls: std::sync::atomic::AtomicU32::new(0),
+                stop_for_replace_calls: std::sync::atomic::AtomicU32::new(0),
+            }
+        }
+    }
+
+    impl Controller for CountingController {
+        fn start(&self, _: MetaMapType, _: Option<serde_json::Value>, _: bool) -> Result<(), String> {
+            Ok(())
+        }
+        fn stop(&self, _graceful: bool, _new_status: &str) -> Result<(), String> {
+            self.stop_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+        fn get_runtime_status(&self) -> BlockControllerRuntimeStatus {
+            BlockControllerRuntimeStatus { blockid: self.block_id.clone(), ..Default::default() }
+        }
+        fn send_input(&self, _: BlockInputUnion, _: Option<u64>) -> Result<(), String> {
+            Ok(())
+        }
+        fn controller_type(&self) -> &str {
+            &self.controller_type
+        }
+        fn block_id(&self) -> &str {
+            &self.block_id
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    /// A second test double that overrides `stop_for_replace` (mirroring
+    /// `ShellController`'s real override) so the "which method actually
+    /// fired" assertion below is meaningful — `CountingController` alone
+    /// would pass even if `resync_controller` still called plain `stop()`,
+    /// since the DEFAULT `stop_for_replace` delegates to `stop()` too.
+    struct OverridingCountingController(CountingController);
+
+    impl Controller for OverridingCountingController {
+        fn start(&self, m: MetaMapType, o: Option<serde_json::Value>, f: bool) -> Result<(), String> {
+            self.0.start(m, o, f)
+        }
+        fn stop(&self, g: bool, s: &str) -> Result<(), String> {
+            self.0.stop(g, s)
+        }
+        fn stop_for_replace(&self, new_status: &str) -> Result<(), String> {
+            self.0.stop_for_replace_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let _ = new_status;
+            Ok(())
+        }
+        fn get_runtime_status(&self) -> BlockControllerRuntimeStatus {
+            self.0.get_runtime_status()
+        }
+        fn send_input(&self, i: BlockInputUnion, s: Option<u64>) -> Result<(), String> {
+            self.0.send_input(i, s)
+        }
+        fn controller_type(&self) -> &str {
+            self.0.controller_type()
+        }
+        fn block_id(&self) -> &str {
+            self.0.block_id()
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+    }
+
+    #[test]
+    fn default_stop_for_replace_delegates_to_stop() {
+        let ctrl = CountingController::new("block-default-delegate", "stub");
+        ctrl.stop_for_replace(STATUS_DONE).unwrap();
+        assert_eq!(ctrl.stop_calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn remove_controller_entry_only_removes_the_registry_entry_without_calling_stop() {
+        let block_id = "block-remove-entry-only";
+        let ctrl = Arc::new(CountingController::new(block_id, "stub"));
+        CONTROLLER_REGISTRY.write().unwrap().insert(block_id.to_string(), ctrl.clone());
+        assert!(get_controller(block_id).is_some());
+
+        remove_controller_entry_only(block_id);
+
+        assert!(get_controller(block_id).is_none(), "controller must be gone from the registry");
+        assert_eq!(
+            ctrl.stop_calls.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "remove_controller_entry_only must not itself call stop() — that's the caller's job via stop_for_replace"
+        );
+    }
+
+    #[test]
+    fn resync_controller_replace_path_calls_stop_for_replace_not_stop() {
+        use crate::backend::obj::Block;
+
+        let block_id = "block-resync-replace-uses-stop-for-replace";
+        let old = Arc::new(OverridingCountingController(CountingController::new(block_id, "old-type")));
+        register_controller(block_id, old.clone());
+        assert!(get_controller(block_id).is_some());
+
+        // A real ShellController with cmd:runonstart=false so resync_controller's
+        // replacement construction doesn't open a real PTY — controller_type
+        // "shell" != old's "old-type" forces needs_replace=true.
+        let mut meta = MetaMapType::new();
+        meta.insert(META_KEY_CONTROLLER.to_string(), serde_json::Value::String("shell".to_string()));
+        meta.insert(META_KEY_CMD_RUN_ON_START.to_string(), serde_json::Value::Bool(false));
+        let block = Block { oid: block_id.to_string(), version: 1, meta, ..Default::default() };
+
+        let result = resync_controller(&block, "tab-1", None, false, None, None, None, None, None, Arc::from("test-boot"));
+        assert!(result.is_ok(), "resync_controller failed: {result:?}");
+
+        assert_eq!(
+            old.0.stop_for_replace_calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the OLD controller's stop_for_replace should have fired exactly once"
+        );
+        assert_eq!(
+            old.0.stop_calls.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "the OLD controller's plain stop() must NOT have fired — that would (on ShellController) SIGTERM the whole process group, taking a declared-background descendant down with it"
+        );
+
+        // A new controller now owns the block, replacing the old one.
+        let replaced = get_controller(block_id);
+        assert!(replaced.is_some());
+        assert_eq!(replaced.unwrap().controller_type(), "shell");
+
+        // Cleanup — real teardown, not a replace, so the ordinary path is fine.
+        delete_controller(block_id);
+    }
 
     #[test]
     fn test_status_constants() {

@@ -851,6 +851,60 @@ impl Controller for ShellController {
         Ok(())
     }
 
+    fn stop_for_replace(&self, new_status: &str) -> Result<(), String> {
+        // Same extraction as stop() — but the kill below targets ONLY this
+        // one pid, never the process group/job, so a declared-background
+        // descendant (e.g. `task dev`) survives. See
+        // docs/specs/SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md.
+        #[allow(unused_variables)] // used under #[cfg(unix)] only
+        let pid_to_kill = {
+            let mut inner = self.inner.lock().unwrap();
+            if inner.proc_status == new_status {
+                return Ok(());
+            }
+            let pid = inner.child_pid;
+            inner.input_tx = None;
+            Self::set_status(&mut inner, new_status);
+            pid
+        };
+
+        let Some(pid) = pid_to_kill else { return Ok(()) };
+
+        // Prefer the tracked kill (Windows: OpenProcess+TerminateProcess,
+        // with a membership check against the block's job first — see
+        // `process_tracker::registry::kill_pid`). This is expected to
+        // succeed in every real production case: `track_spawned` already
+        // ran for this exact pid right after this controller's own spawn.
+        if let Some(registry) = crate::backend::process_tracker::registry::global() {
+            if registry.kill_pid(&self.block_id, pid) {
+                return Ok(());
+            }
+        }
+
+        // Fallback — reached when the registry global isn't set (tests;
+        // same "silently skip tracker registration" convention
+        // `track_spawned`'s own doc comment describes) OR, on Unix,
+        // ALWAYS: `process_tracker::new_tracker` currently returns the
+        // no-op `StubTracker` on every non-Windows platform (no real
+        // cgroup/pgrp tracker is implemented yet, despite the aspirational
+        // table in `process_tracker/mod.rs`'s module doc comment), so
+        // `kill_pid` unconditionally returns `false` there — this IS the
+        // real Unix implementation today, not a rare edge case. A direct,
+        // single-PID (not group) signal, so this can't reach a
+        // declared-background descendant the way stop()'s `-(pid)` does.
+        #[cfg(unix)]
+        {
+            // SAFETY: kill() is a well-defined POSIX syscall.
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+            tokio::spawn(async move {
+                tokio::time::sleep(tokio::time::Duration::from_secs(KILL_GRACE_SECS)).await;
+                unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+            });
+        }
+
+        Ok(())
+    }
+
     fn get_runtime_status(&self) -> BlockControllerRuntimeStatus {
         self.get_status_snapshot()
     }
