@@ -103,46 +103,59 @@ instead (grouped by `dispatch_id`, min per group).
   `pill-agent-running` pill variant, and `data-tool="workflow"` color rules
   (reusing the existing `--term-bright-magenta` agent color).
 
-## Review history — five rounds, two failed heuristics, one final policy
+## Review history — six rounds, three failed closures, reverted to the honest baseline
 
-ReAgent and Codex both independently flagged, across five review rounds,
+ReAgent and Codex both independently flagged, across six review rounds,
 that same-kind parallel calls (e.g. two Agent-tool spawns issued in one
-turn) could be silently mismatched by the ordinal matcher. Two attempted
-fixes both turned out to be unsound on closer scrutiny:
+turn) could be silently mismatched by the ordinal matcher. THREE attempted
+closures were each shot down — the third for a more serious reason than
+the first two (it actively broke the common case, not just failed to close
+the narrow one):
 
-1. A shared-`slug` "same concurrent batch" check — wrong, because that
+1. A shared-`slug` "same concurrent batch" check — wrong precedent. That
    precedent describes multiple MEMBERS of one Task/Workflow invocation
    sharing a batch codename, not two separate solo calls (each gets its
    own dispatch_id and plausibly its own distinct slug).
-2. A `ToolNode.timestamp`-gap threshold — also wrong, because that
-   timestamp is the frontend's own receive-time, and a single turn can
-   take many seconds to stream when the model generates a long
-   description between two tool_use blocks, so a genuine same-turn pair
-   can still land seconds apart at any threshold.
+2. A `ToolNode.timestamp`-gap threshold — unsound. That timestamp is the
+   frontend's own receive-time, and a single turn can take many seconds to
+   stream when the model generates a long description between two
+   tool_use blocks, so a genuine same-turn pair can still land seconds
+   apart at any threshold.
+3. A same-category COUNT cap (bail whenever a pane has 2+ dispatch-kind
+   tool nodes of the same category anywhere in the loaded transcript) —
+   an active regression, not just an unclosed gap. It counted EVERY
+   historical tool node in the whole transcript, not just currently-live
+   ones, so any pane that had simply made more than one sequential
+   Agent-tool call over a session — the overwhelmingly common case —
+   permanently returned an empty map. The doc comment at the time falsely
+   claimed a liveness filter existed; it didn't.
 
 The actually-reliable signal (which assistant turn/message each tool_use
 block came from) exists in the raw Anthropic `message.id`, one layer above
 the parser, but isn't threaded through to `ToolNode` today — doing so means
 touching `stream-parser.ts`, a component this codebase's own comments flag
-as fragile with a cited regression history. Given two heuristics had
-already failed review, expanding into that component under review pressure
-was judged a worse trade than accepting a coverage loss honestly.
+as fragile with a cited regression history.
 
-**Final policy:** the matcher now unconditionally bails whenever a pane has
-more than one dispatch-kind tool node of the same category (`solo` —
-covers `Agent`/`Task` — or `workflow`) needing relative ordering. This is
-provably correct (no ordering claim is ever made among same-category
-calls) at the cost of only matching when a pane has at most one live
-solo-kind call and at most one live Workflow-kind call at correlation
-time. Threading the real `message.id` through the streaming parser would
-close this gap without the coverage cost — a legitimate follow-up, not
-required to ship this safely.
+**Final decision: stop attempting to close this specific gap.** Reverted
+`dispatch-correlation.ts` to what it had before this whole closure effort
+began — a tie guard on the exact `spawned_at` millisecond, plus the
+kind-compatibility check. This is provably safe for the common case
+(sequential calls across a session almost never share an exact spawn
+millisecond) and honestly accepts, rather than half-closes with a broken
+heuristic, that two same-kind calls with distinct, non-tied spawn times
+from a genuine parallel spawn can still be mismatched. A regression test
+(`dispatch-correlation.test.ts`, "matches many SEQUENTIAL same-category
+calls across a whole session") locks in the specific case mechanism 3
+broke. Threading the real `message.id` through the streaming parser would
+close the residual gap properly — a legitimate follow-up, not attempted
+again here after three failed tries.
 
 ## Known, accepted limitations
 
-- **Same-category cap.** See "Review history" above — a pane with two or
-  more still-live dispatch-kind tool nodes of the same category never
-  gets cards for either, by design.
+- **Same-kind parallel spawns.** See "Review history" above — two same-kind
+  calls (e.g. two Agent-tool calls) issued in the SAME turn, with distinct
+  non-tied spawn times, can still be mismatched. Sequential calls across a
+  session (the common case) are unaffected.
 - **Ordinal matching, not exact.** Falls back to `CompactResult` whenever:
   a dispatch's member data has aged out of `ListActive` (no `spawned_at`
   to order by); or older transcript history not yet paginated into view.
