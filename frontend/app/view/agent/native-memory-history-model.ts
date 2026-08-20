@@ -148,6 +148,7 @@ export class NativeMemoryHistoryModel {
         this.setError(null);
         try {
             const res = await RpcApi.NativeMemoryDiffCommand(TabRpcClient, {
+                agent_id: this.agentId,
                 from_version_id: from,
                 to_version_id: to,
             });

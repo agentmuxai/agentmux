@@ -74,7 +74,12 @@ export const MemoryApi = {
 
     NativeMemoryDiffCommand(
         client: RpcClient,
-        data: { from_version_id: string; to_version_id: string },
+        // agent_id required (reagent P1 on agent1/memory-version-core):
+        // the backend verifies BOTH versions belong to this agent before
+        // returning their content — every caller shares one instance-wide
+        // X-AuthKey, so without it any caller could read any other
+        // agent's memory content by version id.
+        data: { agent_id: string; from_version_id: string; to_version_id: string },
         opts?: RpcOpts,
     ): Promise<NativeMemoryDiffResult> {
         return client.rpcCall("agent:memory:diff", data, opts);
