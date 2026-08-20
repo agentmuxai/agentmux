@@ -201,6 +201,10 @@ export class AgentNativeMemoryModel {
                 agent_id: this.agentId,
                 filename,
                 content,
+                // reagent P1 on PR #2678: without this, the backend
+                // defaults to "agent_inferred", permanently mislabeling a
+                // human-authored Stash edit as "Agent" in the history UI.
+                provenance: { source: "human" },
             });
             this.setContent(content);
             this.setEditing(false);
@@ -233,6 +237,7 @@ export class AgentNativeMemoryModel {
                 agent_id: this.agentId,
                 filename,
                 content,
+                provenance: { source: "human" },
             });
             await this.loadFiles();
             await this.selectFile(filename);

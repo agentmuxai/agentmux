@@ -113,6 +113,13 @@ export class NativeMemoryHistoryModel {
     revertingAtom: Accessor<boolean> = this._reverting[0];
     private setReverting = this._reverting[1];
 
+    /** reagent P2 on PR #2678: guards computeDiff against a stale response —
+     *  selecting one version pair, then a different pair before the first
+     *  NativeMemoryDiffCommand resolves, could otherwise let the stale
+     *  response overwrite diffTextAtom after the newer selection's request
+     *  already completed. */
+    private latestDiffRequestId = 0;
+
     /** Called after a successful revert so the caller (e.g.
      *  AgentNativeMemoryModel) can refresh the live file content it shows
      *  elsewhere — this model only owns history/diff/revert state, not the
@@ -146,6 +153,12 @@ export class NativeMemoryHistoryModel {
      *  queue, and matches "pick two things to compare" as the only real
      *  use case. */
     toggleDiffSelection(versionId: string): void {
+        // Any change to the selection invalidates whatever diff request (if
+        // any) was previously in flight — otherwise a stale response could
+        // still land afterward and repopulate diffTextAtom for a selection
+        // the user has since abandoned, even on a path (like selecting a
+        // third id, below) that doesn't itself start a new diff request.
+        this.latestDiffRequestId++;
         const current = this.diffSelectionAtom();
         if (current.includes(versionId)) {
             this.setDiffSelection(current.filter((id) => id !== versionId));
@@ -163,6 +176,9 @@ export class NativeMemoryHistoryModel {
         // the earlier version", regardless of click order.
         const [from, to] = orderVersionsOldestFirst(idA, idB, this.versionsAtom());
 
+        // toggleDiffSelection already bumped latestDiffRequestId for this
+        // call — capture it as-is rather than bumping again here.
+        const requestId = this.latestDiffRequestId;
         this.setDiffLoading(true);
         this.setError(null);
         try {
@@ -171,15 +187,18 @@ export class NativeMemoryHistoryModel {
                 from_version_id: from,
                 to_version_id: to,
             });
+            if (requestId !== this.latestDiffRequestId) return;
             this.setDiffText(res.diff);
         } catch (e) {
+            if (requestId !== this.latestDiffRequestId) return;
             this.setError(`Failed to load diff: ${(e as Error).message ?? e}`);
         } finally {
-            this.setDiffLoading(false);
+            if (requestId === this.latestDiffRequestId) this.setDiffLoading(false);
         }
     }
 
     clearDiffSelection(): void {
+        this.latestDiffRequestId++;
         this.setDiffSelection([]);
         this.setDiffText(null);
     }
