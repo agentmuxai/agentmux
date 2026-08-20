@@ -20,9 +20,18 @@
  */
 
 import type { JSX } from "solid-js";
+import type { AgentDispatch } from "../../../swarm/swarm-model";
 import type { ToolNode } from "../../types";
 
-export type ToolRenderer = (node: ToolNode) => JSX.Element;
+/** Extra, renderer-optional context beyond the node itself. Currently just
+ *  the ordinal-matched live dispatch (see `activity/dispatch-correlation.ts`)
+ *  for Agent/Task/Workflow tool calls — undefined when no confident match
+ *  was found, or for any other tool kind. */
+export interface ToolRenderContext {
+    dispatchMatch?: AgentDispatch;
+}
+
+export type ToolRenderer = (node: ToolNode, ctx?: ToolRenderContext) => JSX.Element;
 export type ToolMatcher = (node: ToolNode) => boolean;
 
 export interface ToolRendererEntry {

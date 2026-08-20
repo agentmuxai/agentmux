@@ -23,13 +23,17 @@
  * `log`/`handleShellTermReady`) — see `agentmux-ai/AGENT_PANE_ACTIVITY_LOG_SPEC.md`.
  */
 
-import { Show, type Accessor, type JSX } from "solid-js";
+import { createMemo, Show, type Accessor, type JSX } from "solid-js";
 import type { SignalPair } from "../state";
 import type { DocumentNode, DocumentState } from "../types";
 import type { ScrollCommand } from "../hooks/useScrollToNode";
 import type { LayoutView } from "@/app/store/agent-pane-layout-store";
 import { AgentDocumentVirtualList } from "../virtualization/AgentDocumentVirtualList";
 import { createAgentViewState } from "../virtualization/state";
+import { correlateDispatchesForBlock } from "../activity/dispatch-correlation";
+import { allSubagentsAtom } from "../activity/subagent-source";
+import { allDispatchesAtom } from "../activity/dispatch-source";
+import type { AgentDispatch } from "../../swarm/swarm-model";
 import { InAppLoginPanel } from "./InAppLoginPanel";
 import { PROVIDERS } from "../providers/catalog";
 import type { LaunchPhase } from "../flows/launch-phase";
@@ -170,6 +174,16 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
         </Show>
     );
 
+    // Ordinal-matched tool_use_id -> live dispatch for this pane's
+    // Agent/Task/Workflow tool calls (see activity/dispatch-correlation.ts).
+    // Empty (not attempted) without a blockId — a pane with no block id has
+    // no dispatches of its own to match against anyway.
+    const dispatchMatches = createMemo<Map<string, AgentDispatch>>(() =>
+        props.blockId
+            ? correlateDispatchesForBlock(props.blockId, props.documentAtom[0](), allSubagentsAtom(), allDispatchesAtom())
+            : new Map()
+    );
+
     return (
         <AgentDocumentVirtualList
             viewState={viewState}
@@ -190,6 +204,7 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
             workingRowHeight={props.workingRowHeight}
             onOpenHistory={props.onOpenHistory}
             headerSlot={headerSlot()}
+            dispatchMatches={dispatchMatches}
         />
     );
 };

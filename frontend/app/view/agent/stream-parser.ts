@@ -128,6 +128,8 @@ export function extractToolDetail(tool: string, params: Record<string, any>): st
             return params.pattern || "";
         case "Agent":
             return params.description || params.prompt || "";
+        case "Workflow":
+            return params.title || params.description || "";
         case "web_search":
         case "WebSearch":
             return params.query || "";
@@ -739,7 +741,7 @@ export class ClaudeCodeStreamParser {
      */
     private normalizeToolName(tool: string): ToolNode['tool'] {
         const normalized = tool.charAt(0).toUpperCase() + tool.slice(1).toLowerCase();
-        const knownTools = ["Read", "Edit", "Bash", "Write", "Grep", "Glob", "Task", "Agent"];
+        const knownTools = ["Read", "Edit", "Bash", "Write", "Grep", "Glob", "Task", "Agent", "Workflow"];
 
         return knownTools.includes(normalized) ? (normalized as ToolNode['tool']) : "Other";
     }

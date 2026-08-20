@@ -18,6 +18,7 @@
 import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 // `Show` retained for fallback ToolOverlayResult sub-tree.
 import type { ToolNode } from "../types";
+import type { AgentDispatch } from "../../swarm/swarm-model";
 import { atoms } from "@/app/store/global";
 import { Markdown } from "@/app/element/markdown";
 import { BashOutputViewer } from "./BashOutputViewer";
@@ -32,15 +33,21 @@ import {
     resolveToolRenderer,
     byKind,
     anyTool,
+    type ToolRenderContext,
 } from "./tool-renderers/registry";
 // Side-effect: registers the rich renderers (WebSearch cards, WebFetch view, record tables, …).
 import "./tool-renderers/SearchResults";
 import "./tool-renderers/WebFetchResult";
 import "./tool-renderers/RecordTable";
+import "./tool-renderers/DispatchCard";
 
 interface ToolOverlayLogProps {
     node: ToolNode;
     fontScale?: () => number;
+    /** Ordinal-matched live dispatch for an Agent/Task/Workflow tool call —
+     *  see `activity/dispatch-correlation.ts`. Undefined when no confident
+     *  match was found, or for any other tool kind. */
+    dispatchMatch?: AgentDispatch;
 }
 
 const KIND_CLASS: Record<string, string> = {
@@ -312,13 +319,13 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
                     <ChunkList chunks={chunks()} />
                 </Match>
                 <Match when={!isStreaming() && hasResult()}>
-                    <ToolOverlayResult node={props.node} />
+                    <ToolOverlayResult node={props.node} dispatchMatch={props.dispatchMatch} />
                 </Match>
                 <Match when={!isStreaming() && !hasResult() && hasChunks()}>
                     <ChunkList chunks={chunks()} />
                 </Match>
                 <Match when={!hasChunks() && !hasResult()}>
-                    <ToolOverlayResult node={props.node} />
+                    <ToolOverlayResult node={props.node} dispatchMatch={props.dispatchMatch} />
                 </Match>
             </Switch>
         </div>
@@ -409,7 +416,7 @@ ToolOverlayLog.displayName = "ToolOverlayLog";
  * rendered. Used when there are no streaming chunks yet (or the tool
  * doesn't stream).
  */
-function ToolOverlayResult(props: { node: ToolNode }): JSX.Element {
+function ToolOverlayResult(props: { node: ToolNode; dispatchMatch?: AgentDispatch }): JSX.Element {
     // NEVER destructure `const node = props.node`. The streaming
     // buffer keeps this component mounted across reducer updates;
     // the reducer's ToolChunkAppend replaces the ToolNode reference
@@ -428,7 +435,7 @@ function ToolOverlayResult(props: { node: ToolNode }): JSX.Element {
                 </div>
             }
         >
-            {renderToolResultBody(props.node)}
+            {renderToolResultBody(props.node, { dispatchMatch: props.dispatchMatch })}
         </Show>
     );
 }
@@ -542,7 +549,14 @@ function renderSearch(node: ToolNode): JSX.Element {
     );
 }
 
-function renderAgent(node: ToolNode): JSX.Element {
+// Exported (not just module-local) so `DispatchCard.tsx`'s no-match fallback
+// can delegate to the SAME per-kind rendering these built-ins already do
+// (description-while-running, no-result gating) instead of a bare
+// `CompactResult` call that loses both — reagent/codex P1 on PR #2676: a
+// still-running unmatched Agent/Task call was showing raw "No output" and a
+// completed one was losing its description entirely, guaranteed to trigger
+// on the Agent History tab (which always falls back to CompactResult there).
+export function renderAgent(node: ToolNode): JSX.Element {
     return (
         <div class="agent-tool-agent">
             <Show when={(node.params as any).description}>
@@ -555,10 +569,25 @@ function renderAgent(node: ToolNode): JSX.Element {
     );
 }
 
-function renderTask(node: ToolNode): JSX.Element {
+export function renderTask(node: ToolNode): JSX.Element {
     return (
         <div class="agent-tool-task">
             <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
+        </div>
+    );
+}
+
+export function renderWorkflow(node: ToolNode): JSX.Element {
+    return (
+        <div class="agent-tool-workflow">
+            <Show when={(node.params as any).description ?? (node.params as any).title}>
+                <div class="agent-tool-agent-desc">
+                    {(node.params as any).description ?? (node.params as any).title}
+                </div>
+            </Show>
+            <Show when={node.result}>
+                <CompactResult tool={node.tool} params={node.params as any} result={node.result} />
+            </Show>
         </div>
     );
 }
@@ -568,8 +597,8 @@ function renderCompactDefault(node: ToolNode): JSX.Element {
 }
 
 // Register the built-ins (priority 0; the catch-all sits below everything). Rich,
-// name/shape-matched renderers (WebSearch cards, mcp__* tools, …) register from
-// their own modules at a higher priority.
+// name/shape-matched renderers (WebSearch cards, mcp__* tools, DispatchCard, …)
+// register from their own modules at a higher priority.
 registerToolRenderer({ priority: 0, label: "builtin:Edit", match: byKind("Edit"), render: renderEdit });
 registerToolRenderer({ priority: 0, label: "builtin:Bash", match: byKind("Bash"), render: renderBash });
 registerToolRenderer({ priority: 0, label: "builtin:Read", match: byKind("Read"), render: renderRead });
@@ -577,10 +606,11 @@ registerToolRenderer({ priority: 0, label: "builtin:Write", match: byKind("Write
 registerToolRenderer({ priority: 0, label: "builtin:Search", match: byKind("Grep", "Glob"), render: renderSearch });
 registerToolRenderer({ priority: 0, label: "builtin:Agent", match: byKind("Agent"), render: renderAgent });
 registerToolRenderer({ priority: 0, label: "builtin:Task", match: byKind("Task"), render: renderTask });
+registerToolRenderer({ priority: 0, label: "builtin:Workflow", match: byKind("Workflow"), render: renderWorkflow });
 registerToolRenderer({ priority: -Infinity, label: "builtin:default", match: anyTool, render: renderCompactDefault });
 
-function renderToolResultBody(node: ToolNode): JSX.Element {
+function renderToolResultBody(node: ToolNode, ctx?: ToolRenderContext): JSX.Element {
     // Hard fallback to the default renderer if (somehow) nothing is registered.
     const render = resolveToolRenderer(node) ?? renderCompactDefault;
-    return render(node);
+    return render(node, ctx);
 }
