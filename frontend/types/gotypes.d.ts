@@ -226,6 +226,18 @@ declare global {
         timestamp?: number;
     };
 
+    // wshrpc.CommandBackgroundTaskPidData — fire-and-forget push of a
+    // declared-background task's real OS pid, relayed from
+    // `agentmux-bashwrap`'s own WPS `"pid"` chunk (op: "pid" on the
+    // `tool_chunk` event this block already subscribes to). `node_id` is
+    // the same join key as `CommandBackgroundTaskCompletionData` above.
+    // See docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md.
+    type CommandBackgroundTaskPidData = {
+        blockid: string;
+        node_id: string;
+        pid: number;
+    };
+
     // CommandAgentAnswerData — AskUserQuestion answer, delivered to the running
     // agent CLI via the Agent SDK control protocol (a control_response carrying
     // updatedInput.answers). Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.

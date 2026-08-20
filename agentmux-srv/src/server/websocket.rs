@@ -31,6 +31,7 @@ use crate::backend::rpc_types::{
     CommandAgentAnswerData,
     COMMAND_DOCK_NODE_STATUS, CommandDockNodeStatusData,
     COMMAND_BACKGROUND_TASK_COMPLETION, CommandBackgroundTaskCompletionData,
+    COMMAND_BACKGROUND_TASK_PID, CommandBackgroundTaskPidData,
 };
 use crate::backend::base::normalize_working_dir;
 use crate::backend::obj::{Block, TermSize, WaveObjUpdate, wave_obj_to_value};
@@ -1137,6 +1138,35 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                         node_id = %cmd.node_id,
                         error = %e,
                         "failed to mark background task terminal in the durable registry",
+                    );
+                }
+                Ok(None)
+            })
+        }),
+    );
+
+    // backgroundtaskpid → fire-and-forget push of a declared-background
+    // task's real OS pid, relayed from `agentmux-bashwrap`'s own WPS "pid"
+    // chunk. Closes the gap where `db_background_tasks.pid` existed but
+    // nothing in production ever wrote it (Phase A of
+    // docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md). Best-effort,
+    // same as the two handlers above: a write failure here doesn't block
+    // anything else and is only ever a diagnostic/teardown-survival input,
+    // never something the model-visible tool_result depends on.
+    let wstore_btp = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_BACKGROUND_TASK_PID,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_btp.clone();
+            Box::pin(async move {
+                let cmd: CommandBackgroundTaskPidData = serde_json::from_value(data)
+                    .map_err(|e| format!("backgroundtaskpid: {e}"))?;
+                if let Err(e) = wstore.background_task_set_pid(&cmd.node_id, cmd.pid as i64) {
+                    tracing::warn!(
+                        target: "background_tasks",
+                        node_id = %cmd.node_id,
+                        error = %e,
+                        "failed to record background task pid in the durable registry",
                     );
                 }
                 Ok(None)

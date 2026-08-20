@@ -75,6 +75,14 @@ pub const COMMAND_DOCK_NODE_STATUS: &str = "docknodestatus";
 /// See docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md.
 pub const COMMAND_BACKGROUND_TASK_COMPLETION: &str = "backgroundtaskcompletion";
 
+/// Fire-and-forget push of a declared-background task's real OS pid, relayed
+/// from `agentmux-bashwrap`'s own WPS `"pid"` chunk (published only when
+/// `--declared-background` is set — see `bash_wrap.rs`). Mirrors into
+/// `db_background_tasks.pid` via `background_task_set_pid`, closing the gap
+/// where that column existed but nothing ever wrote it in production. See
+/// docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md.
+pub const COMMAND_BACKGROUND_TASK_PID: &str = "backgroundtaskpid";
+
 // Subprocess agent commands
 pub const COMMAND_SUBPROCESS_SPAWN: &str = "subprocessspawn";
 pub const COMMAND_AGENT_INPUT: &str = "agentinput";
