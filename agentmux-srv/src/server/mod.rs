@@ -476,6 +476,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/agent/memory/list", get(handle_agent_memory_list))
         .route("/api/v1/agent/memory/read", get(handle_agent_memory_read))
         .route("/api/v1/agent/memory/write", post(handle_agent_memory_write))
+        .route("/api/v1/agent/memory/history", get(handle_agent_memory_history))
+        .route("/api/v1/agent/memory/diff", get(handle_agent_memory_diff))
+        .route("/api/v1/agent/memory/revert", post(handle_agent_memory_revert))
         .route("/api/v1/agent/preset/list", get(handle_agent_preset_list))
         .route("/api/v1/agent/preset/get", get(handle_agent_preset_get))
         .route("/api/v1/agent/identity/accounts", get(handle_agent_identity_accounts))
@@ -991,22 +994,92 @@ async fn handle_agent_memory_read(
 }
 
 #[derive(serde::Deserialize)]
+struct AgentMemoryWriteProvenanceReq {
+    source: String,
+    #[serde(default)]
+    detail: serde_json::Value,
+}
+
+#[derive(serde::Deserialize)]
 struct AgentMemoryWriteRequest {
     agent_id: String,
     filename: String,
     content: String,
+    #[serde(default)]
+    provenance: Option<AgentMemoryWriteProvenanceReq>,
 }
 
 /// `POST /api/v1/agent/memory/write` — create/overwrite one of the agent's own
-/// memory files (atomic tmp→rename). Backs the `MemoryWrite` MCP tool.
+/// memory files (atomic tmp→rename). Backs the `MemoryWrite` MCP tool — the
+/// primary write path an agent actually uses, so `provenance` (optional,
+/// see docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md
+/// §4.1) threads through to the version history here, not just on the
+/// WebSocket RPC's `agent:memory:write_file`.
 async fn handle_agent_memory_write(
     State(state): State<AppState>,
     Json(req): Json<AgentMemoryWriteRequest>,
 ) -> impl IntoResponse {
-    match app_api::memory_write_impl(&state, &req.agent_id, &req.filename, &req.content) {
+    let mut detail_str = String::new();
+    let provenance = if let Some(p) = req.provenance.as_ref() {
+        detail_str = p.detail.to_string();
+        Some(app_api::MemoryWriteProvenance { source: &p.source, detail: &detail_str })
+    } else {
+        None
+    };
+    match app_api::memory_write_impl(&state, &req.agent_id, &req.filename, &req.content, provenance) {
         Ok(()) => (StatusCode::OK, Json(json!({ "ok": true }))).into_response(),
         Err(e) => (app_api_error_status(&e), Json(json!({ "error": e }))).into_response(),
     }
+}
+
+#[derive(serde::Deserialize)]
+struct AgentMemoryHistoryQuery {
+    agent_id: String,
+    filename: String,
+}
+
+/// `GET /api/v1/agent/memory/history?agent_id=<slug>&filename=<f>` — list
+/// every recorded version of one memory file, newest first. Backs the
+/// `MemoryHistory` MCP tool.
+async fn handle_agent_memory_history(
+    State(state): State<AppState>,
+    Query(q): Query<AgentMemoryHistoryQuery>,
+) -> impl IntoResponse {
+    app_api_response(app_api::memory_history_impl(&state, &q.agent_id, &q.filename))
+}
+
+#[derive(serde::Deserialize)]
+struct AgentMemoryDiffQuery {
+    from_version_id: String,
+    to_version_id: String,
+}
+
+/// `GET /api/v1/agent/memory/diff?from_version_id=&to_version_id=` — a
+/// line-based diff between two recorded versions. Backs the `MemoryDiff`
+/// MCP tool.
+async fn handle_agent_memory_diff(
+    State(state): State<AppState>,
+    Query(q): Query<AgentMemoryDiffQuery>,
+) -> impl IntoResponse {
+    app_api_response(app_api::memory_diff_impl(&state, &q.from_version_id, &q.to_version_id))
+}
+
+#[derive(serde::Deserialize)]
+struct AgentMemoryRevertRequest {
+    agent_id: String,
+    filename: String,
+    target_version_id: String,
+}
+
+/// `POST /api/v1/agent/memory/revert` — restore a memory file's live
+/// content to a prior version, recorded as a NEW version (`source:
+/// "revert"`) — never rewrites or deletes history. Backs the
+/// `MemoryRevert` MCP tool.
+async fn handle_agent_memory_revert(
+    State(state): State<AppState>,
+    Json(req): Json<AgentMemoryRevertRequest>,
+) -> impl IntoResponse {
+    app_api_response(app_api::memory_revert_impl(&state, &req.agent_id, &req.filename, &req.target_version_id))
 }
 
 /// `GET /api/v1/agent/preset/list` — list all presets (shared catalog, summary

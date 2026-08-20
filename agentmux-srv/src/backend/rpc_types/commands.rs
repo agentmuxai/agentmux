@@ -483,6 +483,11 @@ pub const COMMAND_NATIVE_MEMORY_LIST: &str = "agent:memory:list";
 pub const COMMAND_NATIVE_MEMORY_READ_FILE: &str = "agent:memory:read_file";
 pub const COMMAND_NATIVE_MEMORY_WRITE_FILE: &str = "agent:memory:write_file";
 
+// ---- Native memory version history (SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md) ----
+pub const COMMAND_NATIVE_MEMORY_HISTORY: &str = "agent:memory:history";
+pub const COMMAND_NATIVE_MEMORY_DIFF: &str = "agent:memory:diff";
+pub const COMMAND_NATIVE_MEMORY_REVERT: &str = "agent:memory:revert";
+
 // ---- Client type constants ----
 
 pub const CLIENT_TYPE_CONN_SERVER: &str = "connserver";
