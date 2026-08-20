@@ -76,8 +76,11 @@ Keychain service/account naming scheme
 (`security -s agentmux -a "acct:muxbus:global:access:0"` etc., from
 reading the source). **A real end user hitting this bug has no equivalent
 path today.** The app itself has no "reset MuxBus connection" / "clear
-stored credentials and start over" action that doesn't first require
-successfully reading what's already there.
+stored credentials and start over" action at all — and, as §3/§4 qualify,
+simply adding one isn't guaranteed to be the equivalent path either: it
+would need to avoid inheriting the same unbounded-block behavior that
+caused the original prompt-storm, which the manual `security`-CLI
+remediation here didn't actually rule out for an in-process delete.
 
 ## 3. What should actually change in how we build features like this
 
@@ -86,9 +89,19 @@ successfully reading what's already there.
   fine, just suboptimal" case (data readable, just wastefully shaped) but
   not the "actively failing" case that motivated writing it. When the fix
   *is* the recovery path, design a variant of it that doesn't require the
-  precondition that's failing — a delete-and-start-over option is often
-  strictly easier to make robust than a migrate-in-place one, because
-  deleting doesn't require successfully reading first.
+  precondition that's failing — a delete-and-start-over option is a
+  genuinely different case from migrate-in-place, because it doesn't need
+  to read the content first. **That's necessary but not sufficient,
+  though** (Codex, this PR's own review — a fitting note to land on): not
+  reading first doesn't mean the delete itself is safe from the same
+  failure mode. `secret_store::delete` is deliberately left unbounded
+  (retro-secret-store-keychain-read-timeout-2026-08-20.md §5) — a
+  from-the-app delete-based reset could hang exactly like the read did,
+  for exactly the users who'd need it. The manual fix on the real machine
+  used the `security` CLI directly, not the app's own delete path, and
+  whether an *in-process* delete is actually reliable in the stuck-consent
+  case it's meant to rescue from was never verified. §4's recommendation
+  is corrected to reflect this.
 - **This gap wasn't caught by two rounds of automated review.** Both
   reagent and Codex reviewed #2665 and #2679 closely enough to catch
   subtle ordering and security bugs in the code — but neither exercises
@@ -112,14 +125,28 @@ successfully reading what's already there.
 
 ## 4. Follow-up
 
-- **Recommended, not yet built**: an explicit, user-facing "reset MuxBus
-  connection" action (Settings or wherever account state is surfaced)
-  that deletes every known Keychain entry for the account unconditionally
-  — the same operation performed manually here — without first trying to
+- **Recommended, not yet built, and not as simple as it first looked**:
+  an explicit, user-facing "reset MuxBus connection" action (Settings or
+  wherever account state is surfaced) that clears every known Keychain
+  entry for the account unconditionally, without first trying to
   read/migrate anything. This is the missing piece that would let a real
   user self-serve out of this exact stuck state instead of needing a
-  developer with shell access. Not implemented in this pass; flagging for
-  a deliberate go/no-go rather than building it unprompted.
+  developer with shell access — *if* built correctly. Caught in this PR's
+  own review (Codex): building it as a straightforward call into
+  `secret_store::delete` is not safe to assume, because that function is
+  *itself* unbounded (§3, retro-secret-store-keychain-read-timeout-
+  2026-08-20.md §5) — an in-app reset could hang exactly like the read
+  did, for exactly the users it's meant to rescue. The manual fix that
+  worked here used the `security` CLI directly, outside the app's own
+  process; whether an in-process delete behaves the same way in a stuck-
+  consent state was never actually tested. Before building this, either
+  (a) verify empirically that deletes against an *existing, prompt-stuck*
+  entry don't block the same way reads do, or (b) design the action with
+  its own bounded/fallback path (e.g. a hard timeout with a "delete
+  failed, here's the manual command" fallback message) rather than
+  assuming delete is safe by default. Not implemented in this pass;
+  flagging for a deliberate go/no-go with this caveat attached, rather
+  than building it unprompted on the untested assumption.
 - Same open items already carried from the prior retros: writes
   (`put`/`delete`) are still unbounded (retro-secret-store-keychain-read-
   timeout-2026-08-20.md §5), and the broader `secret_store` audit
