@@ -156,7 +156,7 @@ export const ProviderLogo = (props: ProviderLogoProps): JSX.Element => {
     const r = inner();
 
     if (r.png) {
-        return <img src={r.png} alt={props.provider ?? ""} class={cls} width={size()} height={size()} />;
+        return <img src={r.png} alt="" aria-hidden="true" class={cls} width={size()} height={size()} />;
     }
 
     if (r.html) {
