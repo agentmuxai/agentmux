@@ -48,12 +48,30 @@ pub const SERVICE: &str = "agentmux";
 /// (e.g. `muxbus_save_lock`) indefinitely. See this module's doc comment.
 const TIMEOUT: Duration = Duration::from_secs(15);
 
-/// Run `f` on a detached thread and wait up to `timeout` for it. `Timeout`
-/// is a distinct outcome from any error `f` itself can return — callers
-/// that want it folded into their own error type do that at the call site
+/// Why `run_with_timeout` gave up waiting — reagent P2: collapsing these
+/// into one outcome made a closure PANIC (sender dropped without sending,
+/// `mpsc::RecvTimeoutError::Disconnected`) misreport as "timed out after
+/// 15s" — actively misleading, since the operation actually failed
+/// immediately, not after waiting the full deadline.
+#[derive(Debug, PartialEq)]
+enum RunOutcome {
+    /// The deadline elapsed with no answer yet — the likely "stuck consent
+    /// prompt" case this module exists to bound.
+    TimedOut,
+    /// The worker thread's sender was dropped without sending — it panicked
+    /// before calling `f` to completion.
+    WorkerPanicked,
+}
+
+/// Run `f` on a detached thread and wait up to `timeout` for it. The
+/// `RunOutcome` distinction is separate from any error `f` itself can
+/// return — callers fold it into their own error type at the call site
 /// (see `put`/`get`/`get_optional`/`delete` below), not here, so this stays
 /// reusable for a future caller with a different error shape.
-fn run_with_timeout<T: Send + 'static>(timeout: Duration, f: impl FnOnce() -> T + Send + 'static) -> Result<T, ()> {
+fn run_with_timeout<T: Send + 'static>(
+    timeout: Duration,
+    f: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, RunOutcome> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         // The receiver may already be gone (we timed out and moved on) —
@@ -61,7 +79,10 @@ fn run_with_timeout<T: Send + 'static>(timeout: Duration, f: impl FnOnce() -> T 
         // bug; the value is dropped.
         let _ = tx.send(f());
     });
-    rx.recv_timeout(timeout).map_err(|_| ())
+    rx.recv_timeout(timeout).map_err(|e| match e {
+        mpsc::RecvTimeoutError::Timeout => RunOutcome::TimedOut,
+        mpsc::RecvTimeoutError::Disconnected => RunOutcome::WorkerPanicked,
+    })
 }
 
 fn entry(account_id: &str) -> Result<Entry, String> {
@@ -77,10 +98,18 @@ pub fn account_key(account_id: &str) -> String {
 /// Store (or overwrite) the secret for `account_id` in the OS keychain.
 pub fn put(account_id: &str, secret: &str) -> Result<(), String> {
     let account_id = account_id.to_string();
-    let secret = secret.to_string();
+    // reagent P1: wrap the plaintext BEFORE moving it into the detached
+    // thread's closure, not after — moving a plain `String` there left an
+    // extra, unscrubbed heap copy of the secret alive for up to the full
+    // timeout on a stuck call (a real widening of the plaintext-exposure
+    // window versus the pre-timeout code, which passed the caller's `&str`
+    // straight through with no extra copy at all). `Zeroizing` here makes
+    // this copy scrub itself on drop, same guarantee `get`/`get_optional`
+    // already give their own copies.
+    let secret = Zeroizing::new(secret.to_string());
     match run_with_timeout(TIMEOUT, move || put_now(&account_id, &secret)) {
         Ok(result) => result,
-        Err(()) => Err(timeout_message("write")),
+        Err(outcome) => Err(run_outcome_message("write", outcome)),
     }
 }
 
@@ -96,7 +125,7 @@ pub fn get(account_id: &str) -> Result<Zeroizing<String>, String> {
     let account_id = account_id.to_string();
     match run_with_timeout(TIMEOUT, move || get_now(&account_id)) {
         Ok(result) => result,
-        Err(()) => Err(timeout_message("read")),
+        Err(outcome) => Err(run_outcome_message("read", outcome)),
     }
 }
 
@@ -120,7 +149,7 @@ pub fn get_optional(account_id: &str) -> Result<Option<Zeroizing<String>>, Strin
     let account_id = account_id.to_string();
     match run_with_timeout(TIMEOUT, move || get_optional_now(&account_id)) {
         Ok(result) => result,
-        Err(()) => Err(timeout_message("read")),
+        Err(outcome) => Err(run_outcome_message("read", outcome)),
     }
 }
 
@@ -138,7 +167,7 @@ pub fn delete(account_id: &str) -> Result<(), String> {
     let account_id = account_id.to_string();
     match run_with_timeout(TIMEOUT, move || delete_now(&account_id)) {
         Ok(result) => result,
-        Err(()) => Err(timeout_message("delete")),
+        Err(outcome) => Err(run_outcome_message("delete", outcome)),
     }
 }
 
@@ -150,11 +179,16 @@ fn delete_now(account_id: &str) -> Result<(), String> {
     }
 }
 
-fn timeout_message(op: &str) -> String {
-    format!(
-        "keychain {op} timed out after {TIMEOUT:?} — likely an unanswered OS access-consent prompt \
-         (see docs/retro/retro-macos-muxbus-keychain-prompt-storm-2026-08-19.md §5)"
-    )
+fn run_outcome_message(op: &str, outcome: RunOutcome) -> String {
+    match outcome {
+        RunOutcome::TimedOut => format!(
+            "keychain {op} timed out after {TIMEOUT:?} — likely an unanswered OS access-consent \
+             prompt (see docs/retro/retro-macos-muxbus-keychain-prompt-storm-2026-08-19.md §5)"
+        ),
+        RunOutcome::WorkerPanicked => {
+            format!("keychain {op} failed: the background thread performing it panicked")
+        }
+    }
 }
 
 #[cfg(test)]
@@ -174,9 +208,27 @@ mod tests {
 
     #[test]
     fn run_with_timeout_gives_up_when_the_work_outlives_the_deadline() {
-        let result: Result<(), ()> = run_with_timeout(Duration::from_millis(50), || {
+        let result: Result<(), RunOutcome> = run_with_timeout(Duration::from_millis(50), || {
             std::thread::sleep(Duration::from_secs(5));
         });
-        assert_eq!(result, Err(()));
+        assert_eq!(result, Err(RunOutcome::TimedOut));
+    }
+
+    #[test]
+    fn run_with_timeout_reports_a_panic_distinctly_from_a_timeout() {
+        // reagent P2: a panicking closure must not be misreported as
+        // "timed out" — it failed immediately, not after waiting the full
+        // deadline. Give it a generous deadline so a slow test runner can't
+        // turn this into a race against the (much shorter) real timeout.
+        let result: Result<(), RunOutcome> = run_with_timeout(Duration::from_secs(5), || {
+            panic!("simulated worker panic");
+        });
+        assert_eq!(result, Err(RunOutcome::WorkerPanicked));
+    }
+
+    #[test]
+    fn run_outcome_message_distinguishes_timeout_from_panic() {
+        assert!(run_outcome_message("read", RunOutcome::TimedOut).contains("timed out"));
+        assert!(run_outcome_message("read", RunOutcome::WorkerPanicked).contains("panicked"));
     }
 }
