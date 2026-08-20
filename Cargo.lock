@@ -29,6 +29,7 @@ dependencies = [
  "chrono",
  "clap",
  "dirs",
+ "libc",
  "portable-pty",
  "reqwest",
  "serde",
