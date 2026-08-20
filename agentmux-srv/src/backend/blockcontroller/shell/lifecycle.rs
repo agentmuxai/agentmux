@@ -883,15 +883,27 @@ impl Controller for ShellController {
 
         // Fallback — reached when the registry global isn't set (tests;
         // same "silently skip tracker registration" convention
-        // `track_spawned`'s own doc comment describes) OR, on Unix,
-        // ALWAYS: `process_tracker::new_tracker` currently returns the
-        // no-op `StubTracker` on every non-Windows platform (no real
-        // cgroup/pgrp tracker is implemented yet, despite the aspirational
-        // table in `process_tracker/mod.rs`'s module doc comment), so
-        // `kill_pid` unconditionally returns `false` there — this IS the
-        // real Unix implementation today, not a rare edge case. A direct,
-        // single-PID (not group) signal, so this can't reach a
-        // declared-background descendant the way stop()'s `-(pid)` does.
+        // `track_spawned`'s own doc comment describes), OR `kill_pid`
+        // itself returned `false` because this pid isn't (yet, or ever)
+        // a recognized member of the block's tracker — e.g.
+        // `track_spawned`'s own `assign_process` call failed at spawn
+        // time (a real, already-logged non-fatal warning path in
+        // `registry::track_spawned`). Unlike `stop()`, where a failed
+        // direct kill is backstopped by `delete_controller`'s whole-job
+        // teardown, `stop_for_replace` deliberately never touches the
+        // job — so without a fallback here, that failure mode would leak
+        // the old CLI process forever once resync_controller replaces it
+        // (reagentx P1, PR #2683). A direct, single-PID (not group,
+        // not job) kill on both platforms, so this can't reach a
+        // declared-background descendant the way stop()'s `-(pid)` /
+        // a whole-job close would.
+        //
+        // On Unix this is ALSO the primary (not just fallback) path in
+        // production today: `process_tracker::new_tracker` currently
+        // returns the no-op `StubTracker` on every non-Windows platform
+        // (no real cgroup/pgrp tracker is implemented yet, despite the
+        // aspirational table in `process_tracker/mod.rs`'s module doc
+        // comment), so `kill_pid` unconditionally returns `false` there.
         #[cfg(unix)]
         {
             // SAFETY: kill() is a well-defined POSIX syscall.
@@ -900,6 +912,39 @@ impl Controller for ShellController {
                 tokio::time::sleep(tokio::time::Duration::from_secs(KILL_GRACE_SECS)).await;
                 unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
             });
+        }
+        #[cfg(windows)]
+        {
+            // Mirrors process_tracker::windows::JobObjectTracker::kill_pid's
+            // own kill step exactly, minus its job-membership pre-check
+            // (which is precisely what already failed to get us here) —
+            // a plain OpenProcess(PROCESS_TERMINATE) + TerminateProcess on
+            // the raw pid, best-effort (the process may have already
+            // exited on its own).
+            use windows_sys::Win32::Foundation::CloseHandle;
+            use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+            unsafe {
+                let h = OpenProcess(PROCESS_TERMINATE, 0, pid);
+                if !h.is_null() {
+                    let ok = TerminateProcess(h, 1);
+                    CloseHandle(h);
+                    if ok == 0 {
+                        tracing::warn!(
+                            block_id = %self.block_id,
+                            pid,
+                            error = %std::io::Error::last_os_error(),
+                            "stop_for_replace: fallback TerminateProcess failed"
+                        );
+                    }
+                } else {
+                    tracing::warn!(
+                        block_id = %self.block_id,
+                        pid,
+                        error = %std::io::Error::last_os_error(),
+                        "stop_for_replace: fallback OpenProcess failed — old CLI process may be leaked"
+                    );
+                }
+            }
         }
 
         Ok(())
