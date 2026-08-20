@@ -1,5 +1,25 @@
 # AgentMux Version History
 
+## 0.55.17 — 2026-08-20
+
+- fix(muxbus): let the browser sign-in flow be cancelled instead of hanging for 5 minutes
+- feat(agent-api): add UIScreenshot/UIClick/UIQuery — agent-facing UI automation
+- fix(security): close host_ipc.Register identity-spoofing race with a host-only shared secret
+- feat(config): non-stable channels default to isolated per-channel settings.json
+- fix(muxbus): collapse macOS/Linux keychain token storage from 12 entries to 1, stopping the multi-prompt Keychain access storm
+- fix(srv): bump sysinfo to 0.35 to fix CreateToolhelp32Snapshot handle leak
+- fix(sound): tool-call tones default to max volume; centralize scattered gain-default literals
+- feat(settings): add missing waiting-for-input tone enable toggle + volume slider
+- feat(settings): make the AskUserQuestion auto-answer timeout user-configurable
+- feat(memory): version-controlled native memory history with fs-watch drift detection and Armory/Stash UI
+- fix(swarm): robust dispatch attribution and formalized session lifecycle
+- fix(identity): bound keychain reads/writes with a 15s timeout so an unanswered OS consent prompt fails fast instead of hanging indefinitely
+- feat(background-tasks): wire db_background_tasks.pid into a real production path
+- docs: retro synthesizing the macOS Keychain prompt saga and the self-heal chicken-and-egg gap it surfaced
+- fix(agent): declared-background tasks survive a session restart, not just idle-timeout
+- fix(armory): use block-tile app icon for AgentMux tile, shorten Cloud subtitle
+
+
 ## 0.55.16 — 2026-08-19
 
 - fix(ci): nightly artifacts build delegates to reusable build-*.yml workflows
