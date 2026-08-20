@@ -409,6 +409,20 @@ struct TerminalMessage<'a> {
     timestamp: u64,
 }
 
+/// Published once, only for a `--declared-background` invocation, so srv can
+/// record a real OS pid in `db_background_tasks` (that column exists today
+/// but nothing in production ever writes it — see
+/// docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md). Carries THIS
+/// process's own pid (the wrapper), not the inner `bash -c` child's — see
+/// that spec §2 for why the wrapper is the correct attachment point.
+#[derive(Serialize)]
+struct PidMessage<'a> {
+    op: &'static str, // "pid"
+    tool_id: &'a str,
+    pid: u32,
+    timestamp: u64,
+}
+
 /// Internal channel payload: a single line tagged with its source.
 /// Bytes are raw — UTF-8 conversion is deferred to the publish /
 /// aggregation site so non-UTF-8 output (binary `cat`, Windows
@@ -475,6 +489,9 @@ pub async fn run(mut args: Args) -> Result<i32> {
         {
             Ok(()) => tracing::info!(target: "bashwrap", tool_id = %args.tool_id, "initial publish ok"),
             Err(e) => tracing::warn!(target: "bashwrap", tool_id = %args.tool_id, error = %e, "initial publish failed"),
+        }
+        if args.declared_background {
+            publish_pid(client, &args.tool_id, args.block_id.as_deref(), std::process::id()).await;
         }
     }
 
@@ -555,6 +572,33 @@ async fn publish_system(
             },
         )
         .await
+}
+
+/// Publish this process's own pid, once, for a declared-background
+/// invocation. Best-effort with a single retry: the frontend's
+/// "accepted background launch" signal (which is what creates the
+/// `db_background_tasks` row this pid attaches to — see
+/// `websocket.rs`'s `docknodestatus` handler) and this publish are two
+/// independent async paths with no ordering guarantee between them. A
+/// single short retry is cheap insurance against the rare case where
+/// this publish's WPS round-trip lands before that row exists yet;
+/// see docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md §3.3
+/// for why this doesn't need to be fully reliable (Phase B does not
+/// depend on the pid always landing).
+async fn publish_pid(client: &WpsClient, tool_id: &str, block_id: Option<&str>, pid: u32) {
+    let msg = PidMessage {
+        op: "pid",
+        tool_id,
+        pid,
+        timestamp: now_ms(),
+    };
+    if client.publish_chunk(block_id, &msg).await.is_ok() {
+        return;
+    }
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    if let Err(e) = client.publish_chunk(block_id, &msg).await {
+        tracing::warn!(target: "bashwrap", tool_id, pid, error = %e, "pid publish failed after retry");
+    }
 }
 
 async fn publish_line(
