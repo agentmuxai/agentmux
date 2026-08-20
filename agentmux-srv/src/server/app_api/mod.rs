@@ -999,6 +999,14 @@ pub(crate) fn memory_diff_impl(
     if from.agent_id != version_agent_id || to.agent_id != version_agent_id {
         return Err(format!("memory.diff: one or both versions do not belong to {agent_id}"));
     }
+    // reagent P2 — see the identical check in native_memory_handlers.rs's
+    // WS RPC handler for the full rationale.
+    if from.filename != to.filename {
+        return Err(format!(
+            "memory.diff: from_version_id and to_version_id are versions of different files ({} vs {})",
+            from.filename, to.filename
+        ));
+    }
     let diff = crate::server::native_memory_handlers::line_diff(&from.content, &to.content);
     serde_json::to_value(crate::backend::rpc_types::NativeMemoryDiffResult { diff }).map_err(|e| e.to_string())
 }

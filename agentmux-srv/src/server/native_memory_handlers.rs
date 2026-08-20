@@ -1107,6 +1107,16 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                         cmd.agent_id
                     ));
                 }
+                // reagent P2: ownership alone isn't enough — from/to must
+                // also be versions of the SAME file, or the "diff" is a
+                // meaningless line-by-line comparison of two unrelated
+                // files with no error to signal that.
+                if from.filename != to.filename {
+                    return Err(format!(
+                        "agent:memory:diff: from_version_id and to_version_id are versions of different files ({} vs {})",
+                        from.filename, to.filename
+                    ));
+                }
 
                 let diff = line_diff(&from.content, &to.content);
                 Ok(Some(serde_json::to_value(NativeMemoryDiffResult { diff }).map_err(|e| e.to_string())?))
@@ -1888,6 +1898,44 @@ mod tests {
             }),
         ).await;
         assert!(err.contains("do not belong to"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn diff_rejects_two_versions_of_different_files() {
+        // reagent P2: ownership alone isn't enough — from/to must also be
+        // versions of the SAME file, or the "diff" is a meaningless
+        // line-by-line comparison of two unrelated files.
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config = tempfile::tempdir().unwrap();
+        let (engine, mut rx) = build_channel_state("agent-diff-files", "/work/channel-a", config.path(), shared_id_store.clone());
+
+        call_rpc::<Option<serde_json::Value>>(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-diff-files", "filename": "a.md", "content": "content a" }),
+        ).await;
+        call_rpc::<Option<serde_json::Value>>(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-diff-files", "filename": "b.md", "content": "content b" }),
+        ).await;
+        let history_a: NativeMemoryHistoryResult = call_rpc(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_HISTORY,
+            serde_json::json!({ "agent_id": "agent-diff-files", "filename": "a.md" }),
+        ).await;
+        let history_b: NativeMemoryHistoryResult = call_rpc(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_HISTORY,
+            serde_json::json!({ "agent_id": "agent-diff-files", "filename": "b.md" }),
+        ).await;
+
+        let err = call_rpc_expect_error(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_DIFF,
+            serde_json::json!({
+                "agent_id": "agent-diff-files",
+                "from_version_id": history_a.versions[0].id,
+                "to_version_id": history_b.versions[0].id,
+            }),
+        ).await;
+        assert!(err.contains("different files"), "unexpected error: {err}");
     }
 
     #[tokio::test]
