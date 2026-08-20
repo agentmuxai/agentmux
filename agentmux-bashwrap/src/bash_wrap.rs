@@ -528,7 +528,13 @@ pub async fn run(mut args: Args) -> Result<i32> {
     }
 
     let start = std::time::Instant::now();
-    let status = run_proc(&args, &command, wps.as_ref(), buffered.clone()).await?;
+    // NOT `?` here — captured instead of propagated immediately. `run_proc`
+    // can fail fast (e.g. `locate_bash()`/PTY-or-pipe spawn failure) and an
+    // early `?`-return would skip the pid_publish join below entirely,
+    // reproducing the exact abandonment bug the join exists to prevent, just
+    // via the Err path instead of a fast Ok exit (reagentx P1, round 3 on
+    // this PR — the round-2 fix only covered the Ok(status) fast-exit case).
+    let run_result = run_proc(&args, &command, wps.as_ref(), buffered.clone()).await;
     let elapsed = start.elapsed();
 
     if let Some(handle) = pid_publish {
@@ -546,6 +552,8 @@ pub async fn run(mut args: Args) -> Result<i32> {
             }
         }
     }
+
+    let status = run_result?;
 
     if let Some(client) = wps.as_ref() {
         let _ = client
