@@ -8,6 +8,7 @@ pub mod agent_credentials;
 pub mod agent_jekt_keys;
 pub mod agent_lan_keys;
 pub mod agent_native_memory;
+pub mod agent_native_memory_versions;
 pub mod lan_peer_pubkey_pins;
 pub mod agents;
 pub mod agents_consolidate;
@@ -30,7 +31,8 @@ pub mod snapshot;
 pub mod store;
 
 pub use agent_credentials::AgentCredential;
-pub use agent_native_memory::NativeMemoryMirrorRow;
+pub use agent_native_memory::{NativeMemoryMirrorRow, NativeMemoryMirrorRowWithAgent};
+pub use agent_native_memory_versions::{NativeMemoryVersion, NativeMemoryVersionSummary};
 pub use agents::{AgentDefinition, AgentInstance, InstanceStatus, InstanceUpdate};
 pub use content::AgentContent;
 pub use cron::CronJob;

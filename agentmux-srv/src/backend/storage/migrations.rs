@@ -46,7 +46,13 @@ use super::error::StoreError;
 ///        {provider_id: content} instruction variants, additive to the
 ///        existing flat `instructions` column. ABF v0.2 §2.2, see
 ///        docs/specs/SPEC_ABF_V0_2_PROVIDER_AWARE_COMPONENTS_AND_NATIVE_MEMORY_2026_08_10.md.
-pub const SHARED_STORE_SCHEMA_VERSION: i64 = 7;
+///   v8 — db_agent_native_memory_versions: append-only version history for
+///        native memory content, one row per `agent:memory:write_file`
+///        call (plus reverts and, later, out-of-band-write detection) —
+///        the mirror in v6 only ever holds the current value, with no way
+///        to see what a file contained before its last write. See
+///        docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md.
+pub const SHARED_STORE_SCHEMA_VERSION: i64 = 8;
 
 /// `user_version` value stamped into `objects.db` after `run_object_schema`.
 /// The flat schema reset the counter to 1 (the pre-flatten chain never set
@@ -191,7 +197,11 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 7;
 ///        Deliberately NO FK to db_bundles (unlike the agent-level ref
 ///        tables' FK to db_agent_definitions) — see this table's own doc
 ///        comment at its CREATE TABLE for why.
-pub const OBJECT_SCHEMA_VERSION: i64 = 23;
+///   v24 — db_agent_native_memory_versions: append-only version history for
+///        native memory content, mirroring the v14 table's own dual-
+///        schema duplication (id_store per-channel fallback). See
+///        docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md.
+pub const OBJECT_SCHEMA_VERSION: i64 = 24;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -692,6 +702,27 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             PRIMARY KEY (agent_id, filename)
         );
 
+        -- v24: append-only version history for native memory content — see
+        -- db_agent_native_memory_versions in run_shared_store_schema's doc
+        -- comment for the full rationale
+        -- (SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md).
+        -- Duplicated here for the same id_store-per-channel-fallback reason
+        -- as db_agent_native_memory itself, immediately above.
+        CREATE TABLE IF NOT EXISTS db_agent_native_memory_versions (
+            id                 TEXT PRIMARY KEY,
+            agent_id           TEXT NOT NULL,
+            filename           TEXT NOT NULL,
+            content            TEXT NOT NULL,
+            content_hash       TEXT NOT NULL,
+            parent_version_id  TEXT,
+            source             TEXT NOT NULL DEFAULT 'agent_inferred',
+            source_detail      TEXT NOT NULL DEFAULT '{}',
+            session_id         TEXT NOT NULL DEFAULT '',
+            created_at         INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_native_memory_versions_lookup
+            ON db_agent_native_memory_versions(agent_id, filename, created_at);
+
         -- v18: per-agent HMAC-SHA256 signing key for host-tier jekt sender
         -- verification (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2).
         -- hmac_key is base64-encoded, 32 random bytes, minted on first use
@@ -1077,7 +1108,26 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
             last_seen_path     TEXT NOT NULL DEFAULT '',
             last_seen_mtime_ms INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (agent_id, filename)
-        );",
+        );
+
+        -- v8: append-only version history for native memory content — one
+        -- row per agent:memory:write_file call (plus reverts), so a prior
+        -- value is never lost the way the mirror above loses it on every
+        -- overwrite. See docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md.
+        CREATE TABLE IF NOT EXISTS db_agent_native_memory_versions (
+            id                 TEXT PRIMARY KEY,
+            agent_id           TEXT NOT NULL,
+            filename           TEXT NOT NULL,
+            content            TEXT NOT NULL,
+            content_hash       TEXT NOT NULL,
+            parent_version_id  TEXT,
+            source             TEXT NOT NULL DEFAULT 'agent_inferred',
+            source_detail      TEXT NOT NULL DEFAULT '{}',
+            session_id         TEXT NOT NULL DEFAULT '',
+            created_at         INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_ss_native_memory_versions_lookup
+            ON db_agent_native_memory_versions(agent_id, filename, created_at);",
     )?;
 
     // Seed the blank Memory singleton — same fixed id as objects.db so
@@ -1134,7 +1184,15 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
 ///        have the row. See `identity::resolver::inject`'s account
 ///        resolution for the read-with-fallback + write-back-to-source-store
 ///        logic this enables.
-pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 2;
+///   v3 — db_agent_native_memory_versions, for schema parity with the v1
+///        native memory mirror this store already carries. Same as that
+///        table, this store's copy is not an actively-written duplicate
+///        (id_store/store.db remains the authoritative write path — see
+///        v2's note above) — added here only so a future always-global
+///        read path (mirroring what v2 did for db_accounts) is not blocked
+///        on a missing table. See
+///        docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md.
+pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 3;
 
 /// Initialize (or re-validate) the `~/.agentmux/shared/identity-store.db`
 /// schema — the permanently-global store introduced by
@@ -1292,7 +1350,25 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
             last_seen_path     TEXT NOT NULL DEFAULT '',
             last_seen_mtime_ms INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (agent_id, filename)
-        );",
+        );
+
+        -- v3: schema parity with the v1 native memory mirror above — see
+        -- IDENTITY_STORE_SCHEMA_VERSION's own doc comment for why this
+        -- store's copy is not (yet) an actively-written duplicate.
+        CREATE TABLE IF NOT EXISTS db_agent_native_memory_versions (
+            id                 TEXT PRIMARY KEY,
+            agent_id           TEXT NOT NULL,
+            filename           TEXT NOT NULL,
+            content            TEXT NOT NULL,
+            content_hash       TEXT NOT NULL,
+            parent_version_id  TEXT,
+            source             TEXT NOT NULL DEFAULT 'agent_inferred',
+            source_detail      TEXT NOT NULL DEFAULT '{}',
+            session_id         TEXT NOT NULL DEFAULT '',
+            created_at         INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_ids_native_memory_versions_lookup
+            ON db_agent_native_memory_versions(agent_id, filename, created_at);",
     )?;
 
     // Seed the blank Memory singleton — same fixed id as objects.db/store.db
