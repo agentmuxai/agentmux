@@ -195,6 +195,15 @@ pub struct CommandBackgroundTaskPidData {
     pub pid: u32,
 }
 
+/// Data for `COMMAND_LIST_BACKGROUND_TASKS` — request/response, returns
+/// this block's current `db_background_tasks` rows (as
+/// `muxspect_handlers::BackgroundTaskView`s). See
+/// docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.1.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CommandListBackgroundTasksData {
+    pub blockid: String,
+}
+
 /// Data for AgentAnswerCommand — an AskUserQuestion answer delivered back to
 /// the running agent CLI via the Agent SDK control protocol (a `control_response`
 /// carrying `updatedInput.answers`). Spec:
