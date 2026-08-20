@@ -131,6 +131,14 @@ export interface AgentAtoms {
      * docs/specs/SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md.
      */
     attachedTaskAtom: SignalPair<AttachedTaskState | null>;
+    /**
+     * Live registry-derived attached-task floor, or null. Reducer-owned
+     * (see `AgentPaneState.registryAttachedTaskSince`) — a SEPARATE axis
+     * from `attachedTaskAtom` above, combined with it (not merged into it)
+     * by `agent-view.tsx`'s attached-task effect. See
+     * docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md.
+     */
+    registryAttachedTaskSinceAtom: SignalPair<number | null>;
 }
 
 /**
@@ -199,5 +207,6 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
         failureAtom: createSignal<PaneFailure | null>(null),
         compactingAtom: createSignal<CompactionState | null>(null),
         attachedTaskAtom: createSignal<AttachedTaskState | null>(null),
+        registryAttachedTaskSinceAtom: createSignal<number | null>(null),
     };
 }

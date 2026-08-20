@@ -2806,6 +2806,80 @@ describe("agent-pane-state reducer", () => {
         });
     });
 
+    // Phase C of SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md
+    // — a SEPARATE axis from attachedTask above, exclusively owned by
+    // useBackgroundTaskRegistry.ts (see registryAttachedTaskSince's doc
+    // comment in types.ts for why: agent-view.tsx's own attached-task
+    // effect independently recomputes and clears `attachedTask` from the
+    // transcript alone, which would otherwise stomp a direct dispatch into
+    // that same field for a task the transcript has no record of).
+    describe("Registry-derived attached-task floor (RegistryAttachedTaskObserved / RegistryAttachedTaskCleared)", () => {
+        it("initial state: registryAttachedTaskSince null", () => {
+            const s = mk();
+            expect(s.registryAttachedTaskSince).toBeNull();
+        });
+
+        it("RegistryAttachedTaskObserved sets registryAttachedTaskSince with the given timestamp", () => {
+            const s = mk();
+            const r = update(s, { type: "RegistryAttachedTaskObserved", at: 100 });
+            expect(r.state.registryAttachedTaskSince).toBe(100);
+            expect(r.events).toEqual([{ type: "registry-attached-task-observed", at: 100 }]);
+        });
+
+        it("RegistryAttachedTaskObserved is a no-op (same ref) when the value is unchanged", () => {
+            let s = mk();
+            s = update(s, { type: "RegistryAttachedTaskObserved", at: 100 }).state;
+            const r = update(s, { type: "RegistryAttachedTaskObserved", at: 100 });
+            expect(r.state).toBe(s);
+            expect(r.events).toEqual([]);
+        });
+
+        it("RegistryAttachedTaskObserved DOES update when a fresher/different value arrives — unlike AttachedTaskObserved's edge-trigger no-op", () => {
+            let s = mk();
+            s = update(s, { type: "RegistryAttachedTaskObserved", at: 100 }).state;
+            const r = update(s, { type: "RegistryAttachedTaskObserved", at: 50 });
+            expect(r.state.registryAttachedTaskSince).toBe(50);
+        });
+
+        it("RegistryAttachedTaskCleared clears an active value", () => {
+            let s = mk();
+            s = update(s, { type: "RegistryAttachedTaskObserved", at: 100 }).state;
+            const r = update(s, { type: "RegistryAttachedTaskCleared" });
+            expect(r.state.registryAttachedTaskSince).toBeNull();
+            expect(r.events).toEqual([{ type: "registry-attached-task-cleared" }]);
+        });
+
+        it("RegistryAttachedTaskCleared is idempotent when already null", () => {
+            const s = mk();
+            const r = update(s, { type: "RegistryAttachedTaskCleared" });
+            expect(r.state).toBe(s);
+            expect(r.events).toEqual([]);
+        });
+
+        it("is fully independent of attachedTask — neither axis's commands touch the other's field", () => {
+            let s = mk();
+            s = update(s, { type: "AttachedTaskObserved", at: 100 }).state;
+            s = update(s, { type: "RegistryAttachedTaskObserved", at: 200 }).state;
+            expect(s.attachedTask).toEqual({ since: 100 });
+            expect(s.registryAttachedTaskSince).toBe(200);
+            s = update(s, { type: "AttachedTaskCleared" }).state;
+            expect(s.attachedTask).toBeNull();
+            expect(s.registryAttachedTaskSince).toBe(200); // untouched by AttachedTaskCleared
+            s = update(s, { type: "RegistryAttachedTaskCleared" }).state;
+            expect(s.registryAttachedTaskSince).toBeNull();
+        });
+
+        it("survives TurnEnd/TurnReset, same as attachedTask", () => {
+            let s = ready(100);
+            s = update(s, { type: "RegistryAttachedTaskObserved", at: 150 }).state;
+            s = update(s, { type: "TurnStart", at: 200 }).state;
+            s = update(s, { type: "TurnEnd", stats: null }).state;
+            expect(s.registryAttachedTaskSince).toBe(150);
+            s = update(s, { type: "TurnReset" }).state;
+            expect(s.registryAttachedTaskSince).toBe(150);
+        });
+    });
+
     // SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md — folds
     // useAgentFailure's local failure state into the reducer so a backend
     // failure classification unconditionally ends a working turn, instead
