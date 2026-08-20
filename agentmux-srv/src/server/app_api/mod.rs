@@ -901,6 +901,23 @@ pub(crate) fn memory_write_impl(
     ).map_err(|e| format!("memory.write: {e}"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("memory.write: mkdir: {e}"))?;
 
+    // Version history recorded BEFORE the live-file write below — reagent
+    // P1: closes the same fs-watch race described in
+    // native_memory_handlers.rs's write_file handler. This is the path the
+    // MemoryWrite MCP tool actually calls in production (agent_id here is
+    // the slug, resolved the same way memory_dir_for_agent resolves it) —
+    // instrumenting it matters at least as much as the WebSocket RPC path,
+    // since it's what an agent's own MemoryWrite tool call hits. Non-fatal
+    // on failure — a durability/review layer on top of the write, not the
+    // write itself.
+    let (source, detail) = match &provenance {
+        Some(p) => (p.source, p.detail),
+        None => ("agent_inferred", "{}"),
+    };
+    if let Err(e) = state.id_store.agent_native_memory_version_insert(agent_id, filename, content, source, detail, "") {
+        tracing::warn!(agent_id, filename, error = %e, "memory.write: version insert failed (non-fatal)");
+    }
+
     let dest = dir.join(filename);
     let tmp = dir.join(format!(".{}.{}.tmp", filename, uuid::Uuid::new_v4()));
     if let Err(e) = std::fs::write(&tmp, content) {
@@ -910,22 +927,6 @@ pub(crate) fn memory_write_impl(
     if let Err(e) = std::fs::rename(&tmp, &dest) {
         let _ = std::fs::remove_file(&tmp);
         return Err(format!("memory.write: rename: {e}"));
-    }
-
-    // Version history — additive, non-fatal on failure (the live write
-    // above already succeeded; see native_memory_handlers.rs's own
-    // write_file handler for the identical non-fatal-failure rationale).
-    // This is the path the MemoryWrite MCP tool actually calls in
-    // production (agent_id here is the slug, resolved the same way
-    // memory_dir_for_agent resolves it) — instrumenting it matters at
-    // least as much as the WebSocket RPC path, since it's what an agent's
-    // own MemoryWrite tool call hits.
-    let (source, detail) = match &provenance {
-        Some(p) => (p.source, p.detail),
-        None => ("agent_inferred", "{}"),
-    };
-    if let Err(e) = state.id_store.agent_native_memory_version_insert(agent_id, filename, content, source, detail, "") {
-        tracing::warn!(agent_id, filename, error = %e, "memory.write: version insert failed (non-fatal)");
     }
 
     state.broker.publish(crate::backend::wps::WaveEvent {
@@ -963,6 +964,7 @@ pub(crate) fn memory_history_impl(
 
 pub(crate) fn memory_diff_impl(
     state: &AppState,
+    agent_id: &str,
     from_version_id: &str,
     to_version_id: &str,
 ) -> Result<serde_json::Value, String> {
@@ -976,6 +978,11 @@ pub(crate) fn memory_diff_impl(
         .agent_native_memory_version_get(to_version_id)
         .map_err(|e| format!("memory.diff: store: {e}"))?
         .ok_or_else(|| format!("memory.diff: version {to_version_id} not found"))?;
+    // reagent P1 — see the identical check in native_memory_handlers.rs's
+    // WS RPC handler for the full rationale.
+    if from.agent_id != agent_id || to.agent_id != agent_id {
+        return Err(format!("memory.diff: one or both versions do not belong to {agent_id}"));
+    }
     let diff = crate::server::native_memory_handlers::line_diff(&from.content, &to.content);
     serde_json::to_value(crate::backend::rpc_types::NativeMemoryDiffResult { diff }).map_err(|e| e.to_string())
 }
@@ -1004,6 +1011,18 @@ pub(crate) fn memory_revert_impl(
         &state.wstore, agent_id,
     ).map_err(|e| format!("memory.revert: {e}"))?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("memory.revert: mkdir: {e}"))?;
+
+    // Version recorded BEFORE the live-file write below — same fs-watch-race
+    // rationale as memory_write_impl above (reagent P1). Fatal on failure,
+    // same reasoning as the WS RPC revert handler: silently reverting the
+    // file but failing to record what it was reverted to would leave the
+    // caller with no way to know.
+    let detail = json!({ "reverted_to": target_version_id }).to_string();
+    let new_version = state
+        .id_store
+        .agent_native_memory_version_insert(agent_id, filename, &target.content, "revert", &detail, "")
+        .map_err(|e| format!("memory.revert: version insert: {e}"))?;
+
     let dest = dir.join(filename);
     let tmp = dir.join(format!(".{}.{}.tmp", filename, uuid::Uuid::new_v4()));
     if let Err(e) = std::fs::write(&tmp, &target.content) {
@@ -1014,12 +1033,6 @@ pub(crate) fn memory_revert_impl(
         let _ = std::fs::remove_file(&tmp);
         return Err(format!("memory.revert: rename: {e}"));
     }
-
-    let detail = json!({ "reverted_to": target_version_id }).to_string();
-    let new_version = state
-        .id_store
-        .agent_native_memory_version_insert(agent_id, filename, &target.content, "revert", &detail, "")
-        .map_err(|e| format!("memory.revert: version insert: {e}"))?;
 
     state.broker.publish(crate::backend::wps::WaveEvent {
         event: format!("agent:memory:changed:{agent_id}"),
@@ -1146,10 +1159,42 @@ mod memory_version_impl_tests {
         let newest = versions[0].get("id").and_then(|v| v.as_str()).unwrap();
         let oldest = versions[1].get("id").and_then(|v| v.as_str()).unwrap();
 
-        let diff = memory_diff_impl(&state, oldest, newest).unwrap();
+        let diff = memory_diff_impl(&state, "agent-app-3", oldest, newest).unwrap();
         let diff_text = diff.get("diff").and_then(|v| v.as_str()).unwrap();
         assert!(diff_text.contains("- v1"), "unexpected diff: {diff_text}");
         assert!(diff_text.contains("+ v2"), "unexpected diff: {diff_text}");
+    }
+
+    #[tokio::test]
+    async fn diff_rejects_a_version_from_a_different_agent() {
+        let tmp_a = tempfile::tempdir().unwrap();
+        let tmp_b = tempfile::tempdir().unwrap();
+        let state = crate::server::tests::test_state();
+        let mut def_a = agent_def("agent-diff-a", &tmp_a.path().to_string_lossy());
+        let mut def_b = agent_def("agent-diff-b", &tmp_b.path().to_string_lossy());
+        state.wstore.agent_def_insert(&mut def_a).unwrap();
+        state.wstore.agent_def_insert(&mut def_b).unwrap();
+        for (id, dir) in [("agent-diff-a", tmp_a.path()), ("agent-diff-b", tmp_b.path())] {
+            state
+                .wstore
+                .agent_content_set(&crate::backend::storage::AgentContent {
+                    agent_id: id.to_string(),
+                    content_type: "env".to_string(),
+                    content: format!("CLAUDE_CONFIG_DIR={}\n", dir.display()),
+                    updated_at: 0,
+                })
+                .unwrap();
+        }
+
+        memory_write_impl(&state, "agent-diff-a", "MEMORY.md", "v1", None).unwrap();
+        memory_write_impl(&state, "agent-diff-a", "MEMORY.md", "v2", None).unwrap();
+        let history = memory_history_impl(&state, "agent-diff-a", "MEMORY.md").unwrap();
+        let versions = history.get("versions").and_then(|v| v.as_array()).unwrap();
+        let newest = versions[0].get("id").and_then(|v| v.as_str()).unwrap().to_string();
+        let oldest = versions[1].get("id").and_then(|v| v.as_str()).unwrap().to_string();
+
+        let err = memory_diff_impl(&state, "agent-diff-b", &oldest, &newest).unwrap_err();
+        assert!(err.contains("do not belong to"), "unexpected error: {err}");
     }
 
     #[tokio::test]

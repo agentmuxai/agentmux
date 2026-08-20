@@ -2116,11 +2116,12 @@ async fn call_tool(
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| anyhow::anyhow!("missing required parameter: to_version_id"))?;
             require_agent_env(local_url, auth_key, block_id)?;
+            let agent_id = agent_slug()?;
             let url = format!("{}/api/v1/agent/memory/diff", local_url.trim_end_matches('/'));
             let resp = client
                 .get(&url)
                 .header("X-AuthKey", auth_key)
-                .query(&[("from_version_id", from_version_id), ("to_version_id", to_version_id)])
+                .query(&[("agent_id", agent_id.as_str()), ("from_version_id", from_version_id), ("to_version_id", to_version_id)])
                 .send()
                 .await
                 .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;

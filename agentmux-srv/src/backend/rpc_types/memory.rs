@@ -76,8 +76,19 @@ pub struct NativeMemoryWriteProvenance {
     pub source: String,
     /// Arbitrary JSON — the jekt marker fields when `source == "jekt"`.
     /// Stored verbatim as the version row's `source_detail`.
-    #[serde(default)]
+    ///
+    /// reagent P2: `#[serde(default)]` on a bare `serde_json::Value` yields
+    /// `Value::Null` when the caller supplies `source` but omits `detail`
+    /// — `.to_string()` on that is the literal string `"null"`, not the
+    /// `"{}"` every no-provenance write elsewhere in this module already
+    /// uses as its default `source_detail`. `default_detail()` below keeps
+    /// the two cases consistent.
+    #[serde(default = "default_detail")]
     pub detail: serde_json::Value,
+}
+
+fn default_detail() -> serde_json::Value {
+    serde_json::json!({})
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,6 +135,13 @@ pub struct NativeMemoryHistoryResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandNativeMemoryDiffData {
+    /// reagent P1: required so the handler can verify BOTH versions belong
+    /// to this agent before returning their content — unlike list/read/
+    /// write/history/revert (all of which take an agent_id and scope to
+    /// it), diff originally took bare version ids with no ownership check
+    /// at all. Since every caller shares one instance-wide X-AuthKey, that
+    /// let any caller read any other agent's memory content by version id.
+    pub agent_id: String,
     pub from_version_id: String,
     pub to_version_id: String,
 }

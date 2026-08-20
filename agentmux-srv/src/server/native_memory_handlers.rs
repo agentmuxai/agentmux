@@ -488,11 +488,16 @@ fn version_to_meta(v: &NativeMemoryVersion) -> NativeMemoryVersionMeta {
     }
 }
 
-/// Cap on the number of lines either side of a diff may have before we fall
-/// back to a coarse "content differs" result instead of running the O(n*m)
-/// LCS table below — memory files are markdown notes, not logs; this
-/// guards a diff RPC call against a pathological multi-megabyte file.
-const MAX_DIFF_LINES: usize = 20_000;
+/// Cap on the LCS table's cell COUNT (from_lines.len() * to_lines.len()),
+/// not on either side's line count independently — reagent P1: the
+/// original per-side-only cap (20,000 lines each) bounded neither
+/// dimension against the other, so two files each under that cap could
+/// still produce a ~3.2GB `usize` table (20_000 * 20_000 * 8 bytes) in the
+/// shared agentmux-srv process. 4,000,000 cells keeps the table under
+/// ~32MB (`* size_of::<usize>()`) regardless of how the two side lengths
+/// are distributed — generous for memory files (markdown notes, not logs)
+/// while still bounded for any combination of sizes.
+const MAX_DIFF_CELLS: usize = 4_000_000;
 
 /// A minimal unified-diff-style line comparison: longest-common-subsequence
 /// based, output lines prefixed `"  "` (context), `"- "` (removed, `from`
@@ -502,9 +507,9 @@ pub(crate) fn line_diff(from: &str, to: &str) -> String {
     let from_lines: Vec<&str> = from.lines().collect();
     let to_lines: Vec<&str> = to.lines().collect();
 
-    if from_lines.len() > MAX_DIFF_LINES || to_lines.len() > MAX_DIFF_LINES {
+    if from_lines.len().saturating_mul(to_lines.len()) > MAX_DIFF_CELLS {
         return format!(
-            "(diff omitted: {} and {} lines exceed the {MAX_DIFF_LINES}-line comparison cap)",
+            "(diff omitted: {} x {} lines exceeds the {MAX_DIFF_CELLS}-cell comparison cap)",
             from_lines.len(),
             to_lines.len(),
         );
@@ -904,6 +909,36 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 std::fs::create_dir_all(&dir)
                     .map_err(|e| format!("agent:memory:write_file: mkdir: {e}"))?;
 
+                // Version history — recorded BEFORE the live-file write below,
+                // not after. reagent P1: the drift detector's fast path
+                // (native_memory_drift.rs) subscribes to fs-watch events on
+                // this same directory; if the version row were inserted AFTER
+                // the write (as an earlier revision of this handler did), a
+                // fs-watch event for the write below can be processed before
+                // this version exists, see a hash that doesn't match anything
+                // recorded yet, and log this legitimate RPC write as a
+                // spurious "external_fs_write". Recording the version first
+                // establishes a real happens-before: the file-modify event
+                // that write can possibly generate cannot fire until the
+                // write below actually executes, by which point this version
+                // already exists to match against. Non-fatal on failure — a
+                // durability/review layer on top of the write, not the write
+                // itself (mirrors the mirror-upsert failure handling below).
+                let (version_source, version_detail) = match &cmd.provenance {
+                    Some(p) => (p.source.as_str(), p.detail.to_string()),
+                    None => ("agent_inferred", "{}".to_string()),
+                };
+                if let Err(e) = id_store.agent_native_memory_version_insert(
+                    &agent.id,
+                    &cmd.filename,
+                    &cmd.content,
+                    version_source,
+                    &version_detail,
+                    "",
+                ) {
+                    tracing::warn!(agent_id = %agent.id, filename = %cmd.filename, error = %e, "agent:memory:write_file: version insert failed (non-fatal)");
+                }
+
                 let dest = dir.join(&cmd.filename);
                 // Per-write UUID suffix prevents concurrent writes to the same
                 // filename from sharing a tmp path and silently corrupting each
@@ -943,27 +978,6 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     mtime_ms,
                 ) {
                     tracing::warn!(agent_id = %agent.id, filename = %cmd.filename, error = %e, "agent:memory:write_file: mirror upsert failed (non-fatal)");
-                }
-
-                // Version history (SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md
-                // §4.1) — additive to the mirror upsert above, never read on
-                // this write path, only by history/diff/revert. Failure here
-                // is non-fatal for the same reason the mirror upsert above
-                // is: the write to the live file already succeeded, and this
-                // is a durability/review layer on top, not the write itself.
-                let (version_source, version_detail) = match &cmd.provenance {
-                    Some(p) => (p.source.as_str(), p.detail.to_string()),
-                    None => ("agent_inferred", "{}".to_string()),
-                };
-                if let Err(e) = id_store.agent_native_memory_version_insert(
-                    &agent.id,
-                    &cmd.filename,
-                    &cmd.content,
-                    version_source,
-                    &version_detail,
-                    "",
-                ) {
-                    tracing::warn!(agent_id = %agent.id, filename = %cmd.filename, error = %e, "agent:memory:write_file: version insert failed (non-fatal)");
                 }
 
                 tracing::info!(
@@ -1018,6 +1032,17 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     .agent_native_memory_version_get(&cmd.to_version_id)
                     .map_err(|e| format!("agent:memory:diff: store: {e}"))?
                     .ok_or_else(|| format!("agent:memory:diff: version {} not found", cmd.to_version_id))?;
+                // reagent P1: unlike list/read/write/history/revert, this
+                // handler has no other agent-scoping — every caller shares
+                // one instance-wide X-AuthKey, so without this check any
+                // caller could read any other agent's memory content by
+                // version id.
+                if from.agent_id != cmd.agent_id || to.agent_id != cmd.agent_id {
+                    return Err(format!(
+                        "agent:memory:diff: one or both versions do not belong to {}",
+                        cmd.agent_id
+                    ));
+                }
 
                 let diff = line_diff(&from.content, &to.content);
                 Ok(Some(serde_json::to_value(NativeMemoryDiffResult { diff }).map_err(|e| e.to_string())?))
@@ -1069,6 +1094,19 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 let dir = memory_dir_for_cwd(&config_dir, &agent.working_directory);
                 std::fs::create_dir_all(&dir)
                     .map_err(|e| format!("agent:memory:revert: mkdir: {e}"))?;
+
+                // Version recorded BEFORE the live-file write below — same
+                // fs-watch-race rationale as agent:memory:write_file's own
+                // handler above (reagent P1). Unlike that handler, a failure
+                // here IS fatal: the RPC's whole contract is "return the new
+                // version," so silently reverting the file but not returning
+                // a version would leave the caller with no way to know what
+                // they just reverted to.
+                let detail = serde_json::json!({ "reverted_to": cmd.target_version_id }).to_string();
+                let new_version = id_store
+                    .agent_native_memory_version_insert(&agent.id, &cmd.filename, &target.content, "revert", &detail, "")
+                    .map_err(|e| format!("agent:memory:revert: version insert: {e}"))?;
+
                 let dest = dir.join(&cmd.filename);
                 let tmp = dir.join(format!(".{}.{}.tmp", cmd.filename, uuid::Uuid::new_v4()));
                 if let Err(e) = std::fs::write(&tmp, &target.content) {
@@ -1099,11 +1137,6 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 ) {
                     tracing::warn!(agent_id = %agent.id, filename = %cmd.filename, error = %e, "agent:memory:revert: mirror upsert failed (non-fatal)");
                 }
-
-                let detail = serde_json::json!({ "reverted_to": cmd.target_version_id }).to_string();
-                let new_version = id_store
-                    .agent_native_memory_version_insert(&agent.id, &cmd.filename, &target.content, "revert", &detail, "")
-                    .map_err(|e| format!("agent:memory:revert: version insert: {e}"))?;
 
                 tracing::info!(
                     agent_id = %cmd.agent_id,
@@ -1730,7 +1763,7 @@ mod tests {
 
         let diff: NativeMemoryDiffResult = call_rpc(
             &engine, &mut rx, COMMAND_NATIVE_MEMORY_DIFF,
-            serde_json::json!({ "from_version_id": oldest.id, "to_version_id": newest.id }),
+            serde_json::json!({ "agent_id": "agent-ver-4", "from_version_id": oldest.id, "to_version_id": newest.id }),
         ).await;
         assert!(diff.diff.contains("  line a"), "unexpected diff: {}", diff.diff);
         assert!(diff.diff.contains("- line b"), "unexpected diff: {}", diff.diff);
@@ -1746,9 +1779,44 @@ mod tests {
 
         let err = call_rpc_expect_error(
             &engine, &mut rx, COMMAND_NATIVE_MEMORY_DIFF,
-            serde_json::json!({ "from_version_id": "nope", "to_version_id": "also-nope" }),
+            serde_json::json!({ "agent_id": "agent-ver-5", "from_version_id": "nope", "to_version_id": "also-nope" }),
         ).await;
         assert!(err.contains("not found"), "unexpected error: {err}");
+    }
+
+    #[tokio::test]
+    async fn diff_rejects_a_version_from_a_different_agent() {
+        // reagent P1: from/to must both belong to the calling agent_id —
+        // this is the regression test for that fix.
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config_a = tempfile::tempdir().unwrap();
+        let config_b = tempfile::tempdir().unwrap();
+        let (engine_a, mut rx_a) = build_channel_state("agent-diff-a", "/work/channel-a", config_a.path(), shared_id_store.clone());
+        let (engine_b, mut rx_b) = build_channel_state("agent-diff-b", "/work/channel-b", config_b.path(), shared_id_store.clone());
+
+        call_rpc::<Option<serde_json::Value>>(
+            &engine_a, &mut rx_a, COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-diff-a", "filename": "MEMORY.md", "content": "v1" }),
+        ).await;
+        call_rpc::<Option<serde_json::Value>>(
+            &engine_a, &mut rx_a, COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-diff-a", "filename": "MEMORY.md", "content": "v2" }),
+        ).await;
+        let history_a: NativeMemoryHistoryResult = call_rpc(
+            &engine_a, &mut rx_a, COMMAND_NATIVE_MEMORY_HISTORY,
+            serde_json::json!({ "agent_id": "agent-diff-a", "filename": "MEMORY.md" }),
+        ).await;
+
+        let err = call_rpc_expect_error(
+            &engine_b, &mut rx_b, COMMAND_NATIVE_MEMORY_DIFF,
+            serde_json::json!({
+                "agent_id": "agent-diff-b",
+                "from_version_id": history_a.versions[1].id,
+                "to_version_id": history_a.versions[0].id,
+            }),
+        ).await;
+        assert!(err.contains("do not belong to"), "unexpected error: {err}");
     }
 
     #[tokio::test]

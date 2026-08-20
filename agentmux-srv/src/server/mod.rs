@@ -1050,18 +1050,20 @@ async fn handle_agent_memory_history(
 
 #[derive(serde::Deserialize)]
 struct AgentMemoryDiffQuery {
+    agent_id: String,
     from_version_id: String,
     to_version_id: String,
 }
 
-/// `GET /api/v1/agent/memory/diff?from_version_id=&to_version_id=` — a
-/// line-based diff between two recorded versions. Backs the `MemoryDiff`
-/// MCP tool.
+/// `GET /api/v1/agent/memory/diff?agent_id=<slug>&from_version_id=&to_version_id=`
+/// — a line-based diff between two recorded versions, both of which must
+/// belong to `agent_id` (reagent P1 — see `memory_diff_impl`'s own doc for
+/// why). Backs the `MemoryDiff` MCP tool.
 async fn handle_agent_memory_diff(
     State(state): State<AppState>,
     Query(q): Query<AgentMemoryDiffQuery>,
 ) -> impl IntoResponse {
-    app_api_response(app_api::memory_diff_impl(&state, &q.from_version_id, &q.to_version_id))
+    app_api_response(app_api::memory_diff_impl(&state, &q.agent_id, &q.from_version_id, &q.to_version_id))
 }
 
 #[derive(serde::Deserialize)]
