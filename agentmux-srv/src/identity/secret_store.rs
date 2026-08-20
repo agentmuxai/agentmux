@@ -16,21 +16,35 @@
 //! ships with a keychain on all three platforms, so keyring is the path
 //! here. Failures surface as a typed error rather than a silent downgrade.
 //!
-//! **Bounded by [`TIMEOUT`]**: every operation below can require
-//! interactive OS consent ("App wants to access your confidential
-//! information...") the first time a given code signature touches a given
-//! entry — and that consent call has no cancellation mechanism, so an
-//! unanswered prompt (headless process, dialog on another Space, no
-//! attached display session) blocks the underlying platform call
-//! indefinitely. Confirmed live — see
+//! **Reads are bounded by [`TIMEOUT`]; writes are not — see below.** Every
+//! operation here can require interactive OS consent ("App wants to access
+//! your confidential information...") the first time a given code
+//! signature touches a given entry, and that consent call has no
+//! cancellation mechanism: an unanswered prompt (headless process, dialog
+//! on another Space, no attached display session) blocks the underlying
+//! platform call indefinitely. Confirmed live — see
 //! `docs/retro/retro-macos-muxbus-keychain-prompt-storm-2026-08-19.md` §5.
-//! Every public function here runs the real platform call on a detached
-//! thread and gives up waiting after `TIMEOUT`, so a stuck prompt bounds
-//! how long the CALLER waits (and any lock it's holding) instead of hanging
-//! it forever. The detached thread itself is NOT killed — it keeps running
-//! until the OS resolves it (answered or not) — this is a wait-bound, not a
-//! true cancellation; there is no way to cancel the underlying platform
-//! call itself.
+//!
+//! `get`/`get_optional` run the real platform call on a detached thread and
+//! give up waiting after `TIMEOUT`, so a stuck prompt bounds how long the
+//! CALLER waits (and any lock it's holding) instead of hanging it forever.
+//! This is safe specifically because a read has no side effect: if the
+//! timeout fires, the detached thread's eventual (possibly much later)
+//! result is just discarded — nothing acts on a stale read.
+//!
+//! `put`/`delete` deliberately do NOT use this timeout (reagent + Codex,
+//! PR #2679 round 2): the same "detached thread keeps running after the
+//! caller gives up" behavior is unsafe for a MUTATION. A caller that treats
+//! a timed-out write as failure and proceeds — e.g. skipping a dependent DB
+//! write, or a rollback in `muxbus.rs` writing a different value to the
+//! same entry — can have the orphaned original write land afterward and
+//! silently clobber whatever the caller did next, with no ordering
+//! guarantee between them. There is no cancellation-equivalent compensation
+//! available (the platform call truly cannot be cancelled), so until one
+//! exists, an unbounded wait — the pre-existing, safe-if-slow behavior — is
+//! the correct tradeoff for anything that mutates state. A stuck consent
+//! prompt on a write still blocks its caller indefinitely; only reads are
+//! protected today.
 
 use std::sync::mpsc;
 use std::time::Duration;
@@ -96,24 +110,12 @@ pub fn account_key(account_id: &str) -> String {
 }
 
 /// Store (or overwrite) the secret for `account_id` in the OS keychain.
+///
+/// Deliberately unbounded — see this module's doc comment for why a
+/// timeout is unsafe for a mutation specifically (a timed-out-but-later-
+/// completing write can land after the caller has already acted on the
+/// assumption it failed).
 pub fn put(account_id: &str, secret: &str) -> Result<(), String> {
-    let account_id = account_id.to_string();
-    // reagent P1: wrap the plaintext BEFORE moving it into the detached
-    // thread's closure, not after — moving a plain `String` there left an
-    // extra, unscrubbed heap copy of the secret alive for up to the full
-    // timeout on a stuck call (a real widening of the plaintext-exposure
-    // window versus the pre-timeout code, which passed the caller's `&str`
-    // straight through with no extra copy at all). `Zeroizing` here makes
-    // this copy scrub itself on drop, same guarantee `get`/`get_optional`
-    // already give their own copies.
-    let secret = Zeroizing::new(secret.to_string());
-    match run_with_timeout(TIMEOUT, move || put_now(&account_id, &secret)) {
-        Ok(result) => result,
-        Err(outcome) => Err(run_outcome_message("write", outcome)),
-    }
-}
-
-fn put_now(account_id: &str, secret: &str) -> Result<(), String> {
     entry(account_id)?
         .set_password(secret)
         .map_err(|e| format!("keychain write failed: {e}"))
@@ -163,15 +165,10 @@ fn get_optional_now(account_id: &str) -> Result<Option<Zeroizing<String>>, Strin
 
 /// Delete the secret for `account_id`. A missing entry is treated as
 /// success (idempotent delete).
+///
+/// Deliberately unbounded — see this module's doc comment for why a
+/// timeout is unsafe for a mutation specifically.
 pub fn delete(account_id: &str) -> Result<(), String> {
-    let account_id = account_id.to_string();
-    match run_with_timeout(TIMEOUT, move || delete_now(&account_id)) {
-        Ok(result) => result,
-        Err(outcome) => Err(run_outcome_message("delete", outcome)),
-    }
-}
-
-fn delete_now(account_id: &str) -> Result<(), String> {
     match entry(account_id)?.delete_password() {
         Ok(()) => Ok(()),
         Err(keyring::Error::NoEntry) => Ok(()),

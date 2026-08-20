@@ -42,14 +42,14 @@ operation waiting on that same lock too.
 ## 3. Fix
 
 Added a 15-second timeout, applied inside `secret_store`'s existing
-`get`/`get_optional`/`put`/`delete` functions themselves — no signature
-change, no caller updates needed anywhere in the codebase. Each function
-now runs the real platform call on a detached `std::thread`, and the
-caller waits on a channel with `recv_timeout`. A timeout produces the same
-`Result<_, String>` error shape these functions already returned for other
-keychain failures (locked keychain, no Secret Service daemon, etc.), so
-every existing caller's error handling — already written to tolerate "the
-keychain read failed" — covers this for free.
+`get`/`get_optional` functions themselves — no signature change, no caller
+updates needed anywhere in the codebase. Each function now runs the real
+platform call on a detached `std::thread`, and the caller waits on a
+channel with `recv_timeout`. A timeout produces the same `Result<_, String>`
+error shape these functions already returned for other keychain failures
+(locked keychain, no Secret Service daemon, etc.), so every existing
+caller's error handling — already written to tolerate "the keychain read
+failed" — covers this for free.
 
 This is a wait-bound, not a true cancellation: the detached thread doing
 the actual blocked platform call keeps running until the OS resolves it
@@ -61,6 +61,20 @@ Verified live against this exact machine's real stuck entries: the same
 read that previously blocked for minutes-plus now returns after exactly
 15.006s with a clear timeout error, unblocking the MuxBus self-heal
 migration path to actually run on its next attempt.
+
+**`put`/`delete` deliberately do NOT get this timeout** (reagent + Codex,
+independently, in review round 2 of the PR that shipped this). A read is
+safe to bound because it has no side effect — if the timeout fires, the
+detached thread's eventual result is just discarded. A write is not: a
+caller that treats a timed-out `put`/`delete` as failure and proceeds
+(skipping a dependent DB write, or a rollback writing something else to
+the same entry) can have the orphaned original write land afterward and
+silently clobber whatever the caller did next, with no ordering guarantee
+between them. There's no cancellation-equivalent compensation available —
+the platform call truly cannot be cancelled — so until one exists, writes
+keep the original unbounded (safe-if-slow) behavior. A stuck consent
+prompt on a write still hangs its caller indefinitely; only reads are
+protected by this fix.
 
 ## 4. Why 15 seconds
 
@@ -74,6 +88,12 @@ a design to revisit.
 
 ## 5. What this does not fix
 
+- **Writes (`put`/`delete`) are still unbounded** — see §3's last
+  paragraph. A stuck consent prompt on a first-ever write (e.g. the very
+  first `muxbus_save` after a login) can still hang its caller
+  indefinitely. Only reads are protected today; making writes safe needs
+  an actual cancellation or ordering-preserving compensation mechanism,
+  not just a wait-bound, and wasn't designed in this pass.
 - The underlying Keychain ACL weirdness/ACL-per-entry mechanics from
   [retro-macos-keychain-credential-isolation-gap-2026-08-17.md](retro-macos-keychain-credential-isolation-gap-2026-08-17.md)
   and the "Always Allow doesn't work" experience are unchanged — this
