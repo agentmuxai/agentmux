@@ -83,6 +83,15 @@ pub const COMMAND_BACKGROUND_TASK_COMPLETION: &str = "backgroundtaskcompletion";
 /// docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md.
 pub const COMMAND_BACKGROUND_TASK_PID: &str = "backgroundtaskpid";
 
+/// Request/response — the current `db_background_tasks` rows for one
+/// block, so the frontend can seed its `attachedTask` axis from the
+/// durable registry (a source of truth) instead of only ever re-deriving
+/// it from this tab's own live transcript replay, which has no way to
+/// know about a task that survived a session restart under a controller
+/// generation with no transcript history of ever launching it. See
+/// docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.1.
+pub const COMMAND_LIST_BACKGROUND_TASKS: &str = "listbackgroundtasks";
+
 // Subprocess agent commands
 pub const COMMAND_SUBPROCESS_SPAWN: &str = "subprocessspawn";
 pub const COMMAND_AGENT_INPUT: &str = "agentinput";
