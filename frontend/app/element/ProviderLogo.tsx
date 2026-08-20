@@ -20,6 +20,7 @@ import githubSvg from "@lobehub/icons-static-svg/icons/github.svg?raw";
 import awsSvg from "@lobehub/icons-static-svg/icons/aws-color.svg?raw";
 import plandexUrl from "@/app/element/icons/plandex.png?url";
 import brainSvg from "@/app/asset/logo-brain.svg?raw";
+import agentmuxIconUrl from "@/app/asset/agentmux-icon.png?url";
 import type { JSX } from "solid-js";
 
 // Several of the raw SVGs above (notably logo-brain.svg, whose 16-stop
@@ -100,10 +101,9 @@ export const ProviderLogo = (props: ProviderLogoProps): JSX.Element => {
 
         if (p === "muxcode" || p === "mux-code" || p === "mux_code") return { html: brainSvg };
 
-        // AgentMux's own brand mark — the brain-alternate logo. `brainSvg`
-        // (@/app/asset/logo-brain.svg) is byte-identical to the source
-        // frontend/logos/agentmux-logo-brain-alternate.svg.
-        if (p === "agentmux") return { html: brainSvg };
+        // AgentMux's own brand mark — the app's block-tile icon (same mark as
+        // the taskbar/favicon icon, assets/linux/icons/hicolor/*/apps/agentmux.png).
+        if (p === "agentmux") return { png: agentmuxIconUrl };
 
         // Handcrafted multi-color Slack mark (the package ships only a mono
         // variant; the brand is recognized by its four colors).
