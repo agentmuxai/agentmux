@@ -292,6 +292,12 @@ const KNOWN_REGISTERED_UNDECLARED = [
     "agent.send",
     "agent.status",
     "agent.stop",
+    // Registered in agent1/memory-version-core; the frontend bindings land
+    // in the stacked agent1/memory-version-frontend PR, which removes
+    // these three entries once rpc-api.ts declares them.
+    "agent:memory:diff",
+    "agent:memory:history",
+    "agent:memory:revert",
     "bundle.delete",
     "bundle.export",
     "bundle.export_for_agent",
