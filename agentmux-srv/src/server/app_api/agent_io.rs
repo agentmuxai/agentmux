@@ -379,6 +379,28 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 }
 
+/// Core `agent.stop` logic, factored out so `fleet.bulk-stop`
+/// (`server/app_api/fleet.rs`) can loop it per target instead of
+/// duplicating the controller-lookup/stop/status-read sequence.
+pub(crate) fn stop_one_agent_block(block_id: &str, signal: Option<&str>) -> Result<AgentStopResult, String> {
+    tracing::info!(block_id = %block_id, signal = ?signal, "agent.stop");
+
+    let ctrl = blockcontroller::get_controller(block_id)
+        .ok_or_else(|| format!("NOT_RUNNING: no controller for block {block_id}"))?;
+
+    let force = matches!(signal, Some("SIGKILL") | Some("SIGTERM"));
+    ctrl.stop(!force, blockcontroller::STATUS_DONE)?;
+
+    let exit_code = blockcontroller::get_block_controller_status(block_id)
+        .map(|s| s.shellprocexitcode);
+
+    Ok(AgentStopResult {
+        block_id: block_id.to_string(),
+        status: "done".to_string(),
+        exit_code,
+    })
+}
+
 fn register_agent_stop(engine: &Arc<WshRpcEngine>, _state: &AppState) {
     engine.register_handler(
         COMMAND_AGENT_STOP_API,
@@ -386,23 +408,8 @@ fn register_agent_stop(engine: &Arc<WshRpcEngine>, _state: &AppState) {
             Box::pin(async move {
                 let cmd: CommandAgentStopApiData = serde_json::from_value(data)
                     .map_err(|e| format!("agent.stop: {e}"))?;
-
-                tracing::info!(block_id = %cmd.block_id, signal = ?cmd.signal, "agent.stop");
-
-                let ctrl = blockcontroller::get_controller(&cmd.block_id)
-                    .ok_or_else(|| format!("NOT_RUNNING: no controller for block {}", cmd.block_id))?;
-
-                let force = matches!(cmd.signal.as_deref(), Some("SIGKILL") | Some("SIGTERM"));
-                ctrl.stop(!force, blockcontroller::STATUS_DONE)?;
-
-                let exit_code = blockcontroller::get_block_controller_status(&cmd.block_id)
-                    .map(|s| s.shellprocexitcode);
-
-                Ok(Some(serde_json::to_value(&AgentStopResult {
-                    block_id: cmd.block_id,
-                    status: "done".to_string(),
-                    exit_code,
-                }).unwrap()))
+                let result = stop_one_agent_block(&cmd.block_id, cmd.signal.as_deref())?;
+                Ok(Some(serde_json::to_value(&result).unwrap()))
             })
         }),
     );

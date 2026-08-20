@@ -2440,3 +2440,263 @@ async fn muxspect_describe_last_error_is_null_for_a_block_with_no_output() {
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["last_error"], serde_json::Value::Null);
 }
+
+// ---------------------------------------------------------------------------
+// Fleet control — docs/specs/SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md
+// ---------------------------------------------------------------------------
+
+mod fleet_tests {
+    use super::*;
+    use crate::backend::rpc_types::{
+        FleetActionResult, FleetGroup, FleetGroupListResult, StagePlanInput,
+        COMMAND_FLEET_GROUP_CREATE, COMMAND_FLEET_GROUP_DELETE, COMMAND_FLEET_GROUP_LIST,
+        COMMAND_FLEET_GROUP_UPDATE,
+    };
+    use crate::server::app_api::fleet::{fleet_broadcast_impl, fleet_bulk_stop_impl};
+
+    #[tokio::test]
+    async fn broadcast_reports_a_failure_for_a_block_with_no_registered_agent() {
+        let state = test_state();
+        let unique = uuid::Uuid::new_v4();
+        let unregistered_block = format!("no-such-block-{unique}");
+
+        let result = fleet_broadcast_impl(
+            &state,
+            vec![unregistered_block.clone()],
+            "hello fleet".to_string(),
+            None,
+        );
+
+        assert!(result.succeeded.is_empty());
+        assert_eq!(result.failed.len(), 1);
+        assert_eq!(result.failed[0].id, unregistered_block);
+        assert!(
+            result.failed[0].error.contains("no registered agent"),
+            "expected a clear resolution error, got: {}",
+            result.failed[0].error
+        );
+    }
+
+    // A registered block must resolve past the "no registered agent" check —
+    // whatever inject_message itself then does (it has no real terminal to
+    // deliver into under test) is a separate concern already covered by
+    // reactive::handler's own test suite. This test's job is narrower:
+    // prove block_id -> agent_id resolution actually ran for a real
+    // registration, not the generic "unregistered" failure path above.
+    #[tokio::test]
+    async fn broadcast_resolves_a_registered_block_past_the_unregistered_check() {
+        let state = test_state();
+        let unique = uuid::Uuid::new_v4();
+        let agent_id = format!("fleet-test-agent-{unique}");
+        let block_id = format!("fleet-test-block-{unique}");
+        state.reactive_handler.register_agent(&agent_id, &block_id, None).unwrap();
+
+        let result = fleet_broadcast_impl(&state, vec![block_id.clone()], "hi".to_string(), None);
+
+        let outcome_ids: Vec<&str> = result
+            .succeeded
+            .iter()
+            .map(|s| s.as_str())
+            .chain(result.failed.iter().map(|f| f.id.as_str()))
+            .collect();
+        assert_eq!(outcome_ids, vec![block_id.as_str()], "exactly one outcome for the one target");
+        if let Some(failure) = result.failed.first() {
+            assert!(
+                !failure.error.contains("no registered agent"),
+                "a registered block must not fail resolution: {}",
+                failure.error
+            );
+        }
+    }
+
+    // Multi-target: one registered, one not — proves partial results are
+    // reported per-target (never a single aggregate outcome for the whole
+    // call), per the spec's §3/§5.4 "never a single aggregate toast" rule.
+    #[tokio::test]
+    async fn broadcast_reports_independent_outcomes_per_target() {
+        let state = test_state();
+        let unique = uuid::Uuid::new_v4();
+        let agent_id = format!("fleet-test-agent-{unique}");
+        let good_block = format!("fleet-test-block-good-{unique}");
+        let bad_block = format!("fleet-test-block-bad-{unique}");
+        state.reactive_handler.register_agent(&agent_id, &good_block, None).unwrap();
+
+        let result = fleet_broadcast_impl(
+            &state,
+            vec![good_block.clone(), bad_block.clone()],
+            "hi".to_string(),
+            None,
+        );
+
+        let bad_failure = result.failed.iter().find(|f| f.id == bad_block);
+        assert!(bad_failure.is_some(), "unregistered target must be reported as failed");
+        assert!(bad_failure.unwrap().error.contains("no registered agent"));
+        // The good block produced exactly one outcome (succeeded or failed
+        // for a DIFFERENT reason than "unregistered") — never silently
+        // dropped just because a sibling target failed.
+        let good_outcome_count = result.succeeded.iter().filter(|s| **s == good_block).count()
+            + result.failed.iter().filter(|f| f.id == good_block).count();
+        assert_eq!(good_outcome_count, 1, "the registered target must produce exactly one outcome");
+    }
+
+    fn stop_result(targets: Vec<String>, staged: Option<StagePlanInput>) -> FleetActionResult {
+        fleet_bulk_stop_impl(targets, None, staged)
+    }
+
+    #[tokio::test]
+    async fn bulk_stop_reports_a_failure_per_target_with_no_live_controller() {
+        let targets = vec!["blk-a".to_string(), "blk-b".to_string(), "blk-c".to_string()];
+        let result = stop_result(targets.clone(), None);
+
+        assert!(result.succeeded.is_empty());
+        assert_eq!(result.failed.len(), 3);
+        assert!(!result.aborted_early);
+        let failed_ids: Vec<&str> = result.failed.iter().map(|f| f.id.as_str()).collect();
+        assert_eq!(failed_ids, vec!["blk-a", "blk-b", "blk-c"]);
+        for f in &result.failed {
+            assert!(f.error.contains("NOT_RUNNING"), "expected a controller-lookup failure, got: {}", f.error);
+        }
+    }
+
+    // Every target fails under test (no live controller reachable), so a
+    // staged plan with any max_fail_percentage below 100 must abort after
+    // its first batch and record the untried remainder distinctly (never
+    // silently drop them — succeeded+failed must always equal the original
+    // target count).
+    #[tokio::test]
+    async fn bulk_stop_staged_aborts_early_and_accounts_for_every_target() {
+        let targets: Vec<String> = (0..5).map(|i| format!("blk-{i}")).collect();
+        let result = stop_result(
+            targets.clone(),
+            Some(StagePlanInput { batch_size: 2, max_fail_percentage: 50 }),
+        );
+
+        assert!(result.aborted_early);
+        assert!(result.succeeded.is_empty());
+        assert_eq!(result.failed.len(), 5, "every target must be accounted for, tried or skipped");
+
+        // First batch (blk-0, blk-1) actually attempted.
+        let attempted: Vec<&str> = result.failed[..2].iter().map(|f| f.id.as_str()).collect();
+        assert_eq!(attempted, vec!["blk-0", "blk-1"]);
+        for f in &result.failed[..2] {
+            assert!(f.error.contains("NOT_RUNNING"));
+        }
+        // Remaining three were skipped, not attempted.
+        for f in &result.failed[2..] {
+            assert!(f.error.contains("skipped"), "expected a skip marker, got: {}", f.error);
+        }
+    }
+
+    // max_fail_percentage=100 never trips (100% failure is never > 100%),
+    // so a staged plan with that threshold runs every batch to completion.
+    #[tokio::test]
+    async fn bulk_stop_staged_with_max_fail_percentage_100_never_aborts() {
+        let targets: Vec<String> = (0..5).map(|i| format!("blk-{i}")).collect();
+        let result = stop_result(
+            targets.clone(),
+            Some(StagePlanInput { batch_size: 2, max_fail_percentage: 100 }),
+        );
+
+        assert!(!result.aborted_early);
+        assert_eq!(result.failed.len(), 5);
+        for f in &result.failed {
+            assert!(f.error.contains("NOT_RUNNING"), "expected every target actually attempted, got: {}", f.error);
+        }
+    }
+
+    // Exercises the actual registered RPC handlers (deserialize -> store call
+    // -> serialize), not just the store layer directly (already covered by
+    // `agent_groups.rs`'s own unit tests) — same
+    // `WshRpcEngine::new()` + `handle_message` + response-channel pattern
+    // `agent_handlers::core`'s `exportagents` tests already use.
+    #[tokio::test]
+    async fn group_crud_roundtrips_through_the_rpc_handlers() {
+        use crate::backend::rpc::engine::WshRpcEngine;
+        use crate::backend::rpc_types::RpcMessage;
+
+        let state = test_state();
+        let (engine, mut output_rx) = WshRpcEngine::new();
+        crate::server::app_api::fleet::register(&engine, &state);
+
+        async fn call(
+            engine: &std::sync::Arc<WshRpcEngine>,
+            output_rx: &mut tokio::sync::mpsc::UnboundedReceiver<RpcMessage>,
+            command: &str,
+            data: serde_json::Value,
+        ) -> RpcMessage {
+            engine.handle_message(RpcMessage {
+                command: command.to_string(),
+                reqid: uuid::Uuid::new_v4().to_string(),
+                data: Some(data),
+                ..Default::default()
+            });
+            tokio::time::timeout(std::time::Duration::from_secs(2), output_rx.recv())
+                .await
+                .expect("handler should respond within 2s")
+                .expect("response channel should not close")
+        }
+
+        let created = call(
+            &engine,
+            &mut output_rx,
+            COMMAND_FLEET_GROUP_CREATE,
+            serde_json::json!({ "name": "backend", "member_ids": ["b1", "b2"] }),
+        ).await;
+        assert!(created.error.is_empty(), "create failed: {}", created.error);
+        let created: FleetGroup = serde_json::from_value(created.data.unwrap()).unwrap();
+        assert_eq!(created.name, "backend");
+        assert_eq!(created.member_ids, vec!["b1".to_string(), "b2".to_string()]);
+
+        let listed = call(&engine, &mut output_rx, COMMAND_FLEET_GROUP_LIST, serde_json::json!({})).await;
+        assert!(listed.error.is_empty());
+        let listed: FleetGroupListResult = serde_json::from_value(listed.data.unwrap()).unwrap();
+        assert_eq!(listed.groups.len(), 1);
+        assert_eq!(listed.groups[0].id, created.id);
+
+        let updated = call(
+            &engine,
+            &mut output_rx,
+            COMMAND_FLEET_GROUP_UPDATE,
+            serde_json::json!({ "id": created.id, "name": "backend-2" }),
+        ).await;
+        assert!(updated.error.is_empty(), "update failed: {}", updated.error);
+        let updated: FleetGroup = serde_json::from_value(updated.data.unwrap()).unwrap();
+        assert_eq!(updated.name, "backend-2");
+        assert_eq!(updated.member_ids, vec!["b1".to_string(), "b2".to_string()], "untouched field must survive");
+
+        let deleted = call(
+            &engine,
+            &mut output_rx,
+            COMMAND_FLEET_GROUP_DELETE,
+            serde_json::json!({ "id": created.id }),
+        ).await;
+        assert!(deleted.error.is_empty());
+        assert_eq!(deleted.data.unwrap()["ok"], serde_json::Value::Bool(true));
+
+        let listed_after = call(&engine, &mut output_rx, COMMAND_FLEET_GROUP_LIST, serde_json::json!({})).await;
+        let listed_after: FleetGroupListResult = serde_json::from_value(listed_after.data.unwrap()).unwrap();
+        assert!(listed_after.groups.is_empty());
+    }
+
+    #[tokio::test]
+    async fn group_update_on_a_missing_id_errors_instead_of_silently_no_opping() {
+        use crate::backend::rpc::engine::WshRpcEngine;
+        use crate::backend::rpc_types::RpcMessage;
+
+        let state = test_state();
+        let (engine, mut output_rx) = WshRpcEngine::new();
+        crate::server::app_api::fleet::register(&engine, &state);
+
+        engine.handle_message(RpcMessage {
+            command: COMMAND_FLEET_GROUP_UPDATE.to_string(),
+            reqid: "req-1".to_string(),
+            data: Some(serde_json::json!({ "id": "does-not-exist", "name": "x" })),
+            ..Default::default()
+        });
+        let resp = tokio::time::timeout(std::time::Duration::from_secs(2), output_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!resp.error.is_empty(), "updating a nonexistent group must error, not silently no-op");
+    }
+}
