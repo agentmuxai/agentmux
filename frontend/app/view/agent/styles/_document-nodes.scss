@@ -435,7 +435,8 @@
             padding: var(--space-2) 0;
         }
 
-        .agent-tool-agent {
+        .agent-tool-agent,
+        .agent-tool-workflow {
             .agent-tool-agent-desc {
                 color: var(--secondary-text-color);
                 font-size: 12px;
@@ -449,6 +450,62 @@
                 max-height: 200px;
                 overflow-y: auto;
                 overscroll-behavior: contain;
+            }
+        }
+
+        // DispatchCard — compact live-status card replacing the raw JSON
+        // dump for Agent/Task/Workflow tool calls that ordinal-matched a
+        // live AgentDispatch. See tool-renderers/DispatchCard.tsx.
+        .agent-dispatch-card {
+            display: flex;
+            align-items: center;
+            gap: var(--space-1);
+            padding: var(--space-1) var(--space-2);
+            border-radius: var(--radius-2, 4px);
+            background: color-mix(in srgb, var(--term-bright-magenta) 8%, transparent);
+            cursor: default;
+            font-size: 12px;
+
+            &:hover {
+                background: color-mix(in srgb, var(--term-bright-magenta) 14%, transparent);
+
+                .agent-dispatch-card-view-link {
+                    opacity: 1;
+                }
+            }
+
+            .agent-dispatch-card-status-icon {
+                flex-shrink: 0;
+            }
+
+            .agent-dispatch-card-name {
+                font-weight: 500;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .agent-dispatch-card-members {
+                color: var(--secondary-text-color);
+                font-family: var(--fixed-font, monospace);
+                font-variant-numeric: tabular-nums;
+                flex-shrink: 0;
+            }
+
+            .agent-dispatch-card-view-link {
+                margin-left: auto;
+                color: var(--accent-color);
+                flex-shrink: 0;
+                opacity: 0.7;
+                transition: opacity 0.15s ease;
+            }
+
+            &.agent-dispatch-card-running .agent-dispatch-card-status-icon {
+                color: var(--warning-color);
+            }
+
+            &.agent-dispatch-card-done .agent-dispatch-card-status-icon {
+                color: var(--success-color);
             }
         }
 
@@ -504,6 +561,7 @@
     .agent-tool-block[data-tool="glob"]   .agent-tool-name { color: var(--term-bright-cyan); }
     .agent-tool-block[data-tool="agent"]  .agent-tool-name { color: var(--term-bright-magenta); }
     .agent-tool-block[data-tool="task"]   .agent-tool-name { color: var(--secondary-text-color); }
+    .agent-tool-block[data-tool="workflow"] .agent-tool-name { color: var(--term-bright-magenta); }
     .agent-tool-block[data-tool="other"]  .agent-tool-name { color: var(--secondary-text-color); }
 
     // Per-tool left-border identity colors — terminal (non-running, non-failed, non-pinned) state.
@@ -516,6 +574,7 @@
     .agent-tool-block[data-tool="grep"]:not(.running):not(.failed):not(.pinned),
     .agent-tool-block[data-tool="glob"]:not(.running):not(.failed):not(.pinned)      { border-left-color: var(--term-bright-cyan); }
     .agent-tool-block[data-tool="agent"]:not(.running):not(.failed):not(.pinned)     { border-left-color: var(--term-bright-magenta); }
+    .agent-tool-block[data-tool="workflow"]:not(.running):not(.failed):not(.pinned)  { border-left-color: var(--term-bright-magenta); }
     .agent-tool-block[data-tool="webfetch"]:not(.running):not(.failed):not(.pinned),
     .agent-tool-block[data-tool="websearch"]:not(.running):not(.failed):not(.pinned) { border-left-color: var(--term-bright-blue); }
 
@@ -546,6 +605,7 @@
         &.pill-written  { color: var(--success-color);       background: color-mix(in srgb, var(--success-color)       14%, transparent); }
         &.pill-edited   { color: var(--warning-color);       background: color-mix(in srgb, var(--warning-color)       14%, transparent); }
         &.pill-agent    { color: var(--term-bright-magenta); background: color-mix(in srgb, var(--term-bright-magenta) 12%, transparent); }
+        &.pill-agent-running { color: var(--warning-color); background: color-mix(in srgb, var(--warning-color) 14%, transparent); }
     }
 
     // Glob file list — shown when CompactResult is expanded for a Glob result.

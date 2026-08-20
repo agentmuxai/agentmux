@@ -64,6 +64,14 @@ function summarize(tool: string, params: Record<string, any>, result: any): stri
             if (result.status) return `Status: ${result.status}`;
             break;
         }
+        case "Workflow": {
+            if (result.status) return `Status: ${result.status}`;
+            if (result.content && typeof result.content === "string") {
+                const trimmed = result.content.trim();
+                return trimmed.length > 150 ? trimmed.slice(0, 150) + "..." : trimmed;
+            }
+            break;
+        }
     }
 
     // Generic: extract known content fields

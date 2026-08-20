@@ -27,12 +27,16 @@
  */
 
 import { type JSX } from "solid-js";
+import type { AgentDispatch } from "../../swarm/swarm-model";
 import type { ToolNode } from "../types";
 import { ToolOverlayLog } from "./ToolOverlayLog";
 
 export interface ToolBlockOverlayProps {
     node: ToolNode;
     previewFontScale?: () => number;
+    /** Ordinal-matched live dispatch for an Agent/Task/Workflow tool call —
+     *  see `activity/dispatch-correlation.ts`. */
+    dispatchMatch?: AgentDispatch;
 }
 
 const STATUS_LABEL: Record<ToolNode["status"], string> = {
@@ -60,7 +64,7 @@ export const ToolBlockOverlay = (props: ToolBlockOverlayProps): JSX.Element => (
                 {STATUS_LABEL[props.node.status]}
             </span>
         </div>
-        <ToolOverlayLog node={props.node} fontScale={props.previewFontScale} />
+        <ToolOverlayLog node={props.node} fontScale={props.previewFontScale} dispatchMatch={props.dispatchMatch} />
     </div>
 );
 

@@ -44,6 +44,7 @@ import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import clsx from "clsx";
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { extractToolDetail } from "../stream-parser";
+import type { AgentDispatch } from "../../swarm/swarm-model";
 import type { BashResult, EditResult, GlobResult, GrepResult, ToolNode, WriteResult } from "../types";
 import { AnsweredQuestionMessage } from "./AnsweredQuestionMessage";
 import { PeekOverlay } from "./PeekOverlay";
@@ -98,6 +99,10 @@ interface ToolBlockProps {
     onTogglePin: () => void;
     /** Mark this tool held-open — called once on its active→inactive transition. */
     onHoldOpen?: () => void;
+    /** Ordinal-matched live dispatch for an Agent/Task/Workflow tool call —
+     *  see `activity/dispatch-correlation.ts`. Undefined when no confident
+     *  match was found, or for any other tool kind. */
+    dispatchMatch?: AgentDispatch;
 }
 
 const STATUS_ICON: Record<ToolNode["status"], string> = {
@@ -222,6 +227,28 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // DOM is stable when the pane is resized through the breakpoint).
     const resultPill = (): { label: string; variant: string } | null => {
         const s = props.node.status;
+
+        // Agent/Task/Workflow: prefer the live ordinal-matched dispatch
+        // status (see activity/dispatch-correlation.ts) over the tool
+        // call's own status. Deliberately bypasses the running/no-result
+        // gate below — the whole point is showing progress WHILE the
+        // subagent/workflow is still running, long before the parent's own
+        // tool_use resolves.
+        if (props.node.tool === "Agent" || props.node.tool === "Task" || props.node.tool === "Workflow") {
+            const d = props.dispatchMatch;
+            if (d) {
+                if (d.status === "running") {
+                    return d.kind === "workflow"
+                        ? { label: `${d.members_done}/${d.member_count}`, variant: "agent-running" }
+                        : { label: "running", variant: "agent-running" };
+                }
+                return { label: "done", variant: "agent" };
+            }
+            // No confident match — fall back to today's static, result-gated behavior.
+            if (s === "running" || s === "pending_approval" || !props.node.result) return null;
+            return s === "success" ? { label: "done", variant: "agent" } : null;
+        }
+
         if (s === "running" || s === "pending_approval" || !props.node.result) return null;
         const r = props.node.result as any;
         switch (props.node.tool) {
@@ -267,8 +294,6 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                     ? { label: `${n} line${n === 1 ? "" : "s"}`, variant: "edited" }
                     : { label: "edited", variant: "edited" };
             }
-            case "Agent":
-                return s === "success" ? { label: "done", variant: "agent" } : null;
             default:
                 return null;
         }
@@ -486,7 +511,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                     aria-hidden={!expanded()}
                     onClick={(e) => e.stopPropagation()}
                 >
-                    <ToolBlockOverlay node={props.node} previewFontScale={previewFontScale} />
+                    <ToolBlockOverlay node={props.node} previewFontScale={previewFontScale} dispatchMatch={props.dispatchMatch} />
                 </div>
             </div>
         </Show>
