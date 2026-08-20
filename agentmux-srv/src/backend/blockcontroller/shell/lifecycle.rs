@@ -848,6 +848,58 @@ impl Controller for ShellController {
             });
         }
 
+        // A declared-background descendant (bashwrap, and transitively
+        // whatever it PTY-spawned, e.g. `task dev`) deliberately detaches
+        // into its OWN session at startup (`setsid()` in bash_wrap.rs's
+        // `detach_declared_background_session`), specifically so a
+        // session-RESTART's narrower kill (`stop_for_replace`, above)
+        // can't reach it via PTY-hangup/session-leader-death SIGHUP. But
+        // that same detachment also removes it from THIS process's group
+        // — so the group-wide kill just above (intended to reach it on a
+        // genuine STOP, e.g. pane close) no longer can either. On
+        // non-Windows, nothing else fills that gap:
+        // `process_tracker::new_tracker` returns the no-op `StubTracker`
+        // there (no real cgroup/pgrp tracker is implemented — see
+        // `detach_declared_background_session`'s doc comment), so
+        // `delete_controller`'s `registry.remove()` was never doing
+        // anything for it either. Without this step, `stop()` (the real,
+        // unmodified deletion path — used by `delete_tab`/`delete_block`/
+        // `wcore::tab`) would leak it forever on Linux/macOS (reagentx
+        // finding, PR #2683). Kill each `Running`, known-pid declared-
+        // background task's own (detached) process group explicitly, by
+        // pid from the durable registry — the one piece of state that
+        // still knows about it once it's escaped this controller's own
+        // process tree. Windows is unaffected: Job Object membership
+        // isn't process-group-based, so `delete_controller`'s existing
+        // whole-job close already reaches it there, unchanged.
+        #[cfg(unix)]
+        if let Some(store) = &self.wstore {
+            match store.background_task_list_for_block(&self.block_id) {
+                Ok(tasks) => {
+                    for task in tasks {
+                        if task.status != crate::backend::storage::background_tasks::BackgroundTaskStatus::Running {
+                            continue;
+                        }
+                        let Some(pid) = task.pid else { continue };
+                        let pid = pid as libc::pid_t;
+                        // SAFETY: kill() is a well-defined POSIX syscall.
+                        unsafe { libc::kill(-pid, libc::SIGTERM) };
+                        tokio::spawn(async move {
+                            tokio::time::sleep(tokio::time::Duration::from_secs(KILL_GRACE_SECS)).await;
+                            unsafe { libc::kill(-pid, libc::SIGKILL) };
+                        });
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        block_id = %self.block_id,
+                        error = %e,
+                        "stop(): failed to list declared-background tasks for cleanup",
+                    );
+                }
+            }
+        }
+
         Ok(())
     }
 
