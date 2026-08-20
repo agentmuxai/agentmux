@@ -52,57 +52,69 @@ export function FleetToolbar({ model }: { model: SwarmViewModel }): JSX.Element 
         await model.saveSelectionAsGroup(name);
     };
 
+    // Shown whenever there's either a live selection to act on OR a saved
+    // group to offer — a saved group must stay reachable as a one-click way
+    // to RESTORE a selection even when nothing is currently checked (Codex
+    // P2, PR #2687 review: the whole toolbar, including the group picker,
+    // used to be gated on count() > 0, so a group could never be the FIRST
+    // thing a user reached for).
+    const showToolbar = () => count() > 0 || model.fleetGroupsAtom().length > 0;
+
     return (
-        <Show when={count() > 0}>
+        <Show when={showToolbar()}>
             <div class="swarm-fleet-toolbar">
                 {/* Never "act on selected" without stating the concrete count
                     first (spec §3: hidden scope is the top accidental-broadcast
-                    cause). */}
-                <span class="swarm-fleet-toolbar-count">{count()} selected</span>
+                    cause). Selection-dependent actions below are gated on
+                    count() > 0 individually — only the group picker (and this
+                    bar's own visibility) doesn't require a selection. */}
+                <Show when={count() > 0}>
+                    <span class="swarm-fleet-toolbar-count">{count()} selected</span>
 
-                <Show
-                    when={!broadcastOpen()}
-                    fallback={
-                        <div class="swarm-fleet-broadcast-inline">
-                            <input
-                                type="text"
-                                class="swarm-fleet-broadcast-input"
-                                placeholder={`Message to send to ${count()} agents…`}
-                                value={broadcastText()}
-                                onInput={(e) => setBroadcastText(e.currentTarget.value)}
-                                onKeyDown={(e) => {
-                                    if (e.key === "Enter") void sendBroadcast();
-                                    if (e.key === "Escape") { setBroadcastOpen(false); setBroadcastText(""); }
-                                }}
-                                autofocus
-                            />
-                            <button
-                                type="button"
-                                class="swarm-fleet-btn swarm-fleet-btn--primary"
-                                disabled={!broadcastText().trim() || model.fleetActionInFlightAtom()}
-                                onClick={() => void sendBroadcast()}
-                            >
-                                Send
-                            </button>
-                            <button type="button" class="swarm-fleet-btn" onClick={() => { setBroadcastOpen(false); setBroadcastText(""); }}>
-                                Cancel
-                            </button>
-                        </div>
-                    }
-                >
-                    <button type="button" class="swarm-fleet-btn" onClick={() => setBroadcastOpen(true)}>
-                        <i class="fa-solid fa-tower-broadcast" /> Broadcast
+                    <Show
+                        when={!broadcastOpen()}
+                        fallback={
+                            <div class="swarm-fleet-broadcast-inline">
+                                <input
+                                    type="text"
+                                    class="swarm-fleet-broadcast-input"
+                                    placeholder={`Message to send to ${count()} agents…`}
+                                    value={broadcastText()}
+                                    onInput={(e) => setBroadcastText(e.currentTarget.value)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") void sendBroadcast();
+                                        if (e.key === "Escape") { setBroadcastOpen(false); setBroadcastText(""); }
+                                    }}
+                                    autofocus
+                                />
+                                <button
+                                    type="button"
+                                    class="swarm-fleet-btn swarm-fleet-btn--primary"
+                                    disabled={!broadcastText().trim() || model.fleetActionInFlightAtom()}
+                                    onClick={() => void sendBroadcast()}
+                                >
+                                    Send
+                                </button>
+                                <button type="button" class="swarm-fleet-btn" onClick={() => { setBroadcastOpen(false); setBroadcastText(""); }}>
+                                    Cancel
+                                </button>
+                            </div>
+                        }
+                    >
+                        <button type="button" class="swarm-fleet-btn" onClick={() => setBroadcastOpen(true)}>
+                            <i class="fa-solid fa-tower-broadcast" /> Broadcast
+                        </button>
+                    </Show>
+
+                    <button
+                        type="button"
+                        class="swarm-fleet-btn swarm-fleet-btn--destructive"
+                        disabled={model.fleetActionInFlightAtom()}
+                        onClick={() => setStopConfirmOpen(true)}
+                    >
+                        <i class="fa-solid fa-stop" /> Stop {count()}
                     </button>
                 </Show>
-
-                <button
-                    type="button"
-                    class="swarm-fleet-btn swarm-fleet-btn--destructive"
-                    disabled={model.fleetActionInFlightAtom()}
-                    onClick={() => setStopConfirmOpen(true)}
-                >
-                    <i class="fa-solid fa-stop" /> Stop {count()}
-                </button>
 
                 <div class="swarm-fleet-group-picker">
                     <button type="button" class="swarm-fleet-btn" onClick={() => setGroupPickerOpen((v) => !v)}>
@@ -110,34 +122,39 @@ export function FleetToolbar({ model }: { model: SwarmViewModel }): JSX.Element 
                     </button>
                     <Show when={groupPickerOpen()}>
                         <div class="swarm-fleet-group-dropdown">
-                            <Show
-                                when={savingGroupName() !== null}
-                                fallback={
-                                    <button
-                                        type="button"
-                                        class="swarm-fleet-group-dropdown-item swarm-fleet-group-dropdown-item--action"
-                                        onClick={() => setSavingGroupName("")}
-                                    >
-                                        Save selection as group…
-                                    </button>
-                                }
-                            >
-                                <div class="swarm-fleet-group-save-inline">
-                                    <input
-                                        type="text"
-                                        placeholder="Group name"
-                                        value={savingGroupName() ?? ""}
-                                        onInput={(e) => setSavingGroupName(e.currentTarget.value)}
-                                        onKeyDown={(e) => {
-                                            if (e.key === "Enter") void submitSaveGroup();
-                                            if (e.key === "Escape") setSavingGroupName(null);
-                                        }}
-                                        autofocus
-                                    />
-                                    <button type="button" class="swarm-fleet-btn swarm-fleet-btn--primary" onClick={() => void submitSaveGroup()}>
-                                        Save
-                                    </button>
-                                </div>
+                            {/* Saving only makes sense against a non-empty
+                                selection — applying/deleting an EXISTING
+                                group below never requires one. */}
+                            <Show when={count() > 0}>
+                                <Show
+                                    when={savingGroupName() !== null}
+                                    fallback={
+                                        <button
+                                            type="button"
+                                            class="swarm-fleet-group-dropdown-item swarm-fleet-group-dropdown-item--action"
+                                            onClick={() => setSavingGroupName("")}
+                                        >
+                                            Save selection as group…
+                                        </button>
+                                    }
+                                >
+                                    <div class="swarm-fleet-group-save-inline">
+                                        <input
+                                            type="text"
+                                            placeholder="Group name"
+                                            value={savingGroupName() ?? ""}
+                                            onInput={(e) => setSavingGroupName(e.currentTarget.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === "Enter") void submitSaveGroup();
+                                                if (e.key === "Escape") setSavingGroupName(null);
+                                            }}
+                                            autofocus
+                                        />
+                                        <button type="button" class="swarm-fleet-btn swarm-fleet-btn--primary" onClick={() => void submitSaveGroup()}>
+                                            Save
+                                        </button>
+                                    </div>
+                                </Show>
                             </Show>
                             <Show when={model.fleetGroupsAtom().length > 0} fallback={<div class="swarm-fleet-group-dropdown-empty">No saved groups yet</div>}>
                                 <For each={model.fleetGroupsAtom()}>
@@ -167,9 +184,11 @@ export function FleetToolbar({ model }: { model: SwarmViewModel }): JSX.Element 
                     </Show>
                 </div>
 
-                <button type="button" class="swarm-fleet-btn swarm-fleet-toolbar-clear" onClick={() => model.clearSelection()}>
-                    Clear
-                </button>
+                <Show when={count() > 0}>
+                    <button type="button" class="swarm-fleet-btn swarm-fleet-toolbar-clear" onClick={() => model.clearSelection()}>
+                        Clear
+                    </button>
+                </Show>
             </div>
 
             <ConfirmModal

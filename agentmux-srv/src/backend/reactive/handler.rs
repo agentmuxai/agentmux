@@ -1033,6 +1033,39 @@ impl ReactiveHandler {
         self.inner.lock().unwrap().get_audit_log(limit)
     }
 
+    /// Records an action that isn't a jekt injection (currently: fleet
+    /// bulk-stop — `agentmux-srv/src/server/app_api/fleet.rs`) into the SAME
+    /// audit ring buffer, so it shows up in Warden's Audit tab exactly like
+    /// an ordinary injection (`SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md`
+    /// §6 — fleet actions get visibility there without Warden owning any
+    /// new code). `action` fills the slot `log_audit` normally uses for the
+    /// injected message text (e.g. `"fleet.bulk-stop"`); `target_agent` is
+    /// the resolved agent name for `block_id` when known, else `block_id`
+    /// itself (an unregistered/already-stopped block has no agent to name).
+    #[allow(clippy::too_many_arguments)]
+    pub fn log_fleet_action_audit(
+        &self,
+        source_agent: Option<&str>,
+        target_agent: &str,
+        block_id: &str,
+        action: &str,
+        success: bool,
+        error_message: Option<&str>,
+        request_id: &str,
+    ) {
+        self.inner.lock().unwrap().log_audit(
+            source_agent,
+            target_agent,
+            block_id,
+            action,
+            success,
+            error_message,
+            request_id,
+            None,
+            None,
+        );
+    }
+
     /// See the inner [`Handler::record_supervisor_decision`].
     pub fn record_supervisor_decision(
         &self,

@@ -1025,9 +1025,10 @@ async fn handle_agent_memory_write(
 /// once. Backs the `FleetBulkStop` MCP tool. Infallible per-target (never
 /// a single bool) — see `FleetActionResult`'s doc comment.
 async fn handle_fleet_bulk_stop(
+    State(state): State<AppState>,
     Json(req): Json<crate::backend::rpc_types::CommandFleetBulkStopData>,
 ) -> impl IntoResponse {
-    let result = app_api::fleet::fleet_bulk_stop_impl(req.targets, req.signal.as_deref(), req.staged);
+    let result = app_api::fleet::fleet_bulk_stop_impl(&state, req.targets, req.signal.as_deref(), req.staged);
     (StatusCode::OK, Json(result)).into_response()
 }
 

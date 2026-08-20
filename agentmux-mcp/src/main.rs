@@ -1347,58 +1347,130 @@ async fn call_tool(
                 .ok()
                 .filter(|s| !s.is_empty());
 
+            // `/agentmux/reactive/inject`'s `target_agent` resolves by
+            // registered AGENT NAME only (`agent_to_block`,
+            // agentmux-srv/src/backend/reactive/handler.rs) — never by
+            // block_id, even though this tool's own advertised contract
+            // (FLEET_BROADCAST_TOOL) is block_id values from FleetList, to
+            // stay consistent with FleetBulkStop's targeting scheme. The
+            // WS-RPC path (`fleet_broadcast_impl`, agentmux-srv) already
+            // resolves block_id -> agent_id via `get_agent_by_block` before
+            // injecting; this MCP path talks to srv over plain HTTP with no
+            // access to that in-process registry, so it resolves the same
+            // way DiscoverAgents/FleetList already do: read
+            // `/agentmux/discovery`'s `host.addressable` (each entry already
+            // carries both `agent_id` and a live `block_id`) and map through
+            // it before signing/injecting (Codex P1 + reagent P0, PR #2687
+            // review — every advertised call failed "agent not found"
+            // without this).
+            let discovery_url = format!("{}/agentmux/discovery", local_url.trim_end_matches('/'));
+            let discovery_resp = client
+                .get(&discovery_url)
+                .header("X-AuthKey", auth_key)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("discovery request failed: {e}"))?;
+            if !discovery_resp.status().is_success() {
+                let status = discovery_resp.status();
+                let text = discovery_resp.text().await.unwrap_or_default();
+                anyhow::bail!("discovery failed: HTTP {status} — {text}");
+            }
+            let discovery: Value = discovery_resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("discovery response parse failed: {e}"))?;
+            let block_to_agent: std::collections::HashMap<String, String> = discovery
+                .get("host")
+                .and_then(|h| h.get("addressable"))
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|e| {
+                            let agent_id = e.get("agent_id")?.as_str()?.to_string();
+                            let block_id = e.get("block_id")?.as_str()?.to_string();
+                            Some((block_id, agent_id))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
             // Same signed single-target delivery SendMessage uses, looped
             // once per target — only this process holds AGENTMUX_JEKT_KEY,
             // so per-message signing can only happen here (see this
             // tool's own doc comment). Never a single aggregate result:
             // per-target success/failure is collected below regardless of
-            // how many targets fail.
+            // how many targets fail. Sent in chunks with a pause between
+            // them — `/agentmux/reactive/inject` shares ReactiveHandler's
+            // global rate limiter (10/sec, hard reset per second, not a
+            // smooth refill — agentmux-srv/src/backend/reactive/mod.rs's
+            // RATE_LIMIT_MAX), and a tight loop past ~10 targets would
+            // otherwise deterministically fail the tail of any larger
+            // broadcast with "rate limit exceeded" (Codex P1, same review).
+            // Mirrors `fleet_broadcast_impl`'s own chunking constants —
+            // kept in sync by hand since this is a separate process/crate
+            // with no dependency on agentmux-srv internals.
+            const BROADCAST_CHUNK_SIZE: usize = 10;
+            const BROADCAST_CHUNK_PAUSE: std::time::Duration = std::time::Duration::from_millis(1100);
+
             let url = format!("{}/agentmux/reactive/inject", local_url.trim_end_matches('/'));
             let mut succeeded: Vec<String> = Vec::new();
             let mut failed: Vec<serde_json::Value> = Vec::new();
-            for target in targets {
-                let (request_id, ts_secs, jekt_sig, lan_sig) =
-                    sign_outgoing_jekt(source_agent.as_deref(), &target, message);
-                let req = InjectRequest {
-                    target_agent: target.clone(),
-                    message: message.to_string(),
-                    source_agent: source_agent.clone(),
-                    request_id: Some(request_id),
-                    ts_secs: Some(ts_secs),
-                    jekt_sig,
-                    lan_sig,
-                };
-                let outcome = async {
-                    let resp = client
-                        .post(&url)
-                        .header("X-AuthKey", auth_key)
-                        .json(&req)
-                        .send()
-                        .await
-                        .map_err(|e| format!("request failed: {e}"))?;
-                    if !resp.status().is_success() {
-                        let status = resp.status();
-                        let text = resp.text().await.unwrap_or_default();
-                        return Err(format!("HTTP {status} — {text}"));
-                    }
-                    let result: Value = resp
-                        .json()
-                        .await
-                        .map_err(|e| format!("response parse failed: {e}"))?;
-                    if result.get("success").and_then(|v| v.as_bool()) == Some(true) {
-                        Ok(())
-                    } else {
-                        Err(result
-                            .get("error")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("unknown error")
-                            .to_string())
-                    }
+            for (chunk_idx, chunk) in targets.chunks(BROADCAST_CHUNK_SIZE).enumerate() {
+                if chunk_idx > 0 {
+                    tokio::time::sleep(BROADCAST_CHUNK_PAUSE).await;
                 }
-                .await;
-                match outcome {
-                    Ok(()) => succeeded.push(target),
-                    Err(error) => failed.push(json!({ "id": target, "error": error })),
+                for target in chunk {
+                    let target = target.clone();
+                    let Some(target_agent) = block_to_agent.get(&target).cloned() else {
+                        failed.push(json!({
+                            "id": target,
+                            "error": "no registered agent for this block (not a live agent pane, or not yet registered)"
+                        }));
+                        continue;
+                    };
+                    let (request_id, ts_secs, jekt_sig, lan_sig) =
+                        sign_outgoing_jekt(source_agent.as_deref(), &target_agent, message);
+                    let req = InjectRequest {
+                        target_agent,
+                        message: message.to_string(),
+                        source_agent: source_agent.clone(),
+                        request_id: Some(request_id),
+                        ts_secs: Some(ts_secs),
+                        jekt_sig,
+                        lan_sig,
+                    };
+                    let outcome = async {
+                        let resp = client
+                            .post(&url)
+                            .header("X-AuthKey", auth_key)
+                            .json(&req)
+                            .send()
+                            .await
+                            .map_err(|e| format!("request failed: {e}"))?;
+                        if !resp.status().is_success() {
+                            let status = resp.status();
+                            let text = resp.text().await.unwrap_or_default();
+                            return Err(format!("HTTP {status} — {text}"));
+                        }
+                        let result: Value = resp
+                            .json()
+                            .await
+                            .map_err(|e| format!("response parse failed: {e}"))?;
+                        if result.get("success").and_then(|v| v.as_bool()) == Some(true) {
+                            Ok(())
+                        } else {
+                            Err(result
+                                .get("error")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unknown error")
+                                .to_string())
+                        }
+                    }
+                    .await;
+                    match outcome {
+                        Ok(()) => succeeded.push(target),
+                        Err(error) => failed.push(json!({ "id": target, "error": error })),
+                    }
                 }
             }
 

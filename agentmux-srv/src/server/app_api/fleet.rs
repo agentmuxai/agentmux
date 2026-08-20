@@ -26,6 +26,7 @@
 //! HTTP (`POST /api/v1/fleet/bulk-stop`) for `FleetBulkStop`.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::backend::reactive::types::InjectionRequest;
 use crate::backend::rpc::engine::WshRpcEngine;
@@ -33,6 +34,21 @@ use crate::backend::rpc_types::*;
 
 use super::AppState;
 use super::agent_io::stop_one_agent_block;
+
+/// `ReactiveHandler`'s injection rate limiter resets to `RATE_LIMIT_MAX`
+/// (10, `backend/reactive/mod.rs`) once per full second — a token-bucket
+/// hard reset, not smooth refill. A tight loop sending more than that many
+/// injections within one second exhausts it, and every target past the
+/// 10th in that window deterministically fails with "rate limit exceeded"
+/// (reagent/Codex P1, PR #2687 review). Chunking to this size and pausing
+/// just over a second between chunks keeps every chunk under the limiter's
+/// own budget instead of racing it. Not imported directly — `agentmux-mcp`
+/// is a separate process/crate with no dependency on `agentmux-srv`
+/// internals, so its own client-side broadcast loop (`FleetBroadcast`,
+/// `agentmux-mcp/src/main.rs`) mirrors this constant rather than sharing it;
+/// keep both in sync if `RATE_LIMIT_MAX` ever changes.
+const BROADCAST_CHUNK_SIZE: usize = 10;
+const BROADCAST_CHUNK_PAUSE: Duration = Duration::from_millis(1100);
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_fleet_broadcast(engine, state);
@@ -52,7 +68,7 @@ fn register_fleet_broadcast(engine: &Arc<WshRpcEngine>, state: &AppState) {
             Box::pin(async move {
                 let cmd: CommandFleetBroadcastData = serde_json::from_value(data)
                     .map_err(|e| format!("fleet.broadcast: {e}"))?;
-                let result = fleet_broadcast_impl(&state, cmd.targets, cmd.message, None);
+                let result = fleet_broadcast_impl(&state, cmd.targets, cmd.message, None).await;
                 Ok(Some(serde_json::to_value(&result).unwrap()))
             })
         }),
@@ -65,64 +81,88 @@ fn register_fleet_broadcast(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// in this codebase currently calls this with `Some(..)` (see the
 /// module doc comment for why an agent-initiated broadcast instead loops
 /// the client-side signed path).
-pub(crate) fn fleet_broadcast_impl(
+///
+/// Sends in chunks of `BROADCAST_CHUNK_SIZE`, pausing `BROADCAST_CHUNK_PAUSE`
+/// between chunks — see that constant's doc comment for why a tight loop
+/// would otherwise starve past `ReactiveHandler`'s own rate limiter.
+pub(crate) async fn fleet_broadcast_impl(
     state: &AppState,
     targets: Vec<String>,
     message: String,
     source_agent: Option<String>,
 ) -> FleetActionResult {
     let mut result = FleetActionResult::default();
-    for block_id in targets {
-        let Some(agent) = state.reactive_handler.get_agent_by_block(&block_id) else {
-            result.failed.push(FleetActionFailure {
-                id: block_id,
-                error: "no registered agent for this block (not a live agent pane, or not yet registered)".to_string(),
-            });
-            continue;
-        };
-        let req = InjectionRequest {
-            target_agent: agent.agent_id.clone(),
-            message: message.clone(),
-            source_agent: source_agent.clone(),
-            request_id: Some(uuid::Uuid::new_v4().to_string()),
-            ..Default::default()
-        };
-        let resp = state.reactive_handler.inject_message(req);
-        if resp.success {
-            result.succeeded.push(block_id);
-        } else {
-            result.failed.push(FleetActionFailure {
-                id: block_id,
-                error: resp.error.unwrap_or_else(|| "delivery failed".to_string()),
-            });
+    for (chunk_idx, chunk) in targets.chunks(BROADCAST_CHUNK_SIZE).enumerate() {
+        if chunk_idx > 0 {
+            tokio::time::sleep(BROADCAST_CHUNK_PAUSE).await;
+        }
+        for block_id in chunk {
+            let block_id = block_id.clone();
+            let Some(agent) = state.reactive_handler.get_agent_by_block(&block_id) else {
+                result.failed.push(FleetActionFailure {
+                    id: block_id,
+                    error: "no registered agent for this block (not a live agent pane, or not yet registered)".to_string(),
+                });
+                continue;
+            };
+            let req = InjectionRequest {
+                target_agent: agent.agent_id.clone(),
+                message: message.clone(),
+                source_agent: source_agent.clone(),
+                request_id: Some(uuid::Uuid::new_v4().to_string()),
+                ..Default::default()
+            };
+            let resp = state.reactive_handler.inject_message(req);
+            if resp.success {
+                result.succeeded.push(block_id);
+            } else {
+                result.failed.push(FleetActionFailure {
+                    id: block_id,
+                    error: resp.error.unwrap_or_else(|| "delivery failed".to_string()),
+                });
+            }
         }
     }
     result
 }
 
-fn register_fleet_bulk_stop(engine: &Arc<WshRpcEngine>, _state: &AppState) {
+fn register_fleet_bulk_stop(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let state = state.clone();
     engine.register_handler(
         COMMAND_FLEET_BULK_STOP,
         Box::new(move |data, _ctx| {
+            let state = state.clone();
             Box::pin(async move {
                 let cmd: CommandFleetBulkStopData = serde_json::from_value(data)
                     .map_err(|e| format!("fleet.bulk-stop: {e}"))?;
-                let result = fleet_bulk_stop_impl(cmd.targets, cmd.signal.as_deref(), cmd.staged);
+                let result = fleet_bulk_stop_impl(&state, cmd.targets, cmd.signal.as_deref(), cmd.staged);
                 Ok(Some(serde_json::to_value(&result).unwrap()))
             })
         }),
     );
 }
 
+const FLEET_BULK_STOP_AUDIT_ACTION: &str = "fleet.bulk-stop";
+
 /// Stops `targets` (block ids) via the existing single-target
-/// `stop_one_agent_block`, one call per target. Without `staged`, runs
-/// every target as a single batch (still returns full per-target detail,
-/// never a bool). With `staged`, targets are stopped `batch_size` at a
-/// time; if the failure rate WITHIN a completed batch exceeds
-/// `max_fail_percentage`, remaining targets are recorded as failed
-/// (untried) and `aborted_early` is set — caps blast radius on a bad
-/// selection rather than plowing through every remaining target.
+/// `stop_one_agent_block`, one call per target, and — unlike that
+/// single-target primitive, which involves no jekt signing and so was
+/// never audited — records one `AuditLogEntry` per target via
+/// `ReactiveHandler::log_fleet_action_audit`, so Warden's Audit tab sees
+/// every fleet-initiated stop (`SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md`
+/// §6; reagent/Codex P2, PR #2687 review — this was missing entirely).
+/// Without `staged`, runs every target as a single batch (still returns
+/// full per-target detail, never a bool). With `staged`, targets are
+/// stopped `batch_size` at a time; if the failure rate WITHIN a completed
+/// batch exceeds `max_fail_percentage`, remaining targets are recorded as
+/// failed (untried) and `aborted_early` is set — caps blast radius on a
+/// bad selection rather than plowing through every remaining target.
+/// `aborted_early` is only ever set when targets were genuinely left
+/// unattempted — tripping the threshold on the LAST batch (nothing left to
+/// skip) must not report "aborted early" when the full list actually ran
+/// (reagent P2, same review).
 pub(crate) fn fleet_bulk_stop_impl(
+    state: &AppState,
     targets: Vec<String>,
     signal: Option<&str>,
     staged: Option<StagePlanInput>,
@@ -137,32 +177,100 @@ pub(crate) fn fleet_bulk_stop_impl(
         let batch_len = batch.len();
         let mut batch_failures = 0usize;
         for block_id in batch {
+            let target_agent = state
+                .reactive_handler
+                .get_agent_by_block(&block_id)
+                .map(|a| a.agent_id)
+                .unwrap_or_else(|| block_id.clone());
+            let request_id = uuid::Uuid::new_v4().to_string();
             match stop_one_agent_block(&block_id, signal) {
-                Ok(_) => result.succeeded.push(block_id),
+                Ok(_) => {
+                    state.reactive_handler.log_fleet_action_audit(
+                        None, &target_agent, &block_id, FLEET_BULK_STOP_AUDIT_ACTION,
+                        true, None, &request_id,
+                    );
+                    result.succeeded.push(block_id);
+                }
                 Err(e) => {
+                    state.reactive_handler.log_fleet_action_audit(
+                        None, &target_agent, &block_id, FLEET_BULK_STOP_AUDIT_ACTION,
+                        false, Some(&e), &request_id,
+                    );
                     batch_failures += 1;
                     result.failed.push(FleetActionFailure { id: block_id, error: e });
                 }
             }
         }
         if let Some(max_pct) = max_fail_percentage {
-            let batch_fail_pct = (batch_failures * 100) / batch_len.max(1);
-            if batch_fail_pct as u8 > max_pct {
+            if exceeds_fail_threshold(batch_failures, batch_len, max_pct) {
                 // Remaining, untried targets are recorded as failed so the
                 // caller's succeeded+failed count always equals the
                 // original target count — never a silently-dropped subset.
+                let mut skipped_any = false;
                 for remaining in iter {
+                    skipped_any = true;
                     result.failed.push(FleetActionFailure {
                         id: remaining,
                         error: "skipped: staged rollout aborted after a prior batch's failure rate exceeded max_fail_percentage".to_string(),
                     });
                 }
-                result.aborted_early = true;
+                // Only a genuine early abort if something was actually left
+                // unattempted — tripping the threshold on the final batch
+                // ran the whole list, so it isn't "early" at all.
+                result.aborted_early = skipped_any;
                 break 'batches;
             }
         }
     }
     result
+}
+
+/// `batch_failures / batch_len` (as a percentage) exceeds `max_pct`.
+/// Cross-multiplies instead of computing a truncated integer percentage
+/// first — `batch_failures * 100 / batch_len` rounds DOWN before
+/// comparing, so e.g. 1 failure in a batch of 3 (33.3%) reads as 33 and
+/// never exceeds `max_pct = 33`, silently missing the threshold it was
+/// meant to catch (Codex P2, PR #2687 review). `batch_failures * 100 >
+/// max_pct * batch_len` is the same inequality with no rounding.
+fn exceeds_fail_threshold(batch_failures: usize, batch_len: usize, max_pct: u8) -> bool {
+    batch_failures * 100 > max_pct as usize * batch_len
+}
+
+#[cfg(test)]
+mod threshold_tests {
+    use super::exceeds_fail_threshold;
+
+    #[test]
+    fn one_in_three_at_33_percent_threshold_now_trips() {
+        // 1/3 = 33.33...% — the old truncated-integer comparison rounded
+        // this down to exactly 33 and never exceeded max_pct=33. The real
+        // rate DOES exceed 33%, so this must trip.
+        assert!(exceeds_fail_threshold(1, 3, 33));
+    }
+
+    #[test]
+    fn one_in_three_at_34_percent_threshold_does_not_trip() {
+        // 33.33% does not exceed a 34% threshold.
+        assert!(!exceeds_fail_threshold(1, 3, 34));
+    }
+
+    #[test]
+    fn zero_failures_never_trips() {
+        assert!(!exceeds_fail_threshold(0, 10, 0));
+    }
+
+    #[test]
+    fn all_failures_trips_any_threshold_below_100() {
+        assert!(exceeds_fail_threshold(5, 5, 99));
+        assert!(!exceeds_fail_threshold(5, 5, 100));
+    }
+
+    #[test]
+    fn two_in_seven_at_28_percent_threshold() {
+        // 2/7 = 28.57...% — exceeds a 28% threshold, does not exceed 29%.
+        assert!(exceeds_fail_threshold(2, 7, 28));
+        assert!(!exceeds_fail_threshold(2, 7, 29));
+    }
 }
 
 fn now_ms() -> i64 {

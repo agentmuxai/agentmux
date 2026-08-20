@@ -2465,7 +2465,7 @@ mod fleet_tests {
             vec![unregistered_block.clone()],
             "hello fleet".to_string(),
             None,
-        );
+        ).await;
 
         assert!(result.succeeded.is_empty());
         assert_eq!(result.failed.len(), 1);
@@ -2491,7 +2491,7 @@ mod fleet_tests {
         let block_id = format!("fleet-test-block-{unique}");
         state.reactive_handler.register_agent(&agent_id, &block_id, None).unwrap();
 
-        let result = fleet_broadcast_impl(&state, vec![block_id.clone()], "hi".to_string(), None);
+        let result = fleet_broadcast_impl(&state, vec![block_id.clone()], "hi".to_string(), None).await;
 
         let outcome_ids: Vec<&str> = result
             .succeeded
@@ -2526,7 +2526,7 @@ mod fleet_tests {
             vec![good_block.clone(), bad_block.clone()],
             "hi".to_string(),
             None,
-        );
+        ).await;
 
         let bad_failure = result.failed.iter().find(|f| f.id == bad_block);
         assert!(bad_failure.is_some(), "unregistered target must be reported as failed");
@@ -2539,14 +2539,15 @@ mod fleet_tests {
         assert_eq!(good_outcome_count, 1, "the registered target must produce exactly one outcome");
     }
 
-    fn stop_result(targets: Vec<String>, staged: Option<StagePlanInput>) -> FleetActionResult {
-        fleet_bulk_stop_impl(targets, None, staged)
+    fn stop_result(state: &AppState, targets: Vec<String>, staged: Option<StagePlanInput>) -> FleetActionResult {
+        fleet_bulk_stop_impl(state, targets, None, staged)
     }
 
     #[tokio::test]
     async fn bulk_stop_reports_a_failure_per_target_with_no_live_controller() {
+        let state = test_state();
         let targets = vec!["blk-a".to_string(), "blk-b".to_string(), "blk-c".to_string()];
-        let result = stop_result(targets.clone(), None);
+        let result = stop_result(&state, targets.clone(), None);
 
         assert!(result.succeeded.is_empty());
         assert_eq!(result.failed.len(), 3);
@@ -2565,8 +2566,10 @@ mod fleet_tests {
     // target count).
     #[tokio::test]
     async fn bulk_stop_staged_aborts_early_and_accounts_for_every_target() {
+        let state = test_state();
         let targets: Vec<String> = (0..5).map(|i| format!("blk-{i}")).collect();
         let result = stop_result(
+            &state,
             targets.clone(),
             Some(StagePlanInput { batch_size: 2, max_fail_percentage: 50 }),
         );
@@ -2591,8 +2594,10 @@ mod fleet_tests {
     // so a staged plan with that threshold runs every batch to completion.
     #[tokio::test]
     async fn bulk_stop_staged_with_max_fail_percentage_100_never_aborts() {
+        let state = test_state();
         let targets: Vec<String> = (0..5).map(|i| format!("blk-{i}")).collect();
         let result = stop_result(
+            &state,
             targets.clone(),
             Some(StagePlanInput { batch_size: 2, max_fail_percentage: 100 }),
         );
@@ -2602,6 +2607,66 @@ mod fleet_tests {
         for f in &result.failed {
             assert!(f.error.contains("NOT_RUNNING"), "expected every target actually attempted, got: {}", f.error);
         }
+    }
+
+    // Regression for reagent's P2 (PR #2687 review): tripping the failure
+    // threshold on the LAST batch must not report aborted_early, since
+    // nothing was actually left unattempted — the whole target list ran.
+    #[tokio::test]
+    async fn bulk_stop_does_not_report_aborted_early_when_the_failing_batch_is_the_last_one() {
+        let state = test_state();
+        // batch_size=5 with exactly 5 targets → a single batch. All 5 fail
+        // (no live controller under test), which exceeds any threshold
+        // below 100 — but there's no second batch left to skip.
+        let targets: Vec<String> = (0..5).map(|i| format!("blk-{i}")).collect();
+        let result = stop_result(
+            &state,
+            targets.clone(),
+            Some(StagePlanInput { batch_size: 5, max_fail_percentage: 50 }),
+        );
+
+        assert_eq!(result.failed.len(), 5, "every target was still attempted");
+        for f in &result.failed {
+            assert!(
+                f.error.contains("NOT_RUNNING"),
+                "every target must show a real attempt error, not a skip marker: {}",
+                f.error
+            );
+        }
+        assert!(
+            !result.aborted_early,
+            "the whole list ran (it was the last/only batch) — this must not read as an early abort"
+        );
+    }
+
+    // Regression for reagent/Codex P2 (PR #2687 review): bulk-stop must be
+    // visible in Warden's Audit tab, same as an ordinary jekt injection —
+    // this was missing entirely before this fix.
+    #[tokio::test]
+    async fn bulk_stop_writes_an_audit_entry_per_target() {
+        let state = test_state();
+        // ACTIVE_LOGIN-style caveat: get_audit_log reads a process-global
+        // ring buffer shared by every test in this binary (same singleton
+        // as ReactiveHandler itself) — filter by this test's own
+        // uuid-suffixed block_id rather than assuming a before/after
+        // length diff or `.last()` reflects only this test's own write.
+        let unique = uuid::Uuid::new_v4();
+        let agent_id = format!("fleet-audit-agent-{unique}");
+        let block_id = format!("fleet-audit-block-{unique}");
+        state.reactive_handler.register_agent(&agent_id, &block_id, None).unwrap();
+
+        let _ = stop_result(&state, vec![block_id.clone()], None);
+        let matching: Vec<_> = state
+            .reactive_handler
+            .get_audit_log(10_000)
+            .into_iter()
+            .filter(|e| e.block_id == block_id)
+            .collect();
+
+        assert_eq!(matching.len(), 1, "exactly one audit entry for this test's own block_id");
+        let entry = &matching[0];
+        assert_eq!(entry.target_agent, agent_id, "audit entry should resolve the block's registered agent name");
+        assert!(!entry.success, "the stop itself failed under test (no live controller) — audit must reflect that");
     }
 
     // Exercises the actual registered RPC handlers (deserialize -> store call
