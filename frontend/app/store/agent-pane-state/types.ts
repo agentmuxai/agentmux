@@ -325,6 +325,26 @@ export interface AgentPaneState {
      */
     attachedTask: AttachedTaskState | null;
     /**
+     * Earliest `started_at_ms` among this block's currently-`Running`
+     * `db_background_tasks` rows (Phase A/B of
+     * docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md),
+     * or `null`. A SEPARATE floor signal, not a duplicate of `attachedTask`
+     * above: the durable registry can know about a task the live transcript
+     * has no record of at all (e.g. it survived a session restart under a
+     * fresh controller generation — Phase B). Deliberately owned
+     * EXCLUSIVELY by its own two commands
+     * (`RegistryAttachedTaskObserved`/`RegistryAttachedTaskCleared`,
+     * dispatched only from `useBackgroundTaskRegistry.ts`) — no other
+     * command touches it, specifically so the transcript-derived
+     * `attachedTask` axis's own independent recompute-and-clear effect
+     * (`agent-view.tsx`'s attached-task effect) can never stomp on it. The
+     * effect instead READS this field and combines it with its own
+     * transcript-derived value (registry ∪ transcript, earliest start
+     * wins) rather than treating either source as sole truth. See the
+     * Codex P1 finding on PR #2685 this was written to address.
+     */
+    registryAttachedTaskSince: number | null;
+    /**
      * Wall-clock ms of the most recent REAL `CompactionBoundary` event
      * (backend-sourced, exact — not the ≥50%-drop heuristic below). The
      * `TokensIn` heuristic checks this before firing its own synthetic
@@ -357,6 +377,7 @@ export const initialState = (agentId: string): AgentPaneState => ({
     failure: null,
     compacting: null,
     attachedTask: null,
+    registryAttachedTaskSince: null,
     lastCompactionBoundaryAt: null,
 });
 
@@ -670,6 +691,18 @@ export type AgentPaneCommand =
      * `PinnedActivity` for this block just ended. No-op if already null.
      */
     | { type: "AttachedTaskCleared" }
+
+    // ── Registry-derived attached-task floor (Phase C of
+    // SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md) — see
+    // `registryAttachedTaskSince`'s doc comment above for why this is a
+    // separate axis rather than reusing AttachedTaskObserved/Cleared. ──
+    /** Sets `registryAttachedTaskSince` verbatim (idempotent set, not an
+     * edge-triggered toggle like AttachedTaskObserved — the registry's own
+     * earliest-running-task computation already handles the "already
+     * observed" case, so the reducer doesn't need its own no-op guard). */
+    | { type: "RegistryAttachedTaskObserved"; at: number }
+    /** Clears `registryAttachedTaskSince` back to null. */
+    | { type: "RegistryAttachedTaskCleared" }
     ;
 
 export type AgentPaneEvent =
@@ -869,7 +902,11 @@ export type AgentPaneEvent =
     /** `AttachedTaskObserved` set `state.attachedTask` (0→1 edge). */
     | { type: "attached-task-observed"; at: number }
     /** `AttachedTaskCleared` cleared `state.attachedTask` (1→0 edge). */
-    | { type: "attached-task-cleared" };
+    | { type: "attached-task-cleared" }
+    /** `RegistryAttachedTaskObserved` set `state.registryAttachedTaskSince`. */
+    | { type: "registry-attached-task-observed"; at: number }
+    /** `RegistryAttachedTaskCleared` cleared `state.registryAttachedTaskSince`. */
+    | { type: "registry-attached-task-cleared" };
 
 export interface ReducerResult {
     state: AgentPaneState;

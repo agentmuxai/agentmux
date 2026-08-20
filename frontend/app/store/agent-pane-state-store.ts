@@ -107,6 +107,15 @@ export interface AgentPaneProjections {
      * docs/specs/SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md.
      */
     attachedTask?: (next: AttachedTaskState | null) => void;
+    /**
+     * Live registry-derived attached-task floor, or null. Reducer-owned
+     * (see `AgentPaneState.registryAttachedTaskSince` /
+     * `RegistryAttachedTaskObserved` / `RegistryAttachedTaskCleared`) — a
+     * SEPARATE axis from `attachedTask` above, combined with it by
+     * `agent-view.tsx`'s attached-task effect rather than merged into it.
+     * See docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md.
+     */
+    registryAttachedTaskSince?: (next: number | null) => void;
 }
 
 interface Slot {
@@ -343,6 +352,7 @@ export function dispatch(
     proj("failure", prev.failure, slot.state.failure, slot.proj.failure);
     proj("compacting", prev.compacting, slot.state.compacting, slot.proj.compacting);
     proj("attachedTask", prev.attachedTask, slot.state.attachedTask, slot.proj.attachedTask);
+    proj("registryAttachedTaskSince", prev.registryAttachedTaskSince, slot.state.registryAttachedTaskSince, slot.proj.registryAttachedTaskSince);
 
     if (cascadeSetter != null) {
         console.warn(
