@@ -91,9 +91,7 @@ impl Store {
     /// inserting, so two truly concurrent calls for the same `(agent_id,
     /// filename)` (e.g. two panes of the same agent identity writing at
     /// once) could both read the same latest id and insert sibling
-    /// versions instead of a linear chain. Mirrors
-    /// `agent_native_memory_version_insert_if_changed`'s own single-lock
-    /// shape below.
+    /// versions instead of a linear chain.
     pub fn agent_native_memory_version_insert(
         &self,
         agent_id: &str,
