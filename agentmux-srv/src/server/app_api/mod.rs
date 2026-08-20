@@ -916,8 +916,20 @@ pub(crate) fn memory_write_impl(
     // invisible to a WS-RPC-based history/diff/revert call for the same
     // logical agent whenever slug != id. See `resolve_agent_uuid`'s own
     // doc for the full resolution-order rationale.
+    //
+    // Hard-fails on resolution failure — reagent P2 (re-review): this used
+    // to silently fall back to the raw slug via `unwrap_or_else`, while
+    // memory_history_impl/memory_diff_impl/memory_revert_impl all hard-fail
+    // on the identical call. `memory_dir_for_agent` above already succeeded
+    // (proving `agent_id` resolves via at least one lookup path), so a
+    // failure here is very likely transient (e.g. a registry-file I/O
+    // hiccup) rather than "unknown agent" — but silently keying this
+    // version by the raw slug on that failure would reintroduce the exact
+    // disjoint-keyspace bug (a write invisible to history/diff/revert) this
+    // PR exists to fix. A visible, retriable write failure is strictly
+    // safer than a silent data-integrity split.
     let version_agent_id = crate::server::native_memory_handlers::resolve_agent_uuid(&state.wstore, agent_id)
-        .unwrap_or_else(|_| agent_id.to_string());
+        .map_err(|e| format!("memory.write: {e}"))?;
     let (source, detail) = match &provenance {
         Some(p) => (p.source, p.detail),
         None => ("agent_inferred", "{}"),

@@ -92,6 +92,21 @@ impl Store {
     /// filename)` (e.g. two panes of the same agent identity writing at
     /// once) could both read the same latest id and insert sibling
     /// versions instead of a linear chain.
+    ///
+    /// reagent P2 (second re-review, PR #2674): an in-process `Mutex` only
+    /// serializes callers sharing this one `Store`/`Connection` — it does
+    /// nothing for two SEPARATE `srv` processes (e.g. two channels/
+    /// instances of AgentMux) each holding their own `Connection` to the
+    /// same shared-store SQLite file. Those two connections' SELECT-latest
+    /// and INSERT could still interleave across processes, producing
+    /// sibling versions with the same `parent_version_id`. Wrapping the
+    /// read+insert in a `BEGIN IMMEDIATE` transaction closes that gap at
+    /// the SQLite level: it acquires the RESERVED lock up front (before
+    /// the SELECT runs), so a second connection's own `BEGIN IMMEDIATE`
+    /// blocks (up to `busy_timeout`, already configured at open) until
+    /// this one commits — true cross-process mutual exclusion, unlike a
+    /// plain deferred transaction (whose lock isn't acquired until the
+    /// first write, after the read has already happened).
     pub fn agent_native_memory_version_insert(
         &self,
         agent_id: &str,
@@ -105,9 +120,10 @@ impl Store {
         let hash = content_hash(content);
         let created_at = now_ms();
 
-        let conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let parent_version_id: Option<String> = {
-            let mut stmt = conn.prepare(
+            let mut stmt = tx.prepare(
                 "SELECT id FROM db_agent_native_memory_versions
                  WHERE agent_id = ?1 AND filename = ?2
                  ORDER BY created_at DESC, rowid DESC
@@ -119,7 +135,7 @@ impl Store {
                 Err(e) => return Err(e.into()),
             }
         };
-        conn.execute(
+        tx.execute(
             "INSERT INTO db_agent_native_memory_versions
                  (id, agent_id, filename, content, content_hash, parent_version_id, source, source_detail, session_id, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
@@ -136,6 +152,7 @@ impl Store {
                 created_at,
             ],
         )?;
+        tx.commit()?;
 
         Ok(NativeMemoryVersion {
             id,
@@ -301,6 +318,59 @@ mod tests {
         assert_ne!(v1.id, v2.id);
         assert_eq!(v2.parent_version_id, Some(v1.id));
         assert_eq!(v1.content_hash, v2.content_hash);
+    }
+
+    // Regression for reagent P2 on PR #2674 (second re-review): an
+    // in-process Mutex only serializes callers sharing one Store/Connection
+    // — it does nothing for two SEPARATE connections to the same
+    // shared-store sqlite file (the real-world case: two srv processes,
+    // e.g. two AgentMux channels/instances, both writing the same agent's
+    // same memory file at close to the same moment). Opens the SAME
+    // on-disk file via two independent `Store` instances (simulating two
+    // processes) and fires one truly-concurrent insert from each — without
+    // the `BEGIN IMMEDIATE` fix, both connections' SELECT-latest could read
+    // the same pre-existing "latest" and each insert a version with that
+    // same parent, instead of one correctly chaining onto the other.
+    //
+    // Run several rounds rather than one shot — a race that depends on
+    // exact timing is more convincing (and less likely to pass by luck on
+    // a fast machine) when it holds up repeatedly, not just once.
+    #[test]
+    fn concurrent_inserts_from_two_separate_connections_form_a_linear_chain() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let path = tmp.path().to_path_buf();
+        let store_a = std::sync::Arc::new(Store::open_shared(&path).unwrap());
+        let store_b = std::sync::Arc::new(Store::open_shared(&path).unwrap());
+
+        for round in 0..8 {
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+            let (ba, bb) = (barrier.clone(), barrier.clone());
+            let (sa, sb) = (store_a.clone(), store_b.clone());
+            let filename = format!("MEMORY-{round}.md");
+            let (fa, fb) = (filename.clone(), filename.clone());
+
+            let ha = std::thread::spawn(move || {
+                ba.wait();
+                sa.agent_native_memory_version_insert("agent-1", &fa, "A", "human", "{}", "").unwrap()
+            });
+            let hb = std::thread::spawn(move || {
+                bb.wait();
+                sb.agent_native_memory_version_insert("agent-1", &fb, "B", "human", "{}", "").unwrap()
+            });
+            let va = ha.join().unwrap();
+            let vb = hb.join().unwrap();
+
+            // Exactly one must chain onto the other — never both `None`
+            // parents (both saw an empty table) and never two unrelated
+            // versions with no parent/child relationship between them.
+            let a_onto_b = va.parent_version_id == Some(vb.id.clone());
+            let b_onto_a = vb.parent_version_id == Some(va.id.clone());
+            assert!(
+                a_onto_b != b_onto_a,
+                "round {round}: exactly one of A/B must chain onto the other — A.parent={:?} B.parent={:?}",
+                va.parent_version_id, vb.parent_version_id,
+            );
+        }
     }
 
     #[test]

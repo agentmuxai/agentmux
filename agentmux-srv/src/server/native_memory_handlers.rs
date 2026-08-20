@@ -557,15 +557,24 @@ pub(crate) fn line_diff(from: &str, to: &str) -> String {
 
     let n = from_lines.len();
     let m = to_lines.len();
-    // lcs[i][j] = length of the longest common subsequence of
-    // from_lines[i..] and to_lines[j..].
-    let mut lcs = vec![vec![0usize; m + 1]; n + 1];
+    let cols = m + 1;
+    // A single flat allocation, not `n + 1` separate `Vec<usize>` rows —
+    // reagent P2: MAX_DIFF_CELLS bounds the cell COUNT (n * m), but a
+    // maximally lopsided diff (e.g. ~4,000,000 short lines vs. 1 line)
+    // stays under that cap while `vec![vec![...]; n + 1]` would still
+    // perform ~4,000,001 individual heap allocations — one per row — whose
+    // allocator overhead and allocation-count latency dwarf the actual
+    // cell-data cost the cap was meant to bound. lcs[i][j] (length of the
+    // longest common subsequence of from_lines[i..] and to_lines[j..])
+    // lives at flat index i * cols + j.
+    let mut lcs = vec![0usize; (n + 1) * cols];
+    let idx = |i: usize, j: usize| i * cols + j;
     for i in (0..n).rev() {
         for j in (0..m).rev() {
-            lcs[i][j] = if from_lines[i] == to_lines[j] {
-                lcs[i + 1][j + 1] + 1
+            lcs[idx(i, j)] = if from_lines[i] == to_lines[j] {
+                lcs[idx(i + 1, j + 1)] + 1
             } else {
-                lcs[i + 1][j].max(lcs[i][j + 1])
+                lcs[idx(i + 1, j)].max(lcs[idx(i, j + 1)])
             };
         }
     }
@@ -579,7 +588,7 @@ pub(crate) fn line_diff(from: &str, to: &str) -> String {
             out.push('\n');
             i += 1;
             j += 1;
-        } else if lcs[i + 1][j] >= lcs[i][j + 1] {
+        } else if lcs[idx(i + 1, j)] >= lcs[idx(i, j + 1)] {
             out.push_str("- ");
             out.push_str(from_lines[i]);
             out.push('\n');
@@ -2017,6 +2026,19 @@ mod tests {
     #[test]
     fn line_diff_handles_identical_content() {
         assert_eq!(line_diff("same", "same"), "  same\n");
+    }
+
+    // reagent P2 on PR #2674 (re-review): line_diff was rewritten from
+    // vec![vec![0usize; m + 1]; n + 1] (n+1 separate heap allocations) to a
+    // single flat Vec indexed manually via `i * cols + j` — a lopsided
+    // shape (one side much longer than the other) exercises exactly the
+    // index arithmetic that refactor could get wrong, so cover it with an
+    // asymmetric case in both directions rather than only the roughly
+    // square cases above.
+    #[test]
+    fn line_diff_handles_a_lopsided_shape_in_both_directions() {
+        assert_eq!(line_diff("a\nb\nc\nd\ne", "c"), "- a\n- b\n  c\n- d\n- e\n");
+        assert_eq!(line_diff("c", "a\nb\nc\nd\ne"), "+ a\n+ b\n  c\n+ d\n+ e\n");
     }
 
     #[test]
