@@ -19,6 +19,7 @@ import {
     stabilizeGroupIdentity,
     subagentDisplayLabel,
     subagentRowKey,
+    workflowRetireSignal,
     type ActiveCron,
     type ActiveShell,
     type ActiveSubagent,
@@ -463,13 +464,13 @@ describe("collectClearableRows", () => {
         expect(collectClearableRows([node])).toEqual([]);
     });
 
-    it("includes a terminal ('retired', i.e. all-members-done) WorkflowDispatch row", () => {
+    it("includes a terminal ('retired', i.e. all-members-done) WorkflowDispatch row, keyed by workflowRetireSignal not lastEventAt", () => {
         const [wf] = buildDispatchBuckets(
-            [mkDispatch({ dispatch_id: "wf_1", status: "completed", last_event_at: 700 })],
+            [mkDispatch({ dispatch_id: "wf_1", status: "completed", last_event_at: 700, member_count: 2, members_done: 2 })],
             [mk({ agent_id: "a1", dispatch_id: "wf_1" })]
         ).workflowRows;
         const rows = collectClearableRows([mkNode([], [wf])]);
-        expect(rows).toEqual([{ rowKey: "wf_1", lastEventAt: 700 }]);
+        expect(rows).toEqual([{ rowKey: "wf_1", lastEventAt: workflowRetireSignal(wf) }]);
     });
 
     it("excludes a still-running WorkflowDispatch row", () => {
@@ -519,6 +520,32 @@ describe("filterRetired", () => {
     it("is a no-op (identity semantics aside) when nothing is retired", () => {
         const rows = filterRetired([1, 2, 3], new Map(), keyFn, () => 0);
         expect(rows).toEqual([1, 2, 3]);
+    });
+});
+
+describe("workflowRetireSignal", () => {
+    it("encodes membersDone and memberCount into one comparable number", () => {
+        expect(workflowRetireSignal({ memberCount: 3, membersDone: 2 })).toBe(2_000_003);
+    });
+
+    it("produces the SAME signal for a placeholder and the eventual real dispatch representing identical, unchanged member progress", () => {
+        // Reagent P1 on PR #2677 — the actual regression this guards
+        // against: a placeholder WorkflowDispatch (buildDispatchBuckets's
+        // orphanedWorkflowMembers fallback) and the real AgentDispatch that
+        // eventually replaces it derive lastEventAt from two different
+        // clocks and essentially never match numerically, even with zero
+        // real activity in between — but they DO derive the same member
+        // counts from the same underlying member set, so the retire
+        // signal correctly stays stable across that transition.
+        const placeholder = { memberCount: 2, membersDone: 1 };
+        const real = { memberCount: 2, membersDone: 1 }; // same known members, nothing new happened
+        expect(workflowRetireSignal(placeholder)).toBe(workflowRetireSignal(real));
+    });
+
+    it("changes once a member's progress genuinely advances — the un-retire-on-new-activity case still works", () => {
+        const before = { memberCount: 2, membersDone: 1 };
+        const afterAnotherCompletes = { memberCount: 2, membersDone: 2 };
+        expect(workflowRetireSignal(before)).not.toBe(workflowRetireSignal(afterAnotherCompletes));
     });
 });
 

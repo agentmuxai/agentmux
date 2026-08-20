@@ -166,9 +166,10 @@ export interface WorkflowDispatch {
     memberCount: number;
     membersDone: number;
     /** "active" if any member is still active; "retired" once every member
-     *  has completed. Derived from AgentDispatch.status ("running" |
-     *  "completed") — different vocabulary, same meaning as the rest of
-     *  this file's group rows. */
+     *  has completed OR been abandoned. Derived from AgentDispatch.status
+     *  ("running" | "completed" | "abandoned") — both non-"running" values
+     *  fold into "retired" here, different vocabulary but same meaning as
+     *  the rest of this file's group rows. */
     status: "active" | "retired";
     lastEventAt: number;
 }
@@ -376,7 +377,9 @@ export function collectClearableRows(nodes: AgentTreeNode[]): { rowKey: string; 
             // this exact feature, not a bug — see that field's own doc
             // comment on the WorkflowDispatch interface above.
             if (w.status !== "active") {
-                result.push({ rowKey: w.dispatchId, lastEventAt: w.lastEventAt });
+                // workflowRetireSignal, NOT w.lastEventAt — see that
+                // function's doc comment (reagent P1 on PR #2677).
+                result.push({ rowKey: w.dispatchId, lastEventAt: workflowRetireSignal(w) });
             }
         }
     }
@@ -495,6 +498,33 @@ export function groupCacheKey(child: WorkflowDispatch): string {
  *  string templates drifting apart. */
 export function subagentRowKey(agentId: string): string {
     return `agent:${agentId}`;
+}
+
+/**
+ * The "has anything genuinely new happened" signal `filterRetired` compares
+ * for a `WorkflowDispatch` row — `memberCount`/`membersDone`, NOT
+ * `lastEventAt`. Reagent P1 on PR #2677: `lastEventAt` is sourced from two
+ * structurally different clocks depending on whether the row is currently a
+ * synthesized placeholder (`buildDispatchBuckets`'s `orphanedWorkflowMembers`
+ * fallback — `Math.max` of each member's OWN event timestamp, i.e. when
+ * Claude Code wrote that JSONL line) or the real `AgentDispatch`
+ * (`agentmux-srv`'s `refresh_dispatch_info` sets it to `now_millis()`, i.e.
+ * when the BACKEND processed that event — always later, by an unpredictable
+ * amount, than the event's own timestamp). Those two values essentially
+ * never numerically match for the same underlying activity, so retiring a
+ * placeholder row under `lastEventAt` and later comparing against the real
+ * row's `lastEventAt` looked like "new activity happened" the moment
+ * `ListDispatches` caught up — even with zero real change — silently
+ * un-retiring the exact row the placeholder fallback and the persisted-
+ * retire feature both exist to keep dismissed. `memberCount`/`membersDone`
+ * are counts, not timestamps — both the placeholder and the real dispatch
+ * derive them from "how many members are known, how many are done," which
+ * converges to the same numbers for the same underlying member set
+ * regardless of which representation (placeholder or real) is currently
+ * rendering it.
+ */
+export function workflowRetireSignal(w: Pick<WorkflowDispatch, "memberCount" | "membersDone">): number {
+    return w.membersDone * 1_000_000 + w.memberCount;
 }
 
 /**
@@ -1639,7 +1669,9 @@ export class SwarmViewModel implements ViewModel {
             // filterRetired's doc comment for the un-retire-on-new-activity
             // mechanism (SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20 §6).
             const agentToolRows = filterRetired(rawAgentToolRows, retired, (s) => subagentRowKey(s.agent_id), (s) => s.last_event_at);
-            const visibleWorkflowRows = filterRetired(workflowRows, retired, (w) => w.dispatchId, (w) => w.lastEventAt);
+            // workflowRetireSignal, NOT w.lastEventAt — see that function's
+            // doc comment (reagent P1 on PR #2677).
+            const visibleWorkflowRows = filterRetired(workflowRows, retired, (w) => w.dispatchId, (w) => workflowRetireSignal(w));
             const shellRows = buildShellRows(shells, blockId);
             const cronRows = buildCronRows(crons, blockId);
             return {
