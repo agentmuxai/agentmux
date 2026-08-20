@@ -634,7 +634,19 @@ impl SubagentWatcher {
     /// happens lazily at the next event or ListDispatches read. `started ==
     /// results` alone is not terminal — it also holds between phases of a
     /// still-running workflow, hence the quiet window.
+    ///
+    /// `Abandoned` is terminal and never recomputed here — early return.
+    /// `reconcile_stale_subagents` is the ONLY writer of `Abandoned`
+    /// (SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.2),
+    /// and `list_dispatches()` calls this function on every single read
+    /// (not just on new events) — without this guard, the very next
+    /// `ListDispatches` RPC after a reconciliation pass would silently
+    /// overwrite Abandoned back to Running/Completed based on counts alone,
+    /// discarding the reconciliation before any client ever observed it.
     pub(super) fn refresh_dispatch_status(state: &mut DispatchState) {
+        if state.info.status == DispatchStatus::Abandoned {
+            return;
+        }
         let counts_complete = state.info.member_count > 0
             && state.info.members_done >= state.info.member_count;
         let quiet = now_millis().saturating_sub(state.info.last_event_at) > 60_000;

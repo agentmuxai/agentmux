@@ -1322,9 +1322,17 @@ fn reconcile_stale_subagents_leaves_active_alone_when_parent_turn_is_active() {
 #[test]
 fn reconcile_stale_subagents_leaves_active_alone_when_no_controller_is_registered() {
     // No register_stub_controller call — block id is guaranteed unique
-    // (per-test suffix) so get_block_controller_status returns None.
-    // unwrap_or(true) means "uncertain" defaults to "assume active,
-    // don't touch it" — the same conservative bias as ReconcileTurnActive.
+    // (per-test suffix) so get_block_controller_status returns None. The
+    // public entry point's synchronous behavior is unchanged by the
+    // None-retry fix: it queues a bounded one-shot retry
+    // (`retry_reconcile_once`) rather than leaving the entry untouched
+    // forever, but that retry itself silently no-ops here because
+    // `fixture_watcher()` is built via bare `new()` (no `self_ref` to
+    // upgrade to a real `Arc` — see `retry_reconcile_once`'s doc comment,
+    // same "untracked -> safe no-op" convention `trigger_eager_naming`
+    // uses). So immediately after this call, nothing has changed yet —
+    // covered directly (not via a real spawned retry) by the
+    // `_impl(..., allow_retry: false)` tests below.
     let block_id = format!("recon-unregistered-{}", now_millis());
 
     let watcher = fixture_watcher();
@@ -1341,6 +1349,55 @@ fn reconcile_stale_subagents_leaves_active_alone_when_no_controller_is_registere
 
     let info = watcher.get_info("sub-a").expect("sub-a should still exist");
     assert_eq!(info.status, SubAgentStatus::Active);
+}
+
+#[test]
+fn reconcile_stale_subagents_impl_with_retry_exhausted_leaves_active_alone_when_no_controller_is_registered() {
+    // The bounded-retry fix's terminal case: a second attempt (allow_retry:
+    // false, as the real tokio::spawn'd retry calls it) with the controller
+    // STILL unregistered must give up, not chain into another retry or
+    // panic. See SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.2.
+    let block_id = format!("recon-unregistered-exhausted-{}", now_millis());
+
+    let watcher = fixture_watcher();
+    {
+        let mut sessions = watcher.sessions.lock().unwrap();
+        let mut s1 = SessionWatch { subagents: HashMap::new() };
+        let mut state = fixture_state("parent-1", "sub-a", "s1");
+        state.info.parent_block_id = block_id.clone();
+        s1.subagents.insert("sub-a".to_string(), state);
+        sessions.insert("s1".to_string(), s1);
+    }
+
+    watcher.reconcile_stale_subagents_impl(&block_id, "s1", false);
+
+    let info = watcher.get_info("sub-a").expect("sub-a should still exist");
+    assert_eq!(info.status, SubAgentStatus::Active, "unregistered + retry exhausted must still not guess");
+}
+
+#[test]
+fn reconcile_stale_subagents_impl_reconciles_normally_once_the_controller_registers_before_the_retry() {
+    // The success path the retry exists for: controller was unregistered
+    // on the first attempt, but has since registered (confirmed idle) by
+    // the time the retry runs — reconciliation should proceed exactly as
+    // if it had been confirmed idle from the start.
+    let block_id = format!("recon-registers-before-retry-{}", now_millis());
+    register_stub_controller(&block_id, false);
+
+    let watcher = fixture_watcher();
+    {
+        let mut sessions = watcher.sessions.lock().unwrap();
+        let mut s1 = SessionWatch { subagents: HashMap::new() };
+        let mut state = fixture_state("parent-1", "sub-a", "s1");
+        state.info.parent_block_id = block_id.clone();
+        s1.subagents.insert("sub-a".to_string(), state);
+        sessions.insert("s1".to_string(), s1);
+    }
+
+    watcher.reconcile_stale_subagents_impl(&block_id, "s1", false);
+
+    let info = watcher.get_info("sub-a").expect("sub-a should still exist");
+    assert_eq!(info.status, SubAgentStatus::Abandoned);
 }
 
 #[test]
@@ -1397,6 +1454,72 @@ fn reconcile_stale_subagents_never_touches_a_sibling_blocks_subagent_in_the_same
     assert_eq!(owned_info.status, SubAgentStatus::Abandoned, "this block's own subagent should still be reconciled");
     let sibling_info = watcher.get_info("sub-sibling").expect("sub-sibling should still exist");
     assert_eq!(sibling_info.status, SubAgentStatus::Active, "a sibling block's subagent must never be reconciled by an unrelated block's idle read");
+}
+
+#[test]
+fn reconcile_stale_subagents_marks_workflow_dispatch_abandoned_when_all_members_done_and_one_abandoned() {
+    // SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.2's
+    // aggregation rule: a Workflow-kind AgentDispatch's own status must
+    // become Abandoned (not stay ambiguously Running/Completed) once every
+    // member is Completed|Abandoned and at least one is genuinely Abandoned.
+    let block_id = format!("recon-wf-abandon-{}", now_millis());
+    register_stub_controller(&block_id, false);
+    let dispatch_id = "wf-recon-1";
+
+    let watcher = fixture_watcher();
+    {
+        let mut dispatches = watcher.dispatches.lock().unwrap();
+        dispatches.insert(dispatch_id.to_string(), fixture_dispatch_state(dispatch_id, &block_id));
+    }
+    {
+        let mut sessions = watcher.sessions.lock().unwrap();
+        let mut s1 = SessionWatch { subagents: HashMap::new() };
+        let mut done_member = fixture_state_for_block(&block_id, "sub-done", "s1");
+        done_member.info.dispatch_id = dispatch_id.to_string();
+        done_member.info.status = SubAgentStatus::Completed;
+        let mut still_active_member = fixture_state_for_block(&block_id, "sub-active", "s1");
+        still_active_member.info.dispatch_id = dispatch_id.to_string();
+        // Left Active — reconcile_stale_subagents will flip this one to
+        // Abandoned, which is what should trigger the dispatch-level
+        // aggregation (one member done+one already-completed = "all done,
+        // at least one abandoned").
+        s1.subagents.insert("sub-done".to_string(), done_member);
+        s1.subagents.insert("sub-active".to_string(), still_active_member);
+        sessions.insert("s1".to_string(), s1);
+    }
+
+    watcher.reconcile_stale_subagents(&block_id, "s1");
+
+    let dispatches = watcher.list_dispatches();
+    let d = dispatches.iter().find(|d| d.dispatch_id == dispatch_id).expect("dispatch should still exist");
+    assert_eq!(d.status, DispatchStatus::Abandoned);
+}
+
+#[test]
+fn reconcile_stale_subagents_does_not_touch_workflow_dispatch_status_when_parent_turn_is_active() {
+    let block_id = format!("recon-wf-active-{}", now_millis());
+    register_stub_controller(&block_id, true);
+    let dispatch_id = "wf-recon-2";
+
+    let watcher = fixture_watcher();
+    {
+        let mut dispatches = watcher.dispatches.lock().unwrap();
+        dispatches.insert(dispatch_id.to_string(), fixture_dispatch_state(dispatch_id, &block_id));
+    }
+    {
+        let mut sessions = watcher.sessions.lock().unwrap();
+        let mut s1 = SessionWatch { subagents: HashMap::new() };
+        let mut member = fixture_state_for_block(&block_id, "sub-a", "s1");
+        member.info.dispatch_id = dispatch_id.to_string();
+        s1.subagents.insert("sub-a".to_string(), member);
+        sessions.insert("s1".to_string(), s1);
+    }
+
+    watcher.reconcile_stale_subagents(&block_id, "s1");
+
+    let dispatches = watcher.list_dispatches();
+    let d = dispatches.iter().find(|d| d.dispatch_id == dispatch_id).expect("dispatch should still exist");
+    assert_eq!(d.status, DispatchStatus::Running, "a genuinely active parent turn must never abandon the dispatch");
 }
 
 /// SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_RETIRE_2026_07_20 §7 Open
