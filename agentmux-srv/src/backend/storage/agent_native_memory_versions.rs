@@ -84,6 +84,16 @@ impl Store {
     /// `content` is byte-identical to the previous version — simplicity
     /// over cleverness; dedup-by-hash is a possible future optimization,
     /// not this one.
+    ///
+    /// reagent P2 (re-review): the read-latest-then-insert sequence is a
+    /// single connection-lock acquisition, not two — an earlier revision
+    /// released the lock between reading `parent_version_id` and
+    /// inserting, so two truly concurrent calls for the same `(agent_id,
+    /// filename)` (e.g. two panes of the same agent identity writing at
+    /// once) could both read the same latest id and insert sibling
+    /// versions instead of a linear chain. Mirrors
+    /// `agent_native_memory_version_insert_if_changed`'s own single-lock
+    /// shape below.
     pub fn agent_native_memory_version_insert(
         &self,
         agent_id: &str,
@@ -95,14 +105,22 @@ impl Store {
     ) -> Result<NativeMemoryVersion, StoreError> {
         let id = uuid::Uuid::new_v4().to_string();
         let hash = content_hash(content);
-        // Locks and releases its own connection guard before we take ours
-        // below — no re-entrant locking.
-        let parent_version_id = self
-            .agent_native_memory_version_latest(agent_id, filename)?
-            .map(|v| v.id);
         let created_at = now_ms();
 
         let conn = self.conn.lock().unwrap();
+        let parent_version_id: Option<String> = {
+            let mut stmt = conn.prepare(
+                "SELECT id FROM db_agent_native_memory_versions
+                 WHERE agent_id = ?1 AND filename = ?2
+                 ORDER BY created_at DESC, rowid DESC
+                 LIMIT 1",
+            )?;
+            match stmt.query_row(params![agent_id, filename], |row| row.get::<_, String>(0)) {
+                Ok(id) => Some(id),
+                Err(rusqlite::Error::QueryReturnedNoRows) => None,
+                Err(e) => return Err(e.into()),
+            }
+        };
         conn.execute(
             "INSERT INTO db_agent_native_memory_versions
                  (id, agent_id, filename, content, content_hash, parent_version_id, source, source_detail, session_id, created_at)
