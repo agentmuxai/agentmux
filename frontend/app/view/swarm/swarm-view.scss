@@ -733,3 +733,284 @@
     50%       { opacity: 0.3; }
 }
 
+// ── Fleet control (SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md) ───────────
+
+.swarm-agent-select-checkbox {
+    flex-shrink: 0;
+    width: 13px;
+    height: 13px;
+    margin: 0;
+    cursor: pointer;
+}
+
+.swarm-agent-select-spacer {
+    width: 13px;
+    flex-shrink: 0;
+}
+
+.swarm-fleet-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: var(--hover-bg-color, rgba(255, 255, 255, 0.06));
+    border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+    flex-wrap: wrap;
+}
+
+.swarm-fleet-toolbar-count {
+    font-weight: 600;
+    font-size: 12px;
+    margin-right: 4px;
+}
+
+.swarm-fleet-toolbar-clear {
+    margin-left: auto;
+}
+
+.swarm-fleet-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    appearance: none;
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.15));
+    border-radius: 4px;
+    background: var(--main-bg-color);
+    color: var(--main-text-color);
+    font-size: 12px;
+    padding: 4px 9px;
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+        background: var(--hover-bg-color, rgba(255, 255, 255, 0.08));
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: default;
+    }
+
+    &--primary {
+        border-color: var(--accent-color);
+        color: var(--accent-color);
+    }
+
+    &--destructive {
+        border-color: var(--error-color, #e5484d);
+        color: var(--error-color, #e5484d);
+
+        &:hover:not(:disabled) {
+            background: rgba(229, 72, 77, 0.1);
+        }
+    }
+}
+
+.swarm-fleet-broadcast-inline {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 220px;
+}
+
+.swarm-fleet-broadcast-input {
+    flex: 1;
+    background: var(--main-bg-color);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.15));
+    border-radius: 4px;
+    color: var(--main-text-color);
+    font-size: 12px;
+    padding: 4px 8px;
+}
+
+.swarm-fleet-group-picker {
+    position: relative;
+}
+
+.swarm-fleet-group-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 5;
+    min-width: 200px;
+    max-height: 260px;
+    overflow-y: auto;
+    background: var(--main-bg-color);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.15));
+    border-radius: 6px;
+    box-shadow: var(--shadow-modal, 0 4px 16px rgba(0, 0, 0, 0.4));
+    padding: 4px;
+}
+
+.swarm-fleet-group-dropdown-empty {
+    padding: 6px 8px;
+    font-size: 11px;
+    color: var(--secondary-text-color);
+}
+
+.swarm-fleet-group-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+
+    &--action {
+        color: var(--accent-color);
+        font-weight: 500;
+    }
+}
+
+.swarm-fleet-group-dropdown-item-apply {
+    flex: 1;
+    text-align: left;
+    appearance: none;
+    border: none;
+    background: none;
+    color: var(--main-text-color);
+    font-size: 12px;
+    padding: 5px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+
+    &:hover {
+        background: var(--hover-bg-color, rgba(255, 255, 255, 0.08));
+    }
+}
+
+.swarm-fleet-group-dropdown-item-count {
+    color: var(--secondary-text-color);
+}
+
+.swarm-fleet-group-dropdown-item-delete {
+    flex-shrink: 0;
+    appearance: none;
+    border: none;
+    background: none;
+    color: var(--secondary-text-color);
+    font-size: 10px;
+    padding: 4px 6px;
+    cursor: pointer;
+    border-radius: 4px;
+
+    &:hover {
+        color: var(--error-color, #e5484d);
+        background: rgba(229, 72, 77, 0.1);
+    }
+}
+
+.swarm-fleet-group-save-inline {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+
+    input {
+        flex: 1;
+        background: var(--main-bg-color);
+        border: 1px solid var(--border-color, rgba(255, 255, 255, 0.15));
+        border-radius: 4px;
+        color: var(--main-text-color);
+        font-size: 12px;
+        padding: 4px 6px;
+    }
+}
+
+.swarm-fleet-confirm-target-list {
+    max-height: 160px;
+    overflow-y: auto;
+    background: var(--hover-bg-color, rgba(255, 255, 255, 0.05));
+    border-radius: 4px;
+    padding: 6px 8px;
+    margin-bottom: 8px;
+    font-size: 11px;
+    font-family: var(--termfontfamily, "JetBrains Mono", monospace);
+}
+
+.swarm-fleet-confirm-target-row {
+    padding: 1px 0;
+    color: var(--secondary-text-color);
+}
+
+.swarm-fleet-staging-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    margin-top: 4px;
+    cursor: pointer;
+}
+
+.swarm-fleet-staging-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 6px;
+    padding-left: 20px;
+
+    label {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+        color: var(--secondary-text-color);
+    }
+
+    input {
+        width: 60px;
+        background: var(--main-bg-color);
+        border: 1px solid var(--border-color, rgba(255, 255, 255, 0.15));
+        border-radius: 4px;
+        color: var(--main-text-color);
+        padding: 3px 6px;
+    }
+}
+
+.swarm-fleet-result-panel {
+    border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
+    background: var(--hover-bg-color, rgba(255, 255, 255, 0.03));
+}
+
+.swarm-fleet-result-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.swarm-fleet-result-dismiss {
+    appearance: none;
+    border: none;
+    background: none;
+    color: var(--secondary-text-color);
+    cursor: pointer;
+    padding: 2px 6px;
+
+    &:hover {
+        color: var(--main-text-color);
+    }
+}
+
+.swarm-fleet-result-rows {
+    max-height: 160px;
+    overflow-y: auto;
+    padding: 0 10px 6px;
+    font-size: 11px;
+    font-family: var(--termfontfamily, "JetBrains Mono", monospace);
+}
+
+.swarm-fleet-result-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0;
+
+    &--ok {
+        color: var(--success-color, #4caf50);
+    }
+
+    &--fail {
+        color: var(--error-color, #e5484d);
+    }
+}
+

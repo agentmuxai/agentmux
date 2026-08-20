@@ -19,6 +19,7 @@ import { recordTurn } from "@/app/store/token-usage";
 import { useTick } from "@/app/hook/useTick";
 import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedClock } from "@/util/format-time";
+import { FleetToolbar, FleetResultPanel } from "./swarm-fleet-toolbar";
 import "./swarm-view.scss";
 
 // Navigate to the pane for a given block ID, switching tabs and windows as needed.
@@ -153,6 +154,8 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
                         </div>
                     }
                 >
+                    <FleetToolbar model={model} />
+                    <FleetResultPanel model={model} />
                     <div class="swarm-tree">
                         <For each={tree()}>
                             {(node) => <AgentRow node={node} focusedBlockId={focusedBlockId} model={model} />}
@@ -307,6 +310,20 @@ function AgentRow({
                 title={node.agentName}
             >
                 <div class="swarm-agent-row">
+                    {/* Fleet control selection (SPEC_MULTI_AGENT_FLEET_CONTROL_
+                        2026_08_20.md) — only a block with a real blockId can be
+                        a bulk-action target. stopPropagation so checking it
+                        doesn't also toggle the card's own collapse. */}
+                    <Show when={node.blockId} fallback={<span class="swarm-agent-select-spacer" />}>
+                        <input
+                            type="checkbox"
+                            class="swarm-agent-select-checkbox"
+                            checked={model.isSelected(node.blockId!)}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={() => model.toggleSelected(node.blockId!)}
+                            title="Select for a fleet action (broadcast/stop)"
+                        />
+                    </Show>
                     {/* Chevron only when there's a subtree to collapse; a
                         fixed-width spacer otherwise so labels stay aligned
                         across rows with and without children. No own click
