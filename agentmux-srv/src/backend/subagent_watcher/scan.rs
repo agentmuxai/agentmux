@@ -237,6 +237,25 @@ impl SubagentWatcher {
                 if dispatch_id.starts_with("solo:") {
                     continue;
                 }
+                let Some(state) = dispatches.get_mut(dispatch_id) else { continue };
+                // reagent P2 on PR #2677: `statuses` only reflects members
+                // currently visible in `session.subagents` — a member whose
+                // JSONL file the filesystem watcher hasn't picked up yet
+                // (an async notify/debounce lag racing this exact
+                // reconciliation pass) is invisible here, so `all_done`
+                // could be true against an INCOMPLETE member set. Cross-
+                // check against the dispatch's own authoritative
+                // `member_count` (tracked separately via journal_started/
+                // member_files) — only trust `all_done` when we've actually
+                // seen status for every member the dispatch itself believes
+                // exist. Under-counting here is safe (skip this round, the
+                // next new-evidence event or reconciliation pass reruns
+                // this check with a fuller picture) — over-counting would
+                // risk abandoning a dispatch with a member reconciliation
+                // hasn't even observed yet.
+                if statuses.len() < state.info.member_count {
+                    continue;
+                }
                 let all_done = statuses
                     .iter()
                     .all(|s| matches!(s, SubAgentStatus::Completed | SubAgentStatus::Abandoned));
@@ -244,18 +263,16 @@ impl SubagentWatcher {
                 if !(all_done && any_abandoned) {
                     continue;
                 }
-                if let Some(state) = dispatches.get_mut(dispatch_id) {
-                    if state.info.status != DispatchStatus::Abandoned {
-                        state.info.status = DispatchStatus::Abandoned;
-                        tracing::info!(
-                            dispatch_id = %dispatch_id,
-                            parent_block_id = %parent_block_id,
-                            session_id = %session_id,
-                            member_count = statuses.len(),
-                            "dispatch reconciled: -> abandoned (all members done, at least one abandoned)"
-                        );
-                        updated.push(state.info.clone());
-                    }
+                if state.info.status != DispatchStatus::Abandoned {
+                    state.info.status = DispatchStatus::Abandoned;
+                    tracing::info!(
+                        dispatch_id = %dispatch_id,
+                        parent_block_id = %parent_block_id,
+                        session_id = %session_id,
+                        member_count = statuses.len(),
+                        "dispatch reconciled: -> abandoned (all members done, at least one abandoned)"
+                    );
+                    updated.push(state.info.clone());
                 }
             }
             updated

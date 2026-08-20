@@ -1495,6 +1495,50 @@ fn reconcile_stale_subagents_marks_workflow_dispatch_abandoned_when_all_members_
     assert_eq!(d.status, DispatchStatus::Abandoned);
 }
 
+/// reagent P2 on PR #2677: a member whose JSONL file hasn't been picked up
+/// by the filesystem watcher yet (async notify/debounce lag) is invisible
+/// to `member_statuses_by_dispatch`, so the abandonment aggregation must
+/// not trust `all_done` when it has fewer statuses than the dispatch's own
+/// authoritative `member_count` — otherwise a dispatch could be marked
+/// Abandoned based on an incomplete member set.
+#[test]
+fn reconcile_stale_subagents_does_not_abandon_a_workflow_dispatch_when_a_member_is_not_yet_visible() {
+    let block_id = format!("recon-wf-missing-member-{}", now_millis());
+    register_stub_controller(&block_id, false);
+    let dispatch_id = "wf-recon-missing";
+
+    let watcher = fixture_watcher();
+    {
+        let mut dispatches = watcher.dispatches.lock().unwrap();
+        let mut state = fixture_dispatch_state(dispatch_id, &block_id);
+        // The dispatch itself believes it has 2 members (e.g. from journal
+        // `started` records already read) — only 1 is visible below.
+        state.info.member_count = 2;
+        dispatches.insert(dispatch_id.to_string(), state);
+    }
+    {
+        let mut sessions = watcher.sessions.lock().unwrap();
+        let mut s1 = SessionWatch { subagents: HashMap::new() };
+        let mut only_visible_member = fixture_state_for_block(&block_id, "sub-a", "s1");
+        only_visible_member.info.dispatch_id = dispatch_id.to_string();
+        // Left Active — reconcile flips it to Abandoned, which alone would
+        // satisfy "all done, at least one abandoned" if the second,
+        // not-yet-visible member weren't cross-checked against member_count.
+        s1.subagents.insert("sub-a".to_string(), only_visible_member);
+        sessions.insert("s1".to_string(), s1);
+    }
+
+    watcher.reconcile_stale_subagents(&block_id, "s1");
+
+    let dispatches = watcher.list_dispatches();
+    let d = dispatches.iter().find(|d| d.dispatch_id == dispatch_id).expect("dispatch should still exist");
+    assert_eq!(
+        d.status,
+        DispatchStatus::Running,
+        "must not abandon a dispatch whose member set is incomplete relative to its own member_count"
+    );
+}
+
 #[test]
 fn reconcile_stale_subagents_does_not_touch_workflow_dispatch_status_when_parent_turn_is_active() {
     let block_id = format!("recon-wf-active-{}", now_millis());
