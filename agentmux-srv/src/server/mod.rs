@@ -149,6 +149,13 @@ pub struct AppState {
     /// clear`. Never persisted — see
     /// `docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md`.
     pub dock_snapshots: Arc<crate::backend::dock_snapshot::DockSnapshotCache>,
+    /// Holding pen for a declared-background task's OS pid when it arrives
+    /// (from bashwrap, over WPS) before its `db_background_tasks` row
+    /// exists yet — closes the race `background_task_set_pid`'s silent
+    /// no-op on a missing row would otherwise lose permanently. See
+    /// `docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md` and the
+    /// Codex/reagentx findings on PR #2681.
+    pub pending_background_pids: Arc<crate::backend::pending_background_pids::PendingBackgroundPids>,
     /// Live controller for mDNS-based LAN/host peer discovery. The controller
     /// owns a swappable daemon slot so the `network:lan_discovery` setting can
     /// be toggled at runtime without restarting the process.

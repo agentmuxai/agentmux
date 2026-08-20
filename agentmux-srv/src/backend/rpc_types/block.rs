@@ -183,6 +183,18 @@ pub struct CommandBackgroundTaskCompletionData {
     pub timestamp: Option<i64>,
 }
 
+/// Data for `COMMAND_BACKGROUND_TASK_PID` — a declared-background task's
+/// real OS pid, relayed from `agentmux-bashwrap`'s own WPS `"pid"` chunk.
+/// `node_id` is the originating tool call's node_id/tool_use_id, same join
+/// key as `CommandBackgroundTaskCompletionData` above. See
+/// docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CommandBackgroundTaskPidData {
+    pub blockid: String,
+    pub node_id: String,
+    pub pid: u32,
+}
+
 /// Data for AgentAnswerCommand — an AskUserQuestion answer delivered back to
 /// the running agent CLI via the Agent SDK control protocol (a `control_response`
 /// carrying `updatedInput.answers`). Spec:

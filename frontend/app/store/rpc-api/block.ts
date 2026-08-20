@@ -52,6 +52,13 @@ export const BlockApi = {
         return client.rpcCall("backgroundtaskcompletion", data, opts);
     },
 
+    // Fire-and-forget push of a declared-background task's real OS pid,
+    // relayed from bashwrap's own WPS "pid" chunk. Spec:
+    // docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md.
+    BackgroundTaskPidCommand(client: RpcClient, data: CommandBackgroundTaskPidData, opts?: RpcOpts): Promise<void> {
+        return client.rpcCall("backgroundtaskpid", data, opts);
+    },
+
     // Deliver an AskUserQuestion answer to the running agent CLI as a
     // tool_result. Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
     AgentAnswerCommand(client: RpcClient, data: CommandAgentAnswerData, opts?: RpcOpts): Promise<void> {
