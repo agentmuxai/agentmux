@@ -19,6 +19,8 @@
  * AudioContext — the context is owned by SoundPlayer.
  */
 
+import { DEFAULT_WAITING_VOLUME } from "./sound-defaults";
+
 /** C5 → E5 → G5 in Hz (major triad arpeggio). */
 const ARPEGGIO_HZ = [523.25, 659.25, 783.99] as const;
 /** Duration of each note (ms). */
@@ -39,7 +41,7 @@ export class WaitingTonePlayer {
     private masterGain: GainNode | null = null;
     private filter: BiquadFilterNode | null = null;
     private gain: GainNode | null = null;
-    private gainValue = 0.25;
+    private gainValue = DEFAULT_WAITING_VOLUME;
     private running = false;
     private scheduleHandle: ReturnType<typeof setTimeout> | null = null;
 

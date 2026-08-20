@@ -24,6 +24,7 @@
  */
 
 import { paramsForTool, type SyllableParams } from "./tool-tones";
+import { DEFAULT_TOOLTONES_VOLUME } from "./sound-defaults";
 
 /** Coalesce window per tool, in ms. See spec §9.4. */
 const COALESCE_MS = 30;
@@ -34,7 +35,7 @@ const ENVELOPE_PEAK = 0.4;
 export class ToolTonesPlayer {
     private filter: BiquadFilterNode | null = null;
     private gain: GainNode | null = null;
-    private toolGainValue = 0.15;
+    private toolGainValue = DEFAULT_TOOLTONES_VOLUME;
     private lastFiredAt = new Map<string, number>();
 
     /**

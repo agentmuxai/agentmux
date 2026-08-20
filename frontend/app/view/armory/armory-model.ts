@@ -6,7 +6,12 @@ import { useBlockAtom } from "@/app/store/global";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
 import { createMemo, type Accessor } from "solid-js";
 
-export type ArmorySection = "accounts" | "memory" | "skills" | "mcp" | "bundles";
+// "native_memory" deliberately does NOT reuse the word "memory" — that's
+// already the (confusingly-named, legacy) section id for the global-brain
+// tab below, distinct from a bundle's own "bundles" section (whose backing
+// component, MemoryManager, is itself a naming leftover — see
+// docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.3).
+export type ArmorySection = "accounts" | "memory" | "skills" | "mcp" | "bundles" | "native_memory";
 
 // Label text only (not icon/tooltip, which stay armory-view.tsx's own
 // presentation detail) — hoisted here so viewName can read it without
@@ -19,6 +24,7 @@ export const ARMORY_SECTION_LABELS: Record<ArmorySection, string> = {
     skills: "Skills",
     mcp: "MCP Servers",
     bundles: "ABF",
+    native_memory: "Native Memory",
 };
 
 function isArmorySection(v: unknown): v is ArmorySection {

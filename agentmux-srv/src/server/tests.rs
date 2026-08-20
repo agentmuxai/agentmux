@@ -72,6 +72,7 @@ pub(crate) fn test_state() -> AppState {
         process_tracker,
         process_broker,
         dock_snapshots: Arc::new(crate::backend::dock_snapshot::DockSnapshotCache::new()),
+        pending_background_pids: Arc::new(crate::backend::pending_background_pids::PendingBackgroundPids::new()),
         // Phase E.2c.2 — workspace RPC dispatches through reducer.
         // Tests get fresh state + a dummy broadcast bus.
         srv_state: Arc::new(tokio::sync::Mutex::new(crate::state::State::default())),
@@ -2764,4 +2765,21 @@ mod fleet_tests {
             .unwrap();
         assert!(!resp.error.is_empty(), "updating a nonexistent group must error, not silently no-op");
     }
+}
+
+/// Regression for reagent P2 on PR #2674 (re-review): a caller supplying
+/// `provenance.source` but omitting `detail` must deserialize `detail` as
+/// `{}`, not `Value::Null` — a bare `#[serde(default)]` on a
+/// `serde_json::Value` field yields `Null`, whose `.to_string()` is the
+/// literal string `"null"`, not the `"{}"` every no-provenance write path
+/// already uses. This is the same bug class already fixed once in this
+/// PR's review history for the WS-RPC sibling
+/// (`NativeMemoryWriteProvenance` in rpc_types/memory.rs) — recurring here
+/// in the HTTP/App-API request struct that backs `handle_agent_memory_write`
+/// (the `MemoryWrite` MCP tool's actual write path).
+#[test]
+fn agent_memory_write_provenance_req_defaults_a_missing_detail_to_an_empty_object() {
+    let req: AgentMemoryWriteProvenanceReq = serde_json::from_str(r#"{"source":"human"}"#).unwrap();
+    assert_eq!(req.detail, serde_json::json!({}));
+    assert_eq!(req.detail.to_string(), "{}");
 }

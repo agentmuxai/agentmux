@@ -226,6 +226,40 @@ declare global {
         timestamp?: number;
     };
 
+    // wshrpc.CommandBackgroundTaskPidData — fire-and-forget push of a
+    // declared-background task's real OS pid, relayed from
+    // `agentmux-bashwrap`'s own WPS `"pid"` chunk (op: "pid" on the
+    // `tool_chunk` event this block already subscribes to). `node_id` is
+    // the same join key as `CommandBackgroundTaskCompletionData` above.
+    // See docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md.
+    type CommandBackgroundTaskPidData = {
+        blockid: string;
+        node_id: string;
+        pid: number;
+    };
+
+    // wshrpc.CommandListBackgroundTasksData — request/response, returns
+    // this block's current db_background_tasks rows (BackgroundTaskView[]
+    // below) so the frontend can seed its attachedTask axis from the
+    // durable registry on mount/reconnect. See
+    // docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.1.
+    type CommandListBackgroundTasksData = {
+        blockid: string;
+    };
+
+    // server::muxspect_handlers::BackgroundTaskView — one db_background_tasks
+    // row, as returned by ListBackgroundTasksCommand.
+    type BackgroundTaskView = {
+        id: string;
+        block_id: string;
+        label: string;
+        pid: number | null;
+        started_at_ms: number;
+        status: "running" | "done" | "error" | "stopped";
+        last_seen_ms: number;
+        ended_at_ms: number | null;
+    };
+
     // CommandAgentAnswerData — AskUserQuestion answer, delivered to the running
     // agent CLI via the Agent SDK control protocol (a control_response carrying
     // updatedInput.answers). Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
@@ -1511,7 +1545,7 @@ declare global {
         "subagent:session"?: string;
         // Selected rail section, meta-backed so it survives a block remount
         // and the view model can react to it (armory-model.ts/warden-model.ts).
-        "armory:section"?: "accounts" | "memory" | "skills" | "mcp" | "bundles";
+        "armory:section"?: "accounts" | "memory" | "skills" | "mcp" | "bundles" | "native_memory";
         "warden:section"?: "host" | "lan" | "internet" | "audit" | "supervisor";
     };
 
@@ -1698,6 +1732,7 @@ declare global {
         "dnd:enabled"?: boolean;
         "dnd:concurrency"?: number;
         "dnd:agentinserttoken"?: boolean;
+        "agent:askquestiontimeoutms"?: number;
     };
 
     // waveobj.StickerClickOptsType
@@ -2504,6 +2539,41 @@ declare global {
     // wshrpc.NativeMemoryReadFileResult
     type NativeMemoryReadFileResult = {
         content: string;
+    };
+
+    // wshrpc.NativeMemoryWriteProvenance — optional caller-supplied context
+    // for a memory write, see SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.1.
+    type NativeMemoryWriteProvenance = {
+        source: string; // "human" | "agent_inferred" | "jekt" | ...
+        detail?: unknown;
+    };
+
+    // wshrpc.NativeMemoryVersionMeta — one recorded version's metadata,
+    // without its full content (list-view shape).
+    type NativeMemoryVersionMeta = {
+        id: string;
+        content_hash: string;
+        parent_version_id: string | null;
+        source: string; // "human" | "agent_inferred" | "jekt" | "external_fs_write" | "revert"
+        source_detail: string; // JSON string
+        session_id: string;
+        created_at: number; // unix ms
+    };
+
+    // wshrpc.NativeMemoryHistoryResult — newest first.
+    type NativeMemoryHistoryResult = {
+        versions: NativeMemoryVersionMeta[];
+    };
+
+    // wshrpc.NativeMemoryDiffResult — a minimal line-based diff: each line
+    // prefixed "  " (context), "- " (removed), or "+ " (added).
+    type NativeMemoryDiffResult = {
+        diff: string;
+    };
+
+    // wshrpc.NativeMemoryRevertResult
+    type NativeMemoryRevertResult = {
+        version: NativeMemoryVersionMeta;
     };
 
     // wshrpc.CommandActivitySummaryData

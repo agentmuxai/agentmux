@@ -31,6 +31,8 @@ use crate::backend::rpc_types::{
     CommandAgentAnswerData,
     COMMAND_DOCK_NODE_STATUS, CommandDockNodeStatusData,
     COMMAND_BACKGROUND_TASK_COMPLETION, CommandBackgroundTaskCompletionData,
+    COMMAND_BACKGROUND_TASK_PID, CommandBackgroundTaskPidData,
+    COMMAND_LIST_BACKGROUND_TASKS, CommandListBackgroundTasksData,
 };
 use crate::backend::base::normalize_working_dir;
 use crate::backend::obj::{Block, TermSize, WaveObjUpdate, wave_obj_to_value};
@@ -586,6 +588,26 @@ async fn handle_incoming_text(
     Ok(None)
 }
 
+/// Notify subscribers that `block_id`'s `db_background_tasks` state
+/// changed (observed, pid recorded, or completed), so the frontend can
+/// re-query `COMMAND_LIST_BACKGROUND_TASKS` instead of polling. Live-only
+/// (`persist: 0`, mirroring `process_tracker::registry`'s `emit()` for
+/// `agent:process-added`/`-exited`) — a late subscriber gets the current
+/// state via the mount-time list query, not event replay. Deliberately
+/// carries no task data itself (just an invalidation signal): the list
+/// query is the single source of truth for the actual rows, so there's
+/// nothing to keep in sync between two payload shapes. See
+/// docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.2.
+fn publish_background_task_updated(broker: &crate::backend::wps::Broker, block_id: &str) {
+    broker.publish(crate::backend::wps::WaveEvent {
+        event: "background-task-updated".to_string(),
+        scopes: vec![format!("block:{block_id}")],
+        sender: String::new(),
+        persist: 0,
+        data: Some(serde_json::json!({ "block_id": block_id })),
+    });
+}
+
 fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: String) {
     // getfullconfig → return full config as JSON
     let config_watcher = state.config_watcher.clone();
@@ -1056,11 +1078,15 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // changes again after acceptance).
     let dock_snapshots_dns = state.dock_snapshots.clone();
     let wstore_dns = state.wstore.clone();
+    let pending_pids_dns = state.pending_background_pids.clone();
+    let broker_dns = state.broker.clone();
     engine.register_handler(
         COMMAND_DOCK_NODE_STATUS,
         Box::new(move |data, _ctx| {
             let dock_snapshots = dock_snapshots_dns.clone();
             let wstore = wstore_dns.clone();
+            let pending_pids = pending_pids_dns.clone();
+            let broker = broker_dns.clone();
             Box::pin(async move {
                 let cmd: CommandDockNodeStatusData = serde_json::from_value(data)
                     .map_err(|e| format!("docknodestatus: {e}"))?;
@@ -1070,18 +1096,44 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     .as_millis() as i64;
 
                 if cmd.run_in_background == Some(true) {
-                    if let Err(e) = wstore.background_task_observe(
+                    match wstore.background_task_observe(
                         &cmd.node_id,
                         &cmd.blockid,
                         &cmd.tool_name,
                         observed_at,
                         observed_at,
                     ) {
-                        tracing::warn!(
+                        Ok(()) => publish_background_task_updated(&broker, &cmd.blockid),
+                        Err(e) => tracing::warn!(
                             target: "background_tasks",
                             node_id = %cmd.node_id,
                             error = %e,
                             "failed to observe declared-background task in the durable registry",
+                        ),
+                    }
+                    // bashwrap's own pid publish (COMMAND_BACKGROUND_TASK_PID
+                    // below) routinely races ahead of the observe call above —
+                    // it fires at bashwrap's process start, before the frontend
+                    // even sees an accepted-background tool result. Check for
+                    // (and apply) a pid stashed ahead of this row's existence.
+                    // Runs unconditionally on observe failure too — a stashed
+                    // pid may still apply if the row already existed from an
+                    // earlier retry. Atomic with the pid handler's own
+                    // set_or_stash call for the same id — see
+                    // pending_background_pids.rs's module doc for why that
+                    // matters (Codex/reagentx findings on PR #2681).
+                    let node_id = cmd.node_id.clone();
+                    let wstore_apply = wstore.clone();
+                    let result: Result<(), crate::backend::storage::StoreError> = pending_pids
+                        .observe_and_apply(&cmd.node_id, observed_at, |pid| {
+                            wstore_apply.background_task_set_pid(&node_id, pid)
+                        });
+                    if let Err(e) = result {
+                        tracing::warn!(
+                            target: "background_tasks",
+                            node_id = %cmd.node_id,
+                            error = %e,
+                            "failed to apply a pid stashed ahead of this task's registry row",
                         );
                     }
                 }
@@ -1117,10 +1169,12 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // `tool_name`/original `run_in_background` value to carry forward — the
     // exact bug class #2520 already fixed once for a different call site.
     let wstore_btc = state.wstore.clone();
+    let broker_btc = state.broker.clone();
     engine.register_handler(
         COMMAND_BACKGROUND_TASK_COMPLETION,
         Box::new(move |data, _ctx| {
             let wstore = wstore_btc.clone();
+            let broker = broker_btc.clone();
             Box::pin(async move {
                 let cmd: CommandBackgroundTaskCompletionData = serde_json::from_value(data)
                     .map_err(|e| format!("backgroundtaskcompletion: {e}"))?;
@@ -1131,15 +1185,96 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                         .as_millis() as i64
                 });
                 let status = crate::backend::storage::background_tasks::BackgroundTaskStatus::from_str(&cmd.status);
-                if let Err(e) = wstore.background_task_complete(&cmd.node_id, status, ended_at) {
-                    tracing::warn!(
+                match wstore.background_task_complete(&cmd.node_id, status, ended_at) {
+                    Ok(_) => publish_background_task_updated(&broker, &cmd.blockid),
+                    Err(e) => tracing::warn!(
                         target: "background_tasks",
                         node_id = %cmd.node_id,
                         error = %e,
                         "failed to mark background task terminal in the durable registry",
-                    );
+                    ),
                 }
                 Ok(None)
+            })
+        }),
+    );
+
+    // backgroundtaskpid → fire-and-forget push of a declared-background
+    // task's real OS pid, relayed from `agentmux-bashwrap`'s own WPS "pid"
+    // chunk. Closes the gap where `db_background_tasks.pid` existed but
+    // nothing in production ever wrote it (Phase A of
+    // docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md). Best-effort,
+    // same as the two handlers above: a write failure here doesn't block
+    // anything else and is only ever a diagnostic/teardown-survival input,
+    // never something the model-visible tool_result depends on.
+    //
+    // bashwrap publishes this essentially at process start — routinely
+    // BEFORE `COMMAND_DOCK_NODE_STATUS` above has created this task's
+    // `db_background_tasks` row (that requires a full round-trip through
+    // the frontend recognizing an accepted background launch first).
+    // `background_task_set_pid` silently no-ops on a missing row
+    // (`Ok(false)`), which would lose the pid permanently with no way to
+    // retry a write that will never succeed — stash it instead, and
+    // `COMMAND_DOCK_NODE_STATUS`'s handler applies it the moment the row
+    // exists. See Codex/reagentx findings on PR #2681.
+    let wstore_btp = state.wstore.clone();
+    let pending_pids_btp = state.pending_background_pids.clone();
+    let broker_btp = state.broker.clone();
+    engine.register_handler(
+        COMMAND_BACKGROUND_TASK_PID,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_btp.clone();
+            let pending_pids = pending_pids_btp.clone();
+            let broker = broker_btp.clone();
+            Box::pin(async move {
+                let cmd: CommandBackgroundTaskPidData = serde_json::from_value(data)
+                    .map_err(|e| format!("backgroundtaskpid: {e}"))?;
+                let now_ms = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as i64;
+                let node_id = cmd.node_id.clone();
+                let wstore_set = wstore.clone();
+                let result = pending_pids.set_or_stash(&cmd.node_id, cmd.pid as i64, now_ms, |pid| {
+                    wstore_set.background_task_set_pid(&node_id, pid)
+                });
+                match result {
+                    Ok(()) => publish_background_task_updated(&broker, &cmd.blockid),
+                    Err(e) => tracing::warn!(
+                        target: "background_tasks",
+                        node_id = %cmd.node_id,
+                        error = %e,
+                        "failed to record background task pid in the durable registry",
+                    ),
+                }
+                Ok(None)
+            })
+        }),
+    );
+
+    // listbackgroundtasks → request/response: this block's current
+    // db_background_tasks rows, so the frontend can seed its attachedTask
+    // axis from the durable registry on mount/reconnect instead of only
+    // ever re-deriving it from this tab's own live transcript replay
+    // (which has no way to know about a task that survived a session
+    // restart under a controller generation with no transcript history of
+    // ever launching it — Phase B of
+    // docs/specs/SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md).
+    // See docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.1.
+    let wstore_lbt = state.wstore.clone();
+    engine.register_handler(
+        COMMAND_LIST_BACKGROUND_TASKS,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore_lbt.clone();
+            Box::pin(async move {
+                let cmd: CommandListBackgroundTasksData = serde_json::from_value(data)
+                    .map_err(|e| format!("listbackgroundtasks: {e}"))?;
+                let tasks = wstore
+                    .background_task_list_for_block(&cmd.blockid)
+                    .map_err(|e| format!("listbackgroundtasks: {e}"))?;
+                let views: Vec<super::muxspect_handlers::BackgroundTaskView> =
+                    tasks.into_iter().map(Into::into).collect();
+                Ok(Some(serde_json::to_value(views).map_err(|e| format!("listbackgroundtasks: {e}"))?))
             })
         }),
     );

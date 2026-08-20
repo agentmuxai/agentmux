@@ -24,6 +24,22 @@ export function AdvancedSection(): JSX.Element {
                     />
                 }
             />
+            <SectionHeader label="Agent panes" />
+            <SettingRow
+                label="Auto-answer timeout"
+                description="Seconds an AskUserQuestion panel waits for you before auto-selecting the recommended option(s)"
+                control={
+                    <input
+                        class="setting-number setting-number--wide"
+                        type="number" min={1}
+                        value={((s()["agent:askquestiontimeoutms"] as number) ?? 30000) / 1000}
+                        onBlur={(e) => {
+                            const v = parseFloat(e.currentTarget.value);
+                            if (!isNaN(v) && v >= 1) set("agent:askquestiontimeoutms", Math.round(v * 1000));
+                        }}
+                    />
+                }
+            />
             <SectionHeader label="Widgets" />
             <SettingRow
                 label="Icon-only widget labels"

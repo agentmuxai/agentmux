@@ -33,3 +33,9 @@ portable-pty = "0.9"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dirs = "5"
+
+[target.'cfg(unix)'.dependencies]
+# setsid() for declared-background invocations — see bash_wrap.rs's
+# `detach_declared_background_session` and
+# docs/specs/SPEC_BACKGROUND_TASK_TEARDOWN_SURVIVAL_2026_08_20.md.
+libc = "0.2"

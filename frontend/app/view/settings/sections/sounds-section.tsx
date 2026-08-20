@@ -5,6 +5,7 @@ import { Show, type JSX } from "solid-js";
 
 import { settingsAtom } from "@/app/store/global";
 import { SectionHeader, set, SettingRow, SliderControl, ToggleControl } from "../settings-controls";
+import { DEFAULT_MASTER_VOLUME, DEFAULT_TOOLTONES_VOLUME } from "@/app/notification/sound/sound-defaults";
 
 // ── Section: Sounds & Notifications ───────────────────────────────────────────
 
@@ -12,6 +13,7 @@ export function SoundsSection(): JSX.Element {
     const s = () => settingsAtom() ?? ({} as any);
     const soundsEnabled = () => s()["notify:sounds:enabled"] !== false;
     const toolTonesEnabled = () => s()["notify:tooltones:enabled"] !== false;
+    const waitingToneEnabled = () => s()["notify:sound:agent.waiting.for.input"] !== false;
 
     return (
         <div class="settings-section-body">
@@ -27,7 +29,7 @@ export function SoundsSection(): JSX.Element {
                     control={
                         <SliderControl
                             min={0} max={1} step={0.05}
-                            value={(s()["notify:sounds:volume"] as number) ?? 0.6}
+                            value={(s()["notify:sounds:volume"] as number) ?? DEFAULT_MASTER_VOLUME}
                             onChange={(v) => set("notify:sounds:volume", v)}
                         />
                     }
@@ -112,7 +114,7 @@ export function SoundsSection(): JSX.Element {
                     control={
                         <SliderControl
                             min={0} max={1} step={0.05}
-                            value={(s()["notify:tooltones:volume"] as number) ?? 0.15}
+                            value={(s()["notify:tooltones:volume"] as number) ?? DEFAULT_TOOLTONES_VOLUME}
                             onChange={(v) => set("notify:tooltones:volume", v)}
                         />
                     }
@@ -130,6 +132,25 @@ export function SoundsSection(): JSX.Element {
                             <option value="all">All panes</option>
                             <option value="focused">Focused pane only</option>
                         </select>
+                    }
+                />
+            </Show>
+            <SectionHeader label="Waiting for input" />
+            <SettingRow
+                label="Enable"
+                description="Play a looping ambient tone while an agent pane is blocked waiting for your input"
+                control={<ToggleControl checked={waitingToneEnabled()} onChange={(v) => set("notify:sound:agent.waiting.for.input", v)} />}
+            />
+            <Show when={waitingToneEnabled()}>
+                <SettingRow
+                    indent
+                    label="Volume"
+                    control={
+                        <SliderControl
+                            min={0} max={1} step={0.05}
+                            value={(s()["notify:sounds:waiting:volume"] as number) ?? 0.25}
+                            onChange={(v) => set("notify:sounds:waiting:volume", v)}
+                        />
                     }
                 />
             </Show>

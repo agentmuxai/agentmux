@@ -135,16 +135,19 @@ pub enum DispatchKind {
     Workflow,
 }
 
-// SPEC §9.3 (open): an Abandoned aggregation rule for DispatchStatus,
-// mirroring SubAgentStatus::Abandoned one level up, is proposed but not yet
-// implemented — this enum matches today's WorkflowStatus behavior (no
-// abandoned tracking at the dispatch level) rather than half-implementing
-// an undecided rule.
+// SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.2: the
+// Abandoned aggregation rule flagged as open in an earlier spec is now
+// implemented. Solo kind: mirrors its one member's SubAgentStatus directly
+// (`solo_dispatch`). Workflow kind: `reconcile_stale_subagents` sets this
+// directly (not derived from the counts-based `refresh_dispatch_status`,
+// which only ever produces Running/Completed) whenever every member is
+// Completed|Abandoned and at least one is Abandoned.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum DispatchStatus {
     Running,
     Completed,
+    Abandoned,
 }
 
 /// Solo dispatch identity — a solo Task-tool call has no run-id from Claude

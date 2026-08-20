@@ -293,7 +293,58 @@ pub async fn handle_muxspect_dock(
 
     let nodes = dock_node_views(state.dock_snapshots.get(&q.block_id, now_ms), now_ms, backed);
 
+    // `DockSnapshotCache` is intentionally ephemeral (see its own doc
+    // comment) and evicts any entry — including a genuinely-still-running
+    // `bg: true` one — after MAX_NODE_AGE_MS (1 hour). A `task dev`
+    // session in this repo's own retros has run 12+ hours, so this CLI's
+    // output would go dark on it long before it actually finishes.
+    // `db_background_tasks` (Phase A/B) has no such eviction — merge in
+    // anything it still shows `Running` that the cache no longer has,
+    // rather than changing the cache's own eviction semantics (which are
+    // correct for what it's actually for — see dock_snapshot.rs's doc
+    // comment). See docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.4.
+    let background_tasks = state.wstore.background_task_list_for_block(&q.block_id).unwrap_or_default();
+    let nodes = merge_background_tasks(nodes, background_tasks, now_ms);
+
     Json(json!({ "block_id": q.block_id, "nodes": nodes })).into_response()
+}
+
+/// Append a synthetic `DockNodeView` for every `Running` `db_background_tasks`
+/// row not already represented in `nodes` (by id — `db_background_tasks.id`
+/// mirrors the dock's own `node_id`, see `background_tasks.rs`'s module doc
+/// comment). Pure, unit-testable like `dock_node_views` above. A task
+/// still present in `nodes` is left as-is — the live cache's own status is
+/// more specific (carries `tool_name`, real `stuck` computation) than
+/// anything this synthesizes from the registry alone.
+fn merge_background_tasks(
+    mut nodes: Vec<DockNodeView>,
+    background_tasks: Vec<crate::backend::storage::background_tasks::BackgroundTask>,
+    now_ms: i64,
+) -> Vec<DockNodeView> {
+    use std::collections::HashSet;
+    let existing: HashSet<String> = nodes.iter().map(|n| n.node_id.clone()).collect();
+    for task in background_tasks {
+        if task.status != crate::backend::storage::background_tasks::BackgroundTaskStatus::Running {
+            continue;
+        }
+        if existing.contains(&task.id) {
+            continue;
+        }
+        nodes.push(DockNodeView {
+            node_id: task.id,
+            tool_name: task.label,
+            status: "running".to_string(),
+            age_ms: (now_ms - task.started_at_ms).max(0),
+            // Not computed the same way as a live cache entry's `stuck`
+            // (no ProcessBroker cross-reference here, and a durable
+            // registry row surviving this long is expected, not
+            // suspicious, for a declared-background task) — false rather
+            // than guessing.
+            stuck: false,
+            run_in_background: Some(true),
+        });
+    }
+    nodes
 }
 
 /// Pure computation behind `handle_muxspect_dock` — separated out so the
@@ -624,6 +675,68 @@ mod tests {
         let views = dock_node_views(vec![bg_node], now_ms, false);
         assert_eq!(views[0].run_in_background, Some(true));
         assert!(!views[0].stuck, "status is terminal — the raw heuristic correctly stays quiet");
+    }
+
+    fn bg_task(
+        id: &str,
+        status: crate::backend::storage::background_tasks::BackgroundTaskStatus,
+        started_at_ms: i64,
+    ) -> crate::backend::storage::background_tasks::BackgroundTask {
+        crate::backend::storage::background_tasks::BackgroundTask {
+            id: id.to_string(),
+            block_id: "block-1".to_string(),
+            label: "task dev".to_string(),
+            pid: Some(4242),
+            started_at_ms,
+            status,
+            last_seen_ms: started_at_ms,
+            ended_at_ms: None,
+        }
+    }
+
+    #[test]
+    fn merge_background_tasks_adds_a_running_task_the_cache_evicted() {
+        // The exact §3.4 scenario: DockSnapshotCache's 1-hour TTL evicted
+        // the entry, but db_background_tasks still knows it's running.
+        use crate::backend::storage::background_tasks::BackgroundTaskStatus;
+        let now_ms = 100_000_000;
+        let merged = merge_background_tasks(vec![], vec![bg_task("bg-1", BackgroundTaskStatus::Running, 1_000)], now_ms);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].node_id, "bg-1");
+        assert_eq!(merged[0].status, "running");
+        assert_eq!(merged[0].age_ms, now_ms - 1_000);
+        assert_eq!(merged[0].run_in_background, Some(true));
+        assert!(!merged[0].stuck);
+    }
+
+    #[test]
+    fn merge_background_tasks_skips_a_task_the_cache_still_has() {
+        use crate::backend::storage::background_tasks::BackgroundTaskStatus;
+        let now_ms = 100_000;
+        let existing = dock_node_views(vec![dock_node("bg-1", "running", 90_000)], now_ms, false);
+        let merged = merge_background_tasks(existing, vec![bg_task("bg-1", BackgroundTaskStatus::Running, 1_000)], now_ms);
+        assert_eq!(merged.len(), 1, "must not duplicate a node the live cache already has");
+        assert_eq!(merged[0].tool_name, "Bash", "the live cache's own entry wins, not a synthesized one");
+    }
+
+    #[test]
+    fn merge_background_tasks_ignores_non_running_tasks() {
+        use crate::backend::storage::background_tasks::BackgroundTaskStatus;
+        let now_ms = 100_000;
+        for status in [BackgroundTaskStatus::Done, BackgroundTaskStatus::Error, BackgroundTaskStatus::Stopped] {
+            let merged = merge_background_tasks(vec![], vec![bg_task("bg-1", status, 1_000)], now_ms);
+            assert!(merged.is_empty(), "status={status:?} is terminal — must not be synthesized as a live dock row");
+        }
+    }
+
+    #[test]
+    fn merge_background_tasks_on_no_tasks_is_a_true_no_op() {
+        let now_ms = 100_000;
+        let existing = dock_node_views(vec![dock_node("n1", "running", 90_000)], now_ms, false);
+        let expected_len = existing.len();
+        let merged = merge_background_tasks(existing, vec![], now_ms);
+        assert_eq!(merged.len(), expected_len);
+        assert_eq!(merged[0].node_id, "n1");
     }
 
     #[tokio::test]

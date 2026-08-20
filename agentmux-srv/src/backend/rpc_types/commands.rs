@@ -75,6 +75,23 @@ pub const COMMAND_DOCK_NODE_STATUS: &str = "docknodestatus";
 /// See docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md.
 pub const COMMAND_BACKGROUND_TASK_COMPLETION: &str = "backgroundtaskcompletion";
 
+/// Fire-and-forget push of a declared-background task's real OS pid, relayed
+/// from `agentmux-bashwrap`'s own WPS `"pid"` chunk (published only when
+/// `--declared-background` is set — see `bash_wrap.rs`). Mirrors into
+/// `db_background_tasks.pid` via `background_task_set_pid`, closing the gap
+/// where that column existed but nothing ever wrote it in production. See
+/// docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md.
+pub const COMMAND_BACKGROUND_TASK_PID: &str = "backgroundtaskpid";
+
+/// Request/response — the current `db_background_tasks` rows for one
+/// block, so the frontend can seed its `attachedTask` axis from the
+/// durable registry (a source of truth) instead of only ever re-deriving
+/// it from this tab's own live transcript replay, which has no way to
+/// know about a task that survived a session restart under a controller
+/// generation with no transcript history of ever launching it. See
+/// docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md §3.1.
+pub const COMMAND_LIST_BACKGROUND_TASKS: &str = "listbackgroundtasks";
+
 // Subprocess agent commands
 pub const COMMAND_SUBPROCESS_SPAWN: &str = "subprocessspawn";
 pub const COMMAND_AGENT_INPUT: &str = "agentinput";
@@ -495,6 +512,11 @@ pub const COMMAND_AGENT_SESSION_LIST_ARCHIVES: &str = "agent:session:list_archiv
 pub const COMMAND_NATIVE_MEMORY_LIST: &str = "agent:memory:list";
 pub const COMMAND_NATIVE_MEMORY_READ_FILE: &str = "agent:memory:read_file";
 pub const COMMAND_NATIVE_MEMORY_WRITE_FILE: &str = "agent:memory:write_file";
+
+// ---- Native memory version history (SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md) ----
+pub const COMMAND_NATIVE_MEMORY_HISTORY: &str = "agent:memory:history";
+pub const COMMAND_NATIVE_MEMORY_DIFF: &str = "agent:memory:diff";
+pub const COMMAND_NATIVE_MEMORY_REVERT: &str = "agent:memory:revert";
 
 // ---- Client type constants ----
 

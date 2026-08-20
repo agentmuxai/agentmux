@@ -56,7 +56,40 @@ export const MemoryApi = {
         return client.rpcCall("agent:memory:read_file", data, opts);
     },
 
-    NativeMemoryWriteFileCommand(client: RpcClient, data: { agent_id: string; filename: string; content: string }, opts?: RpcOpts): Promise<void> {
+    NativeMemoryWriteFileCommand(
+        client: RpcClient,
+        data: { agent_id: string; filename: string; content: string; provenance?: NativeMemoryWriteProvenance },
+        opts?: RpcOpts,
+    ): Promise<void> {
         return client.rpcCall("agent:memory:write_file", data, opts);
+    },
+
+    NativeMemoryHistoryCommand(
+        client: RpcClient,
+        data: { agent_id: string; filename: string },
+        opts?: RpcOpts,
+    ): Promise<NativeMemoryHistoryResult> {
+        return client.rpcCall("agent:memory:history", data, opts);
+    },
+
+    NativeMemoryDiffCommand(
+        client: RpcClient,
+        // agent_id required (reagent P1 on agent1/memory-version-core):
+        // the backend verifies BOTH versions belong to this agent before
+        // returning their content — every caller shares one instance-wide
+        // X-AuthKey, so without it any caller could read any other
+        // agent's memory content by version id.
+        data: { agent_id: string; from_version_id: string; to_version_id: string },
+        opts?: RpcOpts,
+    ): Promise<NativeMemoryDiffResult> {
+        return client.rpcCall("agent:memory:diff", data, opts);
+    },
+
+    NativeMemoryRevertCommand(
+        client: RpcClient,
+        data: { agent_id: string; filename: string; target_version_id: string },
+        opts?: RpcOpts,
+    ): Promise<NativeMemoryRevertResult> {
+        return client.rpcCall("agent:memory:revert", data, opts);
     },
 };

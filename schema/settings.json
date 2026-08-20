@@ -269,8 +269,8 @@
           "type": "number",
           "minimum": 0,
           "maximum": 1,
-          "default": 0.15,
-          "description": "Independent gain for tool-call tones, 0.0 (silent) to 1.0. Layered below the shared master gain — turning the master off silences both. Default 0.15."
+          "default": 1.0,
+          "description": "Independent gain for tool-call tones, 0.0 (silent) to 1.0. Layered below the shared master gain — turning the master off silences both. Default 1.0."
         },
         "notify:tooltones:scope": {
           "type": "string",
@@ -292,6 +292,12 @@
           "type": "boolean",
           "default": true,
           "description": "Insert a file-reference token into the composer on drop (in addition to attaching the file). Default true."
+        },
+        "agent:askquestiontimeoutms": {
+          "type": "integer",
+          "minimum": 1000,
+          "default": 30000,
+          "description": "How long an AskUserQuestion panel waits for a human before auto-selecting the recommended option(s) and submitting, in milliseconds. Default 30000 (30s). See docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md §5.2."
         }
       },
       "additionalProperties": false,

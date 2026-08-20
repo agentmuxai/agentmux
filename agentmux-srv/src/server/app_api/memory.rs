@@ -54,7 +54,7 @@ fn register_memory_write(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let req: Req = serde_json::from_value(data)
                     .map_err(|e| format!("memory.write: {e}"))?;
                 check_s1(&ctx, &req.agent_id)?;
-                memory_write_impl(&state, &req.agent_id, &req.filename, &req.content)?;
+                memory_write_impl(&state, &req.agent_id, &req.filename, &req.content, None)?;
                 Ok(None)
             })
         }),

@@ -675,6 +675,79 @@ pub fn isolated_auth_reason() -> IsolatedAuthReason {
     }
 }
 
+/// Isolated per-channel `settings.json`. Same shape and same reasoning as
+/// [`isolated_auth_enabled`] — see
+/// `docs/specs/SPEC_SETTINGS_ISOLATED_BY_CHANNEL_2026_08_19.md`.
+///
+/// Resolution order:
+/// 1. `AGENTMUX_ISOLATED_SETTINGS=1` / `=0` — explicit override, always wins.
+/// 2. Otherwise, defaults to isolated for every channel except `"stable"`.
+///    `stable` is the real release channel — the daily-driver install(s)
+///    this machine's actual work depends on — and keeps the old
+///    always-global behavior, so nobody's real window theme/pinned
+///    widgets/voice API key gets silently blanked by a channel-name
+///    coincidence. Every `task dev` branch and every `task package` local
+///    build now starts with a genuinely default `settings.json` — the
+///    motivating case was `network:lan_discovery` silently carrying
+///    `true` into a brand-new build from a decision made in an unrelated
+///    channel weeks earlier.
+/// 3. If `AGENTMUX_CHANNEL` isn't set yet, stays global — conservative
+///    default when channel context is unknown, not a guess.
+///
+/// Deliberately a SEPARATE flag from `AGENTMUX_ISOLATED_AUTH`, not a
+/// shared `AGENTMUX_ISOLATED` umbrella — see the spec's Open Questions
+/// §1 for why.
+pub fn isolated_settings_enabled() -> bool {
+    isolated_settings_reason().is_isolated()
+}
+
+/// Which rule decided [`isolated_settings_enabled`]'s result — for
+/// boot-time diagnostics, mirroring [`IsolatedAuthReason`] exactly (see
+/// that type's doc comment for the rationale: one resolution, two views,
+/// so the boolean and the log line can never drift apart).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IsolatedSettingsReason {
+    /// `AGENTMUX_ISOLATED_SETTINGS=1`.
+    ExplicitOptIn,
+    /// `AGENTMUX_ISOLATED_SETTINGS` is set to anything other than exactly
+    /// `"1"` — fail-safe by construction, same rule as
+    /// `IsolatedAuthReason::ExplicitOptOut` and for the same reason: a
+    /// typo'd opt-out attempt must not silently isolate a non-stable
+    /// channel instead of falling back to the safe (global) state.
+    ExplicitOptOut,
+    /// No override; `AGENTMUX_CHANNEL` is set and isn't `"stable"`.
+    ChannelDefaultIsolated,
+    /// No override; `AGENTMUX_CHANNEL` is `"stable"` or unset entirely.
+    ChannelDefaultGlobal,
+}
+
+impl IsolatedSettingsReason {
+    pub fn is_isolated(self) -> bool {
+        matches!(self, Self::ExplicitOptIn | Self::ChannelDefaultIsolated)
+    }
+
+    /// Short, log-friendly label.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ExplicitOptIn => "explicit opt-in",
+            Self::ExplicitOptOut => "explicit opt-out",
+            Self::ChannelDefaultIsolated => "channel default — isolated",
+            Self::ChannelDefaultGlobal => "channel default — global",
+        }
+    }
+}
+
+pub fn isolated_settings_reason() -> IsolatedSettingsReason {
+    match std::env::var("AGENTMUX_ISOLATED_SETTINGS") {
+        Ok(v) if v == "1" => IsolatedSettingsReason::ExplicitOptIn,
+        Ok(_) => IsolatedSettingsReason::ExplicitOptOut,
+        Err(_) => match std::env::var("AGENTMUX_CHANNEL") {
+            Ok(ch) if ch != "stable" => IsolatedSettingsReason::ChannelDefaultIsolated,
+            _ => IsolatedSettingsReason::ChannelDefaultGlobal,
+        },
+    }
+}
+
 /// `~/.agentmux/` root, or the test override via
 /// `AGENTMUX_HOME_OVERRIDE`. Falls back to error if no home dir
 /// can be resolved (rare — should only happen in stripped CI envs).
@@ -1415,6 +1488,99 @@ mod tests {
         }
 
         std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        clear_channel_env();
+    }
+
+    /// RAII guard clearing `AGENTMUX_ISOLATED_SETTINGS` on drop, even on
+    /// panic — mirrors `IsolatedAuthGuard` above.
+    struct IsolatedSettingsGuard;
+    impl Drop for IsolatedSettingsGuard {
+        fn drop(&mut self) {
+            std::env::remove_var("AGENTMUX_ISOLATED_SETTINGS");
+        }
+    }
+
+    #[test]
+    fn isolated_settings_reason_classifies_all_four_states() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("AGENTMUX_ISOLATED_SETTINGS");
+        clear_channel_env();
+        let _guard = IsolatedSettingsGuard;
+
+        std::env::set_var("AGENTMUX_ISOLATED_SETTINGS", "1");
+        assert_eq!(isolated_settings_reason(), IsolatedSettingsReason::ExplicitOptIn);
+        assert!(isolated_settings_reason().is_isolated());
+
+        std::env::set_var("AGENTMUX_ISOLATED_SETTINGS", "0");
+        assert_eq!(isolated_settings_reason(), IsolatedSettingsReason::ExplicitOptOut);
+        assert!(!isolated_settings_reason().is_isolated());
+
+        std::env::remove_var("AGENTMUX_ISOLATED_SETTINGS");
+        std::env::set_var("AGENTMUX_CHANNEL", "local-some-branch-abc123-1");
+        assert_eq!(isolated_settings_reason(), IsolatedSettingsReason::ChannelDefaultIsolated);
+        assert!(isolated_settings_reason().is_isolated());
+
+        std::env::set_var("AGENTMUX_CHANNEL", "stable");
+        assert_eq!(isolated_settings_reason(), IsolatedSettingsReason::ChannelDefaultGlobal);
+        assert!(!isolated_settings_reason().is_isolated());
+
+        clear_channel_env();
+        assert_eq!(isolated_settings_reason(), IsolatedSettingsReason::ChannelDefaultGlobal);
+        assert!(!isolated_settings_reason().is_isolated());
+    }
+
+    #[test]
+    fn isolated_settings_reason_fails_safe_on_a_malformed_value_on_a_non_stable_channel() {
+        // Same fail-safe rule as isolated_auth_reason's equivalent test
+        // (reagentx P2 on PR #2431) — a typo'd opt-out must land on
+        // ExplicitOptOut (global), not silently isolate.
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_channel_env();
+        std::env::set_var("AGENTMUX_CHANNEL", "dev-some-branch");
+        let _guard = IsolatedSettingsGuard;
+
+        for malformed in ["false", "no", "TRUE", "2", ""] {
+            std::env::set_var("AGENTMUX_ISOLATED_SETTINGS", malformed);
+            assert_eq!(
+                isolated_settings_reason(),
+                IsolatedSettingsReason::ExplicitOptOut,
+                "AGENTMUX_ISOLATED_SETTINGS={malformed:?} on a non-stable channel must fail safe to global, not isolate"
+            );
+            assert!(!isolated_settings_reason().is_isolated());
+        }
+
+        std::env::remove_var("AGENTMUX_ISOLATED_SETTINGS");
+        clear_channel_env();
+    }
+
+    #[test]
+    fn isolated_settings_and_isolated_auth_are_independent_flags() {
+        // Open question §1 in the spec: these must not accidentally share
+        // state — setting one must not affect the other's resolution.
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_channel_env();
+        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        std::env::remove_var("AGENTMUX_ISOLATED_SETTINGS");
+        std::env::set_var("AGENTMUX_CHANNEL", "dev-some-branch");
+        let _guard_a = IsolatedAuthGuard;
+        let _guard_s = IsolatedSettingsGuard;
+
+        std::env::set_var("AGENTMUX_ISOLATED_AUTH", "0");
+        assert!(!isolated_auth_enabled());
+        assert!(
+            isolated_settings_enabled(),
+            "AGENTMUX_ISOLATED_AUTH=0 must not disable settings isolation"
+        );
+
+        std::env::remove_var("AGENTMUX_ISOLATED_AUTH");
+        std::env::set_var("AGENTMUX_ISOLATED_SETTINGS", "0");
+        assert!(!isolated_settings_enabled());
+        assert!(
+            isolated_auth_enabled(),
+            "AGENTMUX_ISOLATED_SETTINGS=0 must not disable auth isolation"
+        );
+
+        std::env::remove_var("AGENTMUX_ISOLATED_SETTINGS");
         clear_channel_env();
     }
 

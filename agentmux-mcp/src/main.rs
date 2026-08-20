@@ -473,14 +473,61 @@ const MEMORY_READ_TOOL: &str = r#"{
 
 const MEMORY_WRITE_TOOL: &str = r#"{
   "name": "MemoryWrite",
-  "description": "Create or overwrite one of your own native memory (brain) markdown files. The write is atomic. Use it to persist notes/context for your future self across conversations.",
+  "description": "Create or overwrite one of your own native memory (brain) markdown files. The write is atomic. Use it to persist notes/context for your future self across conversations. Every write is retained as a version (see MemoryHistory) — nothing is ever silently lost.",
   "inputSchema": {
     "type": "object",
     "properties": {
       "filename": { "type": "string", "description": "The memory file to write (created if absent, overwritten if present)" },
-      "content":  { "type": "string", "description": "Full markdown content to store in the file" }
+      "content":  { "type": "string", "description": "Full markdown content to store in the file" },
+      "provenance": {
+        "type": "object",
+        "description": "Optional context for why you're writing this — helps a human reviewing history later. Omit for an ordinary write from your own reasoning.",
+        "properties": {
+          "source": { "type": "string", "description": "\"human\" if directly instructed by the operator, \"jekt\" if this write is a direct response to jekt content still in your context, omit otherwise (defaults to agent_inferred)" },
+          "detail":  { "type": "object", "description": "Extra structured context — e.g. the jekt's marker fields (FROM/TIER/TRUST/DELIVERY/MSGID) when source is \"jekt\"" }
+        },
+        "required": ["source"]
+      }
     },
     "required": ["filename", "content"]
+  }
+}"#;
+
+const MEMORY_HISTORY_TOOL: &str = r#"{
+  "name": "MemoryHistory",
+  "description": "List every recorded version of one of your own native memory (brain) markdown files, newest first. Each entry shows who/what wrote it (source: human, agent_inferred, jekt, external_fs_write, or revert) and when. Use it to review how a memory file changed over time, or to find a version id to pass to MemoryDiff/MemoryRevert.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "filename": { "type": "string", "description": "The memory file to show history for (from MemoryList)" }
+    },
+    "required": ["filename"]
+  }
+}"#;
+
+const MEMORY_DIFF_TOOL: &str = r#"{
+  "name": "MemoryDiff",
+  "description": "Show a line-based diff between two recorded versions of a memory file. Get version ids from MemoryHistory.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "from_version_id": { "type": "string", "description": "The earlier version id (from MemoryHistory)" },
+      "to_version_id":   { "type": "string", "description": "The later version id (from MemoryHistory)" }
+    },
+    "required": ["from_version_id", "to_version_id"]
+  }
+}"#;
+
+const MEMORY_REVERT_TOOL: &str = r#"{
+  "name": "MemoryRevert",
+  "description": "Restore a memory file's live content to a prior recorded version. This does NOT delete history — it records a new version (source: \"revert\") whose content matches the target, same as `git revert`. Use it to undo a bad or fabricated memory write once you've confirmed via MemoryHistory/MemoryDiff which version to restore.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "filename": { "type": "string", "description": "The memory file to revert" },
+      "target_version_id": { "type": "string", "description": "The version id to restore (from MemoryHistory)" }
+    },
+    "required": ["filename", "target_version_id"]
   }
 }"#;
 
@@ -646,6 +693,9 @@ async fn main() {
                 let memory_list: Value = serde_json::from_str(MEMORY_LIST_TOOL).expect("static json");
                 let memory_read: Value = serde_json::from_str(MEMORY_READ_TOOL).expect("static json");
                 let memory_write: Value = serde_json::from_str(MEMORY_WRITE_TOOL).expect("static json");
+                let memory_history: Value = serde_json::from_str(MEMORY_HISTORY_TOOL).expect("static json");
+                let memory_diff: Value = serde_json::from_str(MEMORY_DIFF_TOOL).expect("static json");
+                let memory_revert: Value = serde_json::from_str(MEMORY_REVERT_TOOL).expect("static json");
                 let preset_list: Value = serde_json::from_str(PRESET_LIST_TOOL).expect("static json");
                 let preset_get: Value = serde_json::from_str(PRESET_GET_TOOL).expect("static json");
                 let identity_accounts: Value =
@@ -655,7 +705,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, open_media, send_message, discover_agents, get_agent_transcript, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, fleet_list, fleet_broadcast, fleet_bulk_stop, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, open_media, send_message, discover_agents, get_agent_transcript, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, fleet_list, fleet_broadcast, fleet_bulk_stop, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {
@@ -2299,11 +2349,17 @@ async fn call_tool(
             require_agent_env(local_url, auth_key, block_id)?;
             let agent_id = agent_slug()?;
             let url = format!("{}/api/v1/agent/memory/write", local_url.trim_end_matches('/'));
-            let body = json!({
+            let mut body = json!({
                 "agent_id": agent_id,
                 "filename": filename,
                 "content": content,
             });
+            // Pass provenance through verbatim when the caller supplied it —
+            // advisory metadata for the version history, see
+            // SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.1.
+            if let Some(provenance) = arguments.get("provenance") {
+                body["provenance"] = provenance.clone();
+            }
             let resp = client
                 .post(&url)
                 .header("X-AuthKey", auth_key)
@@ -2317,6 +2373,104 @@ async fn call_tool(
                 anyhow::bail!("memory/write failed: HTTP {status} — {text}");
             }
             Ok(format!("Wrote memory file \"{filename}\""))
+        }
+        "MemoryHistory" => {
+            let filename = arguments
+                .get("filename")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: filename"))?;
+            require_agent_env(local_url, auth_key, block_id)?;
+            let agent_id = agent_slug()?;
+            let url = format!("{}/api/v1/agent/memory/history", local_url.trim_end_matches('/'));
+            let resp = client
+                .get(&url)
+                .header("X-AuthKey", auth_key)
+                .query(&[("agent_id", agent_id.as_str()), ("filename", filename)])
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("memory/history failed: HTTP {status} — {text}");
+            }
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+        }
+        "MemoryDiff" => {
+            let from_version_id = arguments
+                .get("from_version_id")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: from_version_id"))?;
+            let to_version_id = arguments
+                .get("to_version_id")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: to_version_id"))?;
+            require_agent_env(local_url, auth_key, block_id)?;
+            let agent_id = agent_slug()?;
+            let url = format!("{}/api/v1/agent/memory/diff", local_url.trim_end_matches('/'));
+            let resp = client
+                .get(&url)
+                .header("X-AuthKey", auth_key)
+                .query(&[("agent_id", agent_id.as_str()), ("from_version_id", from_version_id), ("to_version_id", to_version_id)])
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("memory/diff failed: HTTP {status} — {text}");
+            }
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+            Ok(result
+                .get("diff")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .unwrap_or_else(|| {
+                    serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string())
+                }))
+        }
+        "MemoryRevert" => {
+            let filename = arguments
+                .get("filename")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: filename"))?;
+            let target_version_id = arguments
+                .get("target_version_id")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: target_version_id"))?;
+            require_agent_env(local_url, auth_key, block_id)?;
+            let agent_id = agent_slug()?;
+            let url = format!("{}/api/v1/agent/memory/revert", local_url.trim_end_matches('/'));
+            let body = json!({
+                "agent_id": agent_id,
+                "filename": filename,
+                "target_version_id": target_version_id,
+            });
+            let resp = client
+                .post(&url)
+                .header("X-AuthKey", auth_key)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("memory/revert failed: HTTP {status} — {text}");
+            }
+            Ok(format!("Reverted \"{filename}\" to version {target_version_id}"))
         }
         "PresetList" => {
             require_agent_env(local_url, auth_key, block_id)?;
@@ -2524,6 +2678,9 @@ mod tests {
             MEMORY_LIST_TOOL,
             MEMORY_READ_TOOL,
             MEMORY_WRITE_TOOL,
+            MEMORY_HISTORY_TOOL,
+            MEMORY_DIFF_TOOL,
+            MEMORY_REVERT_TOOL,
             PRESET_LIST_TOOL,
             PRESET_GET_TOOL,
             IDENTITY_ACCOUNTS_TOOL,
@@ -2536,10 +2693,12 @@ mod tests {
         // response before this change too — SHELL_INPUT/STATUS, the three
         // UI_* tools, GET_AGENT_TRANSCRIPT, and SUPERVISOR_NUDGE are all
         // live tools missing from it. Not fixed here (out of scope for
-        // this feature) — just adding the 3 new fleet-control tools to
-        // whatever this test already covered, so at least those don't
-        // silently join the drift.
-        assert_eq!(defs.len(), 30, "tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 fleet-control tools added by SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md");
+        // this feature) — just adding the 3 new fleet-control tools
+        // (SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md) alongside the 3
+        // memory-version-history tools merged in from a concurrent PR, on
+        // top of whatever this test already covered, so at least those
+        // don't silently join the drift.
+        assert_eq!(defs.len(), 33, "tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools");
         for d in defs {
             let v: Value = serde_json::from_str(d).expect("tool def must be valid JSON");
             assert!(
