@@ -497,6 +497,18 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/ui/screenshot", post(ui_handlers::handle_ui_screenshot))
         .route("/api/v1/ui/click", post(ui_handlers::handle_ui_click))
         .route("/api/v1/ui/query", post(ui_handlers::handle_ui_query))
+        // Fleet control (SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md) —
+        // bulk-stop is the one fleet action exposed to agentmux-mcp (see
+        // `FleetBulkStop`): stopping a controller involves no jekt signing,
+        // unlike broadcast (which an agent instead sends by looping the
+        // existing single-target signed SendMessage path client-side —
+        // see `server/app_api/fleet.rs`'s module doc comment for why no
+        // `/api/v1/fleet/broadcast` route exists). Same MCP-facing App-API
+        // trust model as the routes above: gated by the general X-AuthKey
+        // middleware wrapping this whole router, no additional per-agent
+        // scoping — fleet actions target OTHER agents' panes by design, so
+        // "own pane only" doesn't apply here the way it does to `ui/*`.
+        .route("/api/v1/fleet/bulk-stop", post(handle_fleet_bulk_stop))
         .route("/api/messaging/status", get(messaging_handlers::handle_status))
         .route("/api/messaging/discord/send", post(messaging_handlers::handle_discord_send))
         .route("/api/messaging/telegram/send", post(messaging_handlers::handle_telegram_send))
@@ -1048,6 +1060,17 @@ async fn handle_agent_memory_write(
         Ok(()) => (StatusCode::OK, Json(json!({ "ok": true }))).into_response(),
         Err(e) => (app_api_error_status(&e), Json(json!({ "error": e }))).into_response(),
     }
+}
+
+/// `POST /api/v1/fleet/bulk-stop` — stop many agent panes (block ids) at
+/// once. Backs the `FleetBulkStop` MCP tool. Infallible per-target (never
+/// a single bool) — see `FleetActionResult`'s doc comment.
+async fn handle_fleet_bulk_stop(
+    State(state): State<AppState>,
+    Json(req): Json<crate::backend::rpc_types::CommandFleetBulkStopData>,
+) -> impl IntoResponse {
+    let result = app_api::fleet::fleet_bulk_stop_impl(&state, req.targets, req.signal.as_deref(), req.staged);
+    (StatusCode::OK, Json(result)).into_response()
 }
 
 #[derive(serde::Deserialize)]

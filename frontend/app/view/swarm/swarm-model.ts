@@ -3,6 +3,7 @@
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/rpc-api";
+import type { FleetActionResult, FleetGroup, FleetStagePlan } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
@@ -868,6 +869,37 @@ export class SwarmViewModel implements ViewModel {
     trackedBlockIdsAtom: Accessor<string[]> = this._trackedBlockIds[0];
     private setTrackedBlockIds: Setter<string[]> = this._trackedBlockIds[1];
 
+    // Fleet control (SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md) — which
+    // top-level agent blockIds are currently checked for a bulk action.
+    // Ephemeral (resets on reload), same posture as _expandedAgentIds above.
+    private _selectedBlockIds = createSignal<Set<string>>(new Set());
+    selectedBlockIdsAtom: Accessor<Set<string>> = this._selectedBlockIds[0];
+    private setSelectedBlockIds: Setter<Set<string>> = this._selectedBlockIds[1];
+
+    // Result of the most recently completed bulk action, rendered as a
+    // per-target success/failure list — never collapsed to a single
+    // aggregate toast (spec §3/§5.4: silent partial failure is the most
+    // commonly-cited fleet-ops UX pitfall). Cleared explicitly by the user
+    // dismissing the panel, not auto-cleared on a timer, so a failure list
+    // can't disappear before it's been read.
+    private _lastFleetResult = createSignal<{ action: "broadcast" | "bulk-stop"; result: FleetActionResult } | null>(
+        null,
+    );
+    lastFleetResultAtom: Accessor<{ action: "broadcast" | "bulk-stop"; result: FleetActionResult } | null> =
+        this._lastFleetResult[0];
+    private setLastFleetResult: Setter<{ action: "broadcast" | "bulk-stop"; result: FleetActionResult } | null> =
+        this._lastFleetResult[1];
+
+    private _fleetActionInFlight = createSignal<boolean>(false);
+    fleetActionInFlightAtom: Accessor<boolean> = this._fleetActionInFlight[0];
+    private setFleetActionInFlight: Setter<boolean> = this._fleetActionInFlight[1];
+
+    // Saved target groups (Ansible-inventory-group-style) — see
+    // db_agent_groups / fleet.group.* in the spec.
+    private _fleetGroups = createSignal<FleetGroup[]>([]);
+    fleetGroupsAtom: Accessor<FleetGroup[]> = this._fleetGroups[0];
+    private setFleetGroups: Setter<FleetGroup[]> = this._fleetGroups[1];
+
     private _loading = createSignal<boolean>(true);
     loadingAtom: Accessor<boolean> = this._loading[0];
     private setLoading: Setter<boolean> = this._loading[1];
@@ -1143,6 +1175,7 @@ export class SwarmViewModel implements ViewModel {
                 this.loadDispatches(),
                 this.loadShells(),
                 this.loadCrons(),
+                this.loadFleetGroups(),
             ]);
             // codex P2 on PR #2677: a transient ListActive/ListDispatches
             // failure is swallowed by its own loader (silent catch below),
@@ -1330,6 +1363,94 @@ export class SwarmViewModel implements ViewModel {
             else next.add(blockId);
             return next;
         });
+    }
+
+    // ── Fleet control (SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md) ──────
+
+    isSelected(blockId: string): boolean {
+        return this.selectedBlockIdsAtom().has(blockId);
+    }
+
+    toggleSelected(blockId: string): void {
+        this.setSelectedBlockIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(blockId)) next.delete(blockId);
+            else next.add(blockId);
+            return next;
+        });
+    }
+
+    selectAll(blockIds: string[]): void {
+        this.setSelectedBlockIds(new Set(blockIds));
+    }
+
+    clearSelection(): void {
+        this.setSelectedBlockIds(new Set<string>());
+    }
+
+    /** Replaces the current selection with a saved group's members — the
+     *  frontend resolves the group to concrete ids HERE, once, rather than
+     *  passing a group_id through to the action RPCs, so membership can't
+     *  drift between confirming a bulk action and it actually running
+     *  (spec §5.1). */
+    applyGroupAsSelection(group: FleetGroup): void {
+        this.setSelectedBlockIds(new Set(group.member_ids));
+    }
+
+    /** Non-destructive: executes immediately, no confirmation — see spec
+     *  §5.2/§3 (reserve blocking confirms for irreversible actions). */
+    async broadcastToSelection(message: string): Promise<FleetActionResult> {
+        const targets = Array.from(this.selectedBlockIdsAtom());
+        this.setFleetActionInFlight(true);
+        try {
+            const result = await RpcApi.FleetBroadcastCommand(TabRpcClient, { targets, message });
+            this.setLastFleetResult({ action: "broadcast", result });
+            return result;
+        } finally {
+            this.setFleetActionInFlight(false);
+        }
+    }
+
+    /** Destructive — callers must confirm with the user first, showing the
+     *  exact resolved target count (spec §3: never hide scope, never "stop
+     *  selected" without the concrete list/count). Clears the selection on
+     *  completion regardless of outcome, since the stopped panes are no
+     *  longer a meaningful target set to keep checked. */
+    async bulkStopSelection(opts?: { signal?: string; staged?: FleetStagePlan }): Promise<FleetActionResult> {
+        const targets = Array.from(this.selectedBlockIdsAtom());
+        this.setFleetActionInFlight(true);
+        try {
+            const result = await RpcApi.FleetBulkStopCommand(TabRpcClient, { targets, ...opts });
+            this.setLastFleetResult({ action: "bulk-stop", result });
+            return result;
+        } finally {
+            this.setFleetActionInFlight(false);
+            this.clearSelection();
+        }
+    }
+
+    dismissFleetResult(): void {
+        this.setLastFleetResult(null);
+    }
+
+    async loadFleetGroups(): Promise<void> {
+        try {
+            const { groups } = await RpcApi.FleetGroupListCommand(TabRpcClient, {});
+            this.setFleetGroups(groups ?? []);
+        } catch (e) {
+            console.error("swarm: loadFleetGroups failed", e);
+        }
+    }
+
+    async saveSelectionAsGroup(name: string): Promise<void> {
+        const member_ids = Array.from(this.selectedBlockIdsAtom());
+        await RpcApi.FleetGroupCreateCommand(TabRpcClient, { name, member_ids });
+        await this.loadFleetGroups();
+    }
+
+    async deleteFleetGroup(id: string): Promise<void> {
+        await RpcApi.FleetGroupDeleteCommand(TabRpcClient, { id });
+        await this.loadFleetGroups();
     }
 
     /** Retire (dismiss) a row — `rowKey` is `subagentRowKey(agent_id)` for
