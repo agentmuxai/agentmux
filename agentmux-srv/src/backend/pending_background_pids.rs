@@ -15,11 +15,27 @@
 //!
 //! `background_task_set_pid` (`background_tasks.rs`) is a bare
 //! `UPDATE ... WHERE id = ?` — it silently no-ops (`Ok(false)`) when the
-//! row doesn't exist yet, and the pid would be lost forever with no
-//! retry that could ever succeed (retrying the same too-early write
-//! doesn't help — the row still won't exist). This module closes that
-//! gap: a pid that arrives too early is stashed here instead, and applied
-//! the moment `background_task_observe` creates the row. See
+//! row doesn't exist yet, and the pid would be lost forever with no retry
+//! that could ever succeed (retrying the same too-early write doesn't
+//! help — the row still won't exist).
+//!
+//! [`set_or_stash`](PendingBackgroundPids::set_or_stash) and
+//! [`observe_and_apply`](PendingBackgroundPids::observe_and_apply) are the
+//! two sides of the fix, called from `websocket.rs`'s
+//! `COMMAND_BACKGROUND_TASK_PID` and `COMMAND_DOCK_NODE_STATUS` handlers
+//! respectively. Both run their DB call (via the `try_set`/`apply` closure)
+//! WHILE HOLDING this module's own lock, not as a separate step after it —
+//! an earlier version of this module exposed plain `stash`/`take` methods
+//! instead, with each handler doing its own DB call first and the
+//! stash/take second, unlocked in between. That let the two handlers'
+//! steps interleave (pid handler's DB call sees no row → before it stashes,
+//! the observe handler's own take() already ran and found nothing →
+//! observe handler's row now exists but nothing will ever re-check it →
+//! pid handler's stash lands after the one take() that would have
+//! consumed it, and sits unclaimed until the TTL drops it). Making the DB
+//! call part of the SAME critical section as the buffer mutation closes
+//! that window: whichever handler's critical section runs second always
+//! observes the first one's effect, DB row or stash, correctly. See
 //! docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md and the
 //! Codex/reagentx findings on PR #2681 this was written to address.
 
@@ -52,27 +68,54 @@ impl PendingBackgroundPids {
         Self::default()
     }
 
-    /// Record a pid that arrived before its `db_background_tasks` row
-    /// existed. Overwrites any previous stash for the same id (only the
-    /// latest pid is meaningful — there is at most one live process per
-    /// declared-background task id).
-    pub fn stash(&self, id: &str, pid: i64, now_ms: i64) {
-        let mut guard = self.inner.lock();
+    fn evict_expired_locked(guard: &mut HashMap<String, PendingEntry>, now_ms: i64) {
         guard.retain(|_, e| now_ms.saturating_sub(e.stashed_at_ms) < PENDING_PID_TTL_MS);
-        guard.insert(id.to_string(), PendingEntry { pid, stashed_at_ms: now_ms });
     }
 
-    /// Remove and return a stashed pid for `id`, if one is still pending
-    /// and hasn't expired. Called right after `background_task_observe`
-    /// creates/refreshes a row, so a pid that arrived first can be applied
-    /// immediately.
-    pub fn take(&self, id: &str, now_ms: i64) -> Option<i64> {
+    /// Called from the pid-arrival side (`COMMAND_BACKGROUND_TASK_PID`).
+    /// Runs `try_set(pid)` (the `background_task_set_pid` DB call) while
+    /// holding this module's lock; if it reports the row doesn't exist yet
+    /// (`Ok(false)`), stashes the pid instead of losing it. Atomic with
+    /// `observe_and_apply` below for the same `id` — see the module doc
+    /// comment for why that matters.
+    pub fn set_or_stash<E>(
+        &self,
+        id: &str,
+        pid: i64,
+        now_ms: i64,
+        try_set: impl FnOnce(i64) -> Result<bool, E>,
+    ) -> Result<(), E> {
         let mut guard = self.inner.lock();
-        let entry = guard.remove(id)?;
-        if now_ms.saturating_sub(entry.stashed_at_ms) >= PENDING_PID_TTL_MS {
-            return None;
+        Self::evict_expired_locked(&mut guard, now_ms);
+        match try_set(pid)? {
+            true => {
+                guard.remove(id);
+            }
+            false => {
+                guard.insert(id.to_string(), PendingEntry { pid, stashed_at_ms: now_ms });
+            }
         }
-        Some(entry.pid)
+        Ok(())
+    }
+
+    /// Called from the row-creation side (`COMMAND_DOCK_NODE_STATUS`),
+    /// after its own `background_task_observe(...)` call. Checks for a
+    /// pid stashed ahead of the row's existence and, if present and not
+    /// expired, applies it via `apply` (another `background_task_set_pid`
+    /// call) while holding this module's lock. Atomic with `set_or_stash`
+    /// above for the same `id`.
+    pub fn observe_and_apply<E>(
+        &self,
+        id: &str,
+        now_ms: i64,
+        apply: impl FnOnce(i64) -> Result<bool, E>,
+    ) -> Result<(), E> {
+        let mut guard = self.inner.lock();
+        Self::evict_expired_locked(&mut guard, now_ms);
+        if let Some(entry) = guard.remove(id) {
+            apply(entry.pid)?;
+        }
+        Ok(())
     }
 }
 
@@ -80,54 +123,134 @@ impl PendingBackgroundPids {
 mod tests {
     use super::*;
 
+    #[derive(Debug, PartialEq)]
+    struct TestErr;
+
     #[test]
-    fn take_on_unknown_id_is_none() {
+    fn set_or_stash_applies_directly_when_the_row_already_exists() {
         let p = PendingBackgroundPids::new();
-        assert_eq!(p.take("unknown", 1000), None);
+        let mut set_calls = Vec::new();
+        let r: Result<(), TestErr> = p.set_or_stash("t1", 4242, 1000, |pid| {
+            set_calls.push(pid);
+            Ok(true) // row exists, update succeeded
+        });
+        assert!(r.is_ok());
+        assert_eq!(set_calls, vec![4242]);
+        // Nothing stashed — a later observe_and_apply finds nothing to apply.
+        let mut applied = Vec::new();
+        let _: Result<(), TestErr> = p.observe_and_apply("t1", 1001, |pid| {
+            applied.push(pid);
+            Ok(true)
+        });
+        assert!(applied.is_empty());
     }
 
     #[test]
-    fn stash_then_take_round_trips_and_consumes() {
+    fn set_or_stash_then_observe_and_apply_delivers_the_pid() {
+        // The exact race this module exists to close: pid arrives before
+        // the row does.
         let p = PendingBackgroundPids::new();
-        p.stash("t1", 4242, 1000);
-        assert_eq!(p.take("t1", 1500), Some(4242));
-        // Consumed — a second take finds nothing.
-        assert_eq!(p.take("t1", 1500), None);
+        let r: Result<(), TestErr> = p.set_or_stash("t1", 4242, 1000, |_pid| Ok(false)); // no row yet
+        assert!(r.is_ok());
+
+        let mut applied = Vec::new();
+        let r2: Result<(), TestErr> = p.observe_and_apply("t1", 1050, |pid| {
+            applied.push(pid);
+            Ok(true)
+        });
+        assert!(r2.is_ok());
+        assert_eq!(applied, vec![4242]);
+
+        // Consumed — a second observe_and_apply finds nothing.
+        let mut applied2 = Vec::new();
+        let _: Result<(), TestErr> = p.observe_and_apply("t1", 1051, |pid| {
+            applied2.push(pid);
+            Ok(true)
+        });
+        assert!(applied2.is_empty());
     }
 
     #[test]
-    fn take_past_ttl_returns_none_and_still_consumes_the_entry() {
+    fn observe_and_apply_before_any_pid_arrives_is_a_no_op() {
         let p = PendingBackgroundPids::new();
-        p.stash("t1", 4242, 1000);
-        assert_eq!(p.take("t1", 1000 + PENDING_PID_TTL_MS), None);
-        // Even a fresh-enough take afterward finds nothing — it's gone.
-        assert_eq!(p.take("t1", 1000 + PENDING_PID_TTL_MS), None);
+        let mut applied = Vec::new();
+        let _: Result<(), TestErr> = p.observe_and_apply("t1", 1000, |pid| {
+            applied.push(pid);
+            Ok(true)
+        });
+        assert!(applied.is_empty());
     }
 
     #[test]
-    fn stash_overwrites_a_previous_pending_pid_for_the_same_id() {
+    fn set_or_stash_propagates_the_db_error_without_stashing() {
         let p = PendingBackgroundPids::new();
-        p.stash("t1", 111, 1000);
-        p.stash("t1", 222, 1001);
-        assert_eq!(p.take("t1", 1002), Some(222));
+        let r: Result<(), TestErr> = p.set_or_stash("t1", 4242, 1000, |_pid| Err(TestErr));
+        assert_eq!(r, Err(TestErr));
+        // Nothing stashed despite the error.
+        let mut applied = Vec::new();
+        let _: Result<(), TestErr> = p.observe_and_apply("t1", 1001, |pid| {
+            applied.push(pid);
+            Ok(true)
+        });
+        assert!(applied.is_empty());
     }
 
     #[test]
-    fn stash_evicts_other_expired_entries_as_a_side_effect() {
+    fn observe_and_apply_propagates_the_db_error_but_still_consumes_the_stash() {
+        // Matches the module's stated semantics: this is a best-effort
+        // relay, not something worth retrying indefinitely — a stashed
+        // pid is consumed on the attempt regardless of outcome.
         let p = PendingBackgroundPids::new();
-        p.stash("old", 1, 1000);
-        // Well past TTL by the time this second stash happens.
-        p.stash("new", 2, 1000 + PENDING_PID_TTL_MS + 1);
-        assert_eq!(p.take("old", 1000 + PENDING_PID_TTL_MS + 1), None);
-        assert_eq!(p.take("new", 1000 + PENDING_PID_TTL_MS + 1), Some(2));
+        let _: Result<(), TestErr> = p.set_or_stash("t1", 4242, 1000, |_pid| Ok(false));
+        let r: Result<(), TestErr> = p.observe_and_apply("t1", 1001, |_pid| Err(TestErr));
+        assert_eq!(r, Err(TestErr));
+        let mut applied = Vec::new();
+        let _: Result<(), TestErr> = p.observe_and_apply("t1", 1002, |pid| {
+            applied.push(pid);
+            Ok(true)
+        });
+        assert!(applied.is_empty());
+    }
+
+    #[test]
+    fn a_stash_past_ttl_is_not_applied() {
+        let p = PendingBackgroundPids::new();
+        let _: Result<(), TestErr> = p.set_or_stash("t1", 4242, 1000, |_pid| Ok(false));
+        let mut applied = Vec::new();
+        let _: Result<(), TestErr> = p.observe_and_apply("t1", 1000 + PENDING_PID_TTL_MS, |pid| {
+            applied.push(pid);
+            Ok(true)
+        });
+        assert!(applied.is_empty());
+    }
+
+    #[test]
+    fn set_or_stash_overwrites_a_previous_pending_pid_for_the_same_id() {
+        let p = PendingBackgroundPids::new();
+        let _: Result<(), TestErr> = p.set_or_stash("t1", 111, 1000, |_pid| Ok(false));
+        let _: Result<(), TestErr> = p.set_or_stash("t1", 222, 1001, |_pid| Ok(false));
+        let mut applied = Vec::new();
+        let _: Result<(), TestErr> = p.observe_and_apply("t1", 1002, |pid| {
+            applied.push(pid);
+            Ok(true)
+        });
+        assert_eq!(applied, vec![222]);
     }
 
     #[test]
     fn different_ids_coexist_independently() {
         let p = PendingBackgroundPids::new();
-        p.stash("t1", 1, 1000);
-        p.stash("t2", 2, 1000);
-        assert_eq!(p.take("t1", 1000), Some(1));
-        assert_eq!(p.take("t2", 1000), Some(2));
+        let _: Result<(), TestErr> = p.set_or_stash("t1", 1, 1000, |_pid| Ok(false));
+        let _: Result<(), TestErr> = p.set_or_stash("t2", 2, 1000, |_pid| Ok(false));
+        let mut applied = Vec::new();
+        let _: Result<(), TestErr> = p.observe_and_apply("t1", 1000, |pid| {
+            applied.push(pid);
+            Ok(true)
+        });
+        let _: Result<(), TestErr> = p.observe_and_apply("t2", 1000, |pid| {
+            applied.push(pid);
+            Ok(true)
+        });
+        assert_eq!(applied, vec![1, 2]);
     }
 }
