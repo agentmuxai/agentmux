@@ -1,5 +1,11 @@
 # AgentMux Version History
 
+## 0.55.18 — 2026-08-20
+
+- feat(dashboard): make db_background_tasks a real read source for the agent-pane and muxspect dock
+- feat(fleet): multi-agent fleet control — select, broadcast, and bulk-act on many agents at once
+
+
 ## 0.55.17 — 2026-08-20
 
 - fix(muxbus): let the browser sign-in flow be cancelled instead of hanging for 5 minutes
