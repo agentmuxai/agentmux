@@ -103,15 +103,51 @@ instead (grouped by `dispatch_id`, min per group).
   `pill-agent-running` pill variant, and `data-tool="workflow"` color rules
   (reusing the existing `--term-bright-magenta` agent color).
 
+## Review history — five rounds, two failed heuristics, one final policy
+
+ReAgent and Codex both independently flagged, across five review rounds,
+that same-kind parallel calls (e.g. two Agent-tool spawns issued in one
+turn) could be silently mismatched by the ordinal matcher. Two attempted
+fixes both turned out to be unsound on closer scrutiny:
+
+1. A shared-`slug` "same concurrent batch" check — wrong, because that
+   precedent describes multiple MEMBERS of one Task/Workflow invocation
+   sharing a batch codename, not two separate solo calls (each gets its
+   own dispatch_id and plausibly its own distinct slug).
+2. A `ToolNode.timestamp`-gap threshold — also wrong, because that
+   timestamp is the frontend's own receive-time, and a single turn can
+   take many seconds to stream when the model generates a long
+   description between two tool_use blocks, so a genuine same-turn pair
+   can still land seconds apart at any threshold.
+
+The actually-reliable signal (which assistant turn/message each tool_use
+block came from) exists in the raw Anthropic `message.id`, one layer above
+the parser, but isn't threaded through to `ToolNode` today — doing so means
+touching `stream-parser.ts`, a component this codebase's own comments flag
+as fragile with a cited regression history. Given two heuristics had
+already failed review, expanding into that component under review pressure
+was judged a worse trade than accepting a coverage loss honestly.
+
+**Final policy:** the matcher now unconditionally bails whenever a pane has
+more than one dispatch-kind tool node of the same category (`solo` —
+covers `Agent`/`Task` — or `workflow`) needing relative ordering. This is
+provably correct (no ordering claim is ever made among same-category
+calls) at the cost of only matching when a pane has at most one live
+solo-kind call and at most one live Workflow-kind call at correlation
+time. Threading the real `message.id` through the streaming parser would
+close this gap without the coverage cost — a legitimate follow-up, not
+required to ship this safely.
+
 ## Known, accepted limitations
 
+- **Same-category cap.** See "Review history" above — a pane with two or
+  more still-live dispatch-kind tool nodes of the same category never
+  gets cards for either, by design.
 - **Ordinal matching, not exact.** Falls back to `CompactResult` whenever:
-  multiple `Agent`/`Task` calls are spawned in parallel within one assistant
-  turn (array order isn't guaranteed to equal spawn order); a dispatch's
-  member data has aged out of `ListActive` (no `spawned_at` to order by);
-  or older transcript history not yet paginated into view. This was a
-  deliberate, discussed tradeoff (see "Why ordinal matching" above), not an
-  oversight.
+  a dispatch's member data has aged out of `ListActive` (no `spawned_at`
+  to order by); or older transcript history not yet paginated into view.
+  This was a deliberate, discussed tradeoff (see "Why ordinal matching"
+  above), not an oversight.
 - **No deep-link to a specific Swarm row.** Clicking a card opens/focuses
   the Swarm pane generally; no "scroll to this exact dispatch" primitive
   exists anywhere in the app today.
@@ -147,6 +183,7 @@ a visual check.
 ```
 New:
   frontend/app/view/agent/activity/dispatch-source.ts
+  frontend/app/view/agent/activity/dispatch-source.test.ts
   frontend/app/view/agent/activity/dispatch-correlation.ts
   frontend/app/view/agent/activity/dispatch-correlation.test.ts
   frontend/app/view/agent/components/tool-renderers/DispatchCard.tsx

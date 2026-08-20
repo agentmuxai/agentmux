@@ -13,54 +13,67 @@
  * All-or-nothing per pane, not best-effort per node: a wrong card (showing
  * the wrong dispatch's status next to a tool call) is worse than no card,
  * so any ambiguity for ANY node in the pane blanks the whole pane's map
- * rather than guessing. Known, accepted gaps that fall back this way:
- *   - a dispatch whose member data has aged out of `ListActive` (no
- *     `spawned_at` to order by);
- *   - older transcript history not yet paginated into `documentNodes`;
- *   - two dispatches spawned within the same millisecond (tie-guarded
- *     below — bails rather than trust an arbitrary tiebreak).
+ * rather than guessing.
  *
- * Closed (reagent flagged this same residual gap across FOUR consecutive
- * review rounds on PR #2676 — the "believed rare" framing was wrong, and
- * so was this file's first attempted fix): two SAME-kind calls issued in
- * one turn (e.g. two parallel Agent-tool spawns) can have distinct,
- * non-tied `spawned_at` values whose relative order still doesn't match
- * transcript position — the kind-compatibility check can't catch this,
- * both sides read the same kind.
+ * ## Same-kind ordering — history of this exact problem (read before touching)
  *
- * The first attempted fix (a shared-`slug` batch check) was wrong: the
- * "one shared slug = one legitimate concurrent spawn" precedent
- * (REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md Finding 3) describes
- * MULTIPLE MEMBERS of one Task/Workflow-tool invocation sharing a batch
- * codename — not two SEPARATE solo Agent/Task tool_use calls issued in
- * parallel. Each solo call gets its own `solo_dispatch_id`, so two
- * parallel solo calls plausibly get two distinct, singleton slugs — the
- * guard never actually fired for the scenario it was meant to catch.
+ * Two SAME-kind calls issued in one turn (e.g. two parallel Agent-tool
+ * spawns) can have distinct, non-tied `spawned_at` values whose relative
+ * order still doesn't match transcript position — the kind-compatibility
+ * check below can't catch this, both sides read the same kind. Reagent
+ * flagged this across FIVE consecutive review rounds on PR #2676, and TWO
+ * different attempted heuristic fixes both turned out to be unsound:
  *
- * What actually distinguishes "same turn" (ambiguous) from "different,
- * sequential turns" (safely orderable) is `ToolNode.timestamp` — but a
- * bare equality/near-tie check on it isn't the right shape (an earlier
- * draft of this comment dismissed it for exactly that reason). The right
- * shape is a THRESHOLD, because same-turn and different-turn gaps differ
- * by orders of magnitude for these specific tools: two tool_use blocks
- * inside ONE streamed assistant turn parse within single-digit
- * milliseconds of each other (no real-world wait between them — the
- * frontend is just iterating one already-arrived response). Two tool_use
- * blocks from DIFFERENT, sequential turns are separated by at least the
- * FIRST turn's own tool execution time, since the model can't start a next
- * turn before that turn's tool_result returns — and Agent/Task/Workflow
- * calls are inherently slow (real subagent work), so that gap is
- * realistically seconds-to-minutes, never sub-second. `SAME_TURN_THRESHOLD_MS`
- * sits comfortably between those two regimes.
+ * 1. A shared-`slug` batch check: wrong, because "one shared slug = one
+ *    legitimate concurrent spawn" (REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md
+ *    Finding 3) describes MULTIPLE MEMBERS of one Task/Workflow-tool
+ *    invocation sharing a batch codename — not two SEPARATE solo Agent/Task
+ *    calls issued in parallel. Each solo call gets its own
+ *    `solo_dispatch_id` and plausibly its own distinct slug, so the guard
+ *    never fired for the scenario it was meant to catch.
+ * 2. A `ToolNode.timestamp`-gap threshold: also wrong. `timestamp` is the
+ *    FRONTEND's own `Date.now()` at the moment each tool_call event is
+ *    first parsed (`stream-parser.ts`) — not a fixed-latency signal. A
+ *    single assistant turn can take many seconds to stream when the model
+ *    generates a long description/prompt between two tool_use blocks
+ *    (exactly what Agent/Task/Workflow calls carry), so two blocks
+ *    genuinely in ONE turn can still land more than any chosen threshold
+ *    apart — indistinguishable from two truly sequential, different-turn
+ *    calls using timing alone, at any threshold.
+ *
+ * The only signal that's actually reliable is which assistant turn/message
+ * each tool_use block came from — a structural fact, not something
+ * inferrable from timing. That signal exists in the raw Anthropic
+ * `message.id` one layer above this parser (`claude-translator.ts`'s
+ * `handleMessageStart`), but isn't currently threaded through to
+ * `ToolNode`, and adding it means touching `stream-parser.ts` — a
+ * component this codebase's own comments flag as fragile, with a cited
+ * history of regressions (PR #884/#885/#886, #1104, #1326) from exactly
+ * this kind of "add a new field threaded through the live-streaming state
+ * machine" change. Given two heuristic attempts have already both failed
+ * review scrutiny, expanding into that component under review pressure is
+ * a worse trade than accepting a coverage loss honestly.
+ *
+ * Final decision: bail whenever a pane has more than one dispatch-kind
+ * tool node of the SAME category (`solo` — covers `Agent`/`Task` — or
+ * `workflow`) that would need relative ordering. This is provably correct
+ * — no ordering claim is ever made among same-category calls, so there's
+ * nothing to get wrong — at the cost of matching only when a pane has at
+ * most one live Agent/Task-kind call and at most one Workflow-kind call.
+ * Sequential (non-parallel) subagent calls across a session are NOT
+ * affected differently than before — a pane's dispatch-kind tool nodes
+ * are the calls STILL LIVE/relevant at correlation time, not the session's
+ * entire history — but a pane with two GENUINELY concurrent, still-live
+ * calls of the same kind falls back to `CompactResult` for both instead of
+ * risking a wrong pairing. Threading a real per-turn identity through
+ * `stream-parser.ts` would close this gap without the coverage cost, and
+ * is a legitimate follow-up, not required to ship this feature safely.
  */
 
 import type { AgentDispatch, ActiveSubagent } from "../../swarm/swarm-model";
 import type { DocumentNode, ToolNode } from "../types";
 
 const DISPATCH_TOOL_KINDS: ReadonlySet<ToolNode["tool"]> = new Set(["Agent", "Task", "Workflow"]);
-
-/** See the module doc comment's closing paragraph. */
-const SAME_TURN_THRESHOLD_MS = 2000;
 
 function isDispatchToolNode(n: DocumentNode): n is ToolNode {
     return n.type === "tool" && DISPATCH_TOOL_KINDS.has((n as ToolNode).tool);
@@ -97,6 +110,19 @@ export function correlateDispatchesForBlock(
     const toolNodes = documentNodes.filter(isDispatchToolNode);
     if (toolNodes.length === 0) return result;
 
+    // Same-category cap (see the module doc comment above) — no ordering
+    // claim is ever made among two-or-more same-category dispatch-kind
+    // tool nodes, since their relative order can't be verified. Must run
+    // before trusting ANY ordering below.
+    const categoryCounts = new Map<"workflow" | "solo", number>();
+    for (const n of toolNodes) {
+        const cat = dispatchCategory(n.tool);
+        categoryCounts.set(cat, (categoryCounts.get(cat) ?? 0) + 1);
+    }
+    for (const count of categoryCounts.values()) {
+        if (count > 1) return result;
+    }
+
     // Effective spawn time per dispatch_id = earliest known member
     // spawned_at, scoped to this pane.
     const spawnOrderOf = new Map<string, number>();
@@ -106,31 +132,6 @@ export function correlateDispatchesForBlock(
         if (prev === undefined || s.spawned_at < prev) spawnOrderOf.set(s.dispatch_id, s.spawned_at);
     }
 
-    // Same-turn ambiguity guard (see the module doc comment above) — must
-    // run before trusting ANY ordering, including the tie/kind checks
-    // below, since a same-turn pair can have distinct, non-tied
-    // `spawned_at` values and matching kinds yet still be unverifiably
-    // ordered. Missing timestamps can't be ruled safe either — treated
-    // the same as a too-close pair.
-    const byCategory = new Map<"workflow" | "solo", ToolNode[]>();
-    for (const n of toolNodes) {
-        const cat = dispatchCategory(n.tool);
-        const arr = byCategory.get(cat);
-        if (arr) arr.push(n);
-        else byCategory.set(cat, [n]);
-    }
-    for (const nodes of byCategory.values()) {
-        for (let i = 0; i < nodes.length; i++) {
-            for (let j = i + 1; j < nodes.length; j++) {
-                const a = nodes[i].timestamp;
-                const b = nodes[j].timestamp;
-                if (a === undefined || b === undefined || Math.abs(a - b) < SAME_TURN_THRESHOLD_MS) {
-                    return result;
-                }
-            }
-        }
-    }
-
     const blockDispatches = dispatches.filter((d) => d.parent_block_id === blockId);
     const orderable = blockDispatches.filter((d) => spawnOrderOf.has(d.dispatch_id));
 
@@ -138,29 +139,20 @@ export function correlateDispatchesForBlock(
     //  - a dispatch exists for this pane but isn't orderable (its member
     //    data aged out of ListActive) — order downstream of it can't be
     //    trusted;
-    //  - counts disagree with the transcript's tool-node count — parallel
-    //    same-turn spawns, a dispatch pruned entirely from ListDispatches,
-    //    or unpaginated older history all show up here as a mismatch, which
-    //    is the safe direction to fail in (undercount -> no match, never a
-    //    wrong match).
+    //  - counts disagree with the transcript's tool-node count — a
+    //    dispatch pruned entirely from ListDispatches, or unpaginated
+    //    older history, shows up here as a mismatch, which is the safe
+    //    direction to fail in (undercount -> no match, never a wrong
+    //    match).
     if (blockDispatches.length !== orderable.length) return result;
     if (toolNodes.length !== orderable.length) return result;
 
+    // No same-category ties are possible past the cap above (at most one
+    // dispatch per category survives it), so a plain spawn-order sort is
+    // safe here — any residual instability could only occur BETWEEN
+    // categories, which the kind-compatibility check below independently
+    // guards against regardless of sort outcome.
     const sorted = [...orderable].sort((a, b) => spawnOrderOf.get(a.dispatch_id)! - spawnOrderOf.get(b.dispatch_id)!);
-
-    // Tie guard (reagent/codex P1, PR #2676 review) — two dispatches
-    // spawned within the same millisecond produce an unstable sort (falls
-    // back to whichever order `dispatches`/`orderable` happened to arrive
-    // in, unrelated to either transcript or true spawn order). This is
-    // exactly the scenario that could silently swap TWO SAME-KIND calls
-    // (e.g. two parallel Agent-tool spawns) even though the kind-
-    // compatibility check below can't catch it — both sides read "Agent".
-    // Bail on any tie rather than trust an arbitrary tiebreak.
-    for (let i = 1; i < sorted.length; i++) {
-        if (spawnOrderOf.get(sorted[i].dispatch_id) === spawnOrderOf.get(sorted[i - 1].dispatch_id)) {
-            return result;
-        }
-    }
 
     // Kind-compatibility check (reagent P1, PR #2676 review) — count
     // equality alone doesn't guarantee a CORRECT pairing: if a turn spawns
