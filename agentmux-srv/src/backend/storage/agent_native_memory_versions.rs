@@ -187,6 +187,13 @@ impl Store {
     /// explicit RPC write, where every call is expected to record a new
     /// version regardless — see `agent_native_memory_version_insert`'s own
     /// doc) should keep using the plain method above instead.
+    ///
+    /// Same cross-connection hardening as `agent_native_memory_version_
+    /// insert` above (reagent P2 on PR #2674, applied here proactively for
+    /// the identical read-then-insert shape): the read+insert runs inside
+    /// a single `BEGIN IMMEDIATE` transaction, not just a single connection
+    /// lock, so two separate `srv` processes/channels racing this same
+    /// compare-and-insert can't both observe the same stale "latest" either.
     pub fn agent_native_memory_version_insert_if_changed(
         &self,
         agent_id: &str,
@@ -197,10 +204,11 @@ impl Store {
         session_id: &str,
     ) -> Result<Option<NativeMemoryVersion>, StoreError> {
         let hash = content_hash(content);
-        let conn = self.conn.lock().unwrap();
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
         let latest: Option<(String, String)> = {
-            let mut stmt = conn.prepare(
+            let mut stmt = tx.prepare(
                 "SELECT id, content_hash FROM db_agent_native_memory_versions
                  WHERE agent_id = ?1 AND filename = ?2
                  ORDER BY created_at DESC, rowid DESC
@@ -224,7 +232,7 @@ impl Store {
         let id = uuid::Uuid::new_v4().to_string();
         let parent_version_id = latest.map(|(id, _)| id);
         let created_at = now_ms();
-        conn.execute(
+        tx.execute(
             "INSERT INTO db_agent_native_memory_versions
                  (id, agent_id, filename, content, content_hash, parent_version_id, source, source_detail, session_id, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
@@ -241,6 +249,7 @@ impl Store {
                 created_at,
             ],
         )?;
+        tx.commit()?;
 
         Ok(Some(NativeMemoryVersion {
             id,
