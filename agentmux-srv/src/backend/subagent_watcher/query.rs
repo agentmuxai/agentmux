@@ -62,7 +62,17 @@ impl SubagentWatcher {
         if !sub.dispatch_id.starts_with("solo:") {
             return None;
         }
-        let done = matches!(sub.status, SubAgentStatus::Completed | SubAgentStatus::Abandoned);
+        // A solo dispatch's status mirrors its one member's directly — the
+        // member IS the dispatch, no separate aggregation to compute. Kept
+        // as three distinct arms (not `done as usize` collapsing Completed/
+        // Abandoned together) so a dead dispatch reads as Abandoned, not
+        // ambiguously "Completed," in the UI. See
+        // docs/specs/SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.2.
+        let (status, done) = match sub.status {
+            SubAgentStatus::Completed => (DispatchStatus::Completed, true),
+            SubAgentStatus::Abandoned => (DispatchStatus::Abandoned, true),
+            SubAgentStatus::Active => (DispatchStatus::Running, false),
+        };
         Some(AgentDispatch {
             dispatch_id: sub.dispatch_id.clone(),
             kind: DispatchKind::Solo,
@@ -71,7 +81,7 @@ impl SubagentWatcher {
             session_id: sub.session_id.clone(),
             member_count: 1,
             members_done: done as usize,
-            status: if done { DispatchStatus::Completed } else { DispatchStatus::Running },
+            status,
             last_event_at: sub.last_event_at,
             // A solo dispatch's name IS its one member's display_name — no
             // separate dispatch_name storage needed for the Solo kind (only

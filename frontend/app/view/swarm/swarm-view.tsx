@@ -3,7 +3,7 @@
 
 import { createMemo, createSignal, createEffect, onCleanup, For, onMount, Show, type Accessor, type JSX } from "solid-js";
 import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, ActiveCron, WorkflowDispatch, SubagentEvent, DispatchActivityEntry } from "./swarm-model";
-import { subagentDisplayLabel, subagentRowKey, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
+import { collectClearableRows, subagentDisplayLabel, subagentRowKey, workflowRetireSignal, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
 import { ProviderLogo } from "@/app/element/ProviderLogo";
 import AnsiLine from "@/element/ansiline";
 import { callBackendService } from "@/store/wos";
@@ -123,6 +123,7 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
     });
 
     const tree = createMemo(() => model.buildTree());
+    const clearableCount = createMemo(() => collectClearableRows(tree()).length);
 
     // Derive the currently-focused block ID from the active tab's layout model.
     // focusedNode is already a reactive memo on LayoutModel, so this updates
@@ -153,6 +154,18 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
                         </div>
                     }
                 >
+                    <Show when={clearableCount() > 0}>
+                        <div class="swarm-toolbar">
+                            <button
+                                type="button"
+                                class="swarm-clear-completed-btn"
+                                title="Dismiss every completed/interrupted row currently shown"
+                                onClick={() => model.retireAllCompleted()}
+                            >
+                                Clear completed ({clearableCount()})
+                            </button>
+                        </div>
+                    </Show>
                     <div class="swarm-tree">
                         <For each={tree()}>
                             {(node) => <AgentRow node={node} focusedBlockId={focusedBlockId} model={model} />}
@@ -533,7 +546,12 @@ function WorkflowDispatchRow({
     // ALREADY (label-)retired — nothing to dismiss on one still running.
     const handleRetire = (e: MouseEvent) => {
         e.stopPropagation();
-        model.retireRow(group.dispatchId, group.lastEventAt);
+        // workflowRetireSignal, NOT group.lastEventAt — see that function's
+        // doc comment (reagent P1 on PR #2677): lastEventAt is sourced from
+        // two different clocks depending on whether this row is currently
+        // a placeholder or the real dispatch, so it can't be trusted as a
+        // "did anything really change" snapshot across that transition.
+        model.retireRow(group.dispatchId, workflowRetireSignal(group));
     };
 
     // Auto-linger countdown (SPEC_SWARM_ROW_AUTO_LINGER_COUNTDOWN_2026_08_06)

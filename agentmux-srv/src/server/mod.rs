@@ -26,7 +26,7 @@ mod cron;
 mod messaging_handlers;
 mod muxbus_handlers;
 mod muxspect_handlers;
-mod native_memory_handlers;
+pub(crate) mod native_memory_handlers;
 mod ui_handlers;
 
 #[cfg(test)]
@@ -149,6 +149,13 @@ pub struct AppState {
     /// clear`. Never persisted — see
     /// `docs/specs/SPEC_MUXSPECT_DOCK_DIAGNOSIS_AND_REMEDIATION_2026_08_06.md`.
     pub dock_snapshots: Arc<crate::backend::dock_snapshot::DockSnapshotCache>,
+    /// Holding pen for a declared-background task's OS pid when it arrives
+    /// (from bashwrap, over WPS) before its `db_background_tasks` row
+    /// exists yet — closes the race `background_task_set_pid`'s silent
+    /// no-op on a missing row would otherwise lose permanently. See
+    /// `docs/specs/SPEC_BACKGROUND_TASK_PID_CAPTURE_2026_08_20.md` and the
+    /// Codex/reagentx findings on PR #2681.
+    pub pending_background_pids: Arc<crate::backend::pending_background_pids::PendingBackgroundPids>,
     /// Live controller for mDNS-based LAN/host peer discovery. The controller
     /// owns a swappable daemon slot so the `network:lan_discovery` setting can
     /// be toggled at runtime without restarting the process.
@@ -476,6 +483,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/agent/memory/list", get(handle_agent_memory_list))
         .route("/api/v1/agent/memory/read", get(handle_agent_memory_read))
         .route("/api/v1/agent/memory/write", post(handle_agent_memory_write))
+        .route("/api/v1/agent/memory/history", get(handle_agent_memory_history))
+        .route("/api/v1/agent/memory/diff", get(handle_agent_memory_diff))
+        .route("/api/v1/agent/memory/revert", post(handle_agent_memory_revert))
         .route("/api/v1/agent/preset/list", get(handle_agent_preset_list))
         .route("/api/v1/agent/preset/get", get(handle_agent_preset_get))
         .route("/api/v1/agent/identity/accounts", get(handle_agent_identity_accounts))
@@ -991,22 +1001,105 @@ async fn handle_agent_memory_read(
 }
 
 #[derive(serde::Deserialize)]
+struct AgentMemoryWriteProvenanceReq {
+    source: String,
+    // reagent P2 on PR #2674 (re-review): plain #[serde(default)] on a bare
+    // serde_json::Value yields Value::Null when the caller supplies `source`
+    // but omits `detail` — `.to_string()` on that is the literal string
+    // "null", not the "{}" every no-provenance write path uses. Same bug
+    // class already fixed once in rpc_types/memory.rs's sibling
+    // NativeMemoryWriteProvenance (its own `default_detail()`), just
+    // recurring here in this HTTP/App-API request struct.
+    #[serde(default = "default_agent_memory_write_detail")]
+    detail: serde_json::Value,
+}
+
+fn default_agent_memory_write_detail() -> serde_json::Value {
+    serde_json::json!({})
+}
+
+#[derive(serde::Deserialize)]
 struct AgentMemoryWriteRequest {
     agent_id: String,
     filename: String,
     content: String,
+    #[serde(default)]
+    provenance: Option<AgentMemoryWriteProvenanceReq>,
 }
 
 /// `POST /api/v1/agent/memory/write` — create/overwrite one of the agent's own
-/// memory files (atomic tmp→rename). Backs the `MemoryWrite` MCP tool.
+/// memory files (atomic tmp→rename). Backs the `MemoryWrite` MCP tool — the
+/// primary write path an agent actually uses, so `provenance` (optional,
+/// see docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md
+/// §4.1) threads through to the version history here, not just on the
+/// WebSocket RPC's `agent:memory:write_file`.
 async fn handle_agent_memory_write(
     State(state): State<AppState>,
     Json(req): Json<AgentMemoryWriteRequest>,
 ) -> impl IntoResponse {
-    match app_api::memory_write_impl(&state, &req.agent_id, &req.filename, &req.content) {
+    let mut detail_str = String::new();
+    let provenance = if let Some(p) = req.provenance.as_ref() {
+        detail_str = p.detail.to_string();
+        Some(app_api::MemoryWriteProvenance { source: &p.source, detail: &detail_str })
+    } else {
+        None
+    };
+    match app_api::memory_write_impl(&state, &req.agent_id, &req.filename, &req.content, provenance) {
         Ok(()) => (StatusCode::OK, Json(json!({ "ok": true }))).into_response(),
         Err(e) => (app_api_error_status(&e), Json(json!({ "error": e }))).into_response(),
     }
+}
+
+#[derive(serde::Deserialize)]
+struct AgentMemoryHistoryQuery {
+    agent_id: String,
+    filename: String,
+}
+
+/// `GET /api/v1/agent/memory/history?agent_id=<slug>&filename=<f>` — list
+/// every recorded version of one memory file, newest first. Backs the
+/// `MemoryHistory` MCP tool.
+async fn handle_agent_memory_history(
+    State(state): State<AppState>,
+    Query(q): Query<AgentMemoryHistoryQuery>,
+) -> impl IntoResponse {
+    app_api_response(app_api::memory_history_impl(&state, &q.agent_id, &q.filename))
+}
+
+#[derive(serde::Deserialize)]
+struct AgentMemoryDiffQuery {
+    agent_id: String,
+    from_version_id: String,
+    to_version_id: String,
+}
+
+/// `GET /api/v1/agent/memory/diff?agent_id=<slug>&from_version_id=&to_version_id=`
+/// — a line-based diff between two recorded versions, both of which must
+/// belong to `agent_id` (reagent P1 — see `memory_diff_impl`'s own doc for
+/// why). Backs the `MemoryDiff` MCP tool.
+async fn handle_agent_memory_diff(
+    State(state): State<AppState>,
+    Query(q): Query<AgentMemoryDiffQuery>,
+) -> impl IntoResponse {
+    app_api_response(app_api::memory_diff_impl(&state, &q.agent_id, &q.from_version_id, &q.to_version_id))
+}
+
+#[derive(serde::Deserialize)]
+struct AgentMemoryRevertRequest {
+    agent_id: String,
+    filename: String,
+    target_version_id: String,
+}
+
+/// `POST /api/v1/agent/memory/revert` — restore a memory file's live
+/// content to a prior version, recorded as a NEW version (`source:
+/// "revert"`) — never rewrites or deletes history. Backs the
+/// `MemoryRevert` MCP tool.
+async fn handle_agent_memory_revert(
+    State(state): State<AppState>,
+    Json(req): Json<AgentMemoryRevertRequest>,
+) -> impl IntoResponse {
+    app_api_response(app_api::memory_revert_impl(&state, &req.agent_id, &req.filename, &req.target_version_id))
 }
 
 /// `GET /api/v1/agent/preset/list` — list all presets (shared catalog, summary

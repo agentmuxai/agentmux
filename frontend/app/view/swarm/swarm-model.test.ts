@@ -1,25 +1,30 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
     buildCronRows,
     buildDispatchBuckets,
     buildShellRows,
+    collectClearableRows,
     filterRetired,
     groupCacheKey,
     hasRenderableBlock,
+    loadRetiredRowKeysFromStorage,
     mergeDispatchActivityEntries,
     mergeSubagentsPreservingIdentity,
     pruneGroupIdentityCache,
     pruneRetiredEntries,
+    saveRetiredRowKeysToStorage,
     stabilizeGroupIdentity,
     subagentDisplayLabel,
     subagentRowKey,
+    workflowRetireSignal,
     type ActiveCron,
     type ActiveShell,
     type ActiveSubagent,
     type AgentDispatch,
+    type AgentTreeNode,
     type DispatchActivityEntry,
     type WorkflowDispatch,
 } from "./swarm-model";
@@ -151,20 +156,41 @@ describe("buildDispatchBuckets", () => {
         expect(agentToolRows).toHaveLength(2);
     });
 
-    it("falls back to agentToolRows for a workflow-kind subagent whose dispatch is missing from `dispatches` (stale/failed ListDispatches)", () => {
+    it("synthesizes a placeholder workflowRows entry for a workflow-kind subagent whose dispatch is missing from `dispatches` (stale/failed ListDispatches) — never spilled into agentToolRows", () => {
         // `loadDispatches()` silently swallows RPC errors, so `dispatches`
         // can lag or miss entries that `subagents` (a separate fetch)
         // already has. A workflow member with no matching AgentDispatch row
-        // must degrade to an Agent Tool row, not vanish from the tree.
+        // must degrade to its OWN synthesized workflowRows row (grouped by
+        // dispatch_id), not vanish from the tree — and never spill into
+        // agentToolRows, which would break the one-row-per-Workflow-call
+        // invariant. See SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.1.
         const dispatches = [mkDispatch({ dispatch_id: "wf_1", member_count: 1 })];
         const subagents = [
             mk({ agent_id: "a1", dispatch_id: "wf_1" }),
             mk({ agent_id: "a2", dispatch_id: "wf_missing" }),
         ];
         const { agentToolRows, workflowRows } = buildDispatchBuckets(dispatches, subagents);
+        expect(agentToolRows).toHaveLength(0);
+        expect(workflowRows).toHaveLength(2);
+        const placeholder = workflowRows.find((w) => w.dispatchId === "wf_missing");
+        expect(placeholder).toBeDefined();
+        expect(placeholder?.memberCount).toBe(1);
+    });
+
+    it("groups multiple orphaned members of the SAME missing dispatch into one placeholder row, not one per member", () => {
+        const subagents = [
+            mk({ agent_id: "a1", dispatch_id: "wf_missing", last_event_at: 100, status: "active" }),
+            mk({ agent_id: "a2", dispatch_id: "wf_missing", last_event_at: 200, status: "active" }),
+            mk({ agent_id: "a3", dispatch_id: "wf_missing", last_event_at: 150, status: "completed" }),
+        ];
+        const { agentToolRows, workflowRows } = buildDispatchBuckets([], subagents);
+        expect(agentToolRows).toHaveLength(0);
         expect(workflowRows).toHaveLength(1);
-        expect(agentToolRows).toHaveLength(1);
-        expect(agentToolRows[0].agent_id).toBe("a2");
+        expect(workflowRows[0].dispatchId).toBe("wf_missing");
+        expect(workflowRows[0].memberCount).toBe(3);
+        expect(workflowRows[0].membersDone).toBe(1);
+        expect(workflowRows[0].status).toBe("active");
+        expect(workflowRows[0].lastEventAt).toBe(200);
     });
 
     it("passes AgentDispatch.status through directly — running → active, completed → retired", () => {
@@ -179,6 +205,19 @@ describe("buildDispatchBuckets", () => {
         const completed = workflowRows.find((w) => w.dispatchId === "wf_2");
         expect(running?.status).toBe("active");
         expect(completed?.status).toBe("retired");
+    });
+
+    it("maps an abandoned AgentDispatch.status to 'retired', not 'active' — regression guard for the gap this exact bug would reopen", () => {
+        // DispatchStatus::Abandoned (SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md
+        // §3.2) is terminal, same as "completed" — a naive `status ===
+        // "completed" ? "retired" : "active"` mapping (the pre-fix version
+        // of this code) would silently read an abandoned dispatch as still
+        // "active", breaking collectClearableRows and the resultPill.
+        const { workflowRows } = buildDispatchBuckets(
+            [mkDispatch({ dispatch_id: "wf_1", status: "abandoned" })],
+            [mk({ agent_id: "a1", dispatch_id: "wf_1" })]
+        );
+        expect(workflowRows[0].status).toBe("retired");
     });
 
     it("prefers the backend's eager dispatch_name over a member's slug", () => {
@@ -393,6 +432,66 @@ describe("subagentRowKey", () => {
     });
 });
 
+function mkNode(agentToolRows: ActiveSubagent[], workflowRows: WorkflowDispatch[]): AgentTreeNode {
+    return {
+        blockId: "block-1",
+        agentName: "Agent",
+        agentProvider: null,
+        activitySummary: null,
+        contextTokens: null,
+        agentStatus: "idle",
+        agentToolRows,
+        workflowRows,
+        shellRows: [],
+        cronRows: [],
+    };
+}
+
+describe("collectClearableRows", () => {
+    it("includes a terminal-status (completed) Agent Tool row", () => {
+        const node = mkNode([mk({ agent_id: "a1", status: "completed", last_event_at: 500 })], []);
+        const rows = collectClearableRows([node]);
+        expect(rows).toEqual([{ rowKey: "agent:a1", lastEventAt: 500 }]);
+    });
+
+    it("includes an abandoned Agent Tool row", () => {
+        const node = mkNode([mk({ agent_id: "a1", status: "abandoned", last_event_at: 300 })], []);
+        expect(collectClearableRows([node])).toEqual([{ rowKey: "agent:a1", lastEventAt: 300 }]);
+    });
+
+    it("excludes a still-active Agent Tool row", () => {
+        const node = mkNode([mk({ agent_id: "a1", status: "active", last_event_at: 500 })], []);
+        expect(collectClearableRows([node])).toEqual([]);
+    });
+
+    it("includes a terminal ('retired', i.e. all-members-done) WorkflowDispatch row, keyed by workflowRetireSignal not lastEventAt", () => {
+        const [wf] = buildDispatchBuckets(
+            [mkDispatch({ dispatch_id: "wf_1", status: "completed", last_event_at: 700, member_count: 2, members_done: 2 })],
+            [mk({ agent_id: "a1", dispatch_id: "wf_1" })]
+        ).workflowRows;
+        const rows = collectClearableRows([mkNode([], [wf])]);
+        expect(rows).toEqual([{ rowKey: "wf_1", lastEventAt: workflowRetireSignal(wf) }]);
+    });
+
+    it("excludes a still-running WorkflowDispatch row", () => {
+        const [wf] = buildDispatchBuckets(
+            [mkDispatch({ dispatch_id: "wf_1", status: "running" })],
+            [mk({ agent_id: "a1", dispatch_id: "wf_1" })]
+        ).workflowRows;
+        expect(collectClearableRows([mkNode([], [wf])])).toEqual([]);
+    });
+
+    it("collects across multiple blocks/nodes", () => {
+        const nodeA = mkNode([mk({ agent_id: "a1", status: "completed", last_event_at: 1 })], []);
+        const nodeB = mkNode([mk({ agent_id: "b1", status: "abandoned", last_event_at: 2 })], []);
+        expect(collectClearableRows([nodeA, nodeB])).toHaveLength(2);
+    });
+
+    it("returns an empty array when nothing is clearable", () => {
+        expect(collectClearableRows([mkNode([], [])])).toEqual([]);
+    });
+});
+
 describe("filterRetired", () => {
     const keyFn = (n: number) => `row-${n}`;
 
@@ -421,6 +520,32 @@ describe("filterRetired", () => {
     it("is a no-op (identity semantics aside) when nothing is retired", () => {
         const rows = filterRetired([1, 2, 3], new Map(), keyFn, () => 0);
         expect(rows).toEqual([1, 2, 3]);
+    });
+});
+
+describe("workflowRetireSignal", () => {
+    it("encodes membersDone and memberCount into one comparable number", () => {
+        expect(workflowRetireSignal({ memberCount: 3, membersDone: 2 })).toBe(2_000_003);
+    });
+
+    it("produces the SAME signal for a placeholder and the eventual real dispatch representing identical, unchanged member progress", () => {
+        // Reagent P1 on PR #2677 — the actual regression this guards
+        // against: a placeholder WorkflowDispatch (buildDispatchBuckets's
+        // orphanedWorkflowMembers fallback) and the real AgentDispatch that
+        // eventually replaces it derive lastEventAt from two different
+        // clocks and essentially never match numerically, even with zero
+        // real activity in between — but they DO derive the same member
+        // counts from the same underlying member set, so the retire
+        // signal correctly stays stable across that transition.
+        const placeholder = { memberCount: 2, membersDone: 1 };
+        const real = { memberCount: 2, membersDone: 1 }; // same known members, nothing new happened
+        expect(workflowRetireSignal(placeholder)).toBe(workflowRetireSignal(real));
+    });
+
+    it("changes once a member's progress genuinely advances — the un-retire-on-new-activity case still works", () => {
+        const before = { memberCount: 2, membersDone: 1 };
+        const afterAnotherCompletes = { memberCount: 2, membersDone: 2 };
+        expect(workflowRetireSignal(before)).not.toBe(workflowRetireSignal(afterAnotherCompletes));
     });
 });
 
@@ -455,6 +580,39 @@ describe("pruneRetiredEntries", () => {
         const pruned = pruneRetiredEntries(retired, new Set());
         expect(pruned).not.toBe(retired);
         expect(pruned.size).toBe(0);
+    });
+});
+
+describe("loadRetiredRowKeysFromStorage / saveRetiredRowKeysToStorage", () => {
+    beforeEach(() => {
+        localStorage.clear();
+    });
+
+    it("round-trips a map through localStorage", () => {
+        const retired = new Map<string, number>([
+            ["agent:a1", 100],
+            ["wf_1", 200],
+        ]);
+        saveRetiredRowKeysToStorage(retired);
+        const loaded = loadRetiredRowKeysFromStorage();
+        expect(loaded).toEqual(retired);
+    });
+
+    it("returns an empty map when nothing has been saved yet", () => {
+        expect(loadRetiredRowKeysFromStorage()).toEqual(new Map());
+    });
+
+    it("returns an empty map (not a throw) when the stored value is corrupt JSON", () => {
+        localStorage.setItem("agentmux:swarm-retired-rows", "{not valid json");
+        expect(loadRetiredRowKeysFromStorage()).toEqual(new Map());
+    });
+
+    it("overwrites the previously-saved value on a second save", () => {
+        saveRetiredRowKeysToStorage(new Map([["agent:a1", 100]]));
+        saveRetiredRowKeysToStorage(new Map([["agent:a2", 200]]));
+        const loaded = loadRetiredRowKeysFromStorage();
+        expect(loaded.has("agent:a1")).toBe(false);
+        expect(loaded.get("agent:a2")).toBe(200);
     });
 });
 

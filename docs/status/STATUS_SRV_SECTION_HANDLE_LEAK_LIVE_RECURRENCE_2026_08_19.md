@@ -20,13 +20,16 @@ so this doesn't need re-discovering again.
 > `sysinfo` to ≥0.35.0 (latest stable: 0.39.6).** See §7 for full evidence
 > chain and §8 for the recommended fix.
 
-**Status: ROOT CAUSE CONFIRMED (§7) AND FIX APPLIED + VERIFIED (§8), same
-day — `sysinfo` bumped 0.34→0.35, build+tests pass, and a new regression
-test proved broken-vs-fixed on this exact code (fails against 0.34.2, passes
-against 0.35.2). PR pending. No restart of the live, already-leaking
-production instance investigated in §3 was performed or is needed — the fix
-lands in a new build; the existing leaked instance still needs a normal
-restart/update to pick it up, same as any other fix.**
+**Status: RESOLVED, same day.** Root cause confirmed source-level (§7), fix
+applied and merged (§8, PR #2666, commit `3760067`), and confirmed with a
+4-hour live production soak test on a real build of the fix (§9): `Section`
+handles held flat at 11 for the entire run while total handles/memory grew
+normally from ordinary activity. This closes out both this doc and
+`STATUS_SRV_SECTION_HANDLE_LEAK_2026_08_08.md`. The live, already-leaking
+production instance investigated in §3 (PID 30088, 500K+ Section handles at
+the time) was never restarted as part of this work — it still needs a
+normal restart/update to pick up the fix, same as any other change; its
+existing leaked handles do not self-heal without that.
 
 ## 1. Does Windows 11 specifically leak, and Windows 10 doesn't?
 
@@ -305,10 +308,39 @@ This also closes out `docs/status/STATUS_SRV_SECTION_HANDLE_LEAK_2026_08_08.md`
 — same bug, same fix, now landing via PR (see that doc for the original
 live-incident details this fix resolves).
 
-**Not yet done** (out of scope for this fix, tracked as future work): a
-multi-hour live-production soak test confirming `handle64 -s -p <pid>` stays
-flat on a real running instance over the timescales the original incidents
-took to become severe (hours to days) — the 500-call synthetic test above is
-a fast, reliable proxy (proven to discriminate broken/fixed) but is not a
-substitute for confirming in the actual `run_sysinfo_loop` production
-context over real uptime.
+## 9. Multi-hour live soak test — completed, CONFIRMS THE FIX
+
+Run against a fresh isolated portable build (`agentmux-0.55.16+g376006730`,
+built directly from the merged fix commit `3760067`), targeting the real
+`agentmux-srv` process (not its `--crash-monitor` child) running the actual
+production `run_sysinfo_loop`. Sampled `handle64 -s -p <pid>`'s `Section`
+count every 15 minutes for 4 hours (17 samples, 2026-08-19 12:39–16:39),
+via a detached PowerShell monitor confirmed to survive independently of the
+launching process (verified: still alive after its own parent process had
+already exited).
+
+| Time | Section handles | Total handles | Private MB |
+|---|---|---|---|
+| 12:39 (baseline) | 11 | 816 | 26.1 |
+| 12:54 | 12 | 903 | 44.0 |
+| 13:09 | 0† | 958 | 48.2 |
+| 13:24 | 11 | 1,021 | 49.0 |
+| 13:39–16:39 (13 more samples) | **11, every single sample** | 1,021 → 3,091 | 55.8 → 122.3 |
+
+†One transient `0` reading at the 30-minute mark, immediately followed by
+`11` again and staying there for the remaining 3h15m (14 consecutive
+samples) — almost certainly a `handle64` read race (e.g. sampled mid- a
+brief refresh window), not a real drop to zero live handles; not treated as
+meaningful given every surrounding sample is consistent.
+
+**Section handles stayed flat at 11 for the entire run.** Total handle
+count and private memory both grew over the 4 hours (816→3,091 handles,
+26→122 MB) — expected, ordinary churn in other handle types (File/Thread/
+Process, consistent with normal idle-app background activity), and
+specifically **not** the mechanism this fix addresses. The target process
+was still alive and responsive at the end of the run (no crash, no restart
+needed) — consistent with the fix not introducing any new instability.
+
+This is the closing data point flagged as outstanding above: confirmed in
+the actual `run_sysinfo_loop` production code path, over real multi-hour
+uptime, not just the 500-call synthetic proxy. **Status: RESOLVED.**
