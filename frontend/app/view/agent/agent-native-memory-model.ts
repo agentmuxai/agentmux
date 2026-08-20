@@ -73,7 +73,11 @@ export class AgentNativeMemoryModel {
 
     private _content = createSignal<string | null>(null);
     contentAtom: Accessor<string | null> = this._content[0];
-    private setContent = this._content[1];
+    // Not private: NativeMemoryHistoryPanel's revert flow (mounted as a
+    // sibling view inside the same detail pane, see AgentNativeMemoryModal)
+    // pushes the newly-restored content here directly rather than doing a
+    // second read_file round trip of its own.
+    setContent = this._content[1];
 
     private _editing = createSignal<boolean>(false);
     editingAtom: Accessor<boolean> = this._editing[0];

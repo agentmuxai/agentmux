@@ -11,6 +11,7 @@ import { AccountsManager } from "@/app/view/accounts/accounts-manager";
 import { GlobalBrainManager } from "@/app/view/brain/global-brain-manager";
 import { McpManager } from "@/app/view/mcp/mcp-manager";
 import { SkillManager } from "@/app/view/skill/skill-manager";
+import { NativeMemoryManager } from "@/app/view/native-memory/native-memory-manager";
 import { ARMORY_SECTION_LABELS, type ArmorySection, type ArmoryViewModel } from "./armory-model";
 import "./armory-view.scss";
 
@@ -20,6 +21,7 @@ const RAIL: { id: ArmorySection; label: string; tooltip?: string; icon: string }
     { id: "skills",   label: ARMORY_SECTION_LABELS.skills,   icon: "wand-magic-sparkles" },
     { id: "mcp",      label: ARMORY_SECTION_LABELS.mcp,      icon: "plug" },
     { id: "bundles",  label: ARMORY_SECTION_LABELS.bundles,  tooltip: "Armory Bundle Format (ABF)", icon: "layer-group" },
+    { id: "native_memory", label: ARMORY_SECTION_LABELS.native_memory, tooltip: "Per-agent memory version history — diff and revert", icon: "clock-rotate-left" },
 ];
 
 export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Element {
@@ -86,7 +88,7 @@ export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Elem
                 </nav>
                 <div class="bundle-manager-section">
                     {/*
-                     * All five managers stay mounted — toggling is instant and
+                     * All six managers stay mounted — toggling is instant and
                      * never re-fetches. All stay consistent via WPS *:changed events.
                      */}
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "accounts" }}>
@@ -103,6 +105,9 @@ export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Elem
                     </div>
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "bundles" }}>
                         <MemoryManager />
+                    </div>
+                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "native_memory" }}>
+                        <NativeMemoryManager />
                     </div>
                 </div>
                 <nav class="bundle-manager-tab-bar" aria-label="Armory section">

@@ -107,11 +107,11 @@ describe("ArmoryView rail", () => {
         expect(screen.queryByText("Memory")).not.toBeInTheDocument();
     });
 
-    it("orders the rail as Accounts, Memories, Skills, MCP Servers, ABF", () => {
+    it("orders the rail as Accounts, Memories, Skills, MCP Servers, ABF, Native Memory", () => {
         renderArmory();
         const rail = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-rail" });
         const labels = Array.from(rail.querySelectorAll("button span")).map((el) => el.textContent);
-        expect(labels).toEqual(["Accounts", "Memories", "Skills", "MCP Servers", "ABF"]);
+        expect(labels).toEqual(["Accounts", "Memories", "Skills", "MCP Servers", "ABF", "Native Memory"]);
     });
 });
 
