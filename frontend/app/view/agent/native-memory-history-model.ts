@@ -16,6 +16,27 @@ import { createSignal, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 
+/** Order two version ids oldest-first, given `versions` in the model's own
+ *  newest-first order (matches `agent:memory:history`'s response order —
+ *  see `agent_native_memory_version_list`'s `ORDER BY created_at DESC` on
+ *  the backend). Extracted as a standalone, unit-testable function after
+ *  reagent P1 caught this exact ordering inverted in an earlier revision —
+ *  a larger index in a newest-first list means an OLDER version, easy to
+ *  get backwards inline. Returns `[idA, idB]` unchanged if either id isn't
+ *  found in `versions` (defensive default; callers only invoke this with
+ *  ids known to be present). */
+export function orderVersionsOldestFirst(
+    idA: string,
+    idB: string,
+    versions: NativeMemoryVersionMeta[],
+): [string, string] {
+    const indexOf = (id: string) => versions.findIndex((v) => v.id === id);
+    const idxA = indexOf(idA);
+    const idxB = indexOf(idB);
+    if (idxA < 0 || idxB < 0) return [idA, idB];
+    return idxA > idxB ? [idA, idB] : [idB, idA];
+}
+
 /** Human label for a version's `source` field. */
 export function sourceLabel(source: string): string {
     switch (source) {
@@ -140,9 +161,7 @@ export class NativeMemoryHistoryModel {
     private async computeDiff(idA: string, idB: string): Promise<void> {
         // Order oldest -> newest so the diff reads as "what changed since
         // the earlier version", regardless of click order.
-        const versions = this.versionsAtom();
-        const indexOf = (id: string) => versions.findIndex((v) => v.id === id);
-        const [from, to] = indexOf(idA) > indexOf(idB) ? [idB, idA] : [idA, idB];
+        const [from, to] = orderVersionsOldestFirst(idA, idB, this.versionsAtom());
 
         this.setDiffLoading(true);
         this.setError(null);

@@ -29,21 +29,40 @@ export function NativeMemoryManager(): JSX.Element {
     const [selectedFilename, setSelectedFilename] = createSignal<string>("");
     const [filesLoading, setFilesLoading] = createSignal(false);
     const [filesError, setFilesError] = createSignal<string | null>(null);
+    let latestRequestId = 0;
 
     // Re-fetch the file list whenever the selected agent changes; clear the
     // file selection so a stale filename from a different agent can't leak
     // into NativeMemoryHistoryPanel's props.
+    //
+    // `requestId` guards against a stale response: switching agents twice in
+    // quick succession fires two overlapping fetches, and network ordering
+    // doesn't guarantee the later request's response arrives last. Only the
+    // effect run whose id still matches the latest one is allowed to apply
+    // its result — an in-flight response from an abandoned agent selection
+    // is silently dropped instead of overwriting the current selection's
+    // file list (reagent P2 on PR #2678).
     createEffect(() => {
         const agentId = selectedAgentId();
+        const requestId = ++latestRequestId;
         setSelectedFilename("");
         setFiles([]);
         if (!agentId) return;
         setFilesLoading(true);
         setFilesError(null);
         RpcApi.NativeMemoryListCommand(TabRpcClient, { agent_id: agentId })
-            .then((res) => setFiles(res.files))
-            .catch((e: Error) => setFilesError(`Failed to list memory files: ${e.message ?? e}`))
-            .finally(() => setFilesLoading(false));
+            .then((res) => {
+                if (requestId !== latestRequestId) return;
+                setFiles(res.files);
+            })
+            .catch((e: Error) => {
+                if (requestId !== latestRequestId) return;
+                setFilesError(`Failed to list memory files: ${e.message ?? e}`);
+            })
+            .finally(() => {
+                if (requestId !== latestRequestId) return;
+                setFilesLoading(false);
+            });
     });
 
     return (
