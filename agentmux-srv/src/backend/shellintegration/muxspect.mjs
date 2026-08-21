@@ -42,6 +42,14 @@ Usage:
                                   whatever renderer currently has that block
                                   open — no pane reload needed. muxspect's
                                   only mutating command; see the spec above.
+  muxspect verify-sender <agent_name> [--json]
+                                  is <agent_name> a real, currently-live
+                                  agent, and via what tier (spawner / host /
+                                  cross-channel / lan / wan)? For sanity-
+                                  checking a JEKT's claimed FROM before
+                                  acting on it (SPEC_MUXSPECT_VERIFY_SENDER_
+                                  2026_08_21.md). Exits non-zero unless the
+                                  verdict is 'found'.
   muxspect help                   this message
 
 Requires $AGENTMUX_LOCAL_URL and $AGENTMUX_AUTH_KEY in the environment.
@@ -220,6 +228,51 @@ function msToAge(ms) {
     return `${Math.round(ms / 60_000)}m`;
 }
 
+/**
+ * `verify-sender` tier 0 — zero round-trip, checked before any network
+ * call. A `task dev` instance's own `AGENTMUX_CHANNEL` (e.g.
+ * "dev-agenta-background-task-dashboard-intelligence-6c345e93dbc777e1")
+ * and `AGENTMUX_RUNTIME_MODE` ("dev:agenta-background-task-dashboard-
+ * intelligence") already encode which agent's worktree/dev build spawned
+ * THIS instance — a JEKT sender name matching that prefix IS the spawning
+ * agent, a stronger and cheaper signal than anything the srv's discovery
+ * data (host/cross-channel/lan/wan) can report, because it's a parent-
+ * harness-to-spawned-test-instance relationship, not two independent
+ * peers. See docs/retro/RETRO_JEKT_CROSS_CHANNEL_TRUST_SELF_DECLARED_
+ * 2026_08_21.md — the incident that motivated checking this first.
+ *
+ * Returns `null` (fall through to the network tiers) when neither env var
+ * is set, or set but doesn't match `name`. Exported (pure) for
+ * muxspect.test.mjs.
+ */
+export function checkSpawnerTier(name, env) {
+    const needle = name.toLowerCase();
+    const channel = env.AGENTMUX_CHANNEL || "";
+    const runtimeMode = env.AGENTMUX_RUNTIME_MODE || "";
+    const channelMatch = channel.toLowerCase().match(/^dev-([a-z0-9]+)-/);
+    const runtimeMatch = runtimeMode.toLowerCase().match(/^dev:([a-z0-9]+)-/);
+    const spawner = channelMatch?.[1] ?? runtimeMatch?.[1];
+    if (!spawner || spawner !== needle) return null;
+    return { name, status: "found", tier: "spawner", trust: "spawner-verified", channel: channel || undefined };
+}
+
+function renderVerifySender(data) {
+    console.log(`sender: ${data.name}`);
+    console.log(`status: ${data.status}`);
+    if (data.tier) console.log(`tier:   ${data.tier}`);
+    if (data.trust) console.log(`trust:  ${data.trust}`);
+    if (data.last_seen_ms !== undefined && data.last_seen_ms !== null) {
+        console.log(`last_seen: ${ageString(data.last_seen_ms)} ago`);
+    }
+    if (data.channel) console.log(`channel: ${data.channel}`);
+    if (data.local_url) console.log(`local_url: ${data.local_url}`);
+    if (data.status === "not_found") {
+        console.log(`\nno agent named '${data.name}' found on any tier (spawner, host, cross-channel, lan, wan).`);
+    } else if (data.status === "stale") {
+        console.log(`\nfound but heartbeat is stale — treat as unverified.`);
+    }
+}
+
 function renderDock(data) {
     console.log(`block_id: ${data.block_id}`);
     const nodes = data.nodes ?? [];
@@ -298,6 +351,24 @@ async function main() {
 
     if (cmd === "help" || help) {
         console.log(USAGE);
+        return;
+    }
+
+    // Handled before the unconditional requireEnv() below — tier 0
+    // (checkSpawnerTier) is a pure env-var check that shouldn't need
+    // $AGENTMUX_LOCAL_URL/$AGENTMUX_AUTH_KEY at all; only the fallback to
+    // the srv-backed tiers (1-4) needs them.
+    if (cmd === "verify-sender") {
+        const senderName = blockId;
+        if (!senderName) fail("verify-sender requires an agent name — 'muxspect verify-sender <agent_name>'");
+        const spawnerVerdict = checkSpawnerTier(senderName, process.env);
+        const data = spawnerVerdict ?? (await (async () => {
+            const { url, authKey } = requireEnv();
+            return apiGet(url, authKey, `/api/v1/muxspect/verify-sender?name=${encodeURIComponent(senderName)}`);
+        })());
+        if (json) console.log(JSON.stringify(data, null, 2));
+        else renderVerifySender(data);
+        if (data.status !== "found") process.exitCode = 1;
         return;
     }
 

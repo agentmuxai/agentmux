@@ -486,6 +486,185 @@ pub async fn handle_muxspect_dock_clear(
     Json(json!({ "cleared": true, "block_id": req.block_id, "node_id": req.node_id })).into_response()
 }
 
+/// Matches `handle_discovery`'s own ~30s addressable-drop heartbeat rule
+/// (`docs/internals/interagent-comms.md`: "Agents that stop sending
+/// heartbeats drop from the Host addressable list within ~30 s"). Used
+/// here to flag a hit whose own last-seen timestamp is unusually old —
+/// not to gate whether it counts as found at all (a stale hit is still
+/// reported, just downgraded to `status: "stale"` rather than dropped).
+const VERIFY_SENDER_STALE_MS: i64 = 30_000;
+
+#[derive(serde::Deserialize)]
+pub struct MuxspectVerifySenderQuery {
+    pub name: String,
+}
+
+#[derive(serde::Serialize, Debug, PartialEq, Eq)]
+pub struct VerifySenderVerdict {
+    pub name: String,
+    /// `"found"` | `"not_found"` | `"stale"`.
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tier: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trust: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_seen_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_url: Option<String>,
+}
+
+/// One already-fetched candidate, tagged with the tier it was found on.
+/// Keeps [`classify_sender`] pure and independent of `AgentRegistration`/
+/// `AgentEntry`/`LanInstance`'s actual (differently-shaped) types — the
+/// handler below does the field mapping once, at the IO boundary, same
+/// discipline as `dock_node_views`/`last_error_frame` above.
+struct SenderCandidate {
+    name: String,
+    /// `"host"` | `"cross-channel"` | `"lan"` | `"wan"` — NOT `"spawner"`;
+    /// that tier is checked entirely client-side by `muxspect.mjs` before
+    /// this route is ever called (it depends on the CALLER's own
+    /// environment, which this handler has no way to observe). See
+    /// `docs/specs/SPEC_MUXSPECT_VERIFY_SENDER_2026_08_21.md`.
+    tier: &'static str,
+    last_seen_ms: Option<i64>,
+    channel: Option<String>,
+    local_url: Option<String>,
+}
+
+fn tier_trust(tier: &str) -> &'static str {
+    match tier {
+        "host" => "host-verified",
+        "cross-channel" => "cross-channel-verified",
+        _ => "network-claimed", // lan | wan
+    }
+}
+
+/// Pure verdict computation over already-fetched discovery data — see
+/// [`handle_muxspect_verify_sender`] for the IO/fetch boundary this
+/// composes with. `candidates` must already be in tier-priority order
+/// (host, then cross-channel, then lan, then wan — most-trusted first);
+/// this returns the FIRST case-insensitive name match, not the "best" one,
+/// mirroring `handle_discovery`'s own case-insensitive addressing rule (a
+/// name present on multiple tiers reports the most-trusted one, matching
+/// the TRUST value a JEKT from that sender would actually be entitled to).
+fn classify_sender(name: &str, candidates: &[SenderCandidate], now_ms: i64) -> VerifySenderVerdict {
+    let needle = name.to_lowercase();
+    match candidates.iter().find(|c| c.name.to_lowercase() == needle) {
+        None => VerifySenderVerdict {
+            name: name.to_string(),
+            status: "not_found",
+            tier: None,
+            trust: None,
+            last_seen_ms: None,
+            channel: None,
+            local_url: None,
+        },
+        Some(c) => {
+            let stale = c.last_seen_ms.is_some_and(|ls| now_ms - ls >= VERIFY_SENDER_STALE_MS);
+            VerifySenderVerdict {
+                name: name.to_string(),
+                status: if stale { "stale" } else { "found" },
+                tier: Some(c.tier),
+                trust: Some(tier_trust(c.tier)),
+                last_seen_ms: c.last_seen_ms,
+                channel: c.channel.clone(),
+                local_url: c.local_url.clone(),
+            }
+        }
+    }
+}
+
+/// `GET /api/v1/muxspect/verify-sender?name=X` — answers "is X a real,
+/// currently-live agent, and via what delivery tier" in one call, so an
+/// agent that just received a `[JEKT:FROM=X ...]` marker doesn't have to
+/// fall back to manual filesystem/process archaeology to sanity-check the
+/// claimed sender. See `docs/retro/RETRO_JEKT_CROSS_CHANNEL_TRUST_SELF_
+/// DECLARED_2026_08_21.md` for the incident this closes the gap on, and
+/// `docs/specs/SPEC_MUXSPECT_VERIFY_SENDER_2026_08_21.md` for the full
+/// design.
+///
+/// Composes the same four sources `handle_discovery` (`GET
+/// /agentmux/discovery`) already aggregates — host-tier
+/// `AgentRegistration`, the host-global cross-channel shared registry, LAN
+/// mDNS peers, and the WAN cloud subscriber — into a verdict instead of
+/// raw discovery data. Always 200 (matching `list`/`dock`/`describe`'s own
+/// convention of encoding "nothing found" in the body rather than the HTTP
+/// status — a `not_found` verdict is a legitimate query result, not a
+/// caller error) — `apiGet`'s fail-on-non-2xx contract in `muxspect.mjs`
+/// would otherwise turn a normal "no such sender" answer into a hard CLI
+/// failure.
+pub async fn handle_muxspect_verify_sender(
+    State(state): State<AppState>,
+    Query(q): Query<MuxspectVerifySenderQuery>,
+) -> impl IntoResponse {
+    if q.name.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(json!({ "error": "missing name" }))).into_response();
+    }
+
+    let mut candidates: Vec<SenderCandidate> = Vec::new();
+
+    candidates.extend(state.reactive_handler.list_agents().into_iter().map(|a| SenderCandidate {
+        name: a.agent_id,
+        tier: "host",
+        last_seen_ms: Some(a.last_seen as i64),
+        channel: None,
+        local_url: None,
+    }));
+
+    // Mirrors handle_discovery's own cross_channel derivation exactly
+    // (same exclusion of this instance's own channel/URL) — kept as a
+    // separate read here rather than refactored into a shared helper, to
+    // avoid touching handle_discovery's existing, already-tested behavior
+    // for an unrelated new route.
+    let own_channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
+    let local_url = state.local_web_url.clone();
+    if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
+        candidates.extend(
+            crate::backend::reactive::registry::list_all_shared(&shared_dir)
+                .into_iter()
+                .filter(|e| e.channel != own_channel && e.local_url != local_url)
+                .map(|e| SenderCandidate {
+                    name: e.agent_id,
+                    tier: "cross-channel",
+                    last_seen_ms: Some(e.updated_at as i64),
+                    channel: Some(e.channel),
+                    local_url: Some(e.local_url),
+                }),
+        );
+    }
+
+    for lan_instance in state.lan_discovery.get_instances() {
+        let peer_url = format!("{}:{}", lan_instance.address, lan_instance.port);
+        candidates.extend(lan_instance.agents.iter().map(|agent_name| SenderCandidate {
+            name: agent_name.clone(),
+            tier: "lan",
+            last_seen_ms: Some(lan_instance.last_seen as i64),
+            channel: None,
+            local_url: Some(peer_url.clone()),
+        }));
+    }
+
+    if let Some(subscriber) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+        candidates.extend(subscriber.subscribed_agents().into_iter().map(|agent_name| SenderCandidate {
+            name: agent_name,
+            tier: "wan",
+            last_seen_ms: None,
+            channel: None,
+            local_url: None,
+        }));
+    }
+
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64;
+
+    Json(classify_sender(&q.name, &candidates, now_ms)).into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -852,5 +1031,110 @@ mod tests {
         let body = json_body(resp).await;
         let ids: Vec<&str> = body["tasks"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap()).collect();
         assert_eq!(ids, vec!["t1", "t2"], "global query is running-only, across every block");
+    }
+
+    fn candidate(name: &str, tier: &'static str, last_seen_ms: Option<i64>) -> SenderCandidate {
+        SenderCandidate { name: name.to_string(), tier, last_seen_ms, channel: None, local_url: None }
+    }
+
+    #[test]
+    fn classify_sender_not_found_on_empty_candidates() {
+        let verdict = classify_sender("AgentA", &[], 1_000_000);
+        assert_eq!(verdict.status, "not_found");
+        assert_eq!(verdict.tier, None);
+        assert_eq!(verdict.trust, None);
+    }
+
+    #[test]
+    fn classify_sender_found_on_host_tier_is_host_verified() {
+        let candidates = [candidate("AgentA", "host", Some(999_000))];
+        let verdict = classify_sender("AgentA", &candidates, 1_000_000);
+        assert_eq!(verdict.status, "found");
+        assert_eq!(verdict.tier, Some("host"));
+        assert_eq!(verdict.trust, Some("host-verified"));
+    }
+
+    #[test]
+    fn classify_sender_found_on_cross_channel_tier_is_cross_channel_verified() {
+        let candidates = [candidate("AgentA", "cross-channel", Some(999_000))];
+        let verdict = classify_sender("AgentA", &candidates, 1_000_000);
+        assert_eq!(verdict.tier, Some("cross-channel"));
+        assert_eq!(verdict.trust, Some("cross-channel-verified"));
+    }
+
+    #[test]
+    fn classify_sender_found_on_lan_or_wan_tier_is_network_claimed() {
+        let lan = classify_sender("Peer", &[candidate("Peer", "lan", Some(0))], 1_000_000);
+        assert_eq!(lan.trust, Some("network-claimed"));
+        let wan = classify_sender("Peer", &[candidate("Peer", "wan", None)], 1_000_000);
+        assert_eq!(wan.trust, Some("network-claimed"));
+    }
+
+    #[test]
+    fn classify_sender_name_match_is_case_insensitive() {
+        let candidates = [candidate("agenta", "host", Some(999_000))];
+        let verdict = classify_sender("AgentA", &candidates, 1_000_000);
+        assert_eq!(verdict.status, "found");
+    }
+
+    /// Pins the ~30s addressable-drop heartbeat rule
+    /// (`interagent-comms.md`): a hit whose `last_seen_ms` is past the
+    /// threshold is still reported (not silently dropped to not_found) but
+    /// downgraded to `stale` so the caller knows not to trust it blindly.
+    #[test]
+    fn classify_sender_stale_when_last_seen_past_threshold() {
+        let now_ms = 1_000_000;
+        let candidates = [candidate("AgentA", "host", Some(now_ms - VERIFY_SENDER_STALE_MS))];
+        let verdict = classify_sender("AgentA", &candidates, now_ms);
+        assert_eq!(verdict.status, "stale");
+        assert_eq!(verdict.tier, Some("host"), "still reports which tier it was found on");
+    }
+
+    #[test]
+    fn classify_sender_wan_tier_has_no_last_seen_and_is_never_stale() {
+        // WAN candidates carry no last_seen_ms (cloud_subscriber doesn't
+        // track a per-agent heartbeat) — must not be misclassified as
+        // stale just because the field is absent.
+        let candidates = [candidate("AgentA", "wan", None)];
+        let verdict = classify_sender("AgentA", &candidates, 1_000_000);
+        assert_eq!(verdict.status, "found");
+    }
+
+    /// Priority: a name present on multiple tiers reports the FIRST match
+    /// — callers are expected to push candidates in tier-priority order
+    /// (host, cross-channel, lan, wan), so this pins that a host hit wins
+    /// over a later cross-channel entry for the same name, not the other
+    /// way around.
+    #[test]
+    fn classify_sender_reports_first_matching_tier_when_present_on_multiple() {
+        let candidates = [candidate("AgentA", "host", Some(999_000)), candidate("AgentA", "cross-channel", Some(999_000))];
+        let verdict = classify_sender("AgentA", &candidates, 1_000_000);
+        assert_eq!(verdict.tier, Some("host"));
+    }
+
+    #[tokio::test]
+    async fn handle_muxspect_verify_sender_rejects_empty_name() {
+        let state = crate::server::tests::test_state();
+        let resp = handle_muxspect_verify_sender(State(state), Query(MuxspectVerifySenderQuery { name: String::new() }))
+            .await
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn handle_muxspect_verify_sender_not_found_is_still_200() {
+        // A "no such sender" verdict is a legitimate query result, not a
+        // caller error — must stay 200 so muxspect.mjs's apiGet() (which
+        // treats any non-2xx as fatal) doesn't turn it into a hard failure.
+        let state = crate::server::tests::test_state();
+        let resp = handle_muxspect_verify_sender(
+            State(state),
+            Query(MuxspectVerifySenderQuery { name: "NoSuchAgent".to_string() }),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = json_body(resp).await;
+        assert_eq!(body["status"], "not_found");
     }
 }
