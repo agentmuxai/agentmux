@@ -1493,17 +1493,41 @@ pub(super) fn global_output_source(
 /// Exact non-blank line count of the `output` file in `zone`, computed via the
 /// same streaming index builder `read_range` uses (so the two endpoints always
 /// agree). Returns `Some(0)` for an empty file, `None` on read failure.
+///
+/// Reuses `output.idx` when its `covered_size` header already matches the
+/// current `output` size — same freshness check
+/// `register_blockfile_read_range` (`blockfile.rs`) already does — instead of
+/// unconditionally rescanning the entire history on every call. Without this,
+/// every pane open for an agent with any global-zone history pays a full
+/// O(history size) rescan even when nothing has changed since the index was
+/// last built.
 pub(super) fn global_zone_line_count(
     gfs: &Arc<crate::backend::storage::filestore::FileStore>,
     zone: &str,
 ) -> Option<u64> {
+    use crate::backend::blockcontroller::shell::OUTPUT_IDX_HEADER_LEN;
+
     let stat = gfs
         .stat(zone, crate::backend::agent_session::OUTPUT_FILE)
         .ok()??;
     if stat.size == 0 {
         return Some(0);
     }
-    crate::backend::blockcontroller::shell::rebuild_output_idx(gfs, zone, stat.size as u64)
+    let output_size = stat.size as u64;
+
+    if let Ok(Some(idx_stat)) = gfs.stat(zone, "output.idx") {
+        if idx_stat.size >= OUTPUT_IDX_HEADER_LEN {
+            if let Ok((_, header)) = gfs.read_at(zone, "output.idx", 0, OUTPUT_IDX_HEADER_LEN) {
+                if let Ok(bytes) = <[u8; 8]>::try_from(header.as_slice()) {
+                    if u64::from_le_bytes(bytes) == output_size {
+                        return Some(((idx_stat.size - OUTPUT_IDX_HEADER_LEN) / 8) as u64);
+                    }
+                }
+            }
+        }
+    }
+
+    crate::backend::blockcontroller::shell::rebuild_output_idx(gfs, zone, output_size)
 }
 
 /// Resolve a tab ID: use the provided one, or fall back to the first workspace's active tab.
@@ -1807,6 +1831,36 @@ mod cross_channel_tests {
         // Empty / absent zone → Some(0) / None respectively.
         let empty_zone = "agent:def-empty:current";
         assert_eq!(global_zone_line_count(&global, empty_zone), None);
+    }
+
+    #[test]
+    fn global_zone_line_count_reuses_fresh_index_instead_of_rescanning() {
+        // Same fresh-index reuse the read_range path already does
+        // (blockfile.rs) — a header whose covered_size matches the current
+        // `output` size must be trusted as-is, not rebuilt from a full scan.
+        // Proven here by seeding a deliberately-wrong-but-size-matching index
+        // (2 entries) alongside real `output` content that would scan to 3
+        // non-blank lines: a fix that trusts the fresh header returns the
+        // cached 2; the old always-rebuild code returns the rescanned 3.
+        let global = mem_store();
+        let zone = "agent:def-cc-5:current";
+        let body: &[u8] = b"{\"a\":1}\n{\"b\":2}\n{\"c\":3}\n";
+        seed_output(&global, zone, body);
+
+        let mut idx = Vec::new();
+        idx.extend_from_slice(&(body.len() as u64).to_le_bytes()); // covered_size == output size
+        idx.extend_from_slice(&0u64.to_le_bytes()); // fabricated entry 0
+        idx.extend_from_slice(&9u64.to_le_bytes()); // fabricated entry 1 (only 2, not 3)
+        global
+            .make_file(zone, "output.idx", FileMeta::default(), FileOpts::default())
+            .unwrap();
+        global.write_file(zone, "output.idx", &idx).unwrap();
+
+        assert_eq!(
+            global_zone_line_count(&global, zone),
+            Some(2),
+            "must trust the fresh cached index rather than rescanning `output`",
+        );
     }
 }
 
