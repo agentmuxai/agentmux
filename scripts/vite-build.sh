@@ -17,6 +17,12 @@ cd "$REAL_ROOT"
 # heap out of memory" (exit 134) on the macOS CI runner, reproducing on both
 # ci-nightly-artifacts.yml and release.yml. CI runners across all three
 # platforms have well over 4GB free, Node just wasn't told it could use it.
-export NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=4096"
+# Only apply the default if the caller hasn't already sized the heap
+# themselves — Node keeps the LAST --max-old-space-size when duplicated, so
+# unconditionally appending ours would silently shrink an explicit larger
+# value instead of just providing a floor.
+if [[ "${NODE_OPTIONS:-}" != *"max-old-space-size"* && "${NODE_OPTIONS:-}" != *"max-heap-size"* ]]; then
+    export NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=4096"
+fi
 
 exec npx vite build "$@"
