@@ -246,7 +246,7 @@ const UI_QUERY_TOOL: &str = r#"{
 // something to back into accidentally via a narrower tool's scope creep.
 const CAPTURE_WINDOW_TOOL: &str = r#"{
   "name": "CaptureWindow",
-  "description": "Screenshot a DIFFERENT AgentMux window/instance by (partial, case-insensitive) title match — e.g. a separate task dev build running alongside this one. Scoped to AgentMux's own windows only, not arbitrary desktop applications (unlike a general OS computer-use tool). Returns a file path; use the Read tool on that path to view it yourself, or OpenMedia to show it to the user.",
+  "description": "Screenshot a DIFFERENT AgentMux window/instance by (partial, case-insensitive) title match — e.g. a separate task dev build running alongside this one. Scoped to AgentMux's own windows only, not arbitrary desktop applications (unlike a general OS computer-use tool), and never your own instance's window. Every call is logged (who, what, outcome) to an audit trail in this instance's own data dir — a full approval/capability-flag gate is tracked separately, not yet built. Returns a file path; use the Read tool on that path to view it yourself, or OpenMedia to show it to the user.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -911,6 +911,159 @@ fn own_instance_pids() -> std::collections::HashSet<u32> {
         }
     }
     result
+}
+
+/// The actual `CaptureWindow` logic — window enumeration, own-instance and
+/// third-party-app exclusion, capture, and save. Extracted to its own
+/// function (rather than living inline in the `"CaptureWindow" =>` match
+/// arm) so its `Result` can be captured once and unconditionally audit-
+/// logged by the caller before propagating — see `audit_log_capture_window`.
+fn capture_window_impl(title_contains: &str, index: usize) -> Result<String> {
+    let windows =
+        xcap::Window::all().map_err(|e| anyhow::anyhow!("failed to enumerate windows: {e}"))?;
+    // Scoped to AgentMux's own processes only — reagent P1 (PR #2709
+    // round 2): as originally written, this reached ANY top-level OS
+    // window (confirmed in testing: it could screenshot a KeePass
+    // password-manager window with zero gating), which is the
+    // "arbitrary third-party app" capability `docs/specs/computer-use-pane.md`
+    // already scoped out as needing its own per-app approval model —
+    // not this tool's actual motivating need, which was only ever
+    // "see a different AgentMux instance's window." `app_name()`
+    // matching (not `title()`) because AgentMux's own process names
+    // are version-stamped (`agentmux-0.55.18`, etc.), not a single
+    // fixed string, but they all share the `agentmux` prefix.
+    // Excludes the CALLING agent's own instance — reagent P0 (PR
+    // #2709 round 3): the app_name()-only filter above matches every
+    // AgentMux instance's windows, including this one. One AgentMux
+    // instance's top-level window contains every agent's pane in it
+    // (pane-level isolation is enforced only inside that window, via
+    // the signed-identity scheme UIScreenshot/UIClick/UIQuery use —
+    // see the doc comment above CAPTURE_WINDOW_TOOL). Without this
+    // exclusion, any agent could pass a title_contains matching its
+    // OWN instance's window and capture every other agent's pane
+    // content in that same window — exactly the isolation boundary
+    // this tool claims not to cross. See own_instance_pids()'s own
+    // doc comment for how "same instance" is determined.
+    let own_pids = own_instance_pids();
+    let agentmux_windows: Vec<&xcap::Window> = windows
+        .iter()
+        .filter(|w| {
+            let is_agentmux = w
+                .app_name()
+                .map(|a| a.to_lowercase().starts_with("agentmux"))
+                .unwrap_or(false);
+            let is_own_instance = w.pid().map(|p| own_pids.contains(&p)).unwrap_or(true);
+            is_agentmux && !is_own_instance
+        })
+        .collect();
+    let needle = title_contains.to_lowercase();
+    let matches: Vec<&&xcap::Window> = agentmux_windows
+        .iter()
+        .filter(|w| {
+            w.title()
+                .map(|t| t.to_lowercase().contains(&needle))
+                .unwrap_or(false)
+        })
+        .collect();
+
+    if matches.is_empty() {
+        // Only lists OTHER AgentMux windows' titles, not every
+        // window on the desktop — reagent P2 (PR #2709 round 2):
+        // the original version dumped every visible window's title
+        // on any miss, which let a caller enumerate arbitrary
+        // window titles (confirmed in testing: this leaked a
+        // password manager's document title) with no real match
+        // required at all. Still helpful for the actual in-scope
+        // case (multiple AgentMux instances open) without that leak.
+        let titles: Vec<String> = agentmux_windows
+            .iter()
+            .filter_map(|w| w.title().ok())
+            .filter(|t| !t.is_empty())
+            .collect();
+        if titles.is_empty() {
+            anyhow::bail!(
+                "no AgentMux window title contains {title_contains:?} — \
+                 no other AgentMux windows are currently open"
+            );
+        }
+        anyhow::bail!(
+            "no AgentMux window title contains {title_contains:?}. \
+             Open AgentMux window titles: {}",
+            titles.join(", ")
+        );
+    }
+    let window = matches.get(index).ok_or_else(|| {
+        anyhow::anyhow!(
+            "index {index} out of range — only {} window(s) matched {title_contains:?}",
+            matches.len()
+        )
+    })?;
+    let title = window.title().unwrap_or_default();
+
+    let image = window
+        .capture_image()
+        .map_err(|e| anyhow::anyhow!("capture failed: {e}"))?;
+
+    let dir = capture_window_dir();
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| anyhow::anyhow!("failed to create capture dir {}: {e}", dir.display()))?;
+    let path = dir.join(format!("{}.png", uuid::Uuid::new_v4()));
+    image
+        .save(&path)
+        .map_err(|e| anyhow::anyhow!("failed to save capture to {}: {e}", path.display()))?;
+    // Unbounded growth over repeated/looped calls otherwise — same bug
+    // class as UIScreenshot's own screenshot dir (reagent P2, PR #2662)
+    // and reagent's own review of this PR (round 1) pointing out that
+    // fix wasn't reused here. Same fix, same shape: best-effort, on the
+    // write path.
+    prune_old_captures(&dir);
+
+    Ok(format!(
+        "Captured window {title:?} to {} — use Read on that path to view it yourself, or OpenMedia to show it to the user.",
+        path.display()
+    ))
+}
+
+/// Audit trail for `CaptureWindow` — reagent P1 (PR #2709 round 4): the
+/// residual risk after rounds 2-3's scoping (a different AgentMux
+/// instance's window, which can belong to a different OS user on a shared
+/// machine) is a disclosure-across-a-human-boundary question, not a
+/// technical one a capability flag alone would fully answer — a real
+/// per-agent opt-in gate is tracked as a separate follow-up (no existing
+/// settings/enforcement mechanism to build it on today). Logging every
+/// call — who, what was requested, what happened — is the honest,
+/// shippable Phase-1 answer: best-effort (a logging failure must never
+/// break the tool itself), append-only NDJSON inside `capture_window_dir()`
+/// itself — `prune_old_captures`'s PNG-only extension filter already
+/// leaves a `.log` file in that same directory untouched, so this doesn't
+/// need (or want) its own separate directory alongside it.
+fn audit_log_capture_window(title_contains: &str, outcome: &Result<String>) {
+    let entry = serde_json::json!({
+        "timestamp": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+        "agent_id": agent_slug().unwrap_or_else(|_| "unknown".to_string()),
+        "tool": "CaptureWindow",
+        "title_contains": title_contains,
+        "outcome": match outcome {
+            Ok(msg) => serde_json::json!({"result": "success", "detail": msg}),
+            Err(e) => serde_json::json!({"result": "error", "detail": e.to_string()}),
+        },
+    });
+    let dir = capture_window_dir();
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let line = format!("{entry}\n");
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("capture-window-audit.log"))
+    {
+        use std::io::Write;
+        let _ = f.write_all(line.as_bytes());
+    }
 }
 
 /// The calling agent's slug (its `AGENTMUX_AGENT_ID`), injected by AgentMux into
@@ -2119,115 +2272,28 @@ async fn call_tool(
             let title_contains = arguments
                 .get("title_contains")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: title_contains"))?;
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: title_contains"))?
+                .to_string();
             let index = arguments
                 .get("index")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(0) as usize;
 
-            let windows =
-                xcap::Window::all().map_err(|e| anyhow::anyhow!("failed to enumerate windows: {e}"))?;
-            // Scoped to AgentMux's own processes only — reagent P1 (PR #2709
-            // round 2): as originally written, this reached ANY top-level OS
-            // window (confirmed in testing: it could screenshot a KeePass
-            // password-manager window with zero gating), which is the
-            // "arbitrary third-party app" capability `docs/specs/computer-use-pane.md`
-            // already scoped out as needing its own per-app approval model —
-            // not this tool's actual motivating need, which was only ever
-            // "see a different AgentMux instance's window." `app_name()`
-            // matching (not `title()`) because AgentMux's own process names
-            // are version-stamped (`agentmux-0.55.18`, etc.), not a single
-            // fixed string, but they all share the `agentmux` prefix.
-            // Excludes the CALLING agent's own instance — reagent P0 (PR
-            // #2709 round 3): the app_name()-only filter above matches every
-            // AgentMux instance's windows, including this one. One AgentMux
-            // instance's top-level window contains every agent's pane in it
-            // (pane-level isolation is enforced only inside that window, via
-            // the signed-identity scheme UIScreenshot/UIClick/UIQuery use —
-            // see the doc comment above CAPTURE_WINDOW_TOOL). Without this
-            // exclusion, any agent could pass a title_contains matching its
-            // OWN instance's window and capture every other agent's pane
-            // content in that same window — exactly the isolation boundary
-            // this tool claims not to cross. See own_instance_pids()'s own
-            // doc comment for how "same instance" is determined.
-            let own_pids = own_instance_pids();
-            let agentmux_windows: Vec<&xcap::Window> = windows
-                .iter()
-                .filter(|w| {
-                    let is_agentmux = w
-                        .app_name()
-                        .map(|a| a.to_lowercase().starts_with("agentmux"))
-                        .unwrap_or(false);
-                    let is_own_instance = w.pid().map(|p| own_pids.contains(&p)).unwrap_or(true);
-                    is_agentmux && !is_own_instance
-                })
-                .collect();
-            let needle = title_contains.to_lowercase();
-            let matches: Vec<&&xcap::Window> = agentmux_windows
-                .iter()
-                .filter(|w| {
-                    w.title()
-                        .map(|t| t.to_lowercase().contains(&needle))
-                        .unwrap_or(false)
-                })
-                .collect();
-
-            if matches.is_empty() {
-                // Only lists OTHER AgentMux windows' titles, not every
-                // window on the desktop — reagent P2 (PR #2709 round 2):
-                // the original version dumped every visible window's title
-                // on any miss, which let a caller enumerate arbitrary
-                // window titles (confirmed in testing: this leaked a
-                // password manager's document title) with no real match
-                // required at all. Still helpful for the actual in-scope
-                // case (multiple AgentMux instances open) without that leak.
-                let titles: Vec<String> = agentmux_windows
-                    .iter()
-                    .filter_map(|w| w.title().ok())
-                    .filter(|t| !t.is_empty())
-                    .collect();
-                if titles.is_empty() {
-                    anyhow::bail!(
-                        "no AgentMux window title contains {title_contains:?} — \
-                         no other AgentMux windows are currently open"
-                    );
-                }
-                anyhow::bail!(
-                    "no AgentMux window title contains {title_contains:?}. \
-                     Open AgentMux window titles: {}",
-                    titles.join(", ")
-                );
-            }
-            let window = matches.get(index).ok_or_else(|| {
-                anyhow::anyhow!(
-                    "index {index} out of range — only {} window(s) matched {title_contains:?}",
-                    matches.len()
-                )
-            })?;
-            let title = window.title().unwrap_or_default();
-
-            let image = window
-                .capture_image()
-                .map_err(|e| anyhow::anyhow!("capture failed: {e}"))?;
-
-            let dir = capture_window_dir();
-            std::fs::create_dir_all(&dir)
-                .map_err(|e| anyhow::anyhow!("failed to create capture dir {}: {e}", dir.display()))?;
-            let path = dir.join(format!("{}.png", uuid::Uuid::new_v4()));
-            image
-                .save(&path)
-                .map_err(|e| anyhow::anyhow!("failed to save capture to {}: {e}", path.display()))?;
-            // Unbounded growth over repeated/looped calls otherwise — same bug
-            // class as UIScreenshot's own screenshot dir (reagent P2, PR #2662)
-            // and reagent's own review of this PR (round 1) pointing out that
-            // fix wasn't reused here. Same fix, same shape: best-effort, on the
-            // write path.
-            prune_old_captures(&dir);
-
-            Ok(format!(
-                "Captured window {title:?} to {} — use Read on that path to view it yourself, or OpenMedia to show it to the user.",
-                path.display()
-            ))
+            // Audit trail, not a capability gate — reagent P1 (PR #2709
+            // round 4): a real per-agent opt-in gate is a bigger feature
+            // (settings storage + enforcement, no existing mechanism
+            // anywhere in the codebase to build on — confirmed by the
+            // spec this tool's own doc comment already cites) than fits
+            // reactively on this PR, and this tool's actual residual risk
+            // after rounds 2-3's scoping is disclosure across a human
+            // boundary (a different AgentMux instance's window can belong
+            // to a different OS user on a shared machine), not a technical
+            // one — logging every call (who, what was requested, what
+            // happened) is the honest, shippable Phase-1 answer while the
+            // real gate is tracked separately (operator-confirmed).
+            let outcome = capture_window_impl(&title_contains, index);
+            audit_log_capture_window(&title_contains, &outcome);
+            return outcome;
         }
         "UIClick" => {
             require_agent_env(local_url, auth_key, block_id)?;
@@ -2919,6 +2985,16 @@ fn format_duration(d: Duration) -> String {
 mod tests {
     use super::*;
 
+    /// Guards every test that mutates `AGENTMUX_DATA_HOME` (a process-global
+    /// env var) so they never run concurrently against each other — cargo
+    /// runs tests in parallel by default, and two tests independently
+    /// setting/clearing the same env var would otherwise be a genuine race,
+    /// not just a stale comment. Acquire this at the start of any such test,
+    /// before touching the env var, and hold it for the env var's entire
+    /// mutated lifetime (not just around `capture_window_dir()`/
+    /// `audit_log_capture_window()` themselves).
+    static DATA_HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// Mirrors `agentmux-srv`'s `prune_old_screenshots_deletes_only_stale_pngs`
     /// (`ui_handlers.rs`) exactly — same bug class, same fix, same test shape
     /// (reagent P1/P2 on this tool's own PR, #2709 round 1).
@@ -2955,8 +3031,11 @@ mod tests {
     /// which this function replicates rather than reinventing.
     #[test]
     fn capture_window_dir_honors_agentmux_data_home_override() {
-        // SAFETY: test-only, single-threaded within this process's env;
-        // no other test in this crate reads/writes AGENTMUX_DATA_HOME.
+        // SAFETY: test-only; DATA_HOME_ENV_LOCK held for the env var's
+        // entire mutated lifetime serializes this against every other test
+        // that touches AGENTMUX_DATA_HOME (see that lock's own doc comment
+        // — cargo runs tests in parallel by default, so this isn't optional).
+        let _guard = DATA_HOME_ENV_LOCK.lock().unwrap();
         unsafe { std::env::set_var("AGENTMUX_DATA_HOME", "/tmp/custom-agentmux-home") };
         let dir = capture_window_dir();
         unsafe { std::env::remove_var("AGENTMUX_DATA_HOME") };
@@ -2983,6 +3062,38 @@ mod tests {
             pids.contains(&std::process::id()),
             "own_instance_pids() must always include this process's own pid"
         );
+    }
+
+    /// `audit_log_capture_window` must append one valid NDJSON line per
+    /// call, for both success and failure outcomes, without ever panicking
+    /// or returning an error to its caller (it's a fire-and-forget
+    /// best-effort side effect — reagent P1, PR #2709 round 4).
+    #[test]
+    fn audit_log_capture_window_appends_ndjson_for_success_and_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        // SAFETY: test-only; see DATA_HOME_ENV_LOCK's own doc comment for
+        // why this guard (not just the tempdir) is required.
+        let _guard = DATA_HOME_ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var("AGENTMUX_DATA_HOME", dir.path()) };
+
+        audit_log_capture_window("first query", &Ok("captured ok".to_string()));
+        audit_log_capture_window("second query", &Err(anyhow::anyhow!("no match")));
+
+        unsafe { std::env::remove_var("AGENTMUX_DATA_HOME") };
+
+        let log_path = dir.path().join("tmp/capture-window/capture-window-audit.log");
+        let content = std::fs::read_to_string(&log_path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 2, "one NDJSON line per call");
+
+        let first: Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(first["tool"], "CaptureWindow");
+        assert_eq!(first["title_contains"], "first query");
+        assert_eq!(first["outcome"]["result"], "success");
+
+        let second: Value = serde_json::from_str(lines[1]).unwrap();
+        assert_eq!(second["title_contains"], "second query");
+        assert_eq!(second["outcome"]["result"], "error");
     }
 
     /// Every tool advertised by `tools/list` must be valid JSON with a `name`
