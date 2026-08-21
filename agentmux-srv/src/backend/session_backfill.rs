@@ -65,6 +65,24 @@ pub fn largest_session_id(projects_dirs: &[PathBuf], slug: &str) -> Option<Strin
     best.map(|(_, stem)| stem)
 }
 
+/// Recovery lookup for a confirmed-stale `--resume` failure
+/// (`docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`):
+/// rather than giving up and starting a blank conversation the moment a
+/// registry/inherited `session_id` turns out to be unreachable, look for
+/// the largest session actually on disk under this exact `config_dir` (the
+/// `CLAUDE_CONFIG_DIR` the CLI process is about to run with) for
+/// `working_dir`. `None` when `config_dir` is empty/unset (nothing to
+/// search) or no session exists — callers fall back to starting blank in
+/// either case, same as before this existed.
+pub fn find_largest_session_for_working_dir(config_dir: &str, working_dir: &str) -> Option<String> {
+    if config_dir.is_empty() {
+        return None;
+    }
+    let projects_dir = Path::new(config_dir).join("projects");
+    let slug = encode_project_slug(working_dir);
+    largest_session_id(&[projects_dir], &slug)
+}
+
 /// Populate `session_id` for registry records that lack one, from the agent's
 /// largest provider session. Idempotent (skips records that already carry a
 /// non-empty id). Returns the number populated. Best-effort per record — a
@@ -159,6 +177,44 @@ mod tests {
         );
         // Missing project dir is graceful.
         assert_eq!(largest_session_id(&[projects], "nope"), None);
+    }
+
+    #[test]
+    fn find_largest_session_for_working_dir_locates_the_real_transcript() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_dir = tmp.path();
+        let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n";
+        let slug = encode_project_slug(working_dir);
+        let dir = config_dir.join("projects").join(&slug);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
+
+        assert_eq!(
+            find_largest_session_for_working_dir(&config_dir.to_string_lossy(), working_dir).as_deref(),
+            Some("972a6a4f-live")
+        );
+    }
+
+    #[test]
+    fn find_largest_session_for_working_dir_is_none_for_an_empty_config_dir() {
+        // An unset CLAUDE_CONFIG_DIR (empty string) must not be treated as
+        // "search the current directory" — nothing to recover from.
+        assert_eq!(
+            find_largest_session_for_working_dir("", r"C:\Users\asafe\.agentmux\agents\agentx-0623n"),
+            None
+        );
+    }
+
+    #[test]
+    fn find_largest_session_for_working_dir_is_none_when_nothing_exists_there() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert_eq!(
+            find_largest_session_for_working_dir(
+                &tmp.path().to_string_lossy(),
+                r"C:\Users\asafe\.agentmux\agents\nobody-here",
+            ),
+            None
+        );
     }
 
     fn rec(id: &str, base: Option<&str>, wd: &str, sid: Option<&str>) -> NamedAgentRecord {
