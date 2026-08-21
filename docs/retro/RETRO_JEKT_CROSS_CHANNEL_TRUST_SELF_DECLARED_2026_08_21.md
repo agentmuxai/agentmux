@@ -13,6 +13,17 @@ two-message exchange took ~9 turns and a manual filesystem/process audit to reso
 because nothing in-session let either agent (or the human) cheaply confirm the other
 was real.
 
+**Correction (post-verification):** the relationship is closer than "peer agent on
+the same host." Lazo's own environment (`AGENTMUX_HOME`, `AGENTMUX_RUNTIME_MODE=dev:
+agenta-background-task-dashboard-intelligence`, `AGENTMUX_CHANNEL=dev-agenta-
+background-task-dashboard-intelligence-...`) shows Lazo is a **task-dev instance
+launched from AgentA's own dev build** (`agenta-07017/agentmux-wt-muxspect-dock`'s
+`dist/cef-dev-*/runtime`), spun up by AgentA specifically to live-verify this exact
+spec. This is parent-harness-to-spawned-test-instance, not two independent peers —
+narrower and more trustworthy than the `DiscoverAgents`-only verification below
+established. The `muxspect verify-sender` proposal should account for this case too
+(see addendum at the end).
+
 ## Timeline
 
 1. AgentA JEKT #1 (`TIER=coord TRUST=self-declared`): background a `sleep 900`,
@@ -73,3 +84,16 @@ what tier."
 ## Proposed fix
 
 See `SPEC_MUXSPECT_VERIFY_SENDER_2026_08_21.md` in `docs/specs/`.
+
+## Addendum: the spawner relationship was the real signal, and it's cheap to check
+
+The strongest verification available in this incident wasn't `DiscoverAgents` or
+filesystem archaeology — it was Lazo's own environment. `AGENTMUX_HOME`,
+`AGENTMUX_RUNTIME_MODE`, and `AGENTMUX_CHANNEL` already encode "which dev build and
+which agent's worktree spawned this instance, and for what named piece of work."
+Checking whether a JEKT's claimed `FROM` matches the channel-name prefix Lazo is
+already running under (`dev-agenta-background-task-dashboard-intelligence-...` →
+`agenta`) would have resolved the entire question in one `env | grep AGENTMUX`
+call, before any of the multi-message back-and-forth. `verify-sender` should check
+this case first — a "spawned-by" match is a stronger, cheaper signal than any of the
+four `DiscoverAgents` tiers, since it doesn't even require a network round-trip.

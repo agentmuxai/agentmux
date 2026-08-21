@@ -32,16 +32,27 @@ New read-only `muxspect` subcommand, same auth model as the rest of muxspect
 muxspect verify-sender <agent_name> [--json]
 ```
 
-1. New route `/api/v1/muxspect/verify-sender?name=<agent_name>` on the sidecar,
-   backed by the same lookup `DiscoverAgents` already does across
+0. **Spawner check first, no network call.** `task dev` instances already carry
+   `AGENTMUX_CHANNEL` (e.g. `dev-agenta-background-task-dashboard-intelligence-...`)
+   and `AGENTMUX_RUNTIME_MODE` (`dev:agenta-background-task-dashboard-intelligence`),
+   which encode the name of the agent whose worktree/dev build spawned this
+   instance. If `<agent_name>` matches that prefix, short-circuit to `tier: spawner`,
+   `trust: spawner-verified` — this is a stronger signal than anything
+   `DiscoverAgents` can report (parent-harness-to-child-test-instance, not two
+   independent peers) and costs zero round-trips. See
+   `docs/retro/RETRO_JEKT_CROSS_CHANNEL_TRUST_SELF_DECLARED_2026_08_21.md`'s
+   addendum — this is exactly the case that resolved that incident's root cause.
+1. Otherwise, new route `/api/v1/muxspect/verify-sender?name=<agent_name>` on the
+   sidecar, backed by the same lookup `DiscoverAgents` already does across
    `host.addressable`, `host.cross_channel`, `lan`, `wan.subscribed_agents`.
 2. Returns a verdict, not raw discovery data:
    - `not_found` — no matching agent on any tier. Exit code 1.
-   - `found` — with `tier` (`host` | `cross-channel` | `lan` | `wan`),
+   - `found` — with `tier` (`spawner` | `host` | `cross-channel` | `lan` | `wan`),
      `last_seen_ms`, and a **computed** `trust` value derived from the tier
-     (`host-verified` for `host`, `cross-channel-verified` for `cross-channel` —
-     new value, same-machine but not in-process — `network-claimed` for `lan`/`wan`),
-     independent of whatever the original JEKT's `TRUST` field said.
+     (`spawner-verified` for step 0, `host-verified` for `host`,
+     `cross-channel-verified` for `cross-channel` — new value, same-machine but not
+     in-process — `network-claimed` for `lan`/`wan`), independent of whatever the
+     original JEKT's `TRUST` field said.
    - `stale` — found but `last_seen_ms` older than the existing 30s
      addressable-drop threshold (`interagent-comms.md`'s own heartbeat rule).
 3. Exit code 0 for `found`, non-zero for `not_found`/`stale` — usable as a guard:
