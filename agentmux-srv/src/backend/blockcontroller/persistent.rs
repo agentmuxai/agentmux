@@ -1527,19 +1527,108 @@ impl PersistentSubprocessController {
         }
     }
 
+    /// Publish a session-outcome line immediately, via the same append
+    /// path `session_outcome_line`'s other call sites use
+    /// (`persistent_resume::ResumeEffect::EmitSessionOutcome`'s normal
+    /// handling). Used by `retry_after_resume_failure` for the ONE case
+    /// it can decide unambiguously and immediately: no recovery candidate
+    /// exists, so this is genuinely, unconditionally a fresh conversation
+    /// — see that function's own doc comment for why the Resumed case is
+    /// deliberately NOT emitted here.
+    fn emit_session_outcome_now(
+        &self,
+        outcome: persistent_resume::SessionOutcome,
+        attempted_sid: String,
+        actual_sid: Option<String>,
+    ) {
+        let Some(ref broker) = self.broker else { return };
+        let line = session_outcome_line(outcome, attempted_sid, actual_sid);
+        let global_output_zone = super::shell::resolve_global_output_zone(&self.wstore, &self.block_id);
+        super::shell::handle_append_block_file(
+            broker,
+            &self.block_id,
+            PERSISTENT_OUTPUT_SUBJECT,
+            line.as_bytes(),
+            self.filestore.as_ref(),
+            global_output_zone.as_deref(),
+        );
+    }
+
+    /// After a confirmed-stale `--resume` failure, try to recover a REAL
+    /// session instead of giving up and starting blank
+    /// (`docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`).
+    /// Looks for the largest on-disk session under this spawn's own
+    /// `CLAUDE_CONFIG_DIR`/working dir — the same "largest session wins"
+    /// recovery `session_backfill::backfill_session_ids` already trusts
+    /// for the analogous cross-channel-open case.
+    ///
+    /// Returns `None` (caller falls back to starting blank, same as
+    /// before this existed) when: `CLAUDE_CONFIG_DIR` isn't set on this
+    /// config, no session exists there, or the only candidate found is
+    /// the SAME id already confirmed poisoned — guards against looping
+    /// forever "recovering" an id that is itself dead (nothing on disk
+    /// changes between attempts, so an unguarded retry would rediscover
+    /// the identical bad id every time).
+    fn find_recovery_session_id(&self, config: &PersistentSpawnConfig) -> Option<String> {
+        let config_dir = config.env_vars.get("CLAUDE_CONFIG_DIR")?;
+        let candidate = crate::backend::session_backfill::find_largest_session_for_working_dir(
+            config_dir,
+            &config.working_dir,
+        )?;
+        let already_poisoned = self.inner.lock().unwrap().resume_poisoned.as_deref() == Some(candidate.as_str());
+        if already_poisoned {
+            return None;
+        }
+        Some(candidate)
+    }
+
     /// `retry_generation` is the spawn generation whose `ProcessExited`
     /// fired this retry (the process-waiter's own `my_generation_wait`) —
     /// `decide_retry_batch_action` needs it to tell a live NEWER spawn
     /// apart from the impossible "our own process is somehow still
-    /// running" case (issue #2367).
+    /// running" case (issue #2367). `attempted_sid` is the id that was
+    /// just confirmed unreachable — threaded through from
+    /// `persistent_resume::ResumeEffect::FireRetry` so this function can
+    /// emit the eventual `EmitSessionOutcome` itself once recovery is
+    /// known (reagentx + Codex on PR #2693 — `persistent_resume.rs` can
+    /// no longer decide Fresh-vs-Resumed at the point it fires this
+    /// retry, since recovery might succeed).
     fn retry_after_resume_failure(
         &self,
         retry_generation: u64,
         mut config: PersistentSpawnConfig,
         mut entries: Vec<persistent_resume::QueuedRetryEntry>,
         held_error_line: Option<String>,
+        attempted_sid: String,
     ) {
-        config.session_id = String::new();
+        let recovered = self.find_recovery_session_id(&config);
+        config.session_id = recovered.clone().unwrap_or_default();
+        match &recovered {
+            // A real on-disk session was found — don't claim "Resumed"
+            // yet (codex P1 on PR #2693: the CLI can still reject this
+            // recovered id too, e.g. a corrupt file or a non-top-level
+            // session). Left unemitted here on purpose: the spawn below
+            // now threads this attempt through the SAME resume-tracking
+            // machinery a genuine first-time `--resume` uses (`Some(first
+            // .clone())`, not `None`), so `persistent_resume.rs`'s
+            // already-correct, already-tested `SessionCaptured` handling
+            // emits `Resumed` once the CLI actually confirms it — or, if
+            // this recovered id is ALSO stale, cascades into another
+            // `ConfirmedRetry` → this same function again, where
+            // `find_recovery_session_id`'s poison guard refuses to
+            // re-recover the identical dead id and this arm's `None`
+            // branch below correctly emits `Fresh` instead.
+            Some(_) => {}
+            // No recovery candidate — this IS genuinely, unambiguously a
+            // fresh conversation, decided right now. Safe to emit
+            // immediately: nothing downstream can turn this back into a
+            // resume.
+            None => self.emit_session_outcome_now(
+                persistent_resume::SessionOutcome::Fresh,
+                attempted_sid,
+                None,
+            ),
+        }
         let Some(first) = (!entries.is_empty()).then(|| entries.remove(0)) else {
             // Nothing to retry at all (shouldn't happen in practice —
             // the batch always has at least the triggering message) —
@@ -1633,7 +1722,23 @@ impl PersistentSubprocessController {
                 // see `clear_session_id_for_fresh_spawn`).
                 self.clear_session_id_for_fresh_spawn();
                 let retry_config = config.clone();
-                let spawn_result = self.spawn_process(config, None);
+                // `Some(first.clone())`, not `None` (codex P1 on PR
+                // #2693): when `config.session_id` holds a recovered
+                // on-disk session (not empty), this MUST thread through
+                // as a real resume-tracking seed — same as any first-time
+                // `--resume` attempt (mirrors `SendAction::BecomeSpawner`'s
+                // own `spawn_process` call above) — or a recovered id
+                // that turns out to be ALSO stale/rejected has no
+                // detection/retry-cascade at all, stranding the batch on
+                // that attempt's raw error instead of eventually falling
+                // through to the promised blank-conversation fallback.
+                // Harmless when there's nothing to resume: `spawn_process`
+                // only constructs `SpawnedWithResume` tracking when
+                // `inner.session_id` actually ends up populated, which it
+                // won't if `config.session_id` is empty — this always
+                // correctly falls back to `SpawnedFresh` in that case,
+                // same as passing `None` used to.
+                let spawn_result = self.spawn_process(config, Some(first.clone()));
                 match &spawn_result {
                     Ok(_) => self.mark_turn_active_and_publish(),
                     Err(e) => tracing::error!(
@@ -3159,7 +3264,7 @@ impl PersistentSubprocessController {
                                     }
                                 }
                             }
-                            persistent_resume::ResumeEffect::FireRetry { retry, held_error_line } => {
+                            persistent_resume::ResumeEffect::FireRetry { retry, held_error_line, attempted_sid } => {
                                 // Issue #2368: the retry is firing and will
                                 // very likely succeed within milliseconds —
                                 // the doomed attempt's own terminal error
@@ -3183,6 +3288,7 @@ impl PersistentSubprocessController {
                                         retry.config,
                                         retry.messages,
                                         held_error_line,
+                                        attempted_sid,
                                     );
                                 } else if let Some(line) = held_error_line {
                                     // The controller itself is already gone
@@ -3990,12 +4096,142 @@ mod send_input_tests {
             session_id: "dead-sid".to_string(),
             message_id: None,
         };
-        c.retry_after_resume_failure(1, config, vec![qentry(1, "{}")], None);
+        c.retry_after_resume_failure(1, config, vec![qentry(1, "{}")], None, "dead-sid".to_string());
 
         assert_eq!(
             c.inner.lock().unwrap().session_id,
             None,
             "must clear inner.session_id directly, not rely on poison_resume having already done so"
+        );
+    }
+
+    /// Regression test for
+    /// `docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`:
+    /// a confirmed-stale `--resume` must try to recover the largest REAL
+    /// session on disk before giving up and starting blank.
+    #[test]
+    fn find_recovery_session_id_recovers_the_largest_on_disk_session() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_dir = tmp.path().to_string_lossy().to_string();
+        let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
+        let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+        let dir = tmp.path().join("projects").join(&slug);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
+
+        let c = controller();
+        let mut env_vars = HashMap::new();
+        env_vars.insert("CLAUDE_CONFIG_DIR".to_string(), config_dir);
+        let config = PersistentSpawnConfig {
+            cli_command: "claude".to_string(),
+            cli_args: vec![],
+            working_dir,
+            env_vars,
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: "d019e2e4-stale".to_string(),
+            message_id: None,
+        };
+
+        assert_eq!(
+            c.find_recovery_session_id(&config).as_deref(),
+            Some("972a6a4f-live"),
+            "must recover the largest real on-disk session, not give up"
+        );
+    }
+
+    #[test]
+    fn find_recovery_session_id_is_none_without_a_config_dir() {
+        let c = controller();
+        let config = PersistentSpawnConfig {
+            cli_command: "claude".to_string(),
+            cli_args: vec![],
+            working_dir: "/wherever".to_string(),
+            env_vars: HashMap::new(), // no CLAUDE_CONFIG_DIR — same as the pre-fix world
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: "dead-sid".to_string(),
+            message_id: None,
+        };
+        assert_eq!(c.find_recovery_session_id(&config), None);
+    }
+
+    /// Guards against an infinite retry loop: if the ONLY candidate
+    /// recovery finds is the exact id already confirmed poisoned this
+    /// attempt, don't recover it again — nothing on disk changes between
+    /// attempts, so an unguarded recovery would rediscover the identical
+    /// dead id forever.
+    #[test]
+    fn find_recovery_session_id_refuses_an_already_poisoned_candidate() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_dir = tmp.path().to_string_lossy().to_string();
+        let working_dir = "/agents/agentx".to_string();
+        let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+        let dir = tmp.path().join("projects").join(&slug);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("dead-sid.jsonl"), vec![b'x'; 1_000]).unwrap();
+
+        let c = controller();
+        c.inner.lock().unwrap().resume_poisoned = Some("dead-sid".to_string());
+        let mut env_vars = HashMap::new();
+        env_vars.insert("CLAUDE_CONFIG_DIR".to_string(), config_dir);
+        let config = PersistentSpawnConfig {
+            cli_command: "claude".to_string(),
+            cli_args: vec![],
+            working_dir,
+            env_vars,
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: "dead-sid".to_string(),
+            message_id: None,
+        };
+
+        assert_eq!(
+            c.find_recovery_session_id(&config),
+            None,
+            "must not re-recover the same id already confirmed dead this attempt"
+        );
+    }
+
+    /// End-to-end through `retry_after_resume_failure`: when a real,
+    /// larger session exists on disk under this spawn's own
+    /// `CLAUDE_CONFIG_DIR`, the respawn must hydrate `inner.session_id` to
+    /// THAT recovered id — not fall back to a blank conversation — even
+    /// though the actual process spawn itself fails fast here (nonexistent
+    /// binary), mirroring
+    /// `retry_after_resume_failure_clears_inner_session_id_even_when_poison_resume_has_not_run_yet`
+    /// above but for the recovery path instead of the give-up path.
+    #[test]
+    fn retry_after_resume_failure_hydrates_inner_session_id_from_the_recovered_session() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_dir = tmp.path().to_string_lossy().to_string();
+        let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
+        let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+        let dir = tmp.path().join("projects").join(&slug);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
+
+        let c = controller();
+        c.inner.lock().unwrap().session_id = Some("d019e2e4-stale".to_string());
+        let mut env_vars = HashMap::new();
+        env_vars.insert("CLAUDE_CONFIG_DIR".to_string(), config_dir);
+        let config = PersistentSpawnConfig {
+            cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+            cli_args: vec![],
+            working_dir,
+            env_vars,
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: "d019e2e4-stale".to_string(),
+            message_id: None,
+        };
+
+        c.retry_after_resume_failure(1, config, vec![qentry(1, "{}")], None, "dead-sid".to_string());
+
+        assert_eq!(
+            c.inner.lock().unwrap().session_id,
+            Some("972a6a4f-live".to_string()),
+            "must resume the recovered real session, not silently start blank"
         );
     }
 
@@ -4750,7 +4986,7 @@ mod send_input_tests {
             session_id: "dead-sid".to_string(),
             message_id: None,
         };
-        c.retry_after_resume_failure(1, config, vec![qentry(1, "{}")], None);
+        c.retry_after_resume_failure(1, config, vec![qentry(1, "{}")], None, "dead-sid".to_string());
 
         assert_eq!(
             c.inner.lock().unwrap().session_id.as_deref(),
@@ -4787,6 +5023,7 @@ mod send_input_tests {
             config,
             vec![qentry(1, "msg-1"), qentry(2, "msg-2"), qentry(3, "msg-3")],
             None,
+            "dead-sid".to_string(),
         );
 
         assert_eq!(rx.recv().await.unwrap(), "msg-1");
@@ -4817,7 +5054,7 @@ mod send_input_tests {
             session_id: String::new(),
             message_id: None,
         };
-        c.retry_after_resume_failure(1, config, vec![qentry(1, "stuck")], None);
+        c.retry_after_resume_failure(1, config, vec![qentry(1, "stuck")], None, "dead-sid".to_string());
 
         let inner = c.inner.lock().unwrap();
         assert_eq!(
@@ -4860,6 +5097,7 @@ mod send_input_tests {
             config,
             vec![qentry(1, "msg-1"), qentry(2, "msg-2"), qentry(3, "msg-3")],
             None,
+            "dead-sid".to_string(),
         );
 
         let inner = c.inner.lock().unwrap();
@@ -4899,7 +5137,7 @@ mod send_input_tests {
             session_id: String::new(),
             message_id: None,
         };
-        c.retry_after_resume_failure(1, config, vec![qentry(1, "stuck")], None);
+        c.retry_after_resume_failure(1, config, vec![qentry(1, "stuck")], None, "dead-sid".to_string());
 
         {
             let inner = c.inner.lock().unwrap();
@@ -4949,6 +5187,7 @@ mod send_input_tests {
             config,
             vec![qentry(1, "batch-1"), qentry(2, "batch-2")],
             None,
+            "dead-sid".to_string(),
         );
 
         // Races in while the flush task holds the drain claim: must be
@@ -5004,7 +5243,7 @@ mod send_input_tests {
             session_id: String::new(),
             message_id: None,
         };
-        c.retry_after_resume_failure(1, config, vec![qentry(1, "{}")], Some("boom\n".to_string()));
+        c.retry_after_resume_failure(1, config, vec![qentry(1, "{}")], Some("boom\n".to_string()), "dead-sid".to_string());
 
         let flushed = filestore
             .read_file(&block_id, PERSISTENT_OUTPUT_SUBJECT)
@@ -5015,6 +5254,101 @@ mod send_input_tests {
             flushed,
             "a held error line must be flushed to the blockfile when the retry's own respawn fails, \
              not silently dropped"
+        );
+    }
+
+    /// Regression test for reagentx + Codex (PR #2693 review): when no
+    /// recovery candidate exists, this IS unambiguously known right now
+    /// — the outcome must be emitted immediately, not silently dropped
+    /// just because the premature emission at the `persistent_resume.rs`
+    /// state-machine layer was removed.
+    #[test]
+    fn retry_after_resume_failure_emits_fresh_outcome_immediately_when_no_recovery_found() {
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let filestore = Arc::new(FileStore::open_in_memory().unwrap());
+        let block_id = "block-emits-fresh-no-recovery".to_string();
+        let c = PersistentSubprocessController::new(
+            "tab".to_string(),
+            block_id.clone(),
+            Some(broker),
+            None,
+            None,
+            Some(filestore.clone()),
+        );
+        let config = PersistentSpawnConfig {
+            cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+            cli_args: vec![],
+            working_dir: String::new(),
+            env_vars: HashMap::new(), // no CLAUDE_CONFIG_DIR — nothing to recover
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: "dead-sid".to_string(),
+            message_id: None,
+        };
+        c.retry_after_resume_failure(1, config, vec![qentry(1, "{}")], None, "dead-sid".to_string());
+
+        let content = filestore
+            .read_file(&block_id, PERSISTENT_OUTPUT_SUBJECT)
+            .unwrap()
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            .unwrap_or_default();
+        assert!(
+            content.contains("agentmux_session_outcome") && content.contains("\"fresh\""),
+            "a genuinely blank fallback (no recovery candidate) must emit the Fresh outcome \
+             immediately — got: {content:?}"
+        );
+    }
+
+    /// Regression test for reagentx + Codex (PR #2693 review), the other
+    /// half: when a recovery candidate IS found, this function must NOT
+    /// emit ANY outcome yet — the CLI hasn't confirmed it (Codex P1: it
+    /// could still reject the recovered id too). The eventual outcome is
+    /// left to `persistent_resume.rs`'s already-tested `SessionCaptured`
+    /// handling, once the (now resume-tracked) recovery attempt actually
+    /// resolves.
+    #[test]
+    fn retry_after_resume_failure_does_not_emit_an_outcome_yet_when_recovery_is_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_dir = tmp.path().to_string_lossy().to_string();
+        let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
+        let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+        let dir = tmp.path().join("projects").join(&slug);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
+
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let filestore = Arc::new(FileStore::open_in_memory().unwrap());
+        let block_id = "block-defers-outcome-on-recovery".to_string();
+        let c = PersistentSubprocessController::new(
+            "tab".to_string(),
+            block_id.clone(),
+            Some(broker),
+            None,
+            None,
+            Some(filestore.clone()),
+        );
+        let mut env_vars = HashMap::new();
+        env_vars.insert("CLAUDE_CONFIG_DIR".to_string(), config_dir);
+        let config = PersistentSpawnConfig {
+            cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+            cli_args: vec![],
+            working_dir,
+            env_vars,
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: "d019e2e4-stale".to_string(),
+            message_id: None,
+        };
+        c.retry_after_resume_failure(1, config, vec![qentry(1, "{}")], None, "d019e2e4-stale".to_string());
+
+        let content = filestore
+            .read_file(&block_id, PERSISTENT_OUTPUT_SUBJECT)
+            .unwrap()
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            .unwrap_or_default();
+        assert!(
+            !content.contains("agentmux_session_outcome"),
+            "must not claim any outcome until the CLI actually confirms the recovered id — got: {content:?}"
         );
     }
 
@@ -5059,7 +5393,7 @@ mod send_input_tests {
             session_id: String::new(),
             message_id: None,
         };
-        c.retry_after_resume_failure(1, config, vec![qentry(1, "stuck")], Some("boom\n".to_string()));
+        c.retry_after_resume_failure(1, config, vec![qentry(1, "stuck")], Some("boom\n".to_string()), "dead-sid".to_string());
         tokio::time::sleep(tokio::time::Duration::from_millis(20)).await;
 
         let flushed = filestore
@@ -5119,7 +5453,7 @@ mod send_input_tests {
             session_id: String::new(),
             message_id: None,
         };
-        c.retry_after_resume_failure(1, config, vec![qentry(1, "{}")], Some("boom\n".to_string()));
+        c.retry_after_resume_failure(1, config, vec![qentry(1, "{}")], Some("boom\n".to_string()), "dead-sid".to_string());
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         let flushed = filestore
