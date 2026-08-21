@@ -286,7 +286,7 @@ pub struct SettingsType {
     #[serde(rename = "notify:tooltones:enabled", default, skip_serializing_if = "Option::is_none")]
     pub notify_tooltones_enabled: Option<bool>,
 
-    // Independent gain (0.0–1.0; default 1.0). Layered below the
+    // Independent gain (0.0–1.0; default 0.25). Layered below the
     // shared master gain so master kill-switches both subsystems.
     #[serde(rename = "notify:tooltones:volume", default, skip_serializing_if = "Option::is_none")]
     pub notify_tooltones_volume: Option<f32>,
