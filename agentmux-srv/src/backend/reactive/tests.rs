@@ -453,6 +453,144 @@ async fn test_handler_inject_success() {
     assert!(payload.ends_with('\r'), "trailing CR submits the message");
 }
 
+/// issue #2695 (Phase 2): the resolved block's own live identity, queried
+/// via `agent_identity_confirmer`, must be checked against the jekt's
+/// `target_agent` — an ACTIVE mismatch rejects delivery and never reaches
+/// the input sender, distinct from "agent not found".
+#[tokio::test]
+async fn test_handler_inject_rejects_on_identity_mismatch() {
+    let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let sent_clone = sent.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        sent_clone
+            .lock()
+            .unwrap()
+            .push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler
+        .register_agent("agent1", "block1", None)
+        .unwrap();
+    // Simulates a registry/controller drift: agent_to_block says "block1"
+    // belongs to "agent1", but the block's own live identity (as the real
+    // controller would report it) is actually "agent2" — the exact same-
+    // host misdelivery shape reported live.
+    handler.set_agent_identity_confirmer(Arc::new(|_block_id: &str| {
+        Some("agent2".to_string())
+    }));
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "hello".to_string(),
+        source_agent: Some("src".to_string()),
+        request_id: Some("req-mismatch".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: None,
+        forward_hops: 0,
+        ..Default::default()
+    });
+
+    assert!(!resp.success);
+    assert_eq!(resp.block_id.as_deref(), Some("block1"));
+    assert!(resp.error.as_deref().unwrap().contains("identity mismatch"));
+    assert!(
+        sent.lock().unwrap().is_empty(),
+        "a mismatch must never reach the input sender"
+    );
+
+    let log = handler.get_audit_log(10);
+    let mismatch_entry = log
+        .iter()
+        .find(|e| e.outcome.as_deref() == Some("identity-mismatch"))
+        .expect("identity-mismatch outcome should be audited");
+    assert_eq!(mismatch_entry.target_agent, "agent1");
+    assert_eq!(mismatch_entry.block_id, "block1");
+    assert!(!mismatch_entry.success);
+}
+
+/// The confirmer returning `None` (unverifiable — e.g. a controller type
+/// that doesn't implement `agent_id()`) must NOT block delivery — "no
+/// proof available" is not the same as "proof of mismatch." Guards against
+/// this check regressing into a fail-closed one.
+#[tokio::test]
+async fn test_handler_inject_proceeds_when_confirmer_returns_none() {
+    let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let sent_clone = sent.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        sent_clone
+            .lock()
+            .unwrap()
+            .push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler
+        .register_agent("agent1", "block1", None)
+        .unwrap();
+    handler.set_agent_identity_confirmer(Arc::new(|_block_id: &str| None));
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: "hello".to_string(),
+        source_agent: None,
+        request_id: Some("req-unverifiable".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: None,
+        forward_hops: 0,
+        ..Default::default()
+    });
+
+    assert!(resp.success);
+    assert!(!sent.lock().unwrap().is_empty(), "delivery must still happen");
+}
+
+/// A confirmer whose returned identity matches (case-insensitively) must
+/// also proceed — the check is on mismatch, not on the mere presence of a
+/// confirmer.
+#[tokio::test]
+async fn test_handler_inject_proceeds_when_confirmer_matches_case_insensitively() {
+    let sent = Arc::new(Mutex::new(Vec::<(String, Vec<u8>)>::new()));
+    let sent_clone = sent.clone();
+
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |block_id: &str, data: &[u8]| {
+        sent_clone
+            .lock()
+            .unwrap()
+            .push((block_id.to_string(), data.to_vec()));
+        Ok(())
+    }));
+    handler
+        .register_agent("Agent1", "block1", None)
+        .unwrap();
+    handler.set_agent_identity_confirmer(Arc::new(|_block_id: &str| {
+        Some("agent1".to_string())
+    }));
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "AGENT1".to_string(),
+        message: "hello".to_string(),
+        source_agent: None,
+        request_id: Some("req-case".to_string()),
+        priority: None,
+        wait_for_idle: false,
+        jekt_tier: None,
+        delivery_tier: None,
+        forward_hops: 0,
+        ..Default::default()
+    });
+
+    assert!(resp.success);
+    assert!(!sent.lock().unwrap().is_empty());
+}
+
 // SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14.md §1 — a WAN jekt verified
 // against reagent's pinned Ed25519 key is no longer forced to SENSITIVE by
 // delivery tier alone (superseding the original SPEC_JEKT_LAN_WAN_TRUST_

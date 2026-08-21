@@ -66,6 +66,12 @@ pub(super) struct ShellControllerInner {
     pub(super) last_pty_output: Option<Instant>,
     /// True if this pane is running an agent CLI (e.g. claude).
     pub(super) is_agent_pane: bool,
+    /// This pane's own jekt/muxbus identity, captured once at spawn time
+    /// from `resolve_agent_id_for_jekt` (see that fn's doc comment) — the
+    /// independent source of truth `Controller::agent_id()` exposes for
+    /// `inject_message_inner`'s recipient-identity check. `None` for a
+    /// plain (non-agent) terminal pane.
+    pub(super) agent_id: Option<String>,
     /// Next expected input seq number (per-TermViewModel monotonic counter).
     pub(super) input_seq_next: u64,
     /// Out-of-order input packets waiting for their seq slot (capped at SHELL_INPUT_CH_SIZE).
@@ -131,6 +137,7 @@ impl ShellController {
                 spawn_ts_ms: None,
                 last_pty_output: None,
                 is_agent_pane: false,
+                agent_id: None,
                 input_seq_next: 0,
                 input_seq_buf: std::collections::BTreeMap::new(),
             })),

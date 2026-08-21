@@ -8,6 +8,7 @@ use axum::{
 };
 use serde_json::json;
 
+use crate::backend::blockcontroller;
 use crate::backend::reactive::{InjectionRequest, SupervisorAction};
 use crate::backend::reactive::registry as agent_registry;
 use crate::backend::subagent_watcher;
@@ -847,6 +848,20 @@ pub(super) async fn handle_reactive_register(
         .register_agent(&req.agent_id, &req.block_id, req.tab_id.as_deref())
     {
         Ok(()) => {
+            // Refresh the block's OWN captured identity too (reagentx P1 on
+            // #2697): this HTTP path can (re-)register an existing block_id
+            // under a different agent_id (a rename, or a reconfigured
+            // cmd:env) — without this, the controller's `agent_id()` stays
+            // stale at whatever it was captured as at spawn time, and
+            // `inject_message_inner`'s recipient-identity check (#2695)
+            // would then falsely reject the agent's own, correctly-addressed
+            // messages as a mismatch. `get_controller` returning `None`
+            // (block not tracked, or a controller type that doesn't
+            // implement `agent_id()`/`set_agent_id()`) is a harmless no-op.
+            if let Some(ctrl) = blockcontroller::get_controller(&req.block_id) {
+                ctrl.set_agent_id(Some(req.agent_id.clone()));
+            }
+
             // Also write to cross-instance file registry so other AgentMux
             // instances can forward inject requests to this one.
             let data_dir = base::get_wave_data_dir();

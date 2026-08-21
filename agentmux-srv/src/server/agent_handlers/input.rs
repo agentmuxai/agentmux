@@ -503,6 +503,23 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                     let registered = crate::backend::reactive::handler::get_global_handler()
                         .register_agent(&agent_name, &cmd.blockid, None);
                     if registered.is_ok() {
+                        // Refresh the block's OWN captured identity too
+                        // (reagentx P1, round 2 on #2697): this call runs on
+                        // EVERY turn, using block.meta["agentName"] as the
+                        // source of truth — which can diverge from whatever
+                        // a PersistentSubprocessController captured at its
+                        // original spawn_process call (rename, reconfigured
+                        // cmd:env) without the block ever respawning. Without
+                        // this, inject_message_inner's recipient-identity
+                        // check (#2695) would compare the current (correct)
+                        // target_agent against that stale spawn-time value
+                        // and falsely reject the agent's own, correctly-
+                        // addressed jekts as an identity mismatch. A no-op
+                        // for controller types that don't override
+                        // set_agent_id (e.g. SubprocessController).
+                        if let Some(ctrl) = crate::backend::blockcontroller::get_controller(&cmd.blockid) {
+                            ctrl.set_agent_id(Some(agent_name.clone()));
+                        }
                         if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
                             sub.add_agent(&agent_name);
                         }

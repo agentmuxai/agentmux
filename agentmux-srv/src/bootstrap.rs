@@ -982,6 +982,15 @@ pub fn spawn_background_subsystems(
             Err(e) => Err(e),
         }
     }));
+    // Recipient-identity check (issue #2695): before delivering, compare the
+    // resolved target's own live, spawn-time-captured identity (queried from
+    // the actual controller, independent of reactive_handler's own
+    // agent_to_block map) against who the jekt was addressed to. See
+    // Controller::agent_id's doc comment for why this can't be derived from
+    // reactive_handler's own state.
+    reactive_handler.set_agent_identity_confirmer(Arc::new(|block_id: &str| {
+        backend::blockcontroller::get_controller(block_id).and_then(|c| c.agent_id())
+    }));
     let poller = Arc::new(Poller::new(
         PollerConfig {
             muxbus_url: None,
