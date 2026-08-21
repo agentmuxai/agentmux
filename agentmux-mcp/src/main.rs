@@ -778,6 +778,53 @@ fn require_agent_env(local_url: &str, auth_key: &str, block_id: &str) -> Result<
     Ok(())
 }
 
+/// Where `CaptureWindow` writes its PNGs. Mirrors `agentmux-srv`'s own
+/// `get_wave_data_dir()` (`AGENTMUX_DATA_HOME` env var, else `~/.agentmux`)
+/// rather than the shared OS temp dir — reagent P2 on this tool's own PR
+/// (#2709 round 1): `std::env::temp_dir()` is world-readable on a
+/// multi-user host, and CaptureWindow can capture arbitrary OS windows
+/// (not just AgentMux's own pane), so a captured image could leak to other
+/// local users. `agentmux-mcp` can't import `agentmux-srv`'s function
+/// directly (separate crate/process), so this replicates its exact logic
+/// instead of inventing a new convention.
+fn capture_window_dir() -> std::path::PathBuf {
+    let base = std::env::var("AGENTMUX_DATA_HOME")
+        .ok()
+        .filter(|d| !d.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("/"))
+                .join(".agentmux")
+        });
+    base.join("tmp/capture-window")
+}
+
+const CAPTURE_RETENTION: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
+/// Same bug class, same fix, as `agentmux-srv`'s `prune_old_screenshots`
+/// (`ui_handlers.rs`, reagent P2, PR #2662) — reapplied here per reagent's
+/// review of this tool's own PR (#2709 round 1), which found it wasn't
+/// reused. Best-effort, on the write path, PNG-only.
+fn prune_old_captures(dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("png") {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else { continue };
+        let Ok(modified) = metadata.modified() else { continue };
+        let Ok(age) = now.duration_since(modified) else { continue };
+        if age > CAPTURE_RETENTION {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
 /// The calling agent's slug (its `AGENTMUX_AGENT_ID`), injected by AgentMux into
 /// this MCP server's trusted environment. The App API identity/preset/memory
 /// REST endpoints stamp their `agent_id` from this — the agent's own model
@@ -2025,13 +2072,19 @@ async fn call_tool(
                 .capture_image()
                 .map_err(|e| anyhow::anyhow!("capture failed: {e}"))?;
 
-            let dir = std::env::temp_dir().join("agentmux-capture-window");
+            let dir = capture_window_dir();
             std::fs::create_dir_all(&dir)
-                .map_err(|e| anyhow::anyhow!("failed to create temp dir {}: {e}", dir.display()))?;
+                .map_err(|e| anyhow::anyhow!("failed to create capture dir {}: {e}", dir.display()))?;
             let path = dir.join(format!("{}.png", uuid::Uuid::new_v4()));
             image
                 .save(&path)
                 .map_err(|e| anyhow::anyhow!("failed to save capture to {}: {e}", path.display()))?;
+            // Unbounded growth over repeated/looped calls otherwise — same bug
+            // class as UIScreenshot's own screenshot dir (reagent P2, PR #2662)
+            // and reagent's own review of this PR (round 1) pointing out that
+            // fix wasn't reused here. Same fix, same shape: best-effort, on the
+            // write path.
+            prune_old_captures(&dir);
 
             Ok(format!(
                 "Captured window {title:?} to {} — use Read on that path to view it yourself, or OpenMedia to show it to the user.",
@@ -2727,6 +2780,53 @@ fn format_duration(d: Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Mirrors `agentmux-srv`'s `prune_old_screenshots_deletes_only_stale_pngs`
+    /// (`ui_handlers.rs`) exactly — same bug class, same fix, same test shape
+    /// (reagent P1/P2 on this tool's own PR, #2709 round 1).
+    #[test]
+    fn prune_old_captures_deletes_only_stale_pngs() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let fresh = dir.path().join("fresh.png");
+        std::fs::write(&fresh, b"png").unwrap();
+
+        let stale = dir.path().join("stale.png");
+        std::fs::write(&stale, b"png").unwrap();
+        let old_time = std::time::SystemTime::now() - (CAPTURE_RETENTION * 2);
+        let file = std::fs::File::options().write(true).open(&stale).unwrap();
+        file.set_times(std::fs::FileTimes::new().set_modified(old_time))
+            .unwrap();
+
+        // Non-PNG files must never be touched, however old.
+        let other = dir.path().join("notes.txt");
+        std::fs::write(&other, b"keep me").unwrap();
+        let file = std::fs::File::options().write(true).open(&other).unwrap();
+        file.set_times(std::fs::FileTimes::new().set_modified(old_time))
+            .unwrap();
+
+        prune_old_captures(dir.path());
+
+        assert!(fresh.exists(), "fresh capture must survive pruning");
+        assert!(!stale.exists(), "stale capture must be pruned");
+        assert!(other.exists(), "non-png files must never be pruned");
+    }
+
+    /// `AGENTMUX_DATA_HOME`, when set, must win over the `~/.agentmux` default
+    /// — the same override `agentmux-srv`'s own `get_wave_data_dir()` honors,
+    /// which this function replicates rather than reinventing.
+    #[test]
+    fn capture_window_dir_honors_agentmux_data_home_override() {
+        // SAFETY: test-only, single-threaded within this process's env;
+        // no other test in this crate reads/writes AGENTMUX_DATA_HOME.
+        unsafe { std::env::set_var("AGENTMUX_DATA_HOME", "/tmp/custom-agentmux-home") };
+        let dir = capture_window_dir();
+        unsafe { std::env::remove_var("AGENTMUX_DATA_HOME") };
+        assert_eq!(
+            dir,
+            std::path::PathBuf::from("/tmp/custom-agentmux-home/tmp/capture-window")
+        );
+    }
 
     /// Every tool advertised by `tools/list` must be valid JSON with a `name`
     /// and `inputSchema` — the server `expect("static json")`s these at runtime,

@@ -122,10 +122,12 @@ version = "0.55.18"
 dependencies = [
  "agentmux-common",
  "anyhow",
+ "dirs",
  "image 0.25.10",
  "reqwest",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "uuid",
  "xcap",
