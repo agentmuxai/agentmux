@@ -9,7 +9,7 @@ use axum::{
 use serde_json::json;
 
 use crate::backend::blockcontroller;
-use crate::backend::reactive::{InjectionRequest, SupervisorAction};
+use crate::backend::reactive::{AgentRegistration, InjectionRequest, SupervisorAction};
 use crate::backend::reactive::registry as agent_registry;
 use crate::backend::subagent_watcher;
 use crate::backend::base;
@@ -1267,6 +1267,138 @@ pub(super) async fn handle_reactive_supervisor_decision(
     }
 }
 
+// ---- WS RPC: reactive.registrations (issue #2696, Stash UI indicator) ----
+
+/// Whether a host-global shared-registry entry is THIS instance's own
+/// registration (as opposed to a genuinely different instance/channel on
+/// the same host) — every agent unconditionally writes itself into that
+/// same registry, so a "remote"/"elsewhere" listing must exclude its own
+/// entry or it fires on every healthy agent (reagentx P1 on #2698). Same
+/// comparison this file already uses for Tier 2a/2b forwarding.
+pub(super) fn is_self_registration(entry_local_url: &str, this_instances_local_url: &str) -> bool {
+    entry_local_url == this_instances_local_url
+}
+
+/// One cross-instance/channel entry from the host-global shared registry
+/// (`backend::reactive::registry::AgentEntry`), narrowed to what the
+/// frontend actually needs to render a "registered elsewhere too" badge —
+/// deliberately excludes `local_url`/`auth_key`, which are internal
+/// forwarding plumbing, not UI-relevant.
+#[derive(serde::Serialize)]
+pub(super) struct RemoteRegistrationEntry {
+    channel: String,
+    pid: u32,
+    updated_at: u64,
+}
+
+/// Summary of the most recent `identity-mismatch` audit entry for this
+/// agent_id, if any (see #2695's `Handler::inject_message_inner` check) —
+/// narrowed from `AuditLogEntry` to what the Stash badge needs.
+#[derive(serde::Serialize)]
+pub(super) struct MismatchAuditSummary {
+    timestamp: u64,
+    block_id: String,
+    error_message: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+pub(super) struct ReactiveRegistrationsResult {
+    /// This instance's own registration for the agent, if any — same data
+    /// `GET /agentmux/reactive/agent` exposes, reused here so the frontend
+    /// makes one call instead of two.
+    local: Option<AgentRegistration>,
+    /// Every OTHER instance/channel on this host currently claiming this
+    /// same agent_id, freshest first — a non-empty list here is the actual
+    /// risk signal the Stash badge exists to surface (issue #2694's root
+    /// cause was exactly two panes racing to hold the same agent_id).
+    remote: Vec<RemoteRegistrationEntry>,
+    recent_mismatch: Option<MismatchAuditSummary>,
+}
+
+#[derive(serde::Deserialize)]
+pub(super) struct ReactiveRegistrationsParams {
+    agent_id: String,
+}
+
+/// Registers `reactive.registrations`, called by the Stash "Registration"
+/// tab (`AgentIdentityLinksPanel`'s sibling — see `frontend/app/store/
+/// rpc-api/reactive.ts`) to answer "is this agent's jekt identity healthy
+/// right now": where it's registered locally, whether any OTHER
+/// instance/channel on this host also claims the same agent_id (the
+/// collision shape #2694 fixed one specific cause of), and whether a
+/// recent delivery hit the #2695 identity-mismatch guard.
+pub fn register_reactive_ws_handlers(engine: &std::sync::Arc<crate::backend::rpc::engine::WshRpcEngine>, state: &AppState) {
+    let state = state.clone();
+    engine.register_handler(
+        "reactive.registrations",
+        Box::new(move |data, _ctx| {
+            let state = state.clone();
+            Box::pin(async move {
+                let params: ReactiveRegistrationsParams = serde_json::from_value(data)
+                    .map_err(|e| format!("reactive.registrations: {e}"))?;
+
+                let local = state.reactive_handler.get_agent(&params.agent_id);
+
+                // Every agent (including this instance's own) unconditionally
+                // writes itself into the same host-global shared registry
+                // (write_shared_from_env, called from both the PTY-shell and
+                // persistent auto-register paths and from handle_reactive_
+                // register above) — so without filtering, `remote` always
+                // includes THIS instance's own entry alongside any genuinely
+                // other instance, and the "registered elsewhere too" badge
+                // would fire on every healthy agent (reagentx P1). Same
+                // self-filter this file already uses for Tier 2a/2b forwarding
+                // (`entry.local_url == state.local_web_url`, ~line 454/580).
+                let remote = crate::registry::resolve_shared_reactive_dir()
+                    .map(|shared_dir| {
+                        agent_registry::lookup_all_shared(&shared_dir, &params.agent_id)
+                            .into_iter()
+                            .filter(|e| !is_self_registration(&e.local_url, &state.local_web_url))
+                            // A crashed sibling instance's entry otherwise
+                            // lingers until the next startup-only
+                            // cleanup_stale_shared sweep (bootstrap.rs) —
+                            // up to hours later — showing a false "Also
+                            // registered elsewhere" badge in the meantime
+                            // (reagentx P2). PID-liveness is authoritative
+                            // here (same-host by construction, per
+                            // pid_alive's own doc comment), so check it live
+                            // instead of waiting for that sweep.
+                            .filter(|e| agent_registry::pid_alive(e.pid))
+                            .map(|e| RemoteRegistrationEntry {
+                                channel: e.channel,
+                                pid: e.pid,
+                                updated_at: e.updated_at,
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+
+                let target_lower = params.agent_id.to_lowercase();
+                let recent_mismatch = state
+                    .reactive_handler
+                    .get_audit_log(100)
+                    .into_iter()
+                    .find(|e| {
+                        e.outcome.as_deref() == Some("identity-mismatch")
+                            && e.target_agent.to_lowercase() == target_lower
+                    })
+                    .map(|e| MismatchAuditSummary {
+                        timestamp: e.timestamp,
+                        block_id: e.block_id,
+                        error_message: e.error_message,
+                    });
+
+                let result = ReactiveRegistrationsResult {
+                    local,
+                    remote,
+                    recent_mismatch,
+                };
+                Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
+            })
+        }),
+    );
+}
+
 /// `verify_jekt_signature` unit tests (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md
 /// §2.2, reagentx review on PR #2565). Deliberately test the extracted
 /// function directly rather than the full `handle_inject`/websocket
@@ -1693,5 +1825,31 @@ mod resolve_delivery_tier_tests {
     #[test]
     fn full_auth_key_defaults_to_host_when_body_omits_the_field() {
         assert_eq!(resolve_delivery_tier(super::super::ReactiveAuthVia::FullAuthKey, None), "host");
+    }
+}
+
+#[cfg(test)]
+mod is_self_registration_tests {
+    use super::is_self_registration;
+
+    /// reagentx P1 on #2698: without this check, `reactive.registrations`'s
+    /// `remote` list always included this instance's own shared-registry
+    /// entry (every agent unconditionally writes itself into that same
+    /// registry), so the "registered elsewhere too" badge fired on every
+    /// healthy agent — defeating the whole point of the feature.
+    #[test]
+    fn same_local_url_is_self() {
+        assert!(is_self_registration(
+            "http://127.0.0.1:12345",
+            "http://127.0.0.1:12345"
+        ));
+    }
+
+    #[test]
+    fn different_local_url_is_not_self() {
+        assert!(!is_self_registration(
+            "http://127.0.0.1:12345",
+            "http://127.0.0.1:54321"
+        ));
     }
 }
