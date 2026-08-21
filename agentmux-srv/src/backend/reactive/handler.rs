@@ -178,14 +178,16 @@ impl Handler {
         let agent_key = agent_id.to_lowercase();
 
         // Remove existing registration for this agent
-        if let Some(old_block) = self.agent_to_block.remove(&agent_key) {
-            self.block_to_agent.remove(&old_block);
+        let evicted_block = self.agent_to_block.remove(&agent_key);
+        if let Some(ref old_block) = evicted_block {
+            self.block_to_agent.remove(old_block);
         }
 
         // Remove existing registration for this block
-        if let Some(old_agent) = self.block_to_agent.remove(block_id) {
-            self.agent_to_block.remove(&old_agent);
-            self.agent_info.remove(&old_agent);
+        let evicted_agent = self.block_to_agent.remove(block_id);
+        if let Some(ref old_agent) = evicted_agent {
+            self.agent_to_block.remove(old_agent);
+            self.agent_info.remove(old_agent);
         }
 
         let now = now_unix_millis();
@@ -205,6 +207,14 @@ impl Handler {
             },
         );
 
+        self.log_audit_registration(
+            "register",
+            agent_id,
+            block_id,
+            evicted_block.as_deref(),
+            evicted_agent.as_deref(),
+        );
+
         Ok(())
     }
 
@@ -213,6 +223,7 @@ impl Handler {
         let agent_key = agent_id.to_lowercase();
         if let Some(block_id) = self.agent_to_block.remove(&agent_key) {
             self.block_to_agent.remove(&block_id);
+            self.log_audit_registration("unregister", agent_id, &block_id, None, None);
         }
         self.agent_info.remove(&agent_key);
     }
@@ -222,6 +233,7 @@ impl Handler {
         if let Some(agent_id) = self.block_to_agent.remove(block_id) {
             self.agent_to_block.remove(&agent_id);
             self.agent_info.remove(&agent_id);
+            self.log_audit_registration("unregister", &agent_id, block_id, None, None);
         }
     }
 
@@ -908,6 +920,46 @@ impl Handler {
             request_id: request_id.to_string(),
             outcome: outcome.map(|s| s.to_string()),
             reason: reason.map(|s| s.to_string()),
+            event_kind: "delivery".to_string(),
+            evicted_block: None,
+            evicted_agent: None,
+        };
+
+        if self.audit_log.len() >= AUDIT_LOG_MAX {
+            self.audit_log.remove(0);
+        }
+        self.audit_log.push(entry);
+    }
+
+    /// Record a registration/eviction event in the audit log — the
+    /// counterpart to [`log_audit`] (which only ever recorded delivery
+    /// attempts). `evicted_block`/`evicted_agent` capture whichever prior
+    /// mapping a "register" call displaced, so a same-host identity
+    /// collision (two panes racing to register the same agent_id) is
+    /// reconstructable after the fact instead of leaving no trace.
+    pub(super) fn log_audit_registration(
+        &mut self,
+        event_kind: &str,
+        agent_id: &str,
+        block_id: &str,
+        evicted_block: Option<&str>,
+        evicted_agent: Option<&str>,
+    ) {
+        let entry = AuditLogEntry {
+            timestamp: now_unix_millis(),
+            source_agent: None,
+            target_agent: agent_id.to_string(),
+            block_id: block_id.to_string(),
+            message_hash: String::new(),
+            message_length: 0,
+            success: true,
+            error_message: None,
+            request_id: String::new(),
+            outcome: None,
+            reason: None,
+            event_kind: event_kind.to_string(),
+            evicted_block: evicted_block.map(|s| s.to_string()),
+            evicted_agent: evicted_agent.map(|s| s.to_string()),
         };
 
         if self.audit_log.len() >= AUDIT_LOG_MAX {

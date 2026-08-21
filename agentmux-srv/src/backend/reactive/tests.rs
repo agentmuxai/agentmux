@@ -222,6 +222,75 @@ fn test_handler_unregister_block() {
     assert!(handler.get_agent("agent1").is_none());
 }
 
+#[test]
+fn test_handler_register_audits_registration_event() {
+    let mut handler = Handler::new();
+    handler
+        .register_agent("agent1", "block1", None)
+        .unwrap();
+
+    let entries = handler.get_audit_log(10);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].event_kind, "register");
+    assert_eq!(entries[0].target_agent, "agent1");
+    assert_eq!(entries[0].block_id, "block1");
+    assert!(entries[0].evicted_block.is_none());
+    assert!(entries[0].evicted_agent.is_none());
+}
+
+#[test]
+fn test_handler_register_replaces_existing_audits_eviction() {
+    let mut handler = Handler::new();
+    handler
+        .register_agent("agent1", "block1", None)
+        .unwrap();
+    handler
+        .register_agent("agent1", "block2", None)
+        .unwrap();
+
+    let entries = handler.get_audit_log(10);
+    assert_eq!(entries.len(), 2);
+    // get_audit_log returns newest-first (see log_audit_registration).
+    let second_register = &entries[0];
+    assert_eq!(second_register.event_kind, "register");
+    assert_eq!(second_register.block_id, "block2");
+    assert_eq!(second_register.evicted_block.as_deref(), Some("block1"));
+}
+
+#[test]
+fn test_handler_unregister_agent_audits_unregistration() {
+    let mut handler = Handler::new();
+    handler
+        .register_agent("agent1", "block1", None)
+        .unwrap();
+    handler.unregister_agent("agent1");
+
+    let entries = handler.get_audit_log(10);
+    let unregister_entry = entries
+        .iter()
+        .find(|e| e.event_kind == "unregister")
+        .expect("unregister event should be audited");
+    assert_eq!(unregister_entry.target_agent, "agent1");
+    assert_eq!(unregister_entry.block_id, "block1");
+}
+
+#[test]
+fn test_handler_unregister_block_audits_unregistration() {
+    let mut handler = Handler::new();
+    handler
+        .register_agent("agent1", "block1", None)
+        .unwrap();
+    handler.unregister_block("block1");
+
+    let entries = handler.get_audit_log(10);
+    let unregister_entry = entries
+        .iter()
+        .find(|e| e.event_kind == "unregister")
+        .expect("unregister event should be audited");
+    assert_eq!(unregister_entry.target_agent, "agent1");
+    assert_eq!(unregister_entry.block_id, "block1");
+}
+
 /// Issue #2363 / codex P1 on PR #2500: the guarded unregister removes
 /// only its own spawn's registration — a newer spawn's (or replacement
 /// controller's) re-registration under a different nonce must survive a
@@ -1150,7 +1219,14 @@ fn test_handler_audit_log() {
         ..Default::default()
     });
 
-    let log = handler.get_audit_log(10);
+    // register_agent's own setup call above now also audits a "register"
+    // event (event_kind), so filter to the delivery entry this test is
+    // actually about.
+    let log: Vec<_> = handler
+        .get_audit_log(10)
+        .into_iter()
+        .filter(|e| e.event_kind == "delivery")
+        .collect();
     assert_eq!(log.len(), 1);
     assert_eq!(log[0].target_agent, "agent1");
     assert_eq!(log[0].request_id, "req-1");
@@ -1177,7 +1253,14 @@ fn test_handler_audit_log_ordinary_jekt_has_no_outcome() {
         ..Default::default()
     });
 
-    let log = handler.get_audit_log(10);
+    // register_agent's own setup call above now also audits a "register"
+    // event (event_kind), so filter to the delivery entry this test is
+    // actually about.
+    let log: Vec<_> = handler
+        .get_audit_log(10)
+        .into_iter()
+        .filter(|e| e.event_kind == "delivery")
+        .collect();
     assert_eq!(log.len(), 1);
     assert!(log[0].outcome.is_none());
     assert!(log[0].reason.is_none());
@@ -1228,6 +1311,9 @@ fn test_audit_log_entry_outcome_field_serde_roundtrip() {
         request_id: "req-1".to_string(),
         outcome: Some("nudge_declined".to_string()),
         reason: Some("consecutive-nudge ceiling reached".to_string()),
+        event_kind: "delivery".to_string(),
+        evicted_block: None,
+        evicted_agent: None,
     };
     let json = serde_json::to_value(&with_outcome).unwrap();
     assert_eq!(json["outcome"], "nudge_declined");
@@ -1292,7 +1378,13 @@ fn test_record_supervisor_decision_decline_logs_one_entry_no_delivery() {
     assert!(resp.success);
     assert_eq!(resp.block_id.as_deref(), Some("block1"));
 
-    let log = handler.get_audit_log(10);
+    // register_agent's own setup call above now also audits a "register"
+    // event (event_kind), so filter to the decision's own delivery entry.
+    let log: Vec<_> = handler
+        .get_audit_log(10)
+        .into_iter()
+        .filter(|e| e.event_kind == "delivery")
+        .collect();
     assert_eq!(log.len(), 1);
     assert_eq!(log[0].outcome.as_deref(), Some("nudge_declined"));
     assert_eq!(
@@ -1323,7 +1415,13 @@ async fn test_record_supervisor_decision_nudge_failure_is_audited_and_not_counte
         .expect("a failed delivery is still Ok — it's not a ceiling refusal");
     assert!(!resp.success);
 
-    let log = handler.get_audit_log(10);
+    // register_agent's own setup call above now also audits a "register"
+    // event (event_kind), so filter to the decision's own delivery entry.
+    let log: Vec<_> = handler
+        .get_audit_log(10)
+        .into_iter()
+        .filter(|e| e.event_kind == "delivery")
+        .collect();
     assert_eq!(log.len(), 1);
     assert_eq!(log[0].outcome.as_deref(), Some("nudge_failed"));
     assert!(!log[0].success);

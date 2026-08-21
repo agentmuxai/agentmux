@@ -309,6 +309,29 @@ pub struct AuditLogEntry {
     /// Not used by ordinary (non-Supervisor) jekt entries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// "delivery" (default — an inject_message attempt, the only kind this
+    /// log ever recorded before this field existed) | "register" |
+    /// "unregister". Lets `GET /agentmux/reactive/audit` reconstruct
+    /// registration/eviction history, not just delivery attempts — prior to
+    /// this, register_agent_with_nonce/unregister_agent* wrote nothing here
+    /// at all, so a same-host cross-instance identity collision left no
+    /// trace of who registered as an agent_id or who it evicted.
+    #[serde(default = "default_event_kind")]
+    pub event_kind: String,
+    /// For a "register" event: the block_id this agent_key was previously
+    /// mapped to, if registering evicted an existing mapping. `None` if this
+    /// was a fresh registration (no prior holder).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evicted_block: Option<String>,
+    /// For a "register" event: the agent_id this block_id was previously
+    /// registered to, if registering evicted an existing mapping. `None` if
+    /// this block had no prior tenant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evicted_agent: Option<String>,
+}
+
+fn default_event_kind() -> String {
+    "delivery".to_string()
 }
 
 /// A Warden Supervisor watcher agent's decision about a target agent that
