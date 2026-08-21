@@ -32,14 +32,30 @@ agent "ScrollPinTest-host-7c31"), correlated against the same log's
 23:33:51.921  [wave-scroll-shrink] 1023px -> 1004px (delta=19px)      ← IDENTICAL delta
 ```
 
-The same **19px delta recurs exactly** across two different tool
-lifecycles ending two different ways (one runs to natural completion,
-the next is user-interrupted) — strong, clean, reproducible evidence
-that a tool block's DOM swap between its running/streaming shape and its
-terminal/compact shape (`ToolOverlayLog.tsx`'s `<Switch>`, `ToolBlock.tsx`'s
-summary row — "Source A" in the 08-17 analysis) is real and fires
-consistently regardless of *how* the tool call ends, not just on clean
-completion. This is now confirmed, not theorized.
+**Correction (Codex P2, caught after this doc first merged):** the
+original wording here overclaimed. Only the SECOND 19px shrink
+(23:33:51.921) is actually temporally adjacent to a terminal transition —
+12ms after that tool's own `Interrupting → Done`. The FIRST one
+(23:33:41.561) fires 2.8 seconds *before* its tool's `TurnEnd`, while the
+pane is still `Streaming` — it is not evidence of an end-of-tool DOM swap
+at all, just a coincidentally-identical-magnitude shrink from an
+unidentified cause. There is exactly **one** clean example here, not two,
+and "confirmed" was too strong a word for one data point.
+
+That one example is still worth something, though, and more precisely
+than originally stated: the 08-17 analysis's own addendum already ruled
+out `ToolBlock.tsx`'s summary row as a possible cause (`_document-nodes.scss`
+forces `.agent-tool-summary` to `white-space: nowrap; overflow: hidden` —
+fixed height regardless of content) — so this is NOT that component. The
+addendum instead flags `ToolOverlayLog.tsx`'s `<Switch>` branch-swap as
+"the most credible source of a genuinely large vertical delta," but notes
+the existing FLIP-transition mitigation should already engage for the
+*common* case, with a real bypass gap "only for `denied`/`canceled`
+tools." The one clean example in this dataset **is** a canceled tool
+(`RequestStop` → `Interrupting` → `Done`) — consistent with, and a
+plausible live instance of, exactly that narrow bypass gap. Worth
+targeted verification (does `heightStale` read `true` for this specific
+pane at this timestamp), not yet confirmed.
 
 Two more same-class events (23:32:59, 1023→1007 delta=16px; 23:33:14,
 1007→991 delta=16px) occur back-to-back with no tool-state transition
@@ -59,46 +75,69 @@ streamed-content growth/settle, not further isolated by this data.
 23:32:39.024  Streaming → Done         cmd=TurnEnd
 ```
 
-A `Streaming → Idle → Streaming` double-flip within ~156ms
-(`ReconcileTurnActive` firing twice in a row), and 21ms after the second
-flip, **93% of the pane's scroll height disappears in one frame**
-(14525px → 1023px). This is qualitatively different from Class 1's
-per-tool DOM swap — the magnitude implies a large chunk of the transcript
-(plausibly one or more full raw tool outputs, or a subagent's dispatch
-transcript, collapsing to compact form all at once) rather than one
-tool's summary row changing height. **Not characterized by name in the
-08-17 analysis's three sources** — closest to an extreme case of Source A
-if multiple tool blocks flip state in the same reconcile pass, but the
-`ReconcileTurnActive` correlation (a turn-boundary re-evaluation event,
-not a single tool's own state change) suggests a broader mechanism worth
-its own investigation: what does `ReconcileTurnActive` actually
-re-evaluate, and can it be batched/eased rather than applied as one
-synchronous DOM mutation?
+**Correction (Codex P2, caught after this doc first merged):** "in one
+frame" and "synchronous DOM mutation" overclaimed what this data can
+show. `lastKnownScrollHeight` only updates when `scrollToTrueBottom()`
+itself runs — so consecutive log lines are the cumulative delta between
+two *pin-check invocations* (~162ms apart here), not two consecutive
+render frames. The actual collapse could have happened across several
+frames/mutations within that window, not necessarily one. Correspondingly,
+`ReconcileTurnActive` firing 21ms before the big shrink is a **temporal
+correlation, not an established causal link** — one occurrence in the
+whole dataset is not enough to claim it caused anything, only that it's
+the most notable nearby event.
+
+With that walked back: a `Streaming → Idle → Streaming` double-flip
+within ~156ms (`ReconcileTurnActive` firing twice in a row) precedes 93%
+of the pane's scroll height disappearing (14525px → 1023px) sometime in
+the following ~21ms-to-next-pin-check window. This is qualitatively
+different from Class 1's per-tool DOM swap — the magnitude implies a
+large chunk of the transcript (plausibly one or more full raw tool
+outputs, or a subagent's dispatch transcript, collapsing to compact form)
+rather than one tool's summary row changing height. **Not characterized
+by name in the 08-17 analysis's three sources.** Confirming an actual
+causal link to `ReconcileTurnActive` — as opposed to noting the
+correlation — needs mutation- or component-level timing instrumentation
+finer-grained than this pin-check-level diagnostic, not just more log
+data of the same kind.
 
 ## What this confirms vs. still doesn't
 
 **Confirmed:** the pin-teleport mechanism (`scrollToTrueBottom()` always
 uses `behavior: "auto"`, no easing) reads as a visible backward jump for
-*any* shrink, and Class 1 (tool running→terminal swaps, "Source A") is a
-real, reproducible, correctly-identified contributor — now with two
-independent trigger-path confirmations instead of zero.
+*any* shrink — this part is architectural fact, not inference from this
+dataset.
 
-**Still not established:** whether Source B (spinner-collapse
-reclassification) or Source C (markdown throttle) independently
-contribute — none of the 8 events isolate one from the other cleanly.
-**New, not previously characterized:** the `ReconcileTurnActive`-linked
-large-scale collapse (Class 2) — only one instance in this dataset, not
-enough to characterize its trigger condition precisely, but its magnitude
-makes it plausibly the more user-visible/jarring half of the "oscillation"
-complaint, more so than the smaller Class 1 shrinks.
+**Plausible, one supporting data point, not confirmed:** a canceled tool's
+`ToolOverlayLog.tsx` `<Switch>` branch-swap (the narrow FLIP-mitigation
+bypass gap the 08-17 addendum already flagged for `denied`/`canceled`
+tools specifically) as the source of the one clean Class 1 example.
+`ToolBlock.tsx`'s summary row is ruled OUT (fixed height, per that same
+addendum) — don't point a fix there.
+
+**Not established:** whether Source B (spinner-collapse reclassification)
+or Source C (markdown throttle) independently contribute — none of the 8
+events isolate one from the other cleanly. **New, not previously
+characterized, correlation only (not causation):** the
+`ReconcileTurnActive`-adjacent large-scale collapse (Class 2) — one
+instance in this dataset, magnitude alone makes it worth investigating
+further, but neither its exact cause nor its frame-level timing is
+established by this diagnostic.
 
 ## Recommended next step
 
 Don't re-run a blind repro — this data already answers "does the
 instrumentation work and does it correlate with real events" (yes, on
-both counts). The next useful step is narrower: instrument or trace
-specifically what `ReconcileTurnActive` re-evaluates in
-`AgentDocumentVirtualList.tsx`/the agent-document reducer, to explain
-Class 2's 13,502px single-frame collapse — that's the highest-value
-unanswered question this dataset raises, not a repeat of the original
-"does this even happen" question.
+both counts). Two concrete, narrower follow-ups, in priority order:
+
+1. **Class 2 (the large collapse):** the pin-check-level diagnostic used
+   here can't resolve frame- or mutation-level timing. Add finer-grained
+   instrumentation (a `ResizeObserver`/mutation-observer trace, or
+   per-render logging in the agent-document reducer around
+   `ReconcileTurnActive`) before concluding anything about its actual
+   cause — this is the highest-value unanswered question, but needs
+   different tooling than more `wave-scroll-shrink` log lines.
+2. **Class 1 (the canceled-tool shrink):** check whether `heightStale`
+   reads `true` for the specific pane/tool at 23:33:51.921 — a direct,
+   cheap way to confirm (or rule out) the `denied`/`canceled` FLIP-bypass
+   hypothesis without needing a new repro.
