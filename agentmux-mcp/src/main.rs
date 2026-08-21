@@ -222,6 +222,27 @@ const UI_QUERY_TOOL: &str = r#"{
   }
 }"#;
 
+// docs/analysis/ANALYSIS_AGENT_UI_AUTOMATION_CROSS_PANE_AND_CROSS_INSTANCE_TARGETING_2026_08_21.md
+// §1 — deliberately NOT part of the ui_handlers.rs signed-identity/pane-
+// ownership scheme UIScreenshot/UIClick/UIQuery use: this captures an
+// arbitrary OS window (a DIFFERENT AgentMux instance/process, or any other
+// application), which crosses no AgentMux agent-to-agent trust boundary —
+// there's no shared srv/auth-key domain to protect here, unlike reaching
+// into another agent's pane within this same instance (see that doc §2 for
+// why THAT capability is deliberately not offered by any tool today).
+const CAPTURE_WINDOW_TOOL: &str = r#"{
+  "name": "CaptureWindow",
+  "description": "Screenshot any top-level OS window by (partial, case-insensitive) title match — a DIFFERENT AgentMux instance/process, or any other application on the desktop. Not scoped to AgentMux's own pane/agent boundary (unlike UIScreenshot, which only sees your own pane). Returns a file path; use the Read tool on that path to view it yourself, or OpenMedia to show it to the user.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "title_contains": { "type": "string", "description": "Substring to match against window titles, case-insensitive" },
+      "index": { "type": "number", "description": "If multiple windows match, which one to capture (0-based, default 0). The error message lists all matches when this is ambiguous." }
+    },
+    "required": ["title_contains"]
+  }
+}"#;
+
 // Fleet control (SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md) — select,
 // broadcast, and bulk-act on many agents at once, from an agent's own
 // perspective. FleetList is a thin, fleet-framed alias of DiscoverAgents
@@ -677,6 +698,8 @@ async fn main() {
                     serde_json::from_str(UI_SCREENSHOT_TOOL).expect("static json");
                 let ui_click: Value = serde_json::from_str(UI_CLICK_TOOL).expect("static json");
                 let ui_query: Value = serde_json::from_str(UI_QUERY_TOOL).expect("static json");
+                let capture_window: Value =
+                    serde_json::from_str(CAPTURE_WINDOW_TOOL).expect("static json");
                 let fleet_list: Value = serde_json::from_str(FLEET_LIST_TOOL).expect("static json");
                 let fleet_broadcast: Value =
                     serde_json::from_str(FLEET_BROADCAST_TOOL).expect("static json");
@@ -705,7 +728,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, open_media, send_message, discover_agents, get_agent_transcript, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, fleet_list, fleet_broadcast, fleet_bulk_stop, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, open_media, send_message, discover_agents, get_agent_transcript, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, capture_window, fleet_list, fleet_broadcast, fleet_bulk_stop, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {
@@ -1957,6 +1980,64 @@ async fn call_tool(
                 result.path
             ))
         }
+        "CaptureWindow" => {
+            let title_contains = arguments
+                .get("title_contains")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: title_contains"))?;
+            let index = arguments
+                .get("index")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as usize;
+
+            let windows =
+                xcap::Window::all().map_err(|e| anyhow::anyhow!("failed to enumerate windows: {e}"))?;
+            let needle = title_contains.to_lowercase();
+            let matches: Vec<&xcap::Window> = windows
+                .iter()
+                .filter(|w| {
+                    w.title()
+                        .map(|t| t.to_lowercase().contains(&needle))
+                        .unwrap_or(false)
+                })
+                .collect();
+
+            if matches.is_empty() {
+                let titles: Vec<String> = windows
+                    .iter()
+                    .filter_map(|w| w.title().ok())
+                    .filter(|t| !t.is_empty())
+                    .collect();
+                anyhow::bail!(
+                    "no window title contains {title_contains:?}. Visible window titles: {}",
+                    titles.join(", ")
+                );
+            }
+            let window = matches.get(index).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "index {index} out of range — only {} window(s) matched {title_contains:?}",
+                    matches.len()
+                )
+            })?;
+            let title = window.title().unwrap_or_default();
+
+            let image = window
+                .capture_image()
+                .map_err(|e| anyhow::anyhow!("capture failed: {e}"))?;
+
+            let dir = std::env::temp_dir().join("agentmux-capture-window");
+            std::fs::create_dir_all(&dir)
+                .map_err(|e| anyhow::anyhow!("failed to create temp dir {}: {e}", dir.display()))?;
+            let path = dir.join(format!("{}.png", uuid::Uuid::new_v4()));
+            image
+                .save(&path)
+                .map_err(|e| anyhow::anyhow!("failed to save capture to {}: {e}", path.display()))?;
+
+            Ok(format!(
+                "Captured window {title:?} to {} — use Read on that path to view it yourself, or OpenMedia to show it to the user.",
+                path.display()
+            ))
+        }
         "UIClick" => {
             require_agent_env(local_url, auth_key, block_id)?;
             let auth = sign_ui_automation_auth()?;
@@ -2688,6 +2769,7 @@ mod tests {
             FLEET_LIST_TOOL,
             FLEET_BROADCAST_TOOL,
             FLEET_BULK_STOP_TOOL,
+            CAPTURE_WINDOW_TOOL,
         ];
         // This array (and its count) has drifted from the real `tools/list`
         // response before this change too — SHELL_INPUT/STATUS, the three
@@ -2697,8 +2779,10 @@ mod tests {
         // (SPEC_MULTI_AGENT_FLEET_CONTROL_2026_08_20.md) alongside the 3
         // memory-version-history tools merged in from a concurrent PR, on
         // top of whatever this test already covered, so at least those
-        // don't silently join the drift.
-        assert_eq!(defs.len(), 33, "tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools");
+        // don't silently join the drift. CAPTURE_WINDOW_TOOL added here too
+        // (ANALYSIS_AGENT_UI_AUTOMATION_CROSS_PANE_AND_CROSS_INSTANCE_TARGETING_2026_08_21.md)
+        // — same reasoning, not fixing the pre-existing drift.
+        assert_eq!(defs.len(), 34, "tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools + 1 CaptureWindow");
         for d in defs {
             let v: Value = serde_json::from_str(d).expect("tool def must be valid JSON");
             assert!(
