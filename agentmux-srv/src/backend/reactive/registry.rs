@@ -304,8 +304,11 @@ fn pid_alive(pid: u32) -> bool {
 
 /// Grace period during which a forward failure against a live-process entry
 /// is presumed transient rather than proof the specific agent is gone — see
-/// [`should_evict_on_forward_failure`].
-const FORWARD_FAILURE_GRACE_MS: u64 = 60_000;
+/// [`should_evict_on_forward_failure`]. `pub(crate)` so `muxspect_handlers`'s
+/// `verify-sender` route can reuse the same real, already-tested staleness
+/// judgment for shared-registry entries instead of inventing its own
+/// threshold (see that module's own doc comment for why).
+pub(crate) const FORWARD_FAILURE_GRACE_MS: u64 = 60_000;
 
 /// Should `server/reactive.rs`'s evict-on-forward-failure sites remove this
 /// entry after a failed forward (`success:false` or a connection error)?

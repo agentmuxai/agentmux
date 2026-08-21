@@ -43,13 +43,15 @@ Usage:
                                   open — no pane reload needed. muxspect's
                                   only mutating command; see the spec above.
   muxspect verify-sender <agent_name> [--json]
-                                  is <agent_name> a real, currently-live
-                                  agent, and via what tier (spawner / host /
-                                  cross-channel / lan / wan)? For sanity-
-                                  checking a JEKT's claimed FROM before
-                                  acting on it (SPEC_MUXSPECT_VERIFY_SENDER_
-                                  2026_08_21.md). Exits non-zero unless the
-                                  verdict is 'found'.
+                                  is an agent named <agent_name> currently
+                                  REGISTERED, and via what tier (spawner /
+                                  host / cross-channel / lan / wan)?
+                                  Registry-liveness only — NOT cryptographic
+                                  sender verification; does not replace
+                                  checking a JEKT's own TRUST=/SIG= fields
+                                  (SPEC_MUXSPECT_VERIFY_SENDER_2026_08_21.md).
+                                  Exits non-zero unless the verdict is
+                                  'found'.
   muxspect help                   this message
 
 Requires $AGENTMUX_LOCAL_URL and $AGENTMUX_AUTH_KEY in the environment.
@@ -233,13 +235,25 @@ function msToAge(ms) {
  * call. A `task dev` instance's own `AGENTMUX_CHANNEL` (e.g.
  * "dev-agenta-background-task-dashboard-intelligence-6c345e93dbc777e1")
  * and `AGENTMUX_RUNTIME_MODE` ("dev:agenta-background-task-dashboard-
- * intelligence") already encode which agent's worktree/dev build spawned
- * THIS instance — a JEKT sender name matching that prefix IS the spawning
- * agent, a stronger and cheaper signal than anything the srv's discovery
- * data (host/cross-channel/lan/wan) can report, because it's a parent-
- * harness-to-spawned-test-instance relationship, not two independent
- * peers. See docs/retro/RETRO_JEKT_CROSS_CHANNEL_TRUST_SELF_DECLARED_
- * 2026_08_21.md — the incident that motivated checking this first.
+ * intelligence") encode which dev-build/worktree slug this instance was
+ * launched from.
+ *
+ * IMPORTANT — this is a NAMING-CONVENTION HEURISTIC, not an attested
+ * identity: `AGENTMUX_CHANNEL`/`AGENTMUX_RUNTIME_MODE` are derived from
+ * whatever branch/slug name was used to create the `task dev` instance,
+ * not from any launcher-signed or otherwise authenticated "spawned by"
+ * record. A dev branch coincidentally or deliberately named e.g.
+ * `agenta-unrelated-work` would make a claimed sender named `AgentA`
+ * match here even if AgentA never spawned this instance (codex review on
+ * PR #2702, P1). Treat a `tier: "spawner"` result as a coordination hint
+ * for the common case (a task-dev instance checking the agent whose
+ * worktree it's obviously running from), NOT as proof — same caveat as
+ * every other tier this command reports (see [`checkSpawnerTier`]'s
+ * caller for why this command has no `trust`/`verified` field at all). A
+ * real fix would need the launcher to inject an authenticated
+ * `AGENTMUX_SPAWNED_BY` value at instance-creation time rather than this
+ * inferring it from a name string; out of scope here — see
+ * docs/specs/SPEC_MUXSPECT_VERIFY_SENDER_2026_08_21.md's non-goals.
  *
  * Returns `null` (fall through to the network tiers) when neither env var
  * is set, or set but doesn't match `name`. Exported (pure) for
@@ -253,14 +267,26 @@ export function checkSpawnerTier(name, env) {
     const runtimeMatch = runtimeMode.toLowerCase().match(/^dev:([a-z0-9]+)-/);
     const spawner = channelMatch?.[1] ?? runtimeMatch?.[1];
     if (!spawner || spawner !== needle) return null;
-    return { name, status: "found", tier: "spawner", trust: "spawner-verified", channel: channel || undefined };
+    return { name, status: "found", tier: "spawner", channel: channel || undefined };
 }
 
+// `verify-sender` reports REGISTRY LIVENESS only — does an agent named X
+// currently exist in the discovery data. It performs NO cryptographic
+// check and is NOT the JEKT protocol's own sender-authentication
+// mechanism, which is per-message, automatic, and already computes a real
+// `TRUST=`/`SIG=` value on every delivered jekt (HMAC-SHA256 host tier /
+// Ed25519 LAN tier / pinned Ed25519 reagent WAN — see this repo's root
+// CLAUDE.md, "Is a jekt's sender identity actually verified?"). A
+// `status: "found"` result here means "an agent by this name is
+// currently registered" — it does NOT mean a specific JEKT claiming
+// FROM=X was actually sent by X. Deliberately no `trust`/`verified` field
+// in the output for exactly this reason (reagentx-workflow review on PR
+// #2702, P1 — an earlier version reused `host-verified`/`network-claimed`,
+// which collided with that real, stronger, cryptographic guarantee).
 function renderVerifySender(data) {
     console.log(`sender: ${data.name}`);
     console.log(`status: ${data.status}`);
     if (data.tier) console.log(`tier:   ${data.tier}`);
-    if (data.trust) console.log(`trust:  ${data.trust}`);
     if (data.last_seen_ms !== undefined && data.last_seen_ms !== null) {
         console.log(`last_seen: ${ageString(data.last_seen_ms)} ago`);
     }
@@ -269,8 +295,10 @@ function renderVerifySender(data) {
     if (data.status === "not_found") {
         console.log(`\nno agent named '${data.name}' found on any tier (spawner, host, cross-channel, lan, wan).`);
     } else if (data.status === "stale") {
-        console.log(`\nfound but heartbeat is stale — treat as unverified.`);
+        console.log(`\nfound but heartbeat is stale.`);
     }
+    console.log(`\nNote: this is a registry-liveness check, not cryptographic sender verification.`);
+    console.log(`Check the JEKT's own TRUST=/SIG= fields for that (see CLAUDE.md's JEKT section).`);
 }
 
 function renderDock(data) {

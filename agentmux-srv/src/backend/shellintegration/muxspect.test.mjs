@@ -115,7 +115,6 @@ describe("muxspect checkSpawnerTier", () => {
             name: "AgentA",
             status: "found",
             tier: "spawner",
-            trust: "spawner-verified",
             channel: env.AGENTMUX_CHANNEL,
         });
     });
