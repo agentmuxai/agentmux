@@ -13,7 +13,7 @@
 // parser silently misbehaved depending on which side they landed on.
 
 import { describe, expect, it } from "vitest";
-import { parseArgs } from "./muxspect.mjs";
+import { checkSpawnerTier, parseArgs } from "./muxspect.mjs";
 
 describe("muxspect parseArgs", () => {
     it("no args defaults to 'list'", () => {
@@ -96,5 +96,51 @@ describe("muxspect parseArgs", () => {
         const r = parseArgs(["dock", "not-the-word-clear"]);
         expect(r.sub).toBeUndefined();
         expect(r.blockId).toBe("not-the-word-clear");
+    });
+
+    it("'verify-sender <name>' parses like describe (name lands in blockId)", () => {
+        const r = parseArgs(["verify-sender", "AgentA"]);
+        expect(r.cmd).toBe("verify-sender");
+        expect(r.blockId).toBe("AgentA");
+    });
+});
+
+// SPEC_MUXSPECT_VERIFY_SENDER_2026_08_21.md tier 0 — checked before any
+// network call, so it must work purely off process.env with no I/O.
+describe("muxspect checkSpawnerTier", () => {
+    it("matches when AGENTMUX_CHANNEL is a dev channel prefixed with the sender name", () => {
+        const env = { AGENTMUX_CHANNEL: "dev-agenta-background-task-dashboard-intelligence-6c345e93dbc777e1" };
+        const verdict = checkSpawnerTier("AgentA", env);
+        expect(verdict).toEqual({
+            name: "AgentA",
+            status: "found",
+            tier: "spawner",
+            channel: env.AGENTMUX_CHANNEL,
+        });
+    });
+
+    it("matches on AGENTMUX_RUNTIME_MODE when AGENTMUX_CHANNEL is absent", () => {
+        const env = { AGENTMUX_RUNTIME_MODE: "dev:agenta-background-task-dashboard-intelligence" };
+        const verdict = checkSpawnerTier("agenta", env);
+        expect(verdict?.status).toBe("found");
+        expect(verdict?.tier).toBe("spawner");
+    });
+
+    it("is case-insensitive", () => {
+        const env = { AGENTMUX_CHANNEL: "dev-agenta-background-task-dashboard-intelligence-6c345e93dbc777e1" };
+        expect(checkSpawnerTier("agenta", env)?.status).toBe("found");
+    });
+
+    it("returns null when the channel prefix names a DIFFERENT agent", () => {
+        const env = { AGENTMUX_CHANNEL: "dev-someoneelse-other-feature-abc123" };
+        expect(checkSpawnerTier("AgentA", env)).toBeNull();
+    });
+
+    it("returns null when neither env var is set (not a task-dev instance)", () => {
+        expect(checkSpawnerTier("AgentA", {})).toBeNull();
+    });
+
+    it("returns null for a non-dev channel (e.g. plain 'stable')", () => {
+        expect(checkSpawnerTier("AgentA", { AGENTMUX_CHANNEL: "stable" })).toBeNull();
     });
 });
