@@ -19,11 +19,16 @@ serde_json = "1"
 anyhow = "1"
 # Cross-platform (Windows/macOS/Linux) window enumeration + capture for the
 # CaptureWindow tool — deliberately not hand-rolled per-platform GDI/
-# CoreGraphics/X11 FFI (see docs/analysis/ANALYSIS_AGENT_UI_AUTOMATION_CROSS_PANE_AND_CROSS_INSTANCE_TARGETING_2026_08_21.md §1.3).
+# CoreGraphics/X11 FFI.
 xcap = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
 uuid = { version = "1", features = ["v4"] }
 dirs = "5"
+# Process-tree walking so CaptureWindow can exclude the caller's own
+# AgentMux instance (see main.rs's own_instance_pids() doc comment).
+# Version matches agentmux-srv's own pin — 0.34.2 had a real Windows
+# handle leak (STATUS_SRV_SECTION_HANDLE_LEAK_2026_08_08.md), fixed in 0.35+.
+sysinfo = "0.35"
 
 [dev-dependencies]
 tempfile = "3"

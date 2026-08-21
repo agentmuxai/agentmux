@@ -231,6 +231,11 @@ const UI_QUERY_TOOL: &str = r#"{
 // capability is deliberately not offered by any tool today — see
 // docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md §6 and
 // PR #2662's history of real vulnerabilities found in that exact area).
+// "Crosses no boundary within one instance" is an enforced invariant, not
+// just a design intent — see own_instance_pids()'s doc comment (reagent P0,
+// PR #2709 round 3): the caller's OWN instance is always excluded from the
+// candidate set, since one instance's top-level window contains every
+// agent's pane in it.
 //
 // Scoped to AgentMux's own windows only (matched via app_name(), not an
 // unrestricted OS-wide target) — reagent P1 (PR #2709 round 2): an earlier
@@ -832,6 +837,80 @@ fn prune_old_captures(dir: &std::path::Path) {
             let _ = std::fs::remove_file(&path);
         }
     }
+}
+
+/// Max ancestor hops to walk from this MCP process before giving up —
+/// bounds the fallback search (see `own_instance_pids`'s doc comment for why
+/// this is a fallback, not the primary signal), while never walking so far
+/// up the tree (e.g. to `explorer.exe`) that "same instance" degrades into
+/// "everything on the desktop."
+const OWN_INSTANCE_ANCESTOR_HOPS: usize = 8;
+
+/// PIDs `CaptureWindow` must treat as "this agent's own AgentMux instance"
+/// and always exclude — reagent P0 (PR #2709 round 3).
+///
+/// **Primary signal: `AGENTMUX_APP_PATH`.** Every process belonging to this
+/// exact running instance (portable build or install) is launched from
+/// under that one directory — confirmed directly (not assumed): this
+/// agent's own host process's `Process::exe()` path
+/// (`...\agentmux-0.55.18+....-x64-portable\runtime\agentmux-0.55.18.exe`)
+/// starts with `AGENTMUX_APP_PATH`
+/// (`...\agentmux-0.55.18+....-x64-portable`) exactly. This is more precise
+/// than matching on version number alone — it correctly tells apart two
+/// separate instances that happen to share a version (e.g. two portable
+/// builds of the same release), which a version-string match would
+/// conflate.
+///
+/// **Fallback signal: bounded process-ancestor walk.** Kept as a second,
+/// additive layer (union, not replacement) for the case `AGENTMUX_APP_PATH`
+/// isn't set (confirmed present for `AGENTMUX_RUNTIME_MODE=portable`; not
+/// separately confirmed for `task dev` instances). **This alone is not
+/// reliable** — verified directly by testing: Windows recycles PIDs and a
+/// process's recorded parent-PID can point at an already-exited process, so
+/// `sys.process(stale_ppid)` returns `None` and the walk silently stops
+/// short of the real ancestor chain. Confirmed this exact failure in
+/// testing (the walk never reached this instance's own host process). Kept
+/// only as defense-in-depth alongside the path-based signal, never alone.
+///
+/// Fails safe: an unresolvable `pid()` on a *candidate* window (checked by
+/// the caller, `CaptureWindow`'s handler) is treated as "assume it's mine,
+/// exclude it" — so a window this function's own signals can't positively
+/// place is still excluded, not silently let through.
+fn own_instance_pids() -> std::collections::HashSet<u32> {
+    let sys = sysinfo::System::new_all();
+    let mut result = std::collections::HashSet::new();
+
+    if let Ok(app_path) = std::env::var("AGENTMUX_APP_PATH") {
+        if !app_path.is_empty() {
+            let app_path = std::path::Path::new(&app_path);
+            for (pid, proc) in sys.processes() {
+                if proc.exe().map(|e| e.starts_with(app_path)).unwrap_or(false) {
+                    result.insert(pid.as_u32());
+                }
+            }
+        }
+    }
+
+    let my_pid = sysinfo::Pid::from(std::process::id() as usize);
+    let mut ancestors = vec![my_pid];
+    let mut current = my_pid;
+    for _ in 0..OWN_INSTANCE_ANCESTOR_HOPS {
+        let Some(proc) = sys.process(current) else { break };
+        let Some(parent) = proc.parent() else { break };
+        ancestors.push(parent);
+        current = parent;
+    }
+    result.extend(ancestors.iter().map(|p| p.as_u32()));
+    for (pid, proc) in sys.processes() {
+        let Some(ppid) = proc.parent() else { continue };
+        if !ancestors.contains(&ppid) {
+            continue;
+        }
+        if proc.name().to_string_lossy().to_lowercase().starts_with("agentmux") {
+            result.insert(pid.as_u32());
+        }
+    }
+    result
 }
 
 /// The calling agent's slug (its `AGENTMUX_AGENT_ID`), injected by AgentMux into
@@ -2059,12 +2138,28 @@ async fn call_tool(
             // matching (not `title()`) because AgentMux's own process names
             // are version-stamped (`agentmux-0.55.18`, etc.), not a single
             // fixed string, but they all share the `agentmux` prefix.
+            // Excludes the CALLING agent's own instance — reagent P0 (PR
+            // #2709 round 3): the app_name()-only filter above matches every
+            // AgentMux instance's windows, including this one. One AgentMux
+            // instance's top-level window contains every agent's pane in it
+            // (pane-level isolation is enforced only inside that window, via
+            // the signed-identity scheme UIScreenshot/UIClick/UIQuery use —
+            // see the doc comment above CAPTURE_WINDOW_TOOL). Without this
+            // exclusion, any agent could pass a title_contains matching its
+            // OWN instance's window and capture every other agent's pane
+            // content in that same window — exactly the isolation boundary
+            // this tool claims not to cross. See own_instance_pids()'s own
+            // doc comment for how "same instance" is determined.
+            let own_pids = own_instance_pids();
             let agentmux_windows: Vec<&xcap::Window> = windows
                 .iter()
                 .filter(|w| {
-                    w.app_name()
+                    let is_agentmux = w
+                        .app_name()
                         .map(|a| a.to_lowercase().starts_with("agentmux"))
-                        .unwrap_or(false)
+                        .unwrap_or(false);
+                    let is_own_instance = w.pid().map(|p| own_pids.contains(&p)).unwrap_or(true);
+                    is_agentmux && !is_own_instance
                 })
                 .collect();
             let needle = title_contains.to_lowercase();
@@ -2871,6 +2966,25 @@ mod tests {
         );
     }
 
+    /// `own_instance_pids()` must always include the calling process's own
+    /// pid at minimum (the first element of its ancestor-walk fallback,
+    /// independent of whether `AGENTMUX_APP_PATH` is set in this test's
+    /// environment). Not a full behavioral test of the exclusion logic
+    /// itself — mocking `sysinfo`'s real OS process table isn't practical —
+    /// but it does verify the function runs without panicking and its one
+    /// environment-independent guarantee holds. The actual exclusion
+    /// behavior (reagent P0, PR #2709 round 3) was verified manually against
+    /// this repo's own live process tree — see that commit's message for
+    /// the before/after evidence.
+    #[test]
+    fn own_instance_pids_always_includes_the_calling_process_itself() {
+        let pids = own_instance_pids();
+        assert!(
+            pids.contains(&std::process::id()),
+            "own_instance_pids() must always include this process's own pid"
+        );
+    }
+
     /// Every tool advertised by `tools/list` must be valid JSON with a `name`
     /// and `inputSchema` — the server `expect("static json")`s these at runtime,
     /// so a malformed const would panic on the first `tools/list`. Also pins the
@@ -2923,8 +3037,7 @@ mod tests {
         // memory-version-history tools merged in from a concurrent PR, on
         // top of whatever this test already covered, so at least those
         // don't silently join the drift. CAPTURE_WINDOW_TOOL added here too
-        // (ANALYSIS_AGENT_UI_AUTOMATION_CROSS_PANE_AND_CROSS_INSTANCE_TARGETING_2026_08_21.md)
-        // — same reasoning, not fixing the pre-existing drift.
+        // (PR #2709) — same reasoning, not fixing the pre-existing drift.
         assert_eq!(defs.len(), 34, "tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools + 1 CaptureWindow");
         for d in defs {
             let v: Value = serde_json::from_str(d).expect("tool def must be valid JSON");
