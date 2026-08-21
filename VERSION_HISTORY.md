@@ -1,5 +1,19 @@
 # AgentMux Version History
 
+## 0.55.19 — 2026-08-21
+
+- feat(agent-pane): live dispatch cards for Agent/Task/Workflow tool calls in the transcript
+- fix(sound,ui): tool-call tone default to 0.25; widget-bar hover-then-click no longer closes menu
+- fix(agent): recover the largest on-disk session before falling back to a blank conversation on a stale --resume
+- fix(jekt): remove unsafe global-settings agent-id fallback, audit registration events
+- feat(jekt): verify recipient identity before delivery
+- feat(jekt): Stash Registration tab showing live jekt delivery status
+- fix(agent): expand ~ in working_dir too when recovering a stale-resume session
+- fix(build): raise Node heap limit for frontend production build
+- fix(agent-pane): reuse fresh output.idx cache instead of rescanning full history on every pane open
+- feat(muxspect): add `verify-sender` — registry-liveness lookup for a JEKT's claimed FROM
+
+
 ## 0.55.18 — 2026-08-20
 
 - feat(dashboard): make db_background_tasks a real read source for the agent-pane and muxspect dock
