@@ -12,4 +12,17 @@ REAL_ROOT=$(node -e "console.log(require('fs').realpathSync.native(process.cwd()
 # cd to the native-cased path so process.cwd() matches filesystem casing
 cd "$REAL_ROOT"
 
+# Node's default V8 old-space limit (~2GB) is no longer enough headroom for
+# this frontend's production build — it started crashing with "JavaScript
+# heap out of memory" (exit 134) on the macOS CI runner, reproducing on both
+# ci-nightly-artifacts.yml and release.yml. CI runners across all three
+# platforms have well over 4GB free, Node just wasn't told it could use it.
+# Only apply the default if the caller hasn't already sized the heap
+# themselves — Node keeps the LAST --max-old-space-size when duplicated, so
+# unconditionally appending ours would silently shrink an explicit larger
+# value instead of just providing a floor.
+if [[ "${NODE_OPTIONS:-}" != *"max-old-space-size"* && "${NODE_OPTIONS:-}" != *"max-heap-size"* ]]; then
+    export NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=4096"
+fi
+
 exec npx vite build "$@"
