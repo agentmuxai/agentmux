@@ -1354,6 +1354,16 @@ pub fn register_reactive_ws_handlers(engine: &std::sync::Arc<crate::backend::rpc
                         agent_registry::lookup_all_shared(&shared_dir, &params.agent_id)
                             .into_iter()
                             .filter(|e| !is_self_registration(&e.local_url, &state.local_web_url))
+                            // A crashed sibling instance's entry otherwise
+                            // lingers until the next startup-only
+                            // cleanup_stale_shared sweep (bootstrap.rs) —
+                            // up to hours later — showing a false "Also
+                            // registered elsewhere" badge in the meantime
+                            // (reagentx P2). PID-liveness is authoritative
+                            // here (same-host by construction, per
+                            // pid_alive's own doc comment), so check it live
+                            // instead of waiting for that sweep.
+                            .filter(|e| agent_registry::pid_alive(e.pid))
                             .map(|e| RemoteRegistrationEntry {
                                 channel: e.channel,
                                 pid: e.pid,
