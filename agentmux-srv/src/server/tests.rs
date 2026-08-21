@@ -2661,7 +2661,12 @@ mod fleet_tests {
             .reactive_handler
             .get_audit_log(10_000)
             .into_iter()
-            .filter(|e| e.block_id == block_id)
+            // register_agent's own setup call above now also audits a
+            // "register" event (event_kind, #2694) alongside the stop's
+            // own delivery-attempt entry — both share this test's unique
+            // block_id, so filter to the delivery entry this test is
+            // actually about.
+            .filter(|e| e.block_id == block_id && e.event_kind == "delivery")
             .collect();
 
         assert_eq!(matching.len(), 1, "exactly one audit entry for this test's own block_id");
