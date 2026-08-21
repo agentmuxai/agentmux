@@ -15,5 +15,5 @@
  * language/build), but should be kept in sync with these by hand.
  */
 export const DEFAULT_MASTER_VOLUME = 0.6;
-export const DEFAULT_TOOLTONES_VOLUME = 1.0;
+export const DEFAULT_TOOLTONES_VOLUME = 0.25;
 export const DEFAULT_WAITING_VOLUME = 0.25;
