@@ -9,7 +9,7 @@ use axum::{
 use serde_json::json;
 
 use crate::backend::blockcontroller;
-use crate::backend::reactive::{InjectionRequest, SupervisorAction};
+use crate::backend::reactive::{AgentRegistration, InjectionRequest, SupervisorAction};
 use crate::backend::reactive::registry as agent_registry;
 use crate::backend::subagent_watcher;
 use crate::backend::base;
@@ -1265,6 +1265,107 @@ pub(super) async fn handle_reactive_supervisor_decision(
         )
             .into_response(),
     }
+}
+
+// ---- WS RPC: reactive.registrations (issue #2696, Stash UI indicator) ----
+
+/// One cross-instance/channel entry from the host-global shared registry
+/// (`backend::reactive::registry::AgentEntry`), narrowed to what the
+/// frontend actually needs to render a "registered elsewhere too" badge —
+/// deliberately excludes `local_url`/`auth_key`, which are internal
+/// forwarding plumbing, not UI-relevant.
+#[derive(serde::Serialize)]
+pub(super) struct RemoteRegistrationEntry {
+    channel: String,
+    pid: u32,
+    updated_at: u64,
+}
+
+/// Summary of the most recent `identity-mismatch` audit entry for this
+/// agent_id, if any (see #2695's `Handler::inject_message_inner` check) —
+/// narrowed from `AuditLogEntry` to what the Stash badge needs.
+#[derive(serde::Serialize)]
+pub(super) struct MismatchAuditSummary {
+    timestamp: u64,
+    block_id: String,
+    error_message: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+pub(super) struct ReactiveRegistrationsResult {
+    /// This instance's own registration for the agent, if any — same data
+    /// `GET /agentmux/reactive/agent` exposes, reused here so the frontend
+    /// makes one call instead of two.
+    local: Option<AgentRegistration>,
+    /// Every OTHER instance/channel on this host currently claiming this
+    /// same agent_id, freshest first — a non-empty list here is the actual
+    /// risk signal the Stash badge exists to surface (issue #2694's root
+    /// cause was exactly two panes racing to hold the same agent_id).
+    remote: Vec<RemoteRegistrationEntry>,
+    recent_mismatch: Option<MismatchAuditSummary>,
+}
+
+#[derive(serde::Deserialize)]
+pub(super) struct ReactiveRegistrationsParams {
+    agent_id: String,
+}
+
+/// Registers `reactive.registrations`, called by the Stash "Registration"
+/// tab (`AgentIdentityLinksPanel`'s sibling — see `frontend/app/store/
+/// rpc-api/reactive.ts`) to answer "is this agent's jekt identity healthy
+/// right now": where it's registered locally, whether any OTHER
+/// instance/channel on this host also claims the same agent_id (the
+/// collision shape #2694 fixed one specific cause of), and whether a
+/// recent delivery hit the #2695 identity-mismatch guard.
+pub fn register_reactive_ws_handlers(engine: &std::sync::Arc<crate::backend::rpc::engine::WshRpcEngine>, state: &AppState) {
+    let state = state.clone();
+    engine.register_handler(
+        "reactive.registrations",
+        Box::new(move |data, _ctx| {
+            let state = state.clone();
+            Box::pin(async move {
+                let params: ReactiveRegistrationsParams = serde_json::from_value(data)
+                    .map_err(|e| format!("reactive.registrations: {e}"))?;
+
+                let local = state.reactive_handler.get_agent(&params.agent_id);
+
+                let remote = crate::registry::resolve_shared_reactive_dir()
+                    .map(|shared_dir| {
+                        agent_registry::lookup_all_shared(&shared_dir, &params.agent_id)
+                            .into_iter()
+                            .map(|e| RemoteRegistrationEntry {
+                                channel: e.channel,
+                                pid: e.pid,
+                                updated_at: e.updated_at,
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+
+                let target_lower = params.agent_id.to_lowercase();
+                let recent_mismatch = state
+                    .reactive_handler
+                    .get_audit_log(100)
+                    .into_iter()
+                    .find(|e| {
+                        e.outcome.as_deref() == Some("identity-mismatch")
+                            && e.target_agent.to_lowercase() == target_lower
+                    })
+                    .map(|e| MismatchAuditSummary {
+                        timestamp: e.timestamp,
+                        block_id: e.block_id,
+                        error_message: e.error_message,
+                    });
+
+                let result = ReactiveRegistrationsResult {
+                    local,
+                    remote,
+                    recent_mismatch,
+                };
+                Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
+            })
+        }),
+    );
 }
 
 /// `verify_jekt_signature` unit tests (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md
