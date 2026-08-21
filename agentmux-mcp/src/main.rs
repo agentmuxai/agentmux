@@ -222,22 +222,31 @@ const UI_QUERY_TOOL: &str = r#"{
   }
 }"#;
 
-// docs/analysis/ANALYSIS_AGENT_UI_AUTOMATION_CROSS_PANE_AND_CROSS_INSTANCE_TARGETING_2026_08_21.md
-// §1 — deliberately NOT part of the ui_handlers.rs signed-identity/pane-
-// ownership scheme UIScreenshot/UIClick/UIQuery use: this captures an
-// arbitrary OS window (a DIFFERENT AgentMux instance/process, or any other
-// application), which crosses no AgentMux agent-to-agent trust boundary —
-// there's no shared srv/auth-key domain to protect here, unlike reaching
-// into another agent's pane within this same instance (see that doc §2 for
-// why THAT capability is deliberately not offered by any tool today).
+// Deliberately NOT part of the ui_handlers.rs signed-identity/pane-ownership
+// scheme UIScreenshot/UIClick/UIQuery use: this captures a DIFFERENT
+// AgentMux instance/process's top-level window (e.g. a separate `task dev`
+// build), which crosses no agent-to-agent trust boundary within one
+// instance — there's no shared srv/auth-key domain to protect there, unlike
+// reaching into another agent's pane within this same instance (that
+// capability is deliberately not offered by any tool today — see
+// docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md §6 and
+// PR #2662's history of real vulnerabilities found in that exact area).
+//
+// Scoped to AgentMux's own windows only (matched via app_name(), not an
+// unrestricted OS-wide target) — reagent P1 (PR #2709 round 2): an earlier
+// version of this tool could screenshot ANY top-level window, which is the
+// "arbitrary third-party app" capability docs/specs/computer-use-pane.md
+// (draft, unbuilt) already scopes out as needing its own per-app approval
+// gating, mutex, and app-tier warnings before ever being built — not
+// something to back into accidentally via a narrower tool's scope creep.
 const CAPTURE_WINDOW_TOOL: &str = r#"{
   "name": "CaptureWindow",
-  "description": "Screenshot any top-level OS window by (partial, case-insensitive) title match — a DIFFERENT AgentMux instance/process, or any other application on the desktop. Not scoped to AgentMux's own pane/agent boundary (unlike UIScreenshot, which only sees your own pane). Returns a file path; use the Read tool on that path to view it yourself, or OpenMedia to show it to the user.",
+  "description": "Screenshot a DIFFERENT AgentMux window/instance by (partial, case-insensitive) title match — e.g. a separate task dev build running alongside this one. Scoped to AgentMux's own windows only, not arbitrary desktop applications (unlike a general OS computer-use tool). Returns a file path; use the Read tool on that path to view it yourself, or OpenMedia to show it to the user.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "title_contains": { "type": "string", "description": "Substring to match against window titles, case-insensitive" },
-      "index": { "type": "number", "description": "If multiple windows match, which one to capture (0-based, default 0). The error message lists all matches when this is ambiguous." }
+      "title_contains": { "type": "string", "description": "Substring to match against other AgentMux windows' titles, case-insensitive" },
+      "index": { "type": "number", "description": "If multiple AgentMux windows match, which one to capture (0-based, default 0). The error message lists all matching AgentMux window titles when this is ambiguous." }
     },
     "required": ["title_contains"]
   }
@@ -2039,8 +2048,27 @@ async fn call_tool(
 
             let windows =
                 xcap::Window::all().map_err(|e| anyhow::anyhow!("failed to enumerate windows: {e}"))?;
+            // Scoped to AgentMux's own processes only — reagent P1 (PR #2709
+            // round 2): as originally written, this reached ANY top-level OS
+            // window (confirmed in testing: it could screenshot a KeePass
+            // password-manager window with zero gating), which is the
+            // "arbitrary third-party app" capability `docs/specs/computer-use-pane.md`
+            // already scoped out as needing its own per-app approval model —
+            // not this tool's actual motivating need, which was only ever
+            // "see a different AgentMux instance's window." `app_name()`
+            // matching (not `title()`) because AgentMux's own process names
+            // are version-stamped (`agentmux-0.55.18`, etc.), not a single
+            // fixed string, but they all share the `agentmux` prefix.
+            let agentmux_windows: Vec<&xcap::Window> = windows
+                .iter()
+                .filter(|w| {
+                    w.app_name()
+                        .map(|a| a.to_lowercase().starts_with("agentmux"))
+                        .unwrap_or(false)
+                })
+                .collect();
             let needle = title_contains.to_lowercase();
-            let matches: Vec<&xcap::Window> = windows
+            let matches: Vec<&&xcap::Window> = agentmux_windows
                 .iter()
                 .filter(|w| {
                     w.title()
@@ -2050,13 +2078,28 @@ async fn call_tool(
                 .collect();
 
             if matches.is_empty() {
-                let titles: Vec<String> = windows
+                // Only lists OTHER AgentMux windows' titles, not every
+                // window on the desktop — reagent P2 (PR #2709 round 2):
+                // the original version dumped every visible window's title
+                // on any miss, which let a caller enumerate arbitrary
+                // window titles (confirmed in testing: this leaked a
+                // password manager's document title) with no real match
+                // required at all. Still helpful for the actual in-scope
+                // case (multiple AgentMux instances open) without that leak.
+                let titles: Vec<String> = agentmux_windows
                     .iter()
                     .filter_map(|w| w.title().ok())
                     .filter(|t| !t.is_empty())
                     .collect();
+                if titles.is_empty() {
+                    anyhow::bail!(
+                        "no AgentMux window title contains {title_contains:?} — \
+                         no other AgentMux windows are currently open"
+                    );
+                }
                 anyhow::bail!(
-                    "no window title contains {title_contains:?}. Visible window titles: {}",
+                    "no AgentMux window title contains {title_contains:?}. \
+                     Open AgentMux window titles: {}",
                     titles.join(", ")
                 );
             }
