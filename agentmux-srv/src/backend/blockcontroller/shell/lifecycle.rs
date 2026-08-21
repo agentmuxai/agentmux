@@ -31,6 +31,28 @@ use crate::backend::obj::{self, MetaMapType};
 use crate::backend::shellexec::ShellProc;
 use crate::backend::wps;
 
+/// Resolve the effective AGENTMUX_AGENT_ID for jekt auto-registration from a
+/// block's own spawn metadata (or the legacy WAVEMUX_AGENT_ID env var).
+/// Priority: block metadata > WAVEMUX_AGENT_ID env compat. Deliberately does
+/// NOT fall back to the global settings' cmd_env.AGENTMUX_AGENT_ID: that
+/// value is shared across every pane in the instance/channel, so a pane
+/// spawned without its own explicit per-block ID would silently inherit
+/// whatever another pane happened to configure there — and
+/// register_agent_with_nonce unconditionally evicts whoever previously held
+/// that agent_key, so the second such pane to register silently steals the
+/// first's jekt identity (same-host cross-instance jekt misdelivery). A pane
+/// with no block-scoped identity is simply not jekt-registered, matching
+/// persistent.rs's muxbus_agent_id_from_env, which never had this fallback.
+fn resolve_agent_id_for_jekt(block_meta: &MetaMapType) -> Option<String> {
+    block_meta
+        .get(META_KEY_CMD_ENV)
+        .and_then(|m| m.as_object())
+        .and_then(|obj| obj.get("AGENTMUX_AGENT_ID"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| std::env::var("WAVEMUX_AGENT_ID").ok())
+}
+
 impl Controller for ShellController {
     fn start(
         &self,
@@ -166,20 +188,9 @@ impl Controller for ShellController {
         let interactive = Self::is_interactive(&block_meta);
 
         // Resolve effective AGENTMUX_AGENT_ID for jekt auto-registration.
-        // Priority: block metadata > global settings > WAVEMUX_AGENT_ID env compat.
-        let agent_id_for_jekt: Option<String> = block_meta
-            .get(META_KEY_CMD_ENV)
-            .and_then(|m| m.as_object())
-            .and_then(|obj| obj.get("AGENTMUX_AGENT_ID"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .or_else(|| {
-                let cfg = crate::backend::wconfig::ConfigWatcher::with_config(
-                    crate::backend::wconfig::build_default_config(),
-                );
-                cfg.get_settings().cmd_env.get("AGENTMUX_AGENT_ID").cloned()
-            })
-            .or_else(|| std::env::var("WAVEMUX_AGENT_ID").ok());
+        // See resolve_agent_id_for_jekt's doc comment for why this
+        // deliberately does not fall back to global settings.
+        let agent_id_for_jekt: Option<String> = resolve_agent_id_for_jekt(&block_meta);
 
         // Detect agent pane: cmd contains a known agent CLI or has AGENTMUX_AGENT_ID set.
         // Computed here (before spawn) rather than after so the commit-aware admission
@@ -1089,5 +1100,58 @@ impl Controller for ShellController {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod agent_id_for_jekt_tests {
+    use super::resolve_agent_id_for_jekt;
+    use crate::backend::blockcontroller::META_KEY_CMD_ENV;
+    use crate::backend::obj::MetaMapType;
+
+    // WAVEMUX_AGENT_ID is process-global env state and these tests mutate
+    // it directly (no HashMap indirection like persistent.rs's
+    // muxbus_agent_id_from_env), so everything that touches it lives in one
+    // #[test] fn — Rust's test harness runs tests in the same binary
+    // concurrently, and separate fns each doing remove/set/assert/remove on
+    // the same env var would race.
+    #[test]
+    fn resolves_block_scoped_and_legacy_env_but_never_global_settings() {
+        // No block-scoped AGENTMUX_AGENT_ID and no WAVEMUX_AGENT_ID set:
+        // this is the collision-fix regression case. Before the fix, this
+        // path fell back to `ConfigWatcher`'s global cmd_env.AGENTMUX_AGENT_ID
+        // setting; resolve_agent_id_for_jekt's signature no longer even
+        // accepts a way to reach global settings, so a pane with neither
+        // source set is simply not jekt-registered.
+        std::env::remove_var("WAVEMUX_AGENT_ID");
+        let empty_meta = MetaMapType::new();
+        assert_eq!(resolve_agent_id_for_jekt(&empty_meta), None);
+
+        // Block metadata's own cmd:env.AGENTMUX_AGENT_ID takes priority.
+        let mut meta_with_id = MetaMapType::new();
+        meta_with_id.insert(
+            META_KEY_CMD_ENV.to_string(),
+            serde_json::json!({ "AGENTMUX_AGENT_ID": "agentx" }),
+        );
+        assert_eq!(
+            resolve_agent_id_for_jekt(&meta_with_id),
+            Some("agentx".to_string())
+        );
+
+        // Legacy WAVEMUX_AGENT_ID env var still works as a fallback when no
+        // block-scoped ID is set (this one is genuinely block-scoped — it's
+        // read from the spawned child's own env, not a shared global
+        // setting, so it doesn't reintroduce the collision).
+        std::env::set_var("WAVEMUX_AGENT_ID", "legacy-agent");
+        assert_eq!(
+            resolve_agent_id_for_jekt(&empty_meta),
+            Some("legacy-agent".to_string())
+        );
+        // Block metadata still wins over the legacy env var when both are set.
+        assert_eq!(
+            resolve_agent_id_for_jekt(&meta_with_id),
+            Some("agentx".to_string())
+        );
+        std::env::remove_var("WAVEMUX_AGENT_ID");
     }
 }
