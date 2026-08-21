@@ -146,6 +146,16 @@ const ActionWidgets = (): JSX.Element => {
         setOpenParentKey((cur) => (cur === key ? null : cur));
     };
 
+    // Whether the currently-open pinned parent flyout was confirmed by an
+    // explicit click, as opposed to merely being open from hover-intent
+    // (SPEC_WIDGET_BAR_HOVER_CLICK_PREMATURE_CLOSE_2026_08_20.md). Only one
+    // pinned-parent flyout can be open at a time (peers force-close each
+    // other), so a single non-reactive flag alongside `openParentKey` is
+    // enough — no per-key map needed. Reset in the controller's own
+    // onClose below, so every close path (hover-away, outside click,
+    // Escape, a peer forcing it shut) clears it for free.
+    let parentOpenConfirmedByClick = false;
+
     const registerParentHover = (key: string): SubmenuHoverController => {
         // Reuse an existing controller for this key rather than always
         // creating+registering a fresh one (reagent P1 on this PR):
@@ -169,7 +179,10 @@ const ActionWidgets = (): JSX.Element => {
             // (immediately, not gated on this delayed onOpen), so this only
             // needs to update this row's own state.
             onOpen: () => setOpenParentKey(key),
-            onClose: () => setOpenParentKey((cur) => (cur === key ? null : cur)),
+            onClose: () => {
+                setOpenParentKey((cur) => (cur === key ? null : cur));
+                parentOpenConfirmedByClick = false;
+            },
         });
         parentHoverControllers.set(key, hover);
         parentPeers.register(key, hover);
@@ -185,6 +198,16 @@ const ActionWidgets = (): JSX.Element => {
 
     const handleParentSlotClick = (key: string) => {
         if (openParentKey() === key) {
+            // Already open. If that's only because hover opened it (the
+            // user hasn't actually clicked it yet this session), this
+            // click is the user's FIRST real interaction with the trigger
+            // — confirm it stays open instead of closing, and arm the
+            // toggle so a genuine second click does close it
+            // (SPEC_WIDGET_BAR_HOVER_CLICK_PREMATURE_CLOSE_2026_08_20.md).
+            if (!parentOpenConfirmedByClick) {
+                parentOpenConfirmedByClick = true;
+                return;
+            }
             closeParentFlyout(key);
             return;
         }
@@ -201,6 +224,7 @@ const ActionWidgets = (): JSX.Element => {
         // entirely — the flyout would stay open until an unrelated close
         // path (outside click, Escape, re-click) fired.
         parentHoverControllers.get(key)?.openNow();
+        parentOpenConfirmedByClick = true;
     };
 
     // Close on outside click / Escape — mirrors the More dropdown's own
@@ -236,9 +260,18 @@ const ActionWidgets = (): JSX.Element => {
     // onto a pinned parent still force-closed it (via peer-close below), but
     // hovering back onto More never reopened it, only an explicit click did.
     const MORE_PEER_KEY = "__more__";
+    // Whether the current open state was confirmed by an explicit click, as
+    // opposed to merely being open from hover-intent — same rationale as
+    // parentOpenConfirmedByClick above
+    // (SPEC_WIDGET_BAR_HOVER_CLICK_PREMATURE_CLOSE_2026_08_20.md). Reset in
+    // onClose so every close path clears it for free.
+    const [moreConfirmedByClick, setMoreConfirmedByClick] = createSignal(false);
     const moreHover = createSubmenuHover({
         onOpen: () => setMoreOpen(true),
-        onClose: () => setMoreOpen(false),
+        onClose: () => {
+            setMoreOpen(false);
+            setMoreConfirmedByClick(false);
+        },
     });
     const unregisterMoreHover = parentPeers.register(MORE_PEER_KEY, moreHover);
     onCleanup(() => {
@@ -248,6 +281,15 @@ const ActionWidgets = (): JSX.Element => {
 
     const openMore = (_e: MouseEvent) => {
         if (moreOpen()) {
+            // Already open. If that's only because hover opened it, this
+            // click is the user's FIRST real interaction with the button —
+            // confirm it stays open instead of closing, and arm the toggle
+            // so a genuine second click does close it
+            // (SPEC_WIDGET_BAR_HOVER_CLICK_PREMATURE_CLOSE_2026_08_20.md).
+            if (!moreConfirmedByClick()) {
+                setMoreConfirmedByClick(true);
+                return;
+            }
             moreHover.close();
             return;
         }
@@ -257,6 +299,7 @@ const ActionWidgets = (): JSX.Element => {
         // P1 on this PR): without it, the next mouse-leave's `if (!isOpen)
         // return` would skip starting the close-intent timer.
         moreHover.openNow();
+        setMoreConfirmedByClick(true);
     };
 
     const closeMore = () => moreHover.close();
