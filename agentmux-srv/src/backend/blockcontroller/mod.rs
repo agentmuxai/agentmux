@@ -221,6 +221,20 @@ pub trait Controller: Send + Sync {
     #[allow(dead_code)]
     fn block_id(&self) -> &str;
 
+    /// This block's own live, spawn-time-captured jekt/muxbus identity, if
+    /// it has one — an independent source of truth for the recipient-
+    /// identity check in `ReactiveHandler::inject_message_inner`, deliberately
+    /// NOT derived from `ReactiveHandler`'s own `agent_to_block`/`agent_info`
+    /// maps (checking a registry against itself would be a tautology and
+    /// catch nothing). Default `None` for controller types that aren't
+    /// jekt-addressable at all (e.g. plain terminals) — only `ShellController`
+    /// and `PersistentSubprocessController` currently override this, mirroring
+    /// the two paths that already resolve a jekt-registration identity at
+    /// spawn time (`resolve_agent_id_for_jekt`, `muxbus_agent_id_from_env`).
+    fn agent_id(&self) -> Option<String> {
+        None
+    }
+
     /// Downcast support for concrete controller types.
     fn as_any(&self) -> &dyn Any;
 }

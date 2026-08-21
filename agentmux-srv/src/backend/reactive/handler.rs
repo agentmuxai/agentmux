@@ -103,6 +103,11 @@ pub struct Handler {
     /// When set, it is tried before the PTY keystroke path so messages reach (and
     /// steer) agents that have no terminal. See `set_message_sender`.
     message_sender: Option<MessageSender>,
+    /// Queries a resolved delivery target's own live identity before
+    /// delivering, as a check independent of this handler's own
+    /// `agent_to_block` map. See `AgentIdentityConfirmer`'s doc comment and
+    /// `set_agent_identity_confirmer`.
+    agent_identity_confirmer: Option<AgentIdentityConfirmer>,
     audit_log: Vec<AuditLogEntry>,
     rate_limiter: RateLimiter,
     include_source_in_message: bool,
@@ -122,6 +127,7 @@ impl Handler {
             agent_info: HashMap::new(),
             input_sender: None,
             message_sender: None,
+            agent_identity_confirmer: None,
             audit_log: Vec::with_capacity(AUDIT_LOG_MAX),
             rate_limiter: RateLimiter::new(RATE_LIMIT_MAX),
             include_source_in_message: false,
@@ -140,6 +146,14 @@ impl Handler {
     /// back so injection falls through to the keystroke path.
     pub fn set_message_sender(&mut self, sender: MessageSender) {
         self.message_sender = Some(sender);
+    }
+
+    /// Set the agent-identity confirmer used by `inject_message_inner` to
+    /// double-check a resolved delivery target against its own live,
+    /// spawn-time-captured identity before delivering. Optional — if never
+    /// set, delivery proceeds exactly as before this check existed (fail-open).
+    pub fn set_agent_identity_confirmer(&mut self, confirmer: AgentIdentityConfirmer) {
+        self.agent_identity_confirmer = Some(confirmer);
     }
 
     /// Set whether to include source agent prefix in injected messages.
@@ -391,6 +405,60 @@ impl Handler {
                 };
             }
         };
+
+        // Recipient-identity check (issue #2695): before delivering, compare
+        // the resolved block's own live, spawn-time-captured identity
+        // (queried via `agent_identity_confirmer`, which goes straight to
+        // the controller — independent of this handler's own agent_to_block
+        // map) against who this jekt is addressed to. Checking agent_to_block
+        // against itself would be a tautology and catch nothing; this is a
+        // genuine second, independently-written source of truth that can
+        // drift from the registry (e.g. a stale registry entry survived a
+        // respawn, or a resync overwrote registration without updating the
+        // block's own field).
+        //
+        // `None` (no confirmer configured, or this controller type doesn't
+        // implement `agent_id()`) is "unverifiable," not "confirmed absent" —
+        // delivery proceeds exactly as before this check existed. Matches
+        // this codebase's existing jekt trust philosophy elsewhere (see the
+        // TRUST=/ESCALATE= rules): only an ACTIVE mismatch is a red flag,
+        // mere absence of proof is not.
+        if let Some(confirmer) = &self.agent_identity_confirmer {
+            if let Some(actual_agent_id) = confirmer(&block_id) {
+                if actual_agent_id.to_lowercase() != req.target_agent.to_lowercase() {
+                    let err = format!(
+                        "identity mismatch: block {} resolved for target '{}' but its own live identity is '{}'",
+                        block_id, req.target_agent, actual_agent_id
+                    );
+                    tracing::error!(
+                        target = %req.target_agent,
+                        block_id = %block_id,
+                        actual_agent_id = %actual_agent_id,
+                        "reactive inject: recipient identity mismatch — rejecting delivery"
+                    );
+                    self.log_audit(
+                        req.source_agent.as_deref(),
+                        &req.target_agent,
+                        &block_id,
+                        &sanitized,
+                        false,
+                        Some(&err),
+                        &request_id,
+                        Some("identity-mismatch"),
+                        reason,
+                    );
+                    return InjectionResponse {
+                        success: false,
+                        request_id,
+                        block_id: Some(block_id),
+                        error: Some(err),
+                        timestamp: now,
+                        effective_tier: None,
+                        requires_stop: None,
+                    };
+                }
+            }
+        }
 
         // Determine effective jekt tier.
         // Escalation rules (spec §5.2, extended by
@@ -995,6 +1063,13 @@ impl ReactiveHandler {
 
     pub fn set_message_sender(&self, sender: MessageSender) {
         self.inner.lock().unwrap().set_message_sender(sender);
+    }
+
+    pub fn set_agent_identity_confirmer(&self, confirmer: AgentIdentityConfirmer) {
+        self.inner
+            .lock()
+            .unwrap()
+            .set_agent_identity_confirmer(confirmer);
     }
 
     #[allow(dead_code)]

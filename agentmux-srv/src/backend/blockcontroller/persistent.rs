@@ -587,6 +587,16 @@ pub struct PersistentSubprocessController {
     /// actually exits; a `Weak` avoids a reference cycle (this same
     /// struct's `spawn_process` is what schedules that task).
     self_ref: Mutex<Option<std::sync::Weak<Self>>>,
+    /// This controller's own muxbus/jekt identity, captured once at spawn
+    /// time from `muxbus_agent_id_from_env` — the independent source of
+    /// truth `Controller::agent_id()` exposes for `inject_message_inner`'s
+    /// recipient-identity check. Deliberately its own field, not part of
+    /// `PersistentInner` — `config` (and its `env_vars`, where the identity
+    /// is read from) isn't available until `spawn_process`, well after
+    /// `new()`, and this value doesn't participate in any of `PersistentInner`'s
+    /// carefully-ordered spawn/resume/queue state transitions. `None` for a
+    /// persistent block with no muxbus identity set (a non-agent process).
+    agent_id: Mutex<Option<String>>,
 }
 
 /// How long to wait after delivering an AskUserQuestion answer before assuming
@@ -668,6 +678,7 @@ impl PersistentSubprocessController {
             health_monitor,
             stdout_seq: Arc::new(AtomicU64::new(0)),
             self_ref: Mutex::new(None),
+            agent_id: Mutex::new(None),
         }
     }
 
@@ -2411,6 +2422,7 @@ impl PersistentSubprocessController {
         // aware MessageSender (→ send_user_message), not PTY keystrokes.
         // See SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16.
         let agent_id_for_muxbus = muxbus_agent_id_from_env(&config.env_vars);
+        *self.agent_id.lock().unwrap() = agent_id_for_muxbus.clone();
         if let Some(ref agent_id) = agent_id_for_muxbus {
             // `_with_nonce` variants record this spawn's process-wide
             // registration nonce so this exact spawn's exit-handler can
@@ -3689,6 +3701,10 @@ impl Controller for PersistentSubprocessController {
 
     fn block_id(&self) -> &str {
         &self.block_id
+    }
+
+    fn agent_id(&self) -> Option<String> {
+        self.agent_id.lock().unwrap().clone()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

@@ -512,6 +512,7 @@ impl Controller for ShellController {
             }
             inner.spawn_ts_ms = Some(spawn_ts_ms);
             inner.is_agent_pane = is_agent;
+            inner.agent_id = agent_id_for_jekt.clone();
         }
 
         // Auto-register with jekt if AGENTMUX_AGENT_ID was set in the block env.
@@ -1129,6 +1130,10 @@ impl Controller for ShellController {
 
     fn block_id(&self) -> &str {
         &self.block_id
+    }
+
+    fn agent_id(&self) -> Option<String> {
+        self.inner.lock().unwrap().agent_id.clone()
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
