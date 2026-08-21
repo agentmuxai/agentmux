@@ -65,6 +65,33 @@ pub fn largest_session_id(projects_dirs: &[PathBuf], slug: &str) -> Option<Strin
     best.map(|(_, stem)| stem)
 }
 
+/// Recovery lookup for a confirmed-stale `--resume` failure
+/// (`docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`):
+/// rather than giving up and starting a blank conversation the moment a
+/// registry/inherited `session_id` turns out to be unreachable, look for
+/// the largest session actually on disk under this exact `config_dir` (the
+/// `CLAUDE_CONFIG_DIR` the CLI process is about to run with) for
+/// `working_dir`. `None` when `config_dir` is empty/unset (nothing to
+/// search) or no session exists — callers fall back to starting blank in
+/// either case, same as before this existed.
+///
+/// `config_dir` is expanded the same way the actual spawn path expands
+/// every env var (`core::apply_working_dir` -> `expand_home_dir_safe`)
+/// before applying it to the child process — a `CLAUDE_CONFIG_DIR` of
+/// `~/.claude` must resolve to the real home directory here too, or this
+/// searches a literal, nonexistent `~/.claude/projects` while the CLI
+/// itself reads the real expanded path, silently defeating recovery for
+/// every `~`-shorthand config dir (Codex P2 on PR #2693).
+pub fn find_largest_session_for_working_dir(config_dir: &str, working_dir: &str) -> Option<String> {
+    if config_dir.is_empty() {
+        return None;
+    }
+    let expanded = crate::backend::base::expand_home_dir_safe(config_dir);
+    let projects_dir = expanded.join("projects");
+    let slug = encode_project_slug(working_dir);
+    largest_session_id(&[projects_dir], &slug)
+}
+
 /// Populate `session_id` for registry records that lack one, from the agent's
 /// largest provider session. Idempotent (skips records that already carry a
 /// non-empty id). Returns the number populated. Best-effort per record — a
@@ -159,6 +186,73 @@ mod tests {
         );
         // Missing project dir is graceful.
         assert_eq!(largest_session_id(&[projects], "nope"), None);
+    }
+
+    #[test]
+    fn find_largest_session_for_working_dir_locates_the_real_transcript() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_dir = tmp.path();
+        let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n";
+        let slug = encode_project_slug(working_dir);
+        let dir = config_dir.join("projects").join(&slug);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
+
+        assert_eq!(
+            find_largest_session_for_working_dir(&config_dir.to_string_lossy(), working_dir).as_deref(),
+            Some("972a6a4f-live")
+        );
+    }
+
+    #[test]
+    fn find_largest_session_for_working_dir_is_none_for_an_empty_config_dir() {
+        // An unset CLAUDE_CONFIG_DIR (empty string) must not be treated as
+        // "search the current directory" — nothing to recover from.
+        assert_eq!(
+            find_largest_session_for_working_dir("", r"C:\Users\asafe\.agentmux\agents\agentx-0623n"),
+            None
+        );
+    }
+
+    #[test]
+    fn find_largest_session_for_working_dir_is_none_when_nothing_exists_there() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert_eq!(
+            find_largest_session_for_working_dir(
+                &tmp.path().to_string_lossy(),
+                r"C:\Users\asafe\.agentmux\agents\nobody-here",
+            ),
+            None
+        );
+    }
+
+    /// Codex P2 on PR #2693: `config_dir` must be expanded the same way the
+    /// actual spawn path expands every env var (`core::apply_working_dir`'s
+    /// `expand_home_dir_safe`) — a literal, un-expanded `~/...` must not be
+    /// searched as-is, or recovery silently fails for every config dir that
+    /// uses `~`-shorthand. Writes into a uniquely-named folder under the
+    /// REAL home directory (there's no way to test `~` resolution without
+    /// one) and removes it afterward regardless of outcome.
+    #[test]
+    fn find_largest_session_for_working_dir_expands_a_tilde_config_dir() {
+        let home = dirs::home_dir().expect("test requires a resolvable home dir");
+        let rel = format!(".agentmux-test-tilde-expansion-{}", std::process::id());
+        let config_dir_abs = home.join(&rel);
+        let working_dir = r"C:\Users\test\.agentmux\agents\tilde-test";
+        let slug = encode_project_slug(working_dir);
+        let dir = config_dir_abs.join("projects").join(&slug);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("abc123-session.jsonl"), b"{}").unwrap();
+
+        let result = find_largest_session_for_working_dir(&format!("~/{rel}"), working_dir);
+
+        fs::remove_dir_all(&config_dir_abs).ok();
+
+        assert_eq!(
+            result.as_deref(),
+            Some("abc123-session"),
+            "a ~-prefixed config_dir must resolve to the real home directory, not be searched literally"
+        );
     }
 
     fn rec(id: &str, base: Option<&str>, wd: &str, sid: Option<&str>) -> NamedAgentRecord {

@@ -228,7 +228,11 @@ pub(super) enum ResumeEffect {
     /// the caller's own spawn attempt). The caller drops it on success
     /// and flushes it on failure — see
     /// `persistent::PersistentSubprocessController::retry_after_resume_failure`.
-    FireRetry { retry: RetryPayload, held_error_line: Option<String> },
+    /// `attempted_sid` is the id that was just confirmed unreachable —
+    /// carried through so the caller can emit the eventual
+    /// `EmitSessionOutcome` itself once it knows whether recovery
+    /// succeeded (PR #2693 — this module can no longer decide that here).
+    FireRetry { retry: RetryPayload, held_error_line: Option<String>, attempted_sid: String },
     /// Genuinely done, not retrying — publish the terminal status.
     PublishDone,
     /// A `--resume <attempted_sid>` attempt's outcome just became
@@ -538,21 +542,28 @@ pub(super) fn update(state: ResumeState, event: ResumeEvent) -> (ResumeState, Ve
                 // caller's own spawn attempt), so it's bundled into the
                 // effect rather than pre-decided here.
                 //
-                // The resume was CONFIRMED unreachable (`ResumeUnreachable`
-                // already fired to reach `ConfirmedRetry`) — the retry
-                // about to fire clears `session_id` before respawning
-                // (`retry_after_resume_failure`), so this is unambiguously
-                // a Fresh outcome, known now even though the retry itself
-                // hasn't launched yet. See
-                // SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md §2.1.
-                vec![
-                    ResumeEffect::EmitSessionOutcome {
-                        outcome: SessionOutcome::Fresh,
-                        attempted_sid,
-                        actual_sid: None,
-                    },
-                    ResumeEffect::FireRetry { retry, held_error_line },
-                ]
+                // reagentx + Codex (PR #2693 review): the outcome is NO
+                // LONGER decidable here. This module used to assume the
+                // retry unconditionally clears `session_id` and starts
+                // blank — true before #2693, which added a recovery
+                // lookup (`retry_after_resume_failure` now tries to find
+                // a real on-disk session before giving up). Pre-emitting
+                // `Fresh` here was provably wrong whenever recovery
+                // succeeds: the frontend treats a `Fresh` node as a
+                // permanent scroll-anchor that a later `Resumed` outcome
+                // can never clear (`session-outcome.ts`), so the pane
+                // would show a truncated scrollback even when the model
+                // genuinely has full prior context. The caller now
+                // decides and emits the outcome itself, once recovery is
+                // actually known — immediately if it falls back to blank
+                // (see `PersistentSubprocessController::retry_after_resume_failure`),
+                // or via this same module's existing, already-correct
+                // `SessionCaptured` handling above once the recovery
+                // attempt (now itself resume-tracked, not fire-and-forget)
+                // resolves. `attempted_sid` is threaded through
+                // `FireRetry` so the caller has it either way. See
+                // `docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`.
+                vec![ResumeEffect::FireRetry { retry, held_error_line, attempted_sid }]
             };
             (ResumeState::NotTracking { current_generation: generation }, effects)
         }
@@ -718,14 +729,11 @@ mod tests {
         assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
         assert_eq!(
             effects,
-            vec![
-                ResumeEffect::EmitSessionOutcome {
-                    outcome: SessionOutcome::Fresh,
-                    attempted_sid: "dead-sid".to_string(),
-                    actual_sid: None,
-                },
-                ResumeEffect::FireRetry { retry: dummy_retry(), held_error_line: Some("boom".to_string()) },
-            ]
+            vec![ResumeEffect::FireRetry {
+                retry: dummy_retry(),
+                held_error_line: Some("boom".to_string()),
+                attempted_sid: "dead-sid".to_string(),
+            }]
         );
     }
 
@@ -780,14 +788,11 @@ mod tests {
         assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
         assert_eq!(
             effects,
-            vec![
-                ResumeEffect::EmitSessionOutcome {
-                    outcome: SessionOutcome::Fresh,
-                    attempted_sid: "dead-sid".to_string(),
-                    actual_sid: None,
-                },
-                ResumeEffect::FireRetry { retry: dummy_retry(), held_error_line: Some("boom".to_string()) },
-            ]
+            vec![ResumeEffect::FireRetry {
+                retry: dummy_retry(),
+                held_error_line: Some("boom".to_string()),
+                attempted_sid: "dead-sid".to_string(),
+            }]
         );
     }
 
@@ -1030,14 +1035,11 @@ mod tests {
         assert_eq!(state, ResumeState::NotTracking { current_generation: 1 });
         assert_eq!(
             effects,
-            vec![
-                ResumeEffect::EmitSessionOutcome {
-                    outcome: SessionOutcome::Fresh,
-                    attempted_sid: "dead-sid".to_string(),
-                    actual_sid: None,
-                },
-                ResumeEffect::FireRetry { retry: dummy_retry(), held_error_line: None },
-            ]
+            vec![ResumeEffect::FireRetry {
+                retry: dummy_retry(),
+                held_error_line: None,
+                attempted_sid: "dead-sid".to_string(),
+            }]
         );
     }
 
