@@ -18,6 +18,11 @@
  *   - Skills      — the standalone Skill primitive (AgentSkillsModal).
  *   - Startup     — select an existing Bundle as Session Context's
  *                   "Startup Instructions" (AgentStartupModal).
+ *   - Registration — this agent's live jekt/muxbus delivery status:
+ *                   local registration, any OTHER instance/channel on this
+ *                   host also claiming the same identity, and any recent
+ *                   delivery rejected by the identity-mismatch guard
+ *                   (AgentRegistrationPanel — issues #2694/#2695/#2696).
  *
  * The tab list is a data array so future primitives slot in trivially.
  * Briefs is not wired here — it has no backend primitive at all yet
@@ -31,11 +36,12 @@ import { createSignal, For, Show, type JSX } from "solid-js";
 import { AgentIdentityLinksPanel } from "@/app/view/identity/agent-identity-links-panel";
 import { AgentMcpModal } from "./AgentMcpModal";
 import { AgentNativeMemoryModal } from "./AgentNativeMemoryModal";
+import { AgentRegistrationPanel } from "./AgentRegistrationPanel";
 import { AgentSkillsModal } from "./AgentSkillsModal";
 import { AgentStartupModal } from "./AgentStartupModal";
 import "./AgentStashModal.scss";
 
-type StashTabId = "accounts" | "memory" | "mcp" | "skills" | "startup";
+type StashTabId = "accounts" | "memory" | "mcp" | "skills" | "startup" | "registration";
 
 interface AgentStashModalProps {
     agentId: string;
@@ -66,6 +72,10 @@ export const AgentStashModal = (props: AgentStashModalProps): JSX.Element => {
         // this tab picks a bundle as startup instructions, so it's the same
         // concept scoped to one agent.
         { id: "startup", label: "Startup", icon: "layer-group" },
+        // tower-broadcast: distinct from "key" (Accounts, auth identity) —
+        // this tab is about jekt/muxbus delivery identity, a different
+        // concept (issue #2696).
+        { id: "registration", label: "Registration", icon: "tower-broadcast" },
     ];
 
     const [activeTab, setActiveTab] = createSignal<StashTabId>(props.initialTab ?? "accounts");
@@ -117,6 +127,10 @@ export const AgentStashModal = (props: AgentStashModalProps): JSX.Element => {
 
                 <Show when={activeTab() === "startup"}>
                     <AgentStartupModal agentId={props.agentId} />
+                </Show>
+
+                <Show when={activeTab() === "registration"}>
+                    <AgentRegistrationPanel agentId={props.agentId} />
                 </Show>
 
                 {/* Future primitives: Briefs */}

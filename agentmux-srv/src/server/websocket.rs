@@ -1339,6 +1339,9 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // Provider model catalog (providers.models → authoritative /v1/models list)
     super::providers_handlers::register_providers_handlers(engine, &state);
 
+    // reactive.registrations → Stash "Registration" tab live status (#2696)
+    super::reactive::register_reactive_ws_handlers(engine, &state);
+
     // eventreadhistory → read persisted event history from the WPS broker
     let broker_history = state.broker.clone();
     engine.register_handler(

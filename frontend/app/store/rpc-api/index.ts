@@ -20,12 +20,19 @@ import { IdentityApi } from "./identity";
 import { McpApi } from "./mcp";
 import { MemoryApi } from "./memory";
 import { MiscApi } from "./misc";
+import { ReactiveApi } from "./reactive";
 import { SessionApi } from "./session";
 import { SkillApi } from "./skill";
 import { WorkspaceApi } from "./workspace";
 
 export type { OAuthFlowStatus } from "./types";
 export type { FleetActionFailure, FleetActionResult, FleetGroup, FleetStagePlan } from "./fleet";
+export type {
+    ReactiveAgentRegistration,
+    ReactiveMismatchSummary,
+    ReactiveRegistrationsResult,
+    ReactiveRemoteRegistration,
+} from "./reactive";
 
 // WshServerCommandToDeclMap
 export const RpcApi = {
@@ -41,4 +48,5 @@ export const RpcApi = {
     ...SkillApi,
     ...BundleImportApi,
     ...FleetApi,
+    ...ReactiveApi,
 };

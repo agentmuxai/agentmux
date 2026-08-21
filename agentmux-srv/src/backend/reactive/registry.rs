@@ -288,7 +288,7 @@ fn shared_channel_path(shared_dir: &Path, agent_id: &str, channel: &str) -> Path
 /// same-host by construction (a local file only readable by local
 /// processes) — unlike a LAN/cloud registry, PID-liveness is an
 /// authoritative staleness signal, not just a heuristic.
-fn pid_alive(pid: u32) -> bool {
+pub(crate) fn pid_alive(pid: u32) -> bool {
     let target = sysinfo::Pid::from(pid as usize);
     let mut sys = sysinfo::System::new();
     // Targeted refresh, no CPU/memory/exe/cmdline needed — existence alone

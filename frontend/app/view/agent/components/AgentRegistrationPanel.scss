@@ -1,0 +1,125 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+.agent-registration-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px;
+    overflow-y: auto;
+
+    &-error {
+        color: var(--error-text-color);
+        font-size: 12px;
+    }
+
+    &-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    &-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        color: var(--main-text-color);
+    }
+
+    &-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--tertiary-text-color, rgba(255, 255, 255, 0.4));
+        flex: 0 0 auto;
+
+        &.is-valid {
+            background: var(--success-text-color);
+        }
+        &.is-expired {
+            background: var(--error-text-color);
+        }
+        &.is-needs_reauth {
+            background: var(--warning-text-color);
+        }
+        &.is-unknown {
+            background: var(--tertiary-text-color, rgba(255, 255, 255, 0.4));
+        }
+    }
+
+    &-refresh {
+        padding: 4px 10px;
+        font-size: 12px;
+        background: transparent;
+        color: var(--accent-color);
+        border: 1px solid var(--accent-color);
+        border-radius: 0;
+        cursor: default;
+
+        &:hover {
+            background: var(--accent-color);
+            color: var(--main-bg-color);
+        }
+
+        &:disabled {
+            opacity: 0.5;
+            cursor: default;
+        }
+    }
+
+    &-section {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 10px 12px;
+        border: 1px solid var(--border-color);
+
+        h3 {
+            margin: 0;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+            color: var(--secondary-text-color);
+        }
+
+        dl {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 2px 10px;
+            margin: 0;
+            font-size: 12px;
+        }
+
+        dt {
+            color: var(--secondary-text-color);
+        }
+
+        dd {
+            margin: 0;
+            word-break: break-all;
+        }
+
+        ul {
+            margin: 0;
+            padding-left: 18px;
+            font-size: 12px;
+        }
+
+        &.is-warning {
+            border-color: var(--warning-text-color);
+        }
+
+        &.is-error {
+            border-color: var(--error-text-color);
+        }
+    }
+
+    &-hint {
+        font-size: 12px;
+        color: var(--secondary-text-color);
+        margin: 0;
+    }
+}
