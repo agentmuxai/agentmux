@@ -1269,6 +1269,16 @@ pub(super) async fn handle_reactive_supervisor_decision(
 
 // ---- WS RPC: reactive.registrations (issue #2696, Stash UI indicator) ----
 
+/// Whether a host-global shared-registry entry is THIS instance's own
+/// registration (as opposed to a genuinely different instance/channel on
+/// the same host) — every agent unconditionally writes itself into that
+/// same registry, so a "remote"/"elsewhere" listing must exclude its own
+/// entry or it fires on every healthy agent (reagentx P1 on #2698). Same
+/// comparison this file already uses for Tier 2a/2b forwarding.
+pub(super) fn is_self_registration(entry_local_url: &str, this_instances_local_url: &str) -> bool {
+    entry_local_url == this_instances_local_url
+}
+
 /// One cross-instance/channel entry from the host-global shared registry
 /// (`backend::reactive::registry::AgentEntry`), narrowed to what the
 /// frontend actually needs to render a "registered elsewhere too" badge —
@@ -1329,10 +1339,21 @@ pub fn register_reactive_ws_handlers(engine: &std::sync::Arc<crate::backend::rpc
 
                 let local = state.reactive_handler.get_agent(&params.agent_id);
 
+                // Every agent (including this instance's own) unconditionally
+                // writes itself into the same host-global shared registry
+                // (write_shared_from_env, called from both the PTY-shell and
+                // persistent auto-register paths and from handle_reactive_
+                // register above) — so without filtering, `remote` always
+                // includes THIS instance's own entry alongside any genuinely
+                // other instance, and the "registered elsewhere too" badge
+                // would fire on every healthy agent (reagentx P1). Same
+                // self-filter this file already uses for Tier 2a/2b forwarding
+                // (`entry.local_url == state.local_web_url`, ~line 454/580).
                 let remote = crate::registry::resolve_shared_reactive_dir()
                     .map(|shared_dir| {
                         agent_registry::lookup_all_shared(&shared_dir, &params.agent_id)
                             .into_iter()
+                            .filter(|e| !is_self_registration(&e.local_url, &state.local_web_url))
                             .map(|e| RemoteRegistrationEntry {
                                 channel: e.channel,
                                 pid: e.pid,
@@ -1794,5 +1815,31 @@ mod resolve_delivery_tier_tests {
     #[test]
     fn full_auth_key_defaults_to_host_when_body_omits_the_field() {
         assert_eq!(resolve_delivery_tier(super::super::ReactiveAuthVia::FullAuthKey, None), "host");
+    }
+}
+
+#[cfg(test)]
+mod is_self_registration_tests {
+    use super::is_self_registration;
+
+    /// reagentx P1 on #2698: without this check, `reactive.registrations`'s
+    /// `remote` list always included this instance's own shared-registry
+    /// entry (every agent unconditionally writes itself into that same
+    /// registry), so the "registered elsewhere too" badge fired on every
+    /// healthy agent — defeating the whole point of the feature.
+    #[test]
+    fn same_local_url_is_self() {
+        assert!(is_self_registration(
+            "http://127.0.0.1:12345",
+            "http://127.0.0.1:12345"
+        ));
+    }
+
+    #[test]
+    fn different_local_url_is_not_self() {
+        assert!(!is_self_registration(
+            "http://127.0.0.1:12345",
+            "http://127.0.0.1:54321"
+        ));
     }
 }
