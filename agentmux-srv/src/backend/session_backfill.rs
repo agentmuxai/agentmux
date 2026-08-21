@@ -82,13 +82,27 @@ pub fn largest_session_id(projects_dirs: &[PathBuf], slug: &str) -> Option<Strin
 /// searches a literal, nonexistent `~/.claude/projects` while the CLI
 /// itself reads the real expanded path, silently defeating recovery for
 /// every `~`-shorthand config dir (Codex P2 on PR #2693).
+///
+/// `working_dir` gets the same treatment, via `core.rs`'s OWN
+/// `expand_home_dir` — not `base::expand_home_dir_safe` above, a
+/// different function; `apply_working_dir` uses each for a different
+/// input and this must mirror both exactly. This one matters even more
+/// than the config-dir case: `agent_open.rs`'s default cwd for any agent
+/// without an explicit `working_directory` is the literal string
+/// `~/.agentmux/agents/<slug>` — the single most common case, not an
+/// edge case — so without this, `encode_project_slug` would hash the
+/// wrong (literal-tilde) path and recovery would silently fail for
+/// nearly every default-configured agent (Codex P1 on PR #2693, found
+/// after #2693 had already merged — the config-dir half of this same
+/// class of bug was fixed pre-merge, this half wasn't caught in time).
 pub fn find_largest_session_for_working_dir(config_dir: &str, working_dir: &str) -> Option<String> {
     if config_dir.is_empty() {
         return None;
     }
     let expanded = crate::backend::base::expand_home_dir_safe(config_dir);
     let projects_dir = expanded.join("projects");
-    let slug = encode_project_slug(working_dir);
+    let expanded_working_dir = crate::backend::blockcontroller::core::expand_home_dir(working_dir);
+    let slug = encode_project_slug(&expanded_working_dir);
     largest_session_id(&[projects_dir], &slug)
 }
 
@@ -252,6 +266,43 @@ mod tests {
             result.as_deref(),
             Some("abc123-session"),
             "a ~-prefixed config_dir must resolve to the real home directory, not be searched literally"
+        );
+    }
+
+    /// Codex P1 on PR #2693 (found post-merge, in a follow-up review pass
+    /// against the fix commit): `working_dir` needs the exact same
+    /// expansion `config_dir` got above — via `core.rs`'s OWN
+    /// `expand_home_dir`, a different function from `base::
+    /// expand_home_dir_safe` used for `config_dir`, since
+    /// `apply_working_dir` uses one for each. This is the MORE important
+    /// half: `agent_open.rs`'s default cwd for any agent with no explicit
+    /// `working_directory` is literally `~/.agentmux/agents/<slug>` — not
+    /// an edge case, the single most common configuration — so without
+    /// this, recovery silently fails for nearly every default agent.
+    #[test]
+    fn find_largest_session_for_working_dir_expands_a_tilde_working_dir() {
+        let home = dirs::home_dir().expect("test requires a resolvable home dir");
+        let config_rel = format!(".agentmux-test-tilde-workdir-config-{}", std::process::id());
+        let config_dir_abs = home.join(&config_rel);
+        // Mirrors agent_open.rs's actual default cwd format exactly.
+        let working_dir_rel = format!(".agentmux-test-tilde-workdir-agent-{}", std::process::id());
+        let working_dir_tilde = format!("~/{working_dir_rel}");
+        let expanded_working_dir = home.join(&working_dir_rel);
+
+        let slug = encode_project_slug(&expanded_working_dir.to_string_lossy());
+        let dir = config_dir_abs.join("projects").join(&slug);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("def456-session.jsonl"), b"{}").unwrap();
+
+        let result = find_largest_session_for_working_dir(&config_dir_abs.to_string_lossy(), &working_dir_tilde);
+
+        fs::remove_dir_all(&config_dir_abs).ok();
+
+        assert_eq!(
+            result.as_deref(),
+            Some("def456-session"),
+            "a ~-prefixed working_dir (agent_open.rs's actual default cwd shape) must resolve to \
+             the real home directory, not be encoded literally with the tilde"
         );
     }
 
