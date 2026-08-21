@@ -32,14 +32,18 @@ footer's props are read from.
 ## 2. Root cause — confirmed via direct code reading
 
 1. **The event loop that fires tool transitions synchronously, unbatched:**
-   `frontend/app/view/agent/useAgentStream.ts:540` — `for (const event of
-   streamEvents) { ... }` iterates every `StreamEvent` translated from a
-   single incoming backend chunk. Each `tool_call`/`tool_result` event in
-   that loop independently calls `model.dispatchPane(...)` synchronously
-   (lines 583–589 for `ToolStart`, line 592 for `ToolEnd`). A chunk carrying
-   several tool transitions (parallel tool_use blocks, or several small
-   tool calls arriving together) fires several `dispatchPane` calls in the
-   same synchronous pass, back to back.
+   `frontend/app/view/agent/useAgentStream.ts:352-628` — the
+   `fileSubject.subscribe(...)` callback. One "append" notification can
+   carry several newline-delimited raw lines; `for (const line of lines)`
+   (line 371) processes all of them in one synchronous pass, and for each
+   the inner `for (const event of streamEvents) { ... }` (line 540)
+   independently calls `model.dispatchPane(...)` for each
+   `tool_call`/`tool_result` event (lines 583–589 for `ToolStart`, line
+   592 for `ToolEnd`). **The outer, per-line loop is the actual
+   burst boundary** — see §5's correction note: `streamEvents` (the inner
+   loop) is only ever the translation of one raw line, and for Claude a
+   tool's `ToolStart` and its later argument update arrive as separate
+   raw lines, not together in one `streamEvents` array.
 
 2. **No batching in the pane-state store's dispatch path:**
    `frontend/app/store/agent-pane-state-store.ts` — confirmed by direct
@@ -126,13 +130,29 @@ reads as the tool call interrupting the thinking-row text mid-reveal.
 
 ## 5. Recommended fix directions (not implemented here)
 
-1. **Wrap the tool-transition dispatches in `batch()`** — either around the
-   `for` loop in `useAgentStream.ts:540` (batch all `dispatchPane` calls
-   produced from one incoming chunk), or inside `agent-pane-state-store.ts`'s
-   `dispatch()` itself if it can detect/coalesce a rapid sequence of calls.
-   The former is more surgical and matches the existing precedent
-   (`StreamFlushQueue`'s RAF/batch discipline for document nodes) without
-   touching the store's general dispatch path.
+**Correction (2026-08-21, post-review on the follow-up spec PR #2706):**
+point 1 below originally named `useAgentStream.ts:540` — the *inner*
+`for (const event of streamEvents)` loop — as the batch boundary. Codex
+correctly flagged that this doesn't fix the reported Claude-path symptom:
+`streamEvents` is the translation of a single raw line, and a tool call's
+`ToolStart` and its later argument update arrive as **separate raw
+lines** for Claude, not together in one `streamEvents` array. The real
+"arrived together" boundary is the *outer* `for (const line of lines)`
+loop at `useAgentStream.ts:371` (inside the `fileSubject.subscribe`
+callback, `:352-628`), which can process several raw lines from one
+append notification in a single synchronous pass. See
+`docs/specs/SPEC_AGENT_WORKING_ROW_TOOL_BURST_REVEAL_INTERRUPT_2026_08_21.md`
+§2.1 for the corrected design — updated below to match.
+
+1. **Wrap the tool-transition dispatches in `batch()`** — around the outer
+   `for (const line of lines)` loop in `useAgentStream.ts:371` (batch all
+   `dispatchPane` calls produced from one incoming append notification,
+   which may span several raw lines), or inside
+   `agent-pane-state-store.ts`'s `dispatch()` itself if it can
+   detect/coalesce a rapid sequence of calls. The former is more surgical
+   and matches the existing precedent (`StreamFlushQueue`'s RAF/batch
+   discipline for document nodes) without touching the store's general
+   dispatch path.
 2. **Debounce/coalesce the reveal effect itself** — e.g. only restart the
    type-out if `leftText()` has been stable for some short window (a few
    ms), rather than reacting to every intermediate value in a burst. More
@@ -145,9 +165,12 @@ reads as the tool call interrupting the thinking-row text mid-reveal.
 
 ## 6. Sources
 
-- `frontend/app/view/agent/useAgentStream.ts:540` (unbatched per-chunk
-  event loop), `:581–592` (`ToolStart`/`ToolEnd` dispatch sites), `:17–35`
-  (existing `StreamFlushQueue`/`batch()` precedent for document nodes)
+- `frontend/app/view/agent/useAgentStream.ts:352-628` (the
+  `fileSubject.subscribe` callback), `:371` (outer per-line loop — the
+  actual burst boundary), `:540` (inner per-event loop — insufficient in
+  isolation, see §5 correction note), `:581–592` (`ToolStart`/`ToolEnd`
+  dispatch sites), `:17–35` (existing `StreamFlushQueue`/`batch()`
+  precedent for document nodes)
 - `frontend/app/store/agent-pane-state-store.ts:222` (`dispatch()`),
   `:337`, `:351` (`proj("currentTool"/"currentToolArg", ...)`) — no
   `batch(` anywhere in the file

@@ -40,12 +40,17 @@ the row's final settled text — not one restart per intermediate value.
 
 Three pieces compose the bug, none of which is itself wrong in isolation:
 
-1. **`frontend/app/view/agent/useAgentStream.ts:540`** — `for (const event
-   of streamEvents) { ... }` processes every translated event from one
-   incoming backend chunk synchronously. Each `tool_call`/`tool_result`
-   fires its own `model.dispatchPane({ type: "ToolStart" | "ToolEnd", ... })`
-   call immediately (lines 583–592) — a chunk carrying several tool
-   transitions dispatches several times in the same synchronous pass.
+1. **`frontend/app/view/agent/useAgentStream.ts:352-628`** — the
+   `fileSubject.subscribe(...)` callback body. One "append" notification
+   can carry several newline-delimited raw lines (`lineBuffer.split("\n")`,
+   line 360); `for (const line of lines)` (line 371) processes all of them
+   synchronously in one callback invocation, and the inner `for (const
+   event of streamEvents)` loop (line 540) dispatches each translated
+   event's `tool_call`/`tool_result` via its own
+   `model.dispatchPane({ type: "ToolStart" | "ToolEnd", ... })` call
+   immediately (lines 583–592). **The burst-inducing multiplicity is at the
+   outer, per-line level, not the inner per-event level** — see the §2.1
+   revision note for why this distinction matters for the fix.
 
 2. **`frontend/app/store/agent-pane-state-store.ts`** — `dispatch()`
    (from line 222) applies each dispatched change via its own signal
@@ -76,44 +81,77 @@ settled value.
 
 ## 2. Proposed design
 
-### 2.1 Chosen approach: batch the per-chunk dispatch loop
+**Revision note (2026-08-21, post-review):** the original version of this
+section proposed batching `useAgentStream.ts`'s *inner* `for (const event
+of streamEvents)` loop (then cited as line 540). Codex correctly flagged
+that this doesn't fix the reported Claude-path symptom (PR #2706 review
+comment): `streamEvents` is the translation of a **single** raw NDJSON
+line, and for Claude, a tool call's initial dispatch (`content_block_start`
+→ `ToolStart`) and its later argument-bearing update
+(`content_block_stop`) arrive as **separate raw lines**, not together in
+one `streamEvents` array — so batching only the inner loop leaves each of
+those dispatches in its own, still-unbatched reactive commit. Parallel
+tool blocks likewise arrive as separate frames. §2.1 below replaces the
+original proposal with the correct boundary.
 
-Wrap the tool-transition dispatches inside `useAgentStream.ts`'s
-`streamEvents` loop (line 540) in SolidJS's `batch()`, so every
-`dispatchPane` call produced from one incoming chunk (a translated
-`translator.translate(rawEvent)` result) commits as a single reactive
-update instead of one-per-event.
+### 2.1 Chosen approach: batch the per-message line loop, not the per-line event loop
+
+The actual "things that arrived together" unit is **one `fileSubject`
+"append" notification** — `useAgentStream.ts:352-628`, the body of the
+`fileSubject.subscribe(...)` callback. A single append can carry multiple
+newline-delimited raw lines (`msg.data64` decoded, then `lineBuffer.split("\n")`
+at line 360); `for (const line of lines)` (line 371) processes all of them
+synchronously in one callback invocation, each producing its own
+`translator.translate(rawEvent)` → `streamEvents` → `dispatchPane` calls.
+**This outer loop, not the inner one, is where a burst of tool
+transitions actually lands together** — e.g. several small tool
+calls/results whose backend writes got coalesced into one append batch,
+or (per Codex's example) a tool's `ToolStart` and its later argument
+update arriving as two lines within the same append.
+
+Wrap the outer loop (lines 371–621, i.e. everything from the first
+`for (const line of lines)` line through its closing brace) in SolidJS's
+`batch()`, so every `dispatchPane` call produced while processing one
+append notification commits as a single reactive update:
 
 ```ts
 import { batch } from "solid-js";
 
 // ...
 batch(() => {
-    for (const event of streamEvents) {
-        // existing body — dispatchPane calls for tool_call/tool_result/
-        // provider_waiting, plus the parser.parseLine → pushNewNode/
-        // pushUpdatedNode path — unchanged internally.
+    for (const line of lines) {
+        // existing body, unchanged — trimmed-line parsing, the
+        // stderr/compact_boundary/session_outcome/token-extraction
+        // special cases, translator.translate(rawEvent), and the inner
+        // `for (const event of streamEvents)` loop's dispatchPane /
+        // parser.parseLine → pushNewNode/pushUpdatedNode calls.
     }
 });
 ```
 
-**Why this scope, not a wider one:** `streamEvents` is already the natural
-unit of "things that arrived together" — it's the translated output of one
-raw backend chunk. Batching at this boundary directly addresses the
-observed trigger (multiple tool transitions translated from one chunk,
-e.g. parallel tool_use blocks) without changing `dispatch()`'s general
-contract or touching call sites elsewhere in the codebase that call
-`dispatchPane` once per genuinely-independent event (a normal, non-bursty
-turn dispatches once per chunk here too, so `batch()` around a single call
-is a no-op cost-wise).
+**Why this scope, not the inner loop:** the inner `streamEvents` loop only
+sees what one raw line translates to (usually exactly one event for
+Claude); it has no visibility into sibling lines that arrived in the same
+append. The outer loop is the layer that actually observes "these N lines
+arrived together," which is the real definition of a burst here.
+
+**Interaction with the document-node queue:** the same outer-loop body
+already calls `queue.pushNewNode`/`pushUpdatedNode`/`scheduleFlush` for
+non-tool events (text/thinking/etc.), which route through the existing
+`StreamFlushQueue`/RAF mechanism (§ useAgentStream.ts:17–35), not through
+SolidJS signals directly. Wrapping the whole loop in `batch()` is additive
+to that — `batch()` only affects how/when SolidJS signal writes (the
+`dispatchPane`-driven pane-state fields) flush their reactive updates; it
+has no effect on the RAF-scheduled queue's own timing. No conflict
+expected, but call out explicitly for the implementer to verify (§3).
 
 **Why not batch inside `agent-pane-state-store.ts`'s `dispatch()` itself:**
 that function is called once per `dispatchPane` invocation, so wrapping
 its own body in `batch()` would only batch the handful of `proj(...)`
 calls *within a single dispatch* (already effectively atomic from the
 caller's perspective) — it would not coalesce *across* the multiple
-separate `dispatchPane` calls the burst produces. The loop-level fix in
-§2.1 is the layer that actually has visibility into "these N calls arrived
+separate `dispatchPane` calls a burst produces. The loop-level fix above
+is the layer that actually has visibility into "these calls arrived
 together."
 
 ### 2.2 Defense in depth (follow-up, not blocking): debounce the reveal effect
@@ -167,8 +205,11 @@ fix, to keep the initial change small and easy to verify in isolation.
 
 ## 5. Sources
 
-- `frontend/app/view/agent/useAgentStream.ts:540` (unbatched per-chunk
-  loop), `:581–592` (`ToolStart`/`ToolEnd` dispatch sites), `:17–35`
+- `frontend/app/view/agent/useAgentStream.ts:352-628` (the
+  `fileSubject.subscribe` callback), `:371` (outer per-line loop — the
+  correct batch boundary), `:540` (inner per-event loop — insufficient
+  boundary, see §2.1 revision note), `:581–592`
+  (`ToolStart`/`ToolEnd` dispatch sites), `:17–35`
   (existing `StreamFlushQueue`/`batch()` precedent for document nodes)
 - `frontend/app/store/agent-pane-state-store.ts:222` (`dispatch()`),
   `:337`, `:351` (unbatched `proj(...)` signal writes)
