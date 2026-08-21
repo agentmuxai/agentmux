@@ -235,6 +235,20 @@ pub trait Controller: Send + Sync {
         None
     }
 
+    /// Refresh this block's own captured jekt/muxbus identity (see
+    /// [`agent_id`](Controller::agent_id)'s doc comment). Called whenever
+    /// `ReactiveHandler::register_agent`/`register_agent_with_nonce`
+    /// (re-)registers THIS block's block_id under a (possibly different)
+    /// agent_id, so the two independently-written copies never drift apart
+    /// (reagentx P1 on #2697: `agent_id()` was captured once at spawn and
+    /// never refreshed, while `agent_to_block` gets re-keyed on every
+    /// `register_agent` call — e.g. `handle_reactive_register`'s
+    /// frontend-initiated HTTP path — causing a legitimately renamed or
+    /// reconfigured agent's own messages to be falsely rejected as an
+    /// identity mismatch). Default no-op for controller types that don't
+    /// override [`agent_id`](Controller::agent_id) either.
+    fn set_agent_id(&self, _id: Option<String>) {}
+
     /// Downcast support for concrete controller types.
     fn as_any(&self) -> &dyn Any;
 }
