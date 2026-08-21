@@ -245,6 +245,13 @@ pub fn clear_local_current_zone(filestore: &FileStore, zone: &str) {
 /// a missing file is the expected "agent never mirrored" case (silent), other
 /// errors are logged but never propagated. Keeps the global zone in lockstep
 /// with the per-channel `:current` clear in [`archive_session`].
+///
+/// Also clears `output.idx` (codex P2 on #2701): its freshness check is a
+/// `covered_size` byte comparison against the current `output`, so a stale
+/// index left behind after `output` is deleted and rewritten from scratch
+/// could be spuriously accepted as fresh the moment the new output happens
+/// to reach the same byte size, silently reporting the old session's line
+/// count. Deleting it here forces a rebuild against the new content instead.
 pub fn clear_global_current_zone(definition_id: &str) {
     let Some(gfs) = global_transcript_store() else {
         return;
@@ -252,7 +259,7 @@ pub fn clear_global_current_zone(definition_id: &str) {
     let Ok(zone) = validate_and_current(definition_id) else {
         return;
     };
-    for name in [SNAPSHOT_FILE, OUTPUT_FILE, TSIDX_FILE] {
+    for name in [SNAPSHOT_FILE, OUTPUT_FILE, TSIDX_FILE, "output.idx"] {
         // Only delete what's present, so an absent file isn't logged as an error.
         match gfs.stat(&zone, name) {
             Ok(Some(_)) => {

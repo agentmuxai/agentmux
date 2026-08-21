@@ -70,6 +70,13 @@ fn global_store_read_fallback_and_archive_clear() {
             .make_file(&zone, OUTPUT_FILE, FileMeta::default(), FileOpts::default())
             .unwrap();
         global.append_data(&zone, OUTPUT_FILE, b"{\"type\":\"user\"}\n").unwrap();
+        // A cached output.idx sidecar (codex P2 on #2701): must be cleared
+        // alongside `output`, or a same-size-by-coincidence next session
+        // could get its line count spuriously served from this stale index.
+        global
+            .make_file(&zone, "output.idx", FileMeta::default(), FileOpts::default())
+            .unwrap();
+        global.write_file(&zone, "output.idx", b"stale-idx-bytes").unwrap();
     };
 
     // ---- Case A: cross-channel viewer (empty local, content only in global) ----
@@ -89,6 +96,7 @@ fn global_store_read_fallback_and_archive_clear() {
     assert!(archived.is_some(), "empty-local archive must preserve the global conversation");
     assert!(global.stat(&zone, SNAPSHOT_FILE).unwrap().is_none(), "global snapshot not cleared (empty-local path)");
     assert!(global.stat(&zone, OUTPUT_FILE).unwrap().is_none(), "global output not cleared (empty-local path)");
+    assert!(global.stat(&zone, "output.idx").unwrap().is_none(), "global output.idx not cleared (empty-local path)");
     // Preserved as a local archive (browsable here), not silently discarded.
     assert!(!list_archives(&per_channel, def_id, 0).unwrap().is_empty(), "global content must be archived locally");
     // No resurrection on the next open.
@@ -103,6 +111,7 @@ fn global_store_read_fallback_and_archive_clear() {
     assert!(archived_b.is_some(), "should have archived the local current");
     assert!(global.stat(&zone, SNAPSHOT_FILE).unwrap().is_none(), "global snapshot not cleared (local-present path)");
     assert!(global.stat(&zone, OUTPUT_FILE).unwrap().is_none(), "global output not cleared (local-present path)");
+    assert!(global.stat(&zone, "output.idx").unwrap().is_none(), "global output.idx not cleared (local-present path)");
     let (after_b, _) = read_session_state(&per_channel, def_id).unwrap();
     assert_eq!(after_b, None, "no resurrection after local archive");
 }
