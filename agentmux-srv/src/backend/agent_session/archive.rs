@@ -130,6 +130,18 @@ pub fn archive_session(
             );
         }
     }
+    // Clear the output.idx sidecar too (reagent P1 on #2701): same
+    // stale-cache-by-coincidence risk as the tsidx case above, but for
+    // blockfile:read_range's covered_size freshness check.
+    if let Ok(Some(_)) = filestore.stat(&current_zone, "output.idx") {
+        if let Err(e) = filestore.delete_file(&current_zone, "output.idx") {
+            tracing::warn!(
+                definition_id = %definition_id,
+                error = %e,
+                "agent_session: failed to clear current output.idx after archive"
+            );
+        }
+    }
 
     // Clear the GLOBAL current zone in the same lifecycle. Without this, the
     // cross-channel read fallback (`read_session_state` / `blockfile:read_range`
@@ -226,8 +238,16 @@ fn copy_tsidx_best_effort(src_store: &FileStore, src_zone: &str, dst_store: &Fil
 /// only for files that are present (so absence isn't logged as an error).
 /// Best-effort — used after the global-preferred archive has persisted the
 /// content, to retire this channel's (subset) copy.
+///
+/// Also clears `output.idx` (reagent P1 on #2701, mirroring codex's P2 on the
+/// global-zone twin of this function): `blockfile:read_range`'s freshness
+/// check is a `covered_size` byte comparison against the current `output`, so
+/// a stale index left behind after `output` is deleted and rewritten from
+/// scratch could be spuriously accepted the moment the new output happens to
+/// reach the same byte size, silently serving the old session's cached line
+/// count/offsets.
 pub fn clear_local_current_zone(filestore: &FileStore, zone: &str) {
-    for name in [SNAPSHOT_FILE, OUTPUT_FILE, TSIDX_FILE] {
+    for name in [SNAPSHOT_FILE, OUTPUT_FILE, TSIDX_FILE, "output.idx"] {
         match filestore.stat(zone, name) {
             Ok(Some(_)) => {
                 if let Err(e) = filestore.delete_file(zone, name) {

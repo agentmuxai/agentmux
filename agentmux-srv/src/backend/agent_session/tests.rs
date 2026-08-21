@@ -107,11 +107,16 @@ fn global_store_read_fallback_and_archive_clear() {
     // (codex's original P1 path.) Both must end cleared.
     seed_global(snap);
     write_zone_file(&per_channel, &zone, SNAPSHOT_FILE, b"{\"local\":true}").unwrap();
+    // A local output.idx sidecar too (reagent P1 on #2701): clear_local_current_zone
+    // must clear it, same as the global twin, or a same-size-by-coincidence next
+    // session could get its line count spuriously served from this stale index.
+    write_zone_file(&per_channel, &zone, "output.idx", b"stale-local-idx-bytes").unwrap();
     let archived_b = archive_session(&per_channel, def_id).unwrap();
     assert!(archived_b.is_some(), "should have archived the local current");
     assert!(global.stat(&zone, SNAPSHOT_FILE).unwrap().is_none(), "global snapshot not cleared (local-present path)");
     assert!(global.stat(&zone, OUTPUT_FILE).unwrap().is_none(), "global output not cleared (local-present path)");
     assert!(global.stat(&zone, "output.idx").unwrap().is_none(), "global output.idx not cleared (local-present path)");
+    assert!(per_channel.stat(&zone, "output.idx").unwrap().is_none(), "local output.idx not cleared (local-present path)");
     let (after_b, _) = read_session_state(&per_channel, def_id).unwrap();
     assert_eq!(after_b, None, "no resurrection after local archive");
 }
@@ -257,6 +262,28 @@ fn archive_carries_and_clears_tsidx_sidecar() {
     assert!(
         fs.stat(&current_zone, TSIDX_FILE).unwrap().is_none(),
         ":current tsidx must be cleared with output"
+    );
+}
+
+#[test]
+fn archive_clears_output_idx_sidecar() {
+    // reagent P1 on #2701: a stale output.idx left in :current after archive
+    // could be spuriously accepted as fresh by blockfile:read_range's
+    // covered_size check the moment a later session's output happens to
+    // reach the same byte size, silently serving the old cached line
+    // count/offsets. Must be cleared alongside output, same as tsidx above.
+    let fs = fresh_filestore();
+    let payload = br#"{"nodes":[]}"#;
+    write_session_state(&fs, "def-idx", payload).unwrap();
+    append_session_output(&fs, "def-idx", "raw1").unwrap();
+    let current_zone = agent_current_zone("def-idx");
+    write_zone_file(&fs, &current_zone, "output.idx", b"stale-idx-bytes").unwrap();
+
+    archive_session(&fs, "def-idx").unwrap().expect("archived");
+
+    assert!(
+        fs.stat(&current_zone, "output.idx").unwrap().is_none(),
+        ":current output.idx must be cleared with output"
     );
 }
 
