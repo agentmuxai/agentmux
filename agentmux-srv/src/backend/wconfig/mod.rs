@@ -8,11 +8,13 @@
 //! config watcher.
 
 mod loader;
+pub mod redact;
 pub mod types;
 mod watcher;
 
 // Re-export all public APIs so callers can continue using `wconfig::Type`.
 pub use loader::*;
+pub use redact::redact_full_config_for_renderer;
 pub use types::*;
 pub use watcher::*;
 

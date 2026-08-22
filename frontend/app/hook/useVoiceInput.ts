@@ -155,9 +155,26 @@ function createWebSpeechVoiceSession(): VoiceSession {
 }
 
 let _session: VoiceSession | null = null;
+// Which resolved mode `_session` was actually built for. Must be the FULL
+// three-way resolution, not just "webspeech vs. whisper" — createWhisperVoiceSession()
+// itself branches on "groq" vs. "whisper-local" internally (a captured-once
+// `isLocal` controlling webm vs. 16kHz-WAV capture), so a groq<->whisper-local
+// change needs a rebuild too, even though both route through that same
+// factory function. Collapsing them to one "whisper" bucket here would miss
+// exactly that transition.
+let _sessionMode: "webspeech" | "whisper-local" | "groq" | null = null;
 
+/**
+ * Settings -> Recording's engine picker (#2751) made `voice:engine` a live,
+ * user-facing switch for the first time — previously it was settings.json-only
+ * and effectively required an app restart to notice. `getVoiceSession()`'s
+ * singleton cache never accounted for the setting changing mid-session: the
+ * Whisper engine's `isLocal` (webm vs. 16kHz WAV capture) is captured once at
+ * construction, so switching engines left the frontend still recording in the
+ * old format while the backend immediately started expecting the new one —
+ * recording silently breaks until a full reload. Found in PR #2751 review.
+ */
 export function getVoiceSession(): VoiceSession {
-    if (_session) return _session;
     // Engine selection (SPEC_VOICE_STT_ENGINE_2026_06_20.md §5): the Web Speech
     // recognizer can't transcribe in CEF (closed-source Google service), so it's
     // used ONLY when explicitly opted into via `voice:engine: "webspeech"` AND
@@ -167,9 +184,19 @@ export function getVoiceSession(): VoiceSession {
     const hasWebSpeech =
         typeof window !== "undefined" &&
         !!((window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition);
-    _session =
-        engine === "webspeech" && hasWebSpeech
-            ? createWebSpeechVoiceSession()
-            : createWhisperVoiceSession();
+    const resolvedMode: "webspeech" | "whisper-local" | "groq" =
+        engine === "webspeech" && hasWebSpeech ? "webspeech" : engine === "whisper-local" ? "whisper-local" : "groq";
+
+    if (_session && _sessionMode !== resolvedMode) {
+        // The engine changed since this session was built — tear it down
+        // (stopping any in-progress capture cleanly) rather than leave a
+        // stale-mode session running.
+        if (_session.isListening()) _session.toggleListening();
+        _session = null;
+    }
+    if (_session) return _session;
+
+    _session = resolvedMode === "webspeech" ? createWebSpeechVoiceSession() : createWhisperVoiceSession();
+    _sessionMode = resolvedMode;
     return _session;
 }

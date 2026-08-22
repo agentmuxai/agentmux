@@ -81,7 +81,19 @@ export function RecordingSection(): JSX.Element {
     const enabled = () => (s()["voice:enabled"] as boolean) ?? true;
     const engine = () => (s()["voice:engine"] as string) ?? "groq";
     const whisperModel = () => (s()["voice:whisperModel"] as string) ?? "base.en";
-    const modelChoice = () => (WHISPER_MODEL_CHOICES.includes(whisperModel()) ? whisperModel() : "custom");
+    // An explicit voice:whisperModelPath always wins server-side (voice.rs),
+    // so treat its presence as "custom" regardless of whisperModel's value —
+    // otherwise a hand-edited settings.json with both keys set would silently
+    // hide the path that's actually in effect. `explicitCustom` covers the
+    // gap where the user has just clicked "custom path…" but hasn't typed a
+    // path yet (whisperModelPath is still empty at that point, so the above
+    // check alone wouldn't reveal the field).
+    const [explicitCustom, setExplicitCustom] = createSignal(false);
+    const modelChoice = () => {
+        if ((s()["voice:whisperModelPath"] as string | undefined)?.trim()) return "custom";
+        if (explicitCustom()) return "custom";
+        return WHISPER_MODEL_CHOICES.includes(whisperModel()) ? whisperModel() : "custom";
+    };
 
     // ── Device picker (§5) ───────────────────────────────────────────────────
     const [devices, setDevices] = createSignal<MediaDeviceInfo[]>([]);
@@ -104,11 +116,22 @@ export function RecordingSection(): JSX.Element {
     const [testResult, setTestResult] = createSignal<string | null>(null);
     let testStream: MediaStream | null = null;
     let testRecorder: MediaRecorder | null = null;
+    // Bumped by every runTest()/cancelTest() call. Async continuations
+    // (setTimeout callbacks, the fetch round-trip) capture the generation
+    // active when they were scheduled and check it's still current before
+    // touching state — otherwise a Cancel during an in-flight test could not
+    // stop it: stopping the recorder still fired its installed onstop (which
+    // then proceeded to transcribe), and a stale fetch response could
+    // overwrite state a new test had already moved past. See PR #2751 review.
+    let testGeneration = 0;
 
     const stopTest = () => {
         meter.stop();
-        if (testRecorder && testRecorder.state !== "inactive") {
-            try { testRecorder.stop(); } catch { /* ignore */ }
+        if (testRecorder) {
+            testRecorder.onstop = null; // don't let a deliberate stop trigger transcription
+            if (testRecorder.state !== "inactive") {
+                try { testRecorder.stop(); } catch { /* ignore */ }
+            }
         }
         testRecorder = null;
         if (testStream) {
@@ -120,14 +143,17 @@ export function RecordingSection(): JSX.Element {
 
     const runTest = async () => {
         stopTest();
+        const gen = ++testGeneration;
         setTestResult(null);
         setTestState("listening");
+        let stream: MediaStream;
         try {
             const deviceId = s()["voice:inputDeviceId"] as string | undefined;
             const constraint: boolean | MediaTrackConstraints =
                 deviceId && deviceId !== "default" ? { deviceId: { exact: deviceId } } : true;
-            testStream = await navigator.mediaDevices.getUserMedia({ audio: constraint });
+            stream = await navigator.mediaDevices.getUserMedia({ audio: constraint });
         } catch (e: any) {
+            if (gen !== testGeneration) return; // cancelled while awaiting the permission prompt
             setTestState("error");
             setTestResult(
                 e?.name === "NotAllowedError" || e?.name === "SecurityError"
@@ -136,6 +162,13 @@ export function RecordingSection(): JSX.Element {
             );
             return;
         }
+        if (gen !== testGeneration) {
+            // Cancelled while awaiting getUserMedia — this stream was never
+            // handed to stopTest(), so it's the only one that can leak it.
+            stream.getTracks().forEach((t) => t.stop());
+            return;
+        }
+        testStream = stream;
         // Unlocks real device labels for the picker (getUserMedia grant makes
         // enumerateDevices() return non-empty labels from here on).
         void refreshDevices();
@@ -147,38 +180,43 @@ export function RecordingSection(): JSX.Element {
         // end-to-end (misconfiguration is server-side-only).
         const isLocal = engine() === "whisper-local";
         window.setTimeout(() => {
-            if (!testStream) return; // stopped/cancelled before the clip started
-            const mime = isLocal ? "" : pickMime();
+            if (gen !== testGeneration || !testStream) return; // stopped/cancelled before the clip started
             if (isLocal) {
                 // whisper-local expects 16kHz mono WAV; recording that path's
                 // exact encoder here would duplicate whisperVoiceEngine.ts's
                 // ScriptProcessor pipeline. Keep the test flow's own capture
                 // simple (MediaRecorder) and let the user know local-engine
-                // testing isn't wired into this quick check yet.
+                // testing isn't wired into this quick check yet. Full
+                // stopTest() (not just meter.stop()) so the still-open mic
+                // stream from getUserMedia above is actually released —
+                // Cancel isn't shown once we're in the "error" state.
                 setTestState("error");
                 setTestResult(
                     "Quick mic test only validates capture + Groq for now. Save a whisper-cli path above, " +
                     "then try recording from an actual agent pane to validate the local engine end-to-end.",
                 );
-                meter.stop();
+                stopTest();
                 return;
             }
+            const mime = pickMime();
             const chunks: Blob[] = [];
-            testRecorder = new MediaRecorder(testStream, { mimeType: mime });
-            testRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-            testRecorder.onstop = () => {
+            const recorder = new MediaRecorder(testStream, { mimeType: mime });
+            testRecorder = recorder;
+            recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+            recorder.onstop = () => {
+                if (gen !== testGeneration) return; // stopTest() cleared onstop before calling stop(); belt-and-suspenders
                 meter.stop();
                 setTestState("transcribing");
-                void transcribeTestClip(new Blob(chunks, { type: mime }), mime);
+                void transcribeTestClip(gen, new Blob(chunks, { type: mime }), mime);
             };
-            testRecorder.start();
+            recorder.start();
             window.setTimeout(() => {
-                if (testRecorder && testRecorder.state !== "inactive") testRecorder.stop();
+                if (gen === testGeneration && recorder.state !== "inactive") recorder.stop();
             }, 2500);
         }, 1200);
     };
 
-    const transcribeTestClip = async (blob: Blob, mime: string) => {
+    const transcribeTestClip = async (gen: number, blob: Blob, mime: string) => {
         try {
             const base = getWebServerEndpoint();
             const url = `${base}/api/v1/voice/transcribe?mime=${encodeURIComponent(mime)}`;
@@ -187,22 +225,27 @@ export function RecordingSection(): JSX.Element {
                 headers: { "X-AuthKey": getApi()?.getAuthKey?.() ?? "", "Content-Type": mime },
                 body: blob,
             });
+            if (gen !== testGeneration) return; // cancelled (or superseded by a new test) while the request was in flight
             if (!resp.ok) {
                 const detail = await resp.json().then((d: any) => d?.error).catch(() => null);
+                if (gen !== testGeneration) return;
                 setTestState("error");
                 setTestResult(detail ?? `Transcription failed (${resp.status}).`);
                 return;
             }
             const data = (await resp.json()) as { text?: string };
+            if (gen !== testGeneration) return;
             setTestState("done");
             setTestResult((data.text || "").trim() || "(no speech detected)");
         } catch (e) {
+            if (gen !== testGeneration) return;
             setTestState("error");
             setTestResult(e instanceof Error ? e.message : "Request failed.");
         }
     };
 
     const cancelTest = () => {
+        testGeneration++; // invalidate any in-flight continuation before tearing down
         stopTest();
         setTestState("idle");
     };
@@ -263,7 +306,16 @@ export function RecordingSection(): JSX.Element {
                                 value={modelChoice()}
                                 onChange={(e) => {
                                     const v = e.currentTarget.value;
-                                    if (v !== "custom") set("voice:whisperModel", v);
+                                    if (v === "custom") {
+                                        setExplicitCustom(true);
+                                    } else {
+                                        setExplicitCustom(false);
+                                        // A named model takes over — clear any stale explicit
+                                        // path so the two settings can't silently disagree
+                                        // about which one the backend actually uses.
+                                        set("voice:whisperModelPath", null);
+                                        set("voice:whisperModel", v);
+                                    }
                                 }}
                             >
                                 <For each={WHISPER_MODEL_CHOICES}>{(m) => <option value={m}>{m}</option>}</For>
