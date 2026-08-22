@@ -12,6 +12,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { WorkspaceService } from "@/app/store/services";
 import { workspace } from "@/app/store/window-identity";
 import { createBlockOnModel, resolveBlockDef, waitForLayoutModel } from "./tab-presets";
+import { HISTORY_SOURCE_BLOCK_ID_META_KEY, HISTORY_TAB_FOR_META_KEY } from "@/app/view/agent/open-history-tab";
 import { Logger } from "@/util/logger";
 
 export interface ActiveAgentForTab {
@@ -33,8 +34,24 @@ export interface ActiveAgentForTab {
  * `persist_session_id` on every new CLI session capture, per
  * `agentmux-srv/src/backend/blockcontroller/core.rs`).
  *
- * Returns `null` for an empty tab, a non-agent-view block, or a tab with
- * nothing focused.
+ * **Agent History readers are not live agents** (reagent's review of PR
+ * #2727 caught this): `openOrFocusHistoryTab` creates a block with the
+ * SAME `agentId` as the live agent it's a history view of, but it's
+ * never actually launched — no `agent:sessionid` ever gets set on it.
+ * `agent-model.ts` already excludes these (`meta[HISTORY_TAB_FOR_META_KEY]`)
+ * when deciding whether an agent action applies; naively treating one as
+ * "the active agent" here would resolve the right `definitionId` but an
+ * empty `sessionId`, silently producing a no-history fork with no warning
+ * — exactly the failure mode this feature exists to prevent. Rather than
+ * just failing when the focused block turns out to be a history reader,
+ * this falls back to the reader's own recorded source block
+ * (`HISTORY_SOURCE_BLOCK_ID_META_KEY`, set at creation time) and resolves
+ * *that* block's meta instead — a tab showing an agent's history still
+ * has a real agent to fork, one hop away.
+ *
+ * Returns `null` for an empty tab, a non-agent-view block, a tab with
+ * nothing focused, or a history reader whose recorded source block no
+ * longer resolves to a live agent either.
  */
 export function resolveActiveAgentForTab(tabId: string): ActiveAgentForTab | null {
     const layoutModel = getLayoutModelForTabById(tabId);
@@ -43,14 +60,32 @@ export function resolveActiveAgentForTab(tabId: string): ActiveAgentForTab | nul
     if (!node) return null;
     const blockId: string | undefined = node.data?.activeBlockId || node.data?.blockId;
     if (!blockId) return null;
+
+    const resolved = resolveAgentBlock(blockId);
+    if (!resolved) return null;
+    if (resolved.meta[HISTORY_TAB_FOR_META_KEY]) {
+        const sourceBlockId = resolved.meta[HISTORY_SOURCE_BLOCK_ID_META_KEY] as string | undefined;
+        if (!sourceBlockId) return null;
+        const source = resolveAgentBlock(sourceBlockId);
+        if (!source) return null;
+        return {
+            blockId: sourceBlockId,
+            definitionId: source.meta.agentId as string,
+            sessionId: (source.meta["agent:sessionid"] as string) ?? "",
+        };
+    }
+    return {
+        blockId,
+        definitionId: resolved.meta.agentId as string,
+        sessionId: (resolved.meta["agent:sessionid"] as string) ?? "",
+    };
+}
+
+function resolveAgentBlock(blockId: string): { meta: MetaType } | null {
     const block = WOS.getObjectValue<Block>(WOS.makeORef("block", blockId));
     const meta = block?.meta;
     if (!meta || meta.view !== "agent" || !meta.agentId) return null;
-    return {
-        blockId,
-        definitionId: meta.agentId as string,
-        sessionId: (meta["agent:sessionid"] as string) ?? "",
-    };
+    return { meta };
 }
 
 /**

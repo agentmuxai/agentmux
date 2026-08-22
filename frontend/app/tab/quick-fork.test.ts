@@ -60,6 +60,14 @@ vi.mock("@/util/logger", () => ({
     Logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
 
+// Real string constants, mocked directly (not the real module) to avoid
+// pulling in open-history-tab.ts's own dependency graph (WOS, TabRpcClient,
+// etc.) into this unit test.
+vi.mock("@/app/view/agent/open-history-tab", () => ({
+    HISTORY_TAB_FOR_META_KEY: "agent:historyTabFor",
+    HISTORY_SOURCE_BLOCK_ID_META_KEY: "agent:historySourceBlockId",
+}));
+
 describe("resolveActiveAgentForTab", () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -114,6 +122,63 @@ describe("resolveActiveAgentForTab", () => {
             blockId: "block-1",
             definitionId: "def-1",
             sessionId: "",
+        });
+    });
+
+    // reagent's review of PR #2727 — an Agent History reader shares the
+    // live agent's `agentId` but is never itself launched (no
+    // agent:sessionid), so naively treating it as "the active agent"
+    // would silently fork with an empty session and no history, no warning.
+    describe("Agent History reader exclusion (reagent's review of PR #2727)", () => {
+        it("falls back to the reader's recorded source block, not the reader itself", () => {
+            focusedNode.mockReturnValue({ data: { blockId: "history-block" } });
+            getObjectValue.mockImplementation((oref: string) => {
+                if (oref === "block:history-block") {
+                    return {
+                        meta: {
+                            view: "agent",
+                            agentId: "def-1",
+                            "agent:historyTabFor": "def-1",
+                            "agent:historySourceBlockId": "live-block",
+                        },
+                    };
+                }
+                if (oref === "block:live-block") {
+                    return { meta: { view: "agent", agentId: "def-1", "agent:sessionid": "sid-live" } };
+                }
+                return undefined;
+            });
+            expect(resolveActiveAgentForTab("tab-1")).toEqual({
+                blockId: "live-block",
+                definitionId: "def-1",
+                sessionId: "sid-live",
+            });
+        });
+
+        it("returns null when a history reader has no recorded source block", () => {
+            focusedNode.mockReturnValue({ data: { blockId: "history-block" } });
+            getObjectValue.mockReturnValue({
+                meta: { view: "agent", agentId: "def-1", "agent:historyTabFor": "def-1" },
+            });
+            expect(resolveActiveAgentForTab("tab-1")).toBeNull();
+        });
+
+        it("returns null when a history reader's recorded source block no longer resolves to a live agent", () => {
+            focusedNode.mockReturnValue({ data: { blockId: "history-block" } });
+            getObjectValue.mockImplementation((oref: string) => {
+                if (oref === "block:history-block") {
+                    return {
+                        meta: {
+                            view: "agent",
+                            agentId: "def-1",
+                            "agent:historyTabFor": "def-1",
+                            "agent:historySourceBlockId": "gone-block",
+                        },
+                    };
+                }
+                return undefined; // source block deleted/gone
+            });
+            expect(resolveActiveAgentForTab("tab-1")).toBeNull();
         });
     });
 });
