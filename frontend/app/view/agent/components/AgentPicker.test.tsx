@@ -274,6 +274,14 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         const hint = await screen.findByTestId("agent-templates-hint");
         expect(hint).toHaveTextContent("harness");
         expect(hint).toHaveTextContent("model");
+        // Regression guard: a JSX line break directly after a </strong>
+        // closing tag drops the whitespace entirely instead of preserving
+        // it, rendering "model" and "it" concatenated as "modelit" — a
+        // substring check for "model" alone doesn't catch this (it's
+        // still a substring of "modelit"). Assert the exact word boundary
+        // instead.
+        expect(hint.textContent).toContain("model it uses next");
+        expect(hint.textContent).not.toMatch(/model[a-z]/i);
     });
 
     it("clicks on a template open the create-from-template modal", async () => {
