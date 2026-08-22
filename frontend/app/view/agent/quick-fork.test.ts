@@ -83,6 +83,8 @@ describe("quickForkAgent", () => {
         resolveProviderAlias.mockImplementation((id: string) => id);
         listAgentIdentitiesCommand.mockResolvedValue([]);
         setMetaCommand.mockResolvedValue(undefined);
+        closeBlockInStack.mockResolvedValue(undefined);
+        deleteBlock.mockResolvedValue(undefined);
     });
 
     afterEach(() => {
@@ -204,6 +206,35 @@ describe("quickForkAgent", () => {
         forkAgentDefinitionCommand.mockRejectedValue(new Error("boom"));
         expect(await quickForkAgent(model)).toBe(false);
         expect(launchAgentDefinition).not.toHaveBeenCalled();
+        // No block was ever created at this point — nothing to clean up.
+        expect(closeBlockInStack).not.toHaveBeenCalled();
+        expect(deleteBlock).not.toHaveBeenCalled();
+    });
+
+    // Codex's third-round review of PR #2746: launchAgentDefinition's own
+    // doc comment claims it never throws, but several of its awaited calls
+    // (resolveEffectiveLaunchProvider, checkNodejsForProvider, ensureAuthDir)
+    // run unguarded before its own internal try/catches — so it CAN reject,
+    // not just resolve to false, and by then the block has already been
+    // pushed onto the stack.
+    it("pops the new block back out of the stack when launchAgentDefinition itself REJECTS (not just resolves false)", async () => {
+        launchAgentDefinition.mockRejectedValue(new Error("boom"));
+        expect(await quickForkAgent(model)).toBe(false);
+        expect(closeBlockInStack).toHaveBeenCalledWith(expect.anything(), "node-1", "new-block-1");
+        expect(pushNotification).toHaveBeenCalledWith(
+            expect.objectContaining({ type: "error", title: "Quick-fork failed" }),
+        );
+    });
+
+    it("deletes the orphaned block directly (not closeBlockInStack) if the source pane is ALSO gone when launchAgentDefinition rejects", async () => {
+        launchAgentDefinition.mockRejectedValue(new Error("boom"));
+        getNodeByBlockId
+            .mockReturnValueOnce({ id: "node-1", data: { blockStack: ["source-block"] } }) // initial check
+            .mockReturnValueOnce({ id: "node-1", data: { blockStack: ["source-block"] } }) // pre-push re-check
+            .mockReturnValueOnce(undefined); // catch-block cleanup lookup
+        expect(await quickForkAgent(model)).toBe(false);
+        expect(closeBlockInStack).not.toHaveBeenCalled();
+        expect(deleteBlock).toHaveBeenCalledWith("new-block-1");
     });
 
     it("deletes the orphaned skip_placement block and returns false if the pane closed while the RPCs were in flight", async () => {

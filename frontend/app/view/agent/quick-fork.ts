@@ -121,6 +121,30 @@ export async function quickForkAgent(
     // closes that race.
     const ownerTabId = atoms.activeTabId();
 
+    // Declared outside the try so the catch block below can tell whether a
+    // block was actually pushed onto the stack before the failure — only
+    // then is there something to clean up. `launchAgentDefinition`'s own
+    // doc comment claims it never throws, but that guarantee only covers
+    // its OWN internal try/catches; `resolveEffectiveLaunchProvider`,
+    // `checkNodejsForProvider`, and `ensureAuthDir` all run unguarded
+    // before those (Codex's review of this PR), so a launch can genuinely
+    // reject here, not just resolve to `false`.
+    let paneOpenResult: { block_id: string } | undefined;
+
+    const cleanupPushedBlock = async () => {
+        if (!paneOpenResult) return;
+        const currentNode = layoutModel.getNodeByBlockId(model.blockId);
+        if (currentNode) {
+            await closeBlockInStack(layoutModel, currentNode.id, paneOpenResult.block_id).catch((e: any) =>
+                Logger.warn("quick-fork", "failed to clean up the failed fork's block", { error: String(e) }),
+            );
+        } else {
+            // Source pane is gone too — nothing to pop out of, just delete
+            // the orphaned block directly.
+            await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
+        }
+    };
+
     try {
         const forkedDef = await RpcApi.ForkAgentDefinitionCommand(TabRpcClient, {
             source_id: definitionId,
@@ -157,7 +181,7 @@ export async function quickForkAgent(
         // Allocate the new block WITHOUT placing it — same primitive
         // open-history-tab.ts / handleNewAgentTab (agent-view.tsx) use to
         // add a sibling into THIS pane's own stack.
-        const paneOpenResult = (await TabRpcClient.rpcCall(
+        paneOpenResult = (await TabRpcClient.rpcCall(
             "pane.open",
             { view: "agent", skip_placement: true, tab_id: ownerTabId, meta: { view: "agent" } },
             {},
@@ -193,9 +217,7 @@ export async function quickForkAgent(
             // Don't leave the user on a blank/broken pane-stack tab — pop it
             // back out and delete the block, same as the "pane closed
             // mid-flight" cleanup above (Codex P2 on PR #2746).
-            await closeBlockInStack(layoutModel, freshNode.id, paneOpenResult.block_id).catch((e: any) =>
-                Logger.warn("quick-fork", "failed to clean up the failed fork's block", { error: String(e) }),
-            );
+            await cleanupPushedBlock();
             // The cleanup above is otherwise silent — without this, the fork
             // just flashes in and back out with no indication anything went
             // wrong (Codex's second-round review of PR #2746).
@@ -218,6 +240,16 @@ export async function quickForkAgent(
         return launched;
     } catch (e: any) {
         Logger.error("quick-fork", "failed", { error: String(e) });
+        // launchAgentDefinition's own doc comment claims it never throws,
+        // but that only covers its internal try/catches — several awaited
+        // calls inside it (resolveEffectiveLaunchProvider,
+        // checkNodejsForProvider, ensureAuthDir) run unguarded before
+        // those, so a rejection here CAN happen after the block was
+        // already pushed onto the stack (Codex's review of this PR).
+        // cleanupPushedBlock() is a no-op if paneOpenResult was never set
+        // (e.g. ForkAgentDefinitionCommand itself failed, before any block
+        // existed to clean up).
+        await cleanupPushedBlock();
         pushNotification({
             icon: "fa-triangle-exclamation",
             title: "Quick-fork failed",
