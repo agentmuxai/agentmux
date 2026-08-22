@@ -11,6 +11,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { WorkspaceService } from "@/app/store/services";
 import { workspace } from "@/app/store/window-identity";
+import { createBlockOnModel, resolveBlockDef, waitForLayoutModel } from "./tab-presets";
 import { Logger } from "@/util/logger";
 
 export interface ActiveAgentForTab {
@@ -74,13 +75,21 @@ export function resolveActiveAgentForTab(tabId: string): ActiveAgentForTab | nul
  * on the SOURCE pane rather than the new one — acceptable, not a
  * correctness issue, and no worse than not surfacing it at all).
  *
- * The new tab's block is created via `pane.open` with an explicit
- * `tab_id` (`agentmux-srv/src/server/app_api/mod.rs`'s `open_pane`:
- * "explicit tab_id wins") rather than the `skip_placement` +
- * `pushBlockOntoStack` two-step the in-pane fork-tab-strip uses — that
- * dance exists specifically for placing a block into the CURRENT pane's
- * own stack; a brand-new tab has its own empty layout to place into
- * directly, in one RPC.
+ * The new tab's block is created via `waitForLayoutModel` +
+ * `createBlockOnModel` (`tab-presets.ts` — the same path
+ * `applyTabPreset` uses for every freshly-created tab), **not** a raw
+ * `pane.open` with an explicit `tab_id`. Codex's review of PR #2727
+ * caught that the two are NOT equivalent for a brand-new tab, and
+ * `tab-presets.ts`'s own doc comment documents this as an empirically
+ * confirmed gap, not a hypothetical one: a `pane.open` call against a
+ * freshly created `tab_id` succeeds server-side with zero errors (block
+ * created, layout updated) and STILL never renders, because the new
+ * tab's client-side layout model isn't yet subscribed to receive the
+ * backend's `layout:update` broadcast for that specific tab — even after
+ * confirming the tab object itself exists. `createBlockOnModel` sidesteps
+ * this entirely by mutating the local layout tree directly
+ * (`layoutModel.treeReducer`), the same reactive path a normal `Cmd+T`
+ * new tab already uses.
  *
  * @returns the new tab id on success, or `null` if the source tab has no
  *   active agent to fork, or any step failed. Errors are logged, not
@@ -117,11 +126,17 @@ export async function quickForkTabToNewTab(sourceTabId: string): Promise<string 
 
         const newTabId = await WorkspaceService.CreateTab(ws.oid, forkedDef.name, true, false);
 
-        const paneOpenResult = (await TabRpcClient.rpcCall(
-            "pane.open",
-            { view: "agent", tab_id: newTabId, meta: { view: "agent" } },
-            {}
-        )) as { block_id: string };
+        const layoutModel = await waitForLayoutModel(newTabId);
+        if (!layoutModel) {
+            Logger.error("quick-fork", "new tab's layout model never became ready", { newTabId });
+            return null;
+        }
+        const blockDef = resolveBlockDef("defwidget@agent");
+        if (!blockDef) {
+            Logger.error("quick-fork", "could not resolve the agent widget's blockdef");
+            return null;
+        }
+        const newBlockId = await createBlockOnModel(newTabId, layoutModel, blockDef, null, null);
 
         const launched = await sourceModel.launchAgentDefinition(
             forkedDef,
@@ -137,7 +152,7 @@ export async function quickForkTabToNewTab(sourceTabId: string): Promise<string 
                 continueSessionId: active.sessionId,
                 forkSession: true,
             },
-            paneOpenResult.block_id,
+            newBlockId,
             newTabId
         );
         if (!launched) {

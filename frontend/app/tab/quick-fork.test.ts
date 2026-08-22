@@ -28,9 +28,8 @@ vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: { ForkAgentDefinitionCommand: (...args: unknown[]) => forkAgentDefinitionCommand(...args) },
 }));
 
-const rpcCall = vi.fn();
 vi.mock("@/app/store/rpc-util", () => ({
-    TabRpcClient: { rpcCall: (...args: unknown[]) => rpcCall(...args) },
+    TabRpcClient: {},
 }));
 
 const createTab = vi.fn();
@@ -41,6 +40,20 @@ vi.mock("@/app/store/services", () => ({
 const workspace = vi.fn();
 vi.mock("@/app/store/window-identity", () => ({
     workspace: () => workspace(),
+}));
+
+// The proven create+place path (Codex's review of PR #2727): a raw
+// pane.open with an explicit tab_id looks correct but is confirmed NOT
+// equivalent for a brand-new tab (see quick-fork.ts's own doc comment) —
+// waitForLayoutModel + createBlockOnModel is the only path that actually
+// renders.
+const waitForLayoutModel = vi.fn();
+const createBlockOnModel = vi.fn();
+const resolveBlockDef = vi.fn();
+vi.mock("./tab-presets", () => ({
+    waitForLayoutModel: (...args: unknown[]) => waitForLayoutModel(...args),
+    createBlockOnModel: (...args: unknown[]) => createBlockOnModel(...args),
+    resolveBlockDef: (...args: unknown[]) => resolveBlockDef(...args),
 }));
 
 vi.mock("@/util/logger", () => ({
@@ -117,7 +130,9 @@ describe("quickForkTabToNewTab", () => {
         workspace.mockReturnValue({ oid: "ws-1" });
         forkAgentDefinitionCommand.mockResolvedValue({ id: "forked-def", name: "X #2", agent_type: "host" });
         createTab.mockResolvedValue("new-tab-1");
-        rpcCall.mockResolvedValue({ block_id: "new-block-1" });
+        waitForLayoutModel.mockResolvedValue({ treeReducer: vi.fn() });
+        resolveBlockDef.mockReturnValue({ meta: { view: "agent" } });
+        createBlockOnModel.mockResolvedValue("new-block-1");
         launchAgentDefinition.mockResolvedValue(true);
     });
 
@@ -143,7 +158,7 @@ describe("quickForkTabToNewTab", () => {
         expect(forkAgentDefinitionCommand).not.toHaveBeenCalled();
     });
 
-    it("forks the definition, creates a new tab, opens a block into it via an explicit tab_id, and launches with history carryover + unbound identity", async () => {
+    it("forks the definition, creates a new tab, places a block via the proven layout-model path, and launches with history carryover + unbound identity", async () => {
         const newTabId = await quickForkTabToNewTab("tab-1");
 
         expect(forkAgentDefinitionCommand).toHaveBeenCalledWith(
@@ -151,13 +166,18 @@ describe("quickForkTabToNewTab", () => {
             { source_id: "source-def", branch_label: "" }
         );
         expect(createTab).toHaveBeenCalledWith("ws-1", "X #2", true, false);
-        // pane.open must place the block directly into the NEW tab via an
-        // explicit tab_id (open_pane's "explicit tab_id wins" path) — not
-        // skip_placement, which is the different in-pane block-stack dance.
-        expect(rpcCall).toHaveBeenCalledWith(
-            "pane.open",
-            { view: "agent", tab_id: "new-tab-1", meta: { view: "agent" } },
-            {}
+        // Must go through waitForLayoutModel + createBlockOnModel, NOT a raw
+        // pane.open with an explicit tab_id — confirmed (Codex's review of
+        // PR #2727, quick-fork.ts's own doc comment) that pane.open succeeds
+        // server-side but never renders for a brand-new tab.
+        expect(waitForLayoutModel).toHaveBeenCalledWith("new-tab-1");
+        expect(resolveBlockDef).toHaveBeenCalledWith("defwidget@agent");
+        expect(createBlockOnModel).toHaveBeenCalledWith(
+            "new-tab-1",
+            { treeReducer: expect.any(Function) },
+            { meta: { view: "agent" } },
+            null,
+            null
         );
         expect(launchAgentDefinition).toHaveBeenCalledTimes(1);
         const [forkedDef, overrides, targetBlockId, targetTabId] = launchAgentDefinition.mock.calls[0];
@@ -182,5 +202,19 @@ describe("quickForkTabToNewTab", () => {
     it("returns null if ForkAgentDefinitionCommand rejects", async () => {
         forkAgentDefinitionCommand.mockRejectedValue(new Error("boom"));
         expect(await quickForkTabToNewTab("tab-1")).toBeNull();
+    });
+
+    it("returns null (does not fall back to pane.open) if the new tab's layout model never becomes ready", async () => {
+        waitForLayoutModel.mockResolvedValue(null);
+        expect(await quickForkTabToNewTab("tab-1")).toBeNull();
+        expect(createBlockOnModel).not.toHaveBeenCalled();
+        expect(launchAgentDefinition).not.toHaveBeenCalled();
+    });
+
+    it("returns null if the agent widget's blockdef can't be resolved", async () => {
+        resolveBlockDef.mockReturnValue(null);
+        expect(await quickForkTabToNewTab("tab-1")).toBeNull();
+        expect(createBlockOnModel).not.toHaveBeenCalled();
+        expect(launchAgentDefinition).not.toHaveBeenCalled();
     });
 });
