@@ -9,6 +9,17 @@
     border-radius: 0;
 }
 
+// Bookmark row favicon in the bookmarks FlyoutMenu — `.menu-item-icon`
+// (flyoutmenu.scss) sizes the icon slot itself (width/margin/opacity);
+// this adds the image-specific sizing an <img> needs that a font-icon
+// doesn't (height, object-fit, no inline whitespace gap).
+.browser-bookmark-favicon {
+    height: 14px;
+    object-fit: contain;
+    display: block;
+    border-radius: 0;
+}
+
 .browser-view {
     display: flex;
     flex-direction: column;

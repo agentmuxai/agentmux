@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import clsx from "clsx";
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
@@ -9,6 +10,33 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { findBookmark, toggleBookmark } from "./browser-bookmarks-logic";
 import type { BrowserViewModel } from "./browser-model";
+
+/**
+ * A saved bookmark's favicon, falling back to the app's existing "no
+ * favicon" convention (a plain globe icon, matching
+ * `BrowserViewModel.viewIcon`/faviconUrlAtom's own empty-string fallback)
+ * when there's no favicon_url, or the image fails to load. A real `<img>`
+ * — not a FontAwesome name — since `MenuItem.icon` is typed
+ * `string | JSX.Element` specifically to allow this; FlyoutMenu's default
+ * item renderer only handles the string case, so this is paired with a
+ * `renderMenuItem` override below that renders a JSX.Element icon as-is.
+ */
+function BookmarkFavicon(props: { faviconUrl: string }): JSX.Element {
+    const [failed, setFailed] = createSignal(false);
+    return (
+        <Show
+            when={props.faviconUrl && !failed()}
+            fallback={<i class="fa-solid fa-fw fa-globe menu-item-icon" aria-hidden="true" />}
+        >
+            <img
+                src={props.faviconUrl}
+                class="menu-item-icon browser-bookmark-favicon"
+                onError={() => setFailed(true)}
+                alt=""
+            />
+        </Show>
+    );
+}
 
 // Compact tag for an Element — used by diag log lines to identify the
 // previous/next active element across focus transitions.
@@ -144,13 +172,54 @@ export function BrowserNavBar(props: {
     const [bookmarks, setBookmarks] = createSignal<BrowserBookmark[]>([]);
     const [bookmarksLoading, setBookmarksLoading] = createSignal(false);
     const [bookmarksError, setBookmarksError] = createSignal<string | null>(null);
+    // True once loadBookmarks() has resolved successfully at least once in
+    // this pane's lifetime. Gates the "Loading…" placeholder to the very
+    // first fetch only — see loadBookmarks' comment below for why later
+    // opens must NOT flip bookmarksLoading (ReAgent P1, PR #2733).
+    const [hasLoadedBookmarksOnce, setHasLoadedBookmarksOnce] = createSignal(false);
+
+    /** Field-by-field equality, not reference equality — used to decide
+     *  whether a fresh RPC read actually changed anything worth
+     *  re-rendering for (see loadBookmarks below). */
+    const bookmarkListsEqual = (a: BrowserBookmark[], b: BrowserBookmark[]): boolean =>
+        a.length === b.length &&
+        a.every((item, i) => {
+            const other = b[i];
+            return (
+                item.id === other.id &&
+                item.title === other.title &&
+                item.url === other.url &&
+                item.favicon_url === other.favicon_url
+            );
+        });
 
     const loadBookmarks = async () => {
-        setBookmarksLoading(true);
+        // Only show the transient "Loading…" placeholder before the very
+        // first successful load in this pane's lifetime. Every subsequent
+        // menu-open refresh keeps rendering the last-known list while the
+        // fresh fetch resolves in the background — flipping
+        // bookmarksLoading on every open (as this used to, unconditionally)
+        // forced bookmarkMenuItems' createMemo to rebuild a fresh
+        // MenuItem[] (fresh <BookmarkFavicon> elements) TWICE per open, and
+        // since Solid's <For> (inside FlyoutMenu) diffs by reference, that
+        // tore down and remounted every saved bookmark's <img> — reloading
+        // every favicon over the network on every single menu open, not
+        // just the first (ReAgent P1, PR #2733).
+        if (!hasLoadedBookmarksOnce()) setBookmarksLoading(true);
         setBookmarksError(null);
         try {
             const result = await RpcApi.ListBookmarksCommand(TabRpcClient);
-            setBookmarks(result.bookmarks ?? []);
+            const next = result.bookmarks ?? [];
+            // Skip the signal write entirely when nothing actually
+            // changed — keeps the same array/object references so
+            // bookmarkMenuItems' memo doesn't rerun and <For> never
+            // touches the DOM for unchanged rows. A real change (another
+            // window added/removed/edited a bookmark since last open)
+            // still updates normally.
+            if (!bookmarkListsEqual(bookmarks(), next)) {
+                setBookmarks(next);
+            }
+            setHasLoadedBookmarksOnce(true);
         } catch (e) {
             setBookmarksError(`Failed to load bookmarks: ${(e as Error).message ?? e}`);
         } finally {
@@ -206,14 +275,19 @@ export function BrowserNavBar(props: {
     // means the "grows to the bottom of the window, then scrolls
     // internally" behavior (computeMenuPosition's size() middleware,
     // frontend/app/util/menu-position.ts) and edge-flip/click-outside-close
-    // come for free — nothing bookmark-specific to build there. `icon`
-    // uses a plain FontAwesome name (consistent with every other menu item
-    // in the app) rather than a live per-site favicon image — FlyoutMenu's
-    // default item renderer only supports FA icon-name strings, and
-    // special-casing an `<img>` via `renderMenuItem` would be new,
-    // unprecedented surface in a shared component for a purely cosmetic
-    // upgrade, not worth it for v1.
+    // come for free — nothing bookmark-specific to build there. Saved-
+    // bookmark rows use a real per-site favicon (`BookmarkFavicon`, a
+    // JSX.Element) rather than a FontAwesome name — FlyoutMenu's default
+    // item renderer only handles the string-icon case, so the `<FlyoutMenu>`
+    // below carries a `renderMenuItem` override that renders a JSX.Element
+    // icon as-is and falls back to the default fa-${icon} rendering for the
+    // pinned toggle row / placeholder rows, which still use string icons.
     const bookmarkMenuItems = createMemo<MenuItem[]>(() => {
+        // Only true before the first-ever successful loadBookmarks() call
+        // (see its own comment) — every later menu open keeps rendering
+        // the previous list below instead of bouncing through this branch,
+        // so saved bookmarks' <img> favicons are never torn down and
+        // remounted just because the menu was reopened.
         if (bookmarksLoading()) {
             // No icon here (deliberately): FlyoutMenu's default item
             // renderer only ever applies `fa-solid fa-fw fa-${item.icon}` —
@@ -241,7 +315,7 @@ export function BrowserNavBar(props: {
             for (const b of saved) {
                 items.push({
                     label: b.title || b.url,
-                    icon: "bookmark",
+                    icon: <BookmarkFavicon faviconUrl={b.favicon_url ?? ""} />,
                     onClick: () => navigateTo(b.url),
                 });
             }
@@ -280,6 +354,27 @@ export function BrowserNavBar(props: {
                     onOpenChange={(open) => {
                         if (open) void loadBookmarks();
                     }}
+                    // Only the icon slot is customized here — label/onClick/
+                    // divider behavior is identical to FlyoutMenu's default
+                    // rendering. `checked`/`shortcut`/`subItems` are
+                    // deliberately not replicated since this menu never uses
+                    // them (v1 has no folders/radio state) — not a general-
+                    // purpose replacement for the default renderer.
+                    renderMenuItem={(item, menuItemProps) => (
+                        <div {...menuItemProps}>
+                            <Show
+                                when={typeof item.icon !== "string"}
+                                fallback={
+                                    <Show when={item.icon}>
+                                        <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} />
+                                    </Show>
+                                }
+                            >
+                                {item.icon as JSX.Element}
+                            </Show>
+                            <span class="label">{item.label}</span>
+                        </div>
+                    )}
                 >
                     <button
                         class="browser-nav-btn"
