@@ -36,6 +36,7 @@ node ~/.agentmux/shell/muxspect.mjs dock <block_id>
 node ~/.agentmux/shell/muxspect.mjs dock clear <block_id> <node_id>
 node ~/.agentmux/shell/muxspect.mjs conversations
 node ~/.agentmux/shell/muxspect.mjs conversation <agent>
+node ~/.agentmux/shell/muxspect.mjs find <block_id_or_agent>
 node ~/.agentmux/shell/muxspect.mjs help
 ```
 
@@ -97,6 +98,25 @@ This is Phase A of `docs/specs/SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_
 — it does not reach LAN or WAN conversation content (Phase B/C, not yet
 built, and gated on an explicit repo-owner-confirmed addition to
 `CLAUDE.md`'s jekt security rules before they can be).
+
+## Finding which instance has a block/agent (`find`)
+
+`find <block_id_or_agent>` answers "which running instance(s), if any, have
+a controller or subagent dispatch matching this" — checks this instance
+first, then every other channel via the shared reactive registry, with a
+forwarded lookup only for a channel that actually matches (no network calls
+wasted on channels that don't). A UUID-shaped argument is sent as a
+`block_id` query; anything else as an `agent` name query.
+
+```bash
+muxspect find 71a6b2ae-b651-43aa-aed4-6121f24fd713
+muxspect find Korp
+```
+
+An empty result is a legitimate answer — "not found on this host, in any
+known channel" — not an error. Same LAN/WAN boundary as `conversations`
+above (host + cross-channel only). See
+`docs/specs/SPEC_MUXSPECT_CROSS_INSTANCE_FIND_2026_08_22.md`.
 
 ## What it can and can't see
 

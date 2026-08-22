@@ -216,6 +216,192 @@ pub async fn handle_muxspect_describe(
     .into_response()
 }
 
+#[derive(serde::Deserialize)]
+pub struct MuxspectFindQuery {
+    pub block_id: Option<String>,
+    pub agent: Option<String>,
+}
+
+/// `GET /api/v1/muxspect/find?block_id=X` or `?agent=X` — Ext 4 of
+/// `docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md`:
+/// "which running instance(s), if any, have a controller or subagent
+/// dispatch matching block_id/agent X" — the query that debugging session
+/// needed and had no tool for, ending in manual filesystem/env-var
+/// archaeology across every channel by hand.
+///
+/// Checks THIS instance first (host tier, no network) via the same
+/// `ProcessBroker::list()` `handle_muxspect_list` uses (so "found" here
+/// means the same thing `muxspect list` would show, not a different
+/// existence check invented for this endpoint) and, for an `agent` query,
+/// `reactive_handler.list_agents()` (same source `handle_muxspect_conversations`'s
+/// host tier and `verify-sender` use).
+///
+/// Then checks every OTHER channel via the shared reactive registry
+/// (`resolve_shared_reactive_dir` + `list_all_shared` — the exact mechanism
+/// `handle_muxspect_conversations`'s cross-channel tier already uses, see
+/// that handler's own doc comment for the security rationale) WITHOUT any
+/// network call at all for basic existence: `AgentEntry` already carries
+/// `block_id`/`agent_id`/`channel`/`local_url`, so a match there already
+/// answers "which channel" before any forwarding happens. Only a MATCHED
+/// cross-channel entry gets a forwarded `describe` call (same
+/// single-forwarded-hop / timeout discipline as the conversations handler)
+/// to fill in process/controller detail — unmatched channels cost nothing.
+///
+/// Always 200 — zero results is a legitimate answer ("not found on this
+/// host, in any known channel"), not an error, same posture as every other
+/// handler in this file. `results` can have more than one entry only if the
+/// same block_id/agent name somehow exists in more than one place at once
+/// (a real, worth-surfacing anomaly, not something to silently collapse to
+/// the first match).
+///
+/// **Cross-channel `block_id` scope (reagent P2 on PR #2745):** the
+/// cross-channel tier only searches the shared `AgentEntry` registry —
+/// agent-registered blocks. A plain shell/terminal block, or any other
+/// non-agent controller, in a DIFFERENT channel is not findable by
+/// `block_id` here (the host tier above has no such limit — it searches
+/// this instance's FULL `ProcessBroker::list()`, any controller type).
+/// Reaching a non-agent controller cross-channel would need a remote
+/// `/api/v1/muxspect/list`-style forward-and-filter, not just a registry
+/// lookup — out of scope for this change; see
+/// `SPEC_MUXSPECT_CROSS_INSTANCE_FIND_2026_08_22.md`'s Non-goals.
+///
+/// True when a forwarded `describe` response's `process_status.lifecycle`
+/// reads `"unknown"` — `broker::process::Lifecycle::Unknown`'s own doc
+/// comment: "no controller found for this block_id at all." A `None`
+/// input (the forward itself failed/timed out) is NOT the same as this —
+/// deliberately returns `false` for that case, since "we couldn't ask" is
+/// not the same claim as "we asked and it's confirmed gone." Pure
+/// (extracted from the async handler above) for direct unit testing —
+/// reagent P1 on PR #2745 found the un-extracted inline version reported
+/// "found": true unconditionally, with no test coverage of the "gone but
+/// still registered" case at all.
+fn describe_lifecycle_is_unknown(describe: Option<&serde_json::Value>) -> bool {
+    describe
+        .and_then(|d| d.get("process_status"))
+        .and_then(|ps| ps.get("lifecycle"))
+        .and_then(|l| l.as_str())
+        == Some("unknown")
+}
+
+pub async fn handle_muxspect_find(
+    State(state): State<AppState>,
+    Query(q): Query<MuxspectFindQuery>,
+) -> impl IntoResponse {
+    if q.block_id.as_deref().unwrap_or("").is_empty() && q.agent.as_deref().unwrap_or("").is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "provide block_id or agent" })),
+        )
+            .into_response();
+    }
+
+    let mut results: Vec<serde_json::Value> = Vec::new();
+    let own_channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
+
+    // Host tier — no network, same source handle_muxspect_list/
+    // handle_muxspect_conversations already use. list_agents() (mutex lock +
+    // full clone of the agent map) is fetched ONCE here, not once per block
+    // inside the loop below — reagent P2 on PR #2745 caught the original
+    // version paying that cost per block, unnecessary repeated
+    // locking/cloning that scaled with block count, matching how
+    // handle_muxspect_conversations's own host tier already does it.
+    let agents = state.reactive_handler.list_agents();
+    for status in state.process_broker.list() {
+        let block_matches = q.block_id.as_deref().is_some_and(|b| b == status.block_id);
+        let agent_matches = q.agent.as_deref().is_some_and(|name| {
+            agents
+                .iter()
+                .any(|r| r.block_id == status.block_id && r.agent_id.eq_ignore_ascii_case(name))
+        });
+        if !block_matches && !agent_matches {
+            continue;
+        }
+        results.push(json!({
+            "tier": "host",
+            "channel": own_channel,
+            "block_id": status.block_id,
+            "found": true,
+            "process_status": &status,
+        }));
+    }
+
+    // Cross-channel tier — AgentEntry already carries block_id/agent_id, so
+    // matching costs zero network calls; only a match gets forwarded.
+    //
+    // reagent P1 on PR #2745: an earlier version unconditionally reported
+    // "found": true for any registry match, even a possibly-stale one whose
+    // owning agent/block already exited but hasn't been evicted from the
+    // shared registry yet — reported as a successful match with CLI exit
+    // code 0. Two checks now guard against that, mirroring the sibling
+    // handle_muxspect_verify_sender's staleness handling in this same file:
+    //   1. should_evict_on_forward_failure(&entry) (reused verbatim from
+    //      backend::reactive::registry — the exact function the registry's
+    //      OWN eviction logic uses, checking both real PID liveness and
+    //      FORWARD_FAILURE_GRACE_MS age) filters out entries already known
+    //      to be stale, before wasting a network call on them.
+    //   2. Even a fresh-looking entry can point at a block the remote
+    //      ProcessBroker no longer knows about (lifecycle: "unknown" — see
+    //      broker::process::Lifecycle's doc comment: "No controller found
+    //      for this block_id at all"). A successful forward with that
+    //      lifecycle is reported with "found": false, not true.
+    if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
+        let local_url = state.local_web_url.clone();
+        let matches: Vec<_> = crate::backend::reactive::registry::list_all_shared(&shared_dir)
+            .into_iter()
+            .filter(|e| e.channel != own_channel && e.local_url != local_url)
+            .filter(|e| {
+                q.block_id.as_deref().is_some_and(|b| b == e.block_id)
+                    || q.agent.as_deref().is_some_and(|name| e.agent_id.eq_ignore_ascii_case(name))
+            })
+            .filter(|e| !crate::backend::reactive::registry::should_evict_on_forward_failure(e))
+            .collect();
+
+        let mut join_set = tokio::task::JoinSet::new();
+        for entry in matches {
+            let http_client = state.http_client.clone();
+            join_set.spawn(async move {
+                let fetch = http_client
+                    .get(format!("{}/api/v1/muxspect/describe", entry.local_url))
+                    .header("X-AuthKey", &entry.auth_key)
+                    .query(&[("block_id", entry.block_id.as_str())])
+                    .send();
+
+                let describe = match tokio::time::timeout(
+                    std::time::Duration::from_millis(CROSS_CHANNEL_PREVIEW_TIMEOUT_MS),
+                    fetch,
+                )
+                .await
+                {
+                    Ok(Ok(resp)) if resp.status().is_success() => resp.json::<serde_json::Value>().await.ok(),
+                    _ => None, // timeout/connect/parse failure: still report the match, just without detail
+                };
+
+                let lifecycle_unknown = describe_lifecycle_is_unknown(describe.as_ref());
+
+                json!({
+                    "tier": "cross-channel",
+                    "channel": entry.channel,
+                    "block_id": entry.block_id,
+                    "agent_id": entry.agent_id,
+                    "found": !lifecycle_unknown,
+                    "describe": describe,
+                })
+            });
+        }
+        while let Some(res) = join_set.join_next().await {
+            if let Ok(value) = res {
+                results.push(value);
+            }
+        }
+    }
+
+    Json(json!({
+        "query": { "block_id": q.block_id, "agent": q.agent },
+        "results": results,
+    }))
+    .into_response()
+}
+
 /// A `ToolNode`'s status stays `"running"` this long (matches the
 /// frontend's own `TOOL_PROMOTION_MS`, `frontend/app/view/agent/activity/
 /// tool-adapter.ts`) before it's eligible to be flagged `stuck` here — a
@@ -944,6 +1130,37 @@ mod tests {
             "error": {"message": message}
         })
         .to_string()
+    }
+
+    // reagent P1 on PR #2745 — pins describe_lifecycle_is_unknown, the
+    // pure piece extracted from handle_muxspect_find's cross-channel
+    // staleness check.
+    #[test]
+    fn describe_lifecycle_is_unknown_true_for_lifecycle_unknown() {
+        let describe = json!({ "process_status": { "lifecycle": "unknown" } });
+        assert!(describe_lifecycle_is_unknown(Some(&describe)));
+    }
+
+    #[test]
+    fn describe_lifecycle_is_unknown_false_for_a_real_lifecycle() {
+        for lifecycle in ["running", "idle", "done", "error"] {
+            let describe = json!({ "process_status": { "lifecycle": lifecycle } });
+            assert!(!describe_lifecycle_is_unknown(Some(&describe)), "lifecycle={lifecycle}");
+        }
+    }
+
+    #[test]
+    fn describe_lifecycle_is_unknown_false_when_the_forward_itself_failed() {
+        // None (the describe call timed out/errored) is NOT the same claim
+        // as "confirmed gone" — "we couldn't ask" must not read as "unknown".
+        assert!(!describe_lifecycle_is_unknown(None));
+    }
+
+    #[test]
+    fn describe_lifecycle_is_unknown_false_for_malformed_or_missing_fields() {
+        assert!(!describe_lifecycle_is_unknown(Some(&json!({}))));
+        assert!(!describe_lifecycle_is_unknown(Some(&json!({ "process_status": {} }))));
+        assert!(!describe_lifecycle_is_unknown(Some(&json!({ "process_status": { "lifecycle": 123 } }))));
     }
 
     #[test]

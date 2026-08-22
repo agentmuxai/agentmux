@@ -54,6 +54,22 @@ Usage:
                                   name — resolves host first, then
                                   cross-channel (other AgentMux channels on
                                   this same host); does not reach LAN/WAN
+  muxspect find <block_id_or_agent> [--json]
+                                  which running instance(s), if any, have a
+                                  controller/dispatch matching this block id
+                                  or agent name — checks this instance first
+                                  (ANY controller type), then every other
+                                  channel via the shared reactive registry
+                                  (agent-registered blocks ONLY on the
+                                  cross-channel tier — a non-agent controller,
+                                  e.g. a plain shell, in another channel isn't
+                                  findable by block_id there). No forwarded
+                                  call unless a channel actually matches. A
+                                  UUID-shaped query is sent as block_id;
+                                  anything else as agent name
+                                  (SPEC_MUXSPECT_CROSS_INSTANCE_FIND_2026_08_22.md,
+                                  Ext 4 of REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_
+                                  INSPECTION_2026_08_22.md)
   muxspect verify-sender <agent_name> [--json]
                                   is an agent named <agent_name> currently
                                   REGISTERED, and via what tier (spawner /
@@ -360,6 +376,53 @@ function renderConversation(data) {
     for (const l of lines) console.log(l);
 }
 
+// `find <block_id_or_agent>` — Ext 4 of REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_
+// INSPECTION_2026_08_22.md / SPEC_MUXSPECT_CROSS_INSTANCE_FIND_2026_08_22.md.
+// `results` is empty when nothing matched anywhere — a legitimate "not
+// found on this host, in any known channel" answer, not an error.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// `found: false` (cross-channel only) means the shared registry pointed at
+// a channel, but the forwarded describe's own lifecycle came back "unknown"
+// — the remote ProcessBroker has no controller for this block_id at all,
+// i.e. the registry entry was fresh enough to survive the staleness filter
+// srv-side but the block itself is already gone. Shown, not hidden — but
+// not counted toward "genuinely found" for the summary line or exit code.
+function renderFind(data) {
+    const { block_id, agent } = data.query ?? {};
+    console.log(`query: ${block_id ? `block_id=${block_id}` : `agent=${agent}`}`);
+    const results = data.results ?? [];
+    const live = results.filter((r) => r.found !== false);
+    if (results.length === 0) {
+        console.log("\nnot found on this host, in any known channel.");
+        return;
+    }
+    if (live.length === 0) {
+        console.log(`\nnot found — ${results.length} registry match${results.length === 1 ? "" : "es"} pointed at a channel, but the block is already gone there.`);
+    } else {
+        console.log(`\nfound in ${live.length} place${live.length === 1 ? "" : "s"}:`);
+    }
+    for (const r of results) {
+        const staleNote = r.found === false ? " — gone (registry match, but remote lifecycle is 'unknown')" : "";
+        console.log(`\n--- ${r.tier}${r.channel ? ` (${r.channel})` : ""}${staleNote} ---`);
+        console.log(`  block_id: ${r.block_id}`);
+        if (r.agent_id) console.log(`  agent_id: ${r.agent_id}`);
+        if (r.tier === "host" && r.process_status) {
+            console.log(`  lifecycle: ${r.process_status.lifecycle ?? "unknown"}`);
+            console.log(`  controller_type: ${r.process_status.controller_type ?? "(none)"}`);
+        }
+        if (r.tier === "cross-channel") {
+            if (r.describe) {
+                const ps = r.describe.process_status ?? {};
+                console.log(`  lifecycle: ${ps.lifecycle ?? "unknown"}`);
+                console.log(`  controller_type: ${ps.controller_type ?? "(none)"}`);
+            } else {
+                console.log(`  (matched in the shared registry, but the forwarded describe call didn't respond in time — channel may be busy or gone)`);
+            }
+        }
+    }
+}
+
 function renderDock(data) {
     console.log(`block_id: ${data.block_id}`);
     const nodes = data.nodes ?? [];
@@ -481,6 +544,22 @@ async function main() {
         const data = await apiGet(url, authKey, `/agentmux/reactive/transcript?agent=${encodeURIComponent(agentName)}`);
         if (json) console.log(JSON.stringify(data, null, 2));
         else renderConversation(data);
+        return;
+    }
+
+    if (cmd === "find") {
+        const query = blockId; // parseArgs puts the sole positional arg here
+        if (!query) fail("find requires a block_id or agent name — 'muxspect find <block_id_or_agent>'");
+        const isBlockId = UUID_RE.test(query);
+        const params = isBlockId ? `block_id=${encodeURIComponent(query)}` : `agent=${encodeURIComponent(query)}`;
+        const data = await apiGet(url, authKey, `/api/v1/muxspect/find?${params}`);
+        if (json) console.log(JSON.stringify(data, null, 2));
+        else renderFind(data);
+        // A cross-channel result with found:false (registry match, but the
+        // remote lifecycle reads "unknown" — the block is already gone
+        // there) doesn't count as a genuine find for exit-code purposes.
+        const genuinelyFound = (data.results ?? []).some((r) => r.found !== false);
+        if (!genuinelyFound) process.exitCode = 1;
         return;
     }
 
