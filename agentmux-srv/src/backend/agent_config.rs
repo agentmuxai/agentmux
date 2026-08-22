@@ -1067,42 +1067,62 @@ pub fn write_claude_md_respecting_ownership(
         return Ok(());
     };
 
-    let already_offered = std::fs::read_to_string(&ownership_marker_path)
-        .ok()
-        .and_then(|s| serde_json::from_str::<ClaudeMdOwnershipMarker>(&s).ok())
-        .map(|m| m.import_line_offered)
-        .unwrap_or(false);
+    if let Some(parent) = ownership_marker_path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            tracing::warn!(path = %parent.display(), error = %e, "write_claude_md_respecting_ownership: failed to create dir for ownership marker");
+            return Ok(());
+        }
+    }
 
-    if !already_offered {
-        let import_needle = format!("@{AGENTMUX_MEMORY_FILENAME}");
-        // Idempotent even on this first offer: don't duplicate if the
-        // import somehow already appears (e.g. a user copied it in by
-        // hand before AgentMux ever ran here).
-        if !existing_content.contains(&import_needle) {
-            let import_block =
-                format!("\n\n{CLAUDE_MD_IMPORT_MARKER_COMMENT}\n{import_needle}\n");
-            // True append (never a read-modify-write of the whole file) —
-            // an edit racing this function's earlier read is preserved,
-            // not silently discarded (codex P2 on PR #2747).
-            let append_result = std::fs::OpenOptions::new()
-                .append(true)
-                .open(&claude_md_path)
-                .and_then(|mut f| std::io::Write::write_all(&mut f, import_block.as_bytes()));
-            if let Err(e) = append_result {
-                tracing::warn!(path = %claude_md_path.display(), error = %e, "write_claude_md_respecting_ownership: failed to append the @import line this launch");
-                return Ok(());
+    // Atomic "am I the first to offer this" gate, not a read-then-write
+    // check: `create_new` fails with `AlreadyExists` if another
+    // concurrent call already won this race. Two agents sharing a
+    // working directory (agent_open.rs's shared-workdir fallback,
+    // `~/.agentmux/agents/<slug>`, launching concurrently) previously
+    // could both read "not yet offered" and both append the import
+    // line, duplicating it — the only existing serialization
+    // (`agent_open_lock`) is keyed by agent_id, not by working
+    // directory, so it doesn't cover this case (reagent P2, second
+    // review round on PR #2747). Only the caller whose `create_new`
+    // succeeds proceeds to append; every other caller — including a
+    // genuine concurrent racer, and every later launch once the marker
+    // exists — sees `AlreadyExists` and skips straight past.
+    let marker_json = serde_json::to_string(&ClaudeMdOwnershipMarker { import_line_offered: true })
+        .unwrap_or_default();
+    let create_result = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&ownership_marker_path)
+        .and_then(|mut f| std::io::Write::write_all(&mut f, marker_json.as_bytes()));
+
+    match create_result {
+        Ok(()) => {
+            let import_needle = format!("@{AGENTMUX_MEMORY_FILENAME}");
+            // Idempotent even having won the race: don't duplicate if
+            // the import somehow already appears (e.g. a user copied it
+            // in by hand before AgentMux ever ran here).
+            if !existing_content.contains(&import_needle) {
+                let import_block =
+                    format!("\n\n{CLAUDE_MD_IMPORT_MARKER_COMMENT}\n{import_needle}\n");
+                // True append (never a read-modify-write of the whole
+                // file) — an edit racing this function's earlier read is
+                // preserved, not silently discarded (codex P2 on
+                // PR #2747).
+                let append_result = std::fs::OpenOptions::new()
+                    .append(true)
+                    .open(&claude_md_path)
+                    .and_then(|mut f| std::io::Write::write_all(&mut f, import_block.as_bytes()));
+                if let Err(e) = append_result {
+                    tracing::warn!(path = %claude_md_path.display(), error = %e, "write_claude_md_respecting_ownership: failed to append the @import line this launch");
+                }
             }
         }
-        if let Some(parent) = ownership_marker_path.parent() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
-                tracing::warn!(path = %parent.display(), error = %e, "write_claude_md_respecting_ownership: failed to create dir for ownership marker");
-                return Ok(());
-            }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            // Already offered — by us on a prior launch, or a concurrent
+            // racer that won just now. Nothing to do.
         }
-        let marker_json = serde_json::to_string(&ClaudeMdOwnershipMarker { import_line_offered: true })
-            .unwrap_or_default();
-        if let Err(e) = std::fs::write(&ownership_marker_path, marker_json) {
-            tracing::warn!(path = %ownership_marker_path.display(), error = %e, "write_claude_md_respecting_ownership: failed to write ownership marker");
+        Err(e) => {
+            tracing::warn!(path = %ownership_marker_path.display(), error = %e, "write_claude_md_respecting_ownership: failed to create ownership marker");
         }
     }
 
@@ -1795,6 +1815,43 @@ mod tests {
         // The side file, unlike CLAUDE.md, keeps regenerating freely.
         let side_file = std::fs::read_to_string(dir.path().join(AGENTMUX_MEMORY_FILENAME)).unwrap();
         assert_eq!(side_file, "v3");
+    }
+
+    #[test]
+    fn claude_md_concurrent_launches_against_a_shared_workdir_never_duplicate_the_import() {
+        // reagent P2 (second review round) on PR #2747: two agents
+        // sharing a working directory (agent_open.rs's shared-workdir
+        // fallback) launching concurrently previously could both read
+        // "not yet offered" and both append the import line — the only
+        // existing serialization (agent_open_lock) is keyed by
+        // agent_id, not by working directory. Real threads, not a
+        // sequential simulation, to actually exercise the race.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), "# Real project\n").unwrap();
+        let dir_path = dir.path().to_path_buf();
+
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let handles: Vec<_> = (0..8)
+            .map(|i| {
+                let dir_path = dir_path.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait(); // maximize actual overlap
+                    write_claude_md_respecting_ownership(&dir_path, &format!("content-{i}")).unwrap();
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let claude_md = std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap();
+        let import_needle = format!("@{AGENTMUX_MEMORY_FILENAME}");
+        assert_eq!(
+            claude_md.matches(&import_needle).count(),
+            1,
+            "8 concurrent launches against the same foreign CLAUDE.md must still produce exactly one import line, not one per racer"
+        );
     }
 
     #[test]
