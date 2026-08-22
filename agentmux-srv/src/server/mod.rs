@@ -460,6 +460,12 @@ pub fn build_router(state: AppState) -> Router {
         // own environment, no new IPC).
         .route("/api/v1/muxspect/list", get(muxspect_handlers::handle_muxspect_list))
         .route("/api/v1/muxspect/describe", get(muxspect_handlers::handle_muxspect_describe))
+        // Cross-instance lookup — Ext 4 of
+        // docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md.
+        // Checks this instance first, then every other channel via the shared
+        // reactive registry (same mechanism `conversations` below already
+        // uses) — see the handler's own doc comment.
+        .route("/api/v1/muxspect/find", get(muxspect_handlers::handle_muxspect_find))
         // Dock diagnosis/remediation extension (2026-08-06 spec) — `dock` is
         // read-only like the two routes above; `dock/clear` is this module's
         // first mutating route (narrowly scoped — see the handler's own doc

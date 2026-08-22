@@ -125,6 +125,30 @@ describe("muxspect parseArgs", () => {
         expect(r.blockId).toBe("AgentA");
         expect(r.json).toBe(true);
     });
+
+    // Ext 4 (SPEC_MUXSPECT_CROSS_INSTANCE_FIND_2026_08_22.md) — 'find' parses
+    // like 'conversation'/'describe': single positional lands in blockId, no
+    // 'sub' shape needed. The UUID-vs-agent-name dispatch itself lives in
+    // main() (query string routing, not argv parsing) — out of scope for
+    // this pure parser, covered instead by manual/integration verification.
+    it("'find <query>' parses like describe (query lands in blockId)", () => {
+        const r = parseArgs(["find", "71a6b2ae-b651-43aa-aed4-6121f24fd713"]);
+        expect(r.cmd).toBe("find");
+        expect(r.blockId).toBe("71a6b2ae-b651-43aa-aed4-6121f24fd713");
+    });
+
+    it("'find <agent_name>' parses the same way for a non-UUID query", () => {
+        const r = parseArgs(["find", "Korp"]);
+        expect(r.cmd).toBe("find");
+        expect(r.blockId).toBe("Korp");
+    });
+
+    it("'find <query> --json' still resolves the query, flag anywhere", () => {
+        const r = parseArgs(["find", "--json", "Korp"]);
+        expect(r.cmd).toBe("find");
+        expect(r.blockId).toBe("Korp");
+        expect(r.json).toBe(true);
+    });
 });
 
 // SPEC_MUXSPECT_VERIFY_SENDER_2026_08_21.md tier 0 — checked before any
