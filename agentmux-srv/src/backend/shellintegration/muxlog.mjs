@@ -360,14 +360,60 @@ function parse(argv) {
     return { opt, pos };
 }
 
+// Case-insensitive across file path, source label, and version — the
+// original inline filter only lowercased `.file`, so an `-i` matching only
+// via `.source`/`.version` (e.g. `-i Dev:Main`) silently missed real
+// candidates. Exported for muxlog.test.mjs.
+export function filterByInstance(cands, needle) {
+    const n = needle.toLowerCase();
+    return cands.filter(
+        (e) => e.file.toLowerCase().includes(n) || e.source.toLowerCase().includes(n) || e.version.toLowerCase().includes(n),
+    );
+}
+
+// Resolving "the" srv/host log used to mean "freshest across every instance
+// on the machine" — with several instances at the same version routinely
+// running at once (dev branches, portables, channels), that's frequently the
+// WRONG instance, and nothing said so (see
+// docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md
+// §2.1: `swarm` resolved to a stale sibling version's log on the very first
+// live repro of this). An explicit `-i` always wins, same as before. Absent
+// that, prefer OUR OWN running instance — $AGENTMUX_CHANNEL is already in
+// every agent pane's environment (same source resolveBlockId below already
+// trusts for $AGENTMUX_BLOCKID), so a caller running from inside an agent
+// pane gets ITS OWN instance's log by default instead of a same-version
+// sibling's. This is a soft preference, not a hard requirement: falls
+// through to the old "freshest overall" behavior when nothing matches
+// (`launcher` has no per-channel log at all; an older srv build predating
+// Ext 1's AGENTMUX_LOG_DIR fix still only writes to the shared root) rather
+// than failing outright — degrading gracefully beats refusing to run.
+//
+// Pure (no I/O, no process.exit) — takes already-discovered candidates so
+// muxlog.test.mjs can exercise the actual selection logic without touching
+// the real filesystem/HOME. Returns `null` when nothing matches at all;
+// `resolveFile` (below) owns turning that into the CLI's error+exit.
+export function pickCandidate(cands, opt, ownChannel) {
+    if (opt.instance) {
+        const filtered = filterByInstance(cands, opt.instance);
+        return filtered[0]?.file ?? null;
+    }
+    if (ownChannel) {
+        const own = filterByInstance(cands, ownChannel);
+        if (own.length) return own[0].file;
+    }
+    return cands[0]?.file ?? null; // most recently active, no preference matched
+}
+
 function resolveFile(target, opt) {
-    let cands = discover(target);
-    if (opt.instance) cands = cands.filter((e) => e.file.toLowerCase().includes(opt.instance.toLowerCase()) || e.source.includes(opt.instance) || e.version.includes(opt.instance));
-    if (!cands.length) {
-        console.error(`muxlog: no ${target} log found${opt.instance ? ` matching '${opt.instance}'` : ""}. Try \`muxlog ls\`.`);
+    const cands = discover(target);
+    const file = pickCandidate(cands, opt, process.env.AGENTMUX_CHANNEL);
+    if (!file) {
+        console.error(
+            `muxlog: no ${target} log found${opt.instance ? ` matching '${opt.instance}'` : ""}. Try \`muxlog ls\`.`,
+        );
         process.exit(1);
     }
-    return cands[0].file; // most recently active
+    return file;
 }
 
 // ─── phases ───────────────────────────────────────────────────────────────────
@@ -506,7 +552,10 @@ function resolvePhaseFiles(pos, opt) {
     const prefix = `pane=${blockId.slice(0, 7)}`;
 
     let hostCands = discover("host");
-    if (opt.instance) hostCands = hostCands.filter((e) => e.file.toLowerCase().includes(opt.instance.toLowerCase()) || e.source.includes(opt.instance) || e.version.includes(opt.instance));
+    // Case-insensitive filterByInstance (see its own doc comment) — the
+    // content-verification scan just below is the real correctness backstop
+    // for `phases`, so this is only ever an ordering hint, same as before.
+    if (opt.instance) hostCands = filterByInstance(hostCands, opt.instance);
     if (!hostCands.length) {
         console.error(`muxlog: no host log found${opt.instance ? ` matching '${opt.instance}'` : ""}. Try \`muxlog ls\`.`);
         process.exit(1);
@@ -593,9 +642,14 @@ function main() {
 
     if (cmd === "errors") {
         opt.level = ["error", "warn"];
+        // Was its own ad-hoc `.file`-only filter with no own-channel default
+        // at all — routed through the same pickCandidate() every other
+        // recipe uses so `errors` gets the same "prefer my own instance"
+        // behavior instead of "freshest anywhere" (see resolveFile's doc
+        // comment above).
         for (const tgt of ["host", "srv"]) {
-            const f = discover(tgt).filter((e) => !opt.instance || e.file.toLowerCase().includes(opt.instance.toLowerCase()))[0];
-            if (f) { console.log(`\n=== ${tgt}: ${f.file} ===`); printLastLines(f.file, opt.n, opt, true); }
+            const file = pickCandidate(discover(tgt), opt, process.env.AGENTMUX_CHANNEL);
+            if (file) { console.log(`\n=== ${tgt}: ${file} ===`); printLastLines(file, opt.n, opt, true); }
         }
         return;
     }
