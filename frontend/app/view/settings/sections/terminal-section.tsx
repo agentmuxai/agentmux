@@ -144,6 +144,36 @@ export function TerminalSection(): JSX.Element {
                     }
                 />
             </Show>
+            <SettingRow
+                label="Agent max runtime"
+                description="Hours before the watchdog kills a long-running agent pane. 0 = no limit."
+                control={
+                    <input
+                        class="setting-number setting-number--wide"
+                        type="number" min={0} step={0.5}
+                        value={(s()["term:agentmaxruntimehours"] as number) ?? 0}
+                        onBlur={(e) => {
+                            const v = parseFloat(e.currentTarget.value);
+                            if (!isNaN(v) && v >= 0) set("term:agentmaxruntimehours", v);
+                        }}
+                    />
+                }
+            />
+            <SettingRow
+                label="Agent idle timeout"
+                description="Minutes of PTY silence before the watchdog kills an idle agent pane. 0 = no limit."
+                control={
+                    <input
+                        class="setting-number setting-number--wide"
+                        type="number" min={0}
+                        value={(s()["term:agentidletimeoutmins"] as number) ?? 0}
+                        onBlur={(e) => {
+                            const v = parseFloat(e.currentTarget.value);
+                            if (!isNaN(v) && v >= 0) set("term:agentidletimeoutmins", v);
+                        }}
+                    />
+                }
+            />
         </div>
     );
 }
