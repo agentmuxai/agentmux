@@ -70,6 +70,92 @@ export function SliderControl(p: { min: number; max: number; step: number; value
     );
 }
 
+/**
+ * Masked credential input — at-rest shows a fixed-width dot mask with a
+ * "Replace" button (no partial/tail hint: this is a flat settings.json
+ * string, not keychain-backed like the Armory identity form, so there's no
+ * separate masked_tail metadata to show); clicking Replace reveals a
+ * password-type entry field with Save/Cancel. Modeled on
+ * `identity-account-form.tsx`'s masked-key UX without its keychain
+ * lifecycle. See docs/specs/SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md §2
+ * (designed for `voice:groqApiKey`; also intended for messaging-bridge bot
+ * tokens per that spec's Open Question 1 — keep this generic, no
+ * voice-specific naming).
+ */
+export function MaskedKeyField(p: {
+    value: string | undefined;
+    onSave: (key: string) => void;
+    placeholder?: string;
+    disabled?: boolean;
+}): JSX.Element {
+    const [replacing, setReplacing] = createSignal(false);
+    const [draft, setDraft] = createSignal("");
+    const hasValue = () => !!p.value;
+
+    const save = () => {
+        const v = draft().trim();
+        if (!v) return;
+        p.onSave(v);
+        setDraft("");
+        setReplacing(false);
+    };
+    const cancel = () => {
+        setDraft("");
+        setReplacing(false);
+    };
+
+    return (
+        <Show
+            when={hasValue() && !replacing()}
+            fallback={
+                <div class="setting-masked-key setting-masked-key--entry">
+                    <input
+                        class="setting-text"
+                        type="password"
+                        autocomplete="off"
+                        spellcheck={false}
+                        value={draft()}
+                        placeholder={p.placeholder}
+                        disabled={p.disabled}
+                        onInput={(e) => setDraft(e.currentTarget.value)}
+                        onKeyDown={(e) => {
+                            if (e.key === "Enter") save();
+                            if (e.key === "Escape") cancel();
+                        }}
+                    />
+                    <div class="setting-masked-key-actions">
+                        <button
+                            type="button"
+                            class="setting-masked-key-btn setting-masked-key-btn--primary"
+                            disabled={p.disabled || !draft().trim()}
+                            onClick={save}
+                        >
+                            Save
+                        </button>
+                        <Show when={hasValue()}>
+                            <button type="button" class="setting-masked-key-btn" onClick={cancel}>
+                                Cancel
+                            </button>
+                        </Show>
+                    </div>
+                </div>
+            }
+        >
+            <div class="setting-masked-key setting-masked-key--locked">
+                <span class="setting-masked-key-dots">••••••••</span>
+                <button
+                    type="button"
+                    class="setting-masked-key-btn"
+                    disabled={p.disabled}
+                    onClick={() => setReplacing(true)}
+                >
+                    Replace
+                </button>
+            </div>
+        </Show>
+    );
+}
+
 export function KeyValueEditor(p: { value: Record<string, string>; onChange: (v: Record<string, string>) => void }): JSX.Element {
     const keys = () => Object.keys(p.value ?? {});
     const [newKey, setNewKey] = createSignal("");

@@ -222,6 +222,10 @@
           "type": "string",
           "description": "Explicit path to a GGML model file for the local whisper.cpp backend, skipping the auto-download. Env override: AGENTMUX_WHISPER_MODEL."
         },
+        "voice:inputDeviceId": {
+          "type": "string",
+          "description": "Preferred microphone input device (from navigator.mediaDevices.enumerateDevices). Absent or 'default' means the OS default input. See docs/specs/SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md §5."
+        },
         "notify:*": {
           "type": "boolean"
         },
