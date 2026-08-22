@@ -200,4 +200,26 @@ describe("muxlog matchesOwnChannel", () => {
     it("an empty ownChannel never matches anything (guards against normalizing '' -> '' and matching every candidate)", () => {
         expect(matchesOwnChannel({ file: "anything", source: "anything", version: "" }, "")).toBe(false);
     });
+
+    // reagent P1 round 2 on PR #2741: the first fix (strip-all-separators,
+    // then substring check) false-positive matched a genuinely different
+    // sibling channel whose branch name happens to start with the caller's
+    // own branch name as a prefix. Real repro shape: "dev-phase-3" is a
+    // char-for-char prefix of "dev-phase-3-repro" once separators are
+    // flattened away, even though these are two unrelated instances.
+    it("does NOT match a sibling channel whose branch name is a prefix-extension of the caller's own (the exact false-positive reagent found)", () => {
+        const own = normalizeCandFor("dev:phase-3", String.raw`C:\x\dev\phase-3\hash1\logs\y.log`);
+        const sibling = normalizeCandFor("dev:phase-3-repro", String.raw`C:\x\dev\phase-3-repro\hash2\logs\y.log`);
+        expect(matchesOwnChannel(sibling, "dev-phase-3")).toBe(false);
+        expect(matchesOwnChannel(own, "dev-phase-3")).toBe(true);
+    });
+
+    it("does NOT match when the caller's branch is a prefix-extension of a sibling's shorter branch name (the reverse direction)", () => {
+        const shortSibling = { file: String.raw`C:\x\dev\phase\hash\logs\y.log`, source: "dev:phase", version: "" };
+        expect(matchesOwnChannel(shortSibling, "dev-phase-3")).toBe(false);
+    });
+
+    function normalizeCandFor(source, file) {
+        return { file, source, version: "" };
+    }
 });

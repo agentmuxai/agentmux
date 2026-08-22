@@ -378,23 +378,59 @@ export function filterByInstance(cands, needle) {
 // slash-separated) — same words, different separators, so
 // filterByInstance()'s plain substring check never matches (reagent P1 on
 // PR #2741: the own-channel default in pickCandidate silently never fired
-// for `task dev` — exactly the "several instances at the same version"
-// scenario this whole change exists for). Comparing the alphanumeric
-// skeleton (strip everything else) sidesteps needing to know which
-// separator scheme a given candidate uses; path segments stay in the same
-// left-to-right order regardless, so this doesn't need to special-case
-// clone_id either. Scoped to the own-channel default ONLY — an explicit
-// `-i` keeps filterByInstance()'s plain, literal substring matching
-// unchanged (a user typing `-i fix-shell` expects that to mean exactly
-// that substring, not a normalized fuzzy match).
-function normalizeForOwnChannelMatch(s) {
-    return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+// for `task dev`).
+//
+// A first attempt fixed that by stripping ALL separators and doing a plain
+// substring check on the flattened result — reagent P1 round 2 caught the
+// real bug in that: flattening loses word boundaries, so needle
+// "dev-phase-3" (normalized "devphase3") is a substring-PREFIX of an
+// unrelated sibling's "dev-phase-3-repro" (normalized "devphase3repro"),
+// false-positive matching a genuinely different instance whose branch name
+// happens to start with the same characters. No amount of delimiter-padding
+// fixes this on its own, since needle being a true PREFIX of haystack's
+// token sequence still satisfies a boundary-aligned check trivially — the
+// fix has to require the needle match a COMPLETE identifying segment (or
+// exact concatenation of segments), never a partial/prefix one.
+//
+// So: normalize each candidate field into discrete tokens split on real
+// structural boundaries (`/`/`\` for the file path, `:` for the source
+// label's own prefix), and require EXACT equality against one of those
+// tokens — or, for the file path's `dev/<branch>/<clone_id>/logs/...`
+// shape specifically, exact equality against two CONSECUTIVE tokens joined
+// (branch + clone_id) — never a substring/prefix match against a flattened
+// blob. `-i` (filterByInstance) is untouched by any of this — a user
+// typing `-i fix-shell` still gets plain, literal substring matching, same
+// as always.
+function normalizeToken(s) {
+    return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
 export function matchesOwnChannel(cand, ownChannel) {
-    const needle = normalizeForOwnChannelMatch(ownChannel);
+    const needle = normalizeToken(ownChannel);
     if (!needle) return false;
-    return [cand.file, cand.source, cand.version].some((s) => normalizeForOwnChannelMatch(s).includes(needle));
+
+    // Source label: "dev:<branch>" / "channel:<name>" / "shared" — strip a
+    // known "<word>:" prefix if present, exact-match what's left (with and
+    // without a "dev-" prepended, since the channel string carries that
+    // prefix but the source label's own identifying part doesn't).
+    const sourceIdent = normalizeToken(cand.source.replace(/^[a-z]+:/i, ""));
+    if (sourceIdent && (needle === sourceIdent || needle === `dev-${sourceIdent}`)) return true;
+
+    // File path: split on real path separators only (never on '-' — a
+    // branch/channel name's internal hyphens are part of ONE segment, not
+    // segment boundaries). Check each segment alone, and each consecutive
+    // pair joined (the dev-mode branch+clone_id shape), always as exact
+    // equality, never substring.
+    const segments = cand.file.split(/[\\/]/).map(normalizeToken).filter(Boolean);
+    for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        if (needle === seg || needle === `dev-${seg}`) return true;
+        if (i + 1 < segments.length) {
+            const pair = `${seg}-${segments[i + 1]}`;
+            if (needle === pair || needle === `dev-${pair}`) return true;
+        }
+    }
+    return false;
 }
 
 // Resolving "the" srv/host log used to mean "freshest across every instance
