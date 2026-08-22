@@ -243,6 +243,20 @@ impl Store {
         if inst.parent_instance_id.is_empty() {
             return; // chain head — already covered by registry_upsert_if_named.
         }
+        if inst.session_id.is_empty() {
+            // No live session_id captured on THIS row yet. `instance_create`
+            // calls this on every new continuation, and `createagentinstance`
+            // always creates one with session_id = "" (the RPC's
+            // `CommandCreateAgentInstanceData` has no session_id field at
+            // all — it's only ever set later via a genuine capture). If we
+            // propagated an empty value here, every ordinary "Continue
+            // agent" click would immediately clobber the chain root's still-
+            // valid registry session_id with None before the new
+            // continuation's own id is ever captured — reagent P1 on PR
+            // #2755, a self-inflicted regression of the exact field this
+            // fix exists to make more reliable.
+            return;
+        }
         let Some(reg) = self.shared_agent_registry() else {
             return;
         };
@@ -280,10 +294,23 @@ impl Store {
     }
 
     /// Walk `parent_instance_id` upward from `inst` to find the chain
-    /// root — the row with no parent, or an orphan whose parent no longer
-    /// exists (mirrors `instance_list_named`'s recursive-CTE orphan-as-root
-    /// anchor). Bounded to guard against a corrupted cyclic chain; real
-    /// chains are a handful of user-driven resumes deep.
+    /// root — the row with no parent. Bounded to guard against a
+    /// corrupted cyclic chain; real chains are a handful of user-driven
+    /// resumes deep.
+    ///
+    /// When a lookup misses locally, returns `current.parent_instance_id`
+    /// (the id we couldn't resolve), NOT `current.id`. Two cases produce a
+    /// local miss and both want that: (1) the id is a genuinely orphaned
+    /// continuation (its head was hard-deleted, no FK cascade) — the
+    /// registry has no file for it either, so the caller's `reg.get`
+    /// harmlessly no-ops; (2) the id is the chain root living in a
+    /// DIFFERENT channel's local SQLite — this store never has that row,
+    /// but the shared registry still does, under exactly this id. That
+    /// second case is the primary scenario this propagation exists for
+    /// (reopening an agent in another channel/build): `current.id` is a
+    /// continuation's own id, which never has a registry file (reagent P1
+    /// on PR #2755 — the original fallback made cross-channel propagation
+    /// always no-op, defeating the fix for its own target case).
     fn find_chain_root_id(&self, inst: &AgentInstance) -> String {
         let mut current = inst.clone();
         for _ in 0..64 {
@@ -292,7 +319,7 @@ impl Store {
             }
             match self.instance_get(&current.parent_instance_id) {
                 Ok(Some(parent)) => current = parent,
-                _ => return current.id, // orphan: parent missing/unreadable.
+                _ => return current.parent_instance_id.clone(),
             }
         }
         current.id

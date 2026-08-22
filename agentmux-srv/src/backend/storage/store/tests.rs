@@ -2395,6 +2395,103 @@
             "no registry file should be created when the chain root was never named/mirrored");
     }
 
+    #[test]
+    fn continuation_create_with_empty_session_id_does_not_clobber_root() {
+        // Reagent P1 on PR #2755: `createagentinstance`'s real RPC handler
+        // always creates a fresh continuation row with session_id = "" (no
+        // session_id field on CommandCreateAgentInstanceData at all — it's
+        // only ever set later via a genuine capture). Every ordinary
+        // "Continue agent" click must NOT clobber the chain root's
+        // still-valid registry session_id with None before the new
+        // continuation captures its own.
+        let (tmp, store, reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        let head = make_named_inst("inst-head3", "demoNoClobber", &agents_root);
+        store.instance_create(&head).unwrap();
+        use crate::backend::storage::InstanceUpdate;
+        store
+            .instance_update_partial(
+                "inst-head3",
+                &InstanceUpdate { session_id: Some("sess-still-valid".into()), ..Default::default() },
+            )
+            .unwrap();
+        assert_eq!(
+            reg.get("inst-head3").unwrap().unwrap().data.session_id.as_deref(),
+            Some("sess-still-valid")
+        );
+
+        // Matches the real RPC handler: a brand new continuation row with
+        // an empty session_id (default from make_named_inst).
+        let mut cont = make_named_inst("inst-cont3", "demoNoClobber", &agents_root);
+        cont.parent_instance_id = "inst-head3".to_string();
+        assert_eq!(cont.session_id, "", "precondition: matches real creation shape");
+        store.instance_create(&cont).unwrap();
+
+        assert_eq!(
+            reg.get("inst-head3").unwrap().unwrap().data.session_id.as_deref(),
+            Some("sess-still-valid"),
+            "creating a fresh (session-less) continuation must not clobber the root's live session_id"
+        );
+    }
+
+    #[test]
+    fn continuation_session_id_propagates_when_chain_root_lives_in_another_channel() {
+        // Reagent P1 on PR #2755: the primary scenario this whole fix
+        // exists for is cross-channel — the chain root's SQLite row lives
+        // in a DIFFERENT channel's local store, so `instance_get` on the
+        // parent id always misses locally. `find_chain_root_id` must still
+        // resolve to that (unreachable-locally-but-registry-valid) parent
+        // id, not fall back to the continuation's own id (which never has
+        // a registry file, silently defeating the whole fix).
+        let (tmp, store, reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        // Seed a registry record for a "foreign" root with NO matching
+        // local SQLite row — simulates a root instance that lives in
+        // another channel's own database.
+        reg.upsert(&crate::registry::NamedAgentRecord {
+            schema_version: crate::registry::MAX_SUPPORTED_SCHEMA,
+            data: crate::registry::NamedAgentRecordV1 {
+                instance_id: "inst-foreign-root".to_string(),
+                instance_name: "crossChannelAgent".to_string(),
+                definition_id: "def-mirror".to_string(),
+                identity_id: None,
+                memory_id: None,
+                session_id: Some("sess-stale-from-other-channel".to_string()),
+                working_dir: "crossChannelAgent-fixture".to_string(),
+                source_agents_base: None,
+                created_at_ms: 100,
+                last_launched_at_ms: 100,
+                created_by_version: "0.55.18".to_string(),
+                last_launched_by_version: "0.55.18".to_string(),
+            },
+        })
+        .unwrap();
+        assert!(
+            store.instance_get("inst-foreign-root").unwrap().is_none(),
+            "precondition: root has no local SQLite row (lives in another channel)"
+        );
+
+        // This channel resumes the agent: a new local continuation row
+        // pointing at the foreign root, with a freshly captured session_id.
+        let mut cont = make_named_inst("inst-local-cont", "crossChannelAgent", &agents_root);
+        cont.parent_instance_id = "inst-foreign-root".to_string();
+        cont.session_id = "sess-fresh-this-channel".to_string();
+        store.instance_create(&cont).unwrap();
+
+        assert!(
+            reg.get("inst-local-cont").unwrap().is_none(),
+            "the local continuation itself must never get its own registry file"
+        );
+        assert_eq!(
+            reg.get("inst-foreign-root").unwrap().unwrap().data.session_id.as_deref(),
+            Some("sess-fresh-this-channel"),
+            "propagation must reach the foreign root's registry record even though \
+             it has no local SQLite row"
+        );
+    }
+
     // ----------------------------------------------------------------
     // Phase 3a — db_agents dual-write coverage
     // ----------------------------------------------------------------
