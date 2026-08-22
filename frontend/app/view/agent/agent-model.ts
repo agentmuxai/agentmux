@@ -308,6 +308,20 @@ export class AgentViewModel implements ViewModel {
      *   not-yet-placed block (see `pane.open`'s `skip_placement`) rather
      *   than reconfiguring the current pane's own block. Every other
      *   caller omits this and gets today's behavior unchanged.
+     * @param targetTabId `SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md` §4.1
+     *   — when set, this is the tab id passed to `ControllerResyncCommand`
+     *   instead of `atoms.staticTabId()`. Required whenever `targetBlockId`
+     *   points at a block in a genuinely DIFFERENT tab than the one this
+     *   window booted into: `atoms.staticTabId()` is fixed once at window
+     *   bootstrap and never changes (`window-identity.ts`'s own doc
+     *   comment), so it happens to be correct for the existing
+     *   fork-tab-strip case (that block stays in the same tab, just a
+     *   different pane-local block-stack slot) but would be silently WRONG
+     *   for a cross-tab target — the backend stores this value as the
+     *   spawned controller's own `tab_id` (registry registration,
+     *   `AGENTMUX_TABID` env var), not just for logging. Every other
+     *   caller omits this and gets today's `atoms.staticTabId()` behavior
+     *   unchanged.
      */
     /**
      * @returns Whether the launch actually succeeded. This method never
@@ -322,6 +336,7 @@ export class AgentViewModel implements ViewModel {
         agent: AgentDefinition,
         overrides?: LaunchOverrides,
         targetBlockId?: string,
+        targetTabId?: string,
     ): Promise<boolean> => {
         // See resolveEffectiveLaunchProvider's own doc comment
         // (agent-launch-env.ts) for why this must resolve through the
@@ -666,7 +681,7 @@ export class AgentViewModel implements ViewModel {
 
             // Create SubprocessController (no-op start — waits for first message)
             await RpcApi.ControllerResyncCommand(TabRpcClient, {
-                tabid: atoms.staticTabId(),
+                tabid: targetTabId ?? atoms.staticTabId(),
                 blockid: blockId,
                 forcerestart: true,
             });
