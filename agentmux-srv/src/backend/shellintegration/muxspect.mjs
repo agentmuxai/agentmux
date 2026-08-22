@@ -42,6 +42,18 @@ Usage:
                                   whatever renderer currently has that block
                                   open — no pane reload needed. muxspect's
                                   only mutating command; see the spec above.
+  muxspect conversations [--json]  every agent's most recent activity across
+                                  host, cross-channel, LAN, and connected WAN
+                                  in one glance — host/cross-channel entries
+                                  include a last-message preview; LAN/WAN
+                                  are liveness-only for now
+                                  (SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_
+                                  VISIBILITY_2026_08_21.md Phase A)
+  muxspect conversation <agent> [--json]
+                                  read the tail transcript of one agent by
+                                  name — resolves host first, then
+                                  cross-channel (other AgentMux channels on
+                                  this same host); does not reach LAN/WAN
   muxspect verify-sender <agent_name> [--json]
                                   is an agent named <agent_name> currently
                                   REGISTERED, and via what tier (spawner /
@@ -301,6 +313,53 @@ function renderVerifySender(data) {
     console.log(`Check the JEKT's own TRUST=/SIG= fields for that (see CLAUDE.md's JEKT section).`);
 }
 
+// `conversations` — see SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_
+// 2026_08_21.md Phase A. host/cross-channel rows carry a preview + turn
+// state; lan/wan rows are liveness-only (no remote-read protocol yet for
+// those tiers) — rendered with a "(remote — use 'conversation <agent>' once
+// supported)" placeholder rather than blank cells, so the gap is obvious
+// rather than looking like missing data.
+function renderConversations(data) {
+    const agents = data.agents ?? [];
+    if (agents.length === 0) {
+        console.log("(no agents found on any tier)");
+        return;
+    }
+    const rows = agents.map((a) => ({
+        name: a.name,
+        tier: a.tier,
+        turn: a.turn_active === true ? "active" : a.turn_active === false ? "idle" : "?",
+        activity: a.last_activity_ms ? `${ageString(a.last_activity_ms)} ago` : "-",
+        preview: a.remote_fetch_required
+            ? "(remote — use 'conversation <agent>' once supported)"
+            : (a.last_message_preview ?? "(no output yet)"),
+    }));
+    const cols = ["name", "tier", "turn", "activity"];
+    const widths = Object.fromEntries(
+        cols.map((c) => [c, Math.max(c.length, ...rows.map((r) => String(r[c]).length))])
+    );
+    const line = (r) => cols.map((c) => String(r[c]).padEnd(widths[c])).join("  ");
+    console.log(line(Object.fromEntries(cols.map((c) => [c, c]))));
+    for (const r of rows) {
+        console.log(line(r));
+        console.log(`  ${r.preview}`);
+    }
+}
+
+// `conversation <agent>` — reuses the same `/agentmux/reactive/transcript`
+// response `GetAgentTranscript` returns, just rendered for a human. `tier`
+// is present as of Phase A (host | cross-channel); older srv builds
+// predating this change won't send it — printed only when present.
+function renderConversation(data) {
+    console.log(`agent:       ${data.agent}`);
+    if (data.tier) console.log(`tier:        ${data.tier}`);
+    if (data.channel) console.log(`channel:     ${data.channel}`);
+    console.log(`turn_active: ${data.turn_active ?? false}`);
+    const lines = data.lines ?? [];
+    console.log(`\n--- transcript tail (${lines.length}${data.truncated ? ", truncated" : ""}) ---`);
+    for (const l of lines) console.log(l);
+}
+
 function renderDock(data) {
     console.log(`block_id: ${data.block_id}`);
     const nodes = data.nodes ?? [];
@@ -406,6 +465,22 @@ async function main() {
         const data = await apiGet(url, authKey, "/api/v1/muxspect/list");
         if (json) console.log(JSON.stringify(data, null, 2));
         else renderList(data);
+        return;
+    }
+
+    if (cmd === "conversations") {
+        const data = await apiGet(url, authKey, "/api/v1/muxspect/conversations");
+        if (json) console.log(JSON.stringify(data, null, 2));
+        else renderConversations(data);
+        return;
+    }
+
+    if (cmd === "conversation") {
+        const agentName = blockId;
+        if (!agentName) fail("conversation requires an agent name — 'muxspect conversation <agent>'");
+        const data = await apiGet(url, authKey, `/agentmux/reactive/transcript?agent=${encodeURIComponent(agentName)}`);
+        if (json) console.log(JSON.stringify(data, null, 2));
+        else renderConversation(data);
         return;
     }
 

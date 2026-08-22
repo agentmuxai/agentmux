@@ -698,6 +698,157 @@ pub async fn handle_muxspect_verify_sender(
     Json(classify_sender(&q.name, &candidates, now_ms)).into_response()
 }
 
+/// Truncation length for [`last_line_preview`] — keeps `conversations`'
+/// response small even when the tail line is a long tool-call/result frame;
+/// this is a liveness-glance preview, not a transcript reader (that's
+/// `GetAgentTranscript`/`muxspect conversation <agent>`'s job).
+const PREVIEW_MAX_CHARS: usize = 200;
+
+/// Short per-forward timeout for cross-channel preview fetches in
+/// [`handle_muxspect_conversations`] — a single dead/unresponsive channel
+/// must not stall the whole listing; best-effort, matches this file's
+/// diagnostic (never authoritative) posture elsewhere.
+const CROSS_CHANNEL_PREVIEW_TIMEOUT_MS: u64 = 1500;
+
+/// Last non-blank line of a block's own transcript, truncated for preview
+/// display. `None` if the block has no session output yet (e.g. an agent
+/// registered but no turn has produced output) — a missing preview is not
+/// an error, same "encode absence in the body, not the status" posture as
+/// the rest of this file.
+fn last_line_preview(
+    wstore: &std::sync::Arc<crate::backend::storage::store::Store>,
+    filestore: &std::sync::Arc<FileStore>,
+    block_id: &str,
+) -> Option<String> {
+    let (raw_bytes, _) = crate::backend::session_archive::read_session_output(
+        wstore, filestore, block_id,
+    )
+    .ok()?;
+    let text = String::from_utf8_lossy(&raw_bytes);
+    let last = text.lines().rev().find(|l| !l.trim().is_empty())?;
+    let mut preview = last.to_string();
+    if preview.chars().count() > PREVIEW_MAX_CHARS {
+        preview = preview.chars().take(PREVIEW_MAX_CHARS).collect::<String>() + "…";
+    }
+    Some(preview)
+}
+
+/// `GET /api/v1/muxspect/conversations` — a single-call, all-tier glance at
+/// every agent's most recent activity, so an agent (or a human via `muxspect
+/// conversations`) doesn't have to compose `DiscoverAgents` +
+/// N×`GetAgentTranscript` calls by hand. See
+/// `docs/specs/SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`
+/// Phase A.
+///
+/// Host and cross-channel entries carry a `last_message_preview` (the tail
+/// non-blank transcript line) and `turn_active`, read directly for host
+/// (this instance's own `wstore`/`filestore`) and via a single best-effort
+/// forwarded HTTP call per channel for cross-channel (same auth/loopback
+/// pattern `handle_reactive_inject`'s Tier 2b and this instance's own
+/// `handle_muxspect_verify_sender` already use — see those for the security
+/// rationale; not repeated here). LAN and WAN entries carry no preview
+/// (`remote_fetch_required: true`) — Phase A deliberately does not invent a
+/// remote-read protocol for those tiers; see the spec's Phase B/C.
+///
+/// Always 200 — an empty `agents` list is a legitimate result, not an
+/// error, matching every other handler in this file.
+pub async fn handle_muxspect_conversations(State(state): State<AppState>) -> impl IntoResponse {
+    let mut agents: Vec<serde_json::Value> = Vec::new();
+
+    // Host tier — direct local read, no network.
+    for reg in state.reactive_handler.list_agents() {
+        let preview = last_line_preview(&state.wstore, &state.filestore, &reg.block_id);
+        let turn_active = crate::backend::blockcontroller::get_block_controller_status(&reg.block_id)
+            .map(|s| s.turn_active)
+            .unwrap_or(false);
+        agents.push(json!({
+            "name": reg.agent_id,
+            "tier": "host",
+            "turn_active": turn_active,
+            "last_activity_ms": reg.last_seen,
+            "last_message_preview": preview,
+        }));
+    }
+
+    // Cross-channel tier — one best-effort forwarded call per channel.
+    let own_channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
+    let local_url = state.local_web_url.clone();
+    if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
+        let cross_channel_entries: Vec<_> =
+            crate::backend::reactive::registry::list_all_shared(&shared_dir)
+                .into_iter()
+                .filter(|e| e.channel != own_channel && e.local_url != local_url)
+                .collect();
+
+        for entry in cross_channel_entries {
+            let mut preview: Option<String> = None;
+            let mut turn_active: Option<bool> = None;
+
+            let fetch = state
+                .http_client
+                .get(format!("{}/agentmux/reactive/transcript", entry.local_url))
+                .header("X-AuthKey", &entry.auth_key)
+                .query(&[("agent", entry.agent_id.as_str()), ("max_lines", "1")])
+                .send();
+
+            if let Ok(Ok(resp)) = tokio::time::timeout(
+                std::time::Duration::from_millis(CROSS_CHANNEL_PREVIEW_TIMEOUT_MS),
+                fetch,
+            )
+            .await
+            {
+                if resp.status().is_success() {
+                    if let Ok(body) = resp.json::<serde_json::Value>().await {
+                        turn_active = body.get("turn_active").and_then(|v| v.as_bool());
+                        preview = body
+                            .get("lines")
+                            .and_then(|v| v.as_array())
+                            .and_then(|arr| arr.last())
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_string());
+                    }
+                }
+            }
+            // Timeout/connection/parse failure: list the agent anyway with
+            // no preview — best-effort, same as every other tier here.
+
+            agents.push(json!({
+                "name": entry.agent_id,
+                "tier": "cross-channel",
+                "channel": entry.channel,
+                "turn_active": turn_active,
+                "last_activity_ms": entry.updated_at,
+                "last_message_preview": preview,
+            }));
+        }
+    }
+
+    // LAN tier — liveness only, no remote-read protocol in Phase A.
+    for lan_instance in state.lan_discovery.get_instances() {
+        for agent_name in &lan_instance.agents {
+            agents.push(json!({
+                "name": agent_name,
+                "tier": "lan",
+                "host": format!("{}:{}", lan_instance.address, lan_instance.port),
+                "remote_fetch_required": true,
+            }));
+        }
+    }
+
+    // WAN tier — liveness only, no remote-read protocol in Phase A.
+    if let Some(subscriber) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+        for agent_name in subscriber.subscribed_agents() {
+            agents.push(json!({
+                "name": agent_name,
+                "tier": "wan",
+                "remote_fetch_required": true,
+            }));
+        }
+    }
+
+    Json(json!({ "agents": agents })).into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1221,5 +1372,109 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let body = json_body(resp).await;
         assert_eq!(body["status"], "not_found");
+    }
+
+    #[tokio::test]
+    async fn handle_muxspect_conversations_empty_state_is_still_200() {
+        // No agents registered at all is a legitimate result, not an error —
+        // same "encode absence in the body, not the status" posture as the
+        // rest of this file's handlers.
+        let state = crate::server::tests::test_state();
+        let resp = handle_muxspect_conversations(State(state)).await.into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = json_body(resp).await;
+        assert!(body["agents"].is_array());
+    }
+
+    #[tokio::test]
+    async fn handle_muxspect_conversations_includes_a_registered_host_agent() {
+        let state = crate::server::tests::test_state();
+        let unique = uuid::Uuid::new_v4();
+        let agent_id = format!("conversations-test-agent-{unique}");
+        let block_id = format!("conversations-test-block-{unique}");
+        state
+            .reactive_handler
+            .register_agent(&agent_id, &block_id, None)
+            .unwrap();
+
+        let resp = handle_muxspect_conversations(State(state)).await.into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = json_body(resp).await;
+        let agents = body["agents"].as_array().expect("agents array");
+        let entry = agents
+            .iter()
+            .find(|a| a["name"] == agent_id)
+            .expect("registered agent should appear in the listing");
+        assert_eq!(entry["tier"], "host");
+        // No filestore content written for this block in this test — a
+        // missing preview is the correct, non-error result (see
+        // last_line_preview's own doc comment), not something this test
+        // should treat as a failure.
+        assert_eq!(entry["last_message_preview"], serde_json::Value::Null);
+    }
+
+    /// Minimal, non-archived `Block` row so `read_session_output` takes its
+    /// FileStore-read path — matches the pattern
+    /// `session_archive.rs`'s own tests use, just without the extra
+    /// archival-specific meta this module's read path never inspects.
+    fn insert_bare_block(
+        wstore: &std::sync::Arc<crate::backend::storage::store::Store>,
+        block_id: &str,
+    ) {
+        use crate::backend::obj::Block;
+        let mut block = Block {
+            oid: block_id.to_string(),
+            parentoref: String::new(),
+            version: 1,
+            runtimeopts: None,
+            stickers: None,
+            meta: Default::default(),
+            subblockids: None,
+        };
+        wstore.insert(&mut block).expect("wstore insert");
+    }
+
+    #[test]
+    fn last_line_preview_returns_last_non_blank_line() {
+        let filestore = std::sync::Arc::new(FileStore::open_in_memory().unwrap());
+        let wstore = std::sync::Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+        let block_id = uuid::Uuid::new_v4().to_string();
+        filestore
+            .make_file(&block_id, "output", crate::backend::storage::filestore::FileMeta::default(), crate::backend::storage::filestore::FileOpts::default())
+            .expect("make_file");
+        filestore
+            .append_data(&block_id, "output", b"first line\n\nlast line\n")
+            .expect("append_data");
+        insert_bare_block(&wstore, &block_id);
+
+        let preview = last_line_preview(&wstore, &filestore, &block_id);
+        assert_eq!(preview, Some("last line".to_string()));
+    }
+
+    #[test]
+    fn last_line_preview_truncates_long_lines() {
+        let filestore = std::sync::Arc::new(FileStore::open_in_memory().unwrap());
+        let wstore = std::sync::Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+        let block_id = uuid::Uuid::new_v4().to_string();
+        let long_line = "x".repeat(PREVIEW_MAX_CHARS + 50);
+        filestore
+            .make_file(&block_id, "output", crate::backend::storage::filestore::FileMeta::default(), crate::backend::storage::filestore::FileOpts::default())
+            .expect("make_file");
+        filestore
+            .append_data(&block_id, "output", format!("{long_line}\n").as_bytes())
+            .expect("append_data");
+        insert_bare_block(&wstore, &block_id);
+
+        let preview = last_line_preview(&wstore, &filestore, &block_id).unwrap();
+        assert_eq!(preview.chars().count(), PREVIEW_MAX_CHARS + 1); // +1 for the trailing "…"
+        assert!(preview.ends_with('…'));
+    }
+
+    #[test]
+    fn last_line_preview_returns_none_for_missing_block() {
+        let filestore = std::sync::Arc::new(FileStore::open_in_memory().unwrap());
+        let wstore = std::sync::Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
+        let preview = last_line_preview(&wstore, &filestore, "no-such-block");
+        assert_eq!(preview, None);
     }
 }
