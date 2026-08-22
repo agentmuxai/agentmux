@@ -1643,7 +1643,14 @@ impl Store {
             )?;
         }
         self.registry_upsert_if_named(inst);
-        self.registry_propagate_continuation_session_id(inst);
+        // A freshly created row's session_id is never a genuine capture —
+        // production always creates continuations with session_id = ""
+        // (see registry_propagate_continuation_session_id's doc comment).
+        // Skip so we don't clobber the chain root's still-valid registry
+        // pointer with an empty one on every ordinary "Continue agent".
+        if !inst.session_id.is_empty() {
+            self.registry_propagate_continuation_session_id(inst);
+        }
         // Mirror new instance into db_agents.
         self.agents_dual_write_instance_create(inst)?;
         Ok(())
@@ -2132,7 +2139,18 @@ impl Store {
         let fresh = self.instance_get(id)?;
         if let Some(f) = &fresh {
             self.registry_upsert_if_named(f);
-            self.registry_propagate_continuation_session_id(f);
+            // Only propagate when THIS call actually targeted session_id —
+            // `upd.session_id` is `None` for e.g. a bare status change, in
+            // which case `f.session_id` just reflects whatever the row
+            // already had (possibly still empty, pre-first-capture) and
+            // propagating it would clobber a valid root pointer for no
+            // reason. `Some("")` (poison_resume's deliberate stale-resume
+            // clear) and `Some(real_sid)` (a genuine capture) both DO mean
+            // this call wrote session_id and must propagate either way —
+            // see registry_propagate_continuation_session_id's doc comment.
+            if upd.session_id.is_some() {
+                self.registry_propagate_continuation_session_id(f);
+            }
             // Mirror update to db_agents.
             self.agents_dual_write_instance_update(f)?;
         }

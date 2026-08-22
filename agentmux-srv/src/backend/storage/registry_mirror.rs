@@ -239,23 +239,22 @@ impl Store {
     /// every field present in the struct). Best-effort: logs and returns
     /// on any lookup/write failure, since the SQLite write already
     /// succeeded and remains authoritative.
+    ///
+    /// Callers decide WHETHER to invoke this at all based on whether
+    /// `inst.session_id` reflects a genuine write, not just this
+    /// function — an empty `session_id` is ambiguous in isolation: it can
+    /// mean "never captured yet" (a fresh continuation — must NOT
+    /// propagate, would clobber a still-valid root pointer, reagent P1 on
+    /// PR #2755) or "deliberately cleared" (`poison_resume`'s stale-resume
+    /// handling, via `persist_session_id(block_id, "", ...)` on an
+    /// EXISTING row — MUST propagate, otherwise the shared registry keeps
+    /// serving a session_id already proven dead, reagent P1 round 2). Only
+    /// the caller knows which case it's in (create vs. an explicit
+    /// `InstanceUpdate.session_id` write), so this function itself never
+    /// special-cases emptiness — it always mirrors whatever it's given.
     pub(super) fn registry_propagate_continuation_session_id(&self, inst: &AgentInstance) {
         if inst.parent_instance_id.is_empty() {
             return; // chain head — already covered by registry_upsert_if_named.
-        }
-        if inst.session_id.is_empty() {
-            // No live session_id captured on THIS row yet. `instance_create`
-            // calls this on every new continuation, and `createagentinstance`
-            // always creates one with session_id = "" (the RPC's
-            // `CommandCreateAgentInstanceData` has no session_id field at
-            // all — it's only ever set later via a genuine capture). If we
-            // propagated an empty value here, every ordinary "Continue
-            // agent" click would immediately clobber the chain root's still-
-            // valid registry session_id with None before the new
-            // continuation's own id is ever captured — reagent P1 on PR
-            // #2755, a self-inflicted regression of the exact field this
-            // fix exists to make more reliable.
-            return;
         }
         let Some(reg) = self.shared_agent_registry() else {
             return;
