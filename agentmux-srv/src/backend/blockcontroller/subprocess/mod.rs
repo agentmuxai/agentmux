@@ -417,6 +417,10 @@ impl Controller for SubprocessController {
         &self.block_id
     }
 
+    fn health_monitor(&self) -> Option<Arc<HealthMonitor>> {
+        Some(Arc::clone(&self.health_monitor))
+    }
+
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
