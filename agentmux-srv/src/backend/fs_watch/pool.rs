@@ -330,30 +330,68 @@ impl FsWatchPool {
     /// flavored concerns on a Windows-primary codebase), against a
     /// certain, systematic cost (leak or gap, every target, every tick) for
     /// every other watch the alternative would have imposed.
+    ///
+    /// **Race with concurrent `unsubscribe()` — closed by re-checking under
+    /// one held lock** (reagent P1, second review round on #2722): the
+    /// degraded-target list above is a snapshot; without re-verification, a
+    /// concurrent `unsubscribe()` dropping the last subscriber for one of
+    /// these targets between the snapshot and this loop's `watch()` call
+    /// would remove it from `targets` and `unwatch()` it, while this sweep's
+    /// in-flight `watch()` call still re-established a native watch for the
+    /// now-untracked path — orphaning exactly the handle pair this fn exists
+    /// to stop leaking, just via a race instead of per-tick re-watching.
+    /// Each target's re-check + `unwatch()` + `watch()` now happens under a
+    /// single `inner` lock acquisition (not `try_watch()`, which takes its
+    /// own lock and would deadlock if called while this one is held) — a
+    /// concurrent `unsubscribe()` either finishes its own removal entirely
+    /// before this runs (this loop then sees the target is gone and skips
+    /// it) or entirely after (its own `unwatch()` then correctly tears down
+    /// the watch this loop just re-armed) — `Mutex` serializes the two, so
+    /// no interleaving in between is possible.
     fn sweep(&self) {
-        let targets: Vec<(PathBuf, RecursiveMode)> = {
+        let targets: Vec<PathBuf> = {
             let inner = self.inner.lock().unwrap();
             inner
                 .targets
-                .iter()
-                .map(|(p, e)| (p.clone(), e.mode))
-                .filter(|(p, _)| self.health.is_degraded(p))
+                .keys()
+                .filter(|p| self.health.is_degraded(p))
+                .cloned()
                 .collect()
         };
-        for (target, mode) in targets {
-            {
-                let mut inner = self.inner.lock().unwrap();
-                if let Some(w) = inner.watcher.as_mut() {
-                    // Best-effort: a never-established watch has nothing to
-                    // unwatch — try_watch below (re)establishes it
-                    // regardless of whether this succeeds.
-                    let _ = w.unwatch(&target);
-                }
-            }
-            match self.try_watch(&target, mode) {
-                Ok(()) => self.health.clear_degraded(&target),
-                Err(e) => self.health.mark_degraded(target, e),
-            }
+        for target in targets {
+            self.rearm_if_still_subscribed(target);
+        }
+    }
+
+    /// The per-target half of a sweep: re-verify `target` is still
+    /// subscribed, then `unwatch()` + `watch()` it, all under one held
+    /// `inner` lock (see `sweep()`'s doc comment for why the re-check and
+    /// the single lock both matter). Split out from `sweep()`'s loop body
+    /// so a test can call it directly with a `target` captured *before* a
+    /// real `unsubscribe()` ran — deterministically reproducing "sweep
+    /// already decided to process this target, then it was removed before
+    /// the action ran" without needing to win a real thread-scheduling
+    /// race.
+    fn rearm_if_still_subscribed(&self, target: PathBuf) {
+        let mut inner = self.inner.lock().unwrap();
+        // Re-check: still subscribed? A concurrent unsubscribe() may have
+        // removed it since the caller's snapshot — don't resurrect a watch
+        // nobody wants anymore.
+        let Some(mode) = inner.targets.get(&target).map(|e| e.mode) else {
+            return;
+        };
+        let Some(w) = inner.watcher.as_mut() else {
+            return;
+        };
+        // Best-effort: a never-established watch has nothing to unwatch —
+        // the watch() call below (re)establishes it regardless of whether
+        // this succeeds.
+        let _ = w.unwatch(&target);
+        let result = w.watch(&target, mode).map_err(|e| e.to_string());
+        drop(inner);
+        match result {
+            Ok(()) => self.health.clear_degraded(&target),
+            Err(e) => self.health.mark_degraded(target, e),
         }
     }
 }
@@ -572,6 +610,94 @@ mod tests {
              degraded target (before={before}, after={after}) — the \
              unwatch()-before-watch() re-arm path must not leak a \
              File+Semaphore pair per call"
+        );
+    }
+
+    /// Regression test for reagent's second-round P1 on #2722: `sweep()`
+    /// snapshots the degraded-target list, then acts on each one later.
+    /// Without re-verification, a concurrent `unsubscribe()` dropping the
+    /// last subscriber for one of these targets in that window would remove
+    /// it from `targets` (and `unwatch()` it), while this sweep's own
+    /// in-flight `watch()` call still re-established a native watch for the
+    /// now-untracked path — orphaning the handle pair forever, since nothing
+    /// is left to `unwatch()` it again.
+    ///
+    /// **Deterministic, not a timing-based race** (an earlier version of
+    /// this test tried to actually race `sweep()` against `unsubscribe()`
+    /// on separate tasks — unreliable: `unsubscribe()`'s critical section is
+    /// so much shorter than `spawn_blocking`'s own scheduling latency that
+    /// it essentially always completed entirely before or after `sweep()`
+    /// ran, never in the middle, so it couldn't reliably exercise the
+    /// vulnerable window either way). Instead, `sweep()`'s per-target action
+    /// is split into its own method
+    /// ([`rearm_if_still_subscribed`](Self::rearm_if_still_subscribed)) so
+    /// this test can call it directly with a target captured *before* a
+    /// real `unsubscribe()` runs — deterministically reproducing "sweep
+    /// already decided to process this target, then it was removed before
+    /// the action ran" without needing to win any race at all.
+    /// Repeatedly calling `rearm_if_still_subscribed()` on the SAME target
+    /// does not by itself amplify a leak here — each call's own `unwatch()`
+    /// cleans up the *previous* call's watch, so a tight loop on one path is
+    /// self-cleaning regardless of whether the re-check exists (confirmed
+    /// empirically writing this test — a single-shot before/after diff on
+    /// one target is too small to reliably separate from handle-count
+    /// noise, and looping the same target doesn't accumulate). The actual
+    /// damage from a missing re-check is a *one-time* orphaned resurrection
+    /// with no future subscriber left to ever `unwatch()` it again — so
+    /// this amplifies by repeating the whole subscribe -> degrade ->
+    /// unsubscribe -> single-stale-rearm sequence across many DISTINCT
+    /// targets instead, each contributing at most one orphaned handle pair
+    /// if the bug is present, summing to a clearly measurable total.
+    #[cfg(target_os = "windows")]
+    #[tokio::test]
+    async fn sweep_does_not_resurrect_a_target_unsubscribed_after_being_snapshotted() {
+        let pool = FsWatchPool::new();
+        let base = std::env::temp_dir().join("agentmux_fs_watch_pool_sweep_race_test");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+
+        let pid = std::process::id();
+        let before = crate::backend::sysinfo::process_handle_count(pid)
+            .expect("own handle count must be queryable");
+
+        const ROUNDS: u32 = 200;
+        for i in 0..ROUNDS {
+            let dir = base.join(i.to_string());
+            std::fs::create_dir_all(&dir).unwrap();
+
+            let sub = pool.subscribe_dir(&dir);
+            // Captured now, exactly as sweep()'s own snapshot phase would —
+            // before the real unsubscribe() below runs.
+            let target = sub.watch_target.clone();
+            pool.health.mark_degraded(target.clone(), "simulated for test".to_string());
+
+            // The real teardown — exactly what a concurrent unsubscribe()
+            // does, landing (for this test) strictly *after* the target was
+            // "snapshotted" above but strictly *before* the re-arm action
+            // below.
+            pool.unsubscribe(sub);
+
+            // sweep()'s per-target action, called directly with the stale
+            // (now-unsubscribed) target — the exact call sweep()'s loop
+            // would have made had it reached this target after losing the
+            // race.
+            pool.rearm_if_still_subscribed(target);
+        }
+
+        let after = crate::backend::sysinfo::process_handle_count(pid)
+            .expect("own handle count must be queryable");
+        let grew_by = after.saturating_sub(before);
+
+        let _ = std::fs::remove_dir_all(&base);
+
+        assert!(
+            grew_by < ROUNDS / 2,
+            "handle count grew by {grew_by} over {ROUNDS} distinct \
+             subscribe -> unsubscribe -> stale-rearm rounds (before={before}, \
+             after={after}) — rearm_if_still_subscribed() must not \
+             re-establish a watch for a target that was unsubscribed after \
+             being snapshotted; doing so orphans the handle pair with \
+             nothing left to ever unwatch() it"
         );
     }
 }

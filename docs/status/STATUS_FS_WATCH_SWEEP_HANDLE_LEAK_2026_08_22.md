@@ -174,9 +174,34 @@ Also corrected the "cheap no-op" claim in three places it appeared:
 comment (`FsWatchPool::new()`), and `recovery.rs`'s `HEALTH_SWEEP_INTERVAL`
 doc comment — all now describe the degraded-only scoping and why.
 
+### 3.1 A third review round (reagent P1) — snapshot/act race with `unsubscribe()`
+
+`sweep()`'s per-target loop snapshotted the degraded-target list once
+under the pool's lock, then released the lock and acted on each target in
+turn (`unwatch()` + `watch()`). If a concurrent `unsubscribe()` dropped the
+last subscriber for one of those targets during that window, it would
+remove the target from `targets` (and `unwatch()` it itself) — but
+`sweep()`'s own in-flight action for that same target would still go on to
+call `watch()` afterward, re-establishing a native watch for a path with
+no subscriber left and no future sweep tick able to see it again (it's no
+longer in `targets`, so `is_degraded()`'s target list never includes it).
+That orphans the handle pair permanently — worse than the original bug in
+one respect, since this one can never self-heal even under continued
+normal operation.
+
+**Fix**: extracted `sweep()`'s per-target action into its own method,
+`rearm_if_still_subscribed(&self, target: PathBuf)`
+(`agentmux-srv/src/backend/fs_watch/pool.rs`), which re-checks target
+membership and performs `unwatch()`/`watch()` under a single held lock —
+not released between the check and the act, and not implemented by
+calling back into a helper that re-locks (`std::sync::Mutex` isn't
+reentrant, so that would deadlock). A target removed by `unsubscribe()`
+before `rearm_if_still_subscribed` acquires the lock is simply skipped —
+`sweep()` no longer resurrects a watch nobody wants anymore.
+
 ## 4. Verification
 
-Two regression tests in `fs_watch::pool::tests` (both Windows-only):
+Three regression tests in `fs_watch::pool::tests` (all Windows-only):
 
 - `sweep_leaves_a_healthy_target_untouched` — subscribes to a real temp
   directory, calls `sweep()` 200 times back-to-back on the now-healthy
@@ -189,11 +214,29 @@ Two regression tests in `fs_watch::pool::tests` (both Windows-only):
   sweep calls (so each one really exercises `unwatch()` + `watch()`), and
   asserts handle count doesn't grow linearly — proving the re-arm path
   itself, which does still run for real failures, doesn't leak either.
+- `sweep_does_not_resurrect_a_target_unsubscribed_after_being_snapshotted`
+  (§3.1's fix) — deterministically reproduces "sweep already decided to
+  process this target, then it was removed before the action ran" by
+  calling `rearm_if_still_subscribed` directly with a target captured
+  *before* a real `unsubscribe()` runs, rather than trying to race two
+  tasks against each other (an earlier version of this test tried a real
+  `tokio::spawn` race and found it unreliable — `unsubscribe()`'s critical
+  section is far shorter than the scheduling latency needed to land it
+  mid-`sweep()`, so the two operations essentially never interleaved).
+  Repeats the whole subscribe → degrade → unsubscribe → single-stale-rearm
+  sequence across 200 distinct targets rather than looping one target
+  200 times — an early draft of this test that reused a single target
+  didn't discriminate, because each iteration's own `unwatch()` silently
+  cleaned up the *previous* iteration's orphaned watch, masking the leak.
+  A single-target, single-round before/after diff didn't discriminate
+  either — too small to separate from ambient handle-count noise. Only
+  amplifying the one-time-per-target orphan across many distinct targets
+  produced a reliably measurable total.
 
-**Proved both are real discriminators, not just green checkmarks** (same
-methodology the 08-19 sysinfo fix used): temporarily reverted just the
-`unwatch()`-before-`watch()` line (kept both tests, kept the degraded-only
-filter), reran the degraded-target test —
+**Proved all three are real discriminators, not just green checkmarks**
+(same methodology the 08-19 sysinfo fix used): for the first two, temporarily
+reverted just the `unwatch()`-before-`watch()` line (kept both tests, kept
+the degraded-only filter), reran the degraded-target test —
 
 ```
 handle count grew by 400 over 200 sweep() calls on a degraded target
@@ -201,15 +244,18 @@ handle count grew by 400 over 200 sweep() calls on a degraded target
 ```
 
 — **exactly 2.0 handles/call**, matching the theorized File+Semaphore pair
-precisely, twice (this test and the original single-fix version's identical
-result). Restored the fix, reran clean. Full suite:
-`cargo test -p agentmux-srv -- --test-threads=1` — 2640 passed, 0 failed
-(confirmed clean across 3 consecutive runs; one run hit the pre-existing,
-independently-flaky `refresh_processes_specifics_does_not_leak_a_handle_per_call`
-test unrelated to this change — see its own history in
-`STATUS_SRV_SECTION_HANDLE_LEAK_LIVE_RECURRENCE_2026_08_19.md`/this
-session's own prior confirmation that it's order/load-sensitive on a busy
-machine, not a real regression).
+precisely. For the third (§3.1's fix), temporarily reverted
+`rearm_if_still_subscribed`'s re-check (using a hardcoded `RecursiveMode`
+instead of looking the target up), reran —
+
+```
+handle count grew by 400 over 200 distinct subscribe -> unsubscribe ->
+stale-rearm rounds (before=151, after=551)
+```
+
+— again **exactly 2.0 handles/call**, the same signature. Restored the fix
+each time, reran clean. Full suite: `cargo test -p agentmux-srv --bin
+agentmux-srv -- --test-threads=1` — 2641 passed, 0 failed.
 
 ## 5. What this does NOT fix — action needed on already-running instances
 
