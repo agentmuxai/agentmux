@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, type JSX } from "solid-js";
+import clsx from "clsx";
 import { invokeCommand, listenEvent } from "@/app/platform/ipc";
 import { showTextInputContextMenu } from "@/app/store/contextmenu";
 import { FlyoutMenu } from "@/app/element/flyoutmenu";
@@ -9,6 +10,33 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { findBookmark, toggleBookmark } from "./browser-bookmarks-logic";
 import type { BrowserViewModel } from "./browser-model";
+
+/**
+ * A saved bookmark's favicon, falling back to the app's existing "no
+ * favicon" convention (a plain globe icon, matching
+ * `BrowserViewModel.viewIcon`/faviconUrlAtom's own empty-string fallback)
+ * when there's no favicon_url, or the image fails to load. A real `<img>`
+ * — not a FontAwesome name — since `MenuItem.icon` is typed
+ * `string | JSX.Element` specifically to allow this; FlyoutMenu's default
+ * item renderer only handles the string case, so this is paired with a
+ * `renderMenuItem` override below that renders a JSX.Element icon as-is.
+ */
+function BookmarkFavicon(props: { faviconUrl: string }): JSX.Element {
+    const [failed, setFailed] = createSignal(false);
+    return (
+        <Show
+            when={props.faviconUrl && !failed()}
+            fallback={<i class="fa-solid fa-fw fa-globe menu-item-icon" aria-hidden="true" />}
+        >
+            <img
+                src={props.faviconUrl}
+                class="menu-item-icon browser-bookmark-favicon"
+                onError={() => setFailed(true)}
+                alt=""
+            />
+        </Show>
+    );
+}
 
 // Compact tag for an Element — used by diag log lines to identify the
 // previous/next active element across focus transitions.
@@ -206,13 +234,13 @@ export function BrowserNavBar(props: {
     // means the "grows to the bottom of the window, then scrolls
     // internally" behavior (computeMenuPosition's size() middleware,
     // frontend/app/util/menu-position.ts) and edge-flip/click-outside-close
-    // come for free — nothing bookmark-specific to build there. `icon`
-    // uses a plain FontAwesome name (consistent with every other menu item
-    // in the app) rather than a live per-site favicon image — FlyoutMenu's
-    // default item renderer only supports FA icon-name strings, and
-    // special-casing an `<img>` via `renderMenuItem` would be new,
-    // unprecedented surface in a shared component for a purely cosmetic
-    // upgrade, not worth it for v1.
+    // come for free — nothing bookmark-specific to build there. Saved-
+    // bookmark rows use a real per-site favicon (`BookmarkFavicon`, a
+    // JSX.Element) rather than a FontAwesome name — FlyoutMenu's default
+    // item renderer only handles the string-icon case, so the `<FlyoutMenu>`
+    // below carries a `renderMenuItem` override that renders a JSX.Element
+    // icon as-is and falls back to the default fa-${icon} rendering for the
+    // pinned toggle row / placeholder rows, which still use string icons.
     const bookmarkMenuItems = createMemo<MenuItem[]>(() => {
         if (bookmarksLoading()) {
             // No icon here (deliberately): FlyoutMenu's default item
@@ -241,7 +269,7 @@ export function BrowserNavBar(props: {
             for (const b of saved) {
                 items.push({
                     label: b.title || b.url,
-                    icon: "bookmark",
+                    icon: <BookmarkFavicon faviconUrl={b.favicon_url ?? ""} />,
                     onClick: () => navigateTo(b.url),
                 });
             }
@@ -280,6 +308,27 @@ export function BrowserNavBar(props: {
                     onOpenChange={(open) => {
                         if (open) void loadBookmarks();
                     }}
+                    // Only the icon slot is customized here — label/onClick/
+                    // divider behavior is identical to FlyoutMenu's default
+                    // rendering. `checked`/`shortcut`/`subItems` are
+                    // deliberately not replicated since this menu never uses
+                    // them (v1 has no folders/radio state) — not a general-
+                    // purpose replacement for the default renderer.
+                    renderMenuItem={(item, menuItemProps) => (
+                        <div {...menuItemProps}>
+                            <Show
+                                when={typeof item.icon !== "string"}
+                                fallback={
+                                    <Show when={item.icon}>
+                                        <i class={clsx("fa-solid fa-fw", `fa-${item.icon}`, "menu-item-icon")} />
+                                    </Show>
+                                }
+                            >
+                                {item.icon as JSX.Element}
+                            </Show>
+                            <span class="label">{item.label}</span>
+                        </div>
+                    )}
                 >
                     <button
                         class="browser-nav-btn"
