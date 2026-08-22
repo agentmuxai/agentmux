@@ -2301,6 +2301,23 @@ fn test_keyword_match_plural_rule_does_not_introduce_new_false_positives() {
 }
 
 #[test]
+fn test_keyword_match_pat_opts_out_of_plural_to_avoid_common_verb_collision() {
+    // Found in PR #2740 review: a blanket "+s" plural rule applied to "pat"
+    // would match "pats" — the ordinary, very common English verb ("she
+    // pats the dog") — as if it were the plural of the PAT-token keyword.
+    // "pat" is excluded from plural matching for exactly this reason (see
+    // SENSITIVE_WHOLE_WORD_KEYWORDS); only the singular "pat" is keyword-
+    // sensitive, same as before this PR.
+    for msg in [
+        "the user pats the dog",
+        "she gently pats the cat",
+        "he pats his friend on the back",
+    ] {
+        assert!(!is_sensitive_message(msg), "unexpectedly sensitive: {msg:?}");
+    }
+}
+
+#[test]
 fn test_keyword_match_substring_positive_cases() {
     for msg in [
         "here is the api_key value",
