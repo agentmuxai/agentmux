@@ -1,7 +1,7 @@
 // Copyright 2025-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { atoms, recordTEvent, refocusNode } from "@/app/store/global";
+import { atoms, pushNotification, recordTEvent, refocusNode } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Button } from "@/element/button";
@@ -14,6 +14,7 @@ import { ColorSwatchPalette } from "@/app/components/color-swatch-palette";
 import { ObjectService } from "../store/services";
 import { makeORef, useWaveObjectValue } from "../store/wos";
 import { measureTabWidth } from "./tab-measure";
+import { quickForkTabToNewTab } from "./quick-fork";
 import "./tab.scss";
 
 // 14 colors — same hues as the agent-pane border palette
@@ -47,6 +48,7 @@ interface TabContextPanelProps {
     currentColor: string | null | undefined;
     onColorSelect: (hex: string | null) => void;
     onRename: () => void;
+    onQuickFork: () => void;
     onClose: (e?: MouseEvent) => void;
 }
 
@@ -89,6 +91,14 @@ const TabContextPanel = (props: TabContextPanelProps): JSX.Element => {
                 <div class="tab-context-actions">
                     <button class="tab-context-btn" onClick={() => { props.onRename(); props.onClose(); }}>
                         ✏️ Rename
+                    </button>
+                    {/* SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md §4.3 — mirrors
+                        a browser's "Duplicate Tab": full independent identity,
+                        conversation history carried forward, lands in a new
+                        tab immediately. No-op (with a toast) if this tab has
+                        no active agent to fork. */}
+                    <button class="tab-context-btn" onClick={() => { props.onQuickFork(); props.onClose(); }}>
+                        ⑂ Quick-fork to new tab
                     </button>
                     <button class="tab-context-btn tab-context-btn-close" onClick={() => props.onClose()}>
                         ✕ Close menu
@@ -247,6 +257,22 @@ function Tab(props: TabProps): JSX.Element {
         }
     };
 
+    const handleQuickFork = () => {
+        fireAndForget(async () => {
+            const newTabId = await quickForkTabToNewTab(props.id);
+            if (!newTabId) {
+                pushNotification({
+                    icon: "fa-triangle-exclamation",
+                    title: "Quick-fork failed",
+                    message: "This tab has no active agent to fork, or the fork could not be launched.",
+                    timestamp: new Date().toISOString(),
+                    type: "error",
+                    expiration: Date.now() + 8000,
+                });
+            }
+        });
+    };
+
     return (
         <>
             <div
@@ -317,6 +343,7 @@ function Tab(props: TabProps): JSX.Element {
                     currentColor={tabColor()}
                     onColorSelect={handleColorSelect}
                     onRename={() => handleRenameTab()}
+                    onQuickFork={handleQuickFork}
                     onClose={() => setShowColorPicker(false)}
                 />
             </Show>
