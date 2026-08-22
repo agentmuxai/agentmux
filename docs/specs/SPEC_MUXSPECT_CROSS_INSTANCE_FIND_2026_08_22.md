@@ -71,3 +71,13 @@ to the first match.
   module only covers pure helpers like `classify_last_error_source`/
   `last_error_frame`). Relies on code-review + the mirrored pattern's
   existing track record instead.
+- **Cross-channel `block_id` search only covers agent-registered blocks**
+  (reagent P2 on PR #2745). It reads the shared `AgentEntry` registry, not
+  a remote channel's full controller inventory — a plain shell/terminal
+  block, or any other non-agent controller, in a *different* channel is
+  not findable by `block_id` on the cross-channel tier (the host tier has
+  no such limit — it searches this instance's full `ProcessBroker::list()`,
+  any controller type). Reaching a non-agent controller cross-channel would
+  need a remote `/api/v1/muxspect/list`-style forward-and-filter call, a
+  bigger change than a registry lookup; left for a follow-up if it turns
+  out to matter in practice.

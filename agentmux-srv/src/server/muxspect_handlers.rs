@@ -253,6 +253,36 @@ pub struct MuxspectFindQuery {
 /// same block_id/agent name somehow exists in more than one place at once
 /// (a real, worth-surfacing anomaly, not something to silently collapse to
 /// the first match).
+///
+/// **Cross-channel `block_id` scope (reagent P2 on PR #2745):** the
+/// cross-channel tier only searches the shared `AgentEntry` registry —
+/// agent-registered blocks. A plain shell/terminal block, or any other
+/// non-agent controller, in a DIFFERENT channel is not findable by
+/// `block_id` here (the host tier above has no such limit — it searches
+/// this instance's FULL `ProcessBroker::list()`, any controller type).
+/// Reaching a non-agent controller cross-channel would need a remote
+/// `/api/v1/muxspect/list`-style forward-and-filter, not just a registry
+/// lookup — out of scope for this change; see
+/// `SPEC_MUXSPECT_CROSS_INSTANCE_FIND_2026_08_22.md`'s Non-goals.
+///
+/// True when a forwarded `describe` response's `process_status.lifecycle`
+/// reads `"unknown"` — `broker::process::Lifecycle::Unknown`'s own doc
+/// comment: "no controller found for this block_id at all." A `None`
+/// input (the forward itself failed/timed out) is NOT the same as this —
+/// deliberately returns `false` for that case, since "we couldn't ask" is
+/// not the same claim as "we asked and it's confirmed gone." Pure
+/// (extracted from the async handler above) for direct unit testing —
+/// reagent P1 on PR #2745 found the un-extracted inline version reported
+/// "found": true unconditionally, with no test coverage of the "gone but
+/// still registered" case at all.
+fn describe_lifecycle_is_unknown(describe: Option<&serde_json::Value>) -> bool {
+    describe
+        .and_then(|d| d.get("process_status"))
+        .and_then(|ps| ps.get("lifecycle"))
+        .and_then(|l| l.as_str())
+        == Some("unknown")
+}
+
 pub async fn handle_muxspect_find(
     State(state): State<AppState>,
     Query(q): Query<MuxspectFindQuery>,
@@ -297,6 +327,23 @@ pub async fn handle_muxspect_find(
 
     // Cross-channel tier — AgentEntry already carries block_id/agent_id, so
     // matching costs zero network calls; only a match gets forwarded.
+    //
+    // reagent P1 on PR #2745: an earlier version unconditionally reported
+    // "found": true for any registry match, even a possibly-stale one whose
+    // owning agent/block already exited but hasn't been evicted from the
+    // shared registry yet — reported as a successful match with CLI exit
+    // code 0. Two checks now guard against that, mirroring the sibling
+    // handle_muxspect_verify_sender's staleness handling in this same file:
+    //   1. should_evict_on_forward_failure(&entry) (reused verbatim from
+    //      backend::reactive::registry — the exact function the registry's
+    //      OWN eviction logic uses, checking both real PID liveness and
+    //      FORWARD_FAILURE_GRACE_MS age) filters out entries already known
+    //      to be stale, before wasting a network call on them.
+    //   2. Even a fresh-looking entry can point at a block the remote
+    //      ProcessBroker no longer knows about (lifecycle: "unknown" — see
+    //      broker::process::Lifecycle's doc comment: "No controller found
+    //      for this block_id at all"). A successful forward with that
+    //      lifecycle is reported with "found": false, not true.
     if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
         let local_url = state.local_web_url.clone();
         let matches: Vec<_> = crate::backend::reactive::registry::list_all_shared(&shared_dir)
@@ -306,6 +353,7 @@ pub async fn handle_muxspect_find(
                 q.block_id.as_deref().is_some_and(|b| b == e.block_id)
                     || q.agent.as_deref().is_some_and(|name| e.agent_id.eq_ignore_ascii_case(name))
             })
+            .filter(|e| !crate::backend::reactive::registry::should_evict_on_forward_failure(e))
             .collect();
 
         let mut join_set = tokio::task::JoinSet::new();
@@ -328,12 +376,14 @@ pub async fn handle_muxspect_find(
                     _ => None, // timeout/connect/parse failure: still report the match, just without detail
                 };
 
+                let lifecycle_unknown = describe_lifecycle_is_unknown(describe.as_ref());
+
                 json!({
                     "tier": "cross-channel",
                     "channel": entry.channel,
                     "block_id": entry.block_id,
                     "agent_id": entry.agent_id,
-                    "found": true,
+                    "found": !lifecycle_unknown,
                     "describe": describe,
                 })
             });
@@ -1080,6 +1130,37 @@ mod tests {
             "error": {"message": message}
         })
         .to_string()
+    }
+
+    // reagent P1 on PR #2745 — pins describe_lifecycle_is_unknown, the
+    // pure piece extracted from handle_muxspect_find's cross-channel
+    // staleness check.
+    #[test]
+    fn describe_lifecycle_is_unknown_true_for_lifecycle_unknown() {
+        let describe = json!({ "process_status": { "lifecycle": "unknown" } });
+        assert!(describe_lifecycle_is_unknown(Some(&describe)));
+    }
+
+    #[test]
+    fn describe_lifecycle_is_unknown_false_for_a_real_lifecycle() {
+        for lifecycle in ["running", "idle", "done", "error"] {
+            let describe = json!({ "process_status": { "lifecycle": lifecycle } });
+            assert!(!describe_lifecycle_is_unknown(Some(&describe)), "lifecycle={lifecycle}");
+        }
+    }
+
+    #[test]
+    fn describe_lifecycle_is_unknown_false_when_the_forward_itself_failed() {
+        // None (the describe call timed out/errored) is NOT the same claim
+        // as "confirmed gone" — "we couldn't ask" must not read as "unknown".
+        assert!(!describe_lifecycle_is_unknown(None));
+    }
+
+    #[test]
+    fn describe_lifecycle_is_unknown_false_for_malformed_or_missing_fields() {
+        assert!(!describe_lifecycle_is_unknown(Some(&json!({}))));
+        assert!(!describe_lifecycle_is_unknown(Some(&json!({ "process_status": {} }))));
+        assert!(!describe_lifecycle_is_unknown(Some(&json!({ "process_status": { "lifecycle": 123 } }))));
     }
 
     #[test]
