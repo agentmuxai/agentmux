@@ -46,13 +46,24 @@ pub const RETRY_BACKOFF: [Duration; 3] = [
     Duration::from_millis(3200),
 ];
 
-/// How often the background sweep re-verifies every currently-subscribed
-/// path still has a live watch, self-healing a silent death (inotify
-/// instance-limit churn, a watched directory deleted and recreated at a new
-/// inode, a flaky network mount) without needing a true "is this watch still
-/// alive" signal from the OS — re-issuing `watch()` on an already-watched
-/// path is a documented-safe no-op in `notify`, so this is cheap even when
-/// nothing is actually wrong.
+/// How often the background sweep re-arms every currently-*degraded*
+/// path, self-healing a watch that failed to establish (or a prior sweep
+/// found dead) without needing a dedicated retry loop running forever.
+/// **Deliberately scoped to degraded targets only, not every subscribed
+/// path** — an earlier version of this sweep re-issued `watch()`
+/// unconditionally on everything, every tick, to also catch a *silently*
+/// dead healthy-looking watch (inotify instance-limit churn, a watched
+/// directory deleted and recreated at a new inode, a flaky network mount).
+/// That cost more than it bought: `notify` 7.0.0's Windows backend leaks a
+/// File + Semaphore handle pair on every redundant `watch()` call (no
+/// cleanup of the previous entry), and even with an `unwatch()` first to
+/// avoid the leak, the gap between `unwatch()` and `watch()` drops event
+/// coverage for consumers with no reconciliation backstop of their own
+/// (`config_watcher_fs`, `EditorFileWatcher`, `MediaFileWatcher`). See
+/// `pool.rs`'s `sweep()` and
+/// `docs/status/STATUS_FS_WATCH_SWEEP_HANDLE_LEAK_2026_08_22.md` for the
+/// full history and the accepted trade-off (a truly silent death of an
+/// already-healthy watch is no longer self-healed by this sweep).
 pub const HEALTH_SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 
 #[derive(Default)]
@@ -67,6 +78,10 @@ impl HealthState {
 
     pub(super) fn clear_degraded(&self, path: &std::path::Path) {
         self.degraded.lock().unwrap().remove(path);
+    }
+
+    pub(super) fn is_degraded(&self, path: &std::path::Path) -> bool {
+        self.degraded.lock().unwrap().contains_key(path)
     }
 
     pub(super) fn snapshot(&self) -> Vec<(PathBuf, String)> {
