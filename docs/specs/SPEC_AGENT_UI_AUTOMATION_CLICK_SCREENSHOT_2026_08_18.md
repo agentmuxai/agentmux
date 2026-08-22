@@ -371,6 +371,59 @@ harden:
      boundary given AgentMux has zero OS-level capture/injection code to
      build on today.
 
+## 6.1 2026-08-21 addendum — narrow interim exception for `CaptureWindow` (repo-owner confirmed)
+
+**This is a real, narrow, repo-owner-confirmed exception, not a claim of a
+blanket policy change** — recorded here specifically so it's a citable spec
+diff, not just a commit-message assertion, matching this repo's own
+established standard for distinguishing a genuine decision from an
+unverified one (see `CLAUDE.md`'s jekt security section for the same
+pattern applied to a different subsystem: a real change ships with a spec
+diff and tests, not just prose).
+
+**What's confirmed, directly, by the repo owner, in this conversation, on
+this date:** PR #2709's `CaptureWindow` tool — OS-level window capture via
+`xcap`, which §5 places out of Phase-1 scope in its general form — ships
+with **audit logging only**, not the capability-flag gate §6
+recommendation 2 requires, as an accepted interim state. The full gate is
+tracked separately: issue #2714 (agentmuxai/agentmux).
+
+**Why this is narrower than "§5's out-of-scope boundary no longer applies":**
+
+1. §5's stated reason for excluding the `xcap`/`computer-use-pane.md`
+   approach was "arbitrary third-party apps, real OS input queue, no DOM
+   ground-truth" — `CaptureWindow` doesn't have that shape. It's
+   screenshot-only (no input injection at all — `enigo` is not a
+   dependency), and scoped to AgentMux's own windows specifically (matched
+   via `app_name()`, verified in testing to exclude non-AgentMux
+   applications — confirmed capturing a password-manager window was
+   possible before this scoping and is not possible after it). The
+   residual capability is closer to "see a different AgentMux instance,"
+   not "drive an arbitrary desktop app."
+2. It also excludes the caller's own instance (verified in live testing
+   against this repo's actual running process tree, not assumed — see PR
+   #2709's commit history for the before/after evidence), which closes the
+   worse of the two risks §6 already names for cross-window targeting
+   generally (reading/acting on a *different agent's* pane within the same
+   instance). What's left is narrower: a different AgentMux *instance's*
+   window, which can belong to a different OS *user* on a shared machine —
+   a real residual risk, not eliminated, which is exactly why the interim
+   answer is audit logging (detection) rather than a claim that the risk is
+   fully closed.
+3. §6 recommendation 4 (audit logging, "actor, target, timestamp") is
+   satisfied for this tool specifically — every call appends an NDJSON
+   entry to `capture-window-audit.log` in the instance's own private data
+   dir.
+
+**What's still genuinely open, not resolved by this addendum:** §6
+recommendation 2's capability-flag gate itself. This addendum does not
+claim that requirement is satisfied — it records a deliberate, scoped,
+time-bounded exception to shipping without it for this one tool, pending
+issue #2714. A future PR that wants to *widen* `CaptureWindow` (e.g. add
+input injection, or drop the AgentMux-only/own-instance-exclusion scoping)
+would need its own fresh justification — this addendum covers exactly what
+shipped in PR #2709, not a general loosening of §5/§6.
+
 ## 7. Relationship to today's fix
 
 The muxbus sign-in Cancel-button fix that prompted this spec
