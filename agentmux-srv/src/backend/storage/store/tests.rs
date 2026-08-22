@@ -2492,6 +2492,92 @@
         );
     }
 
+    #[test]
+    fn continuation_explicit_session_id_clear_propagates_to_root() {
+        // Reagent P1 round 2 on PR #2755: `poison_resume`'s stale-resume
+        // handling deliberately clears an EXISTING continuation's
+        // session_id to "" (persist_session_id(block_id, "", ...) when a
+        // --resume is confirmed dead — persistent.rs:2384). That's a
+        // genuine, intentional write, not "never captured yet" — it MUST
+        // reach the shared registry, or another channel keeps getting
+        // handed a session_id already proven unreachable.
+        use crate::backend::storage::InstanceUpdate;
+        let (tmp, store, reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        let head = make_named_inst("inst-head-clear", "demoClear", &agents_root);
+        store.instance_create(&head).unwrap();
+        store
+            .instance_update_partial(
+                "inst-head-clear",
+                &InstanceUpdate { session_id: Some("sess-1".into()), ..Default::default() },
+            )
+            .unwrap();
+
+        let mut cont = make_named_inst("inst-cont-clear", "demoClear", &agents_root);
+        cont.parent_instance_id = "inst-head-clear".to_string();
+        cont.session_id = "sess-2".to_string();
+        store.instance_create(&cont).unwrap();
+        assert_eq!(
+            reg.get("inst-head-clear").unwrap().unwrap().data.session_id.as_deref(),
+            Some("sess-2")
+        );
+
+        // The continuation's --resume is confirmed dead: explicit clear.
+        store
+            .instance_update_partial(
+                "inst-cont-clear",
+                &InstanceUpdate { session_id: Some(String::new()), ..Default::default() },
+            )
+            .unwrap();
+        assert_eq!(
+            reg.get("inst-head-clear").unwrap().unwrap().data.session_id,
+            None,
+            "a deliberate clear on an existing continuation must propagate to the root"
+        );
+    }
+
+    #[test]
+    fn continuation_unrelated_field_update_does_not_touch_root_session_id() {
+        // A status-only update on a continuation (session_id untouched,
+        // `InstanceUpdate.session_id` is `None`) must NOT re-propagate
+        // whatever the row's session_id currently happens to be — if it's
+        // still empty (pre-first-capture), that would clobber the root's
+        // valid pointer for a completely unrelated field change.
+        use crate::backend::storage::InstanceUpdate;
+        let (tmp, store, reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        let head = make_named_inst("inst-head-unrelated", "demoUnrelated", &agents_root);
+        store.instance_create(&head).unwrap();
+        store
+            .instance_update_partial(
+                "inst-head-unrelated",
+                &InstanceUpdate { session_id: Some("sess-root-valid".into()), ..Default::default() },
+            )
+            .unwrap();
+
+        // Continuation created session-less (matches real creation shape).
+        let mut cont = make_named_inst("inst-cont-unrelated", "demoUnrelated", &agents_root);
+        cont.parent_instance_id = "inst-head-unrelated".to_string();
+        store.instance_create(&cont).unwrap();
+        assert_eq!(cont.session_id, "");
+
+        // An unrelated status update — session_id is NOT part of this call.
+        store
+            .instance_update_partial(
+                "inst-cont-unrelated",
+                &InstanceUpdate { status: Some("stopped".into()), ..Default::default() },
+            )
+            .unwrap();
+
+        assert_eq!(
+            reg.get("inst-head-unrelated").unwrap().unwrap().data.session_id.as_deref(),
+            Some("sess-root-valid"),
+            "an update that doesn't touch session_id must not clobber the root's pointer"
+        );
+    }
+
     // ----------------------------------------------------------------
     // Phase 3a — db_agents dual-write coverage
     // ----------------------------------------------------------------
