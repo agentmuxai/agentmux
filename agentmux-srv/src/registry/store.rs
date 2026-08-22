@@ -136,6 +136,22 @@ impl Registry {
         self.active_path(instance_id).exists()
     }
 
+    /// Read a single active record by id, without scanning the whole
+    /// tree. `Ok(None)` when there's no active file for `instance_id`
+    /// (never checks `retired/`). Callers that need to patch a single
+    /// field (e.g. propagating a fresh `session_id`) must read-modify-
+    /// upsert via this rather than constructing a partial record —
+    /// `upsert`'s merge overwrites every field present in the struct,
+    /// so a partially-populated record would clobber the rest with
+    /// defaults.
+    pub fn get(&self, instance_id: &str) -> Result<Option<NamedAgentRecord>, RegistryError> {
+        let path = self.active_path(instance_id);
+        if !path.exists() {
+            return Ok(None);
+        }
+        Ok(Some(read_and_validate(&path, instance_id)?))
+    }
+
     /// Whether a record exists in either active or retired. Used by
     /// migration to skip already-tombstoned records (avoid
     /// resurrecting a user's deliberate "Forget agent" via a
