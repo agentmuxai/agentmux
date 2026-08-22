@@ -22,7 +22,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { filterByInstance, glob, pickCandidate } from "./muxlog.mjs";
+import { filterByInstance, glob, matchesOwnChannel, pickCandidate } from "./muxlog.mjs";
 
 let root;
 
@@ -147,7 +147,57 @@ describe("muxlog pickCandidate", () => {
         expect(pickCandidate(cands, opt, "local-main-abc123")).toBeNull();
     });
 
+    // reagent P1 on PR #2741: $AGENTMUX_CHANNEL's dev-mode format is
+    // `dev-<branch>[-<clone_id>]` (hyphen), but logRoots() labels dev
+    // candidates `"dev:" + branch` (colon) with a slash-separated `.file`
+    // path — a plain substring check on the raw channel string never
+    // matches either, so the own-channel default silently never fired for
+    // task dev, reproducing the exact stale-sibling-log bug this PR exists
+    // to fix. Real formats from a live system, not invented ones.
+    it("no explicit -i: matches a dev-mode instance despite the separator mismatch (hyphen channel vs. colon source / slash path)", () => {
+        const devCands = [
+            { file: String.raw`C:\Users\x\.agentmux\dev\main\bd69a405f49440de\logs\agentmux-host-v0.55.19.log`, source: "dev:main", version: "0.55.19" },
+            { file: String.raw`C:\Users\x\.agentmux\dev\agentx-quick-fork-phase-3-4\a4649045a423d8c8\logs\agentmux-host-v0.55.19.log`, source: "dev:agentx-quick-fork-phase-3-4", version: "0.55.19" },
+        ];
+        const opt = {};
+        expect(pickCandidate(devCands, opt, "dev-agentx-quick-fork-phase-3-4")).toBe(devCands[1].file);
+    });
+
+    it("no explicit -i: matches a dev-mode instance with a clone_id suffix on the channel", () => {
+        const devCands = [
+            { file: String.raw`C:\Users\x\.agentmux\dev\main\bd69a405f49440de\logs\agentmux-host-v0.55.19.log`, source: "dev:main", version: "0.55.19" },
+            { file: String.raw`C:\Users\x\.agentmux\dev\main\abc123clone\logs\agentmux-host-v0.55.19.log`, source: "dev:main", version: "0.55.19" },
+        ];
+        const opt = {};
+        // Both candidates' source is "dev:main" (identical, source alone can't
+        // disambiguate) — the clone_id in the channel only appears in the
+        // SECOND candidate's file path, which is what should decide it.
+        expect(pickCandidate(devCands, opt, "dev-main-abc123clone")).toBe(devCands[1].file);
+    });
+
     it("empty candidate list returns null", () => {
         expect(pickCandidate([], {}, "local-main-abc123")).toBeNull();
+    });
+});
+
+describe("muxlog matchesOwnChannel", () => {
+    it("matches despite hyphen vs. colon separator (dev-mode channel vs. muxlog's 'dev:' source label)", () => {
+        expect(matchesOwnChannel({ file: "", source: "dev:agentx-feature", version: "" }, "dev-agentx-feature")).toBe(true);
+    });
+
+    it("matches despite hyphen vs. slash separator (dev-mode channel vs. a filesystem path)", () => {
+        expect(matchesOwnChannel({ file: String.raw`C:\x\dev\agentx-feature\hash\logs\y.log`, source: "", version: "" }, "dev-agentx-feature")).toBe(true);
+    });
+
+    it("matches the portable channel:<name> format unchanged", () => {
+        expect(matchesOwnChannel({ file: "", source: "channel:local-main-abc123", version: "" }, "local-main-abc123")).toBe(true);
+    });
+
+    it("does not match an unrelated channel", () => {
+        expect(matchesOwnChannel({ file: "", source: "dev:agentx-feature", version: "" }, "dev-someone-else")).toBe(false);
+    });
+
+    it("an empty ownChannel never matches anything (guards against normalizing '' -> '' and matching every candidate)", () => {
+        expect(matchesOwnChannel({ file: "anything", source: "anything", version: "" }, "")).toBe(false);
     });
 });

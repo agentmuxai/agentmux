@@ -371,6 +371,32 @@ export function filterByInstance(cands, needle) {
     );
 }
 
+// $AGENTMUX_CHANNEL's dev-mode format is `dev-<branch>[-<clone_id>]`
+// (hyphen-joined — agentmux-common's resolve_channel_and_dir) but never
+// appears as a literal substring of a dev candidate's `.source`
+// (`"dev:" + branch`, colon) or `.file` path (`dev/<branch>/...`,
+// slash-separated) — same words, different separators, so
+// filterByInstance()'s plain substring check never matches (reagent P1 on
+// PR #2741: the own-channel default in pickCandidate silently never fired
+// for `task dev` — exactly the "several instances at the same version"
+// scenario this whole change exists for). Comparing the alphanumeric
+// skeleton (strip everything else) sidesteps needing to know which
+// separator scheme a given candidate uses; path segments stay in the same
+// left-to-right order regardless, so this doesn't need to special-case
+// clone_id either. Scoped to the own-channel default ONLY — an explicit
+// `-i` keeps filterByInstance()'s plain, literal substring matching
+// unchanged (a user typing `-i fix-shell` expects that to mean exactly
+// that substring, not a normalized fuzzy match).
+function normalizeForOwnChannelMatch(s) {
+    return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+export function matchesOwnChannel(cand, ownChannel) {
+    const needle = normalizeForOwnChannelMatch(ownChannel);
+    if (!needle) return false;
+    return [cand.file, cand.source, cand.version].some((s) => normalizeForOwnChannelMatch(s).includes(needle));
+}
+
 // Resolving "the" srv/host log used to mean "freshest across every instance
 // on the machine" — with several instances at the same version routinely
 // running at once (dev branches, portables, channels), that's frequently the
@@ -398,7 +424,7 @@ export function pickCandidate(cands, opt, ownChannel) {
         return filtered[0]?.file ?? null;
     }
     if (ownChannel) {
-        const own = filterByInstance(cands, ownChannel);
+        const own = cands.filter((c) => matchesOwnChannel(c, ownChannel));
         if (own.length) return own[0].file;
     }
     return cands[0]?.file ?? null; // most recently active, no preference matched
