@@ -2205,3 +2205,275 @@ async fn test_handler_inject_wan_trust_is_always_network_claimed_regardless_of_s
     assert!(payload.contains("TRUST=network-claimed"), "got: {payload}");
     assert!(!payload.contains("TRUST=host-verified"));
 }
+
+// -- Jekt tier classification: keyword-match boundary tests (is_sensitive_message) --
+//
+// These test `is_sensitive_message` directly and in isolation, rather than only
+// incidentally through full `Handler::inject_message` calls. Added because a code
+// review of the keyword lists (SENSITIVE_WHOLE_WORD_KEYWORDS /
+// SENSITIVE_SUBSTRING_KEYWORDS, sanitize.rs) found no existing direct unit
+// coverage of the boundary logic itself — see
+// docs/specs/RESEARCH_EVALS_INTEGRATION_2026_08_22.md for the broader context
+// that motivated auditing this path.
+
+#[test]
+fn test_keyword_match_whole_word_positive_cases() {
+    for msg in [
+        "here is my PAT for the repo",
+        "rotate the api token now",
+        "the secret is in the vault",
+        "Password: hunter2",
+        "check the credential file",
+        "unlock the keychain",
+    ] {
+        assert!(is_sensitive_message(msg), "expected sensitive: {msg:?}");
+    }
+}
+
+#[test]
+fn test_keyword_match_whole_word_avoids_substring_false_positives() {
+    // These contain a whole-word keyword as a SUBSTRING only (no word boundary
+    // on both sides) and must NOT trigger — this is the documented purpose of
+    // contains_whole_word (sanitize.rs:145-148).
+    for msg in [
+        "please dispatch the agent",
+        "apply the patch to main",
+        "that matches the pattern",
+        "check version compatibility",
+        "tokenize the input string",
+        "the patient is stable",
+        "he's a good secretary",
+    ] {
+        assert!(!is_sensitive_message(msg), "unexpectedly sensitive: {msg:?}");
+    }
+}
+
+#[test]
+fn test_keyword_match_whole_word_case_insensitive() {
+    for msg in ["TOKEN", "Token", "tOkEn", "SECRET", "Secret"] {
+        assert!(is_sensitive_message(msg), "expected sensitive: {msg:?}");
+    }
+}
+
+#[test]
+fn test_keyword_match_whole_word_at_string_boundaries() {
+    // Keyword as the entire message (no surrounding characters at all) must
+    // still match — before_ok/after_ok both fall back to "start/end of string
+    // counts as a boundary" (sanitize.rs:174-176).
+    assert!(is_sensitive_message("token"));
+    assert!(is_sensitive_message("secret"));
+    // Punctuation-adjacent, not just whitespace-adjacent.
+    assert!(is_sensitive_message("token:abc123"));
+    assert!(is_sensitive_message("(secret)"));
+}
+
+#[test]
+fn test_keyword_match_known_gap_plural_forms_not_caught() {
+    // KNOWN GAP, not a desired behavior: contains_whole_word requires a
+    // non-alphanumeric character (or string end) immediately after the
+    // keyword. Every SENSITIVE_WHOLE_WORD_KEYWORDS entry has a common English
+    // plural formed by appending "s" — that plural is alphanumeric, so it is
+    // NOT a word boundary, and none of these currently match. This means a
+    // jekt saying e.g. "rotate your tokens" or "your credentials were leaked"
+    // does NOT get keyword-escalated today. Documented here so a future edit
+    // to contains_whole_word (or the keyword lists) changes this test
+    // deliberately rather than silently. See PR discussion / follow-up issue
+    // before assuming this should be "fixed" — widening the match could also
+    // introduce new false positives (e.g. a plural-aware rule still needs to
+    // reject "patches"/"tokenizers").
+    for msg in [
+        "please rotate your tokens",
+        "your credentials were leaked",
+        "reset all passwords",
+        "the secrets are stored here",
+        "unlock the keychains",
+    ] {
+        assert!(
+            !is_sensitive_message(msg),
+            "this plural form now matches — update this test deliberately if that's an intended fix: {msg:?}"
+        );
+    }
+}
+
+#[test]
+fn test_keyword_match_substring_positive_cases() {
+    for msg in [
+        "here is the api_key value",
+        "set the ApiKey in config",
+        "do a force-push to main",
+        "git push --force to origin",
+        "DROP TABLE users;",
+        "rm -rf the build dir",
+        "call delete_repo on this",
+        "run account.key.verify first",
+        "open the trust center",
+        "the ssh key is in ~/.ssh",
+        "rotate the webhook secret",
+        "here's the auth key",
+        "copy the private key file",
+    ] {
+        assert!(is_sensitive_message(msg), "expected sensitive: {msg:?}");
+    }
+}
+
+#[test]
+fn test_keyword_match_armory_feature_name_is_a_broad_false_positive_source() {
+    // KNOWN FALSE-POSITIVE SOURCE, not a bug in the matching logic itself:
+    // "armory" is a SENSITIVE_SUBSTRING_KEYWORDS entry, but it is also the
+    // name of a first-class AgentMux pane (MCP servers / Skills / ABF
+    // bundles / accounts hub — see CLAUDE.md's Widgets table). Any jekt that
+    // merely mentions the Armory pane by name — with no credential or
+    // destructive content at all — gets keyword-escalated to
+    // TIER=sensitive. Documented here (not silently) so this is a visible,
+    // deliberate tradeoff rather than a surprise the first time it fires in
+    // practice; flagged separately for the human to decide whether it's
+    // still the intended scope for that keyword.
+    for msg in [
+        "check the Armory tab for MCP servers",
+        "can you open Armory and look at Skills",
+        "the Armory bundle needs an update",
+    ] {
+        assert!(
+            is_sensitive_message(msg),
+            "documenting current (broad) behavior — armory mentions ARE flagged: {msg:?}"
+        );
+    }
+}
+
+// -- Jekt tier classification: marker rendering matrix (wrap_jekt_message) --
+//
+// Direct, isolated tests of wrap_jekt_message's TRUST=/SIG=/ESCALATE= field
+// rendering, covering every branch documented in its own doc comment
+// (sanitize.rs:193-278). Previously only reached transitively through full
+// Handler::inject_message integration tests elsewhere in this file.
+
+fn wrap(
+    effective_tier: &str,
+    delivery_tier: &str,
+    sig_verified: Option<bool>,
+    reagent_verified: Option<bool>,
+    lan_verified: Option<bool>,
+    requires_stop: bool,
+) -> String {
+    wrap_jekt_message(
+        "hello",
+        Some("agent2"),
+        "agent1",
+        effective_tier,
+        delivery_tier,
+        sig_verified,
+        reagent_verified,
+        lan_verified,
+        requires_stop,
+        "msg-1",
+        "normal",
+    )
+}
+
+#[test]
+fn test_marker_host_tier_trust_values() {
+    let m = wrap("coord", "host", Some(true), None, None, false);
+    assert!(m.contains("TRUST=host-verified"), "got: {m}");
+
+    let m = wrap("sensitive", "host", Some(false), None, None, true);
+    assert!(m.contains("TRUST=unverified"), "got: {m}");
+
+    let m = wrap("coord", "host", None, None, None, false);
+    assert!(m.contains("TRUST=self-declared"), "got: {m}");
+}
+
+#[test]
+fn test_marker_lan_tier_trust_values() {
+    // Verified LAN signature gets its own distinct label, not network-claimed.
+    let m = wrap("coord", "lan", None, None, Some(true), false);
+    assert!(m.contains("TRUST=lan-verified"), "got: {m}");
+    assert!(!m.contains("TRUST=network-claimed"), "got: {m}");
+
+    // Failed LAN signature still renders TRUST=network-claimed — the "someone
+    // forged this" red flag lives in TIER/ESCALATE, not a distinct TRUST value.
+    let m = wrap("sensitive", "lan", None, None, Some(false), true);
+    assert!(m.contains("TRUST=network-claimed"), "got: {m}");
+
+    // No LAN signature attempted at all.
+    let m = wrap("coord", "lan", None, None, None, false);
+    assert!(m.contains("TRUST=network-claimed"), "got: {m}");
+}
+
+#[test]
+fn test_marker_wan_tier_trust_is_always_network_claimed() {
+    // sig_verified is a host-only signal; even if somehow set true on a WAN
+    // call, TRUST must not read host-verified — delivery_tier gates this
+    // before sig_verified is even consulted (sanitize.rs:299-309).
+    for reagent in [Some(true), Some(false), None] {
+        let m = wrap("coord", "wan", Some(true), reagent, None, false);
+        assert!(m.contains("TRUST=network-claimed"), "got: {m}");
+        assert!(!m.contains("TRUST=host-verified"), "got: {m}");
+    }
+}
+
+#[test]
+fn test_marker_sig_field_rendering() {
+    let m = wrap("coord", "wan", None, Some(true), None, false);
+    assert!(m.contains("SIG=verified"), "got: {m}");
+
+    let m = wrap("sensitive", "wan", None, Some(false), None, true);
+    assert!(m.contains("SIG=invalid"), "got: {m}");
+
+    // No signature attempted at all -> no SIG= field rendered whatsoever.
+    let m = wrap("coord", "wan", None, None, None, false);
+    assert!(!m.contains("SIG="), "got: {m}");
+}
+
+#[test]
+fn test_marker_escalate_field_rendering() {
+    let m = wrap("sensitive", "wan", None, None, None, true);
+    assert!(m.contains("ESCALATE=required"), "got: {m}");
+    assert!(
+        m.contains("pause and ask the human operator"),
+        "requires_stop=true must render the STOP warning: {m}"
+    );
+
+    let m = wrap("sensitive", "wan", None, Some(true), None, false);
+    assert!(m.contains("ESCALATE=none"), "got: {m}");
+    assert!(
+        m.contains("informational tag only"),
+        "requires_stop=false must render the non-STOP warning: {m}"
+    );
+
+    // Non-sensitive tier never renders ESCALATE= or the warning block at all,
+    // regardless of requires_stop (the caller should never pass true here in
+    // practice, but the renderer itself gates strictly on effective_tier).
+    let m = wrap("coord", "wan", None, None, None, false);
+    assert!(!m.contains("ESCALATE="), "got: {m}");
+    assert!(!m.contains("SENSITIVE"), "got: {m}");
+}
+
+#[test]
+fn test_marker_full_matrix_smoke() {
+    // Broad sweep across delivery tiers x verification states x sensitivity,
+    // asserting only the invariants that must ALWAYS hold, as a smoke test
+    // that no combination panics or produces a malformed marker line.
+    let bools = [Some(true), Some(false), None];
+    for &delivery in &["host", "lan", "wan"] {
+        for &sig in &bools {
+            for &reagent in &bools {
+                for &lan in &bools {
+                    for &tier in &["coord", "sensitive"] {
+                        for &stop in &[true, false] {
+                            let m = wrap(tier, delivery, sig, reagent, lan, stop);
+                            assert!(m.starts_with("[JEKT:FROM=agent2 TO=agent1"), "got: {m}");
+                            assert!(m.contains(&format!("TIER={tier}")), "got: {m}");
+                            assert!(m.contains(&format!("DELIVERY={delivery}")), "got: {m}");
+                            assert!(m.ends_with("[/JEKT]"), "got: {m}");
+                            if tier == "sensitive" {
+                                assert!(m.contains("ESCALATE="), "got: {m}");
+                            } else {
+                                assert!(!m.contains("ESCALATE="), "got: {m}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
