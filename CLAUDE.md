@@ -311,13 +311,22 @@ git push -u origin feature-name
 # notifications are silently dropped. Always include it regardless, so you
 # don't have to track which case you're in.
 #
-# If gh-agent.sh fell back to GenericAgentX-<host> (see below), ALSO prepend
-# the PR TITLE with "<AgentName>@<host>: " (natural casing, e.g. "Korp@claudius:")
-# — the body tag is machine-read only, so a human scanning the PR list still
+# Standard identity (your own dedicated PAT/App account, or a registered
+# named peer account) — plain title, no prefix:
+scripts/gh-agent.sh pr create --title "Feature" --body "$(cat <<EOF
+Description of the change.
+
+<!-- agentmux:agent_id=${AGENTMUX_AGENT_ID,,} -->
+EOF
+)"
+
+# Shared identity ONLY — gh-agent.sh fell back to GenericAgentX-<host> (see
+# "Which GitHub account am I acting as?" below): ALSO prepend the PR TITLE
+# with "<AgentName>@<host>: " (natural casing, e.g. "Korp@claudius:") — the
+# body tag above is machine-read only, so a human scanning the PR list still
 # can't tell shared-identity agents apart without opening each PR. See
-# SPEC_PR_TITLE_AGENT_HOST_PREFIX_2026_08_22.md. Standard-identity agents
-# (own dedicated PAT/App account, or a registered named peer account) skip
-# this — their username already disambiguates them in the list.
+# SPEC_PR_TITLE_AGENT_HOST_PREFIX_2026_08_22.md. Do NOT use this form if you
+# have a dedicated PAT — your username already disambiguates you in the list.
 scripts/gh-agent.sh pr create --title "${AGENTMUX_AGENT_ID}@$(hostname): Feature" --body "$(cat <<EOF
 Description of the change.
 
