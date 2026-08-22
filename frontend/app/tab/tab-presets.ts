@@ -64,10 +64,7 @@ function isLeaf(node: PresetNode): node is LeafNode {
     return (node as LeafNode).widget !== undefined;
 }
 
-// Exported for quick-fork.ts — the same "resolve a widget key to its
-// blockdef" lookup used to build the default tab preset, needed there to
-// create a plain agent block on a freshly-created tab via createBlockOnModel.
-export function resolveBlockDef(widgetKey: WidgetKey): BlockDef | null {
+function resolveBlockDef(widgetKey: WidgetKey): BlockDef | null {
     const widget = fullConfigAtom()?.widgets?.[widgetKey];
     if (!widget?.blockdef) return null;
     return widget.blockdef;
