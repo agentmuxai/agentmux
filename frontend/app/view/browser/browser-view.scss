@@ -51,10 +51,8 @@
     }
 }
 
-.browser-go-btn {
-    width: auto;
-    padding: 0 10px;
-    font-size: 12px;
+.browser-bookmark-btn-error {
+    color: var(--error-color, #e5484d);
 }
 
 .browser-address-bar {

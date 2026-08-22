@@ -13,6 +13,7 @@
 
 import { AgentApi } from "./agent";
 import { BlockApi } from "./block";
+import { BookmarksApi } from "./bookmarks";
 import { BundleImportApi } from "./bundle";
 import { FileApi } from "./file";
 import { FleetApi } from "./fleet";
@@ -49,4 +50,5 @@ export const RpcApi = {
     ...BundleImportApi,
     ...FleetApi,
     ...ReactiveApi,
+    ...BookmarksApi,
 };
