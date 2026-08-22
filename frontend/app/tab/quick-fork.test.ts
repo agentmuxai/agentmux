@@ -24,8 +24,28 @@ vi.mock("@/app/store/global", () => ({
 }));
 
 const forkAgentDefinitionCommand = vi.fn();
+const listAgentIdentitiesCommand = vi.fn();
+const setMetaCommand = vi.fn();
 vi.mock("@/app/store/rpc-api", () => ({
-    RpcApi: { ForkAgentDefinitionCommand: (...args: unknown[]) => forkAgentDefinitionCommand(...args) },
+    RpcApi: {
+        ForkAgentDefinitionCommand: (...args: unknown[]) => forkAgentDefinitionCommand(...args),
+        ListAgentIdentitiesCommand: (...args: unknown[]) => listAgentIdentitiesCommand(...args),
+        SetMetaCommand: (...args: unknown[]) => setMetaCommand(...args),
+    },
+}));
+
+const resolveEffectiveLaunchProvider = vi.fn();
+vi.mock("@/app/view/agent/agent-launch-env", () => ({
+    resolveEffectiveLaunchProvider: (...args: unknown[]) => resolveEffectiveLaunchProvider(...args),
+}));
+
+const resolveProviderAlias = vi.fn();
+vi.mock("@/app/view/agent/providers", () => ({
+    PROVIDERS: {
+        claude: { id: "claude" },
+        codex: { id: "codex" },
+    },
+    resolveProviderAlias: (...args: unknown[]) => resolveProviderAlias(...args),
 }));
 
 vi.mock("@/app/store/rpc-util", () => ({
@@ -199,6 +219,10 @@ describe("quickForkTabToNewTab", () => {
         resolveBlockDef.mockReturnValue({ meta: { view: "agent" } });
         createBlockOnModel.mockResolvedValue("new-block-1");
         launchAgentDefinition.mockResolvedValue(true);
+        resolveEffectiveLaunchProvider.mockResolvedValue("claude");
+        resolveProviderAlias.mockImplementation((id: string) => id);
+        listAgentIdentitiesCommand.mockResolvedValue([]);
+        setMetaCommand.mockResolvedValue(undefined);
     });
 
     afterEach(() => {
@@ -281,5 +305,134 @@ describe("quickForkTabToNewTab", () => {
         expect(await quickForkTabToNewTab("tab-1")).toBeNull();
         expect(createBlockOnModel).not.toHaveBeenCalled();
         expect(launchAgentDefinition).not.toHaveBeenCalled();
+    });
+
+    // Phase 4 (§5): identity is unbound by default; opts.inheritIdentity
+    // opts into the SOURCE definition's own bound account instead, resolved
+    // via ListAgentIdentitiesCommand (this flow has a definitionId, not a
+    // RecentSessionRow).
+    describe("opts.inheritIdentity", () => {
+        it("resolves the source definition's bound account for the fork's own provider and passes it as accountId", async () => {
+            listAgentIdentitiesCommand.mockResolvedValue([{ account_id: "acct-1", provider: "claude" }]);
+            await quickForkTabToNewTab("tab-1", { inheritIdentity: true });
+            expect(listAgentIdentitiesCommand).toHaveBeenCalledWith(
+                expect.anything(),
+                { agent_id: "source-def" }
+            );
+            const overrides = launchAgentDefinition.mock.calls[0][1];
+            expect(overrides.accountId).toBe("acct-1");
+        });
+
+        // reagent's review of PR #2735: ListAgentIdentitiesCommand returns
+        // EVERY provider's link for the agent (ORDER BY provider), so a
+        // source bound to two providers at once (e.g. github + claude) must
+        // NOT just take index 0 — that could inherit the wrong-provider
+        // account and get it persisted under the fork's provider.
+        it("filters to the link matching the fork's own effective provider, ignoring other-provider links", async () => {
+            resolveEffectiveLaunchProvider.mockResolvedValue("claude");
+            listAgentIdentitiesCommand.mockResolvedValue([
+                { account_id: "github-acct", provider: "github" }, // alphabetically first
+                { account_id: "claude-acct", provider: "claude" },
+            ]);
+            await quickForkTabToNewTab("tab-1", { inheritIdentity: true });
+            const overrides = launchAgentDefinition.mock.calls[0][1];
+            expect(overrides.accountId).toBe("claude-acct");
+        });
+
+        it("falls back to unbound when the source has no link for the fork's own provider", async () => {
+            listAgentIdentitiesCommand.mockResolvedValue([{ account_id: "github-acct", provider: "github" }]);
+            await quickForkTabToNewTab("tab-1", { inheritIdentity: true });
+            const overrides = launchAgentDefinition.mock.calls[0][1];
+            expect(overrides.accountId).toBe("");
+        });
+
+        it("falls back to unbound when the source has no linked identity at all", async () => {
+            listAgentIdentitiesCommand.mockResolvedValue([]);
+            await quickForkTabToNewTab("tab-1", { inheritIdentity: true });
+            const overrides = launchAgentDefinition.mock.calls[0][1];
+            expect(overrides.accountId).toBe("");
+        });
+
+        it("matches a legacy-alias provider row via lastLinkedAccountId's own canonicalization, not exact string equality", async () => {
+            resolveEffectiveLaunchProvider.mockResolvedValue("claude");
+            listAgentIdentitiesCommand.mockResolvedValue([{ account_id: "acct-legacy", provider: "claude-code" }]);
+            await quickForkTabToNewTab("tab-1", { inheritIdentity: true });
+            const overrides = launchAgentDefinition.mock.calls[0][1];
+            expect(overrides.accountId).toBe("acct-legacy");
+        });
+
+        // reagent's SECOND round of review on PR #2735: db_agent_identity_links
+        // keys on the raw (agent_id, provider) pair, so a migrated agent can
+        // hold BOTH a canonical row ("claude") and a legacy-alias row
+        // ("claude-code") at once. The real backend spawn resolver iterates
+        // in raw-provider order and overwrites via HashMap::insert, so the
+        // LAST canonical-equivalent row silently wins — a plain first-match
+        // `.find()` would pick the wrong one. Must go through
+        // lastLinkedAccountId, not a raw `.find()`, to match that.
+        it("picks the LAST canonical-equivalent row when both a canonical and legacy-alias row exist, not the first", async () => {
+            resolveEffectiveLaunchProvider.mockResolvedValue("claude");
+            listAgentIdentitiesCommand.mockResolvedValue([
+                { account_id: "acct-alias", provider: "claude-code" }, // alphabetically first
+                { account_id: "acct-canonical", provider: "claude" },
+            ]);
+            await quickForkTabToNewTab("tab-1", { inheritIdentity: true });
+            const overrides = launchAgentDefinition.mock.calls[0][1];
+            expect(overrides.accountId).toBe("acct-canonical");
+        });
+
+        it("falls back to unbound (best-effort, not thrown) when ListAgentIdentitiesCommand rejects", async () => {
+            listAgentIdentitiesCommand.mockRejectedValue(new Error("boom"));
+            const newTabId = await quickForkTabToNewTab("tab-1", { inheritIdentity: true });
+            expect(newTabId).toBe("new-tab-1");
+            const overrides = launchAgentDefinition.mock.calls[0][1];
+            expect(overrides.accountId).toBe("");
+        });
+
+        it("does not resolve identity at all when inheritIdentity is not set", async () => {
+            await quickForkTabToNewTab("tab-1");
+            expect(listAgentIdentitiesCommand).not.toHaveBeenCalled();
+        });
+    });
+
+    // Spec §4.4: a fork that can't carry history forward (provider has no
+    // --fork-session equivalent) needs a visible, non-dismissable-by-accident
+    // note rather than silently starting fresh. quick-fork.ts surfaces this
+    // via a meta flag ForkProviderFallbackBanner (agent-view.tsx) reads.
+    describe("non-Claude fallback meta flag", () => {
+        it("sets the fallback meta flag when the forked provider doesn't support --fork-session and there was a session to lose", async () => {
+            resolveEffectiveLaunchProvider.mockResolvedValue("codex");
+            await quickForkTabToNewTab("tab-1");
+            expect(setMetaCommand).toHaveBeenCalledWith(
+                expect.anything(),
+                { oref: "block:new-block-1", meta: { "quickfork:noHistoryFallback": true } }
+            );
+        });
+
+        it("does not set the flag when the forked provider is claude", async () => {
+            resolveEffectiveLaunchProvider.mockResolvedValue("claude");
+            await quickForkTabToNewTab("tab-1");
+            expect(setMetaCommand).not.toHaveBeenCalled();
+        });
+
+        it("does not set the flag when there was no parent session to lose in the first place", async () => {
+            getObjectValue.mockReturnValue({ meta: { view: "agent", agentId: "source-def" } }); // no agent:sessionid
+            resolveEffectiveLaunchProvider.mockResolvedValue("codex");
+            await quickForkTabToNewTab("tab-1");
+            expect(setMetaCommand).not.toHaveBeenCalled();
+        });
+
+        it("does not set the flag when launchAgentDefinition itself reports failure", async () => {
+            resolveEffectiveLaunchProvider.mockResolvedValue("codex");
+            launchAgentDefinition.mockResolvedValue(false);
+            await quickForkTabToNewTab("tab-1");
+            expect(setMetaCommand).not.toHaveBeenCalled();
+        });
+
+        it("logs but does not throw when SetMetaCommand itself rejects", async () => {
+            resolveEffectiveLaunchProvider.mockResolvedValue("codex");
+            setMetaCommand.mockRejectedValue(new Error("boom"));
+            const newTabId = await quickForkTabToNewTab("tab-1");
+            expect(newTabId).toBe("new-tab-1");
+        });
     });
 });

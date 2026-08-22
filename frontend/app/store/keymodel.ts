@@ -9,9 +9,12 @@ import {
     getApi,
     getBlockComponentModel,
     getFocusedBlockId,
+    pushNotification,
     replaceBlock,
     setIsTermMultiInput,
 } from "@/app/store/global";
+import { quickForkTabToNewTab } from "@/app/tab/quick-fork";
+import { fireAndForget } from "@/util/util";
 import { zoomIn, zoomOut, zoomReset } from "@/app/store/zoom.platform";
 import { getLayoutModelForStaticTab, NavigateDirection } from "@/layout/index";
 import { modalsModel, openModal } from "./modalmodel";
@@ -91,6 +94,34 @@ function registerGlobalKeys() {
     });
     globalKeyMap.set("Cmd:Shift:w", () => {
         simpleCloseStaticTab();
+        return true;
+    });
+    // SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md Phase 3 — no-mouse path
+    // for the tab context menu's "Quick-fork to new tab." Deliberately
+    // reads `atoms.activeTabId()` (the tab the user is currently looking
+    // at), NOT `getLayoutModelForStaticTab()`/`staticTabId` the way
+    // `Cmd:w`'s `genericClose()` does above — `staticTabId` is fixed once
+    // at window bootstrap and never changes (window-identity.ts's own doc
+    // comment), so using it here would silently mis-target after the user
+    // switches tabs. `quickForkTabToNewTab` already takes an explicit tab
+    // id for exactly this reason.
+    globalKeyMap.set("Cmd:Shift:t", () => {
+        const sourceTabId = atoms.activeTabId();
+        if (sourceTabId) {
+            fireAndForget(async () => {
+                const newTabId = await quickForkTabToNewTab(sourceTabId);
+                if (!newTabId) {
+                    pushNotification({
+                        icon: "fa-triangle-exclamation",
+                        title: "Quick-fork failed",
+                        message: "This tab has no active agent to fork, or the fork could not be launched.",
+                        timestamp: new Date().toISOString(),
+                        type: "error",
+                        expiration: Date.now() + 8000,
+                    });
+                }
+            });
+        }
         return true;
     });
     globalKeyMap.set("Cmd:m", () => {

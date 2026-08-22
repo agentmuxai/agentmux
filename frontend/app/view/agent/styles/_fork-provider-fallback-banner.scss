@@ -1,0 +1,35 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Non-Claude fork fallback note (SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md
+// §4.4). Deliberately styled as a lower-key "info" notice, not the
+// error-red of the disconnected banner — this isn't a failure, just an
+// honest disclosure that history didn't carry over.
+.agent-view {
+    .fork-provider-fallback-banner {
+        display: flex;
+        align-items: center;
+        gap: var(--space-1-5);
+        margin: var(--space-1) 0 var(--space-0-5);
+        padding: var(--space-1) var(--space-2);
+        background: color-mix(in srgb, var(--warning-color) 10%, transparent);
+        border: 1px solid color-mix(in srgb, var(--warning-color) 40%, transparent);
+        border-radius: 0;
+        font-size: 12px;
+        flex-shrink: 0;
+        color: var(--main-text-color);
+    }
+
+    .fork-provider-fallback-banner-icon {
+        color: var(--warning-color);
+        font-size: 14px;
+        line-height: 1;
+        flex-shrink: 0;
+    }
+
+    .fork-provider-fallback-banner-message {
+        flex: 1;
+        min-width: 0;
+        opacity: 0.85;
+    }
+}

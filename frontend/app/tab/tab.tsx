@@ -49,6 +49,7 @@ interface TabContextPanelProps {
     onColorSelect: (hex: string | null) => void;
     onRename: () => void;
     onQuickFork: () => void;
+    onQuickForkInheritIdentity: () => void;
     onClose: (e?: MouseEvent) => void;
 }
 
@@ -99,6 +100,15 @@ const TabContextPanel = (props: TabContextPanelProps): JSX.Element => {
                         no active agent to fork. */}
                     <button class="tab-context-btn" onClick={() => { props.onQuickFork(); props.onClose(); }}>
                         ⑂ Quick-fork to new tab
+                    </button>
+                    {/* SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md §5 Phase 4 —
+                        the default quick-fork above leaves the new agent's
+                        Armory identity unbound (a one-click action shouldn't
+                        silently fan out credential access); this explicit
+                        variant opts into inheriting the source's own bound
+                        account instead. */}
+                    <button class="tab-context-btn" onClick={() => { props.onQuickForkInheritIdentity(); props.onClose(); }}>
+                        ⑂ Quick-fork (inherit identity)
                     </button>
                     <button class="tab-context-btn tab-context-btn-close" onClick={() => props.onClose()}>
                         ✕ Close menu
@@ -257,9 +267,9 @@ function Tab(props: TabProps): JSX.Element {
         }
     };
 
-    const handleQuickFork = () => {
+    const runQuickFork = (opts?: { inheritIdentity?: boolean }) => {
         fireAndForget(async () => {
-            const newTabId = await quickForkTabToNewTab(props.id);
+            const newTabId = await quickForkTabToNewTab(props.id, opts);
             if (!newTabId) {
                 pushNotification({
                     icon: "fa-triangle-exclamation",
@@ -272,6 +282,8 @@ function Tab(props: TabProps): JSX.Element {
             }
         });
     };
+    const handleQuickFork = () => runQuickFork();
+    const handleQuickForkInheritIdentity = () => runQuickFork({ inheritIdentity: true });
 
     return (
         <>
@@ -344,6 +356,7 @@ function Tab(props: TabProps): JSX.Element {
                     onColorSelect={handleColorSelect}
                     onRename={() => handleRenameTab()}
                     onQuickFork={handleQuickFork}
+                    onQuickForkInheritIdentity={handleQuickForkInheritIdentity}
                     onClose={() => setShowColorPicker(false)}
                 />
             </Show>

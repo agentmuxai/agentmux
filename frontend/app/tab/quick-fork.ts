@@ -13,7 +13,16 @@ import { WorkspaceService } from "@/app/store/services";
 import { workspace } from "@/app/store/window-identity";
 import { createBlockOnModel, resolveBlockDef, waitForLayoutModel } from "./tab-presets";
 import { HISTORY_SOURCE_BLOCK_ID_META_KEY, HISTORY_TAB_FOR_META_KEY } from "@/app/view/agent/open-history-tab";
+import { resolveEffectiveLaunchProvider } from "@/app/view/agent/agent-launch-env";
+import { PROVIDERS, resolveProviderAlias } from "@/app/view/agent/providers";
+import { lastLinkedAccountId } from "@/app/view/agent/providers/provider-id-aliases";
 import { Logger } from "@/util/logger";
+
+/** Block-meta key the non-Claude fallback banner (`ForkProviderFallbackBanner`,
+ *  `agent-view.tsx`) reads. Set once, after a fork lands, when the
+ *  provider couldn't carry conversation history forward — see
+ *  `quickForkTabToNewTab`'s doc comment. */
+export const FORK_NO_HISTORY_FALLBACK_META_KEY = "quickfork:noHistoryFallback";
 
 export interface ActiveAgentForTab {
     blockId: string;
@@ -95,8 +104,24 @@ function resolveAgentBlock(blockId: string): { meta: MetaType } | null {
  * `template.rs`'s `forkagentdefinition` handler), conversation history
  * carried forward via `continueSessionId`/`forkSession` (Phase 1, PR
  * #2725), Armory/credential identity left **unbound by default** (spec
- * §5 — explicit opt-in to inherit the source's bound account is a later
- * phase, not this one).
+ * §5) unless `opts.inheritIdentity` is explicitly set — Phase 4's
+ * "confirm the identity choice" variant, sourced from the SOURCE
+ * definition's own bound account via `ListAgentIdentitiesCommand`
+ * (`db_agent_identity_links`, the same join `agent-identity-links-panel.tsx`
+ * reads for the Identity tab), not a `RecentSessionRow` (this flow
+ * resolves from block meta, not the picker's recent-sessions RPC).
+ *
+ * When the fork's effective provider (resolved through its bound bundle,
+ * same as `launchAgentDefinition` itself does — `resolveEffectiveLaunchProvider`)
+ * doesn't support `--fork-session`, `fork-session-args.ts`'s
+ * `resolveForkSessionArgs` silently drops the session id inside
+ * `launchAgentDefinition` rather than plain-resuming the parent's live
+ * session (Codex's review of PR #2725). That's the right behavior, but
+ * silent — per spec §4.4, the user needs a visible note that this
+ * happened. Since there's no seam to push a message into the new block's
+ * conversation before its own view even mounts, this sets
+ * `FORK_NO_HISTORY_FALLBACK_META_KEY` on the new block's meta once launch
+ * succeeds; `ForkProviderFallbackBanner` (`agent-view.tsx`) reads it.
  *
  * Reuses the SOURCE tab's own already-mounted `AgentViewModel` instance
  * to perform the launch (via the block-component registry,
@@ -131,7 +156,10 @@ function resolveAgentBlock(blockId: string): { meta: MetaType } | null {
  *   thrown — this is a fire-and-forget UI action, not something callers
  *   need to react to beyond "did it work."
  */
-export async function quickForkTabToNewTab(sourceTabId: string): Promise<string | null> {
+export async function quickForkTabToNewTab(
+    sourceTabId: string,
+    opts?: { inheritIdentity?: boolean }
+): Promise<string | null> {
     const active = resolveActiveAgentForTab(sourceTabId);
     if (!active) {
         Logger.warn("quick-fork", "no active agent in source tab", { sourceTabId });
@@ -173,16 +201,62 @@ export async function quickForkTabToNewTab(sourceTabId: string): Promise<string 
         }
         const newBlockId = await createBlockOnModel(newTabId, layoutModel, blockDef, null, null);
 
+        // Same resolution as launchAgentDefinition itself (agent-model.ts):
+        // effective provider -> PROVIDERS lookup, with an alias fallback.
+        // Computed once, unconditionally — both the identity-inherit filter
+        // and the non-Claude fallback check below need the fork's own
+        // canonical provider.
+        const effectiveProvider = await resolveEffectiveLaunchProvider(forkedDef);
+        const canonicalForkProvider = resolveProviderAlias(effectiveProvider);
+        const provider = PROVIDERS[effectiveProvider] ?? PROVIDERS[canonicalForkProvider];
+
+        // Spec §5 decision: unbound by default, not the source's bound
+        // account — a "quick" one-click action shouldn't silently fan out
+        // credential access to a second agent. Phase 4: explicit opt-in
+        // via opts.inheritIdentity looks up the SOURCE's own bound link
+        // directly (this flow has a definitionId, not a RecentSessionRow).
+        //
+        // Uses `lastLinkedAccountId`, not a raw `.find()` — reagent's
+        // SECOND round of review on this PR caught that a plain `.find()`
+        // (even alias-canonicalized) still picks the FIRST matching row,
+        // but `db_agent_identity_links` keys on the raw (agent_id,
+        // provider) pair, so a migrated agent can hold BOTH a canonical
+        // row ("claude") and a legacy-alias row ("claude-code") for the
+        // same effective provider at once. The backend's real spawn-time
+        // injection iterates rows in that same raw-provider order and
+        // overwrites via HashMap::insert, so the LAST row silently wins in
+        // practice — exactly the mismatch `lastLinkedAccountId`'s own doc
+        // comment describes and requires every "account this agent uses
+        // for this provider" lookup to go through (already true of
+        // launch-flow.ts and useAgentControllerStatus.ts; this call site
+        // was the new one that reintroduced the bug class from
+        // codex-P1-on-#2377).
+        let accountId = "";
+        if (opts?.inheritIdentity) {
+            try {
+                const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
+                    agent_id: active.definitionId,
+                });
+                accountId = lastLinkedAccountId(links, provider?.id ?? canonicalForkProvider) ?? "";
+            } catch (e: any) {
+                Logger.warn("quick-fork", "failed to resolve source identity to inherit", { error: String(e) });
+            }
+        }
+
+        // Non-Claude fallback note (spec §4.4) — resolved BEFORE launching
+        // so it doesn't depend on launchAgentDefinition's return contract
+        // (which is just a boolean). Only relevant when there was actually
+        // a session to lose (an empty active.sessionId is already a fresh
+        // start regardless of provider — nothing silently changed).
+        const showNoHistoryFallback = !!active.sessionId && provider?.id !== "claude";
+
         const launched = await sourceModel.launchAgentDefinition(
             forkedDef,
             {
                 instanceName: forkedDef.name,
                 agentType: (forkedDef.agent_type as "host" | "container") || "host",
                 environment: forkedDef.agent_type === "container" ? "docker" : "local",
-                // Spec §5 decision: unbound by default, not the source's
-                // bound account — a "quick" one-click action shouldn't
-                // silently fan out credential access to a second agent.
-                accountId: "",
+                accountId,
                 memoryId: "",
                 continueSessionId: active.sessionId,
                 forkSession: true,
@@ -192,6 +266,13 @@ export async function quickForkTabToNewTab(sourceTabId: string): Promise<string 
         );
         if (!launched) {
             Logger.warn("quick-fork", "launchAgentDefinition reported failure", { newTabId });
+        } else if (showNoHistoryFallback) {
+            await RpcApi.SetMetaCommand(TabRpcClient, {
+                oref: WOS.makeORef("block", newBlockId),
+                meta: { [FORK_NO_HISTORY_FALLBACK_META_KEY]: true },
+            }).catch((e: any) =>
+                Logger.warn("quick-fork", "failed to set no-history-fallback meta", { error: String(e) })
+            );
         }
         return newTabId;
     } catch (e: any) {
