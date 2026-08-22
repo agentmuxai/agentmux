@@ -358,9 +358,9 @@ already a new definition with its own zone.
 | Phase | Deliverable | Risk | Notes |
 |---|---|---|---|
 | **1** | **Accessory regions + `<PaneRow>` extraction.** Declare the region map; refactor `ActivityDock`/`ActivityRow` onto `<PaneRow>` + `_pane-row.scss`. **No behavior change** (pixel-identical). | low | Pure refactor; unblocks everything; reviewable on its own. |
-| **2** | **Fork model + fork bar (read-only switch).** Layout node `blockStack`/`activeBlockId`; render active; bar lists *already-related* instances (a definition + its open forks) and switches between them. No new fork action yet. | med | The one structural change (layout store + tile). Gated by a design review of dormant-fork lifecycle (§6.6). |
-| **3** | **Fork action (`/btw` + `+`).** Validation gate (§6.4) → fork-session spawn → push fork. | med | Depends on the §6.4 smoke test passing for Claude; graceful fallback for other providers. |
-| **4** | **Keyboard nav + polish.** ↓/↑ fork cycling (empty-composer gated), suspend-on-blur, persistence of stack, close/archive, overflow. | low | UX polish on a working base. |
+| **2** ✅ | **Fork model + fork bar (read-only switch).** Layout node `blockStack`/`activeBlockId`; render active; bar lists *already-related* instances (a definition + its open forks) and switches between them. Shipped as `PaneTabStrip` + `pushBlockOntoStack`/`setActiveBlockInStack`/`closeBlockInStack` (`SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md`). | med | The one structural change (layout store + tile). Gated by a design review of dormant-fork lifecycle (§6.6). |
+| **3** ✅ (partial) | **Fork action (`/btw` + `+`).** Validation gate (§6.4) → fork-session spawn → push fork. The `+`-affordance half shipped 2026-08-22 as **quick-fork** (`SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md`, see that spec's 2026-08-22 correction notice) — triggered from the pane's body context menu rather than a dedicated fork-bar "+" button. **The `/btw` slash-command half is still unimplemented** — a real, open follow-up, not covered by quick-fork. | med | Depends on the §6.4 smoke test passing for Claude; graceful fallback for other providers. |
+| **4** | **Keyboard nav + polish.** ↓/↑ fork cycling (empty-composer gated), suspend-on-blur, persistence of stack, close/archive, overflow. | low | UX polish on a working base. Still open. |
 
 Each phase is independently shippable; Phase 1 is a clean refactor that stands alone even if
 the forks feature pauses.
