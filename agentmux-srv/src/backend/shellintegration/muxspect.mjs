@@ -115,6 +115,20 @@ function requireEnv() {
     return { url, authKey };
 }
 
+// Ext 5 of docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md:
+// this session hit `muxspect conversations` 404ing because the running srv
+// predated that route, with nothing saying so — every response now carries
+// an `x-agentmux-srv-version` header (server/mod.rs's version_header
+// middleware) stamping the instance's own version. Printed to STDERR (not
+// stdout) on every call so it never pollutes piped/parsed `--json` output,
+// and folded into the error message specifically for a 404 — the one status
+// a version mismatch is most likely to explain.
+export function logSrvVersion(resp) {
+    const v = resp.headers.get("x-agentmux-srv-version");
+    if (v) console.error(`[srv v${v}]`);
+    return v;
+}
+
 async function apiGet(url, authKey, urlPath) {
     let resp;
     try {
@@ -122,9 +136,14 @@ async function apiGet(url, authKey, urlPath) {
     } catch (e) {
         fail(`could not reach ${url} — instance unreachable (${e.message})`);
     }
+    const srvVersion = logSrvVersion(resp);
     if (!resp.ok) {
         const body = await resp.text().catch(() => "");
-        fail(`request failed (${resp.status}): ${body || resp.statusText}`);
+        const versionHint =
+            resp.status === 404 && srvVersion
+                ? ` (this instance is running srv v${srvVersion} — a 404 here may mean it predates this command; check you're not talking to a stale build)`
+                : "";
+        fail(`request failed (${resp.status}): ${body || resp.statusText}${versionHint}`);
     }
     return resp.json();
 }
@@ -145,9 +164,14 @@ async function apiPost(url, authKey, urlPath, body) {
     } catch (e) {
         fail(`could not reach ${url} — instance unreachable (${e.message})`);
     }
+    const srvVersion = logSrvVersion(resp);
     if (!resp.ok) {
         const respBody = await resp.text().catch(() => "");
-        fail(`request failed (${resp.status}): ${respBody || resp.statusText}`);
+        const versionHint =
+            resp.status === 404 && srvVersion
+                ? ` (this instance is running srv v${srvVersion} — a 404 here may mean it predates this command; check you're not talking to a stale build)`
+                : "";
+        fail(`request failed (${resp.status}): ${respBody || resp.statusText}${versionHint}`);
     }
     return resp.json();
 }
