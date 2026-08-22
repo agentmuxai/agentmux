@@ -249,10 +249,20 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // Tier 3 — explicit countdown, visible inline (not hover-gated) once
     // the fill level is worth calling out. null below the mid band, or
     // whenever the window itself is unknown (nothing to count down from).
+    //
+    // Gated to Claude only (Codex P2 on PR #2729): `compactionThreshold()`
+    // hard-codes Claude Code's own ~33K auto-compact buffer
+    // (context-window.ts's own doc comment). A non-Claude provider that
+    // happens to report Claude-shaped `message_start` usage (e.g. a
+    // `muxcode`-catalog entry) would otherwise get an invented countdown
+    // against a threshold that has never been verified for it — the same
+    // reason `canCompact()` below already restricts the manual-compact
+    // button to Claude.
     const ctxCountdownText = (): string | null => {
         const t = props.contextTokens;
         const w = props.contextWindow;
         if (t == null || t <= 0 || w == null) return null;
+        if (props.providerId !== "claude") return null;
         return compactionCountdownText(t, w);
     };
 

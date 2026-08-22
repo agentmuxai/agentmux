@@ -23,6 +23,10 @@ afterEach(() => {
 const baseProps = {
     logOpen: false,
     onToggleLog: () => {},
+    // The countdown is Claude-only (compactionThreshold() hard-codes
+    // Claude Code's own auto-compact buffer) — most tests below want it
+    // enabled; the provider-gating test overrides this explicitly.
+    providerId: "claude",
 };
 
 describe("AgentComposerStrip — Tier 3 predictive countdown", () => {
@@ -78,5 +82,22 @@ describe("AgentComposerStrip — Tier 3 predictive countdown", () => {
         ));
         const countdownEl = container.querySelector(".agent-composer-strip-ctx-countdown");
         expect(countdownEl?.getAttribute("title")).toMatch(/manual \/compact can happen at any fill level/);
+    });
+
+    // Regression for Codex P2 on PR #2729: compactionThreshold() hard-codes
+    // Claude Code's own ~33K auto-compact buffer. A non-Claude provider
+    // that happens to report Claude-shaped message_start usage (e.g. a
+    // muxcode-catalog entry) must not get an invented countdown against a
+    // threshold that was never verified for it.
+    it("suppresses the countdown for a non-Claude provider even in the critical band", () => {
+        render(() => (
+            <AgentComposerStrip
+                {...baseProps}
+                providerId="codex"
+                contextTokens={155_000}
+                contextWindow={200_000}
+            />
+        ));
+        expect(screen.queryByText(/to auto-compact/)).toBeNull();
     });
 });
