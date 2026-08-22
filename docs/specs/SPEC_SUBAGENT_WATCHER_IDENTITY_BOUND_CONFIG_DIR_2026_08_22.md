@@ -71,10 +71,15 @@ secret_ref) returns `None` — never blocks, never logs a misleading
 `bound_dir: Option<PathBuf>` parameter, tried **first**; falls back to the
 existing `cmd:env` / `derive_claude_config_dir` chain unchanged when it's
 `None` (ambient/unbound agents keep exactly their old behavior — this is
-purely additive for the identity-bound case). Both call sites
-(`server/reactive.rs`'s register handler, `server/service/misc.rs`'s
-equivalent) now compute `resolve_bound_oauth_config_dir` first and pass it
-through.
+purely additive for the identity-bound case). `server/reactive.rs`'s
+register handler — the only call site that goes through
+`resolve_claude_config_dir` at all — now computes
+`resolve_bound_oauth_config_dir` first and passes it through.
+`server/service/misc.rs`'s `("subagent", "WatchAgent")` RPC handler is a
+separate, manual/legacy entry point that takes `config_dir` as an explicit
+caller-supplied string argument; it never called `resolve_claude_config_dir`
+before this change and still doesn't — out of scope here, since its whole
+design is "the caller already knows the right directory."
 
 ## 3. Non-goals
 
