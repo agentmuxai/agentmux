@@ -395,6 +395,11 @@ pub const COMMAND_MEMORY_LIST: &str = "memory.list";
 pub const COMMAND_MEMORY_READ: &str = "memory.read";
 pub const COMMAND_MEMORY_WRITE: &str = "memory.write";
 
+// Browser-pane bookmarks — a global (shared_dir-backed, not settings.json)
+// flat list. See docs/specs/SPEC_BROWSER_PANE_BOOKMARKS_AND_GO_ICON_2026_08_22.md.
+pub const COMMAND_BOOKMARKS_LIST: &str = "bookmarks.list";
+pub const COMMAND_BOOKMARKS_SET: &str = "bookmarks.set";
+
 // App API — v1 standalone Skill primitives
 pub const COMMAND_SKILL_LIST: &str = "skill.list";
 pub const COMMAND_SKILL_GET: &str = "skill.get";
