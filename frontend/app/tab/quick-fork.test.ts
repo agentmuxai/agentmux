@@ -312,8 +312,8 @@ describe("quickForkTabToNewTab", () => {
     // via ListAgentIdentitiesCommand (this flow has a definitionId, not a
     // RecentSessionRow).
     describe("opts.inheritIdentity", () => {
-        it("resolves the source definition's bound account and passes it as accountId", async () => {
-            listAgentIdentitiesCommand.mockResolvedValue([{ account_id: "acct-1" }]);
+        it("resolves the source definition's bound account for the fork's own provider and passes it as accountId", async () => {
+            listAgentIdentitiesCommand.mockResolvedValue([{ account_id: "acct-1", provider: "claude" }]);
             await quickForkTabToNewTab("tab-1", { inheritIdentity: true });
             expect(listAgentIdentitiesCommand).toHaveBeenCalledWith(
                 expect.anything(),
@@ -323,11 +323,43 @@ describe("quickForkTabToNewTab", () => {
             expect(overrides.accountId).toBe("acct-1");
         });
 
-        it("falls back to unbound when the source has no linked identity", async () => {
+        // reagent's review of PR #2735: ListAgentIdentitiesCommand returns
+        // EVERY provider's link for the agent (ORDER BY provider), so a
+        // source bound to two providers at once (e.g. github + claude) must
+        // NOT just take index 0 — that could inherit the wrong-provider
+        // account and get it persisted under the fork's provider.
+        it("filters to the link matching the fork's own effective provider, ignoring other-provider links", async () => {
+            resolveEffectiveLaunchProvider.mockResolvedValue("claude");
+            listAgentIdentitiesCommand.mockResolvedValue([
+                { account_id: "github-acct", provider: "github" }, // alphabetically first
+                { account_id: "claude-acct", provider: "claude" },
+            ]);
+            await quickForkTabToNewTab("tab-1", { inheritIdentity: true });
+            const overrides = launchAgentDefinition.mock.calls[0][1];
+            expect(overrides.accountId).toBe("claude-acct");
+        });
+
+        it("falls back to unbound when the source has no link for the fork's own provider", async () => {
+            listAgentIdentitiesCommand.mockResolvedValue([{ account_id: "github-acct", provider: "github" }]);
+            await quickForkTabToNewTab("tab-1", { inheritIdentity: true });
+            const overrides = launchAgentDefinition.mock.calls[0][1];
+            expect(overrides.accountId).toBe("");
+        });
+
+        it("falls back to unbound when the source has no linked identity at all", async () => {
             listAgentIdentitiesCommand.mockResolvedValue([]);
             await quickForkTabToNewTab("tab-1", { inheritIdentity: true });
             const overrides = launchAgentDefinition.mock.calls[0][1];
             expect(overrides.accountId).toBe("");
+        });
+
+        it("matches providers via canonical alias resolution, not exact string equality", async () => {
+            resolveEffectiveLaunchProvider.mockResolvedValue("claude");
+            resolveProviderAlias.mockImplementation((id: string) => (id === "claude-legacy" || id === "claude" ? "claude" : id));
+            listAgentIdentitiesCommand.mockResolvedValue([{ account_id: "acct-legacy", provider: "claude-legacy" }]);
+            await quickForkTabToNewTab("tab-1", { inheritIdentity: true });
+            const overrides = launchAgentDefinition.mock.calls[0][1];
+            expect(overrides.accountId).toBe("acct-legacy");
         });
 
         it("falls back to unbound (best-effort, not thrown) when ListAgentIdentitiesCommand rejects", async () => {

@@ -200,18 +200,42 @@ export async function quickForkTabToNewTab(
         }
         const newBlockId = await createBlockOnModel(newTabId, layoutModel, blockDef, null, null);
 
+        // Same resolution as launchAgentDefinition itself (agent-model.ts):
+        // effective provider -> PROVIDERS lookup, with an alias fallback.
+        // Computed once, unconditionally — both the identity-inherit filter
+        // and the non-Claude fallback check below need the fork's own
+        // canonical provider.
+        const effectiveProvider = await resolveEffectiveLaunchProvider(forkedDef);
+        const canonicalForkProvider = resolveProviderAlias(effectiveProvider);
+        const provider = PROVIDERS[effectiveProvider] ?? PROVIDERS[canonicalForkProvider];
+
         // Spec §5 decision: unbound by default, not the source's bound
         // account — a "quick" one-click action shouldn't silently fan out
         // credential access to a second agent. Phase 4: explicit opt-in
         // via opts.inheritIdentity looks up the SOURCE's own bound link
         // directly (this flow has a definitionId, not a RecentSessionRow).
+        //
+        // reagent's review of this PR: ListAgentIdentitiesCommand returns
+        // EVERY provider's link for the source agent (`ORDER BY provider`,
+        // agentmux-srv/src/backend/storage/identities.rs) — a source
+        // commonly holds links for two providers at once (e.g. a `github`
+        // account for git plus an `anthropic` account for the LLM CLI), so
+        // blindly taking index 0 could inherit the wrong-provider account
+        // and get it persisted under the FORK's provider by
+        // launchAgentDefinition's write-through LinkAgentIdentityCommand
+        // call (agent-model.ts), breaking credential resolution instead of
+        // inheriting it. Filter to the link matching the fork's own
+        // canonical provider first — same alias-canonicalized-on-both-sides
+        // comparison bind-to-agent-menu.ts's computeBindCandidates already
+        // uses for this exact class of bug (codex-P1-on-#2377).
         let accountId = "";
         if (opts?.inheritIdentity) {
             try {
                 const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
                     agent_id: active.definitionId,
                 });
-                accountId = links[0]?.account_id ?? "";
+                const link = links.find((l) => resolveProviderAlias(l.provider) === canonicalForkProvider);
+                accountId = link?.account_id ?? "";
             } catch (e: any) {
                 Logger.warn("quick-fork", "failed to resolve source identity to inherit", { error: String(e) });
             }
@@ -222,14 +246,7 @@ export async function quickForkTabToNewTab(
         // (which is just a boolean). Only relevant when there was actually
         // a session to lose (an empty active.sessionId is already a fresh
         // start regardless of provider — nothing silently changed).
-        let showNoHistoryFallback = false;
-        if (active.sessionId) {
-            // Same resolution as launchAgentDefinition itself (agent-model.ts):
-            // effective provider -> PROVIDERS lookup, with an alias fallback.
-            const effectiveProvider = await resolveEffectiveLaunchProvider(forkedDef);
-            const provider = PROVIDERS[effectiveProvider] ?? PROVIDERS[resolveProviderAlias(effectiveProvider)];
-            showNoHistoryFallback = provider?.id !== "claude";
-        }
+        const showNoHistoryFallback = !!active.sessionId && provider?.id !== "claude";
 
         const launched = await sourceModel.launchAgentDefinition(
             forkedDef,
