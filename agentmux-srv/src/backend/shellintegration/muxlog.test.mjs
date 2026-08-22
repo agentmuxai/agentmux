@@ -369,10 +369,6 @@ describe("muxlog checkLiveness", () => {
         });
     }
 
-    function listenOnEphemeralPort() {
-        return listenWithHealthResponse();
-    }
-
     it("returns '?' when there's no sibling data dir at all", async () => {
         const logDir = path.join(root, "logs");
         fs.mkdirSync(logDir, { recursive: true });
@@ -395,6 +391,17 @@ describe("muxlog checkLiveness", () => {
         const { logDir, dataDir } = makeInstance();
         const port = await listenWithHealthResponse();
         fs.writeFileSync(path.join(dataDir, "ipc-port-abc123"), `${port}:some-token`);
+        expect(await checkLiveness(logDir)).toBe("live");
+    });
+
+    // reagent P2 on PR #2752: agentmux-cef/src/lib.rs writes the bare
+    // filename "ipc-port" (no trailing hyphen) when AGENTMUX_IPC_HASH is
+    // unset (task dev:standalone, no launcher) — startsWith("ipc-port-")
+    // alone misses this exact literal.
+    it("returns 'live' via the bare 'ipc-port' filename (no hash suffix, e.g. task dev:standalone)", async () => {
+        const { logDir, dataDir } = makeInstance();
+        const port = await listenWithHealthResponse();
+        fs.writeFileSync(path.join(dataDir, "ipc-port"), `${port}:some-token`);
         expect(await checkLiveness(logDir)).toBe("live");
     });
 

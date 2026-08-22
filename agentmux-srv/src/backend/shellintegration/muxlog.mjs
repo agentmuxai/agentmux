@@ -281,7 +281,11 @@ export async function checkLiveness(logDir) {
     // readdirSync result (unspecified ordering) could probe the dead one
     // and report "dead" for a genuinely live instance. Probe every
     // candidate concurrently instead; "live" if ANY of them answers.
-    const portFiles = entries.filter((n) => n.startsWith("ipc-port-"));
+    // Reagent P2 on PR #2752: agentmux-cef/src/lib.rs writes the bare
+    // filename "ipc-port" (no trailing hyphen) when AGENTMUX_IPC_HASH is
+    // unset (the task dev:standalone no-launcher path) — startsWith
+    // "ipc-port-" alone misses that exact literal.
+    const portFiles = entries.filter((n) => n === "ipc-port" || n.startsWith("ipc-port-"));
     if (portFiles.length === 0) return "?";
     const ports = portFiles
         .map((name) => {
