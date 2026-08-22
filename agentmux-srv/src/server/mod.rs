@@ -559,11 +559,32 @@ pub fn build_router(state: AppState) -> Router {
             .post(crate::messaging::whatsapp::handle_inbound),
     );
 
+    // Ext 5 of docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md:
+    // stamp every response with this instance's own version, so a stale-
+    // build 404 (this session hit exactly this: `muxspect conversations`
+    // 404ing because the running srv predated that route, with nothing
+    // saying so) is self-diagnosing instead of a bare, unexplained 404.
+    // Captured by value (not via AppState extraction) so this applies to
+    // EVERY route uniformly, including the unauthenticated health/webhook
+    // ones, without needing `AppState: Clone`.
+    let version_for_header = state.version.clone();
+    let version_header = axum::middleware::from_fn(move |req: axum::extract::Request, next: axum::middleware::Next| {
+        let version = version_for_header.clone();
+        async move {
+            let mut response = next.run(req).await;
+            if let Ok(value) = axum::http::HeaderValue::from_str(&version) {
+                response.headers_mut().insert("x-agentmux-srv-version", value);
+            }
+            response
+        }
+    });
+
     Router::new()
         .merge(health)
         .merge(whatsapp_webhooks)
         .merge(lan_forward_routes)
         .merge(authed_routes)
+        .layer(version_header)
         .layer(cors)
         .with_state(state)
 }

@@ -12,8 +12,8 @@
 // after the positional command/block_id, and the original (raw-index)
 // parser silently misbehaved depending on which side they landed on.
 
-import { describe, expect, it } from "vitest";
-import { checkSpawnerTier, parseArgs } from "./muxspect.mjs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { checkSpawnerTier, logSrvVersion, parseArgs } from "./muxspect.mjs";
 
 describe("muxspect parseArgs", () => {
     it("no args defaults to 'list'", () => {
@@ -164,5 +164,42 @@ describe("muxspect checkSpawnerTier", () => {
 
     it("returns null for a non-dev channel (e.g. plain 'stable')", () => {
         expect(checkSpawnerTier("AgentA", { AGENTMUX_CHANNEL: "stable" })).toBeNull();
+    });
+});
+
+// Ext 5 (docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md):
+// every response carries an x-agentmux-srv-version header (server/mod.rs's
+// version_header middleware); logSrvVersion reads it and prints to stderr
+// so a stale-build 404 is self-diagnosing instead of a bare, unexplained
+// one. console.error is mocked (not asserted on message text — that's
+// rendering detail) purely to keep test output clean; the return value is
+// what callers (apiGet/apiPost's 404 version-hint) actually depend on.
+describe("muxspect logSrvVersion", () => {
+    let errSpy;
+
+    beforeEach(() => {
+        errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+        errSpy.mockRestore();
+    });
+
+    function fakeResponse(headerValue) {
+        return { headers: { get: (name) => (name === "x-agentmux-srv-version" ? headerValue : null) } };
+    }
+
+    it("returns the version string when the header is present", () => {
+        expect(logSrvVersion(fakeResponse("0.55.19"))).toBe("0.55.19");
+    });
+
+    it("logs to console.error (not stdout) when the header is present", () => {
+        logSrvVersion(fakeResponse("0.55.19"));
+        expect(errSpy).toHaveBeenCalledOnce();
+    });
+
+    it("returns undefined/falsy and logs nothing when the header is absent (older srv build)", () => {
+        expect(logSrvVersion(fakeResponse(null))).toBeFalsy();
+        expect(errSpy).not.toHaveBeenCalled();
     });
 });

@@ -138,3 +138,13 @@ mechanism for one instance to answer a state query from outside itself
 except the path `muxspect` already uses (env-inherited token, same as
 `agentmux-mcp`). Reaching a *different* instance needs a real
 discovery+auth story that doesn't exist yet — planned as Phase 2.
+
+## Every response carries the instance's own version
+
+Every `muxspect` call prints `[srv vX.Y.Z]` to stderr — the running
+instance's own version, read from the `x-agentmux-srv-version` response
+header every route sets. A 404 specifically gets a version hint folded
+into the failure message: a stale local build predating whatever command
+you just ran looks exactly like a missing route otherwise (a real gap this
+session hit live — `muxspect conversations` 404ing against an
+un-rebuilt instance). See `docs/specs/SPEC_MUXSPECT_SRV_VERSION_HEADER_2026_08_22.md`.
