@@ -698,11 +698,22 @@ pub async fn handle_muxspect_verify_sender(
     Json(classify_sender(&q.name, &candidates, now_ms)).into_response()
 }
 
-/// Truncation length for [`last_line_preview`] — keeps `conversations`'
+/// Truncation length for a `last_message_preview` — keeps `conversations`'
 /// response small even when the tail line is a long tool-call/result frame;
 /// this is a liveness-glance preview, not a transcript reader (that's
-/// `GetAgentTranscript`/`muxspect conversation <agent>`'s job).
+/// `GetAgentTranscript`/`muxspect conversation <agent>`'s job). Applied to
+/// BOTH the host-tier read ([`last_line_preview_and_activity`]) and the
+/// cross-channel forwarded read — codex P2 on PR #2715 caught the
+/// cross-channel path skipping this entirely, which let one huge remote
+/// tool-call/result line inflate an otherwise-bounded response.
 const PREVIEW_MAX_CHARS: usize = 200;
+
+/// Bounded tail window read directly off the live FileStore file in
+/// [`last_line_preview_and_activity`]'s fast path — deliberately small
+/// relative to a whole session (which can be many MB): only needs to
+/// comfortably contain the single last non-blank line, not search for a
+/// specific frame shape the way [`LAST_ERROR_TAIL_BYTES`]'s window does.
+const PREVIEW_TAIL_BYTES: i64 = 4096;
 
 /// Short per-forward timeout for cross-channel preview fetches in
 /// [`handle_muxspect_conversations`] — a single dead/unresponsive channel
@@ -710,27 +721,69 @@ const PREVIEW_MAX_CHARS: usize = 200;
 /// diagnostic (never authoritative) posture elsewhere.
 const CROSS_CHANNEL_PREVIEW_TIMEOUT_MS: u64 = 1500;
 
+/// Truncate a preview line to [`PREVIEW_MAX_CHARS`], appending an ellipsis
+/// when it was actually cut. Shared by the host-tier and cross-channel
+/// preview paths so they can't drift out of sync again (codex P2 on
+/// PR #2715 — the cross-channel path originally didn't call this at all).
+fn truncate_preview(line: &str) -> String {
+    if line.chars().count() > PREVIEW_MAX_CHARS {
+        line.chars().take(PREVIEW_MAX_CHARS).collect::<String>() + "…"
+    } else {
+        line.to_string()
+    }
+}
+
 /// Last non-blank line of a block's own transcript, truncated for preview
-/// display. `None` if the block has no session output yet (e.g. an agent
-/// registered but no turn has produced output) — a missing preview is not
-/// an error, same "encode absence in the body, not the status" posture as
-/// the rest of this file.
-fn last_line_preview(
+/// display, plus a real "when was this last written" timestamp — `None`
+/// for either if the block has no session output yet (e.g. an agent
+/// registered but no turn has produced output) — missing is not an error,
+/// same "encode absence in the body, not the status" posture as the rest
+/// of this file.
+///
+/// Fast path: a bounded tail read straight off the live FileStore file
+/// (`stat` + a small `read_at`, not a full read) — covers the overwhelming
+/// common case (an active or recently-active, non-archived block) without
+/// loading/decompressing full session history just to preview one line
+/// (codex P2 on PR #2715: the original version called
+/// `session_archive::read_session_output`, a full-session-export
+/// primitive, for every host agent on every `conversations` call). The
+/// file's own `modts` doubles as a REAL last-activity timestamp — unlike
+/// `AgentRegistration::last_seen`, which nothing in this codebase updates
+/// after registration (codex P2 on PR #2715: using it as
+/// `last_activity_ms` made a long-lived, actively-working agent look
+/// hours-stale). Falls back to the full-read primitive (which also
+/// handles archived/gzip sessions) only when the fast path finds nothing —
+/// no live file yet, or genuinely archived — at the cost of no cheap
+/// activity timestamp in that fallback case (`None`, not a guessed value).
+fn last_line_preview_and_activity(
     wstore: &std::sync::Arc<crate::backend::storage::store::Store>,
     filestore: &std::sync::Arc<FileStore>,
     block_id: &str,
-) -> Option<String> {
-    let (raw_bytes, _) = crate::backend::session_archive::read_session_output(
-        wstore, filestore, block_id,
-    )
-    .ok()?;
-    let text = String::from_utf8_lossy(&raw_bytes);
-    let last = text.lines().rev().find(|l| !l.trim().is_empty())?;
-    let mut preview = last.to_string();
-    if preview.chars().count() > PREVIEW_MAX_CHARS {
-        preview = preview.chars().take(PREVIEW_MAX_CHARS).collect::<String>() + "…";
+) -> (Option<String>, Option<u64>) {
+    if let Ok(Some(file)) = filestore.stat(block_id, "output") {
+        if file.size > 0 {
+            let start = (file.size - PREVIEW_TAIL_BYTES).max(0);
+            if let Ok((_, bytes)) = filestore.read_at(block_id, "output", start, file.size - start) {
+                let text = String::from_utf8_lossy(&bytes);
+                if let Some(last) = text.lines().rev().find(|l| !l.trim().is_empty()) {
+                    return (Some(truncate_preview(last)), Some(file.modts.max(0) as u64));
+                }
+            }
+        }
     }
-    Some(preview)
+
+    match crate::backend::session_archive::read_session_output(wstore, filestore, block_id) {
+        Ok((raw_bytes, _)) => {
+            let text = String::from_utf8_lossy(&raw_bytes);
+            let preview = text
+                .lines()
+                .rev()
+                .find(|l| !l.trim().is_empty())
+                .map(truncate_preview);
+            (preview, None)
+        }
+        Err(_) => (None, None),
+    }
 }
 
 /// `GET /api/v1/muxspect/conversations` — a single-call, all-tier glance at
@@ -757,7 +810,8 @@ pub async fn handle_muxspect_conversations(State(state): State<AppState>) -> imp
 
     // Host tier — direct local read, no network.
     for reg in state.reactive_handler.list_agents() {
-        let preview = last_line_preview(&state.wstore, &state.filestore, &reg.block_id);
+        let (preview, activity_ms) =
+            last_line_preview_and_activity(&state.wstore, &state.filestore, &reg.block_id);
         let turn_active = crate::backend::blockcontroller::get_block_controller_status(&reg.block_id)
             .map(|s| s.turn_active)
             .unwrap_or(false);
@@ -765,12 +819,25 @@ pub async fn handle_muxspect_conversations(State(state): State<AppState>) -> imp
             "name": reg.agent_id,
             "tier": "host",
             "turn_active": turn_active,
-            "last_activity_ms": reg.last_seen,
+            // Real transcript-write time when available (see
+            // last_line_preview_and_activity's doc comment) — falls back
+            // to registration time only when there's no output yet at
+            // all, which is still a meaningful "how long has this agent
+            // existed" signal in that one specific case, not a stand-in
+            // for a genuinely unknown value.
+            "last_activity_ms": activity_ms.unwrap_or(reg.last_seen),
             "last_message_preview": preview,
         }));
     }
 
-    // Cross-channel tier — one best-effort forwarded call per channel.
+    // Cross-channel tier — one best-effort forwarded call per channel, ALL
+    // concurrent (codex P2 on PR #2715: sequential fetches meant a single
+    // dead/slow channel added its full CROSS_CHANNEL_PREVIEW_TIMEOUT_MS to
+    // TOTAL latency instead of every channel paying it once, in parallel).
+    // `forwarded=true` caps each of these at the same single-hop guard
+    // `handle_reactive_transcript`'s own cross-channel fallback uses (see
+    // TranscriptQuery::forwarded's doc comment) — this call IS a forward,
+    // from the target instance's point of view, exactly like that one.
     let own_channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
     let local_url = state.local_web_url.clone();
     if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
@@ -780,46 +847,61 @@ pub async fn handle_muxspect_conversations(State(state): State<AppState>) -> imp
                 .filter(|e| e.channel != own_channel && e.local_url != local_url)
                 .collect();
 
+        let mut join_set = tokio::task::JoinSet::new();
         for entry in cross_channel_entries {
-            let mut preview: Option<String> = None;
-            let mut turn_active: Option<bool> = None;
+            let http_client = state.http_client.clone();
+            join_set.spawn(async move {
+                let mut preview: Option<String> = None;
+                let mut turn_active: Option<bool> = None;
 
-            let fetch = state
-                .http_client
-                .get(format!("{}/agentmux/reactive/transcript", entry.local_url))
-                .header("X-AuthKey", &entry.auth_key)
-                .query(&[("agent", entry.agent_id.as_str()), ("max_lines", "1")])
-                .send();
+                let fetch = http_client
+                    .get(format!("{}/agentmux/reactive/transcript", entry.local_url))
+                    .header("X-AuthKey", &entry.auth_key)
+                    .query(&[
+                        ("agent", entry.agent_id.as_str()),
+                        ("max_lines", "1"),
+                        ("forwarded", "true"),
+                    ])
+                    .send();
 
-            if let Ok(Ok(resp)) = tokio::time::timeout(
-                std::time::Duration::from_millis(CROSS_CHANNEL_PREVIEW_TIMEOUT_MS),
-                fetch,
-            )
-            .await
-            {
-                if resp.status().is_success() {
-                    if let Ok(body) = resp.json::<serde_json::Value>().await {
-                        turn_active = body.get("turn_active").and_then(|v| v.as_bool());
-                        preview = body
-                            .get("lines")
-                            .and_then(|v| v.as_array())
-                            .and_then(|arr| arr.last())
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.to_string());
+                if let Ok(Ok(resp)) = tokio::time::timeout(
+                    std::time::Duration::from_millis(CROSS_CHANNEL_PREVIEW_TIMEOUT_MS),
+                    fetch,
+                )
+                .await
+                {
+                    if resp.status().is_success() {
+                        if let Ok(body) = resp.json::<serde_json::Value>().await {
+                            turn_active = body.get("turn_active").and_then(|v| v.as_bool());
+                            preview = body
+                                .get("lines")
+                                .and_then(|v| v.as_array())
+                                .and_then(|arr| arr.last())
+                                .and_then(|v| v.as_str())
+                                .map(truncate_preview);
+                        }
                     }
                 }
-            }
-            // Timeout/connection/parse failure: list the agent anyway with
-            // no preview — best-effort, same as every other tier here.
+                // Timeout/connection/parse failure: list the agent anyway
+                // with no preview — best-effort, same as every other tier
+                // here.
 
-            agents.push(json!({
-                "name": entry.agent_id,
-                "tier": "cross-channel",
-                "channel": entry.channel,
-                "turn_active": turn_active,
-                "last_activity_ms": entry.updated_at,
-                "last_message_preview": preview,
-            }));
+                json!({
+                    "name": entry.agent_id,
+                    "tier": "cross-channel",
+                    "channel": entry.channel,
+                    "turn_active": turn_active,
+                    "last_activity_ms": entry.updated_at,
+                    "last_message_preview": preview,
+                })
+            });
+        }
+        while let Some(res) = join_set.join_next().await {
+            // A panicked/cancelled task just doesn't contribute a row —
+            // best-effort, matching this whole tier's posture elsewhere.
+            if let Ok(value) = res {
+                agents.push(value);
+            }
         }
     }
 
@@ -1435,7 +1517,7 @@ mod tests {
     }
 
     #[test]
-    fn last_line_preview_returns_last_non_blank_line() {
+    fn last_line_preview_and_activity_returns_last_non_blank_line() {
         let filestore = std::sync::Arc::new(FileStore::open_in_memory().unwrap());
         let wstore = std::sync::Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
         let block_id = uuid::Uuid::new_v4().to_string();
@@ -1447,12 +1529,15 @@ mod tests {
             .expect("append_data");
         insert_bare_block(&wstore, &block_id);
 
-        let preview = last_line_preview(&wstore, &filestore, &block_id);
+        let (preview, activity_ms) = last_line_preview_and_activity(&wstore, &filestore, &block_id);
         assert_eq!(preview, Some("last line".to_string()));
+        // Fast path (live FileStore file present) — a real write timestamp
+        // must come back, not None, per codex P2 on PR #2715.
+        assert!(activity_ms.is_some());
     }
 
     #[test]
-    fn last_line_preview_truncates_long_lines() {
+    fn last_line_preview_and_activity_truncates_long_lines() {
         let filestore = std::sync::Arc::new(FileStore::open_in_memory().unwrap());
         let wstore = std::sync::Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
         let block_id = uuid::Uuid::new_v4().to_string();
@@ -1465,16 +1550,34 @@ mod tests {
             .expect("append_data");
         insert_bare_block(&wstore, &block_id);
 
-        let preview = last_line_preview(&wstore, &filestore, &block_id).unwrap();
+        let (preview, _) = last_line_preview_and_activity(&wstore, &filestore, &block_id);
+        let preview = preview.unwrap();
         assert_eq!(preview.chars().count(), PREVIEW_MAX_CHARS + 1); // +1 for the trailing "…"
         assert!(preview.ends_with('…'));
     }
 
     #[test]
-    fn last_line_preview_returns_none_for_missing_block() {
+    fn last_line_preview_and_activity_returns_none_for_missing_block() {
         let filestore = std::sync::Arc::new(FileStore::open_in_memory().unwrap());
         let wstore = std::sync::Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
-        let preview = last_line_preview(&wstore, &filestore, "no-such-block");
+        let (preview, activity_ms) = last_line_preview_and_activity(&wstore, &filestore, "no-such-block");
         assert_eq!(preview, None);
+        assert_eq!(activity_ms, None);
+    }
+
+    #[test]
+    fn truncate_preview_is_shared_by_host_and_cross_channel_paths() {
+        // Pins the fix for codex P2 on PR #2715 (cross-channel previews
+        // originally skipped truncation entirely) at the unit-test level
+        // — the handler-level concurrent-fetch behavior itself needs a
+        // live second instance to exercise end-to-end, out of reach for
+        // this module's test harness.
+        let long = "y".repeat(PREVIEW_MAX_CHARS + 10);
+        let truncated = truncate_preview(&long);
+        assert_eq!(truncated.chars().count(), PREVIEW_MAX_CHARS + 1);
+        assert!(truncated.ends_with('…'));
+
+        let short = "short line";
+        assert_eq!(truncate_preview(short), short);
     }
 }

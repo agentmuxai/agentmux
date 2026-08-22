@@ -1082,6 +1082,22 @@ pub(super) struct TranscriptQuery {
     agent: String,
     #[serde(default = "default_transcript_max_lines")]
     max_lines: usize,
+    /// Set ONLY by [`handle_reactive_transcript_cross_channel`] on the
+    /// single forwarded request it ever sends — caps cross-channel
+    /// resolution at exactly one hop. Without this, a stale-but-PID-alive
+    /// shared-registry entry (pointing back at this same instance, or at a
+    /// second instance whose own entry for the same agent points back
+    /// here) would forward indefinitely — the exact failure mode
+    /// `handle_reactive_inject`'s `MAX_FORWARD_HOPS`/`forward_hops` guard
+    /// exists to prevent for jekt delivery (reagent P1, codex P1 on
+    /// PR #2715). A bare bool is sufficient here (unlike inject's integer
+    /// hop counter) because this route is architecturally single-hop by
+    /// design — the owning instance found via `lookup_all_shared` always
+    /// has the agent on ITS OWN host tier, never a further cross-channel
+    /// hop of its own — so "already forwarded once" and "hop limit
+    /// reached" are the same condition.
+    #[serde(default)]
+    forwarded: bool,
 }
 fn default_transcript_max_lines() -> usize {
     100
@@ -1114,6 +1130,17 @@ pub(super) async fn handle_reactive_transcript(
     }
 
     let Some(reg) = state.reactive_handler.get_agent(&params.agent) else {
+        if params.forwarded {
+            // Already one hop in — see TranscriptQuery::forwarded's doc
+            // comment. The owning instance's own host-tier lookup just
+            // missed too, so this agent genuinely isn't registered
+            // anywhere reachable; 404, do not attempt a second forward.
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "agent not found"})),
+            )
+                .into_response();
+        }
         return handle_reactive_transcript_cross_channel(&state, &params).await;
     };
     let block_id = reg.block_id.clone();
@@ -1181,9 +1208,20 @@ async fn handle_reactive_transcript_cross_channel(
     let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() else {
         return not_found();
     };
+    // Skip any entry pointing back at THIS instance before picking one —
+    // a stale-but-PID-alive self-registration (the registration race /
+    // incomplete-cleanup case codex flagged on PR #2715) would otherwise
+    // forward a request to ourselves, which re-enters this exact function
+    // and repeats. Filtering here (not just checking the single freshest
+    // pick) also handles a self-entry merely being the FRESHEST of several
+    // candidates — same defense-in-depth `handle_reactive_inject`'s Tier 2b
+    // applies. Combined with `TranscriptQuery::forwarded` above (which
+    // still caps this at one hop even in an exotic multi-instance cycle
+    // this filter alone wouldn't catch — e.g. instance A's entry points to
+    // B and B's own entry for the same agent points back to A).
     let Some(entry) = crate::backend::reactive::registry::lookup_all_shared(&shared_dir, &params.agent)
         .into_iter()
-        .next()
+        .find(|e| !is_self_registration(&e.local_url, &state.local_web_url))
     else {
         return not_found();
     };
@@ -1191,6 +1229,7 @@ async fn handle_reactive_transcript_cross_channel(
     let query: Vec<(&str, String)> = vec![
         ("agent", params.agent.clone()),
         ("max_lines", params.max_lines.to_string()),
+        ("forwarded", "true".to_string()),
     ];
     let resp = state
         .http_client
@@ -1237,6 +1276,7 @@ mod transcript_cross_channel_tests {
             Query(TranscriptQuery {
                 agent: "no-such-agent-anywhere".to_string(),
                 max_lines: 100,
+                forwarded: false,
             }),
         )
         .await;
@@ -1251,6 +1291,7 @@ mod transcript_cross_channel_tests {
             Query(TranscriptQuery {
                 agent: String::new(),
                 max_lines: 100,
+                forwarded: false,
             }),
         )
         .await;
@@ -1296,6 +1337,7 @@ mod transcript_cross_channel_tests {
             Query(TranscriptQuery {
                 agent: agent_id,
                 max_lines: 100,
+                forwarded: false,
             }),
         )
         .await;
@@ -1305,6 +1347,27 @@ mod transcript_cross_channel_tests {
             .unwrap();
         let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
         assert_eq!(body["tier"], "host");
+    }
+
+    /// The P1 regression this guards (reagent + codex on PR #2715): a
+    /// forwarded request (`forwarded: true`) must 404 immediately on a
+    /// host-tier miss, never attempt a second cross-channel lookup/forward
+    /// — that's what caps a stale/cyclic shared-registry entry at exactly
+    /// one hop instead of looping (self-forward) or chaining indefinitely
+    /// (multi-instance cycle).
+    #[tokio::test]
+    async fn forwarded_request_404s_without_a_second_hop() {
+        let state = test_state();
+        let resp = handle_reactive_transcript(
+            State(state),
+            Query(TranscriptQuery {
+                agent: "no-such-agent-anywhere".to_string(),
+                max_lines: 100,
+                forwarded: true,
+            }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 }
 
