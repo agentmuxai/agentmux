@@ -242,7 +242,14 @@ export function canonicalizePath(path: string): string {
         p = p.slice(4); // \\?\C:\... -> C:\...
     }
     p = p.replace(/\\/g, "/");
+    // codex P2 on PR #2739: a UNC path's leading "//" (the authority
+    // marker distinguishing \\server\share from a current-drive-rooted
+    // path) must survive the doubled-slash collapse below, or the
+    // \\?\UNC\ strip above is pointless — the result would compare equal
+    // between panes, but be unusable as an actual path to watch/read.
+    const isUnc = p.startsWith("//");
     p = p.replace(/\/{2,}/g, "/");
+    if (isUnc) p = "/" + p;
     // Windows drive letter — lowercase for stable equality.
     if (/^[A-Za-z]:\//.test(p)) {
         p = p[0].toLowerCase() + p.slice(1);

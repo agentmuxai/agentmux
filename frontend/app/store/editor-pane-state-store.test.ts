@@ -514,15 +514,18 @@ describe("editor-pane-state-store (slice #10, Phase 1A)", () => {
         expect(prefixed).toBe("c:/Users/asafe/AppData/Local/Temp/probe.md");
     });
 
-    it("canonicalizePath strips the \\\\?\\UNC\\ variant for network shares", () => {
+    // Codex P2 on PR #2739: an earlier version of this fix stripped the
+    // \\?\UNC\ prefix but then let the pre-existing doubled-slash collapse
+    // eat the UNC authority marker too, producing "/server/share/..." — a
+    // current-drive-rooted path on Windows, not a usable network path. The
+    // leading "//" must survive so WatchEditorFileCommand/ReadEditorFileCommand
+    // get back something that still actually resolves to the share.
+    it("canonicalizePath strips the \\\\?\\UNC\\ variant while preserving the UNC authority marker", () => {
         const prefixed = canonicalizePath("\\\\?\\UNC\\server\\share\\file.md");
-        // The function's existing (pre-existing, unrelated to this fix)
-        // doubled-slash collapse already reduces a plain UNC path's
-        // leading "\\\\" to a single "/" — this test only pins down that
-        // the \\?\UNC\ prefix itself is stripped consistently with that
-        // existing behavior, not a claim of correct UNC round-tripping.
+        const plainUnc = canonicalizePath("\\\\server\\share\\file.md");
         expect(prefixed.startsWith("\\\\?\\")).toBe(false);
-        expect(prefixed).toBe("/server/share/file.md");
+        expect(prefixed).toBe("//server/share/file.md");
+        expect(prefixed).toBe(plainUnc);
     });
 
     it("slot dispatch path: OpenFile via dispatch updates the snapshot", () => {
