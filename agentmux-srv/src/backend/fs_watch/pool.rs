@@ -122,7 +122,22 @@ impl FsWatchPool {
                         }
                     }
                     Err(e) => {
-                        tracing::warn!(error = %e, "fs_watch: backend reported an error");
+                        // reagent P1 on #2722: sweep() now only re-arms
+                        // targets already marked degraded — an explicit,
+                        // non-silent notify error (e.g. a Windows
+                        // ReadDirectoryChangesW buffer-overflow) has to be
+                        // recorded here, or a watch that dies with a real
+                        // reported error (not just the accepted "truly
+                        // silent, never-erroring death" gap) would never be
+                        // picked up by the sweep either. `notify::Error`
+                        // carries the affected path(s) when it can attribute
+                        // one; mark each degraded so the next sweep re-arms
+                        // it. A path-less error (rare — not attributable to
+                        // any specific target) can only be logged.
+                        tracing::warn!(error = %e, paths = ?e.paths, "fs_watch: backend reported an error");
+                        for path in &e.paths {
+                            bridge.health.mark_degraded(path.clone(), e.to_string());
+                        }
                     }
                 }
             }

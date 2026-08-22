@@ -132,19 +132,42 @@ the life of the process, would go unnoticed until some later, unrelated
 change on the same path happened to trigger a refresh.
 
 **Fix, revised**: `sweep()` now only re-arms targets that are already
-*degraded* (a prior `watch()` attempt failed and was recorded via
-`HealthState::mark_degraded`) — a healthy-looking target is left completely
-untouched, every tick. This fixes the leak the same way (nothing is ever
-double-watched) *and* fixes the coverage gap (a healthy watch is never
-interrupted). The trade-off, stated honestly rather than silently accepted:
-a watch that fails *silently* — dies without `notify` or the OS ever
-reporting an error on it — is no longer self-healed by this sweep, only a
-watch already known degraded. Judged acceptable because a truly silent
-death has no confirmed occurrence in this codebase's history (the
-scenarios `HEALTH_SWEEP_INTERVAL`'s own doc comment lists — inotify
-instance-limit churn, flaky network mounts — are Linux-flavored concerns on
-a Windows-primary codebase), against a certain, systematic cost (leak or
-gap, every target, every tick) the alternative imposed on every watch.
+*degraded* (`HealthState::mark_degraded` was called for them) — a
+healthy-looking target is left completely untouched, every tick. This
+fixes the leak the same way (nothing is ever double-watched) *and* fixes
+the coverage gap (a healthy watch is never interrupted).
+
+**A second review round (reagent P1) caught that this trade-off was
+initially stated too narrowly.** The bridge task that forwards `notify`'s
+raw callback into the broadcast stream had an error branch that only
+logged (`tracing::warn!`) — it never called `mark_degraded`. Before the
+degraded-only scoping, that didn't matter: the unconditional per-tick sweep
+re-armed every target regardless, so an untracked error still got fixed on
+the next tick. After the scoping, it did matter — a watch that died with an
+*explicit, non-silent* `notify` error (e.g. a Windows
+`ReadDirectoryChangesW` buffer-overflow, which `notify` surfaces as a real
+`Err` carrying the affected path via `notify::Error::paths`) would never be
+marked degraded, so `sweep()`'s `is_degraded()` filter would never pick it
+up either — a real, broader-than-documented regression, not just the
+narrow "truly silent, never-erroring death" case the first revision
+described. Fixed by having that error branch call
+`health.mark_degraded(path, ...)` for every path `notify::Error::paths`
+attributes the error to (logged either way; a path-less error still can't
+be attributed to a specific target, so it's logged only).
+
+**The trade-off, now accurately scoped**: only a watch that dies *without
+any reported error at all* — no explicit `notify::Error`, no `watch()`
+failure, truly silent — is unhealed by this sweep. Every explicit failure
+this pool can observe (initial `watch()` failure, sweep-time `watch()`
+failure, or an async `notify` error with an attributable path) now
+degrades the target and gets re-armed on the next tick. Judged acceptable
+because a *truly* silent death (no signal of any kind) has no confirmed
+occurrence in this codebase's history (the scenarios
+`HEALTH_SWEEP_INTERVAL`'s own doc comment lists — inotify instance-limit
+churn, flaky network mounts — are Linux-flavored concerns on a
+Windows-primary codebase), against a certain, systematic cost (leak or gap,
+every target, every tick) the unconditional-sweep alternative imposed on
+every watch.
 
 Also corrected the "cheap no-op" claim in three places it appeared:
 `pool.rs`'s `sweep()` doc comment, `pool.rs`'s health-sweep task spawn
