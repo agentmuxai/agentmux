@@ -103,6 +103,28 @@ describe("muxspect parseArgs", () => {
         expect(r.cmd).toBe("verify-sender");
         expect(r.blockId).toBe("AgentA");
     });
+
+    // SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md Phase A —
+    // both commands fall out of the existing generic parsing for free (no
+    // 'sub' shape needed, unlike 'dock clear'); these tests just pin that.
+    it("'conversations' (no arg) parses like plain 'list'", () => {
+        const r = parseArgs(["conversations"]);
+        expect(r.cmd).toBe("conversations");
+        expect(r.blockId).toBeUndefined();
+    });
+
+    it("'conversation <agent>' parses like describe (agent name lands in blockId)", () => {
+        const r = parseArgs(["conversation", "AgentA"]);
+        expect(r.cmd).toBe("conversation");
+        expect(r.blockId).toBe("AgentA");
+    });
+
+    it("'conversation <agent> --json' still resolves the agent name, flag anywhere", () => {
+        const r = parseArgs(["conversation", "--json", "AgentA"]);
+        expect(r.cmd).toBe("conversation");
+        expect(r.blockId).toBe("AgentA");
+        expect(r.json).toBe(true);
+    });
 });
 
 // SPEC_MUXSPECT_VERIFY_SENDER_2026_08_21.md tier 0 — checked before any

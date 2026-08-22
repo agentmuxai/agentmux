@@ -1082,6 +1082,22 @@ pub(super) struct TranscriptQuery {
     agent: String,
     #[serde(default = "default_transcript_max_lines")]
     max_lines: usize,
+    /// Set ONLY by [`handle_reactive_transcript_cross_channel`] on the
+    /// single forwarded request it ever sends — caps cross-channel
+    /// resolution at exactly one hop. Without this, a stale-but-PID-alive
+    /// shared-registry entry (pointing back at this same instance, or at a
+    /// second instance whose own entry for the same agent points back
+    /// here) would forward indefinitely — the exact failure mode
+    /// `handle_reactive_inject`'s `MAX_FORWARD_HOPS`/`forward_hops` guard
+    /// exists to prevent for jekt delivery (reagent P1, codex P1 on
+    /// PR #2715). A bare bool is sufficient here (unlike inject's integer
+    /// hop counter) because this route is architecturally single-hop by
+    /// design — the owning instance found via `lookup_all_shared` always
+    /// has the agent on ITS OWN host tier, never a further cross-channel
+    /// hop of its own — so "already forwarded once" and "hop limit
+    /// reached" are the same condition.
+    #[serde(default)]
+    forwarded: bool,
 }
 fn default_transcript_max_lines() -> usize {
     100
@@ -1092,6 +1108,15 @@ fn default_transcript_max_lines() -> usize {
 /// watcher agent to inspect on its own poll interval (v1 is pull/poll, not
 /// push — see
 /// docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md).
+///
+/// As of `SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`
+/// Phase A, a miss on this instance's own host-tier registry falls back to
+/// the host-global cross-channel shared registry and forwards a single-hop
+/// HTTP GET to the owning channel's own instance — same auth
+/// (`entry.auth_key` as `X-AuthKey`) and loopback-only pattern
+/// `handle_reactive_inject`'s Tier 2b already uses (see that handler for
+/// the security rationale). Response carries `"tier"` so callers can tell
+/// which tier answered.
 pub(super) async fn handle_reactive_transcript(
     State(state): State<AppState>,
     Query(params): Query<TranscriptQuery>,
@@ -1103,12 +1128,20 @@ pub(super) async fn handle_reactive_transcript(
         )
             .into_response();
     }
+
     let Some(reg) = state.reactive_handler.get_agent(&params.agent) else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "agent not found"})),
-        )
-            .into_response();
+        if params.forwarded {
+            // Already one hop in — see TranscriptQuery::forwarded's doc
+            // comment. The owning instance's own host-tier lookup just
+            // missed too, so this agent genuinely isn't registered
+            // anywhere reachable; 404, do not attempt a second forward.
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "agent not found"})),
+            )
+                .into_response();
+        }
+        return handle_reactive_transcript_cross_channel(&state, &params).await;
     };
     let block_id = reg.block_id.clone();
 
@@ -1146,11 +1179,196 @@ pub(super) async fn handle_reactive_transcript(
     Json(json!({
         "agent": reg.agent_id,
         "block_id": block_id,
+        "tier": "host",
         "turn_active": turn_active,
         "lines": lines,
         "truncated": truncated,
     }))
     .into_response()
+}
+
+/// Fallback path for [`handle_reactive_transcript`] when the target agent
+/// isn't on this instance's own host-tier registry — checks the host-global
+/// cross-channel shared registry and, on a hit, forwards to the owning
+/// channel's own instance. A miss here (not found on this channel OR any
+/// other channel on this host) 404s exactly as the host-only lookup always
+/// did — this does not reach LAN or WAN (Phase A scope; see spec Phase B/C).
+async fn handle_reactive_transcript_cross_channel(
+    state: &AppState,
+    params: &TranscriptQuery,
+) -> Response {
+    let not_found = || {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "agent not found"})),
+        )
+            .into_response()
+    };
+
+    let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() else {
+        return not_found();
+    };
+    // Skip any entry pointing back at THIS instance before picking one —
+    // a stale-but-PID-alive self-registration (the registration race /
+    // incomplete-cleanup case codex flagged on PR #2715) would otherwise
+    // forward a request to ourselves, which re-enters this exact function
+    // and repeats. Filtering here (not just checking the single freshest
+    // pick) also handles a self-entry merely being the FRESHEST of several
+    // candidates — same defense-in-depth `handle_reactive_inject`'s Tier 2b
+    // applies. Combined with `TranscriptQuery::forwarded` above (which
+    // still caps this at one hop even in an exotic multi-instance cycle
+    // this filter alone wouldn't catch — e.g. instance A's entry points to
+    // B and B's own entry for the same agent points back to A).
+    let Some(entry) = crate::backend::reactive::registry::lookup_all_shared(&shared_dir, &params.agent)
+        .into_iter()
+        .find(|e| !is_self_registration(&e.local_url, &state.local_web_url))
+    else {
+        return not_found();
+    };
+
+    let query: Vec<(&str, String)> = vec![
+        ("agent", params.agent.clone()),
+        ("max_lines", params.max_lines.to_string()),
+        ("forwarded", "true".to_string()),
+    ];
+    let resp = state
+        .http_client
+        .get(format!("{}/agentmux/reactive/transcript", entry.local_url))
+        .header("X-AuthKey", &entry.auth_key)
+        .query(&query)
+        .send()
+        .await;
+
+    let Ok(resp) = resp else {
+        return not_found();
+    };
+    if !resp.status().is_success() {
+        return not_found();
+    }
+    let Ok(mut body) = resp.json::<serde_json::Value>().await else {
+        return not_found();
+    };
+    if let Some(obj) = body.as_object_mut() {
+        obj.insert("tier".to_string(), json!("cross-channel"));
+        obj.insert("channel".to_string(), json!(entry.channel));
+    }
+    Json(body).into_response()
+}
+
+#[cfg(test)]
+mod transcript_cross_channel_tests {
+    use super::*;
+    use crate::server::tests::test_state;
+
+    /// The regression this test guards: before Phase A
+    /// (`SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`),
+    /// an unknown agent name always 404d straight out of the host-tier
+    /// lookup. The refactor routes that miss through
+    /// `handle_reactive_transcript_cross_channel` instead — this proves the
+    /// common case (nothing found on any tier, which is what a fresh
+    /// `test_state()` with no shared registry entries looks like) still
+    /// ends in the same 404, not a panic or a wrongly-200'd empty body.
+    #[tokio::test]
+    async fn unknown_agent_still_404s_when_not_on_any_tier() {
+        let state = test_state();
+        let resp = handle_reactive_transcript(
+            State(state),
+            Query(TranscriptQuery {
+                agent: "no-such-agent-anywhere".to_string(),
+                max_lines: 100,
+                forwarded: false,
+            }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn empty_agent_param_is_bad_request_before_any_tier_lookup() {
+        let state = test_state();
+        let resp = handle_reactive_transcript(
+            State(state),
+            Query(TranscriptQuery {
+                agent: String::new(),
+                max_lines: 100,
+                forwarded: false,
+            }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn host_tier_hit_is_labeled_with_its_tier() {
+        let state = test_state();
+        let unique = uuid::Uuid::new_v4();
+        let agent_id = format!("transcript-tier-test-{unique}");
+        let block_id = format!("transcript-tier-block-{unique}");
+        state
+            .reactive_handler
+            .register_agent(&agent_id, &block_id, None)
+            .unwrap();
+        state
+            .filestore
+            .make_file(
+                &block_id,
+                "output",
+                crate::backend::storage::filestore::FileMeta::default(),
+                crate::backend::storage::filestore::FileOpts::default(),
+            )
+            .expect("make_file");
+        state
+            .filestore
+            .append_data(&block_id, "output", b"hello\n")
+            .expect("append_data");
+        let mut block = crate::backend::obj::Block {
+            oid: block_id.clone(),
+            parentoref: String::new(),
+            version: 1,
+            runtimeopts: None,
+            stickers: None,
+            meta: Default::default(),
+            subblockids: None,
+        };
+        state.wstore.insert(&mut block).expect("wstore insert");
+
+        let resp = handle_reactive_transcript(
+            State(state),
+            Query(TranscriptQuery {
+                agent: agent_id,
+                max_lines: 100,
+                forwarded: false,
+            }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(body["tier"], "host");
+    }
+
+    /// The P1 regression this guards (reagent + codex on PR #2715): a
+    /// forwarded request (`forwarded: true`) must 404 immediately on a
+    /// host-tier miss, never attempt a second cross-channel lookup/forward
+    /// — that's what caps a stale/cyclic shared-registry entry at exactly
+    /// one hop instead of looping (self-forward) or chaining indefinitely
+    /// (multi-instance cycle).
+    #[tokio::test]
+    async fn forwarded_request_404s_without_a_second_hop() {
+        let state = test_state();
+        let resp = handle_reactive_transcript(
+            State(state),
+            Query(TranscriptQuery {
+                agent: "no-such-agent-anywhere".to_string(),
+                max_lines: 100,
+                forwarded: true,
+            }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
 }
 
 #[derive(serde::Deserialize)]

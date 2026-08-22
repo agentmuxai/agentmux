@@ -34,6 +34,8 @@ node ~/.agentmux/shell/muxspect.mjs describe <block_id>
 node ~/.agentmux/shell/muxspect.mjs watch <block_id>
 node ~/.agentmux/shell/muxspect.mjs dock <block_id>
 node ~/.agentmux/shell/muxspect.mjs dock clear <block_id> <node_id>
+node ~/.agentmux/shell/muxspect.mjs conversations
+node ~/.agentmux/shell/muxspect.mjs conversation <agent>
 node ~/.agentmux/shell/muxspect.mjs help
 ```
 
@@ -77,6 +79,24 @@ underlying issue (a first-party in-renderer self-expiry fix is tracked
 separately, see that spec §1.2) and not general Activity Dock
 introspection (see "What it can and can't see" below, still accurate for
 everything except this one diagnostic snapshot).
+
+## Seeing every agent's conversation at a glance (`conversations` / `conversation`)
+
+`conversations` lists every agent this instance can see — host (this
+instance's own registry) and cross-channel (other AgentMux channels on
+this same host) entries include `turn_active` and a last-message preview
+(the tail non-blank transcript line); LAN and WAN entries are
+liveness-only for now (`remote_fetch_required: true` — reading their
+conversation content isn't supported yet). `conversation <agent>` reads
+the actual transcript tail for one named agent, resolving host first,
+then cross-channel — same underlying route `GetAgentTranscript` uses, so
+an agent's own MCP tool call and a human running this command see
+identical data.
+
+This is Phase A of `docs/specs/SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`
+— it does not reach LAN or WAN conversation content (Phase B/C, not yet
+built, and gated on an explicit repo-owner-confirmed addition to
+`CLAUDE.md`'s jekt security rules before they can be).
 
 ## What it can and can't see
 
