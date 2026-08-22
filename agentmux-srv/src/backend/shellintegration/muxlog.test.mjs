@@ -22,7 +22,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { filterByInstance, glob, matchesOwnChannel, pickCandidate } from "./muxlog.mjs";
+import { filterByInstance, glob, matchesOwnChannel, pickCandidate, printLastLines, renderLine } from "./muxlog.mjs";
 
 let root;
 
@@ -222,4 +222,69 @@ describe("muxlog matchesOwnChannel", () => {
     function normalizeCandFor(source, file) {
         return { file, source, version: "" };
     }
+});
+
+// Ext 6 (docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md):
+// `-d/--dispatch <id>` productizes the manual correlation that report's
+// whole investigation had to do by hand. Checked on the RAW line text
+// (before/regardless of JSON parsing) because a dispatch id can appear
+// either in the rendered message or as a bare structured-field value —
+// `--grep` only ever matches the message text, which would silently miss
+// a field-only occurrence.
+describe("muxlog renderLine --dispatch filter", () => {
+    const opt = { dispatch: "dispatch-abc123" };
+
+    it("matches when the id appears in the message text", () => {
+        const line = JSON.stringify({ timestamp: "2026-08-22T00:00:00Z", level: "INFO", fields: { message: "processing dispatch-abc123 now" }, target: "agentmux_srv::backend::subagent_watcher" });
+        expect(renderLine(line, opt)).not.toBeNull();
+    });
+
+    it("matches when the id appears ONLY as a structured field value, not in the message", () => {
+        const line = JSON.stringify({ timestamp: "2026-08-22T00:00:00Z", level: "INFO", fields: { message: "backfilling session subagents", dispatch_id: "dispatch-abc123" }, target: "agentmux_srv::backend::subagent_watcher" });
+        expect(renderLine(line, opt)).not.toBeNull();
+    });
+
+    it("excludes a line that doesn't mention the id anywhere", () => {
+        const line = JSON.stringify({ timestamp: "2026-08-22T00:00:00Z", level: "INFO", fields: { message: "unrelated line", dispatch_id: "dispatch-xyz789" }, target: "agentmux_srv::backend::subagent_watcher" });
+        expect(renderLine(line, opt)).toBeNull();
+    });
+
+    it("still composes with other filters (e.g. --level) — both must pass", () => {
+        const debugLine = JSON.stringify({ timestamp: "2026-08-22T00:00:00Z", level: "DEBUG", fields: { message: "dispatch-abc123 debug detail" }, target: "agentmux_srv::backend::subagent_watcher" });
+        expect(renderLine(debugLine, { dispatch: "dispatch-abc123", level: ["info"] })).toBeNull();
+        expect(renderLine(debugLine, { dispatch: "dispatch-abc123", level: ["debug"] })).not.toBeNull();
+    });
+
+    it("with no --dispatch set, every line passes through unaffected (existing behavior)", () => {
+        const line = JSON.stringify({ timestamp: "2026-08-22T00:00:00Z", level: "INFO", fields: { message: "anything at all" }, target: "agentmux_srv::backend::subagent_watcher" });
+        expect(renderLine(line, {})).not.toBeNull();
+    });
+});
+
+describe("muxlog printLastLines return value (Ext 6's verdict count)", () => {
+    let root;
+    let file;
+
+    beforeEach(() => {
+        root = fs.mkdtempSync(path.join(os.tmpdir(), "muxlog-printlines-test-"));
+        file = path.join(root, "test.log");
+    });
+
+    afterEach(() => {
+        fs.rmSync(root, { recursive: true, force: true });
+    });
+
+    it("returns the total match count, not just what was printed within -n", () => {
+        const lines = Array.from({ length: 5 }, (_, i) =>
+            JSON.stringify({ timestamp: "2026-08-22T00:00:00Z", level: "INFO", fields: { message: `line ${i} dispatch-abc123` }, target: "x" }),
+        );
+        fs.writeFileSync(file, lines.join("\n") + "\n");
+        const count = printLastLines(file, 2, { dispatch: "dispatch-abc123" }, true);
+        expect(count).toBe(5); // full match count, even though -n 2 only printed 2
+    });
+
+    it("returns 0 for a file with no matching lines", () => {
+        fs.writeFileSync(file, JSON.stringify({ timestamp: "2026-08-22T00:00:00Z", level: "INFO", fields: { message: "no match here" }, target: "x" }) + "\n");
+        expect(printLastLines(file, 200, { dispatch: "dispatch-nonexistent" }, true)).toBe(0);
+    });
 });
