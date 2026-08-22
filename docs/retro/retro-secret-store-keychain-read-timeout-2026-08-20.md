@@ -107,5 +107,12 @@ a design to revisit.
 
 ## 6. Follow-up
 
-None planned. Revisit the 15s constant if it proves wrong in practice
-(§4).
+The §5 leaked-thread-per-retry risk materialized in practice two days
+later — see
+[retro-keychain-timeout-retry-thread-accumulation-2026-08-22.md](retro-keychain-timeout-retry-thread-accumulation-2026-08-22.md):
+`cloud_subscriber.rs`'s independent retry/sweep timers each leaked their
+own thread on every retry against the same unanswered prompt, accumulating
+to 38 stuck threads on one real instance. That retro has the follow-up
+recommendation (de-duplicate in-flight reads / cooldown after a timeout).
+
+Otherwise: revisit the 15s constant if it proves wrong in practice (§4).
