@@ -406,6 +406,17 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     (await refreshAccountCache()).map((a) => a.id)
                 ),
                 memoryId: row.memory_id,
+                // Carry the parent conversation's history forward — without
+                // these two, forking only clones the agent *definition*
+                // (config/instructions/skills) and starts a brand new
+                // conversation, silently dropping the whole point of a
+                // "fork" (SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md §2).
+                // `forkSession: true` is what makes launchAgentDefinition
+                // append `--fork-session` (Claude only; every other
+                // provider ignores it and falls back to fresh-start, same
+                // as `continueSessionId` alone would do without it).
+                continueSessionId: row.session_id ?? "",
+                forkSession: true,
             });
         } finally {
             setLaunching(null);
