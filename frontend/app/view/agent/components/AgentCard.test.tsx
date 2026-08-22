@@ -12,8 +12,15 @@
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const providerLogoSpy = vi.fn();
-const dualProviderLogoSpy = vi.fn();
+// vi.mock(...) calls below are hoisted above these — and above the
+// AgentCard import that triggers module resolution — so the spies
+// referenced inside the mock factories must be created via vi.hoisted()
+// too, or the factories close over a still-temporal-dead-zone binding
+// (codex P1 on PR #2731).
+const { providerLogoSpy, dualProviderLogoSpy } = vi.hoisted(() => ({
+    providerLogoSpy: vi.fn(),
+    dualProviderLogoSpy: vi.fn(),
+}));
 
 // Real ProviderLogo/DualProviderLogo import raw SVG assets vitest can't
 // resolve without a transformer (same reasoning as MyAgentsList.test.tsx's
