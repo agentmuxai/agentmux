@@ -224,8 +224,92 @@ function follow(file, opt) {
     }, 400);
 }
 
+// ─── liveness ─────────────────────────────────────────────────────────────────
+// A log's mtime says "something was written recently," not "this instance is
+// running right now" — the two look identical for a process that just died.
+// agentmux-cef already writes a real, checkable liveness signal per instance:
+// `<port-file-dir>/ipc-port-<hash>` (agentmux-cef/src/lib.rs), containing
+// `port:token` for the host's IPC HTTP server. We don't replicate the exact
+// hash to compute the filename — glob for any `ipc-port*` file instead,
+// cheaper and forward-compatible if the hash scheme ever changes.
+//
+// Reagent P1 on PR #2752: `port_file_dir` is NOT always the `data` sibling.
+// agentmux-cef/src/lib.rs writes it to `p.cef_cache_dir` for `task dev`
+// instances (`is_dev_build_exe` branch) and to `AGENTMUX_DATA_DIR` (==
+// `DataPaths.data_dir`, the `data` sibling) for portable/installed builds.
+// `logs`/`data`/`cef-cache` are always siblings under the same version dir
+// (agentmux-common/src/data_paths.rs) regardless of build type, so check
+// both siblings rather than trying to infer dev-vs-portable from the path.
+//
+// Exported (pure logic split from the fs/net I/O) for muxlog.test.mjs.
+export function siblingCandidateDirs(logDir) {
+    if (path.basename(logDir) !== "logs") return [];
+    const parent = path.dirname(logDir);
+    return [path.join(parent, "data"), path.join(parent, "cef-cache")];
+}
+
+// Reagent P2 on PR #2742: a raw TCP connect only proves SOMETHING is
+// listening, not that it's AgentMux — if the OS reassigns a dead instance's
+// ephemeral port to an unrelated local service before this probe runs, a
+// bare connect would false-positive "live". The host's IPC server
+// (agentmux-cef/src/ipc.rs) exposes a genuine unauthenticated
+// `GET /health` on this exact port returning `{"status":"ok","version":...}`
+// — verify that shape specifically, not just a successful connection.
+async function probePort(port, timeoutMs = 300) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const resp = await fetch(`http://127.0.0.1:${port}/health`, { signal: controller.signal });
+        if (!resp.ok) return false;
+        const body = await resp.json().catch(() => null);
+        return body?.status === "ok";
+    } catch {
+        return false;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+// "live" | "dead" | "?" — "?" means genuinely unknown (no sibling data/cef-cache dir,
+// no port file, or unreadable/malformed contents), never a liveness verdict
+// of its own. Async — the only I/O-bound piece of muxlog; every caller
+// awaits a Promise.all of these so probes for different instances run
+// concurrently instead of serially piling up 300ms timeouts.
+export async function checkLiveness(logDir) {
+    const candidateDirs = siblingCandidateDirs(logDir);
+    if (candidateDirs.length === 0) return "?";
+    // Reagent P1 on PR #2742: a dev-mode data dir is keyed by BRANCH, not
+    // version, and a crashed (non-graceful-exit) process's port file is
+    // never cleaned up (agentmux-cef/src/lib.rs writes it once at startup;
+    // nothing removes it on a crash, only on the graceful-shutdown path).
+    // So a stale port file from a PRIOR crashed run and a live one from the
+    // CURRENT run can coexist in the same dir — taking only the first
+    // readdirSync result (unspecified ordering) could probe the dead one
+    // and report "dead" for a genuinely live instance. Probe every
+    // candidate concurrently instead; "live" if ANY of them answers.
+    // Reagent P2 on PR #2752: agentmux-cef/src/lib.rs writes the bare
+    // filename "ipc-port" (no trailing hyphen) when AGENTMUX_IPC_HASH is
+    // unset (the task dev:standalone no-launcher path) — startsWith
+    // "ipc-port-" alone misses that exact literal.
+    const ports = [];
+    for (const dir of candidateDirs) {
+        let entries;
+        try { entries = fs.readdirSync(dir); } catch { continue; }
+        for (const name of entries) {
+            if (name !== "ipc-port" && !name.startsWith("ipc-port-")) continue;
+            let contents;
+            try { contents = fs.readFileSync(path.join(dir, name), "utf8"); } catch { continue; }
+            const port = parseInt(contents.trim().split(":")[0], 10);
+            if (Number.isFinite(port) && port > 0 && port <= 65535) ports.push(port);
+        }
+    }
+    if (ports.length === 0) return "?";
+    const results = await Promise.all(ports.map((p) => probePort(p)));
+    return results.some(Boolean) ? "live" : "dead";
+}
+
 // ─── ls ───────────────────────────────────────────────────────────────────────
-function listInstances() {
+async function listInstances() {
     const seen = new Set();
     const rows = [];
     for (const e of discover("host").concat(discover("srv"), discover("launcher"))) {
@@ -234,12 +318,16 @@ function listInstances() {
     }
     rows.sort((a, b) => b.mtime - a.mtime);
     if (!rows.length) { console.log("No AgentMux logs found under ~/.agentmux."); return; }
-    console.log(`${"TARGET".padEnd(9)}${"VERSION".padEnd(9)}${"SOURCE".padEnd(22)}${"AGE".padEnd(8)}${"SIZE".padEnd(8)}PATH`);
-    for (const e of rows) {
+    const live = await Promise.all(rows.map((e) => checkLiveness(path.dirname(e.file))));
+    console.log(`${"TARGET".padEnd(9)}${"VERSION".padEnd(9)}${"SOURCE".padEnd(22)}${"LIVE".padEnd(6)}${"AGE".padEnd(8)}${"SIZE".padEnd(8)}PATH`);
+    rows.forEach((e, i) => {
         console.log(
             e.target.padEnd(9) + e.version.padEnd(9) + e.source.slice(0, 21).padEnd(22) +
-            age(e.mtime).padEnd(8) + human(e.size).padEnd(8) + e.file,
+            live[i].padEnd(6) + age(e.mtime).padEnd(8) + human(e.size).padEnd(8) + e.file,
         );
+    });
+    if (live.every((v) => v === "?")) {
+        console.log(`\nLIVE column is '?' for everything — this host has no findable ipc-port-* files (older builds predating this feature, or none of these are agentmux-cef host instances).`);
     }
 }
 function age(ms) {
@@ -714,12 +802,12 @@ Options (any position):
   --since <ts>  only lines at/after ISO <ts> (e.g. 2026-06-15T23:30)
   --raw         emit the original NDJSON   --verbose  include structured fields`;
 
-function main() {
+async function main() {
     const { opt, pos } = parse(process.argv.slice(2));
     const cmd = pos[0] || "host";
 
     if (cmd === "help" || cmd === "-h" || cmd === "--help") { console.log(HELP); return; }
-    if (cmd === "ls") { listInstances(); return; }
+    if (cmd === "ls") { await listInstances(); return; }
     if (cmd === "mem" || cmd === "doctor") { memDoctor(); return; }
 
     if (cmd === "errors") {
@@ -845,7 +933,12 @@ function main() {
 
 // Only run when executed directly (`node muxlog.mjs ...`) — importing this
 // module (muxlog.test.mjs imports `glob`) must not trigger a live tail loop /
-// `process.exit`. Same pattern as muxspect.mjs.
+// `process.exit`. Same pattern as muxspect.mjs. `main` is async now (the
+// `ls` recipe awaits liveness probes) — `.catch` surfaces a rejected
+// promise as a visible error instead of an unhandled-rejection warning.
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-    main();
+    main().catch((e) => {
+        console.error(`muxlog: ${e?.message ?? String(e)}`);
+        process.exit(1);
+    });
 }
