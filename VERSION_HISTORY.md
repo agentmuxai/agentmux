@@ -1,5 +1,24 @@
 # AgentMux Version History
 
+## 0.55.20 — 2026-08-22
+
+- feat(mcp): add CaptureWindow tool for cross-instance/OS window screenshots
+- feat(muxspect): cross-tier conversation visibility Phase A — host + cross-channel
+- test(jekt): add regression tests for tier-classification keyword matching and marker rendering
+- fix(srv): stop FsWatchPool's health sweep leaking a File+Semaphore handle pair per tick
+- docs(retro): per-build-identity keychain re-prompt + retry-driven thread leak, two more keychain saga findings
+- fix(agent): fork carries conversation history + flat lineage naming
+- fix(agent-pane): refresh Activity Dock subagent rows on abandon so restarts don't show stale 'running' entries
+- feat(tabs): quick-fork a tab into a new tab with full independent identity
+- feat(srv): retention/GC for native memory version history
+- feat(agent-pane): Tier 3 predictive countdown before auto-compact
+- feat(browser-pane): add global bookmarks + icon Go button
+- fix(agent-pane): New Agent heading + harness-only template card icons
+- fix(agent-pane): modelit typo in the New Agent hint text
+- feat(browser-pane): render real per-site favicons in the bookmarks menu
+- feat(armory): rename Memories/Native Memory to Global/Personal Memory, reposition below Accounts
+
+
 ## 0.55.19 — 2026-08-21
 
 - feat(agent-pane): live dispatch cards for Agent/Task/Workflow tool calls in the transcript
