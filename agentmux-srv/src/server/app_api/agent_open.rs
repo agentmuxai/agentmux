@@ -840,6 +840,18 @@ pub(super) fn write_agent_config_files(
     crate::backend::agent_config::cleanup_stale_managed_skill_files(base_path, &new_managed_skill_paths);
 
     for file in &config_files {
+        // CLAUDE.md never gets the generic write below — it goes through
+        // ownership-aware materialization instead, which never overwrites
+        // a pre-existing, non-AgentMux-authored file's content. See
+        // docs/specs/SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md.
+        if file.filename == "CLAUDE.md" {
+            if let Err(e) =
+                crate::backend::agent_config::write_claude_md_respecting_ownership(base_path, &file.content)
+            {
+                return Err(format!("failed to write CLAUDE.md: {e}"));
+            }
+            continue;
+        }
         // Same defense-in-depth join as the cleanup pass above.
         let Ok(file_path) = crate::backend::base::safe_join_within_base(base_path, &file.filename)
         else {
