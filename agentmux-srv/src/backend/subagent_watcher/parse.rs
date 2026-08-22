@@ -473,13 +473,27 @@ pub fn derive_claude_config_dir(agent_id: &str) -> Option<PathBuf> {
     Some(config_dir)
 }
 
-/// The authoritative Claude Code config directory for a block: the
-/// `CLAUDE_CONFIG_DIR` the CLI process was actually launched with, read from
-/// the block's own `cmd:env` meta (written by the launch flow before spawn,
-/// from the exact same resolution the CLI process itself used — see
-/// `agentmux-cef`'s `ensure_auth_dir`). Falls back to
+/// The authoritative Claude Code config directory for a block.
+///
+/// `bound_dir` — pass `identity::resolver::resolve_bound_oauth_config_dir`'s
+/// result here. It wins when present: for an agent bound to an explicit
+/// Armory identity, it's the ONLY correct answer — `cmd:env.CLAUDE_CONFIG_DIR`
+/// below is a write-once launch-time snapshot of the generic shared-provider
+/// dir, while the identity-bound agent's CLI actually runs (and writes
+/// subagent files) under its own identity dir, re-resolved fresh on every
+/// turn (`inject_identity_env_with_broker`,
+/// `SPEC_PROVIDER_ISOLATION_2026_06_20.md` §4.3) — `cmd:env` is never
+/// updated to match. Confirmed live: a real dispatch's transcript landed
+/// under the identity dir while the watcher, following `cmd:env` alone, was
+/// watching the generic dir and never saw it — see
+/// `SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22.md`.
+///
+/// Falls back to `cmd:env.CLAUDE_CONFIG_DIR` (written by the launch flow
+/// before spawn — see `agentmux-cef`'s `ensure_auth_dir`) when `bound_dir`
+/// is `None` (an ambient/unbound agent, where `cmd:env` IS correct and
+/// stays correct — nothing to re-resolve). Falls back further to
 /// `derive_claude_config_dir`'s legacy `~/.config/claude-<agent_id>` guess
-/// only when `cmd:env` isn't set yet.
+/// only when `cmd:env` isn't set yet either.
 ///
 /// This distinction matters: `derive_claude_config_dir`'s guess only holds
 /// for an agent with an explicit per-identity bundle override. Any agent
@@ -493,10 +507,14 @@ pub fn derive_claude_config_dir(agent_id: &str) -> Option<PathBuf> {
 pub fn resolve_claude_config_dir(
     meta: &crate::backend::obj::MetaMapType,
     agent_id: &str,
+    bound_dir: Option<PathBuf>,
 ) -> Option<PathBuf> {
-    meta.get("cmd:env")
-        .and_then(|v| v.get("CLAUDE_CONFIG_DIR"))
-        .and_then(|v| v.as_str())
-        .map(PathBuf::from)
+    bound_dir
+        .or_else(|| {
+            meta.get("cmd:env")
+                .and_then(|v| v.get("CLAUDE_CONFIG_DIR"))
+                .and_then(|v| v.as_str())
+                .map(PathBuf::from)
+        })
         .or_else(|| derive_claude_config_dir(agent_id))
 }
