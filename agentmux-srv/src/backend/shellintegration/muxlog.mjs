@@ -14,7 +14,6 @@
 // One tested implementation does discovery + JSON rendering + filtering uniformly.
 
 import fs from "node:fs";
-import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
