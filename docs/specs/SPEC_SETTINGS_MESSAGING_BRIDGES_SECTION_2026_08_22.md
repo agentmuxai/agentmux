@@ -5,9 +5,15 @@
 **Status:** Draft
 **Scope:** New `frontend/app/view/settings/sections/integrations-section.tsx` (+
 registration in `settings-view.tsx`/`settings-model.ts`), reusing the
-`MaskedKeyField` primitive introduced by `SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md`.
-No backend changes — all four bridges are already fully wired and read their
-config from `settings.json` via the generic `setconfig` merge path.
+`MaskedKeyField` primitive proposed in `SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md`.
+**No runtime backend logic changes** — all four bridges are already fully
+wired and read their config from `settings.json` via the generic `setconfig`
+merge path — but implementation IS expected to add the ~24 `messaging:*` keys
+to `schema/settings.json` and regenerate `frontend/types/gotypes.d.ts` (see
+§0 below): today those keys are declared nowhere, and this schema is
+`additionalProperties: false`, so anything this section's UI saves is
+technically invalid against the shipped schema and invisible to the
+generated frontend type until that's done.
 
 ## Why this needs its own spec
 
@@ -17,9 +23,11 @@ designed in full in that pass: *"the most 'product-shaped' gap in the whole
 audit — arguably bigger in scope than the Recording section (4 separate
 integrations vs. 1)... Left as a follow-up spec of its own given the scope."*
 This is that follow-up. Candidates #2 and #4 from the same audit (agent
-watchdog thresholds, drag-and-drop settings) and candidate #1 (Recording) have
-already shipped (#2748, #2744, #2751) — this closes out the audit's
-remaining item.
+watchdog thresholds, drag-and-drop settings) have already merged (#2748,
+#2744). Candidate #1 (Recording) is implemented in open PR #2751 — **not yet
+merged as of this writing**, still going through review — this spec's design
+depends on that PR's `MaskedKeyField` primitive landing first; see Open
+Question 4 below.
 
 ## Problem
 
@@ -82,6 +90,21 @@ WhatsApp spec §2.1) — so there is exactly one "mode" per bridge, unlike
 
 ## Design
 
+### 0. Schema additions (in scope, despite "no backend changes")
+
+Add all ~24 `messaging:*` keys (§ tables above) to `schema/settings.json`,
+following the exact per-field `type`/`description` shape every other family
+already uses there, and regenerate `frontend/types/gotypes.d.ts` to match
+(same mechanical step the Recording section's PR took for `voice:inputDeviceId`
+and the watchdog PR took for `term:agentmaxruntimehours`/`term:agentidletimeoutmins`).
+This is schema/type-declaration work, not runtime logic — no Rust behavior
+changes, `SettingsType` in `types.rs` already declares these fields with
+their real serde renames — but it's a real, necessary part of implementing
+this spec, not optional polish: `schema/settings.json` has
+`"additionalProperties": false`, so a key this section's UI saves via
+`setconfig` is technically invalid against the shipped schema (and invisible
+to the generated frontend type) until this step is done.
+
 ### 1. Section placement
 
 New rail entry **"Integrations"** (not "Messaging" — reserves that word for a
@@ -129,22 +152,46 @@ established convention — `notify:sounds:enabled` gating the rest of that
 section). No accordion/collapse animation needed for v1 — reuse the plain
 `Show` gate, not a new collapsible-panel primitive.
 
-### 3. Masked fields — reuse `MaskedKeyField` as-is
+### 3. Masked fields — reuse `MaskedKeyField`, but it needs a Clear action first
 
 Every secret field (`token`, `bot_token`, `app_token`, `access_token`,
 `app_secret`, `webhook_verify_token`) uses the `MaskedKeyField` primitive
-`settings-controls.tsx` already has (introduced in
-`SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md` §2, generalized on
-purpose for this exact reuse — see that spec's Open Question 1). No new
-component needed. Each field gets its own short egress note reusing that
-primitive's existing shape, e.g.:
+`settings-controls.tsx` has (from `SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md`
+§2, generalized on purpose for this exact reuse — see that spec's Open
+Question 1). **As designed there it only supports Replace (swap the stored
+value) or Cancel (abandon an in-progress edit) — there is no way to remove a
+stored value entirely.** For Recording's single `voice:groqApiKey` that gap
+is minor (an unwanted key can just be replaced with an unused one), but here
+it's a real usability problem: disabling a bridge is the obvious way a user
+"disconnects" it, and today that leaves the bot token/app secret sitting in
+`settings.json` in plaintext indefinitely — removing it actually requires
+falling back to the raw settings editor, defeating the point of surfacing
+credential management in this UI at all. **This spec adds a "Clear" action to
+`MaskedKeyField`** (third button alongside Replace, in the locked/at-rest
+state — calls `onSave` equivalent with `null` to delete the key via the same
+`set(key, null)` deletion mechanism the Advanced section's `dnd:concurrency`
+field already established) as a small, backward-compatible addition to that
+shared primitive, landing with this section rather than retrofitted later.
 
-- Discord token: *"Used only to connect to Discord's Gateway from this
-  machine; never sent anywhere else."*
-- Slack tokens: *"`xoxb-` calls Slack's Web API; `xapp-` opens a Socket Mode
-  connection — both stay on this machine."*
-- WhatsApp `access_token`/`app_secret`/`webhook_verify_token`: *"Used only for
-  this machine's calls to the Graph API and to validate inbound webhooks."*
+Each field gets its own short egress note reusing that primitive's existing
+shape. Word these as "sent directly to \<service\>'s own servers", not as
+"stays on this machine" — the whole point of a bridge is that the credential
+DOES leave this machine (to Discord's Gateway, Slack's Web API /
+`apps.connections.open`, WhatsApp's Graph API); what the note should
+guarantee is that it goes *only* there, never to any other AgentMux service,
+mirroring the accurate wording the Recording section's Groq key note already
+uses ("directly to api.groq.com — never to any other AgentMux service"):
+
+- Discord token: *"Sent directly from this machine to Discord's Gateway to
+  connect the bot — never to any other AgentMux service."*
+- Slack tokens: *"`xoxb-` is sent directly to Slack's Web API
+  (`chat.postMessage`); `xapp-` opens a Socket Mode connection via
+  `apps.connections.open` — both go only to Slack, never to any other
+  AgentMux service."*
+- WhatsApp `access_token`/`app_secret`/`webhook_verify_token`: *"Sent
+  directly from this machine to Meta's Graph API (or used locally to
+  validate inbound webhook signatures) — never to any other AgentMux
+  service."*
 
 Non-secret identifier fields (`channel`, `phone_number_id`, `guild`,
 `allowed_chats`, `default_chat`, `fallback_template*`, `tunnel_domain`) are
@@ -226,6 +273,11 @@ or manages anything.
    note similar to `term:disablewebgl`'s existing pattern — confirm against
    `bootstrap.rs`/`messaging_handlers.rs` before implementing, since this
    materially changes what the UI should tell the user after a save.
+4. **Sequencing against #2751** — this spec's `MaskedKeyField` reuse (§3,
+   including the new Clear action) is written against that PR's current
+   design. If #2751 changes materially before merging (or doesn't merge as
+   designed), re-check this spec's §3 against whatever actually lands before
+   starting implementation.
 
 ## References
 
@@ -233,7 +285,8 @@ or manages anything.
   the audit this follows up on.
 - `docs/specs/SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md` —
   `MaskedKeyField`'s origin spec; §2 and Open Question 1 anticipate this
-  exact reuse.
+  exact reuse. Implemented in PR #2751 (open, not yet merged as of this
+  writing) — see Open Question 4.
 - `docs/specs/SPEC_MESSAGING_INTEGRATION_WHATSAPP_2026_07_07.md` — WhatsApp
   bridge's own design, including the Cloud-API-only v1 scope decision this
   spec inherits.
