@@ -877,6 +877,120 @@ pub fn write_managed_skill_file_manifest(
     }
 }
 
+// ============================================================
+// CLAUDE.md ownership protection (I/O — see module doc comment)
+// ============================================================
+
+/// First line AgentMux writes on any `CLAUDE.md` it fully owns (freshly
+/// created, or regenerated on every launch since). Its ABSENCE on an
+/// EXISTING file is what marks that file as foreign — predates AgentMux
+/// touching this working directory, or a human replaced AgentMux's file
+/// with their own — and is never overwritten again. See
+/// `docs/specs/SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md`.
+pub const CLAUDE_MD_MANAGED_MARKER: &str = "<!-- agentmux:managed-claude-md -->";
+
+/// AgentMux-owned side file carrying the full Soul+AgentMD+Memory+Skills
+/// composition when the real `CLAUDE.md` is foreign — always safe to
+/// regenerate in place every launch, unlike `CLAUDE.md` itself in that case.
+pub const AGENTMUX_MEMORY_FILENAME: &str = ".claude/AGENTMUX_MEMORY.md";
+
+/// One-time marker recording whether the `@import` line (below) has
+/// already been offered for this working directory. Checked INSTEAD of
+/// re-scanning `CLAUDE.md` content on every launch — without it, a user
+/// who deliberately deletes the import line (opting out of AgentMux
+/// content entirely) would see it silently reappear on their next launch.
+const CLAUDE_MD_OWNERSHIP_MARKER_PATH: &str = ".claude/.agentmux-claude-md-ownership.json";
+
+/// Comment wrapping the `@import` line so its origin — and how to remove
+/// it — is unambiguous to anyone reading a foreign `CLAUDE.md` by hand.
+const CLAUDE_MD_IMPORT_MARKER_COMMENT: &str =
+    "<!-- agentmux:managed-import (safe to delete this line to opt out) -->";
+
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct ClaudeMdOwnershipMarker {
+    import_line_offered: bool,
+}
+
+/// Materialize `generated_content` (the composed Soul+AgentMD+Memory+Skills
+/// `CLAUDE.md` body `build_config_files` already produced) against whatever
+/// is already on disk at `base_path/CLAUDE.md`, WITHOUT ever overwriting a
+/// foreign file's content:
+///
+/// - No file yet, or the existing file starts with
+///   [`CLAUDE_MD_MANAGED_MARKER`]: AgentMux owns it — write `CLAUDE.md`
+///   directly (marker + `generated_content`), exactly as every call site
+///   did unconditionally before this function existed.
+/// - Existing file present WITHOUT the marker: foreign. `CLAUDE.md` itself
+///   is never touched again. `generated_content` instead goes to
+///   [`AGENTMUX_MEMORY_FILENAME`] (always safe to regenerate — it's 100%
+///   AgentMux's own content), pulled in via a single `@import` line
+///   appended to the real `CLAUDE.md` — offered at most once per working
+///   directory (see [`CLAUDE_MD_OWNERSHIP_MARKER_PATH`]'s doc comment).
+///
+/// Best-effort in the same spirit as [`write_managed_skill_file_manifest`]:
+/// an I/O failure on the side-file/marker writes is logged, not
+/// propagated — losing them only means the import line isn't offered (or
+/// the side file isn't refreshed) on this one launch, not a correctness
+/// issue serious enough to fail the whole config-write.
+///
+/// Shared by `agent.open` (`server/app_api/agent_open.rs`) and the
+/// `WriteAgentConfig` "click Launch" path (`server/editor_handlers.rs`) —
+/// per this module's own doc comment, the two config-materializing call
+/// sites that must not drift out of sync. See
+/// `docs/specs/SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md`.
+pub fn write_claude_md_respecting_ownership(
+    base_path: &std::path::Path,
+    generated_content: &str,
+) -> std::io::Result<()> {
+    let claude_md_path = base_path.join("CLAUDE.md");
+    let existing = std::fs::read_to_string(&claude_md_path).ok();
+
+    let agentmux_owns_it = match &existing {
+        None => true,
+        Some(content) => content.starts_with(CLAUDE_MD_MANAGED_MARKER),
+    };
+
+    if agentmux_owns_it {
+        let content = format!("{CLAUDE_MD_MANAGED_MARKER}\n\n{generated_content}");
+        return std::fs::write(&claude_md_path, content);
+    }
+
+    // Foreign file — CLAUDE.md's own content is never touched from here on.
+    let memory_path = base_path.join(AGENTMUX_MEMORY_FILENAME);
+    if let Some(parent) = memory_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&memory_path, generated_content)?;
+
+    let ownership_marker_path = base_path.join(CLAUDE_MD_OWNERSHIP_MARKER_PATH);
+    let already_offered = std::fs::read_to_string(&ownership_marker_path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<ClaudeMdOwnershipMarker>(&s).ok())
+        .map(|m| m.import_line_offered)
+        .unwrap_or(false);
+
+    if !already_offered {
+        let existing_content = existing.unwrap_or_default();
+        let import_needle = format!("@{AGENTMUX_MEMORY_FILENAME}");
+        // Idempotent even on this first offer: don't duplicate if the
+        // import somehow already appears (e.g. a user copied it in by
+        // hand before AgentMux ever ran here).
+        if !existing_content.contains(&import_needle) {
+            let import_block =
+                format!("\n\n{CLAUDE_MD_IMPORT_MARKER_COMMENT}\n{import_needle}\n");
+            std::fs::write(&claude_md_path, format!("{existing_content}{import_block}"))?;
+        }
+        if let Some(parent) = ownership_marker_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let marker_json = serde_json::to_string(&ClaudeMdOwnershipMarker { import_line_offered: true })
+            .unwrap_or_default();
+        std::fs::write(&ownership_marker_path, marker_json)?;
+    }
+
+    Ok(())
+}
+
 /// Best-effort: mint-or-reuse `agent_slug`'s jekt/LAN signing keys
 /// (`SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md` §2.2,
 /// `SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md` §2.1) and patch them into a
@@ -1466,5 +1580,100 @@ mod tests {
     fn inject_jekt_signing_keys_into_mcp_json_returns_none_on_malformed_json() {
         let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
         assert!(inject_jekt_signing_keys_into_mcp_json("not json", &store, "aria").is_none());
+    }
+
+    // ============================================================
+    // write_claude_md_respecting_ownership
+    // (SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md)
+    // ============================================================
+
+    #[test]
+    fn claude_md_fresh_working_dir_writes_directly_with_the_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        write_claude_md_respecting_ownership(dir.path(), "Soul + AgentMD + Memory + Skills").unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap();
+        assert!(content.starts_with(CLAUDE_MD_MANAGED_MARKER));
+        assert!(content.contains("Soul + AgentMD + Memory + Skills"));
+        // No foreign-file side effects on the common (fresh dir) path.
+        assert!(!dir.path().join(AGENTMUX_MEMORY_FILENAME).exists());
+    }
+
+    #[test]
+    fn claude_md_agentmux_owned_file_is_freely_regenerated() {
+        let dir = tempfile::tempdir().unwrap();
+        write_claude_md_respecting_ownership(dir.path(), "first version").unwrap();
+        write_claude_md_respecting_ownership(dir.path(), "second version").unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap();
+        assert!(content.contains("second version"));
+        assert!(!content.contains("first version"), "regeneration must replace, not accumulate");
+    }
+
+    #[test]
+    fn claude_md_foreign_file_content_is_never_touched() {
+        let dir = tempfile::tempdir().unwrap();
+        let human_content = "# My real project\n\nHand-written rules, no AgentMux marker.";
+        std::fs::write(dir.path().join("CLAUDE.md"), human_content).unwrap();
+
+        write_claude_md_respecting_ownership(dir.path(), "AgentMux's generated content").unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap();
+        assert!(content.starts_with(human_content), "every byte of the original file must survive, at the start");
+        assert!(!content.contains("AgentMux's generated content"), "generated content must never land in the real file");
+    }
+
+    #[test]
+    fn claude_md_foreign_file_gets_a_side_file_and_one_import_line() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), "# Real project\n").unwrap();
+
+        write_claude_md_respecting_ownership(dir.path(), "the generated body").unwrap();
+
+        let side_file = std::fs::read_to_string(dir.path().join(AGENTMUX_MEMORY_FILENAME)).unwrap();
+        assert_eq!(side_file, "the generated body");
+
+        let claude_md = std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap();
+        assert!(claude_md.contains(&format!("@{AGENTMUX_MEMORY_FILENAME}")));
+        assert!(claude_md.contains(CLAUDE_MD_IMPORT_MARKER_COMMENT));
+    }
+
+    #[test]
+    fn claude_md_import_line_is_never_duplicated_across_launches() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), "# Real project\n").unwrap();
+
+        write_claude_md_respecting_ownership(dir.path(), "v1").unwrap();
+        write_claude_md_respecting_ownership(dir.path(), "v2").unwrap();
+        write_claude_md_respecting_ownership(dir.path(), "v3").unwrap();
+
+        let claude_md = std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap();
+        let import_needle = format!("@{AGENTMUX_MEMORY_FILENAME}");
+        assert_eq!(claude_md.matches(&import_needle).count(), 1, "the import line must appear exactly once, no matter how many launches");
+        // The side file, unlike CLAUDE.md, keeps regenerating freely.
+        let side_file = std::fs::read_to_string(dir.path().join(AGENTMUX_MEMORY_FILENAME)).unwrap();
+        assert_eq!(side_file, "v3");
+    }
+
+    #[test]
+    fn claude_md_user_deleted_import_line_is_never_reinserted() {
+        // The whole point of the ownership marker file: once offered, a
+        // user's deliberate removal of the import line must stick.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), "# Real project\n").unwrap();
+        write_claude_md_respecting_ownership(dir.path(), "v1").unwrap();
+
+        // User opts out: deletes the import line by hand.
+        std::fs::write(dir.path().join("CLAUDE.md"), "# Real project\n").unwrap();
+
+        write_claude_md_respecting_ownership(dir.path(), "v2").unwrap();
+
+        let claude_md = std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap();
+        assert_eq!(claude_md, "# Real project\n", "import line must not silently reappear after the user removed it");
+        // The side file still refreshes even though nothing links to it
+        // from CLAUDE.md anymore — harmless, and keeps it ready if the
+        // user re-adds the import line themselves later.
+        let side_file = std::fs::read_to_string(dir.path().join(AGENTMUX_MEMORY_FILENAME)).unwrap();
+        assert_eq!(side_file, "v2");
     }
 }
