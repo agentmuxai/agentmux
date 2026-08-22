@@ -95,10 +95,22 @@ identity mirror:
   `normalizeAgentId()`, `muxbus/server/src/index.ts`). **Two different
   accounts' agents named `korp` collide on the exact same routing key today**
   — explicitly flagged as unsolved, out-of-scope Phase-3 work in
-  `muxbus/PLAN_PER_AGENT_CREDENTIAL_BINDING_2026_07_06.md`. This spec's WAN
-  qualifier isn't cosmetic disambiguation on top of an already-unique id — it
-  is compensating for a **real, currently-open collision gap** in muxbus's
-  own storage.
+  `muxbus/PLAN_PER_AGENT_CREDENTIAL_BINDING_2026_07_06.md`.
+  **Correction (Codex's review of PR #2721 caught this precisely): this
+  spec's WAN qualifier does NOT fix that collision — it only fixes the
+  *display* of it.** `GET /reactive/pending/:agent_id` and every other
+  muxbus routing/polling path still key on the unchanged, unnamespaced
+  `agent_id` string. Two accounts' same-named agents can still have messages
+  routed to, or read from, the wrong mailbox — actual traffic
+  misdelivery/exposure, not just a confusing UI label — regardless of what
+  qualifier this spec's display layer renders. **This spec explicitly does
+  not resolve that routing-level collision** (§8 non-goals) — it only
+  ensures a human *looking at two same-named agents* can tell them apart.
+  Fixing the underlying routing key is real, separate, unscoped work
+  (muxbus-side namespacing, likely `<account_user_id>:<agent_id>` as the
+  actual storage/routing key, not just the display qualifier) that this
+  spec deliberately leaves as an **open, unresolved blocker** rather than
+  implying is already handled.
 - **A real ownership pairing already exists and is queryable:**
   `muxbus/server/src/agent-ownership.ts` — table `muxbus-agent-ownership-{env}`,
   PK `account_user_id`, SK `agent_id`, checked via `isAgentOwnedByAccount()`.
@@ -338,6 +350,14 @@ This spec is strictly the **display** layer. It changes nothing about:
   shared identity anchor a future signing scheme *could* reuse; this spec
   does not design or deliver that scheme itself — that's issue #2586's own
   scope, not this one's.
+- **Fixing muxbus's underlying WAN routing-key collision** (flagged by
+  Codex's review of PR #2721, addressed in §2). Two accounts' same-named
+  agents genuinely collide at the routing level in muxbus today
+  (`agent_id` is flat and unnamespaced in every polling/routing path); this
+  spec's `HostLabel` qualifier fixes how that collision is *displayed*, not
+  the collision itself. Left as an explicit, open, unresolved blocker —
+  namespacing the actual muxbus storage/routing key is separate,
+  `agentmux-cloud`-side work this spec does not scope or deliver.
 - **Turning on `ENFORCE_AGENT_BINDING=true`** (`agentmux-cloud`,
   currently log-only in every environment per
   `PLAN_PER_AGENT_CREDENTIAL_BINDING_2026_07_06.md`) — this spec's WAN

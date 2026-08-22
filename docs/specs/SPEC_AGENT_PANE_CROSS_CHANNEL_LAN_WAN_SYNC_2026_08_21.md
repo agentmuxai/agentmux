@@ -9,8 +9,14 @@ discovery/forwarding (`backend/reactive/registry.rs`), jekt trust model
 **Related:** `SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md`,
 `SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md`,
 `SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md`, `SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md`,
-`SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14.md`, `SPEC_CROSS_WINDOW_TAB_REMOUNT_2026_07_11.md`
-(the single-owner-block invariant this spec must not silently break),
+`SPEC_JEKT_REAGENT_TRUST_RELAXATION_2026_08_14.md`, `SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md`
+(§ the `workspace.*` command set — `MoveTabToWorkspace`, `TearOffBlock`,
+`PromoteBlockToTab`, `MoveBlockToTab`, `RestoreTornOffTab` — the single-owner-block
+invariant below is inferred from this being an exhaustive move/promote/restore
+vocabulary with no duplicate/mirror command among it, not from a dedicated
+architecture doc — **correction below, see §2**: an earlier draft of this spec
+cited a `SPEC_CROSS_WINDOW_TAB_REMOUNT_2026_07_11.md` that does not exist
+anywhere in this repo; flagged by reagent's review of PR #2721, fixed here),
 `SPEC_DATA_CHANNELS_2026_05_24.md` (defines "channel" — see naming note below),
 `SPEC_AGENT_NAMING_AND_ADDRESSING_HOST_LAN_WAN_2026_08_22.md` (the `HostLabel`
 primitive this spec's discovery/presence UI should resolve peers to, §4.3/§5
@@ -35,8 +41,12 @@ below — written after this spec, to be consumed by it rather than duplicated)
 ## 1. Problem / TL;DR
 
 Today, an agent pane has **exactly one owner** — one window/tab/block, full stop.
-Moving it between windows *reparents* it (`MoveTab`, `SPEC_CROSS_WINDOW_TAB_REMOUNT_2026_07_11.md`
-§2.2); it never has two live viewers. The ask: open the same agent ("AgentX") from
+Moving it between windows *reparents* it (`MoveTabToWorkspace`/`PromoteBlockToTab`/
+`MoveBlockToTab`, per the `workspace.*` command set in
+`SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md` §"App-API surface" — every
+cross-window/cross-tab operation in that vocabulary is move, promote, or
+restore, never duplicate); it never has two live viewers. The ask: open the
+same agent ("AgentX") from
 a second AgentMux **channel** instance on the same host and have it **mirror
 live** — type in one, see it in both, and vice versa — then extend that to LAN and
 eventually WAN peers. This is a genuinely new capability, not a variant of
@@ -67,13 +77,24 @@ Block/pane content is already published on a per-block scope string
 a torn-off tab in its own OS window render the same live block: it's really just
 another subscriber to one instance's own event bus. **What doesn't exist:** any
 second srv instance subscribing to another instance's `block:<id>` stream, or a
-block having more than one owning window/tab at a time. `SPEC_CROSS_WINDOW_TAB_REMOUNT`
-confirms this is architecturally load-bearing, not incidental: blocks/layout are
-children of the Tab object and *travel with it* on move — there's no "keep both
-ends live" concept anywhere in that model.
+block having more than one owning window/tab at a time. **Correction (flagged by
+reagent's review of PR #2721): an earlier draft cited a
+`SPEC_CROSS_WINDOW_TAB_REMOUNT_2026_07_11.md` as confirming this — that file
+does not exist anywhere in this repo.** The inference stands on weaker but real
+grounds instead: `SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md`'s `workspace.*`
+surface (`MoveTabToWorkspace`, `TearOffBlock`, `PromoteBlockToTab`,
+`MoveBlockToTab`, `RestoreTornOffTab`) is move/promote/restore vocabulary
+throughout, with no duplicate-or-mirror command anywhere in it — consistent
+with, but not verified proof of, a single-owner invariant. Treat "no mirror
+concept exists today" as well-supported and "this is architecturally
+load-bearing for crash recovery specifically" as this spec's own reasonable
+inference, not a cited fact, until someone confirms it against the actual
+crash-recovery code.
 
 **`FleetBroadcast` is not a stream — don't build on the name.**
-(`agentmux-mcp/src/main.rs:225-257`, handler `main.rs:1373`, `backend/app_api/fleet.rs`)
+(`agentmux-mcp/src/main.rs:225-257`, handler `main.rs:1373`,
+`agentmux-srv/src/server/app_api/fleet.rs` — corrected path, flagged by
+reagent's review; the file is not at `backend/app_api/fleet.rs`)
 Per its own doc comment: it loops the *same signed single-target `SendMessage`
 delivery path*, once per target, client-side. It's "send the same discrete
 message N times," not "replicate live state to N viewers." A real terminology
@@ -132,7 +153,7 @@ remote keystrokes act with implicit trust.
 | G1 | Output (the agent's own conversation stream) mirrors to every connected viewer in real time, same-host case first |
 | G2 | Input (what a human types) from any connected viewer reaches the one underlying agent process |
 | G3 | Never weaken the jekt trust model to make this easier — extend it, don't bypass it |
-| G4 | Never break the single-owner-block invariant that crash recovery and transcript persistence depend on (`SPEC_CROSS_WINDOW_TAB_REMOUNT`) |
+| G4 | Never break the single-owner-block invariant that crash recovery and transcript persistence depend on (see §2's correction — inferred from `SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md`'s move/promote/restore-only `workspace.*` vocabulary, not a dedicated architecture doc) |
 | G5 | LAN and WAN are explicit, later, opt-in phases — never silently enabled by turning on same-host mirroring |
 | NG1 | (non-goal, v1) True concurrent multi-cursor editing of the same in-flight composer text — see §6.2 |
 | NG2 | (non-goal) Any of this replacing jekt for actual agent-to-agent coordination — mirroring is human-viewer-facing, not agent-to-agent |
@@ -339,7 +360,7 @@ specifically asks for true simultaneous co-typing.
 
 Internal (this repo, cited above): `SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md`,
 `SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md`, `SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md`,
-`SPEC_CROSS_WINDOW_TAB_REMOUNT_2026_07_11.md`, `SPEC_DATA_CHANNELS_2026_05_24.md`,
+`SPEC_AGENT_SYSTEM_MANAGEMENT_API_2026_07_04.md`, `SPEC_DATA_CHANNELS_2026_05_24.md`,
 `docs/retro/RETRO_JEKT_CROSS_CHANNEL_TRUST_SELF_DECLARED_2026_08_21.md`.
 
 External (research for this spec, 2026-08-21):
