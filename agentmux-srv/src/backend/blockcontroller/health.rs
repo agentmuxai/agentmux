@@ -210,6 +210,18 @@ impl HealthMonitor {
         let now = Instant::now();
         inner.last_output_ts = now;
         inner.last_meaningful_ts = now;
+        // codex P2 on PR #2754: reset unconditionally (both directions), same
+        // reasoning as last_output_ts/last_meaningful_ts above — a turn
+        // boundary must never carry a stale `compacting=true` forward. Without
+        // this, a process that crashes/is cancelled mid-compaction (no
+        // compact_boundary frame ever arrives to clear it via
+        // is_compact_boundary_frame's own call site) leaves `compacting`
+        // stuck true, silently suppressing the NEXT turn's normal 30s/120s
+        // watchdog until the unrelated 600s ceiling — or, if that ceiling has
+        // already elapsed, making the next turn immediately Dead before it's
+        // even produced any output.
+        inner.compacting = false;
+        inner.compacting_started_ts = None;
         if active {
             inner.errors.reset();
             inner.exit_code = None;
@@ -247,6 +259,12 @@ impl HealthMonitor {
         inner.last_meaningful_ts = now;
         inner.errors.reset();
         inner.exit_code = None;
+        // codex P2 on PR #2754: same reset as set_active_turn — a fresh turn
+        // must never inherit a stale `compacting=true` left over from a prior
+        // turn that crashed/was cancelled mid-compaction (no compact_boundary
+        // frame ever arrived to clear it the normal way).
+        inner.compacting = false;
+        inner.compacting_started_ts = None;
         drop(inner);
         tracing::info!(
             block_id = %self.block_id,
@@ -263,6 +281,17 @@ impl HealthMonitor {
         let mut inner = self.inner.lock().unwrap();
         inner.active_turn = false;
         inner.exit_code = Some(exit_code);
+        // codex P2 on PR #2754: a process that exits (crashes, is killed,
+        // exits normally) mid-compaction never gets a compact_boundary frame
+        // to clear `compacting` the normal way — reset it here too, so a
+        // later respawn on this same monitor (persistent/subprocess
+        // controllers reuse one HealthMonitor across turns) doesn't inherit
+        // a stale compacting state. `evaluate_and_transition` below still
+        // classifies purely off `exit_code` regardless (its very first
+        // check), so this has no effect on THIS transition — it's a
+        // safety net for whatever reuses this monitor next.
+        inner.compacting = false;
+        inner.compacting_started_ts = None;
         drop(inner);
         tracing::info!(block_id = %self.block_id, exit_code, "[health] turn_active flip (process exited)");
         self.evaluate_and_transition();
@@ -1168,5 +1197,138 @@ mod tests {
         assert_eq!(history.len(), 1, "must publish an AgentFailure even when Dead was reached via the compacting ceiling");
         let data = history[0].data.clone().expect("failure payload must be present");
         assert_eq!(data.get("code").and_then(|v| v.as_str()), Some("unresponsive"));
+    }
+
+    /// Regression for reagent P1 (PR #2754 review): the REAL production call
+    /// ordering at every controller's stdout-reader loop is
+    /// `record_output(meaningful)` THEN (if `compact_boundary`)
+    /// `set_compacting(false)` — not the reverse. Calling
+    /// `set_compacting(false)` first would re-evaluate against a
+    /// still-stale `last_meaningful_ts` (routinely >120s for any
+    /// compaction long enough to have needed this fix at all), transiently
+    /// computing `Dead` and publishing "Agent unresponsive" for one tick,
+    /// immediately self-cleared a moment later by `record_output`'s own
+    /// re-evaluation — a flicker at exactly the moment this fix exists to
+    /// prevent, and the earlier version of this PR had exactly that bug.
+    /// Exercises the real ordering end-to-end (not `set_compacting`/
+    /// `record_output` in isolation, which the original test suite did and
+    /// which is why this regression wasn't caught the first time) and
+    /// asserts NO `AgentFailure` — not even a transient one — is ever
+    /// published.
+    #[test]
+    fn real_call_ordering_never_flickers_unresponsive_when_compaction_ends() {
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let monitor = HealthMonitor::new("test-block-compact-ordering".to_string(), Some(broker.clone()), None, None);
+        monitor.set_active_turn(true);
+        monitor.set_compacting(true);
+        // A compaction that ran well past DEAD_SECS before compact_boundary
+        // arrived — the real-world shape (a real captured example took
+        // 231.6s vs. the 120s threshold).
+        {
+            let mut inner = monitor.inner.lock().unwrap();
+            inner.last_meaningful_ts = Instant::now() - Duration::from_secs(HealthMonitor::DEAD_SECS + 50);
+        }
+
+        let frame = serde_json::json!({
+            "type": "system",
+            "subtype": "compact_boundary",
+            "compactMetadata": { "trigger": "auto" },
+        });
+        let (meaningful, _error) = classify_output_line(&frame);
+        // The exact sequence every controller's stdout-reader loop now uses.
+        monitor.record_output(meaningful);
+        if is_compact_boundary_frame(&frame) {
+            monitor.set_compacting(false);
+        }
+
+        assert_eq!(monitor.inner.lock().unwrap().current_health, AgentHealth::Healthy);
+        let history = broker.read_event_history(
+            crate::backend::wps::EVENT_AGENT_FAILURE,
+            "block:test-block-compact-ordering",
+            10,
+        );
+        assert!(
+            history.is_empty(),
+            "no AgentFailure — not even a transient publish+clear pair — may fire when compaction ends: {history:?}"
+        );
+    }
+
+    // ---- Stale `compacting` cleared at turn/process boundaries (codex P2, PR #2754) ----
+    //
+    // If a process crashes, is cancelled, or otherwise exits mid-compaction,
+    // no `compact_boundary` frame ever arrives to clear `compacting` the
+    // normal way (`is_compact_boundary_frame` + `set_compacting(false)`).
+    // persistent/subprocess controllers reuse ONE `HealthMonitor` across
+    // turns, so without an explicit reset at every turn/process boundary, a
+    // later, entirely unrelated turn on the same monitor would silently
+    // inherit `compacting=true` — suppressing its normal 30s/120s watchdog
+    // until the unrelated 600s ceiling, or (if that ceiling had already
+    // elapsed) making it immediately `Dead` before it produced any output.
+
+    #[test]
+    fn set_exited_clears_a_stale_compacting_flag() {
+        let monitor = HealthMonitor::new("test-block-exit-clears-compacting".to_string(), None, None, None);
+        monitor.set_active_turn(true);
+        monitor.set_compacting(true);
+        assert!(monitor.is_compacting());
+
+        monitor.set_exited(1);
+        assert!(!monitor.is_compacting(), "a process exit mid-compaction must clear the stale compacting flag");
+    }
+
+    #[test]
+    fn set_active_turn_clears_a_stale_compacting_flag_from_a_prior_turn() {
+        let monitor = HealthMonitor::new("test-block-turn-clears-compacting".to_string(), None, None, None);
+        monitor.set_active_turn(true);
+        monitor.set_compacting(true);
+        assert!(monitor.is_compacting());
+
+        // A fresh turn starting on the same reused monitor, with no
+        // compact_boundary frame having ever arrived to clear the prior
+        // turn's compacting flag the normal way.
+        monitor.set_active_turn(true);
+        assert!(
+            !monitor.is_compacting(),
+            "a new turn must never inherit a stale compacting flag from a prior, never-cleanly-ended turn"
+        );
+    }
+
+    #[test]
+    fn mark_turn_active_clears_a_stale_compacting_flag_from_a_prior_turn() {
+        let monitor = HealthMonitor::new("test-block-mark-clears-compacting".to_string(), None, None, None);
+        monitor.set_active_turn(true);
+        monitor.set_compacting(true);
+        assert!(monitor.is_compacting());
+
+        monitor.mark_turn_active_returning_was_active();
+        assert!(!monitor.is_compacting());
+    }
+
+    /// End-to-end version of the scenario codex's finding warned about: a
+    /// turn dies mid-compaction (process exits, no compact_boundary), then a
+    /// genuinely hung NEW turn starts on the same reused monitor — it must
+    /// still be caught by the NORMAL 120s threshold, not silently protected
+    /// by the stale 600s compacting ceiling for up to 10 minutes.
+    #[test]
+    fn a_new_turn_after_a_crashed_compaction_uses_the_normal_dead_threshold_not_the_stale_ceiling() {
+        let monitor = HealthMonitor::new("test-block-post-crash-turn".to_string(), None, None, None);
+        monitor.set_active_turn(true);
+        monitor.set_compacting(true);
+        monitor.set_exited(1); // crash mid-compaction, no compact_boundary ever arrived
+
+        monitor.set_active_turn(true); // a fresh, unrelated turn starts
+        {
+            let mut inner = monitor.inner.lock().unwrap();
+            // Well past the NORMAL 120s threshold, but nowhere near the
+            // compacting-only 600s ceiling — if the stale flag had survived,
+            // this would incorrectly still read Healthy.
+            inner.last_meaningful_ts = Instant::now() - Duration::from_secs(HealthMonitor::DEAD_SECS + 1);
+        }
+        monitor.check();
+        assert_eq!(
+            monitor.inner.lock().unwrap().current_health,
+            AgentHealth::Dead,
+            "a genuinely silent new turn must be caught by the normal 120s threshold, not shielded by a stale compacting ceiling"
+        );
     }
 }

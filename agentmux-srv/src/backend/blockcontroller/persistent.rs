@@ -2579,10 +2579,24 @@ impl PersistentSubprocessController {
                         }
                     }
                     let (meaningful, _error) = classify_output_line(&parsed);
+                    // reagent P1: record_output must run BEFORE set_compacting(false)
+                    // here, not after. set_compacting(false) leaves last_meaningful_ts
+                    // untouched (by design — see its own doc comment) and immediately
+                    // re-evaluates health; evaluating against a last_meaningful_ts still
+                    // stale from before compaction started (routinely >120s for any
+                    // compaction that actually needed this fix) computes Dead and
+                    // publishes "Agent unresponsive" for one tick, self-clearing the
+                    // instant record_output's own re-evaluation runs — a transient
+                    // flicker at exactly the moment this fix exists to prevent.
+                    // Calling record_output first refreshes last_meaningful_ts to now
+                    // (compact_boundary is itself classified "meaningful" by
+                    // classify_output_line's default arm) while still compacting, so
+                    // set_compacting(false)'s own re-evaluation sees fresh output and
+                    // never dips through Dead at all.
+                    health_read.record_output(meaningful);
                     if is_compact_boundary_frame(&parsed) {
                         health_read.set_compacting(false);
                     }
-                    health_read.record_output(meaningful);
                     let is_result_frame =
                         parsed.get("type").and_then(|v| v.as_str()) == Some("result");
                     // Claude's turn-ending marker. Persistent mode never exits

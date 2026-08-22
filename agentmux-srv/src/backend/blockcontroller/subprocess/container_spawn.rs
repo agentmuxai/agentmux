@@ -468,10 +468,14 @@ impl SubprocessController {
 
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
             let (meaningful, error) = health::classify_output_line(&parsed);
+            // reagent P1 (same finding as persistent.rs, mirrored here):
+            // record_output must run before set_compacting(false) — see
+            // persistent.rs's own comment on this exact ordering for the
+            // full explanation.
+            health.record_output(meaningful);
             if health::is_compact_boundary_frame(&parsed) {
                 health.set_compacting(false);
             }
-            health.record_output(meaningful);
             if let Some((class, msg)) = error {
                 health.record_error(class, msg);
             }
