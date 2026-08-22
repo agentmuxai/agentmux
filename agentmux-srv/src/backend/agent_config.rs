@@ -1024,6 +1024,23 @@ pub fn write_claude_md_respecting_ownership(
     let agentmux_owns_it =
         matches!(&existing, Some(Ok(content)) if content.starts_with(CLAUDE_MD_MANAGED_MARKER));
 
+    // Known, accepted TOCTOU window (codex P2, third review round on
+    // PR #2747): if a foreign CLAUDE.md is created/swapped in between the
+    // read above and this write — e.g. this exact working directory
+    // becoming a real project mid-launch — that unconditional write would
+    // still clobber it once. Not closed here: doing so would need real
+    // file locking (flock/LockFile) across the read-decide-write sequence,
+    // which every other config file this module writes (.mcp.json, skill
+    // files, hooks.json) has the identical unaddressed race against
+    // (agent_open.rs's own "no collision resolution... overwrites
+    // whatever's there" comment, about a directory-level version of the
+    // same class of race). Singling out CLAUDE.md's OWNED-file fast path
+    // for stronger protection than every sibling write in this same
+    // function would be inconsistent scope for what this PR set out to
+    // fix (a stable, at-rest foreign file being clobbered on every
+    // ordinary launch) — narrower and far less likely than that. The
+    // foreign-file branch below (where this PR's actual guarantee lives)
+    // does not have this gap: it never writes CLAUDE.md's own content.
     if agentmux_owns_it || existing.is_none() {
         let content = format!("{CLAUDE_MD_MANAGED_MARKER}\n\n{generated_content}");
         return std::fs::write(&claude_md_path, content);
@@ -1114,6 +1131,18 @@ pub fn write_claude_md_respecting_ownership(
                     .and_then(|mut f| std::io::Write::write_all(&mut f, import_block.as_bytes()));
                 if let Err(e) = append_result {
                     tracing::warn!(path = %claude_md_path.display(), error = %e, "write_claude_md_respecting_ownership: failed to append the @import line this launch");
+                    // Roll back the marker we just created — winning the
+                    // race doesn't mean the offer actually completed. Without
+                    // this, the marker alone would permanently record
+                    // "offered" even though the import line was never
+                    // added, and every later launch's create_new would hit
+                    // AlreadyExists and skip forever, with no retry path
+                    // (reagent P1 + codex, third review round on PR #2747).
+                    // Best-effort: if the removal itself fails, a future
+                    // launch just stays stuck the way it would have been
+                    // without this fix — not worse, and not worth
+                    // escalating a cleanup failure into a launch failure.
+                    let _ = std::fs::remove_file(&ownership_marker_path);
                 }
             }
         }
@@ -1852,6 +1881,41 @@ mod tests {
             1,
             "8 concurrent launches against the same foreign CLAUDE.md must still produce exactly one import line, not one per racer"
         );
+    }
+
+    #[test]
+    fn claude_md_marker_is_rolled_back_when_the_append_fails() {
+        // reagent P1 + codex, third review round on PR #2747: winning the
+        // create_new race must not permanently record "offered" if the
+        // append itself then fails -- otherwise every later launch's
+        // create_new hits AlreadyExists and the import is never offered
+        // again, with no retry path.
+        let dir = tempfile::tempdir().unwrap();
+        let claude_md_path = dir.path().join("CLAUDE.md");
+        std::fs::write(&claude_md_path, "# Real project\n").unwrap();
+
+        // Read-only so the append's .open(...) fails, even though the
+        // read earlier in the function (which only needs read access)
+        // succeeds fine.
+        let mut perms = std::fs::metadata(&claude_md_path).unwrap().permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(&claude_md_path, perms).unwrap();
+
+        write_claude_md_respecting_ownership(dir.path(), "v1").unwrap();
+
+        let marker_path = dir.path().join(CLAUDE_MD_OWNERSHIP_MARKER_PATH);
+        assert!(!marker_path.exists(), "a failed append must roll back the ownership marker so a future launch can retry");
+
+        // Restore write access and confirm a later launch actually succeeds.
+        let mut perms = std::fs::metadata(&claude_md_path).unwrap().permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        perms.set_readonly(false);
+        std::fs::set_permissions(&claude_md_path, perms).unwrap();
+
+        write_claude_md_respecting_ownership(dir.path(), "v2").unwrap();
+        let claude_md = std::fs::read_to_string(&claude_md_path).unwrap();
+        let import_needle = format!("@{AGENTMUX_MEMORY_FILENAME}");
+        assert_eq!(claude_md.matches(&import_needle).count(), 1, "retry after the file becomes writable again must succeed");
     }
 
     #[test]
