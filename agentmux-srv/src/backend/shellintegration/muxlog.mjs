@@ -360,14 +360,122 @@ function parse(argv) {
     return { opt, pos };
 }
 
+// Case-insensitive across file path, source label, and version — the
+// original inline filter only lowercased `.file`, so an `-i` matching only
+// via `.source`/`.version` (e.g. `-i Dev:Main`) silently missed real
+// candidates. Exported for muxlog.test.mjs.
+export function filterByInstance(cands, needle) {
+    const n = needle.toLowerCase();
+    return cands.filter(
+        (e) => e.file.toLowerCase().includes(n) || e.source.toLowerCase().includes(n) || e.version.toLowerCase().includes(n),
+    );
+}
+
+// $AGENTMUX_CHANNEL's dev-mode format is `dev-<branch>[-<clone_id>]`
+// (hyphen-joined — agentmux-common's resolve_channel_and_dir) but never
+// appears as a literal substring of a dev candidate's `.source`
+// (`"dev:" + branch`, colon) or `.file` path (`dev/<branch>/...`,
+// slash-separated) — same words, different separators, so
+// filterByInstance()'s plain substring check never matches (reagent P1 on
+// PR #2741: the own-channel default in pickCandidate silently never fired
+// for `task dev`).
+//
+// A first attempt fixed that by stripping ALL separators and doing a plain
+// substring check on the flattened result — reagent P1 round 2 caught the
+// real bug in that: flattening loses word boundaries, so needle
+// "dev-phase-3" (normalized "devphase3") is a substring-PREFIX of an
+// unrelated sibling's "dev-phase-3-repro" (normalized "devphase3repro"),
+// false-positive matching a genuinely different instance whose branch name
+// happens to start with the same characters. No amount of delimiter-padding
+// fixes this on its own, since needle being a true PREFIX of haystack's
+// token sequence still satisfies a boundary-aligned check trivially — the
+// fix has to require the needle match a COMPLETE identifying segment (or
+// exact concatenation of segments), never a partial/prefix one.
+//
+// So: normalize each candidate field into discrete tokens split on real
+// structural boundaries (`/`/`\` for the file path, `:` for the source
+// label's own prefix), and require EXACT equality against one of those
+// tokens — or, for the file path's `dev/<branch>/<clone_id>/logs/...`
+// shape specifically, exact equality against two CONSECUTIVE tokens joined
+// (branch + clone_id) — never a substring/prefix match against a flattened
+// blob. `-i` (filterByInstance) is untouched by any of this — a user
+// typing `-i fix-shell` still gets plain, literal substring matching, same
+// as always.
+function normalizeToken(s) {
+    return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+export function matchesOwnChannel(cand, ownChannel) {
+    const needle = normalizeToken(ownChannel);
+    if (!needle) return false;
+
+    // Source label: "dev:<branch>" / "channel:<name>" / "shared" — strip a
+    // known "<word>:" prefix if present, exact-match what's left (with and
+    // without a "dev-" prepended, since the channel string carries that
+    // prefix but the source label's own identifying part doesn't).
+    const sourceIdent = normalizeToken(cand.source.replace(/^[a-z]+:/i, ""));
+    if (sourceIdent && (needle === sourceIdent || needle === `dev-${sourceIdent}`)) return true;
+
+    // File path: split on real path separators only (never on '-' — a
+    // branch/channel name's internal hyphens are part of ONE segment, not
+    // segment boundaries). Check each segment alone, and each consecutive
+    // pair joined (the dev-mode branch+clone_id shape), always as exact
+    // equality, never substring.
+    const segments = cand.file.split(/[\\/]/).map(normalizeToken).filter(Boolean);
+    for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        if (needle === seg || needle === `dev-${seg}`) return true;
+        if (i + 1 < segments.length) {
+            const pair = `${seg}-${segments[i + 1]}`;
+            if (needle === pair || needle === `dev-${pair}`) return true;
+        }
+    }
+    return false;
+}
+
+// Resolving "the" srv/host log used to mean "freshest across every instance
+// on the machine" — with several instances at the same version routinely
+// running at once (dev branches, portables, channels), that's frequently the
+// WRONG instance, and nothing said so (see
+// docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md
+// §2.1: `swarm` resolved to a stale sibling version's log on the very first
+// live repro of this). An explicit `-i` always wins, same as before. Absent
+// that, prefer OUR OWN running instance — $AGENTMUX_CHANNEL is already in
+// every agent pane's environment (same source resolveBlockId below already
+// trusts for $AGENTMUX_BLOCKID), so a caller running from inside an agent
+// pane gets ITS OWN instance's log by default instead of a same-version
+// sibling's. This is a soft preference, not a hard requirement: falls
+// through to the old "freshest overall" behavior when nothing matches
+// (`launcher` has no per-channel log at all; an older srv build predating
+// Ext 1's AGENTMUX_LOG_DIR fix still only writes to the shared root) rather
+// than failing outright — degrading gracefully beats refusing to run.
+//
+// Pure (no I/O, no process.exit) — takes already-discovered candidates so
+// muxlog.test.mjs can exercise the actual selection logic without touching
+// the real filesystem/HOME. Returns `null` when nothing matches at all;
+// `resolveFile` (below) owns turning that into the CLI's error+exit.
+export function pickCandidate(cands, opt, ownChannel) {
+    if (opt.instance) {
+        const filtered = filterByInstance(cands, opt.instance);
+        return filtered[0]?.file ?? null;
+    }
+    if (ownChannel) {
+        const own = cands.filter((c) => matchesOwnChannel(c, ownChannel));
+        if (own.length) return own[0].file;
+    }
+    return cands[0]?.file ?? null; // most recently active, no preference matched
+}
+
 function resolveFile(target, opt) {
-    let cands = discover(target);
-    if (opt.instance) cands = cands.filter((e) => e.file.toLowerCase().includes(opt.instance.toLowerCase()) || e.source.includes(opt.instance) || e.version.includes(opt.instance));
-    if (!cands.length) {
-        console.error(`muxlog: no ${target} log found${opt.instance ? ` matching '${opt.instance}'` : ""}. Try \`muxlog ls\`.`);
+    const cands = discover(target);
+    const file = pickCandidate(cands, opt, process.env.AGENTMUX_CHANNEL);
+    if (!file) {
+        console.error(
+            `muxlog: no ${target} log found${opt.instance ? ` matching '${opt.instance}'` : ""}. Try \`muxlog ls\`.`,
+        );
         process.exit(1);
     }
-    return cands[0].file; // most recently active
+    return file;
 }
 
 // ─── phases ───────────────────────────────────────────────────────────────────
@@ -506,7 +614,10 @@ function resolvePhaseFiles(pos, opt) {
     const prefix = `pane=${blockId.slice(0, 7)}`;
 
     let hostCands = discover("host");
-    if (opt.instance) hostCands = hostCands.filter((e) => e.file.toLowerCase().includes(opt.instance.toLowerCase()) || e.source.includes(opt.instance) || e.version.includes(opt.instance));
+    // Case-insensitive filterByInstance (see its own doc comment) — the
+    // content-verification scan just below is the real correctness backstop
+    // for `phases`, so this is only ever an ordering hint, same as before.
+    if (opt.instance) hostCands = filterByInstance(hostCands, opt.instance);
     if (!hostCands.length) {
         console.error(`muxlog: no host log found${opt.instance ? ` matching '${opt.instance}'` : ""}. Try \`muxlog ls\`.`);
         process.exit(1);
@@ -593,9 +704,14 @@ function main() {
 
     if (cmd === "errors") {
         opt.level = ["error", "warn"];
+        // Was its own ad-hoc `.file`-only filter with no own-channel default
+        // at all — routed through the same pickCandidate() every other
+        // recipe uses so `errors` gets the same "prefer my own instance"
+        // behavior instead of "freshest anywhere" (see resolveFile's doc
+        // comment above).
         for (const tgt of ["host", "srv"]) {
-            const f = discover(tgt).filter((e) => !opt.instance || e.file.toLowerCase().includes(opt.instance.toLowerCase()))[0];
-            if (f) { console.log(`\n=== ${tgt}: ${f.file} ===`); printLastLines(f.file, opt.n, opt, true); }
+            const file = pickCandidate(discover(tgt), opt, process.env.AGENTMUX_CHANNEL);
+            if (file) { console.log(`\n=== ${tgt}: ${file} ===`); printLastLines(file, opt.n, opt, true); }
         }
         return;
     }

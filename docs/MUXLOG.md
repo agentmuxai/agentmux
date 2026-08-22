@@ -25,9 +25,16 @@ muxlog phases       # merged turn-phase timeline for one pane — defaults to yo
 muxlog help         # full usage
 ```
 
-`muxlog` always defaults to the **most-recently-active** instance. With several
-instances running (dev + portables + different versions), that's almost always
-the one you mean — and `muxlog ls` shows the rest.
+`muxlog` defaults to **your own running instance** when it can tell what that
+is — `$AGENTMUX_CHANNEL` is already set in every agent pane's environment, so
+a recipe run from inside an agent pane resolves to that instance's own log
+first, not a same-version sibling's. Falls back to the
+**most-recently-active** instance across the whole machine only when nothing
+matches your own channel (e.g. `launcher`, which has no per-channel log at
+all) or `$AGENTMUX_CHANNEL` isn't set (a human running `muxlog` outside any
+agent pane). `-i <substr>` always overrides both. `muxlog ls` shows every
+instance so you can sanity-check which one a bare `muxlog swarm`/`errors`/
+etc. actually resolved to.
 
 ---
 
