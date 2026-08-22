@@ -4,7 +4,7 @@
 **Repo:** agentmuxai/agentmux
 **Trigger:** investigating AgentA's long compaction stretch (see `REPORT_AGENTA_AUTH_AUDIT_AND_COMPACTION_2026-07-31.md`) required reconstructing *when* compaction happened from git commit timestamps — AgentMux itself couldn't answer that question directly. This spec is about closing that gap structurally.
 
-**Implementation status:** Tier 1 (live "compaction started" signal + status) and Tier 2 (elapsed-time counter) — plus the backend §4.1 fix they depend on — have shipped. Tier 3 (predictive countdown enhancement) and Tier 4 (estimated progress bar) are explicit follow-ups, not yet built; see §7. §4.2's original hook-mechanism sketch ("write a sentinel line to a pipe" / "curl a loopback endpoint") has been superseded by the concrete implementation described in §4.2 below — kept updated to match what actually shipped rather than left as a stale sketch.
+**Implementation status:** Tier 1 (live "compaction started" signal + status), Tier 2 (elapsed-time counter), and Tier 3 (predictive countdown) — plus the backend §4.1 fix they depend on — have shipped. Tier 4 (estimated progress bar) is the remaining explicit follow-up, not yet built; see §7. §4.2's original hook-mechanism sketch ("write a sentinel line to a pipe" / "curl a loopback endpoint") has been superseded by the concrete implementation described in §4.2 below — kept updated to match what actually shipped rather than left as a stale sketch.
 
 ---
 
@@ -143,9 +143,15 @@ The `PreCompact` hook (§4.2) fires synchronously the moment compaction begins. 
 
 A stopwatch starts on the `PreCompact` signal and stops when the `compact_boundary` event (§2) arrives — real elapsed time, not an estimate, since both endpoints are genuine events. The live client-side reading is superseded by the backend's authoritative `durationMs` once the real event lands.
 
-### Tier 3 — predictive count-down *before* compaction starts — NOT YET IMPLEMENTED (follow-up)
+### Tier 3 — predictive count-down *before* compaction starts — SHIPPED (2026-08-22)
 
-Partially built already (Tier 0). The gap is presentation, not data: `compactionThreshold(contextWindow) − currentTokens` is already computable every turn; it just isn't surfaced as explicit countdown language ("~4.2k tokens until auto-compact") or escalated into a proactive banner as the `critical` band is crossed — today it's a number you have to hover to see. Important limitation: this only predicts the `auto` trigger. A `manual` `/compact` (typed by the user or invoked by the agent itself) can happen at any fill level and is fundamentally unpredictable — the countdown should be labeled as applying to auto-compaction only, not a guarantee of when compaction will occur.
+Frontend-only, exactly as scoped: `compactionThreshold(contextWindow) − currentTokens` (already computable every turn since Tier 0) is now surfaced as explicit countdown language, inline and hover-independent — `~4.2k to auto-compact`, rendered next to the existing `12.1k / 64k` context text in `AgentComposerStrip.tsx` once the fill level reaches the `mid` band or above (silent below that — not worth calling out yet). The hover tooltip (`contextTitle()`) also gained the same remaining-count line, so the full-precision and compact readings agree.
+
+**Escalation at the `critical` band**, implemented as a strengthened inline treatment rather than a new standalone banner component: the countdown text gains a bold weight and a leading `⚠` glyph (`.agent-composer-strip-ctx-countdown--critical` in `_composer-strip.scss`), layered on top of the pulsing red color the `critical` band's `ctx` text already had. A genuinely separate full-width banner (matching `AgentDisconnectedBanner.tsx`'s pattern) was considered and deliberately not built — this strip's own file-header comment already documents its tiered-wrap responsive layout as fragile/hand-tuned, and a new mounted row would need its own container-query wiring to avoid fighting that; the strengthened-inline-text approach delivers the same "hard to miss once critical" outcome without that risk. Revisit if a real banner is wanted later.
+
+**Labeled as auto-compaction-only, as required**: both the inline countdown's tooltip and the main tooltip's added line state explicitly that this predicts only the CLI's own auto-compact point — a manual `/compact` can happen at any fill level and is not predicted by this countdown.
+
+Test coverage: `AgentComposerStrip.test.tsx` (band gating, critical escalation class, zero-clamp past the threshold, tooltip wording) — proved discriminating by temporarily stubbing `compactionCountdownText` to always return `null` and confirming 4 of 7 tests fail with the expected signature, then restoring.
 
 ### Tier 4 — percent-complete of the compaction operation itself — NOT YET IMPLEMENTED (follow-up)
 

@@ -23,7 +23,10 @@
  * In flow order:
  *   1. AgentRuntimeDropup (single Mode · Model · Effort trigger)
  *   2. tokens (↑in ↓out) · elapsed
- *   3. ⚙N process badge · context text (12.1k / 64k) · auth tag · HOST/SANDBOX
+ *   3. ⚙N process badge · context text (12.1k / 64k) · countdown text
+ *      (mid band+, "~4.2k to auto-compact" — Tier 3 of
+ *      SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md §7) · auth tag ·
+ *      HOST/SANDBOX
  *      tag + Shell toggle (paired as one unit, same day, per direct user
  *      request — HOST/SANDBOX moved out of the controls zone to sit
  *      immediately left of Shell)
@@ -69,11 +72,31 @@ function contextTitle(tokens: number, contextWindow: number | undefined): string
         return `Context: ${formatExactNumber(tokens)} tokens`;
     }
     const pct = ((tokens / contextWindow) * 100).toFixed(1);
+    const remaining = Math.max(0, compactionThreshold(contextWindow) - tokens);
     return (
         `Context window: ${formatExactNumber(tokens)} / ${formatExactNumber(contextWindow)} tokens (${pct}%)\n` +
         `This is the total conversation history sent to the model on each turn.\n` +
-        `Auto-compacts around ${formatExactNumber(compactionThreshold(contextWindow))} tokens.`
+        `Auto-compacts around ${formatExactNumber(compactionThreshold(contextWindow))} tokens ` +
+        `(≈${formatExactNumber(remaining)} tokens left).\n` +
+        `Applies to auto-compaction only — a manual /compact can happen at any fill level.`
     );
+}
+
+/**
+ * Tier 3 of docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md
+ * §7 — explicit countdown language, surfaced inline (not hover-gated) once
+ * the fill level is worth calling out (mid band and above). Predicts only
+ * the `auto` trigger: `compactionThreshold(window) − tokens` is the
+ * distance to the CLI's own auto-compact point, computable every turn
+ * (Tier 0's groundwork) — a manual `/compact` can happen at any fill level
+ * and is fundamentally unpredictable, so this must never be read as "the"
+ * time compaction will happen, only as "no sooner than."
+ */
+function compactionCountdownText(tokens: number, window: number): string | null {
+    const band = ctxBand(tokens, window);
+    if (band === "low") return null;
+    const remaining = Math.max(0, compactionThreshold(window) - tokens);
+    return `~${formatCompactNumber(remaining)} to auto-compact`;
 }
 
 // ── Props ──────────────────────────────────────────────────────────────────
@@ -223,6 +246,26 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         return `${formatCompactNumber(t)} / ${formatCompactNumber(w)}`;
     };
 
+    // Tier 3 — explicit countdown, visible inline (not hover-gated) once
+    // the fill level is worth calling out. null below the mid band, or
+    // whenever the window itself is unknown (nothing to count down from).
+    //
+    // Gated to Claude only (Codex P2 on PR #2729): `compactionThreshold()`
+    // hard-codes Claude Code's own ~33K auto-compact buffer
+    // (context-window.ts's own doc comment). A non-Claude provider that
+    // happens to report Claude-shaped `message_start` usage (e.g. a
+    // `muxcode`-catalog entry) would otherwise get an invented countdown
+    // against a threshold that has never been verified for it — the same
+    // reason `canCompact()` below already restricts the manual-compact
+    // button to Claude.
+    const ctxCountdownText = (): string | null => {
+        const t = props.contextTokens;
+        const w = props.contextWindow;
+        if (t == null || t <= 0 || w == null) return null;
+        if (props.providerId !== "claude") return null;
+        return compactionCountdownText(t, w);
+    };
+
     // Only offer manual compaction for Claude (the only provider this has
     // been verified against — see onCompact's doc comment), only once
     // there's something to compact, and not while a turn is already in
@@ -302,6 +345,15 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                         }
                     >
                         {ctxText()}
+                    </span>
+                </Show>
+                <Show when={ctxCountdownText()}>
+                    <span
+                        class={`agent-composer-strip-ctx-countdown ${ctxClass()}`}
+                        classList={{ "agent-composer-strip-ctx-countdown--critical": ctxClass().endsWith("critical") }}
+                        title="Applies to auto-compaction only — a manual /compact can happen at any fill level."
+                    >
+                        {ctxCountdownText()}
                     </span>
                 </Show>
                 <Show when={props.providerId === "claude" && props.onCompact != null && ctxText() != null}>
