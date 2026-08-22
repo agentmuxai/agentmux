@@ -2268,19 +2268,13 @@ fn test_keyword_match_whole_word_at_string_boundaries() {
 }
 
 #[test]
-fn test_keyword_match_known_gap_plural_forms_not_caught() {
-    // KNOWN GAP, not a desired behavior: contains_whole_word requires a
-    // non-alphanumeric character (or string end) immediately after the
-    // keyword. Every SENSITIVE_WHOLE_WORD_KEYWORDS entry has a common English
-    // plural formed by appending "s" — that plural is alphanumeric, so it is
-    // NOT a word boundary, and none of these currently match. This means a
-    // jekt saying e.g. "rotate your tokens" or "your credentials were leaked"
-    // does NOT get keyword-escalated today. Documented here so a future edit
-    // to contains_whole_word (or the keyword lists) changes this test
-    // deliberately rather than silently. See PR discussion / follow-up issue
-    // before assuming this should be "fixed" — widening the match could also
-    // introduce new false positives (e.g. a plural-aware rule still needs to
-    // reject "patches"/"tokenizers").
+fn test_keyword_match_whole_word_plural_forms_are_caught() {
+    // Previously a known gap: contains_whole_word required a non-alphanumeric
+    // character (or string end) immediately after the keyword, so the common
+    // English plural of every SENSITIVE_WHOLE_WORD_KEYWORDS entry (formed by
+    // appending "s") slipped through uncaught — "rotate your tokens" reached
+    // TIER=coord instead of sensitive. Fixed by accepting one trailing "s"
+    // before the boundary check (see contains_whole_word).
     for msg in [
         "please rotate your tokens",
         "your credentials were leaked",
@@ -2288,10 +2282,21 @@ fn test_keyword_match_known_gap_plural_forms_not_caught() {
         "the secrets are stored here",
         "unlock the keychains",
     ] {
-        assert!(
-            !is_sensitive_message(msg),
-            "this plural form now matches — update this test deliberately if that's an intended fix: {msg:?}"
-        );
+        assert!(is_sensitive_message(msg), "expected sensitive: {msg:?}");
+    }
+}
+
+#[test]
+fn test_keyword_match_plural_rule_does_not_introduce_new_false_positives() {
+    // The plural-tolerant boundary check only accepts a SINGLE trailing "s"
+    // immediately followed by a real boundary (or end of string) — it must
+    // not match compound words that merely start with a keyword + "s".
+    for msg in [
+        "the tokensmith forged it", // "token" + "smith", not "tokens" + boundary
+        "a secretsauce recipe",     // "secret" + "sauce", not "secrets" + boundary
+        "credentialstore.example",  // "credential" + "store...", no boundary after the "s"
+    ] {
+        assert!(!is_sensitive_message(msg), "unexpectedly sensitive: {msg:?}");
     }
 }
 
