@@ -208,10 +208,25 @@ export interface ReducerResult {
 /**
  * Canonicalize a filesystem path so `C:/x` and `C:\x` resolve to the
  * same tab. Phase 1A approach (cheap, deterministic, no I/O):
+ *   - strip Windows' `\\?\` extended-length ("verbatim") prefix
  *   - normalize backslashes to forward slashes
  *   - collapse repeated slashes
  *   - lowercase the Windows drive letter
  *   - strip a trailing slash (except for a bare "/" or drive root)
+ *
+ * **The `\\?\` strip closes a real live-reload bug**, confirmed by live
+ * repro (2026-08-22): `EditorFileWatcher`'s published `editor:file_changed`
+ * WPS event carries a path produced by Rust's `Path::canonicalize()`,
+ * which on Windows unconditionally prepends `\\?\` (`\\?\UNC\` for a
+ * network share) — well-documented std behavior, and something this
+ * backend's own comments already flag in two other places
+ * (`editor_file_watcher.rs`, `media_file_watcher.rs`) for the backend's
+ * OWN internal path matching. Nothing on the frontend ever produces that
+ * prefix for the same file (a tab's `filePath` is derived from whatever
+ * path was originally requested to open it), so without stripping it
+ * here, `_handleExternalFileChanged`'s `canonicalizePath(rawPath) !==
+ * canonicalizePath(tab.filePath)` comparison NEVER matches — live-reload
+ * silently never fires for any tab, on Windows, unconditionally.
  *
  * Symlink resolution is intentionally out of scope — that requires
  * filesystem I/O which can't sit inside a pure reducer. The saga in
@@ -220,7 +235,13 @@ export interface ReducerResult {
  */
 export function canonicalizePath(path: string): string {
     if (!path) return path;
-    let p = path.replace(/\\/g, "/");
+    let p = path;
+    if (p.startsWith("\\\\?\\UNC\\")) {
+        p = "\\\\" + p.slice(8); // \\?\UNC\server\share\... -> \\server\share\...
+    } else if (p.startsWith("\\\\?\\")) {
+        p = p.slice(4); // \\?\C:\... -> C:\...
+    }
+    p = p.replace(/\\/g, "/");
     p = p.replace(/\/{2,}/g, "/");
     // Windows drive letter — lowercase for stable equality.
     if (/^[A-Za-z]:\//.test(p)) {
