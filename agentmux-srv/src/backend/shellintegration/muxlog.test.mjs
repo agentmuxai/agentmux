@@ -1,12 +1,22 @@
+// @vitest-environment node
+//
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
+//
+// Forces the real Node environment (vitest.config.ts's global default is
+// jsdom, for frontend component tests) — muxlog.mjs is a standalone Node
+// CLI script that never runs in a browser, and jsdom's `fetch` polyfill
+// doesn't actually reach a real local HTTP server the way checkLiveness's
+// tests below need (probePort speaks real HTTP as of reagent P2 on
+// PR #2742 — every "live"/"multiple ipc-port files" case silently failed
+// under jsdom's fetch until this was added, passing fine under plain Node).
 //
 // Unit tests for muxlog.mjs's glob()/filterByInstance()/pickCandidate() —
 // pure logic (filesystem reads against a real temp dir for glob(), plain
 // data for the other two — no mocking needed, no network, no process.exit).
 // Runs as part of `npm test` (vitest), same discipline as muxspect.test.mjs.
 //
-// Pins two fixes from docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md:
+// Pins three fixes/features from docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md:
 // - §2.2/§2.3: the channels/ log-discovery glob had one wildcard segment more
 //   than any real on-disk channel-build layout actually has
 //   (`channels/*/versions/*/*/logs` vs. the real `channels/*/versions/*/logs`),
@@ -17,12 +27,18 @@
 //   `swarm` resolved to a stale same-version sibling's log on the very first
 //   live repro. `pickCandidate` now prefers a candidate matching the
 //   caller's own $AGENTMUX_CHANNEL when no explicit `-i` is given.
+// - Ext 3: `muxlog ls` inferred liveness from log mtime alone (a dead
+//   process's log looks identical to a live-but-idle one). checkLiveness()
+//   TCP-probes the real `ipc-port-*` file agentmux-cef already writes per
+//   instance.
 
 import fs from "node:fs";
+import http from "node:http";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { filterByInstance, glob, matchesOwnChannel, pickCandidate, printLastLines, renderLine } from "./muxlog.mjs";
+import { checkLiveness, filterByInstance, glob, matchesOwnChannel, pickCandidate, printLastLines, renderLine, siblingCandidateDirs } from "./muxlog.mjs";
 
 let root;
 
@@ -286,5 +302,153 @@ describe("muxlog printLastLines return value (Ext 6's verdict count)", () => {
     it("returns 0 for a file with no matching lines", () => {
         fs.writeFileSync(file, JSON.stringify({ timestamp: "2026-08-22T00:00:00Z", level: "INFO", fields: { message: "no match here" }, target: "x" }) + "\n");
         expect(printLastLines(file, 200, { dispatch: "dispatch-nonexistent" }, true)).toBe(0);
+    });
+});
+
+describe("muxlog siblingCandidateDirs", () => {
+    it("returns both the 'data' and 'cef-cache' siblings of a trailing 'logs' segment", () => {
+        const logs = path.join("channels", "chan-a", "versions", "0.55.19", "logs");
+        const data = path.join("channels", "chan-a", "versions", "0.55.19", "data");
+        const cefCache = path.join("channels", "chan-a", "versions", "0.55.19", "cef-cache");
+        expect(siblingCandidateDirs(logs)).toEqual([data, cefCache]);
+    });
+
+    it("returns an empty array for a directory that isn't named 'logs'", () => {
+        expect(siblingCandidateDirs(path.join("channels", "chan-a", "versions", "0.55.19", "data"))).toEqual([]);
+    });
+});
+
+describe("muxlog checkLiveness", () => {
+    let root;
+    let server;
+
+    beforeEach(() => {
+        root = fs.mkdtempSync(path.join(os.tmpdir(), "muxlog-liveness-test-"));
+    });
+
+    afterEach(() => {
+        fs.rmSync(root, { recursive: true, force: true });
+        server?.close();
+        server = undefined;
+    });
+
+    function makeInstance() {
+        const logDir = path.join(root, "logs");
+        const dataDir = path.join(root, "data");
+        const cefCacheDir = path.join(root, "cef-cache");
+        fs.mkdirSync(logDir, { recursive: true });
+        fs.mkdirSync(dataDir, { recursive: true });
+        fs.mkdirSync(cefCacheDir, { recursive: true });
+        return { logDir, dataDir, cefCacheDir };
+    }
+
+    // A real HTTP server answering GET /health with the exact shape
+    // agentmux-cef's own IPC server returns ({"status":"ok",...}) — probePort
+    // now speaks HTTP, not raw TCP, so the test double has to match (reagent
+    // P2 on PR #2742).
+    function listenWithHealthResponse() {
+        return new Promise((resolve) => {
+            server = http.createServer((req, res) => {
+                if (req.url === "/health") {
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ status: "ok", version: "0.55.19" }));
+                } else {
+                    res.writeHead(404);
+                    res.end();
+                }
+            });
+            server.listen(0, "127.0.0.1", () => resolve(server.address().port));
+        });
+    }
+
+    // A listener that accepts the TCP connection (so a bare connect-only
+    // probe would false-positive "live") but isn't AgentMux's IPC server at
+    // all — the exact scenario reagent P2 described (OS reassigns a dead
+    // instance's port to an unrelated local service).
+    function listenAsUnrelatedService() {
+        return new Promise((resolve) => {
+            server = net.createServer((sock) => sock.end("not an agentmux server\n"));
+            server.listen(0, "127.0.0.1", () => resolve(server.address().port));
+        });
+    }
+
+    it("returns '?' when there's no sibling data dir at all", async () => {
+        const logDir = path.join(root, "logs");
+        fs.mkdirSync(logDir, { recursive: true });
+        // no "data" dir created
+        expect(await checkLiveness(logDir)).toBe("?");
+    });
+
+    it("returns '?' when the data dir exists but has no ipc-port-* file", async () => {
+        const { logDir } = makeInstance();
+        expect(await checkLiveness(logDir)).toBe("?");
+    });
+
+    it("returns '?' for a malformed port file (no ':' separator, or non-numeric port)", async () => {
+        const { logDir, dataDir } = makeInstance();
+        fs.writeFileSync(path.join(dataDir, "ipc-port-abc123"), "not-a-port-file");
+        expect(await checkLiveness(logDir)).toBe("?");
+    });
+
+    it("returns 'live' when the recorded port answers GET /health with status:ok", async () => {
+        const { logDir, dataDir } = makeInstance();
+        const port = await listenWithHealthResponse();
+        fs.writeFileSync(path.join(dataDir, "ipc-port-abc123"), `${port}:some-token`);
+        expect(await checkLiveness(logDir)).toBe("live");
+    });
+
+    // reagent P2 on PR #2752: agentmux-cef/src/lib.rs writes the bare
+    // filename "ipc-port" (no trailing hyphen) when AGENTMUX_IPC_HASH is
+    // unset (task dev:standalone, no launcher) — startsWith("ipc-port-")
+    // alone misses this exact literal.
+    it("returns 'live' via the bare 'ipc-port' filename (no hash suffix, e.g. task dev:standalone)", async () => {
+        const { logDir, dataDir } = makeInstance();
+        const port = await listenWithHealthResponse();
+        fs.writeFileSync(path.join(dataDir, "ipc-port"), `${port}:some-token`);
+        expect(await checkLiveness(logDir)).toBe("live");
+    });
+
+    // reagent P1 on PR #2752: agentmux-cef/src/lib.rs writes the port file
+    // to the `cef-cache` sibling (not `data`) for `task dev` instances
+    // (is_dev_build_exe branch) — checking only `data` always reports '?'
+    // for the primary dev workflow, even when it's genuinely live.
+    it("returns 'live' via a port file in the 'cef-cache' sibling (task dev's actual layout)", async () => {
+        const { logDir, cefCacheDir } = makeInstance();
+        const port = await listenWithHealthResponse();
+        fs.writeFileSync(path.join(cefCacheDir, "ipc-port"), `${port}:some-token`);
+        expect(await checkLiveness(logDir)).toBe("live");
+    });
+
+    // reagent P2 on PR #2742: a raw TCP connect alone isn't proof of
+    // liveness — something else could be listening on a reassigned port.
+    it("returns 'dead' when something IS listening but doesn't answer as AgentMux's IPC server", async () => {
+        const { logDir, dataDir } = makeInstance();
+        const port = await listenAsUnrelatedService();
+        fs.writeFileSync(path.join(dataDir, "ipc-port-abc123"), `${port}:some-token`);
+        expect(await checkLiveness(logDir)).toBe("dead");
+    });
+
+    // reagent P1 on PR #2742: a dev-mode data dir can hold a stale port file
+    // (crashed process, never cleaned up) alongside a live one — checking
+    // only the first readdirSync result (unspecified order) risks probing
+    // the dead one and reporting "dead" for a genuinely live instance.
+    it("returns 'live' when multiple ipc-port-* files exist and only one is actually alive", async () => {
+        const { logDir, dataDir } = makeInstance();
+        const livePort = await listenWithHealthResponse();
+        // A stale port file pointing at a port nothing is listening on —
+        // simulates a crashed prior run's never-cleaned-up port file.
+        fs.writeFileSync(path.join(dataDir, "ipc-port-stalehash"), "1:dead-token");
+        fs.writeFileSync(path.join(dataDir, "ipc-port-livehash"), `${livePort}:live-token`);
+        expect(await checkLiveness(logDir)).toBe("live");
+    });
+
+    it("returns 'dead' when the recorded port has nothing listening on it", async () => {
+        const { logDir, dataDir } = makeInstance();
+        // Bind then immediately close — the port is very likely free again,
+        // and nothing else in this test process will grab it in between.
+        const port = await listenWithHealthResponse();
+        await new Promise((resolve) => server.close(resolve));
+        fs.writeFileSync(path.join(dataDir, "ipc-port-abc123"), `${port}:some-token`);
+        expect(await checkLiveness(logDir)).toBe("dead");
     });
 });
