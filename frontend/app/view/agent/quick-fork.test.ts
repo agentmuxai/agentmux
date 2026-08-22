@@ -18,9 +18,10 @@ vi.mock("@/layout/index", () => ({
 
 const getObjectValue = vi.fn();
 const activeTabId = vi.fn();
+const pushNotification = vi.fn();
 vi.mock("@/app/store/global", () => ({
     atoms: { activeTabId: () => activeTabId() },
-    pushNotification: vi.fn(),
+    pushNotification: (...args: unknown[]) => pushNotification(...args),
     WOS: {
         getObjectValue: (...args: unknown[]) => getObjectValue(...args),
         makeORef: (kind: string, id: string) => `${kind}:${id}`,
@@ -175,6 +176,22 @@ describe("quickForkAgent", () => {
     it("does not push closeBlockInStack when the launch succeeds", async () => {
         await quickForkAgent(model);
         expect(closeBlockInStack).not.toHaveBeenCalled();
+    });
+
+    // Codex's second-round review of PR #2746: the cleanup above is
+    // otherwise silent — without a notification, the fork just flashes in
+    // and back out with no indication anything went wrong.
+    it("pushes a failure notification when launchAgentDefinition reports failure", async () => {
+        launchAgentDefinition.mockResolvedValue(false);
+        await quickForkAgent(model);
+        expect(pushNotification).toHaveBeenCalledWith(
+            expect.objectContaining({ type: "error", title: "Quick-fork failed" }),
+        );
+    });
+
+    it("does not push a failure notification when the launch succeeds", async () => {
+        await quickForkAgent(model);
+        expect(pushNotification).not.toHaveBeenCalled();
     });
 
     it("logs but does not throw when closeBlockInStack itself rejects on a failed launch", async () => {

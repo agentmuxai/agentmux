@@ -192,10 +192,21 @@ export async function quickForkAgent(
             Logger.warn("quick-fork", "launchAgentDefinition reported failure", { blockId: paneOpenResult.block_id });
             // Don't leave the user on a blank/broken pane-stack tab — pop it
             // back out and delete the block, same as the "pane closed
-            // mid-flight" cleanup above (Codex P2 on this PR).
+            // mid-flight" cleanup above (Codex P2 on PR #2746).
             await closeBlockInStack(layoutModel, freshNode.id, paneOpenResult.block_id).catch((e: any) =>
                 Logger.warn("quick-fork", "failed to clean up the failed fork's block", { error: String(e) }),
             );
+            // The cleanup above is otherwise silent — without this, the fork
+            // just flashes in and back out with no indication anything went
+            // wrong (Codex's second-round review of PR #2746).
+            pushNotification({
+                icon: "fa-triangle-exclamation",
+                title: "Quick-fork failed",
+                message: "The forked agent could not be launched.",
+                timestamp: new Date().toISOString(),
+                type: "error",
+                expiration: Date.now() + 8000,
+            });
         } else if (showNoHistoryFallback) {
             await RpcApi.SetMetaCommand(TabRpcClient, {
                 oref: WOS.makeORef("block", paneOpenResult.block_id),
