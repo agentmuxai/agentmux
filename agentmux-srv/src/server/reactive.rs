@@ -1092,6 +1092,15 @@ fn default_transcript_max_lines() -> usize {
 /// watcher agent to inspect on its own poll interval (v1 is pull/poll, not
 /// push — see
 /// docs/analysis/ANALYSIS_WARDEN_AUTO_CONTROLLER_CONTINUATION_WATCHER_2026_08_12.md).
+///
+/// As of `SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`
+/// Phase A, a miss on this instance's own host-tier registry falls back to
+/// the host-global cross-channel shared registry and forwards a single-hop
+/// HTTP GET to the owning channel's own instance — same auth
+/// (`entry.auth_key` as `X-AuthKey`) and loopback-only pattern
+/// `handle_reactive_inject`'s Tier 2b already uses (see that handler for
+/// the security rationale). Response carries `"tier"` so callers can tell
+/// which tier answered.
 pub(super) async fn handle_reactive_transcript(
     State(state): State<AppState>,
     Query(params): Query<TranscriptQuery>,
@@ -1103,12 +1112,9 @@ pub(super) async fn handle_reactive_transcript(
         )
             .into_response();
     }
+
     let Some(reg) = state.reactive_handler.get_agent(&params.agent) else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "agent not found"})),
-        )
-            .into_response();
+        return handle_reactive_transcript_cross_channel(&state, &params).await;
     };
     let block_id = reg.block_id.clone();
 
@@ -1146,11 +1152,160 @@ pub(super) async fn handle_reactive_transcript(
     Json(json!({
         "agent": reg.agent_id,
         "block_id": block_id,
+        "tier": "host",
         "turn_active": turn_active,
         "lines": lines,
         "truncated": truncated,
     }))
     .into_response()
+}
+
+/// Fallback path for [`handle_reactive_transcript`] when the target agent
+/// isn't on this instance's own host-tier registry — checks the host-global
+/// cross-channel shared registry and, on a hit, forwards to the owning
+/// channel's own instance. A miss here (not found on this channel OR any
+/// other channel on this host) 404s exactly as the host-only lookup always
+/// did — this does not reach LAN or WAN (Phase A scope; see spec Phase B/C).
+async fn handle_reactive_transcript_cross_channel(
+    state: &AppState,
+    params: &TranscriptQuery,
+) -> Response {
+    let not_found = || {
+        (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "agent not found"})),
+        )
+            .into_response()
+    };
+
+    let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() else {
+        return not_found();
+    };
+    let Some(entry) = crate::backend::reactive::registry::lookup_all_shared(&shared_dir, &params.agent)
+        .into_iter()
+        .next()
+    else {
+        return not_found();
+    };
+
+    let query: Vec<(&str, String)> = vec![
+        ("agent", params.agent.clone()),
+        ("max_lines", params.max_lines.to_string()),
+    ];
+    let resp = state
+        .http_client
+        .get(format!("{}/agentmux/reactive/transcript", entry.local_url))
+        .header("X-AuthKey", &entry.auth_key)
+        .query(&query)
+        .send()
+        .await;
+
+    let Ok(resp) = resp else {
+        return not_found();
+    };
+    if !resp.status().is_success() {
+        return not_found();
+    }
+    let Ok(mut body) = resp.json::<serde_json::Value>().await else {
+        return not_found();
+    };
+    if let Some(obj) = body.as_object_mut() {
+        obj.insert("tier".to_string(), json!("cross-channel"));
+        obj.insert("channel".to_string(), json!(entry.channel));
+    }
+    Json(body).into_response()
+}
+
+#[cfg(test)]
+mod transcript_cross_channel_tests {
+    use super::*;
+    use crate::server::tests::test_state;
+
+    /// The regression this test guards: before Phase A
+    /// (`SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`),
+    /// an unknown agent name always 404d straight out of the host-tier
+    /// lookup. The refactor routes that miss through
+    /// `handle_reactive_transcript_cross_channel` instead — this proves the
+    /// common case (nothing found on any tier, which is what a fresh
+    /// `test_state()` with no shared registry entries looks like) still
+    /// ends in the same 404, not a panic or a wrongly-200'd empty body.
+    #[tokio::test]
+    async fn unknown_agent_still_404s_when_not_on_any_tier() {
+        let state = test_state();
+        let resp = handle_reactive_transcript(
+            State(state),
+            Query(TranscriptQuery {
+                agent: "no-such-agent-anywhere".to_string(),
+                max_lines: 100,
+            }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn empty_agent_param_is_bad_request_before_any_tier_lookup() {
+        let state = test_state();
+        let resp = handle_reactive_transcript(
+            State(state),
+            Query(TranscriptQuery {
+                agent: String::new(),
+                max_lines: 100,
+            }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn host_tier_hit_is_labeled_with_its_tier() {
+        let state = test_state();
+        let unique = uuid::Uuid::new_v4();
+        let agent_id = format!("transcript-tier-test-{unique}");
+        let block_id = format!("transcript-tier-block-{unique}");
+        state
+            .reactive_handler
+            .register_agent(&agent_id, &block_id, None)
+            .unwrap();
+        state
+            .filestore
+            .make_file(
+                &block_id,
+                "output",
+                crate::backend::storage::filestore::FileMeta::default(),
+                crate::backend::storage::filestore::FileOpts::default(),
+            )
+            .expect("make_file");
+        state
+            .filestore
+            .append_data(&block_id, "output", b"hello\n")
+            .expect("append_data");
+        let mut block = crate::backend::obj::Block {
+            oid: block_id.clone(),
+            parentoref: String::new(),
+            version: 1,
+            runtimeopts: None,
+            stickers: None,
+            meta: Default::default(),
+            subblockids: None,
+        };
+        state.wstore.insert(&mut block).expect("wstore insert");
+
+        let resp = handle_reactive_transcript(
+            State(state),
+            Query(TranscriptQuery {
+                agent: agent_id,
+                max_lines: 100,
+            }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(body["tier"], "host");
+    }
 }
 
 #[derive(serde::Deserialize)]

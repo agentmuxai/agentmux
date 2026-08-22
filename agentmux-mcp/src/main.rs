@@ -132,7 +132,7 @@ const DISCOVER_AGENTS_TOOL: &str = r#"{
 
 const GET_AGENT_TRANSCRIPT_TOOL: &str = r#"{
   "name": "GetAgentTranscript",
-  "description": "Read the tail of a registered agent's session transcript by name, plus whether it currently has a turn in flight (turn_active). For a Warden Supervisor watcher agent polling other agents on its own interval to decide whether to nudge a stalled one to continue. Returns JSON: {agent, block_id, turn_active, lines: [...], truncated}. Read-only, best-effort — does not deliver anything to the target.",
+  "description": "Read the tail of a registered agent's session transcript by name, plus whether it currently has a turn in flight (turn_active). Resolves agents on this host first, then falls back to other channels on this same host (cross-channel) — does NOT reach LAN or WAN agents (use ListConversations to see those, but note they're liveness-only for now). For a Warden Supervisor watcher agent polling other agents on its own interval to decide whether to nudge a stalled one to continue, or any agent wanting to check what another agent on this host is doing. Returns JSON: {agent, block_id, tier, turn_active, lines: [...], truncated}. Read-only, best-effort — does not deliver anything to the target.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -140,6 +140,23 @@ const GET_AGENT_TRANSCRIPT_TOOL: &str = r#"{
       "max_lines": { "type": "integer", "description": "Max number of recent transcript lines to return (default 100, server-capped at 500)" }
     },
     "required": ["agent"]
+  }
+}"#;
+
+// Cross-tier conversation glance
+// (SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md Phase A) —
+// one call to see every agent's recent activity across host + cross-channel
+// (with a last-message preview) and LAN + WAN (liveness only — Phase A
+// deliberately does not invent a remote-read protocol for those tiers; see
+// the spec's Phase B/C). Thin passthrough to the srv's own
+// `/api/v1/muxspect/conversations`, same auth pattern as every other tool
+// here.
+const LIST_CONVERSATIONS_TOOL: &str = r#"{
+  "name": "ListConversations",
+  "description": "See every agent's most recent activity across host, cross-channel (other AgentMux channels on this same host), LAN, and connected WAN in one call — a faster alternative to DiscoverAgents + N x GetAgentTranscript. Host and cross-channel entries include turn_active, last_activity_ms, and a last_message_preview (tail transcript line). LAN and WAN entries are liveness-only (remote_fetch_required: true) — reading their conversation content isn't supported yet. Read-only. Takes no arguments.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {}
   }
 }"#;
 
@@ -698,6 +715,8 @@ async fn main() {
                     serde_json::from_str(DISCOVER_AGENTS_TOOL).expect("static json");
                 let get_agent_transcript: Value =
                     serde_json::from_str(GET_AGENT_TRANSCRIPT_TOOL).expect("static json");
+                let list_conversations: Value =
+                    serde_json::from_str(LIST_CONVERSATIONS_TOOL).expect("static json");
                 let supervisor_nudge: Value =
                     serde_json::from_str(SUPERVISOR_NUDGE_TOOL).expect("static json");
                 let whoami: Value = serde_json::from_str(WHOAMI_TOOL).expect("static json");
@@ -742,7 +761,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, open_media, send_message, discover_agents, get_agent_transcript, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, capture_window, fleet_list, fleet_broadcast, fleet_bulk_stop, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, open_media, send_message, discover_agents, get_agent_transcript, list_conversations, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, capture_window, fleet_list, fleet_broadcast, fleet_bulk_stop, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {
@@ -1921,6 +1940,38 @@ async fn call_tool(
                 let status = resp.status();
                 let text = resp.text().await.unwrap_or_default();
                 anyhow::bail!("transcript fetch failed: HTTP {status} — {text}");
+            }
+
+            let result: Value = resp
+                .json()
+                .await
+                .map_err(|e| anyhow::anyhow!("response parse failed: {e}"))?;
+
+            Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string()))
+        }
+        "ListConversations" => {
+            if local_url.is_empty() || auth_key.is_empty() {
+                anyhow::bail!(
+                    "AGENTMUX_LOCAL_URL and AGENTMUX_AUTH_KEY must be set. \
+                     Is this agent pane opened via AgentMux?"
+                );
+            }
+
+            let url = format!(
+                "{}/api/v1/muxspect/conversations",
+                local_url.trim_end_matches('/')
+            );
+            let resp = client
+                .get(&url)
+                .header("X-AuthKey", auth_key)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("request failed: {e}"))?;
+
+            if !resp.status().is_success() {
+                let status = resp.status();
+                let text = resp.text().await.unwrap_or_default();
+                anyhow::bail!("conversations fetch failed: HTTP {status} — {text}");
             }
 
             let result: Value = resp
@@ -3138,6 +3189,7 @@ mod tests {
             FLEET_BROADCAST_TOOL,
             FLEET_BULK_STOP_TOOL,
             CAPTURE_WINDOW_TOOL,
+            LIST_CONVERSATIONS_TOOL,
         ];
         // This array (and its count) has drifted from the real `tools/list`
         // response before this change too — SHELL_INPUT/STATUS, the three
@@ -3149,7 +3201,10 @@ mod tests {
         // top of whatever this test already covered, so at least those
         // don't silently join the drift. CAPTURE_WINDOW_TOOL added here too
         // (PR #2709) — same reasoning, not fixing the pre-existing drift.
-        assert_eq!(defs.len(), 34, "tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools + 1 CaptureWindow");
+        // LIST_CONVERSATIONS_TOOL added here too
+        // (SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md
+        // Phase A) — same reasoning, not fixing the pre-existing drift.
+        assert_eq!(defs.len(), 35, "tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools + 1 CaptureWindow + 1 ListConversations");
         for d in defs {
             let v: Value = serde_json::from_str(d).expect("tool def must be valid JSON");
             assert!(

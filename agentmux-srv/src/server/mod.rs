@@ -480,6 +480,13 @@ pub fn build_router(state: AppState) -> Router {
             "/api/v1/muxspect/verify-sender",
             get(muxspect_handlers::handle_muxspect_verify_sender),
         )
+        // All-tier conversation glance (host/cross-channel previews, LAN/WAN
+        // liveness) — see the handler's own doc comment
+        // (SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md Phase A).
+        .route(
+            "/api/v1/muxspect/conversations",
+            get(muxspect_handlers::handle_muxspect_conversations),
+        )
         // Agent App API — identity / preset / memory namespaces, the MCP-facing
         // slice of the app-API RPC surface (SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28).
         // The agent identity (`agent_id`) is supplied by agentmux-mcp from its
