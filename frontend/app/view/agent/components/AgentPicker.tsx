@@ -915,7 +915,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             onFirstLoad={() => setMyAgentsLoaded(true)}
                         />
                         <div class="agent-picker-templates-header" data-testid="agent-templates-header">
-                            <span>+ New from template</span>
+                            <span>New Agent</span>
                         </div>
                         <p class="agent-picker-templates-hint" data-testid="agent-templates-hint">
                             Each card is a <strong>harness</strong> (the CLI that runs the agent, e.g. Claude Code,
