@@ -18,8 +18,8 @@ use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::backend::blockcontroller::{
-    core, health::classify_output_line, publish_controller_status, session_stats, shell,
-    DEFAULT_GRACEFUL_KILL_WAIT_MS, STATUS_DONE, STATUS_RUNNING,
+    core, health::{classify_output_line, is_compact_boundary_frame}, publish_controller_status,
+    session_stats, shell, DEFAULT_GRACEFUL_KILL_WAIT_MS, STATUS_DONE, STATUS_RUNNING,
 };
 use crate::backend::wps;
 
@@ -315,7 +315,18 @@ impl SubprocessController {
                         // terminal `result` frame for failure classification.
                         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
                             let (meaningful, error) = classify_output_line(&parsed);
+                            // reagent P1 (same finding as persistent.rs, mirrored
+                            // here): record_output must run before
+                            // set_compacting(false), or its re-evaluation sees a
+                            // still-stale last_meaningful_ts and transiently
+                            // publishes/clears "Agent unresponsive" right at the
+                            // moment compaction ends — see persistent.rs's own
+                            // comment on this exact ordering for the full
+                            // explanation.
                             health_read.record_output(meaningful);
+                            if is_compact_boundary_frame(&parsed) {
+                                health_read.set_compacting(false);
+                            }
                             if let Some((class, msg)) = error {
                                 health_read.record_error(class, msg);
                             }

@@ -249,6 +249,18 @@ pub trait Controller: Send + Sync {
     /// override [`agent_id`](Controller::agent_id) either.
     fn set_agent_id(&self, _id: Option<String>) {}
 
+    /// This controller's `HealthMonitor`, if it owns one. Default `None`,
+    /// mirroring [`agent_id`](Controller::agent_id)'s default-None pattern
+    /// — only controller types actually wired to a `HealthMonitor`
+    /// (persistent, host_spawn/subprocess, container_spawn) override this.
+    /// Used by `handle_wps_publish` (`server/mod.rs`) to forward a
+    /// `compaction_started` WPS event into the right block's health
+    /// monitor — see
+    /// docs/specs/SPEC_UNRESPONSIVE_FALSE_POSITIVE_DURING_COMPACTION_2026_08_22.md.
+    fn health_monitor(&self) -> Option<Arc<health::HealthMonitor>> {
+        None
+    }
+
     /// Downcast support for concrete controller types.
     fn as_any(&self) -> &dyn Any;
 }
