@@ -215,7 +215,17 @@ export function BrowserNavBar(props: {
     // upgrade, not worth it for v1.
     const bookmarkMenuItems = createMemo<MenuItem[]>(() => {
         if (bookmarksLoading()) {
-            return [{ label: "Loading…", icon: "spinner" }];
+            // No icon here (deliberately): FlyoutMenu's default item
+            // renderer only ever applies `fa-solid fa-fw fa-${item.icon}` —
+            // there's no way to also pair in `fa-spin` through that field,
+            // so a `fa-spinner` icon would render static/non-animating and
+            // look broken next to every other spinner in this codebase
+            // (which is always fa-spinner + fa-spin together, e.g.
+            // swarm-view.tsx:757, toolchain-view.tsx:322). A label-only row
+            // for this brief, local-file-read loading state is honest
+            // rather than a fake, non-spinning spinner (ReAgent re-review,
+            // PR #2730).
+            return [{ label: "Loading…" }];
         }
         const items: MenuItem[] = [];
         if (model.urlAtom()) {
