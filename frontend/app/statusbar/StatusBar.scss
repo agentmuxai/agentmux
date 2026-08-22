@@ -241,7 +241,11 @@
     min-width: 200px;
     z-index: var(--zindex-modal-wrapper);
     font-size: 11px;
-    zoom: var(--zoomfactor);
+    // Deliberately NOT `zoom: var(--zoomfactor)` — see
+    // docs/specs/SPEC_STATUS_BAR_POPOVER_DOUBLE_ZOOM_OFFSET_2026_08_22.md
+    // (same double-application bug as TokenBreakdownPopover's sibling rule
+    // in _token-usage.scss — this shared class's positioning also comes
+    // from computeMenuPosition, per the comment above).
     color: var(--main-text-color);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
 

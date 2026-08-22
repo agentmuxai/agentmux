@@ -13,7 +13,11 @@
     border: 1px solid var(--border-color);
     border-radius: 0;
     font-size: 11px;
-    zoom: var(--zoomfactor);
+    // Deliberately NOT `zoom: var(--zoomfactor)` — this balloon is
+    // positioned via computeMenuPosition (see the doc comment above) from
+    // an anchor rect that's already real, post-chrome-zoom pixels; self-
+    // zooming it too double-applies the same factor to its own left/top —
+    // see docs/specs/SPEC_STATUS_BAR_POPOVER_DOUBLE_ZOOM_OFFSET_2026_08_22.md.
     // Size to content, but wrap (don't single-line overflow) once the tip
     // exceeds max-width. `nowrap` + `max-width` contradicted: long tips
     // (e.g. GFX's full GPU renderer string) spilled out of the balloon.
