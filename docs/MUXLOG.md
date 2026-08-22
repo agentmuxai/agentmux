@@ -94,9 +94,12 @@ muxlog srv --since 2026-06-15T23:30 cat        # a time window
 AgentMux logs live in **three** root trees, not one:
 
 ```
-~/.agentmux/logs/                                   shared: sidecar, launcher, some host
-~/.agentmux/dev/<branch>/<hash>/logs/               task dev — keyed on the git branch
-~/.agentmux/channels/local-*/versions/<v>/.../logs/ portable / per-build instances
+~/.agentmux/logs/                                  shared: launcher, and sidecar
+                                                    when AGENTMUX_LOG_DIR isn't set
+~/.agentmux/dev/<branch>/<hash>/logs/              task dev — keyed on the git branch
+~/.agentmux/channels/<channel>/versions/<v>/logs/  portable / per-build instances —
+                                                    both host AND sidecar, as of the
+                                                    sidecar honoring AGENTMUX_LOG_DIR
 ```
 
 The old `muxlog` followed a single version-pinned pointer

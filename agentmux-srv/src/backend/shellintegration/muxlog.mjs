@@ -17,6 +17,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 
 const HOME = os.homedir();
 const AGENTMUX = path.join(HOME, ".agentmux");
@@ -24,19 +25,46 @@ const AGENTMUX = path.join(HOME, ".agentmux");
 // ─── Log discovery ────────────────────────────────────────────────────────────
 // Logs can live in any of these roots (the shared dir alone is NOT enough — dev
 // builds and per-build channels keep their host log in their own data dir):
-//   ~/.agentmux/logs/                                  (shared: srv, launcher, some host)
+//   ~/.agentmux/logs/                                  (shared: launcher, and
+//                                                        srv when AGENTMUX_LOG_DIR
+//                                                        isn't set — see below)
 //   ~/.agentmux/dev/<branch>/<hash>/logs/              (task dev, keyed on branch)
-//   ~/.agentmux/channels/local-*/versions/<v>/.../logs/(portable/per-build)
+//   ~/.agentmux/channels/<channel>/versions/<v>/logs/  (portable/per-build; both
+//                                                        host AND srv as of
+//                                                        agentmux-srv/src/bootstrap.rs
+//                                                        honoring AGENTMUX_LOG_DIR —
+//                                                        see REPORT_MUXSPECT_MUXLOG_
+//                                                        CROSS_CHANNEL_INSPECTION_2026_08_22.md)
+//
+// The confirmed on-disk depth is `versions/<v>/logs` (ONE directory between
+// version and logs — verified against a real running instance's own
+// AGENTMUX_LOG_DIR). An earlier version of this glob assumed TWO directories
+// (`versions/*/*/logs`), which never actually matches that shape — silently
+// finding zero channel-build logs ever, on any platform, the entire time this
+// source existed. Try both depths (cheap — glob() is a handful of readdirSync
+// calls) so a differently-shaped install elsewhere still resolves, deduping by
+// path so a hit on the 1-level pattern doesn't also list on the 2-level one.
 function* logRoots() {
     yield { dir: path.join(AGENTMUX, "logs"), source: "shared" };
     for (const p of glob(path.join(AGENTMUX, "dev", "*", "*", "logs")))
         yield { dir: p, source: "dev:" + p.split(path.sep).at(-3) };
-    for (const p of glob(path.join(AGENTMUX, "channels", "*", "versions", "*", "*", "logs")))
+    const seen = new Set();
+    for (const p of glob(path.join(AGENTMUX, "channels", "*", "versions", "*", "logs"))) {
+        if (seen.has(p)) continue; seen.add(p);
+        yield { dir: p, source: "channel:" + p.split(path.sep).at(-4) };
+    }
+    for (const p of glob(path.join(AGENTMUX, "channels", "*", "versions", "*", "*", "logs"))) {
+        if (seen.has(p)) continue; seen.add(p);
         yield { dir: p, source: "channel:" + p.split(path.sep).at(-5) };
+    }
 }
 
 // Tiny one-level-per-`*` glob (no deps). Only handles `*` path segments.
-function glob(pattern) {
+// Exported (pure, no I/O beyond readdirSync/existsSync — no network, no
+// process.exit) for muxlog.test.mjs, which pins the depth-matching bug fixed
+// in logRoots() below (an earlier version of the channels/ glob pattern had
+// one wildcard segment too many and could never match a real install).
+export function glob(pattern) {
     const parts = pattern.split(path.sep);
     let bases = [parts[0] === "" ? path.sep : parts[0]];
     for (let i = 1; i < parts.length; i++) {
@@ -656,4 +684,9 @@ function main() {
     follow(file, opt);
 }
 
-main();
+// Only run when executed directly (`node muxlog.mjs ...`) — importing this
+// module (muxlog.test.mjs imports `glob`) must not trigger a live tail loop /
+// `process.exit`. Same pattern as muxspect.mjs.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+    main();
+}

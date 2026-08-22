@@ -276,14 +276,33 @@ pub fn install_crash_guard() -> Option<crate::crash_monitor::CrashHandlerGuard> 
 pub fn init_logging() -> tracing_appender::non_blocking::WorkerGuard {
     use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
 
-    // Always log to ~/.agentmux/logs/ so all logs (host + sidecar) land in one
-    // discoverable directory. AGENTMUX_DATA_HOME controls the data dir, not logs.
+    // Prefer AGENTMUX_LOG_DIR (set by the launcher, per-instance-scoped —
+    // agentmux-common::DataPaths::to_env_vars) so srv's log file lands in the
+    // SAME per-channel directory agentmux-cef's host log already uses, and
+    // the same directory the shell-integration pointer lookups
+    // (bash.sh/zsh.sh/fish.fish/pwsh.ps1's `$AGENTMUX_LOG_DIR/current-<target>-
+    // v<version>.path`) already assume both host AND srv write into. Before
+    // this, srv unconditionally wrote to the SHARED ~/.agentmux/logs/ root
+    // regardless of channel — every instance at the same version interleaved
+    // into one file, with no way to attribute a line back to its instance
+    // (see docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md
+    // §2.2-2.3). Read inline (not via DataPaths::from_env(), which requires
+    // several other vars to all be present) to match this file's existing
+    // lightweight-env-var-read style for a single value (see the
+    // AGENTMUX_CHANNEL/AGENTMUX_HOME_OVERRIDE reads below) and to keep
+    // working the same as before when AGENTMUX_LOG_DIR isn't set (a
+    // standalone/no-launcher run).
     // Version is embedded in the filename for side-by-side coexistence.
     let version = env!("CARGO_PKG_VERSION");
-    let log_dir = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".agentmux")
-        .join("logs");
+    let log_dir = std::env::var_os("AGENTMUX_LOG_DIR")
+        .filter(|s| !s.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap_or_default()
+                .join(".agentmux")
+                .join("logs")
+        });
     let _ = std::fs::create_dir_all(&log_dir);
 
     // Delete log files older than 7 days to prevent unbounded growth.
