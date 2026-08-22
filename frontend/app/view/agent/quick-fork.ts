@@ -168,15 +168,20 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
         // "unbound" alternative wouldn't actually be a safer/different
         // option (binding never copies the credential; it's shared by
         // account_id regardless of who links to it).
-        let accountId = "";
-        try {
-            const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
-                agent_id: definitionId,
-            });
-            accountId = lastLinkedAccountId(links, provider?.id ?? canonicalForkProvider) ?? "";
-        } catch (e: any) {
-            Logger.warn("quick-fork", "failed to resolve source identity to inherit", { error: String(e) });
-        }
+        //
+        // A lookup failure here is NOT swallowed into "proceed unbound"
+        // (Codex's review of PR #2756): the backend's OAuth-class layer-3
+        // spawn gate (`identity/resolver/inject.rs`) blocks a definition
+        // with no resolved binding at all, unless it opted into ambient
+        // login — so an unresolved lookup would let `launchAgentDefinition`
+        // report success while the new agent can never actually spawn its
+        // first turn, silently contradicting quick-fork's own "always
+        // inherits identity" promise. Rethrown into the outer catch, which
+        // already handles cleanup + notification identically.
+        const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
+            agent_id: definitionId,
+        });
+        const accountId = lastLinkedAccountId(links, provider?.id ?? canonicalForkProvider) ?? "";
 
         // Non-Claude fallback note — only relevant when there was actually
         // a session to lose (an empty sessionId is already a fresh start
@@ -228,7 +233,7 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
             // wrong (Codex's second-round review of PR #2746).
             pushNotification({
                 icon: "fa-triangle-exclamation",
-                title: "Quick-fork failed",
+                title: "Quick Fork failed",
                 message: "The forked agent could not be launched.",
                 timestamp: new Date().toISOString(),
                 type: "error",
@@ -257,7 +262,7 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
         await cleanupPushedBlock();
         pushNotification({
             icon: "fa-triangle-exclamation",
-            title: "Quick-fork failed",
+            title: "Quick Fork failed",
             message: e instanceof Error ? e.message : String(e),
             timestamp: new Date().toISOString(),
             type: "error",

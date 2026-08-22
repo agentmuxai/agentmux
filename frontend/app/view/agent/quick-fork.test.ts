@@ -190,7 +190,7 @@ describe("quickForkAgent", () => {
         launchAgentDefinition.mockResolvedValue(false);
         await quickForkAgent(model);
         expect(pushNotification).toHaveBeenCalledWith(
-            expect.objectContaining({ type: "error", title: "Quick-fork failed" }),
+            expect.objectContaining({ type: "error", title: "Quick Fork failed" }),
         );
     });
 
@@ -225,7 +225,7 @@ describe("quickForkAgent", () => {
         expect(await quickForkAgent(model)).toBe(false);
         expect(closeBlockInStack).toHaveBeenCalledWith(expect.anything(), "node-1", "new-block-1");
         expect(pushNotification).toHaveBeenCalledWith(
-            expect.objectContaining({ type: "error", title: "Quick-fork failed" }),
+            expect.objectContaining({ type: "error", title: "Quick Fork failed" }),
         );
     });
 
@@ -286,12 +286,24 @@ describe("quickForkAgent", () => {
             expect(overrides.accountId).toBe("acct-canonical");
         });
 
-        it("falls back to empty (best-effort, not thrown) when ListAgentIdentitiesCommand rejects", async () => {
+        // Codex's review of PR #2756: silently proceeding unbound on a
+        // lookup failure would let launchAgentDefinition report success
+        // while the backend's OAuth layer-3 spawn gate blocks the new
+        // agent's actual first turn (no resolved binding at all) --
+        // contradicting quick-fork's own "always inherits identity"
+        // promise. Aborts the whole fork instead, same cleanup +
+        // notification path as any other mid-flight failure.
+        it("aborts the fork (cleans up the pushed block, notifies) when ListAgentIdentitiesCommand rejects, rather than proceeding unbound", async () => {
             listAgentIdentitiesCommand.mockRejectedValue(new Error("boom"));
             const result = await quickForkAgent(model);
-            expect(result).toBe(true);
-            const overrides = launchAgentDefinition.mock.calls[0][1];
-            expect(overrides.accountId).toBe("");
+            expect(result).toBe(false);
+            expect(launchAgentDefinition).not.toHaveBeenCalled();
+            // No block was ever created at this point — nothing to clean up.
+            expect(closeBlockInStack).not.toHaveBeenCalled();
+            expect(deleteBlock).not.toHaveBeenCalled();
+            expect(pushNotification).toHaveBeenCalledWith(
+                expect.objectContaining({ type: "error", title: "Quick Fork failed" }),
+            );
         });
 
         it("falls back to empty when the source has no linked identity at all", async () => {
