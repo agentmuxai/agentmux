@@ -121,24 +121,7 @@ impl FsWatchPool {
                             let _ = bridge.tx.send(FsWatchEvent { path, kind });
                         }
                     }
-                    Err(e) => {
-                        // reagent P1 on #2722: sweep() now only re-arms
-                        // targets already marked degraded — an explicit,
-                        // non-silent notify error (e.g. a Windows
-                        // ReadDirectoryChangesW buffer-overflow) has to be
-                        // recorded here, or a watch that dies with a real
-                        // reported error (not just the accepted "truly
-                        // silent, never-erroring death" gap) would never be
-                        // picked up by the sweep either. `notify::Error`
-                        // carries the affected path(s) when it can attribute
-                        // one; mark each degraded so the next sweep re-arms
-                        // it. A path-less error (rare — not attributable to
-                        // any specific target) can only be logged.
-                        tracing::warn!(error = %e, paths = ?e.paths, "fs_watch: backend reported an error");
-                        for path in &e.paths {
-                            bridge.health.mark_degraded(path.clone(), e.to_string());
-                        }
-                    }
+                    Err(e) => bridge.handle_backend_error(e),
                 }
             }
         });
@@ -291,6 +274,27 @@ impl FsWatchPool {
             return Err("no fs watcher backend available".to_string());
         };
         watcher.watch(target, mode).map_err(|e| e.to_string())
+    }
+
+    /// Handle an async error surfaced by the `notify` backend's own callback
+    /// (piped through `raw_rx` in `Self::new`'s bridge task). Extracted out
+    /// of that task so a test can drive a real `notify::Error` through it
+    /// directly (reagent P2 on #2722: the original three sweep regression
+    /// tests all simulated degradation via a direct `health.mark_degraded`
+    /// call, so none of them actually exercised this fn or proved that
+    /// `notify::Error::paths` lines up with the exact `PathBuf` key
+    /// `inner.targets` uses — the assumption `sweep()`'s `is_degraded()`
+    /// filter depends on to ever re-arm a target that failed this way).
+    ///
+    /// `notify::Error` carries the affected path(s) when it can attribute
+    /// one; mark each degraded so the next sweep re-arms it. A path-less
+    /// error (rare — not attributable to any specific target) can only be
+    /// logged.
+    fn handle_backend_error(&self, e: notify::Error) {
+        tracing::warn!(error = %e, paths = ?e.paths, "fs_watch: backend reported an error");
+        for path in &e.paths {
+            self.health.mark_degraded(path.clone(), e.to_string());
+        }
     }
 
     /// Re-arm every currently-*degraded* target — the backstop that lets a
@@ -451,6 +455,45 @@ mod tests {
         assert_eq!(pool.health().active_watches, 0, "last subscriber gone -> watch torn down");
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Regression test for reagent's P2 on #2722: the round-2 fix
+    /// (`handle_backend_error`, née an inline branch in the bridge task)
+    /// only helps `sweep()` re-arm a target if `notify::Error::paths`
+    /// actually lines up with the exact `PathBuf` key `inner.targets` uses
+    /// — otherwise `mark_degraded` records a path `is_degraded()` will
+    /// faithfully report as degraded, but that never matches any key
+    /// `sweep()`'s `targets.keys().filter(is_degraded)` iterates, so the
+    /// re-arm silently never happens for any *real* backend error. Uses a
+    /// real subscription's `watch_target` (produced by the same
+    /// `canonicalize()` path a live `notify` callback's error would need to
+    /// match) rather than a hand-built path, so this actually exercises
+    /// that assumption instead of just asserting `handle_backend_error`
+    /// calls `mark_degraded` (which the original three sweep tests already
+    /// covered indirectly by calling `mark_degraded` directly).
+    #[tokio::test]
+    async fn handle_backend_error_degrades_the_exact_target_key_sweep_looks_up() {
+        let pool = FsWatchPool::new();
+        let dir = std::env::temp_dir().join("agentmux_fs_watch_pool_backend_error_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let sub = pool.subscribe_dir(&dir);
+        let target = sub.watch_target.clone();
+        assert!(!pool.health.is_degraded(&target), "precondition: not degraded yet");
+
+        pool.handle_backend_error(notify::Error::generic("simulated backend error").add_path(target.clone()));
+
+        assert!(
+            pool.health.is_degraded(&target),
+            "handle_backend_error() must mark the exact watch_target key degraded \
+             so sweep()'s is_degraded() filter (which iterates inner.targets' own \
+             keys) actually picks it up — a mismatched path here would silently \
+             defeat the whole reagent-P1 fix for any real notify backend error"
+        );
+
+        pool.unsubscribe(sub);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

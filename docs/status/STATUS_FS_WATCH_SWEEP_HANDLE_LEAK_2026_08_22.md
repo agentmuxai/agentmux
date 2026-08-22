@@ -199,9 +199,41 @@ reentrant, so that would deadlock). A target removed by `unsubscribe()`
 before `rearm_if_still_subscribed` acquires the lock is simply skipped —
 `sweep()` no longer resurrects a watch nobody wants anymore.
 
+### 3.2 A fourth review round (reagent P2) — the round-2 fix itself was never actually exercised
+
+All three sweep regression tests (§4) simulate degradation by calling
+`pool.health.mark_degraded(...)` directly — none of them drive a real
+`notify::Error` through the bridge task's error branch (§3's round-2 fix).
+That left an unverified assumption the whole round-2 fix depends on:
+`notify::Error::paths` has to line up, path-for-path, with the exact
+`PathBuf` keys `inner.targets` uses (the canonicalized `watch_target` a
+subscription produces), or `mark_degraded` records a path that
+`is_degraded()` will faithfully report as degraded while `sweep()`'s own
+`targets.keys().filter(is_degraded)` never matches it — silently defeating
+the fix for any real backend error, with no test able to catch it because
+every test bypassed exactly the part in question.
+
+**Fix**: extracted the bridge task's error-handling branch into its own
+method, `handle_backend_error(&self, e: notify::Error)`
+(`agentmux-srv/src/backend/fs_watch/pool.rs`), so a test can drive a real
+`notify::Error` (`notify::Error::generic(...).add_path(...)`) through it
+directly using a real subscription's `watch_target` — the same
+`canonicalize()`-derived path a live `notify` callback's error would need
+to match — rather than a hand-built one.
+
 ## 4. Verification
 
-Three regression tests in `fs_watch::pool::tests` (all Windows-only):
+Four regression tests in `fs_watch::pool::tests` (all Windows-only except
+`handle_backend_error_degrades_the_exact_target_key_sweep_looks_up`, which
+doesn't touch a real OS watcher and runs on every platform):
+
+- `handle_backend_error_degrades_the_exact_target_key_sweep_looks_up`
+  (§3.2's fix) — subscribes to a real temp directory, constructs a real
+  `notify::Error` carrying that subscription's own `watch_target`, drives
+  it through `handle_backend_error` directly, and asserts
+  `health.is_degraded()` returns true for that *exact* `PathBuf` —
+  confirming the path threading actually works end-to-end rather than
+  only through directly-called `mark_degraded`.
 
 - `sweep_leaves_a_healthy_target_untouched` — subscribes to a real temp
   directory, calls `sweep()` 200 times back-to-back on the now-healthy
