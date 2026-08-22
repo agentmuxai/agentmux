@@ -21,8 +21,6 @@ export interface DropOutcome {
     results: Array<{ source: string; dest?: string; error?: string }>;
 }
 
-const DEFAULT_CONCURRENCY = 4;
-
 /**
  * Read the OS paths captured by the CEF DragHandler stash. Returns an empty
  * array if the stash has expired or wasn't populated (non-CEF host, drop
@@ -41,13 +39,19 @@ export async function consumeDragPaths(): Promise<string[]> {
  * Copy each `sourcePath` into `targetDir` with the configured concurrency.
  * Filename collisions are de-conflicted server-side (`report (1).csv` etc.);
  * the returned `dest` is the actual landed path.
+ *
+ * `opts.concurrency` absent/undefined means unlimited (all files copy at
+ * once) — matches the `dnd:concurrency` setting's documented contract
+ * ("absent means unlimited", schema/settings.json). Do not reintroduce a
+ * default cap here; the Settings UI's "leave blank for unlimited" copy
+ * depends on this actually being true (see PR #2744 review discussion).
  */
 export async function copyFilesToDir(
     sourcePaths: string[],
     targetDir: string,
     opts?: { concurrency?: number },
 ): Promise<DropOutcome> {
-    const concurrency = Math.max(1, opts?.concurrency ?? DEFAULT_CONCURRENCY);
+    const concurrency = Math.max(1, opts?.concurrency ?? sourcePaths.length);
     const results: DropOutcome["results"] = [];
 
     let nextIdx = 0;

@@ -82,6 +82,45 @@ export function AdvancedSection(): JSX.Element {
                     />
                 }
             />
+            <SectionHeader label="Drag & drop" />
+            <SettingRow
+                label="Enable file drop"
+                description="Drag files onto an agent pane to attach them"
+                control={
+                    <ToggleControl
+                        checked={(s()["dnd:enabled"] as boolean) ?? true}
+                        onChange={(v) => set("dnd:enabled", v)}
+                    />
+                }
+            />
+            <SettingRow
+                label="Insert reference token"
+                description="Also insert a file-reference token into the composer on drop, in addition to attaching the file"
+                control={
+                    <ToggleControl
+                        checked={(s()["dnd:agentinserttoken"] as boolean) ?? true}
+                        onChange={(v) => set("dnd:agentinserttoken", v)}
+                    />
+                }
+            />
+            <SettingRow
+                label="Max concurrent uploads"
+                description="Files uploaded at once on a multi-file drop. Leave blank for unlimited."
+                control={
+                    <input
+                        class="setting-number setting-number--wide"
+                        type="number" min={1}
+                        placeholder="unlimited"
+                        value={(s()["dnd:concurrency"] as number) ?? ""}
+                        onBlur={(e) => {
+                            const raw = e.currentTarget.value.trim();
+                            if (raw === "") { set("dnd:concurrency", null); return; }
+                            const v = parseInt(raw, 10);
+                            if (!isNaN(v) && v >= 1) set("dnd:concurrency", v);
+                        }}
+                    />
+                }
+            />
             <SectionHeader label="Environment" />
             <SettingRow
                 stacked
