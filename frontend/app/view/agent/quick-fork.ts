@@ -27,8 +27,8 @@
  * owner scope of its own.
  */
 
-import { getLayoutModelForStaticTab, pushBlockOntoStack } from "@/layout/index";
-import { pushNotification, WOS } from "@/app/store/global";
+import { closeBlockInStack, getLayoutModelForStaticTab, pushBlockOntoStack } from "@/layout/index";
+import { atoms, pushNotification, WOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { ObjectService } from "@/app/store/services";
@@ -56,6 +56,7 @@ export interface QuickForkModel {
         agent: AgentDefinition,
         overrides?: LaunchOverrides,
         targetBlockId?: string,
+        targetTabId?: string,
     ) => Promise<boolean>;
 }
 
@@ -104,6 +105,22 @@ export async function quickForkAgent(
     const node = layoutModel.getNodeByBlockId(model.blockId);
     if (!node) return false;
 
+    // Captured NOW, synchronously, before any `await` below — the pane
+    // being right-clickable at all guarantees its own tab is the active
+    // one at this exact instant. The several RPCs this function awaits
+    // (fork, identity lookup, pane.open, launch) can take a while; if the
+    // user switches window tabs mid-flight, `pane.open`'s `skip_placement`
+    // path still resolves its OWN `tab_id` server-side ("explicit tab_id
+    // wins, else split_reference_block_id's owner, else whichever tab is
+    // globally active" — `open_pane`, agentmux-srv/src/server/app_api/mod.rs)
+    // and `launchAgentDefinition`'s `ControllerResyncCommand` uses
+    // `atoms.staticTabId()` (fixed at window bootstrap, not necessarily
+    // this tab) when no override is given — either one would otherwise
+    // silently register the new block under the WRONG tab (Codex's review
+    // of this PR, two P1s). Passing this captured value through to both
+    // closes that race.
+    const ownerTabId = atoms.activeTabId();
+
     try {
         const forkedDef = await RpcApi.ForkAgentDefinitionCommand(TabRpcClient, {
             source_id: definitionId,
@@ -142,7 +159,7 @@ export async function quickForkAgent(
         // add a sibling into THIS pane's own stack.
         const paneOpenResult = (await TabRpcClient.rpcCall(
             "pane.open",
-            { view: "agent", skip_placement: true, meta: { view: "agent" } },
+            { view: "agent", skip_placement: true, tab_id: ownerTabId, meta: { view: "agent" } },
             {},
         )) as { block_id: string };
 
@@ -169,9 +186,16 @@ export async function quickForkAgent(
                 forkSession: true,
             },
             paneOpenResult.block_id,
+            ownerTabId,
         );
         if (!launched) {
             Logger.warn("quick-fork", "launchAgentDefinition reported failure", { blockId: paneOpenResult.block_id });
+            // Don't leave the user on a blank/broken pane-stack tab — pop it
+            // back out and delete the block, same as the "pane closed
+            // mid-flight" cleanup above (Codex P2 on this PR).
+            await closeBlockInStack(layoutModel, freshNode.id, paneOpenResult.block_id).catch((e: any) =>
+                Logger.warn("quick-fork", "failed to clean up the failed fork's block", { error: String(e) }),
+            );
         } else if (showNoHistoryFallback) {
             await RpcApi.SetMetaCommand(TabRpcClient, {
                 oref: WOS.makeORef("block", paneOpenResult.block_id),

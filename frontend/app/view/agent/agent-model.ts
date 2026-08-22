@@ -309,23 +309,33 @@ export class AgentViewModel implements ViewModel {
      *   `pane.open`'s `skip_placement`) pushed onto THIS SAME pane's own
      *   block-stack, rather than reconfiguring the current pane's own
      *   block. Every other caller omits this and gets today's behavior
-     *   unchanged. Always stays within the current window tab, so
-     *   `ControllerResyncCommand`'s `tabid` (below) never needs an
-     *   override — `atoms.staticTabId()` is already correct.
+     *   unchanged.
+     * @param targetTabId The tab id to pass to `ControllerResyncCommand`
+     *   instead of `atoms.staticTabId()` (fixed at window bootstrap, not
+     *   necessarily the tab this launch is actually happening in). Required
+     *   whenever the caller's own operation spans an `await` between
+     *   resolving "which tab am I in" and this call — `quickForkAgent`
+     *   captures the active tab id synchronously before its own several
+     *   RPCs, since the user could switch window tabs mid-flight otherwise,
+     *   silently registering the new block's controller under the wrong tab
+     *   (Codex's review of PR #2746, one of two P1s from the same root
+     *   cause). Every other caller omits this and gets today's
+     *   `atoms.staticTabId()` behavior unchanged.
      */
     /**
      * @returns Whether the launch actually succeeded. This method never
      *   THROWS (every failure path is caught and logged internally, by
      *   design — most callers fire-and-forget and don't want a launch
      *   failure to crash their UI), but callers that need to react to
-     *   failure (e.g. `quickForkAgent`, which must not push a
-     *   permanently-broken tab onto the pane's stack) can check the
+     *   failure (e.g. `quickForkAgent`, which must not leave a
+     *   permanently-broken tab on the pane's stack) can check the
      *   returned boolean instead of relying on a rejected promise.
      */
     launchAgentDefinition = async (
         agent: AgentDefinition,
         overrides?: LaunchOverrides,
         targetBlockId?: string,
+        targetTabId?: string,
     ): Promise<boolean> => {
         // See resolveEffectiveLaunchProvider's own doc comment
         // (agent-launch-env.ts) for why this must resolve through the
@@ -670,7 +680,7 @@ export class AgentViewModel implements ViewModel {
 
             // Create SubprocessController (no-op start — waits for first message)
             await RpcApi.ControllerResyncCommand(TabRpcClient, {
-                tabid: atoms.staticTabId(),
+                tabid: targetTabId ?? atoms.staticTabId(),
                 blockid: blockId,
                 forcerestart: true,
             });

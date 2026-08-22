@@ -9,13 +9,17 @@ import { quickForkAgent } from "./quick-fork";
 
 const getNodeByBlockId = vi.fn();
 const pushBlockOntoStack = vi.fn();
+const closeBlockInStack = vi.fn();
 vi.mock("@/layout/index", () => ({
     getLayoutModelForStaticTab: () => ({ getNodeByBlockId }),
     pushBlockOntoStack: (...args: unknown[]) => pushBlockOntoStack(...args),
+    closeBlockInStack: (...args: unknown[]) => closeBlockInStack(...args),
 }));
 
 const getObjectValue = vi.fn();
+const activeTabId = vi.fn();
 vi.mock("@/app/store/global", () => ({
+    atoms: { activeTabId: () => activeTabId() },
     pushNotification: vi.fn(),
     WOS: {
         getObjectValue: (...args: unknown[]) => getObjectValue(...args),
@@ -70,6 +74,7 @@ describe("quickForkAgent", () => {
         vi.clearAllMocks();
         getNodeByBlockId.mockReturnValue({ id: "node-1", data: { blockStack: ["source-block"] } });
         getObjectValue.mockReturnValue({ meta: { view: "agent", agentId: "source-def", "agent:sessionid": "sid-parent" } });
+        activeTabId.mockReturnValue("tab-1");
         forkAgentDefinitionCommand.mockResolvedValue({ id: "forked-def", name: "X #2", agent_type: "host" });
         rpcCall.mockResolvedValue({ block_id: "new-block-1" });
         launchAgentDefinition.mockResolvedValue(true);
@@ -106,22 +111,75 @@ describe("quickForkAgent", () => {
         // "+" new-tab button use — NOT a WorkspaceService.CreateTab call.
         expect(rpcCall).toHaveBeenCalledWith(
             "pane.open",
-            { view: "agent", skip_placement: true, meta: { view: "agent" } },
+            { view: "agent", skip_placement: true, tab_id: "tab-1", meta: { view: "agent" } },
             {},
         );
         expect(pushBlockOntoStack).toHaveBeenCalledWith(expect.anything(), "node-1", "new-block-1");
         expect(launchAgentDefinition).toHaveBeenCalledTimes(1);
-        const [forkedDef, overrides, targetBlockId] = launchAgentDefinition.mock.calls[0];
+        const [forkedDef, overrides, targetBlockId, targetTabId] = launchAgentDefinition.mock.calls[0];
         expect(forkedDef).toEqual({ id: "forked-def", name: "X #2", agent_type: "host" });
         expect(overrides.continueSessionId).toBe("sid-parent");
         expect(overrides.forkSession).toBe(true);
         expect(overrides.accountId).toBe("");
         expect(targetBlockId).toBe("new-block-1");
+        expect(targetTabId).toBe("tab-1");
         expect(result).toBe(true);
+    });
+
+    // Codex's review of PR #2746: the several RPCs this function awaits
+    // (fork, identity lookup, pane.open, launch) leave a window for the
+    // user to switch window tabs mid-flight. pane.open's skip_placement
+    // path and launchAgentDefinition's ControllerResyncCommand would
+    // otherwise each independently resolve "the active tab" at their own
+    // execution time (possibly AFTER the switch), silently registering the
+    // new block under the wrong tab. The active tab id must be captured
+    // ONCE, synchronously, before any await, and threaded through both.
+    it("captures the active tab id synchronously and passes the SAME value to both pane.open and launchAgentDefinition, even if the active tab changes mid-flight", async () => {
+        activeTabId.mockReturnValue("tab-original");
+        let resolveForkCommand: (v: unknown) => void;
+        forkAgentDefinitionCommand.mockReturnValue(
+            new Promise((resolve) => { resolveForkCommand = resolve; }),
+        );
+
+        const pending = quickForkAgent(model);
+        // Simulate the user switching window tabs while the fork RPC is
+        // still in flight — a later read of activeTabId() must NOT affect
+        // this in-progress call.
+        activeTabId.mockReturnValue("tab-switched-to");
+        resolveForkCommand!({ id: "forked-def", name: "X #2", agent_type: "host" });
+        await pending;
+
+        expect(rpcCall).toHaveBeenCalledWith(
+            "pane.open",
+            expect.objectContaining({ tab_id: "tab-original" }),
+            {},
+        );
+        const [, , , targetTabId] = launchAgentDefinition.mock.calls[0];
+        expect(targetTabId).toBe("tab-original");
     });
 
     it("returns the launch result even when launchAgentDefinition itself reports failure (best-effort logging, not a thrown error)", async () => {
         launchAgentDefinition.mockResolvedValue(false);
+        expect(await quickForkAgent(model)).toBe(false);
+    });
+
+    // Codex P2 on PR #2746: a failed launch previously left the new block
+    // pushed onto the stack and active, stranding the user on a blank/
+    // broken pane-stack tab with no visible way to recover.
+    it("pops the new block back out of the stack and returns false when launchAgentDefinition reports failure", async () => {
+        launchAgentDefinition.mockResolvedValue(false);
+        expect(await quickForkAgent(model)).toBe(false);
+        expect(closeBlockInStack).toHaveBeenCalledWith(expect.anything(), "node-1", "new-block-1");
+    });
+
+    it("does not push closeBlockInStack when the launch succeeds", async () => {
+        await quickForkAgent(model);
+        expect(closeBlockInStack).not.toHaveBeenCalled();
+    });
+
+    it("logs but does not throw when closeBlockInStack itself rejects on a failed launch", async () => {
+        launchAgentDefinition.mockResolvedValue(false);
+        closeBlockInStack.mockRejectedValue(new Error("boom"));
         expect(await quickForkAgent(model)).toBe(false);
     });
 
