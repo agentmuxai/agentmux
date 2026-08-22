@@ -218,4 +218,83 @@ impl Store {
             }
         }
     }
+
+    /// Propagate a fresh `session_id` onto the chain-root registry record
+    /// when `inst` is a **continuation** row (`parent_instance_id` set).
+    ///
+    /// `registry_upsert_if_named` above deliberately excludes continuation
+    /// rows from the mirror (see its filter comment — kept symmetric with
+    /// `instance_list_named`'s legacy dropdown mode so a resume chain
+    /// doesn't fragment into N registry files). That's correct for most
+    /// fields, but it leaves the registry's `session_id` — the ONE field a
+    /// cross-channel/cross-build reader consults to `--resume` this agent —
+    /// stuck at whatever the chain head had when first mirrored, never
+    /// updated by any later resume. Root cause of
+    /// docs/retro/retro-agent-resumed-9-day-stale-session-2026-08-22.md:
+    /// reopening the agent in a different channel silently resumed a
+    /// stale-but-valid session instead of the live one.
+    ///
+    /// Read-modify-write against the existing root record (never
+    /// constructs a partial one — `Registry::upsert`'s merge overwrites
+    /// every field present in the struct). Best-effort: logs and returns
+    /// on any lookup/write failure, since the SQLite write already
+    /// succeeded and remains authoritative.
+    pub(super) fn registry_propagate_continuation_session_id(&self, inst: &AgentInstance) {
+        if inst.parent_instance_id.is_empty() {
+            return; // chain head — already covered by registry_upsert_if_named.
+        }
+        let Some(reg) = self.shared_agent_registry() else {
+            return;
+        };
+        let root_id = self.find_chain_root_id(inst);
+        if root_id == inst.id {
+            return;
+        }
+        let mut rec = match reg.get(&root_id) {
+            Ok(Some(rec)) => rec,
+            Ok(None) => return, // root was never named/mirrored — nothing to update.
+            Err(e) => {
+                tracing::warn!(
+                    instance_id = %inst.id,
+                    root_id = %root_id,
+                    error = %e,
+                    "registry: failed to read chain-root record for session_id propagation"
+                );
+                return;
+            }
+        };
+        let fresh_session_id = empty_to_none(&inst.session_id);
+        if rec.data.session_id == fresh_session_id {
+            return; // already current — skip the write.
+        }
+        rec.data.session_id = fresh_session_id;
+        rec.schema_version = rec.data.min_schema_version().max(rec.schema_version);
+        if let Err(e) = reg.upsert(&rec) {
+            tracing::warn!(
+                instance_id = %inst.id,
+                root_id = %root_id,
+                error = %e,
+                "registry: failed to propagate continuation session_id to chain root"
+            );
+        }
+    }
+
+    /// Walk `parent_instance_id` upward from `inst` to find the chain
+    /// root — the row with no parent, or an orphan whose parent no longer
+    /// exists (mirrors `instance_list_named`'s recursive-CTE orphan-as-root
+    /// anchor). Bounded to guard against a corrupted cyclic chain; real
+    /// chains are a handful of user-driven resumes deep.
+    fn find_chain_root_id(&self, inst: &AgentInstance) -> String {
+        let mut current = inst.clone();
+        for _ in 0..64 {
+            if current.parent_instance_id.is_empty() {
+                return current.id;
+            }
+            match self.instance_get(&current.parent_instance_id) {
+                Ok(Some(parent)) => current = parent,
+                _ => return current.id, // orphan: parent missing/unreadable.
+            }
+        }
+        current.id
+    }
 }

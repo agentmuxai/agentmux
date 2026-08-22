@@ -52,6 +52,29 @@ fn upsert_update_replaces_known_fields() {
 }
 
 #[test]
+fn get_returns_none_for_missing_record() {
+    let (_t, reg) = fresh();
+    assert!(reg.get("nope").unwrap().is_none());
+}
+
+#[test]
+fn get_returns_existing_active_record() {
+    let (_t, reg) = fresh();
+    reg.upsert(&record("aaa", "demo", 100)).unwrap();
+    let got = reg.get("aaa").unwrap().unwrap();
+    assert_eq!(got.data.instance_name, "demo");
+    assert_eq!(got.data.last_launched_at_ms, 100);
+}
+
+#[test]
+fn get_does_not_see_retired_records() {
+    let (_t, reg) = fresh();
+    reg.upsert(&record("aaa", "demo", 100)).unwrap();
+    reg.retire("aaa").unwrap();
+    assert!(reg.get("aaa").unwrap().is_none());
+}
+
+#[test]
 fn retire_then_unretire_round_trips() {
     let (_t, reg) = fresh();
     reg.upsert(&record("aaa", "demo", 100)).unwrap();

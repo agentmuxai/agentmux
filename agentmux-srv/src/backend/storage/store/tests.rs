@@ -2287,6 +2287,115 @@
     }
 
     // ----------------------------------------------------------------
+    // Cross-channel resume: continuation session_id propagation
+    // (docs/retro/retro-agent-resumed-9-day-stale-session-2026-08-22.md)
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn continuation_session_id_propagates_to_chain_root_registry_record() {
+        // registry_upsert_if_named excludes continuation rows from the
+        // mirror entirely (avoids fragmenting one resume chain into N
+        // registry files). Without propagation, a resume's fresh
+        // session_id never reaches the registry record another
+        // channel/build actually reads for `--resume` — this is the exact
+        // bug from the retro. The head's OWN registry file must carry the
+        // continuation's session_id after the resume.
+        let (tmp, store, reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        let head = make_named_inst("inst-head", "demoResume", &agents_root);
+        store.instance_create(&head).unwrap();
+        assert_eq!(
+            reg.get("inst-head").unwrap().unwrap().data.session_id,
+            None,
+            "precondition: head created with no session_id"
+        );
+
+        let mut cont = make_named_inst("inst-cont", "demoResume", &agents_root);
+        cont.parent_instance_id = "inst-head".to_string();
+        cont.session_id = "sess-resumed-1".to_string();
+        store.instance_create(&cont).unwrap();
+
+        // The continuation itself must NOT get its own registry file
+        // (would fragment the picker into duplicate entries).
+        assert!(reg.get("inst-cont").unwrap().is_none());
+        assert_eq!(
+            reg.get("inst-head").unwrap().unwrap().data.session_id.as_deref(),
+            Some("sess-resumed-1"),
+            "head's registry record must reflect the continuation's session_id"
+        );
+
+        // A later session_id update on the SAME continuation row (e.g. a
+        // fresh capture mid-turn, not a brand new resume) must also
+        // propagate — this is the `instance_update_partial` path
+        // `persist_session_id` actually calls.
+        use crate::backend::storage::InstanceUpdate;
+        store
+            .instance_update_partial(
+                "inst-cont",
+                &InstanceUpdate { session_id: Some("sess-resumed-2".into()), ..Default::default() },
+            )
+            .unwrap();
+        assert_eq!(
+            reg.get("inst-head").unwrap().unwrap().data.session_id.as_deref(),
+            Some("sess-resumed-2"),
+            "a later session_id update on the continuation must also propagate to the head"
+        );
+    }
+
+    #[test]
+    fn continuation_session_id_propagation_walks_multi_hop_chain() {
+        // head -> cont1 -> cont2: cont2's session_id must land on the
+        // ORIGINAL head's registry record, not cont1's (cont1 never got
+        // its own registry file either).
+        let (tmp, store, reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        let head = make_named_inst("inst-head2", "demoChain", &agents_root);
+        store.instance_create(&head).unwrap();
+
+        let mut cont1 = make_named_inst("inst-cont1", "demoChain", &agents_root);
+        cont1.parent_instance_id = "inst-head2".to_string();
+        cont1.session_id = "sess-1".to_string();
+        store.instance_create(&cont1).unwrap();
+
+        let mut cont2 = make_named_inst("inst-cont2", "demoChain", &agents_root);
+        cont2.parent_instance_id = "inst-cont1".to_string();
+        cont2.session_id = "sess-2".to_string();
+        store.instance_create(&cont2).unwrap();
+
+        assert!(reg.get("inst-cont1").unwrap().is_none());
+        assert!(reg.get("inst-cont2").unwrap().is_none());
+        assert_eq!(
+            reg.get("inst-head2").unwrap().unwrap().data.session_id.as_deref(),
+            Some("sess-2"),
+            "multi-hop chain must resolve all the way to the original head"
+        );
+    }
+
+    #[test]
+    fn continuation_session_id_propagation_noop_when_root_never_mirrored() {
+        // Head row's own instance_name is empty (never mirrored — no
+        // registry file exists for it at all). Propagation must no-op,
+        // not error or create a stray file.
+        let (tmp, store, reg) = store_with_registry();
+        let agents_root = tmp.path().join("agents");
+
+        let mut head = make_named_inst("inst-unnamed-head", "demoUnnamed", &agents_root);
+        head.instance_name = String::new();
+        store.instance_create(&head).unwrap();
+        assert!(reg.get("inst-unnamed-head").unwrap().is_none());
+
+        let mut cont = make_named_inst("inst-unnamed-cont", "demoUnnamed", &agents_root);
+        cont.parent_instance_id = "inst-unnamed-head".to_string();
+        cont.session_id = "sess-orphan".to_string();
+        store.instance_create(&cont).unwrap();
+
+        assert!(reg.list_active().unwrap().is_empty(),
+            "no registry file should be created when the chain root was never named/mirrored");
+    }
+
+    // ----------------------------------------------------------------
     // Phase 3a — db_agents dual-write coverage
     // ----------------------------------------------------------------
 
