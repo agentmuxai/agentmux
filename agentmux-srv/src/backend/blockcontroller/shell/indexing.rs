@@ -33,6 +33,17 @@ pub(crate) fn rebuild_output_idx(
     const IDX: &str = "output.idx";
     const WIN: i64 = 1 << 20; // 1 MiB read window
 
+    // Start/duration logging (docs/status/STATUS_CROSS_CHANNEL_AGENT_OPEN_FULL_APP_FREEZE_2026_08_22.md
+    // §7.1): the prior completion-only log recorded a rebuild happened but
+    // not how long it ran for or when it started, so a live incident
+    // couldn't be checked for whether a rebuild's execution window actually
+    // overlapped some other stalled RPC — only that both happened "around
+    // the same time." Kept as a lasting diagnostic, not a one-off debug
+    // print — a slow rebuild is exactly the kind of thing worth being able
+    // to correlate after the fact, the same way `mem_attribution` already is.
+    let started = std::time::Instant::now();
+    tracing::info!(block_id = %block_id, covered = output_size, "output.idx rebuild starting");
+
     // Offsets buffer starts with the covered-size header.
     let mut buf: Vec<u8> = Vec::new();
     buf.extend_from_slice(&output_size.to_le_bytes());
@@ -87,7 +98,13 @@ pub(crate) fn rebuild_output_idx(
     }
     match fs.write_file(block_id, IDX, &buf) {
         Ok(()) => {
-            tracing::info!(block_id = %block_id, lines = line_count, covered = output_size, "output.idx rebuilt");
+            tracing::info!(
+                block_id = %block_id,
+                lines = line_count,
+                covered = output_size,
+                duration_ms = started.elapsed().as_millis() as u64,
+                "output.idx rebuilt"
+            );
             Some(line_count)
         }
         Err(e) => {
