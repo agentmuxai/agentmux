@@ -103,7 +103,8 @@ describe("quickForkAgent", () => {
         expect(forkAgentDefinitionCommand).not.toHaveBeenCalled();
     });
 
-    it("forks the definition, pushes the new block onto THIS pane's own stack (not a new window tab), and launches with history carryover + unbound identity", async () => {
+    it("forks the definition, pushes the new block onto THIS pane's own stack (not a new window tab), and launches with history carryover", async () => {
+        listAgentIdentitiesCommand.mockResolvedValue([{ account_id: "acct-1", provider: "claude" }]);
         const result = await quickForkAgent(model);
 
         expect(forkAgentDefinitionCommand).toHaveBeenCalledWith(
@@ -123,7 +124,9 @@ describe("quickForkAgent", () => {
         expect(forkedDef).toEqual({ id: "forked-def", name: "X #2", agent_type: "host" });
         expect(overrides.continueSessionId).toBe("sid-parent");
         expect(overrides.forkSession).toBe(true);
-        expect(overrides.accountId).toBe("");
+        // Always inherits the source's own bound account (spec §5, revised
+        // 2026-08-22) — no separate unbound/opt-in variant.
+        expect(overrides.accountId).toBe("acct-1");
         expect(targetBlockId).toBe("new-block-1");
         expect(targetTabId).toBe("tab-1");
         expect(result).toBe(true);
@@ -187,7 +190,7 @@ describe("quickForkAgent", () => {
         launchAgentDefinition.mockResolvedValue(false);
         await quickForkAgent(model);
         expect(pushNotification).toHaveBeenCalledWith(
-            expect.objectContaining({ type: "error", title: "Quick-fork failed" }),
+            expect.objectContaining({ type: "error", title: "Quick Fork failed" }),
         );
     });
 
@@ -222,7 +225,7 @@ describe("quickForkAgent", () => {
         expect(await quickForkAgent(model)).toBe(false);
         expect(closeBlockInStack).toHaveBeenCalledWith(expect.anything(), "node-1", "new-block-1");
         expect(pushNotification).toHaveBeenCalledWith(
-            expect.objectContaining({ type: "error", title: "Quick-fork failed" }),
+            expect.objectContaining({ type: "error", title: "Quick Fork failed" }),
         );
     });
 
@@ -247,10 +250,14 @@ describe("quickForkAgent", () => {
         expect(launchAgentDefinition).not.toHaveBeenCalled();
     });
 
-    describe("opts.inheritIdentity", () => {
-        it("resolves the source definition's bound account for the fork's own provider and passes it as accountId", async () => {
+    // Spec §5 (revised 2026-08-22): always inherit the source's own bound
+    // account — there's no separate "unbound" variant to opt out into,
+    // since binding never copies the underlying credential anyway (it's
+    // shared by account_id regardless of which agent links to it).
+    describe("identity inheritance", () => {
+        it("resolves the source definition's bound account for the fork's own provider and passes it as accountId, unconditionally", async () => {
             listAgentIdentitiesCommand.mockResolvedValue([{ account_id: "acct-1", provider: "claude" }]);
-            await quickForkAgent(model, { inheritIdentity: true });
+            await quickForkAgent(model);
             expect(listAgentIdentitiesCommand).toHaveBeenCalledWith(
                 expect.anything(),
                 { agent_id: "source-def" },
@@ -264,7 +271,7 @@ describe("quickForkAgent", () => {
                 { account_id: "github-acct", provider: "github" },
                 { account_id: "claude-acct", provider: "claude" },
             ]);
-            await quickForkAgent(model, { inheritIdentity: true });
+            await quickForkAgent(model);
             const overrides = launchAgentDefinition.mock.calls[0][1];
             expect(overrides.accountId).toBe("claude-acct");
         });
@@ -274,22 +281,36 @@ describe("quickForkAgent", () => {
                 { account_id: "acct-alias", provider: "claude-code" },
                 { account_id: "acct-canonical", provider: "claude" },
             ]);
-            await quickForkAgent(model, { inheritIdentity: true });
+            await quickForkAgent(model);
             const overrides = launchAgentDefinition.mock.calls[0][1];
             expect(overrides.accountId).toBe("acct-canonical");
         });
 
-        it("falls back to unbound (best-effort, not thrown) when ListAgentIdentitiesCommand rejects", async () => {
+        // Codex's review of PR #2756: silently proceeding unbound on a
+        // lookup failure would let launchAgentDefinition report success
+        // while the backend's OAuth layer-3 spawn gate blocks the new
+        // agent's actual first turn (no resolved binding at all) --
+        // contradicting quick-fork's own "always inherits identity"
+        // promise. Aborts the whole fork instead, same cleanup +
+        // notification path as any other mid-flight failure.
+        it("aborts the fork (cleans up the pushed block, notifies) when ListAgentIdentitiesCommand rejects, rather than proceeding unbound", async () => {
             listAgentIdentitiesCommand.mockRejectedValue(new Error("boom"));
-            const result = await quickForkAgent(model, { inheritIdentity: true });
-            expect(result).toBe(true);
-            const overrides = launchAgentDefinition.mock.calls[0][1];
-            expect(overrides.accountId).toBe("");
+            const result = await quickForkAgent(model);
+            expect(result).toBe(false);
+            expect(launchAgentDefinition).not.toHaveBeenCalled();
+            // No block was ever created at this point — nothing to clean up.
+            expect(closeBlockInStack).not.toHaveBeenCalled();
+            expect(deleteBlock).not.toHaveBeenCalled();
+            expect(pushNotification).toHaveBeenCalledWith(
+                expect.objectContaining({ type: "error", title: "Quick Fork failed" }),
+            );
         });
 
-        it("does not resolve identity at all when inheritIdentity is not set", async () => {
+        it("falls back to empty when the source has no linked identity at all", async () => {
+            listAgentIdentitiesCommand.mockResolvedValue([]);
             await quickForkAgent(model);
-            expect(listAgentIdentitiesCommand).not.toHaveBeenCalled();
+            const overrides = launchAgentDefinition.mock.calls[0][1];
+            expect(overrides.accountId).toBe("");
         });
     });
 

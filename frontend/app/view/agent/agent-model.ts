@@ -819,12 +819,8 @@ export class AgentViewModel implements ViewModel {
                 click: () => void openOrFocusHistoryTab({ currentBlockId: this.blockId, agentId }),
             },
             {
-                label: "Quick-fork",
+                label: "Quick Fork",
                 click: () => void quickForkAgent(this),
-            },
-            {
-                label: "Quick-fork (inherit identity)",
-                click: () => void quickForkAgent(this, { inheritIdentity: true }),
             },
             { type: "separator" },
         ];
