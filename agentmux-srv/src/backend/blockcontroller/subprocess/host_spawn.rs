@@ -18,8 +18,8 @@ use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::backend::blockcontroller::{
-    core, health::classify_output_line, publish_controller_status, session_stats, shell,
-    DEFAULT_GRACEFUL_KILL_WAIT_MS, STATUS_DONE, STATUS_RUNNING,
+    core, health::{classify_output_line, is_compact_boundary_frame}, publish_controller_status,
+    session_stats, shell, DEFAULT_GRACEFUL_KILL_WAIT_MS, STATUS_DONE, STATUS_RUNNING,
 };
 use crate::backend::wps;
 
@@ -315,6 +315,9 @@ impl SubprocessController {
                         // terminal `result` frame for failure classification.
                         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
                             let (meaningful, error) = classify_output_line(&parsed);
+                            if is_compact_boundary_frame(&parsed) {
+                                health_read.set_compacting(false);
+                            }
                             health_read.record_output(meaningful);
                             if let Some((class, msg)) = error {
                                 health_read.record_error(class, msg);

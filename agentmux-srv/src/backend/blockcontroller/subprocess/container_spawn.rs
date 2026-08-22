@@ -468,6 +468,9 @@ impl SubprocessController {
 
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
             let (meaningful, error) = health::classify_output_line(&parsed);
+            if health::is_compact_boundary_frame(&parsed) {
+                health.set_compacting(false);
+            }
             health.record_output(meaningful);
             if let Some((class, msg)) = error {
                 health.record_error(class, msg);

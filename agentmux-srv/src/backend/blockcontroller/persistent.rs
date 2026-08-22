@@ -32,7 +32,7 @@ use super::{
     STATUS_RUNNING,
 };
 use super::core;
-use super::health::{classify_output_line, HealthMonitor};
+use super::health::{classify_output_line, is_compact_boundary_frame, HealthMonitor};
 use super::persistent_resume;
 use crate::backend::eventbus::EventBus;
 use crate::backend::storage::filestore::FileStore;
@@ -2579,6 +2579,9 @@ impl PersistentSubprocessController {
                         }
                     }
                     let (meaningful, _error) = classify_output_line(&parsed);
+                    if is_compact_boundary_frame(&parsed) {
+                        health_read.set_compacting(false);
+                    }
                     health_read.record_output(meaningful);
                     let is_result_frame =
                         parsed.get("type").and_then(|v| v.as_str()) == Some("result");
@@ -3709,6 +3712,10 @@ impl Controller for PersistentSubprocessController {
 
     fn set_agent_id(&self, id: Option<String>) {
         *self.agent_id.lock().unwrap() = id;
+    }
+
+    fn health_monitor(&self) -> Option<Arc<HealthMonitor>> {
+        Some(Arc::clone(&self.health_monitor))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

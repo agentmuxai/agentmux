@@ -1237,6 +1237,130 @@ async fn wps_publish_omits_persist_defaults_to_zero() {
     assert_eq!(resp.status(), StatusCode::OK);
 }
 
+// ---- compaction_started -> HealthMonitor wiring (SPEC_UNRESPONSIVE_FALSE_POSITIVE_DURING_COMPACTION_2026_08_22) ----
+
+/// Minimal test double: the only thing that matters is `health_monitor()`
+/// returning a real, inspectable `HealthMonitor`. Every other `Controller`
+/// method is a harmless no-op, mirroring `blockcontroller::mod`'s own
+/// `CountingController` test-double pattern.
+struct CompactionTestController {
+    block_id: String,
+    health: std::sync::Arc<crate::backend::blockcontroller::health::HealthMonitor>,
+}
+
+impl crate::backend::blockcontroller::Controller for CompactionTestController {
+    fn start(
+        &self,
+        _: crate::backend::obj::MetaMapType,
+        _: Option<serde_json::Value>,
+        _: bool,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+    fn stop(&self, _graceful: bool, _new_status: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn get_runtime_status(&self) -> crate::backend::blockcontroller::BlockControllerRuntimeStatus {
+        crate::backend::blockcontroller::BlockControllerRuntimeStatus {
+            blockid: self.block_id.clone(),
+            ..Default::default()
+        }
+    }
+    fn send_input(
+        &self,
+        _: crate::backend::blockcontroller::BlockInputUnion,
+        _: Option<u64>,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+    fn controller_type(&self) -> &str {
+        "test-compaction"
+    }
+    fn block_id(&self) -> &str {
+        &self.block_id
+    }
+    fn health_monitor(&self) -> Option<std::sync::Arc<crate::backend::blockcontroller::health::HealthMonitor>> {
+        Some(std::sync::Arc::clone(&self.health))
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+/// A `compaction_started` publish for a block with a registered controller
+/// must reach that controller's own `HealthMonitor::set_compacting(true)` —
+/// the actual production wiring path (`agentmux-bashwrap precompact` → this
+/// HTTP endpoint → `get_controller` → `health_monitor()`), exercised
+/// end-to-end through the real router rather than calling `set_compacting`
+/// directly.
+#[tokio::test]
+async fn wps_publish_compaction_started_marks_the_target_blocks_health_monitor_compacting() {
+    let block_id = "test-compaction-wired-block";
+    let health = std::sync::Arc::new(crate::backend::blockcontroller::health::HealthMonitor::new(
+        block_id.to_string(),
+        None,
+        None,
+        None,
+    ));
+    let controller = std::sync::Arc::new(CompactionTestController {
+        block_id: block_id.to_string(),
+        health: health.clone(),
+    });
+    crate::backend::blockcontroller::register_controller(block_id, controller);
+
+    assert!(!health.is_compacting(), "precondition: not compacting yet");
+
+    let app = test_router();
+    let body = serde_json::json!({
+        "event": "compaction_started",
+        "scopes": [format!("block:{block_id}")],
+        "persist": 0,
+        "data": { "trigger": "auto", "sessionId": "sess-1", "startedAt": "2026-08-22T00:00:00Z" }
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/agentmux/wps/publish")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(health.is_compacting(), "compaction_started must reach the target block's HealthMonitor");
+
+    crate::backend::blockcontroller::delete_controller(block_id);
+}
+
+/// A `compaction_started` publish for a block with NO registered controller
+/// (unknown/stale block id) must still succeed — this is best-effort
+/// observability wiring, matching the `PreCompact` hook's own "never
+/// fail/delay the operation" contract; a missing controller must never turn
+/// into an HTTP error.
+#[tokio::test]
+async fn wps_publish_compaction_started_for_an_unregistered_block_is_a_harmless_no_op() {
+    // Deliberately never registered — assert_ne against the registry isn't
+    // needed; get_controller returning None is exactly the case under test.
+    let block_id = "test-compaction-unregistered-block-xyz";
+    assert!(crate::backend::blockcontroller::get_controller(block_id).is_none());
+
+    let app = test_router();
+    let body = serde_json::json!({
+        "event": "compaction_started",
+        "scopes": [format!("block:{block_id}")],
+        "persist": 0,
+        "data": { "trigger": "manual", "sessionId": "", "startedAt": "2026-08-22T00:00:00Z" }
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/agentmux/wps/publish")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "an unregistered block id must not fail the publish");
+}
+
 // ---- First-class agent API (SPEC_AGENT_API_FIRST_CLASS_SURFACE) ----
 
 /// `GET /api/v1/self` resolves the seeded agent block to its tab / window /
