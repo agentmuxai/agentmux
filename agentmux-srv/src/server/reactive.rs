@@ -880,9 +880,20 @@ pub(super) async fn handle_reactive_register(
             // the block's own `cmd:env`, not just guess a path convention.
             let block = state.wstore.get::<crate::backend::obj::Block>(&req.block_id).ok().flatten();
             let empty_meta = crate::backend::obj::MetaMapType::new();
+            // Identity-bound agents' real CLAUDE_CONFIG_DIR is never the
+            // stale `cmd:env` snapshot below — see
+            // `resolve_claude_config_dir`'s doc comment and
+            // SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22.md.
+            let bound_dir = crate::identity::resolver::resolve_bound_oauth_config_dir(
+                &state.wstore,
+                &state.id_store,
+                &state.identity_store,
+                &req.block_id,
+            );
             let config_dir = subagent_watcher::resolve_claude_config_dir(
                 block.as_ref().map(|b| &b.meta).unwrap_or(&empty_meta),
                 &req.agent_id,
+                bound_dir,
             );
             if let Some(config_dir) = config_dir {
                 state.subagent_watcher.watch_agent(&req.agent_id, &req.block_id, config_dir.clone());

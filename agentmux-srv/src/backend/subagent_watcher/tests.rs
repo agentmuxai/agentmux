@@ -802,14 +802,14 @@ fn resolve_claude_config_dir_prefers_cmd_env_over_the_legacy_guess() {
         serde_json::json!({ "CLAUDE_CONFIG_DIR": "/agentmux/shared/providers/claude" }),
     );
 
-    let resolved = resolve_claude_config_dir(&meta, "some-agent").unwrap();
+    let resolved = resolve_claude_config_dir(&meta, "some-agent", None).unwrap();
     assert_eq!(resolved, PathBuf::from("/agentmux/shared/providers/claude"));
 }
 
 #[test]
 fn resolve_claude_config_dir_falls_back_to_the_legacy_guess_when_cmd_env_is_absent() {
     let meta = crate::backend::obj::MetaMapType::new();
-    let resolved = resolve_claude_config_dir(&meta, "SomeAgent").unwrap();
+    let resolved = resolve_claude_config_dir(&meta, "SomeAgent", None).unwrap();
     assert_eq!(resolved, derive_claude_config_dir("SomeAgent").unwrap());
 }
 
@@ -820,8 +820,26 @@ fn resolve_claude_config_dir_falls_back_when_cmd_env_lacks_the_key() {
     // non-Claude provider, or a race before the key is written).
     meta.insert("cmd:env".to_string(), serde_json::json!({ "OTHER_VAR": "x" }));
 
-    let resolved = resolve_claude_config_dir(&meta, "SomeAgent").unwrap();
+    let resolved = resolve_claude_config_dir(&meta, "SomeAgent", None).unwrap();
     assert_eq!(resolved, derive_claude_config_dir("SomeAgent").unwrap());
+}
+
+// SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22.md: for an
+// identity-bound agent, `cmd:env.CLAUDE_CONFIG_DIR` is a stale launch-time
+// snapshot of the GENERIC shared-provider dir — the real, identity-bound
+// dir (what `resolve_bound_oauth_config_dir` returns) must win whenever
+// it's available, regardless of what `cmd:env` says.
+#[test]
+fn resolve_claude_config_dir_prefers_the_identity_bound_dir_over_stale_cmd_env() {
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    meta.insert(
+        "cmd:env".to_string(),
+        serde_json::json!({ "CLAUDE_CONFIG_DIR": "/agentmux/shared/providers/claude" }),
+    );
+
+    let bound = PathBuf::from("/agentmux/shared/identities/acct-1/claude");
+    let resolved = resolve_claude_config_dir(&meta, "some-agent", Some(bound.clone())).unwrap();
+    assert_eq!(resolved, bound);
 }
 
 #[tokio::test]

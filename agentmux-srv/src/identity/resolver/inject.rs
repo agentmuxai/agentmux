@@ -17,6 +17,7 @@
 //! below.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -249,6 +250,51 @@ pub fn resolve_account(
         return Ok(Some((a, identity_store.clone())));
     }
     Ok(None)
+}
+
+/// Read-only lookup of a block's identity-bound OAuth config dir — the same
+/// directory `inject_identity_env_with_broker`'s OAuth branch would inject,
+/// without any of that function's side effects (no token-expiry probe, no
+/// account-status upsert, no `identityaccounts:changed` publish, no
+/// `SpawnGateError` on failure). For a background caller that only needs to
+/// know WHERE to look (e.g. `subagent_watcher` deciding which directory to
+/// watch at agent registration, not spawn) rather than what to inject.
+///
+/// Deliberately does not call `inject_identity_env`/`inject_identity_env_with_broker`:
+/// those also resolve API-key-class secrets into the caller's env map (a
+/// leak risk for a caller that only wants a path) and perform real writes —
+/// none of which belong on every registration, only on an actual spawn/turn.
+/// See `SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22.md`.
+///
+/// Returns `None` (never an error) for: no instance for this block, no
+/// definition, a non-OAuth-class (or unrecognized) provider, no direct
+/// binding for that provider, an account row that doesn't resolve, or a
+/// `secret_ref` that isn't `OAuthConfigDir` — every one of these is exactly
+/// "nothing bound, fall back to the old behavior" for a caller that isn't
+/// gating a spawn.
+pub fn resolve_bound_oauth_config_dir(
+    wstore: &Arc<Store>,
+    id_store: &Arc<Store>,
+    identity_store: &Arc<Store>,
+    block_id: &str,
+) -> Option<PathBuf> {
+    let instance = wstore.instance_get_active_for_block(block_id).ok().flatten()?;
+    let def = wstore.agent_def_get(&instance.definition_id).ok().flatten()?;
+    let effective_provider = id_store.resolve_effective_provider_id(&def);
+    let canonical_provider = resolve_provider_alias(&effective_provider).to_string();
+    if !matches!(provider_class(&canonical_provider), Some(ProviderClass::OAuth { .. })) {
+        return None;
+    }
+
+    let bindings = resolve_bindings_for_instance(identity_store, &instance, None);
+    let binding = bindings
+        .iter()
+        .find(|b| resolve_provider_alias(&b.provider) == canonical_provider)?;
+    let (account, _store) = resolve_account(id_store, identity_store, &binding.account_id).ok().flatten()?;
+    match account.secret_ref {
+        SecretRef::OAuthConfigDir { dir } => Some(PathBuf::from(dir)),
+        _ => None,
+    }
 }
 
 /// **Before touching `gate_oauth_failure` / `inject_identity_env_with_broker`:**
@@ -2395,5 +2441,146 @@ mod tests {
             Some("/var/agentmux/identities/id-drift/claude"),
             "the claude binding must actually inject, proving the gate expected claude (from the bundle), not codex (from the drifted column)"
         );
+    }
+
+    fn make_agent_def_with_provider(id: &str, provider: &str) -> crate::backend::storage::store::AgentDefinition {
+        crate::backend::storage::store::AgentDefinition {
+            id: id.to_string(),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: "✦".to_string(),
+            provider: provider.to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            memory_id: String::new(),
+        }
+    }
+
+    // SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22.md
+    #[cfg(debug_assertions)]
+    #[test]
+    fn resolve_bound_oauth_config_dir_resolves_the_identity_bound_dir() {
+        let store = make_store();
+        let mut def = make_agent_def_with_provider("def-1", "claude");
+        store.agent_def_insert(&mut def).unwrap();
+
+        let claude = make_account(
+            "acct-claude",
+            "claude",
+            SecretRef::OAuthConfigDir {
+                dir: "/var/agentmux/identities/id-bound/claude".to_string(),
+            },
+        );
+        store.identity_upsert(&claude).unwrap();
+        store.agent_identity_link("def-1", "acct-claude", "claude").unwrap();
+
+        insert_block_for_agent(&store, "block-bound", "def-1");
+        let inst = make_instance("block-bound", "id-bound");
+        store.instance_create(&inst).unwrap();
+
+        let resolved = resolve_bound_oauth_config_dir(&store, &store, &store, "block-bound");
+        assert_eq!(
+            resolved,
+            Some(std::path::PathBuf::from("/var/agentmux/identities/id-bound/claude")),
+        );
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn resolve_bound_oauth_config_dir_none_when_no_instance_for_block() {
+        let store = make_store();
+        let resolved = resolve_bound_oauth_config_dir(&store, &store, &store, "no-such-block");
+        assert_eq!(resolved, None);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn resolve_bound_oauth_config_dir_none_for_api_key_class_provider() {
+        let store = make_store();
+        // github is API-key class, not OAuth — never resolves to a config dir.
+        let mut def = make_agent_def_with_provider("def-1", "github");
+        store.agent_def_insert(&mut def).unwrap();
+
+        let github = make_account(
+            "acct-gh",
+            "github",
+            SecretRef::PlaintextDev { plaintext_dev: "ghp_x".to_string() },
+        );
+        store.identity_upsert(&github).unwrap();
+        store.agent_identity_link("def-1", "acct-gh", "github").unwrap();
+
+        insert_block_for_agent(&store, "block-gh", "def-1");
+        let inst = make_instance("block-gh", "id-gh");
+        store.instance_create(&inst).unwrap();
+
+        let resolved = resolve_bound_oauth_config_dir(&store, &store, &store, "block-gh");
+        assert_eq!(resolved, None);
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn resolve_bound_oauth_config_dir_none_when_oauth_provider_has_no_binding() {
+        let store = make_store();
+        let mut def = make_agent_def_with_provider("def-1", "claude");
+        store.agent_def_insert(&mut def).unwrap();
+        // No account, no link — an ambient/unbound agent.
+
+        insert_block_for_agent(&store, "block-unbound", "def-1");
+        let inst = make_instance("block-unbound", "");
+        store.instance_create(&inst).unwrap();
+
+        let resolved = resolve_bound_oauth_config_dir(&store, &store, &store, "block-unbound");
+        assert_eq!(resolved, None, "ambient/unbound agents must fall through, not error");
+    }
+
+    // Proves the "no side effects" claim in the doc comment, not just states
+    // it: an oauth probe on the real path would flip this account's status
+    // from "unknown" (probe_oauth_status sees no token file at this
+    // nonexistent dir and returns needs_reauth) — resolve_bound_oauth_config_dir
+    // must leave it untouched since it never calls the probe/upsert at all.
+    #[cfg(debug_assertions)]
+    #[test]
+    fn resolve_bound_oauth_config_dir_does_not_mutate_account_status() {
+        let store = make_store();
+        let mut def = make_agent_def_with_provider("def-1", "claude");
+        store.agent_def_insert(&mut def).unwrap();
+
+        let claude = make_account(
+            "acct-claude",
+            "claude",
+            SecretRef::OAuthConfigDir { dir: "/nonexistent/dir/for/probe".to_string() },
+        );
+        store.identity_upsert(&claude).unwrap();
+        store.agent_identity_link("def-1", "acct-claude", "claude").unwrap();
+
+        insert_block_for_agent(&store, "block-status", "def-1");
+        let inst = make_instance("block-status", "id-status");
+        store.instance_create(&inst).unwrap();
+
+        let _ = resolve_bound_oauth_config_dir(&store, &store, &store, "block-status");
+
+        let reread = store.identity_get("acct-claude").unwrap().unwrap();
+        assert_eq!(reread.status, "unknown", "status must be untouched — no probe/upsert side effect");
     }
 }

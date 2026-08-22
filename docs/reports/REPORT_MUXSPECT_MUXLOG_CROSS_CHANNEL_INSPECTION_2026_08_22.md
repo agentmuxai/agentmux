@@ -152,17 +152,26 @@ Roughly in the order that unblocks the most downstream value:
    report a single verdict (written → watched → registered → visible, or
    the exact step where it stopped).
 
-## 4. Open — the original bug
+## 4. Resolved — the original bug
 
-None of the above resolves *why* the test dispatch never appeared in Swarm.
-What's confirmed: the subagent's `agent-ab786c0dbcfa0a121.jsonl` +
-`.meta.json` were written correctly, at the right path, at the right time;
-the backend's file watcher is structurally configured to catch exactly that
-file pattern; and no srv log file located so far (including the
-freshest-available `v0.55.19` one) contains any line mentioning that
-dispatch id or this session's block id. The `session_belongs_to_block` gate
-in the event-processing pipeline (`subagent_watcher/mod.rs`) remains the
-leading suspect for a silent drop, but this could not be confirmed with the
-tooling available today — which is itself the point of this report. Once
-even §3.1 or §3.3 lands, re-running this same repro should give a
-conclusive answer instead of another round of manual log archaeology.
+**Root-caused 2026-08-22, once §3.1/§3.3/§3.6 landed, exactly as predicted
+above.** `session_belongs_to_block` was NOT the cause — that gate never even
+ran. `muxlog ls`'s LIVE column plus `muxlog swarm -d <id>` (both from this
+report) made it possible to confirm, on a real live dispatch, that
+`subagent_watcher`'s own "watching for subagent JSONL files" event fired
+exactly once, at agent registration, against
+`~/.agentmux/shared/providers/claude/projects` — while the dispatch's real
+transcript was written under
+`~/.agentmux/shared/identities/<uuid>/claude/projects/...` (the agent's
+actual bound Armory identity). Two different directories; the watcher could
+never have seen the write no matter how long it waited.
+
+The cause: `subagent_watcher::resolve_claude_config_dir` trusted the
+block's persisted `cmd:env.CLAUDE_CONFIG_DIR` — a write-once, launch-time
+snapshot of the *generic* shared-provider dir. `SPEC_PROVIDER_ISOLATION_2026_06_20.md`
+§4.3 already documented that this snapshot goes stale for any
+identity-bound agent, and re-resolves the REAL value on every turn via a
+separate code path (`inject_identity_env_with_broker`) that never writes
+back into `cmd:env`. `subagent_watcher` was added later and never joined
+that re-resolution. Fixed in
+`docs/specs/SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22.md`.
