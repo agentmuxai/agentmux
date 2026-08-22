@@ -283,16 +283,21 @@ dev` + clicking through the feature) — typecheck/unit-test coverage only.
 
 **Deviations from the plan above, decided during implementation:**
 
-- **No live favicon thumbnails in the menu.** `FlyoutMenu`'s default item
-  renderer only supports a FontAwesome icon-name string (`item.icon` is
-  typed `string | JSX.Element`, but `flyoutmenu.tsx`'s render only ever
-  treats it as a string — no existing consumer uses the `JSX.Element`
-  branch). Special-casing a real `<img>` favicon via `renderMenuItem` would
-  be new, unprecedented surface in a shared component for a cosmetic
-  upgrade — every bookmark row instead shows a plain `fa-bookmark` icon,
-  matching how every other menu in the app already renders. `favicon_url`
-  is still captured and stored on each record (harmless, forward-
-  compatible) — just not rendered as an image in v1.
+- **Live favicon thumbnails, added as a same-day follow-up (PR after
+  #2730).** Originally deferred — `FlyoutMenu`'s default item renderer only
+  supports a FontAwesome icon-name string, and `item.icon`'s `JSX.Element`
+  branch (`custom.d.ts:465`) had no existing consumer to confirm the
+  pattern. Revisited on request: `browser-nav-bar.tsx` now passes a
+  `renderMenuItem` override on this menu's `<FlyoutMenu>` — it renders
+  `item.icon` as-is when it's a `JSX.Element` (a small `<BookmarkFavicon>`
+  component wrapping the real `<img src={favicon_url}>`, falling back to a
+  plain globe icon on a missing URL or an `onError` load failure) and falls
+  back to the original `fa-solid fa-fw fa-${icon}` rendering for string
+  icons (the pinned toggle row, loading/empty-state rows). Scoped
+  deliberately to only this menu's icon slot — `checked`/`shortcut`/
+  `subItems` aren't replicated since nothing here uses them yet. Live-
+  verified via CDP against a running `task dev` instance: a real bookmark
+  row renders `<img src="https://agentmux.ai/favicon.ico">`.
 - **No per-row delete for a bookmark other than the current page.**
   `MenuItem` has no secondary-action/trailing-button slot, and nesting a
   submenu (`subItems: [Open, Remove]`) per row would replace "click to
