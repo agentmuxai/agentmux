@@ -2212,9 +2212,9 @@ async fn test_handler_inject_wan_trust_is_always_network_claimed_regardless_of_s
 // incidentally through full `Handler::inject_message` calls. Added because a code
 // review of the keyword lists (SENSITIVE_WHOLE_WORD_KEYWORDS /
 // SENSITIVE_SUBSTRING_KEYWORDS, sanitize.rs) found no existing direct unit
-// coverage of the boundary logic itself — see
-// docs/specs/RESEARCH_EVALS_INTEGRATION_2026_08_22.md for the broader context
-// that motivated auditing this path.
+// coverage of the boundary logic itself — see the "Evals for AgentMux" research
+// discussion (github.com/agentmuxai/agentmux/discussions/2716) for the broader
+// context that motivated auditing this path.
 
 #[test]
 fn test_keyword_match_whole_word_positive_cases() {
