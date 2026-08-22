@@ -269,20 +269,20 @@ pub async fn handle_muxspect_find(
     let own_channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
 
     // Host tier — no network, same source handle_muxspect_list/
-    // handle_muxspect_conversations already use.
+    // handle_muxspect_conversations already use. list_agents() (mutex lock +
+    // full clone of the agent map) is fetched ONCE here, not once per block
+    // inside the loop below — reagent P2 on PR #2745 caught the original
+    // version paying that cost per block, unnecessary repeated
+    // locking/cloning that scaled with block count, matching how
+    // handle_muxspect_conversations's own host tier already does it.
+    let agents = state.reactive_handler.list_agents();
     for status in state.process_broker.list() {
         let block_matches = q.block_id.as_deref().is_some_and(|b| b == status.block_id);
-        let agent_matches = q
-            .agent
-            .as_deref()
-            .and_then(|name| {
-                state
-                    .reactive_handler
-                    .list_agents()
-                    .into_iter()
-                    .find(|r| r.block_id == status.block_id && r.agent_id.eq_ignore_ascii_case(name))
-            })
-            .is_some();
+        let agent_matches = q.agent.as_deref().is_some_and(|name| {
+            agents
+                .iter()
+                .any(|r| r.block_id == status.block_id && r.agent_id.eq_ignore_ascii_case(name))
+        });
         if !block_matches && !agent_matches {
             continue;
         }
