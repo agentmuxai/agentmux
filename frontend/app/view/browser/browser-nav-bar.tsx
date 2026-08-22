@@ -56,6 +56,29 @@ export function BrowserNavBar(props: {
         if (modelUrl !== addressBar()) setAddressBar(modelUrl);
     });
 
+    // Shared tail of "actually go somewhere": update model + address-bar
+    // state AND drive the real native CEF pane (via IPC when the pane
+    // already exists, or by creating it for the first time). Extracted so
+    // the bookmark-click path (below) can't drift from the address-bar
+    // submit path the way it did before this was pulled out — a bookmark
+    // click used to call only `model.navigate()`, which updates reducer
+    // state/block-meta but never told the actual CEF pane to navigate, so
+    // the address bar changed while the displayed page didn't (reagentx/
+    // Codex review, PR #2730).
+    const navigateTo = (url: string) => {
+        model.navigate(url);
+        setAddressBar(url);
+
+        if (props.paneCreated()) {
+            invokeCommand("browser_pane_navigate", {
+                block_id: model.blockId,
+                url,
+            }).catch((e: any) => model.onError(`Navigation failed: ${e}`));
+        } else {
+            props.createPane(url);
+        }
+    };
+
     const handleNavigate = () => {
         const url = addressBar().trim();
         diag(`input-submit value=${JSON.stringify(url)}`);
@@ -70,17 +93,7 @@ export function BrowserNavBar(props: {
             }
         }
 
-        model.navigate(normalized);
-        setAddressBar(normalized);
-
-        if (props.paneCreated()) {
-            invokeCommand("browser_pane_navigate", {
-                block_id: model.blockId,
-                url: normalized,
-            }).catch((e: any) => model.onError(`Navigation failed: ${e}`));
-        } else {
-            props.createPane(normalized);
-        }
+        navigateTo(normalized);
     };
 
     const handleAddressKeyDown = (e: KeyboardEvent) => {
@@ -219,9 +232,7 @@ export function BrowserNavBar(props: {
                 items.push({
                     label: b.title || b.url,
                     icon: "bookmark",
-                    onClick: () => {
-                        model.navigate(b.url);
-                    },
+                    onClick: () => navigateTo(b.url),
                 });
             }
         } else if (items.length > 0) {
