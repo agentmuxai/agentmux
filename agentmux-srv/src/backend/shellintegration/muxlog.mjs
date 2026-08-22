@@ -118,9 +118,21 @@ const RESET = "\x1b[0m";
 const DIM = "\x1b[2m";
 
 // An NDJSON log line → one compact human line (or null if filtered out).
-function renderLine(raw, opt) {
+// Exported (pure — no I/O) for muxlog.test.mjs, which pins Ext 6's
+// `-d/--dispatch` raw-line-substring behavior directly.
+export function renderLine(raw, opt) {
     const t = raw.trim();
     if (!t) return null;
+    // Ext 6: `--dispatch <id>` — checked on the RAW line text, before JSON
+    // parsing and regardless of it, because a dispatch/subagent id can show
+    // up either in the rendered message OR as a bare structured field value
+    // (`dispatch_id`, `session_id`, `agent_id`, ... — the exact field name
+    // varies per call site, see subagent_watcher.rs's own tracing calls).
+    // `--grep` only ever matches the message text (phases' own doc comment
+    // above), which would silently miss a field-only occurrence; a plain
+    // substring check on the whole raw line catches both uniformly without
+    // needing to enumerate every field name that might carry an id.
+    if (opt.dispatch && !t.includes(opt.dispatch)) return null;
     let j;
     try {
         j = JSON.parse(t);
@@ -181,13 +193,18 @@ function readForDisplay(file, whole) {
 
 // Filter FIRST, then keep the last n survivors — so `muxlog bridge`/`grep`
 // returns the last n *matching* lines, not "the last n lines, if any match".
-function printLastLines(file, n, opt, whole = false) {
+// Returns the total match count (before the -n cap) — Ext 6's `swarm
+// --dispatch` verdict needs to say "0 matches" precisely, not just print
+// nothing and leave the caller to guess whether that means zero matches or
+// a resolution/read failure upstream.
+export function printLastLines(file, n, opt, whole = false) {
     const rendered = [];
     for (const l of readForDisplay(file, whole).split("\n")) {
         const r = renderLine(l, opt); if (r != null) rendered.push(r);
     }
     const out = n > 0 ? rendered.slice(-n) : rendered;
     for (const r of out) process.stdout.write(r + "\n");
+    return rendered.length;
 }
 
 function follow(file, opt) {
@@ -350,6 +367,7 @@ function parse(argv) {
         else if (a === "-v" || a === "--verbose") opt.verbose = true;
         else if (a === "-n") opt.n = parseInt(argv[++i], 10) || 200;
         else if (a === "-i" || a === "--instance") opt.instance = argv[++i];
+        else if (a === "-d" || a === "--dispatch") opt.dispatch = argv[++i];
         else if (a === "--level") { const v = argv[++i]; if (v) opt.level = v.toLowerCase().split(","); }
         else if (a === "--target") opt.target = argv[++i];
         else if (a === "--exclude-target") opt.excludeTarget = argv[++i];
@@ -681,11 +699,13 @@ const HELP = `muxlog — AgentMux log viewer
   muxlog errors                      ERROR/WARN across host+srv (active instance)
   muxlog bridge                      startup-handshake trace (debug reconnect loops)
   muxlog swarm                       subagent/swarm lifecycle trace (spawn/name/status, debug duplicate groups)
+  muxlog swarm -d <dispatch_id>      same, filtered to one dispatch + a match-count verdict — "did this ever get processed here"
   muxlog auth                        provider auth/identity trace (login/OAuth wiring/unlink/account removal, credstate snapshots)
   muxlog phases [<block-id>]         merged turn-phase timeline (host [wave-turn] + srv [health]) for one pane — defaults to $AGENTMUX_BLOCKID
 
 Options (any position):
   -i <substr>   pick the instance whose log path/branch/version matches <substr>
+  -d <id>       only lines mentioning <id> anywhere in the raw line (message OR any structured field) — combine with 'swarm' for a per-dispatch verdict
   -n <N>        history lines before following (default 200)
   -a            include agent-transcript noise (excluded by default)
   --grep <re>   filter on the message field only (not the whole JSON line)
@@ -729,7 +749,30 @@ function main() {
         opt.target = opt.target || "subagent_watcher";
         const f = resolveFile("srv", opt);
         console.log(`=== swarm trace: ${f} ===`);
-        printLastLines(f, opt.n, opt, true);
+        const matched = printLastLines(f, opt.n, opt, true);
+        // Ext 6 of docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md:
+        // `-d/--dispatch <id>` productizes the manual correlation this
+        // report's whole investigation had to do by hand — "did
+        // subagent_watcher ever log anything about this specific dispatch,
+        // on the instance I'm actually resolved to." A silent 0 matches
+        // looks identical to "the recipe found nothing to print" for any
+        // other filter; --dispatch gets an explicit verdict line instead,
+        // since "never appeared in Swarm" is exactly the symptom a human
+        // reaches for this flag to diagnose, and an empty result IS the
+        // answer, not an accident.
+        if (opt.dispatch) {
+            if (matched === 0) {
+                console.log(
+                    `\nverdict: 0 lines mention '${opt.dispatch}' in ${f}\n` +
+                    `  — either it was never processed by subagent_watcher on THIS instance` +
+                    ` (double-check you're resolved to the right one: \`muxlog ls\`, or pass -i explicitly),` +
+                    ` or the dispatch id itself doesn't match what actually got logged (try a shorter/partial` +
+                    ` substring — e.g. just the first 8 chars of a UUID).`,
+                );
+            } else {
+                console.log(`\nverdict: ${matched} line${matched === 1 ? "" : "s"} mention '${opt.dispatch}' in ${f}`);
+            }
+        }
         return;
     }
     if (cmd === "auth") {
