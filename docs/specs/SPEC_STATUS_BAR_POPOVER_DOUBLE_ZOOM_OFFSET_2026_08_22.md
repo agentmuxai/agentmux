@@ -1,17 +1,23 @@
 # SPEC — Status bar popovers render offset (and undersized) under Chrome zoom
 
-**Date:** 2026-08-22
-**Type:** Bug diagnosis (root-caused precisely; fix NOT yet implemented — this
-is the diagnostic writeup, per explicit request to investigate and document
-before touching code)
-**Status:** Draft
+**Date:** 2026-08-22 (fixed 2026-08-22, PR #2736)
+**Type:** Bug diagnosis + fix (implemented, verified live via CDP)
+**Status:** Resolved
 **Scope (confirmed affected):** `frontend/app/statusbar/TokenBreakdownPopover.tsx`
 (+ `_token-usage.scss`), `frontend/app/statusbar/CpuCoresPopover.tsx`
 (+ `_cpu-cores-popover.scss`), `frontend/app/statusbar/DiskVolumesPopover.tsx`
 (+ `_disk-volumes-popover.scss`), `frontend/app/statusbar/StatusBarTip.tsx`
 (+ `StatusBarTip.scss`), and the shared `.status-bar-popover` class
-(`StatusBar.scss:244` — likely also covers `HostPopover.tsx`/`InstancePanel.tsx`,
-not individually re-verified here). **Not affected:** `MoreDropdown`,
+(`StatusBar.scss:244` — confirmed also covers `HostPopover.tsx`, which
+renders with `class="status-bar-popover host-popover"`, i.e. via the same
+shared, now-fixed class, not a separate one). **Not affected:**
+`InstancePanel.tsx` — despite living in the same `frontend/app/statusbar/`
+directory and looking superficially similar, it positions itself via its
+own `bottom`/`right` fixed-positioning logic (`InstancePanel.tsx:411-421`),
+NOT `computeMenuPosition`, and `_instance-panel.scss` has no `zoom:`
+declaration at all — an earlier draft of this spec incorrectly listed it as
+a likely-affected consumer without individually verifying it; corrected
+per codex's review of PR #2736. Also not affected: `MoreDropdown`,
 `PinnedWidgetFlyout`, `AgentRuntimeDropup`, the generic `flyoutmenu.tsx` —
 none of these self-apply `zoom:` in their own SCSS (verified by direct grep),
 so they don't hit this bug despite using the same `computeMenuPosition`
@@ -89,16 +95,20 @@ child SCSS files… new UI elements just work" (zoom-architecture.md:75-76).
 The gap: that document only ever discusses **in-flow containers**. It never
 anticipated a **Portal'd, `position: fixed`, floating popover positioned via
 absolute-pixel math derived from an anchor that is ITSELF inside a zoomed
-container** — which is exactly what every status-bar popover is (per
+container** — which is exactly what most status-bar popovers are (per
 `docs/specs/SPEC_STATUS_BAR_POPOVER_AIRSPACE_CLIP_2026_08_17.md`'s own
-confirmed-consumer list: `TokenBreakdownPopover`, `CpuCoresPopover`,
-`DiskVolumesPopover`, `InstancePanel`, all Portal + `computeMenuPosition` +
-`usePaneOverlay`). Someone (reasonably, by analogy with `.window-header`/
-`.status-bar`) applied the same "just add `zoom: var(--zoomfactor)`" pattern
-to the popovers themselves, not realizing the popover's *position* was
-already computed in real, post-zoom pixels via its anchor — unlike
-`.window-header`, which has no anchor-derived position at all, just normal
-flow layout.
+confirmed-consumer list for the AIRSPACE-CLIP mechanism specifically:
+`TokenBreakdownPopover`, `CpuCoresPopover`, `DiskVolumesPopover`,
+`InstancePanel`, all sharing `usePaneOverlay`. That list is about airspace
+clipping, not `computeMenuPosition` — `InstancePanel` is on it but, per the
+correction above, positions itself via its own `bottom`/`right` math, not
+`computeMenuPosition`, and was never actually affected by *this* bug).
+Someone (reasonably, by analogy with `.window-header`/`.status-bar`)
+applied the same "just add `zoom: var(--zoomfactor)`" pattern to the
+Portal'd, `computeMenuPosition`-driven popovers specifically, not realizing
+their *position* was already computed in real, post-zoom pixels via their
+anchor — unlike `.window-header`, which has no anchor-derived position at
+all, just normal flow layout.
 
 ### `usePaneOverlay` — confirmed NOT involved
 
@@ -122,13 +132,14 @@ Confirmed via direct grep for `zoom:\s*var\(--zoomfactor\)` across
 
 | File | Selector | Self-applies zoom? |
 |---|---|---|
-| `_token-usage.scss:62` | `.token-usage-breakdown` | Yes — **repro'd live above** |
-| `_cpu-cores-popover.scss:41` | (CPU cores popover root) | Yes — same bug expected |
-| `_disk-volumes-popover.scss:38` | (disk volumes popover root) | Yes — same bug expected |
-| `StatusBarTip.scss:16` | `.status-bar-tip` | Yes — same bug expected |
-| `StatusBar.scss:244` | `.status-bar-popover` (shared class) | Yes — same bug expected for whichever popovers compose it (at minimum `HostPopover`/`InstancePanel` per the airspace-clip spec's consumer list; not individually re-verified) |
-| `StatusBar.scss:25` | `.status-bar` (the status bar itself, in-flow) | Yes — **correct**, this is the container the architecture doc intended |
-| `window-header.{win32,linux,darwin}.scss` | `.window-header` (in-flow) | Yes — **correct**, same reasoning |
+| `_token-usage.scss:62` | `.token-usage-breakdown` | Yes — **repro'd live above; fixed in PR #2736** |
+| `_cpu-cores-popover.scss:41` | `.cpu-cores-popover` | Yes — same bug; **fixed in PR #2736** |
+| `_disk-volumes-popover.scss:38` | `.disk-volumes-popover` | Yes — same bug; **fixed in PR #2736** |
+| `StatusBarTip.scss:16` | `.status-bar-tip-balloon` | Yes — same bug (confirmed positioned via `computeMenuPosition`, per its own doc comment); **fixed in PR #2736** |
+| `StatusBar.scss:244` | `.status-bar-popover` (shared class) | Yes — same bug for every popover composing it, **confirmed** for `HostPopover` (renders `class="status-bar-popover host-popover"`); **fixed in PR #2736** |
+| `_instance-panel.scss` | `.instance-panel` | **No `zoom:` declaration at all** — positions via its own `bottom`/`right` math (`InstancePanel.tsx:411-421`), not `computeMenuPosition`. Not affected; not touched by the fix. |
+| `StatusBar.scss:25` | `.status-bar` (the status bar itself, in-flow) | Yes — **correct**, this is the container the architecture doc intended; unchanged |
+| `window-header.{win32,linux,darwin}.scss` | `.window-header` (in-flow) | Yes — **correct**, same reasoning; unchanged |
 
 Not affected (verified no self-`zoom:` in their own SCSS):
 `more-dropdown.tsx`, `pinned-widget-flyout.tsx`, `AgentRuntimeDropup.tsx`,
@@ -136,9 +147,10 @@ Not affected (verified no self-`zoom:` in their own SCSS):
 elements don't self-zoom, so they position correctly regardless of Chrome
 zoom.
 
-## Fix directions (not yet chosen/implemented)
+## Fix (implemented, PR #2736)
 
-Two viable approaches, not mutually exclusive:
+Two viable approaches were considered, not mutually exclusive — **option 1
+was chosen and shipped**:
 
 1. **Strip `zoom:` from each popover's own root rule.** The anchor rect
    `computeMenuPosition` starts from is already real/post-zoom (since the
@@ -160,8 +172,13 @@ Two viable approaches, not mutually exclusive:
    zoom-scoped popover, unlike option 1's "just don't self-zoom a
    Portal'd/positioned element" rule of thumb.
 
-Whichever direction is chosen, it should be applied uniformly to all five
-affected selectors above in one pass, and a regression test/live-repro check
-at a non-default `--zoomfactor` (e.g. `0.65` or `1.5`) should be added for at
-least one representative popover (`TokenBreakdownPopover` is the "canonical"
-one per `CpuCoresPopover.tsx`'s own doc comment) to prevent recurrence.
+Applied uniformly to all five affected selectors in one pass. No automated
+regression test was added (CSS `zoom` has no layout effect in jsdom, so
+nothing in that environment could distinguish the buggy state from the
+fixed one) — instead, an explanatory comment was added at each fix site,
+and the fix was verified live via CDP against a running `task dev`
+instance: forced `--zoomfactor: 0.65`, confirmed `TokenBreakdownPopover`'s
+computed `zoom` is now `1` and its rendered rect exactly matches its
+declared inline `left`/`top`/`width` (previously diverged by exactly
+0.65× on every dimension, matching the reproduction at the top of this
+document).
