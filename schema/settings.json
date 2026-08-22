@@ -65,6 +65,18 @@
         "term:predictiveecho:thresholdms": {
           "type": "number"
         },
+        "term:agentmaxruntimehours": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0,
+          "description": "Maximum wall-clock runtime (hours) before the watchdog kills an agent pane. 0 (default) disables the limit."
+        },
+        "term:agentidletimeoutmins": {
+          "type": "number",
+          "minimum": 0,
+          "default": 0,
+          "description": "Minutes of PTY silence before the watchdog kills an idle agent pane. 0 (default) disables the limit."
+        },
         "cmd:env": {
           "additionalProperties": {
             "type": "string"
