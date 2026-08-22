@@ -1733,6 +1733,7 @@ declare global {
         "voice:whisperCliPath"?: string;
         "voice:whisperModel"?: string;
         "voice:whisperModelPath"?: string;
+        "voice:inputDeviceId"?: string;
         "notify:*"?: boolean;
         "notify:sounds:enabled"?: boolean;
         "notify:sounds:volume"?: number;

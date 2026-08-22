@@ -956,8 +956,7 @@ function installVoiceInputErrorListener(): void {
             case "service-not-allowed":
                 title = "Voice transcription unavailable";
                 message =
-                    "Speech recognition isn't available in this build yet. " +
-                    "Server-side transcription is in progress.";
+                    "Voice transcription isn't configured — open Settings ▸ Recording to set it up.";
                 break;
             default:
                 return; // non-fatal / unknown — no toast

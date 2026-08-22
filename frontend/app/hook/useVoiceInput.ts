@@ -21,6 +21,15 @@ export interface VoiceSession {
      *  Mic buttons read this to render a "blocked" affordance; cleared when a
      *  session starts successfully. */
     lastError: SignalAtom<string | null>;
+    /** Optional detail string accompanying `lastError` — e.g. the server's
+     *  actual error body ("whisper-cli not found at ...") for
+     *  `service-not-allowed`, rather than just the coarse category. Additive:
+     *  existing consumers (MicButton.tsx's tooltip) only read `lastError` and
+     *  are unaffected; the Settings -> Recording "test your microphone" flow
+     *  reads this to show the specific failure. Not implemented by every
+     *  engine (optional) — the Web Speech engine has no server round-trip to
+     *  report a detail for. */
+    lastErrorDetail?: SignalAtom<string | null>;
     isAvailable: () => boolean;
     toggleListening: () => void;
     registerPane: (blockId: string, handle: PaneVoiceHandle) => void;
