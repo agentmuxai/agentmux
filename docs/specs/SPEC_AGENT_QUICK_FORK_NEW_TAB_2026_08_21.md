@@ -1,27 +1,53 @@
-# SPEC: Quick-fork an agent into a new tab (hot clone, full identity)
+# SPEC: Quick-fork an agent into a new pane-stack tab (hot clone, full identity)
 
 **Date:** 2026-08-21
-**Status:** Draft — architecture proposal, no code landed
-**Scope:** `agent.open` (`agentmux-srv/src/server/app_api/agent_open.rs`), `NewTab`/`SetActiveTab`
-MCP tools, `AgentDefinition`/`AgentInstance` model, Armory identity binding
+**Status:** Implemented (destination corrected 2026-08-22 — see correction notice below)
+**Scope:** `AgentViewModel.getBodyContextMenuItems` (`agent-model.ts`), the
+pane's own block-stack (`frontend/layout/lib/layoutStack.ts`),
+`AgentDefinition`/`AgentInstance` model, Armory identity binding
 **Related:** `SPEC_MULTI_SESSION_AGENT_FORK_2026_06_06.md` (designed
 `ForkAgentDefinitionCommand` — **now implemented**, see §2's correction),
 `SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15.md`
-(in-pane fork bar — the closest existing sibling feature, `--fork-session` validation
-gate already passed there), `SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17.md`
+(**not a sibling feature — this spec is now understood to complete that
+spec's own §6.3 "Fork action (`/btw` and the `+` affordance)", see the
+correction notice below**), `SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17.md`
 (App-API `agent.*` surface incl. `agent.open`/`agent.fork`/`agent.define`),
 `SPEC_AGENT_NAMING_AND_ADDRESSING_HOST_LAN_WAN_2026_08_22.md` (the naming
 scheme this spec's forked agents follow, §4.5)
 
-> **Naming.** This is a **quick-fork**, not a duplicate of the in-pane **fork bar**
-> from `SPEC_AGENT_PANE_FORKS_AND_AUX_PINS`. Both features share one backend
-> mechanism (fork the `AgentDefinition`, spawn with `--resume <sid> --fork-session`)
-> and differ only in *where the result lands*: the fork bar pushes the new block onto
-> the **same pane's** `blockStack`; a quick-fork opens it as a **new tab**, fully
-> independent, immediately visible, no bottom-bar row to notice or switch to. "Hot
-> clone" describes the user-facing effect (identical context, up and running
-> instantly); "quick-fork" is the mechanism name, kept consistent with the
-> codebase's existing fork vocabulary rather than inventing a new one.
+> **Correction (2026-08-22, repo-owner-directed).** This spec originally
+> proposed landing the fork in a brand-new top-level **window** tab
+> (`WorkspaceService.CreateTab`), reasoning (§4.2 below, kept verbatim for the
+> record) that this was a deliberately *different* feature from the in-pane
+> **fork bar** in `SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15.md` rather
+> than an implementation of it. That reasoning was wrong on two counts,
+> caught live during manual testing: (1) it missed that
+> `launchAgentDefinition`'s own `targetBlockId` parameter (`agent-model.ts`,
+> shipped 2026-07-20, a month before this spec) already existed *specifically*
+> for "the fork-tab-strip `+` action" — i.e. the pane-stack destination this
+> spec should have targeted from the start; (2) forking is a **per-agent**
+> action, and the codebase already has an established per-agent right-click
+> surface for exactly that (`AgentViewModel.getBodyContextMenuItems`, home to
+> "Agent History") — the window tab-strip's own context menu, which this spec
+> used instead, is ambiguous about *which* agent it targets once a tab can
+> ever hold more than one pane, and puts a per-agent action on a per-tab
+> surface. **Corrected:** the fork now lands as a new sibling block pushed
+> onto the SAME pane's own `blockStack` (`pushBlockOntoStack`, the identical
+> primitive `open-history-tab.ts`'s "Agent History" entry and the pane tab
+> strip's own "+" already use), triggered from the body context menu right
+> next to "Agent History" — not a new window tab, not the tab-strip's
+> right-click menu. All of §1-§3's problem framing, §5's identity-binding
+> decision, §4.4's non-Claude fallback, and §4.5's naming scheme are
+> unaffected by this correction — only *where the result lands* and *where
+> it's triggered from* changed. See `frontend/app/view/agent/quick-fork.ts`'s
+> own doc comment for the implementation-level version of this history.
+
+> **Naming.** "Quick-fork" is the mechanism name, kept consistent with the
+> codebase's existing fork vocabulary. As corrected above, it is now the
+> same feature as `SPEC_AGENT_PANE_FORKS_AND_AUX_PINS`'s in-pane fork bar's
+> §6.3 fork action — not a distinct sibling. "Hot clone" describes the
+> user-facing effect (identical context, up and running instantly in a
+> sibling tab in the same pane).
 
 ---
 
@@ -202,56 +228,68 @@ Non-Claude providers: `forkSession: true` is silently ignored unless
 exactly the honest fallback §4.4 describes, now tied to the real code path
 rather than assumed.
 
-### 4.2 Decision: new tab vs. in-pane fork bar vs. new window
+### 4.2 Decision: new tab vs. in-pane fork bar vs. new window — **superseded, see correction notice**
 
-| | **New tab (this spec)** | In-pane fork bar (existing spec) | New OS window |
+The table and "Decision: new tab" conclusion below are kept verbatim for the
+historical record of what this spec originally argued — **the actual shipped
+behavior is the "In-pane fork bar" column**, per the 2026-08-22 correction at
+the top of this document. The reasoning under "Backend reuse" (definition-
+forking reuse, the history-carryover fix being a shared prerequisite either
+way) held up; the "Decision" line's conclusion did not.
+
+| | ~~New tab (this spec)~~ | **In-pane fork bar — what actually shipped** | New OS window |
 |---|---|---|---|
-| Visibility | Immediate, full tab, no extra click | Requires noticing/switching the bottom bar | Immediate, but heavier (new window chrome, tear-off machinery) |
-| Use case fit | "Hand this off, work it in parallel, side by side" | "Explore a tangent, come back to the main thread" | Rare — multi-monitor workflows |
-| Backend reuse | Definition-forking: 100%. History carryover: **0% wired today** (§2) — same fix needed regardless of landing spot | Same gap — the in-pane fork bar's own `/btw` action (§6.3 there) isn't built yet either | Same gap + tear-off saga |
-| New structural concept | None (tabs already exist) | `blockStack` at the layout node (that spec's one new concept) | None (tear-off already exists) |
+| Visibility | Immediate, full tab, no extra click | Immediate, full pane-stack tab, no extra click (same as "New tab" — the "requires noticing the bottom bar" framing below assumed the OLD read-only fork-bar-as-status-list design, not the block-stack tab strip that actually shipped) | Immediate, but heavier (new window chrome, tear-off machinery) |
+| Use case fit | "Hand this off, work it in parallel, side by side" | Same use case, same immediacy — the pane-stack tab strip (`PaneTabStrip`) is a first-class, always-visible tab bar, not a background status row | Rare — multi-monitor workflows |
+| Backend reuse | Definition-forking: 100%. History carryover: **0% wired today** (§2) — same fix needed regardless of landing spot | Same — this is the shared prerequisite regardless of destination | Same gap + tear-off saga |
+| New structural concept | None (tabs already exist) | None — `blockStack` at the layout node already shipped (`SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md`) before this spec was even written | None (tear-off already exists) |
 
-**Decision: new tab.** It matches the stated use case (a peer to hand off to, not a
-background tangent) with zero new *structural* concepts — tabs and `NewTab`
-exist today. The history-carryover fix (§2) is required work regardless of
-which landing spot is chosen, so it isn't a point in favor of either option;
-it's simply a shared prerequisite. A "quick-fork to new window" variant is a
-trivial follow-on (swap the target of step 3 for the existing tear-off saga)
-but is not needed for v1.
+**Decision (corrected): in-pane fork bar / pane-stack tab.** Forking is a
+per-agent action; the pane-stack tab strip is the per-agent-pane surface that
+already exists for exactly this (it's what "Agent History" already opens
+into). The original "new tab" decision incorrectly treated the two as
+distinct use cases ("hand off / work in parallel" vs. "explore a tangent") —
+in practice a pane-stack tab satisfies both: it's a first-class, always-
+visible tab the moment a second one exists (not a background/dormant row),
+and switching or closing it doesn't disturb the parent.
 
-### 4.3 Trigger / UX
+### 4.3 Trigger / UX — **corrected 2026-08-22**
 
-- **Primary affordance: right-click the tab → "Quick-fork to new tab."** Mirrors
-  a pattern every user already has from browsers ("Duplicate Tab") — discoverable
-  without adding persistent chrome, and it puts the action where the object it
-  operates on lives (the tab), matching where the result lands (a new tab).
-  Deliberately **not** a new icon in the pane itself: `SPEC_AGENT_PANE_FORKS_AND_AUX_PINS`
-  already documents ~16 hand-stacked pane surfaces as a problem to fix, not add
-  to, and a pane-level fork icon would risk visual confusion with that spec's
-  own in-pane fork bar (two different-looking "fork" affordances in one pane,
-  landing in two different places).
-- **Secondary: a keybinding** for the no-mouse path (G1) — tab-scoped, in the
-  same family as other tab-level shortcuts (new tab, close tab), not a
-  pane-level binding, for the same reason as above.
-- No modal by default (G1) — one click/keystroke does steps 1-5 above with sane
-  defaults (§4.4). An optional long-press/right-click-submenu variant opens a
-  small confirmation surfacing the identity choice (§5) for users who want to
-  decide per-fork rather than rely on the default.
-- Auto-generated tab title = the forked definition's auto-generated name (§4.5),
-  consistent with existing fork auto-naming.
-- Deferred: should the tab strip's own "+ New Tab" button grow a split/dropdown
-  (plain new tab vs. fork current) for users who never discover right-click?
-  Ship right-click-only for v1; add the split-button only if discoverability
-  turns out to be a real problem in practice.
+- **Primary (and only) affordance: right-click the agent pane's body →
+  "Quick-fork" / "Quick-fork (inherit identity)".** `AgentViewModel.getBodyContextMenuItems`
+  (`agent-model.ts`) — the same per-agent right-click surface "Agent History"
+  already lives on, spliced at the top of the menu by `blockframe.tsx`. This
+  replaces the original "right-click the tab" design (§4.2's superseded
+  table): a window tab-strip context menu is the wrong surface for a
+  per-agent action once a tab can host more than one pane, and forking
+  belongs next to the pane's other per-agent action, not off on a different
+  chrome layer.
+- No modal by default (G1) — one click does the fork with sane defaults
+  (§4.4); a second, explicit "Quick-fork (inherit identity)" menu entry
+  covers the identity-choice variant (§5) without a confirmation dialog.
+- New pane-stack tab's title = the forked definition's auto-generated name
+  (§4.5), consistent with existing fork auto-naming.
+- No keybinding for v1 (the original spec's `Cmd:Shift:t` binding operated on
+  the active WINDOW tab, which no longer matches this action's actual
+  target — the focused PANE's own agent — so it was removed rather than
+  repointed; a future keybinding should route through
+  `getFocusedBlockInStaticTab()` + `getBlockComponentModel(...)` the way
+  other pane-scoped bindings do, but that's a deliberate follow-up, not
+  shipped here). The original spec's `SPEC_AGENT_PANE_FORKS_AND_AUX_PINS`
+  §6.3 `/btw` slash command remains unimplemented and is also a candidate
+  follow-up for a keyboard-first trigger.
 
 ### 4.4 Non-Claude provider fallback
 
 Identical honesty requirement to `SPEC_AGENT_PANE_FORKS_AND_AUX_PINS` §6.4: for a
-provider without an equivalent to `--fork-session`, the new tab still opens
-immediately (G1/G2 hold) but starts a **fresh conversation** on the forked
-definition, with a visible, non-dismissable-by-accident note in the new tab's
-first turn ("this provider doesn't support forking mid-conversation — starting
-fresh") rather than silently pretending context carried over.
+provider without an equivalent to `--fork-session`, the new pane-stack tab still
+opens immediately (G1/G2 hold) but starts a **fresh conversation** on the forked
+definition, with a visible, non-dismissable-by-accident note ("this provider
+doesn't support forking mid-conversation — starting fresh") rather than
+silently pretending context carried over. Implemented as a persistent pane
+banner (`ForkProviderFallbackBanner`), not a synthesized first-turn message —
+see that component's own doc comment for why (no seam to push into the
+conversation before the pane's stream mounts).
 
 ### 4.5 Naming the fork
 
@@ -315,9 +353,9 @@ is narrower and different from the original draft's Phase 1:
 | Phase | Deliverable | Depends on |
 |---|---|---|
 | **1** ✅ | Fix the two confirmed bugs blocking correctness even for the *existing* fork flow: (a) wire `continueSessionId`/`forkSession: true` into the fork path's `launchAgentDefinition` call (§2 — currently missing entirely), (b) fix `template.rs`'s fork-count filter to walk the lineage root instead of the immediate parent (§4.5) — **landed**, also fixed a third bug found while implementing (b): the suggested name was built from the immediate parent's own name, not the lineage root's, so even a correctly-counted fork of a fork produced "AgentX #2 #3" instead of the flat "AgentX #3" | — |
-| **2** ✅ | Wire the quick-fork action itself. The launch reuses the SOURCE tab's own already-mounted `AgentViewModel` (via `getBlockComponentModel`) rather than constructing a new one, since `launchAgentDefinition`'s only per-instance state is `this.blockId` (already overridden by the new `targetBlockId` arg) and `this.nodejsError`. Also found and fixed a real prerequisite bug: `launchAgentDefinition` unconditionally used `atoms.staticTabId()` for `ControllerResyncCommand`'s `tabid` — harmless for the existing same-tab `targetBlockId` use case, but silently wrong for a genuinely cross-tab target (the backend stores this as the spawned controller's own registry `tab_id` and `AGENTMUX_TABID` env var, not just for logging) — added a `targetTabId` override param. Right-click trigger ("⑂ Quick-fork to new tab" in the tab's existing color/rename context panel) landed as part of this phase too, not deferred to Phase 3, since Phase 2 needs *some* way to invoke it to be a real, testable feature. **Block creation went through a real correction mid-review**: the first version created+placed the new block via `pane.open` with an explicit `tab_id` (`open_pane`'s "explicit tab_id wins" resolution), which looked like a clean one-RPC answer but is confirmed NOT equivalent to the client-side path for a brand-new tab — `tab-presets.ts`'s own doc comment documents this exact gap as empirically confirmed live: `pane.open` against a freshly created tab succeeds server-side with zero errors and still never renders, because the new tab's client-side layout model isn't yet subscribed to the backend's `layout:update` broadcast for that tab. Codex's review of PR #2727 caught this; fixed by switching to the proven `waitForLayoutModel` + `createBlockOnModel` path `applyTabPreset` already uses for every new tab. | Phase 1 |
-| **3** ✅ | UX polish: `Cmd:Shift:t` keybinding on the currently-active tab (`keymodel.ts`), and the non-Claude fallback note — `quick-fork.ts` sets `FORK_NO_HISTORY_FALLBACK_META_KEY` on the new block once launch succeeds when the fork's effective provider doesn't support `--fork-session` and there was a session to lose; `ForkProviderFallbackBanner` (`agent-view.tsx`) reads it, cloned from `AgentDisconnectedBanner`'s no-dismiss-button pattern since there's no seam to push a synthesized message into the new pane's conversation before its own stream mounts. The tab-strip "+" split-button (§4.3's deferred item) is **deliberately still skipped** — per §4.3's own "ship right-click-only for v1" language, not a gap; revisit only if discoverability of the right-click path proves to be a real problem in practice. | Phase 2 |
-| **4** ✅ | Confirmation variant exposing the identity choice (§5): a second "⑂ Quick-fork (inherit identity)" entry in the tab's context panel (`tab.tsx`) alongside the default quick-fork, calling `quickForkTabToNewTab(tabId, {inheritIdentity: true})`. Resolves the SOURCE definition's own bound account via `ListAgentIdentitiesCommand` (`db_agent_identity_links`) rather than a `RecentSessionRow` — this flow only ever has a `definitionId`, not a picker row. | Phase 2 |
+| **2** ✅ (destination corrected 2026-08-22) | Wire the quick-fork action itself. **Originally shipped landing the fork in a brand-new top-level window tab** (`WorkspaceService.CreateTab`) triggered from the window tab-strip's own right-click menu; **corrected per the notice at the top of this document** to land as a new sibling block pushed onto the SOURCE pane's own `blockStack` (`pushBlockOntoStack` — the same primitive `open-history-tab.ts`'s "Agent History" entry and the pane tab strip's own "+" already use), triggered from `AgentViewModel.getBodyContextMenuItems` right next to "Agent History". The launch reuses `this.launchAgentDefinition` directly (the method's own view-model instance, since the trigger now lives inside that same class) via its pre-existing `targetBlockId` override param — no `targetTabId` override needed post-correction, since the destination never leaves the current window tab. | Phase 1 |
+| **3** ✅ | The non-Claude fallback note: `quick-fork.ts`'s `quickForkAgent` sets `FORK_NO_HISTORY_FALLBACK_META_KEY` on the new block once launch succeeds when the fork's effective provider doesn't support `--fork-session` and there was a session to lose; `ForkProviderFallbackBanner` (`agent-view.tsx`) reads it, cloned from `AgentDisconnectedBanner`'s no-dismiss-button pattern since there's no seam to push a synthesized message into the new pane's conversation before its own stream mounts. **The `Cmd:Shift:t` keybinding and the tab-strip "+" split-button from the original draft were both removed/dropped as part of the destination correction** — see §4.3. | Phase 2 |
+| **4** ✅ | Confirmation variant exposing the identity choice (§5): a second "Quick-fork (inherit identity)" entry in the body context menu alongside the default quick-fork, calling `quickForkAgent(this, {inheritIdentity: true})`. Resolves the SOURCE definition's own bound account via `ListAgentIdentitiesCommand` (`db_agent_identity_links`), filtered to the fork's own canonical effective provider via `lastLinkedAccountId` (`provider-id-aliases.ts`) — not a raw `.find()` (two review rounds on PR #2735 caught, respectively, taking the wrong-provider link and taking the wrong ROW among same-provider links when a canonical + legacy-alias row both exist). | Phase 2 |
 
 Phase 1 is **not optional polish** — without it, quick-fork (and the existing
 in-pane fork prompt) both silently produce fresh-start clones with no

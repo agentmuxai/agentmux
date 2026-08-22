@@ -8,16 +8,16 @@
  * render/Show behavior. Mirrors AgentDisconnectedBanner.test.tsx, the
  * component this one was cloned from.
  *
- * `@/app/tab/quick-fork` is mocked to just the one string constant this
- * component actually needs — the real module pulls in RpcApi/WOS/layout/
- * tab-presets, none of which a pure render test should have to satisfy.
+ * `@/app/view/agent/quick-fork` is mocked to just the one string constant
+ * this component actually needs — the real module pulls in RpcApi/WOS/
+ * layout, none of which a pure render test should have to satisfy.
  */
 
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/app/tab/quick-fork", () => ({
+vi.mock("@/app/view/agent/quick-fork", () => ({
     FORK_NO_HISTORY_FALLBACK_META_KEY: "quickfork:noHistoryFallback",
 }));
 

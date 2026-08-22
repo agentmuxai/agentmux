@@ -16,11 +16,12 @@
  * with no close button, so it can't be swiped away by accident the way a
  * toast could — it reflects `quick-fork.ts`'s own
  * `FORK_NO_HISTORY_FALLBACK_META_KEY` block meta, set once right after the
- * fork lands, and stays for the life of the pane.
+ * fork lands, and stays for the life of the pane (the fork's new pane-stack
+ * tab, per `quickForkAgent`'s doc comment — not a new top-level window tab).
  */
 
 import { Show, type Accessor, type JSX } from "solid-js";
-import { FORK_NO_HISTORY_FALLBACK_META_KEY } from "@/app/tab/quick-fork";
+import { FORK_NO_HISTORY_FALLBACK_META_KEY } from "@/app/view/agent/quick-fork";
 
 interface ForkProviderFallbackBannerProps {
     /** The pane's own block meta, e.g. `block()?.meta`. */

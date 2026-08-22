@@ -24,6 +24,7 @@ import { dimAgentColor, isValidAgentColor, pickAgentColor } from "./agent-color"
 import { parseSeedZoom } from "./agent-zoom-seed";
 import { resolveForkSessionArgs } from "./fork-session-args";
 import { HISTORY_TAB_FOR_META_KEY, openOrFocusHistoryTab } from "./open-history-tab";
+import { quickForkAgent } from "./quick-fork";
 
 export class AgentViewModel implements ViewModel {
     viewType = "agent";
@@ -302,34 +303,32 @@ export class AgentViewModel implements ViewModel {
      * a SubprocessController ready for user input.
      */
     /**
-     * @param targetBlockId In-pane tabs, Phase 4 — when set, launches INTO
-     *   that block instead of `this.blockId`. Used for the fork-tab-strip
-     *   `+` action, which spawns the fork into a freshly-created,
-     *   not-yet-placed block (see `pane.open`'s `skip_placement`) rather
-     *   than reconfiguring the current pane's own block. Every other
-     *   caller omits this and gets today's behavior unchanged.
-     * @param targetTabId `SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md` §4.1
-     *   — when set, this is the tab id passed to `ControllerResyncCommand`
-     *   instead of `atoms.staticTabId()`. Required whenever `targetBlockId`
-     *   points at a block in a genuinely DIFFERENT tab than the one this
-     *   window booted into: `atoms.staticTabId()` is fixed once at window
-     *   bootstrap and never changes (`window-identity.ts`'s own doc
-     *   comment), so it happens to be correct for the existing
-     *   fork-tab-strip case (that block stays in the same tab, just a
-     *   different pane-local block-stack slot) but would be silently WRONG
-     *   for a cross-tab target — the backend stores this value as the
-     *   spawned controller's own `tab_id` (registry registration,
-     *   `AGENTMUX_TABID` env var), not just for logging. Every other
-     *   caller omits this and gets today's `atoms.staticTabId()` behavior
+     * @param targetBlockId When set, launches INTO that block instead of
+     *   `this.blockId` — used by `quick-fork.ts`'s `quickForkAgent`, which
+     *   spawns the fork into a freshly-created, not-yet-placed block (see
+     *   `pane.open`'s `skip_placement`) pushed onto THIS SAME pane's own
+     *   block-stack, rather than reconfiguring the current pane's own
+     *   block. Every other caller omits this and gets today's behavior
      *   unchanged.
+     * @param targetTabId The tab id to pass to `ControllerResyncCommand`
+     *   instead of `atoms.staticTabId()` (fixed at window bootstrap, not
+     *   necessarily the tab this launch is actually happening in). Required
+     *   whenever the caller's own operation spans an `await` between
+     *   resolving "which tab am I in" and this call — `quickForkAgent`
+     *   captures the active tab id synchronously before its own several
+     *   RPCs, since the user could switch window tabs mid-flight otherwise,
+     *   silently registering the new block's controller under the wrong tab
+     *   (Codex's review of PR #2746, one of two P1s from the same root
+     *   cause). Every other caller omits this and gets today's
+     *   `atoms.staticTabId()` behavior unchanged.
      */
     /**
      * @returns Whether the launch actually succeeded. This method never
      *   THROWS (every failure path is caught and logged internally, by
      *   design — most callers fire-and-forget and don't want a launch
      *   failure to crash their UI), but callers that need to react to
-     *   failure (e.g. the fork-tab-strip "+" action, which must not push a
-     *   permanently-broken tab onto the pane's stack) can check the
+     *   failure (e.g. `quickForkAgent`, which must not leave a
+     *   permanently-broken tab on the pane's stack) can check the
      *   returned boolean instead of relying on a rejected promise.
      */
     launchAgentDefinition = async (
@@ -801,6 +800,12 @@ export class AgentViewModel implements ViewModel {
      * no agent loaded yet (still on the picker).
      *
      * Spec: SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.3.
+     *
+     * Quick-fork lives right alongside it — both are per-agent actions on
+     * THIS pane's own conversation, landing their result as a sibling tab
+     * in this SAME pane (see `quick-fork.ts`'s doc comment for why this
+     * replaced an earlier, wrong attempt that opened a new top-level
+     * window tab instead).
      */
     getBodyContextMenuItems(): ContextMenuItem[] {
         const meta = this.blockAtom()?.meta;
@@ -812,6 +817,14 @@ export class AgentViewModel implements ViewModel {
             {
                 label: "Agent History",
                 click: () => void openOrFocusHistoryTab({ currentBlockId: this.blockId, agentId }),
+            },
+            {
+                label: "Quick-fork",
+                click: () => void quickForkAgent(this),
+            },
+            {
+                label: "Quick-fork (inherit identity)",
+                click: () => void quickForkAgent(this, { inheritIdentity: true }),
             },
             { type: "separator" },
         ];
