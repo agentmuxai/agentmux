@@ -49,18 +49,27 @@ diff at all.
   live and working on this machine: one blob, not twelve, being read
   successfully every minute by the app that already has consent for it.
 - Compared code-signing identity between the already-running 0.55.16 app
-  and the freshly built 0.55.18 app:
+  and the freshly built 0.55.18 app. The Keychain read itself runs in the
+  `agentmux-srv` child binary (`Contents/MacOS/agentmux-srv-<version>-*`),
+  which `package-macos.sh` signs *separately* from the outer `.app` — so
+  that binary's own designated requirement, not the wrapping bundle's
+  `CFBundleIdentifier`, is what macOS's Keychain ACL actually checks
+  against. Comparing the two directly (`codesign -dr -` on each version's
+  `agentmux-srv-*` executable, not the `.app`):
   ```
-  0.55.16: identifier "ai.agentmux.stable.0.55.16" and anchor apple generic
-           and ... certificate leaf[subject.OU] = "7Z3Z4B37QJ"
-  0.55.18: identifier "ai.agentmux.stable.0.55.18" and anchor apple generic
-           and ... certificate leaf[subject.OU] = "7Z3Z4B37QJ"
+  0.54.12 srv: identifier "agentmux-srv-0.54.12-darwin" and anchor apple generic
+               and ... certificate leaf[subject.OU] = "7Z3Z4B37QJ"
+  0.55.16 srv: identifier "agentmux-srv-0.55.16-darwin" and anchor apple generic
+               and ... certificate leaf[subject.OU] = "7Z3Z4B37QJ"
   ```
-  Same Developer ID cert/team, but a **different `identifier`** in each
-  app's designated requirement — because `scripts/package-macos.sh` bakes
-  the version into the bundle id on purpose (`ai.agentmux.<channel>.<version>`,
-  "Version suffix makes every release a distinct macOS app, so
-  double-clicking any build works without needing `open -n`").
+  Same Developer ID cert/team, but a **different `identifier`** per
+  version — `package-macos.sh` signs this binary with `--entitlements`
+  but no explicit `--identifier`, so codesign derives one from the
+  binary's own versioned filename. (The outer `.app`'s `CFBundleIdentifier`
+  is *also* version-baked on purpose — `ai.agentmux.<channel>.<version>`,
+  "version suffix makes every release a distinct macOS app" — but it's not
+  the identity this particular ACL check evaluates, since it's not the
+  process making the call.)
 - `agentmux-srv/src/identity/secret_store.rs` uses the `keyring` crate
   (`Entry::new(SERVICE, &account_key(account_id))`, `SERVICE = "agentmux"`)
   with no custom ACL/`kSecAttrAccessControl` — so macOS's default
@@ -80,13 +89,19 @@ minute, no repeated prompting *within* the already-running, already-granted
 The recurrence is a **separate, previously-undiscussed interaction**
 between two independent, individually-correct design decisions:
 
-1. Every packaged build gets a **version-specific bundle identifier**
-   (`scripts/package-macos.sh`), deliberately, so multiple local builds can
-   coexist and each one launches cleanly without `open -n` gymnastics.
+1. Every packaged build gets a **version-specific code identity** — the
+   outer `.app`'s `CFBundleIdentifier` deliberately (`scripts/package-
+   macos.sh`, so multiple local builds can coexist and each one launches
+   cleanly without `open -n` gymnastics), and, as a side effect of how
+   that same script signs the `agentmux-srv` child binary (entitlements
+   but no explicit `--identifier`), the *actual Keychain-calling
+   executable's* designated requirement too — derived from its own
+   versioned filename.
 2. macOS Keychain's default per-app access grant is scoped to the
-   requesting application's code identity — an "Always Allow" granted to
-   `ai.agentmux.stable.0.55.16` does not carry over to
-   `ai.agentmux.stable.0.55.18`, even though both are signed by the same
+   requesting *process's* code identity, i.e. `agentmux-srv`'s own
+   designated requirement, not the wrapping `.app`'s — an "Always Allow"
+   granted to `agentmux-srv-0.55.16-darwin` does not carry over to
+   `agentmux-srv-0.55.18-darwin`, even though both are signed by the same
    Developer ID certificate, because the *identifier* clause differs.
 
 Put together: **every distinct locally-built version is, to the Keychain,
