@@ -117,44 +117,76 @@ dropping to one), not leak it permanently, but still wasteful — a repeat
 this codebase's comment assumed, on any version checked. The fix applied
 here doesn't depend on or wait for an upstream `notify` bump.
 
-## 3. Fix applied
+## 3. Fix applied — revised after PR review (codex P2 on #2722)
 
-`sweep()` now calls `unwatch()` on each target **before** re-issuing
-`watch()`, so at most one native watch per target exists at any instant —
-regardless of how the underlying `notify` backend implements a redundant
-`watch()` call. This preserves the silent-death self-healing `sweep()`
-exists for (a genuinely dead watch is re-established exactly as before) at
-the cost of a brief re-arm window every 30s per target — an already-accepted
-class of imperfection in this system, since the fast-path/slow-path split
-in `native_memory_drift.rs` already treats a missed fs-watch event as normal
-and backstops it with its own 30s reconciliation sweep.
+**First version** (superseded, kept here for the record): `sweep()` called
+`unwatch()` on *every* target before re-issuing `watch()`, every tick — no
+leak, but review correctly caught that this opened a real coverage gap.
+`unwatch()` then `watch()` leaves the target genuinely unwatched for the
+gap between the two calls. `native_memory_drift`'s slow-path reconciliation
+sweep backstops a missed event there, but three other consumers of the same
+pool — `config_watcher_fs`, `EditorFileWatcher`, `MediaFileWatcher` — rely
+solely on the broadcast stream with no equivalent backstop. A create/modify
+landing in that ~instant gap, on any watched path, every 30 seconds, for
+the life of the process, would go unnoticed until some later, unrelated
+change on the same path happened to trigger a refresh.
+
+**Fix, revised**: `sweep()` now only re-arms targets that are already
+*degraded* (a prior `watch()` attempt failed and was recorded via
+`HealthState::mark_degraded`) — a healthy-looking target is left completely
+untouched, every tick. This fixes the leak the same way (nothing is ever
+double-watched) *and* fixes the coverage gap (a healthy watch is never
+interrupted). The trade-off, stated honestly rather than silently accepted:
+a watch that fails *silently* — dies without `notify` or the OS ever
+reporting an error on it — is no longer self-healed by this sweep, only a
+watch already known degraded. Judged acceptable because a truly silent
+death has no confirmed occurrence in this codebase's history (the
+scenarios `HEALTH_SWEEP_INTERVAL`'s own doc comment lists — inotify
+instance-limit churn, flaky network mounts — are Linux-flavored concerns on
+a Windows-primary codebase), against a certain, systematic cost (leak or
+gap, every target, every tick) the alternative imposed on every watch.
 
 Also corrected the "cheap no-op" claim in three places it appeared:
 `pool.rs`'s `sweep()` doc comment, `pool.rs`'s health-sweep task spawn
 comment (`FsWatchPool::new()`), and `recovery.rs`'s `HEALTH_SWEEP_INTERVAL`
-doc comment.
+doc comment — all now describe the degraded-only scoping and why.
 
 ## 4. Verification
 
-New regression test,
-`fs_watch::pool::tests::sweep_does_not_leak_a_handle_pair_per_call`
-(Windows-only): subscribes to a real temp directory, calls `sweep()` 200
-times back-to-back, and asserts this process's own `GetProcessHandleCount`
-(reusing `backend::sysinfo::process_handle_count`, the same helper the
-sysinfo-leak regression test uses) doesn't grow linearly.
+Two regression tests in `fs_watch::pool::tests` (both Windows-only):
 
-**Proved the test is a real discriminator, not just a green checkmark**
-(same methodology the 08-19 sysinfo fix used): temporarily reverted just the
-`unwatch()`-before-`watch()` change (kept the test), reran —
+- `sweep_leaves_a_healthy_target_untouched` — subscribes to a real temp
+  directory, calls `sweep()` 200 times back-to-back on the now-healthy
+  target, and asserts this process's own `GetProcessHandleCount` (reusing
+  `backend::sysinfo::process_handle_count`, the same helper the sysinfo-leak
+  regression test uses) doesn't grow at all — proving a healthy watch is
+  genuinely skipped, not just "skipped but still leak-free by luck."
+- `sweep_does_not_leak_a_handle_pair_per_call_for_a_degraded_target` —
+  forces the same target into `degraded` state before every one of 200
+  sweep calls (so each one really exercises `unwatch()` + `watch()`), and
+  asserts handle count doesn't grow linearly — proving the re-arm path
+  itself, which does still run for real failures, doesn't leak either.
+
+**Proved both are real discriminators, not just green checkmarks** (same
+methodology the 08-19 sysinfo fix used): temporarily reverted just the
+`unwatch()`-before-`watch()` line (kept both tests, kept the degraded-only
+filter), reran the degraded-target test —
 
 ```
-handle count grew by 400 over 200 sweep() calls on one subscribed target
-(before=155, after=555)
+handle count grew by 400 over 200 sweep() calls on a degraded target
+(before=153, after=553)
 ```
 
 — **exactly 2.0 handles/call**, matching the theorized File+Semaphore pair
-precisely. Restored the fix, reran clean. Full suite:
-`cargo test -p agentmux-srv -- --test-threads=1` — 2639 passed, 0 failed.
+precisely, twice (this test and the original single-fix version's identical
+result). Restored the fix, reran clean. Full suite:
+`cargo test -p agentmux-srv -- --test-threads=1` — 2640 passed, 0 failed
+(confirmed clean across 3 consecutive runs; one run hit the pre-existing,
+independently-flaky `refresh_processes_specifics_does_not_leak_a_handle_per_call`
+test unrelated to this change — see its own history in
+`STATUS_SRV_SECTION_HANDLE_LEAK_LIVE_RECURRENCE_2026_08_19.md`/this
+session's own prior confirmation that it's order/load-sensitive on a busy
+machine, not a real regression).
 
 ## 5. What this does NOT fix — action needed on already-running instances
 
