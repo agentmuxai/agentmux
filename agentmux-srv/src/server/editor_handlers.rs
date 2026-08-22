@@ -321,11 +321,20 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // Inject global memory bundles into CLAUDE.md so agents
                     // launched from the picker receive the same workspace rules
                     // as agents launched via the agent.open RPC.
-                    let content = if file.path == "CLAUDE.md" {
-                        inject_global_bundles(&file.content, &id_store)
-                    } else {
-                        file.content.clone()
-                    };
+                    if file.path == "CLAUDE.md" {
+                        // Ownership-aware materialization instead of the
+                        // generic write below — never overwrites a
+                        // pre-existing, non-AgentMux-authored file's
+                        // content. See
+                        // docs/specs/SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md.
+                        let content = inject_global_bundles(&file.content, &id_store);
+                        crate::backend::agent_config::write_claude_md_respecting_ownership(
+                            base_path, &content,
+                        )
+                        .map_err(|e| format!("failed to write CLAUDE.md: {e}"))?;
+                        tracing::debug!(path = %file_path.display(), "wrote config file (ownership-aware)");
+                        continue;
+                    }
                     // Create parent directories if needed
                     if let Some(parent) = file_path.parent() {
                         if !parent.exists() {
@@ -333,7 +342,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 .map_err(|e| format!("failed to create dir for {}: {e}", file.path))?;
                         }
                     }
-                    std::fs::write(&file_path, &content)
+                    std::fs::write(&file_path, &file.content)
                         .map_err(|e| format!("failed to write {}: {e}", file.path))?;
                     tracing::debug!(path = %file_path.display(), "wrote config file");
                 }
