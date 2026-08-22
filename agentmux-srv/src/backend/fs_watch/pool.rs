@@ -129,9 +129,10 @@ impl FsWatchPool {
         });
 
         // Periodic self-healing sweep — see recovery.rs's HEALTH_SWEEP_INTERVAL
-        // doc comment for why re-issuing watch() on an already-watched path
-        // is a safe, cheap way to detect and recover from a silent death
-        // without needing a true OS-level "is this watch still alive" signal.
+        // doc comment for why detecting a silent death needs a periodic
+        // re-watch, and this fn's own `sweep()` doc comment for why that
+        // re-watch must `unwatch()` first (notify's Windows backend leaks a
+        // handle pair per redundant watch() call otherwise).
         let sweeper = this.clone();
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(HEALTH_SWEEP_INTERVAL);
@@ -278,16 +279,40 @@ impl FsWatchPool {
     }
 
     /// Re-issue `watch()` for every currently-subscribed target, regardless
-    /// of its current health — cheap (a no-op for an already-live watch per
-    /// `notify`'s own docs) and is the only way this pool detects a *silent*
-    /// death, since neither `notify` nor the OS reliably tells us a watch
-    /// died without us asking.
+    /// of its current health, and is the only way this pool detects a
+    /// *silent* death, since neither `notify` nor the OS reliably tells us a
+    /// watch died without us asking.
+    ///
+    /// **Not a no-op for an already-live watch** — the original version of
+    /// this comment claimed it was ("cheap... per `notify`'s own docs"),
+    /// which was wrong and caused a real handle leak (see
+    /// `docs/status/STATUS_FS_WATCH_SWEEP_HANDLE_LEAK_2026_08_22.md`):
+    /// `notify` 7.0.0's Windows backend (`add_watch` in the vendored
+    /// `windows.rs`) opens a brand-new `CreateFileW` directory handle +
+    /// `CreateSemaphoreW` on every call, *unconditionally*, then overwrites
+    /// its internal `watches` map entry for that path with no cleanup of
+    /// the handles the previous entry held — a `HEALTH_SWEEP_INTERVAL`-tick
+    /// (30s) health sweep across every subscribed target therefore leaked
+    /// one File + one Semaphore handle per target, per tick, for the life
+    /// of the process. `unwatch()` first, so at most one native watch per
+    /// target exists at any instant — this preserves the silent-death
+    /// detection this sweep exists for (a genuinely-dead watch's `watch()`
+    /// re-establishes it the same as before) without the leak.
     fn sweep(&self) {
         let targets: Vec<(PathBuf, RecursiveMode)> = {
             let inner = self.inner.lock().unwrap();
             inner.targets.iter().map(|(p, e)| (p.clone(), e.mode)).collect()
         };
         for (target, mode) in targets {
+            {
+                let mut inner = self.inner.lock().unwrap();
+                if let Some(w) = inner.watcher.as_mut() {
+                    // Best-effort: an already-dead/never-established watch
+                    // has nothing to unwatch — try_watch below (re)establishes
+                    // it regardless of whether this succeeds.
+                    let _ = w.unwatch(&target);
+                }
+            }
             match self.try_watch(&target, mode) {
                 Ok(()) => self.health.clear_degraded(&target),
                 Err(e) => self.health.mark_degraded(target, e),
@@ -412,5 +437,56 @@ mod tests {
         // path, which recovery.rs's own unit tests cover at the bookkeeping
         // level instead.
         assert_eq!(pool.health().backend, WatchBackend::Native);
+    }
+
+    /// Regression test for
+    /// `docs/status/STATUS_FS_WATCH_SWEEP_HANDLE_LEAK_2026_08_22.md`:
+    /// `notify` 7.0.0's Windows backend opens a new `CreateFileW` + a new
+    /// `CreateSemaphoreW` on every `watch()` call, unconditionally — even
+    /// for a path that's already watched — and its internal map's
+    /// `insert()` silently drops (without closing) whatever handle pair the
+    /// previous entry held. `sweep()` used to call `watch()` on every
+    /// subscribed target on every `HEALTH_SWEEP_INTERVAL` tick regardless of
+    /// whether it was already healthy, so a long-running process leaked
+    /// ~2 handles per subscribed path per tick for the life of the process.
+    /// Simulates many sweep ticks back-to-back on one subscribed target and
+    /// asserts this process's own handle count does not grow linearly with
+    /// sweep count — a fixed `sweep()` (unwatch() before re-watch()) leaks
+    /// ~0/call; the broken version leaked ~2/call.
+    #[cfg(target_os = "windows")]
+    #[tokio::test]
+    async fn sweep_does_not_leak_a_handle_pair_per_call() {
+        let pool = FsWatchPool::new();
+        let tmp = std::env::temp_dir().join("agentmux_fs_watch_pool_sweep_leak_test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let sub = pool.subscribe_dir(&tmp);
+        // Let the initial watch settle before measuring.
+        tokio::time::sleep(StdDuration::from_millis(100)).await;
+
+        let pid = std::process::id();
+        let before = crate::backend::sysinfo::process_handle_count(pid)
+            .expect("own handle count must be queryable");
+
+        const SWEEPS: u32 = 200;
+        for _ in 0..SWEEPS {
+            pool.sweep();
+        }
+
+        let after = crate::backend::sysinfo::process_handle_count(pid)
+            .expect("own handle count must be queryable");
+        let grew_by = after.saturating_sub(before);
+
+        pool.unsubscribe(sub);
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        assert!(
+            grew_by < SWEEPS / 2,
+            "handle count grew by {grew_by} over {SWEEPS} sweep() calls on one \
+             subscribed target (before={before}, after={after}) — consistent \
+             with the fixed-here bug (a redundant watch() without a prior \
+             unwatch() leaked a File+Semaphore pair per call, ~2/sweep)"
+        );
     }
 }

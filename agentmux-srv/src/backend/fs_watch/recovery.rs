@@ -50,9 +50,13 @@ pub const RETRY_BACKOFF: [Duration; 3] = [
 /// path still has a live watch, self-healing a silent death (inotify
 /// instance-limit churn, a watched directory deleted and recreated at a new
 /// inode, a flaky network mount) without needing a true "is this watch still
-/// alive" signal from the OS — re-issuing `watch()` on an already-watched
-/// path is a documented-safe no-op in `notify`, so this is cheap even when
-/// nothing is actually wrong.
+/// alive" signal from the OS. **Not a free no-op when nothing is wrong** —
+/// re-issuing `watch()` on an already-watched path is NOT safe to do without
+/// first `unwatch()`-ing it: `notify` 7.0.0's Windows backend leaks a
+/// File + Semaphore handle pair per redundant `watch()` call (see
+/// `pool.rs`'s `sweep()` and
+/// `docs/status/STATUS_FS_WATCH_SWEEP_HANDLE_LEAK_2026_08_22.md`). `sweep()`
+/// pays for the safety with an `unwatch()` before every re-`watch()`.
 pub const HEALTH_SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 
 #[derive(Default)]

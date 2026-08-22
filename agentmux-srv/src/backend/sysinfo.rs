@@ -240,7 +240,7 @@ static LAST_HANDLE_WARN: std::sync::OnceLock<std::sync::Mutex<HashMap<u32, Insta
 /// success and failure path; leaking handles from the handle-leak detector
 /// would be a bit much.
 #[cfg(target_os = "windows")]
-fn process_handle_count(pid: u32) -> Option<u32> {
+pub(crate) fn process_handle_count(pid: u32) -> Option<u32> {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{
         GetProcessHandleCount, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
