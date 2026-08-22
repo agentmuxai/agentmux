@@ -143,11 +143,24 @@ pub fn format_injected_message(msg: &str, source_agent: Option<&str>, include_so
 }
 
 /// Keywords that must appear as whole words (surrounded by non-alphanumeric
-/// characters or at string boundaries) to trigger SENSITIVE escalation.
+/// characters or at string boundaries) to trigger SENSITIVE escalation, paired
+/// with whether a simple trailing "s" (plural) should also match.
 /// This prevents false positives from substrings like "patch", "dispatch",
 /// "pattern", "tokenize", "compatibility", etc.
-const SENSITIVE_WHOLE_WORD_KEYWORDS: &[&str] = &[
-    "pat", "token", "secret", "password", "credential", "keychain",
+///
+/// "pat" opts OUT of plural matching: its natural plural "pats" collides with
+/// the extremely common English verb ("the user pats the dog"), which is a
+/// far more common false-positive source than the singular "pat" already is
+/// on its own (PR #2740 review discussion). The other five keywords' plurals
+/// ("tokens", "secrets", "passwords", "credentials", "keychains") don't
+/// collide with unrelated common words, so they opt in.
+const SENSITIVE_WHOLE_WORD_KEYWORDS: &[(&str, bool)] = &[
+    ("pat", false),
+    ("token", true),
+    ("secret", true),
+    ("password", true),
+    ("credential", true),
+    ("keychain", true),
 ];
 
 /// Keywords that are matched as substrings (they are distinctive enough that
@@ -163,8 +176,12 @@ fn is_word_boundary(c: char) -> bool {
     !c.is_alphanumeric() && c != '_'
 }
 
-/// Returns true if `haystack` contains `needle` as a whole word.
-fn contains_whole_word(haystack: &str, needle: &str) -> bool {
+/// Returns true if `haystack` contains `needle` as a whole word, or — when
+/// `allow_plural` is true — as a whole word plus a simple trailing "s" (so
+/// "tokens"/"secrets"/"credentials"/etc. match the same as their singular
+/// form; see doc comment on SENSITIVE_WHOLE_WORD_KEYWORDS for why plurals
+/// were previously missed, and why some keywords opt out).
+fn contains_whole_word(haystack: &str, needle: &str, allow_plural: bool) -> bool {
     let needle_len = needle.len();
     let bytes = haystack.as_bytes();
     let needle_bytes = needle.as_bytes();
@@ -172,10 +189,25 @@ fn contains_whole_word(haystack: &str, needle: &str) -> bool {
     while i + needle_len <= haystack.len() {
         if bytes[i..i + needle_len].eq_ignore_ascii_case(needle_bytes) {
             let before_ok = i == 0 || is_word_boundary(haystack[..i].chars().next_back().unwrap());
-            let after_ok = i + needle_len == haystack.len()
-                || is_word_boundary(haystack[i + needle_len..].chars().next().unwrap());
-            if before_ok && after_ok {
-                return true;
+            if before_ok {
+                let after_idx = i + needle_len;
+                let after_ok = after_idx == haystack.len()
+                    || is_word_boundary(haystack[after_idx..].chars().next().unwrap());
+                if after_ok {
+                    return true;
+                }
+                // Not a boundary right after the match — optionally allow
+                // exactly one trailing "s" (plural) before requiring the
+                // boundary. Since after_ok was false, after_idx <
+                // haystack.len() here, so indexing bytes[after_idx] is safe.
+                if allow_plural && (bytes[after_idx] == b's' || bytes[after_idx] == b'S') {
+                    let after_plural_idx = after_idx + 1;
+                    let after_plural_ok = after_plural_idx == haystack.len()
+                        || is_word_boundary(haystack[after_plural_idx..].chars().next().unwrap());
+                    if after_plural_ok {
+                        return true;
+                    }
+                }
             }
         }
         i += 1;
@@ -187,7 +219,9 @@ fn contains_whole_word(haystack: &str, needle: &str) -> bool {
 pub fn is_sensitive_message(msg: &str) -> bool {
     let lower = msg.to_lowercase();
     SENSITIVE_SUBSTRING_KEYWORDS.iter().any(|kw| lower.contains(kw))
-        || SENSITIVE_WHOLE_WORD_KEYWORDS.iter().any(|kw| contains_whole_word(&lower, kw))
+        || SENSITIVE_WHOLE_WORD_KEYWORDS
+            .iter()
+            .any(|(kw, allow_plural)| contains_whole_word(&lower, kw, *allow_plural))
 }
 
 /// Wrap an injected message with a structured `[JEKT:...]` marker block.
