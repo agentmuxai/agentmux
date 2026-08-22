@@ -1643,6 +1643,7 @@ impl Store {
             )?;
         }
         self.registry_upsert_if_named(inst);
+        self.registry_propagate_continuation_session_id(inst);
         // Mirror new instance into db_agents.
         self.agents_dual_write_instance_create(inst)?;
         Ok(())
@@ -2131,6 +2132,7 @@ impl Store {
         let fresh = self.instance_get(id)?;
         if let Some(f) = &fresh {
             self.registry_upsert_if_named(f);
+            self.registry_propagate_continuation_session_id(f);
             // Mirror update to db_agents.
             self.agents_dual_write_instance_update(f)?;
         }
@@ -2173,6 +2175,7 @@ impl Store {
             // mirror exact.
             if let Ok(Some(fresh)) = self.instance_get(&inst.id) {
                 self.registry_upsert_if_named(&fresh);
+                self.registry_propagate_continuation_session_id(&fresh);
                 // Mirror status fields to db_agents.
                 self.agents_dual_write_instance_update(&fresh)?;
             }
