@@ -919,8 +919,7 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                         </div>
                         <p class="agent-picker-templates-hint" data-testid="agent-templates-hint">
                             Each card is a <strong>harness</strong> (the CLI that runs the agent, e.g. Claude Code,
-                            Codex) — you'll pick which <strong>model</strong>
-                            it uses next.
+                            Codex) — you'll pick which <strong>model</strong> it uses next.
                         </p>
                         <div class="agent-picker-list" data-testid="agent-templates-list">
                             <For each={templates()}>
