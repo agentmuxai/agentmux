@@ -1,5 +1,15 @@
+// @vitest-environment node
+//
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
+//
+// Forces the real Node environment (vitest.config.ts's global default is
+// jsdom, for frontend component tests) — muxlog.mjs is a standalone Node
+// CLI script that never runs in a browser, and jsdom's `fetch` polyfill
+// doesn't actually reach a real local HTTP server the way checkLiveness's
+// tests below need (probePort speaks real HTTP as of reagent P2 on
+// PR #2742 — every "live"/"multiple ipc-port files" case silently failed
+// under jsdom's fetch until this was added, passing fine under plain Node).
 //
 // Unit tests for muxlog.mjs's glob()/filterByInstance()/pickCandidate() —
 // pure logic (filesystem reads against a real temp dir for glob(), plain
@@ -23,6 +33,7 @@
 //   instance.
 
 import fs from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -328,11 +339,38 @@ describe("muxlog checkLiveness", () => {
         return { logDir, dataDir };
     }
 
-    function listenOnEphemeralPort() {
+    // A real HTTP server answering GET /health with the exact shape
+    // agentmux-cef's own IPC server returns ({"status":"ok",...}) — probePort
+    // now speaks HTTP, not raw TCP, so the test double has to match (reagent
+    // P2 on PR #2742).
+    function listenWithHealthResponse() {
         return new Promise((resolve) => {
-            server = net.createServer();
+            server = http.createServer((req, res) => {
+                if (req.url === "/health") {
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ status: "ok", version: "0.55.19" }));
+                } else {
+                    res.writeHead(404);
+                    res.end();
+                }
+            });
             server.listen(0, "127.0.0.1", () => resolve(server.address().port));
         });
+    }
+
+    // A listener that accepts the TCP connection (so a bare connect-only
+    // probe would false-positive "live") but isn't AgentMux's IPC server at
+    // all — the exact scenario reagent P2 described (OS reassigns a dead
+    // instance's port to an unrelated local service).
+    function listenAsUnrelatedService() {
+        return new Promise((resolve) => {
+            server = net.createServer((sock) => sock.end("not an agentmux server\n"));
+            server.listen(0, "127.0.0.1", () => resolve(server.address().port));
+        });
+    }
+
+    function listenOnEphemeralPort() {
+        return listenWithHealthResponse();
     }
 
     it("returns '?' when there's no sibling data dir at all", async () => {
@@ -353,10 +391,33 @@ describe("muxlog checkLiveness", () => {
         expect(await checkLiveness(logDir)).toBe("?");
     });
 
-    it("returns 'live' when something is actually listening on the recorded port", async () => {
+    it("returns 'live' when the recorded port answers GET /health with status:ok", async () => {
         const { logDir, dataDir } = makeInstance();
-        const port = await listenOnEphemeralPort();
+        const port = await listenWithHealthResponse();
         fs.writeFileSync(path.join(dataDir, "ipc-port-abc123"), `${port}:some-token`);
+        expect(await checkLiveness(logDir)).toBe("live");
+    });
+
+    // reagent P2 on PR #2742: a raw TCP connect alone isn't proof of
+    // liveness — something else could be listening on a reassigned port.
+    it("returns 'dead' when something IS listening but doesn't answer as AgentMux's IPC server", async () => {
+        const { logDir, dataDir } = makeInstance();
+        const port = await listenAsUnrelatedService();
+        fs.writeFileSync(path.join(dataDir, "ipc-port-abc123"), `${port}:some-token`);
+        expect(await checkLiveness(logDir)).toBe("dead");
+    });
+
+    // reagent P1 on PR #2742: a dev-mode data dir can hold a stale port file
+    // (crashed process, never cleaned up) alongside a live one — checking
+    // only the first readdirSync result (unspecified order) risks probing
+    // the dead one and reporting "dead" for a genuinely live instance.
+    it("returns 'live' when multiple ipc-port-* files exist and only one is actually alive", async () => {
+        const { logDir, dataDir } = makeInstance();
+        const livePort = await listenWithHealthResponse();
+        // A stale port file pointing at a port nothing is listening on —
+        // simulates a crashed prior run's never-cleaned-up port file.
+        fs.writeFileSync(path.join(dataDir, "ipc-port-stalehash"), "1:dead-token");
+        fs.writeFileSync(path.join(dataDir, "ipc-port-livehash"), `${livePort}:live-token`);
         expect(await checkLiveness(logDir)).toBe("live");
     });
 
@@ -364,7 +425,7 @@ describe("muxlog checkLiveness", () => {
         const { logDir, dataDir } = makeInstance();
         // Bind then immediately close — the port is very likely free again,
         // and nothing else in this test process will grab it in between.
-        const port = await listenOnEphemeralPort();
+        const port = await listenWithHealthResponse();
         await new Promise((resolve) => server.close(resolve));
         fs.writeFileSync(path.join(dataDir, "ipc-port-abc123"), `${port}:some-token`);
         expect(await checkLiveness(logDir)).toBe("dead");

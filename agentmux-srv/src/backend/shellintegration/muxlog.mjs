@@ -230,14 +230,10 @@ function follow(file, opt) {
 // running right now" — the two look identical for a process that just died.
 // agentmux-cef already writes a real, checkable liveness signal per instance:
 // `<data-dir>/ipc-port-<hash>` (agentmux-launcher/src/second_instance.rs),
-// containing `port:token` for the host's cross-window IPC listener. We don't
-// replicate the launcher's FNV-1a dir_hash to compute the exact filename —
-// glob for any `ipc-port-*` in the sibling `data` dir instead, cheaper and
-// forward-compatible if the hash scheme ever changes. A raw TCP connect (no
-// HTTP/token exchange — we're not actually forwarding an IPC call, just
-// confirming something is listening) is enough: nothing binds a dead
-// process's port, so a refused/timed-out connect means genuinely gone, not
-// just quiet.
+// containing `port:token` for the host's IPC HTTP server. We don't replicate
+// the launcher's FNV-1a dir_hash to compute the exact filename — glob for
+// any `ipc-port-*` in the sibling `data` dir instead, cheaper and
+// forward-compatible if the hash scheme ever changes.
 //
 // Exported (pure logic split from the fs/net I/O) for muxlog.test.mjs.
 export function siblingDataDir(logDir) {
@@ -245,20 +241,26 @@ export function siblingDataDir(logDir) {
     return path.join(path.dirname(logDir), "data");
 }
 
-function probePort(port, timeoutMs = 300) {
-    return new Promise((resolve) => {
-        let done = false;
-        const finish = (alive) => {
-            if (done) return;
-            done = true;
-            sock.destroy();
-            resolve(alive);
-        };
-        const sock = net.createConnection({ host: "127.0.0.1", port, timeout: timeoutMs });
-        sock.once("connect", () => finish(true));
-        sock.once("timeout", () => finish(false));
-        sock.once("error", () => finish(false));
-    });
+// Reagent P2 on PR #2742: a raw TCP connect only proves SOMETHING is
+// listening, not that it's AgentMux — if the OS reassigns a dead instance's
+// ephemeral port to an unrelated local service before this probe runs, a
+// bare connect would false-positive "live". The host's IPC server
+// (agentmux-cef/src/ipc.rs) exposes a genuine unauthenticated
+// `GET /health` on this exact port returning `{"status":"ok","version":...}`
+// — verify that shape specifically, not just a successful connection.
+async function probePort(port, timeoutMs = 300) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const resp = await fetch(`http://127.0.0.1:${port}/health`, { signal: controller.signal });
+        if (!resp.ok) return false;
+        const body = await resp.json().catch(() => null);
+        return body?.status === "ok";
+    } catch {
+        return false;
+    } finally {
+        clearTimeout(timer);
+    }
 }
 
 // "live" | "dead" | "?" — "?" means genuinely unknown (no sibling data dir,
@@ -271,13 +273,28 @@ export async function checkLiveness(logDir) {
     if (!dataDir) return "?";
     let entries;
     try { entries = fs.readdirSync(dataDir); } catch { return "?"; }
-    const portFile = entries.find((n) => n.startsWith("ipc-port-"));
-    if (!portFile) return "?";
-    let contents;
-    try { contents = fs.readFileSync(path.join(dataDir, portFile), "utf8"); } catch { return "?"; }
-    const port = parseInt(contents.trim().split(":")[0], 10);
-    if (!Number.isFinite(port) || port <= 0 || port > 65535) return "?";
-    return (await probePort(port)) ? "live" : "dead";
+    // Reagent P1 on PR #2742: a dev-mode data dir is keyed by BRANCH, not
+    // version, and a crashed (non-graceful-exit) process's port file is
+    // never cleaned up (agentmux-cef/src/lib.rs writes it once at startup;
+    // nothing removes it on a crash, only on the graceful-shutdown path).
+    // So a stale port file from a PRIOR crashed run and a live one from the
+    // CURRENT run can coexist in the same dir — taking only the first
+    // readdirSync result (unspecified ordering) could probe the dead one
+    // and report "dead" for a genuinely live instance. Probe every
+    // candidate concurrently instead; "live" if ANY of them answers.
+    const portFiles = entries.filter((n) => n.startsWith("ipc-port-"));
+    if (portFiles.length === 0) return "?";
+    const ports = portFiles
+        .map((name) => {
+            let contents;
+            try { contents = fs.readFileSync(path.join(dataDir, name), "utf8"); } catch { return null; }
+            const port = parseInt(contents.trim().split(":")[0], 10);
+            return Number.isFinite(port) && port > 0 && port <= 65535 ? port : null;
+        })
+        .filter((p) => p !== null);
+    if (ports.length === 0) return "?";
+    const results = await Promise.all(ports.map((p) => probePort(p)));
+    return results.some(Boolean) ? "live" : "dead";
 }
 
 // ─── ls ───────────────────────────────────────────────────────────────────────
