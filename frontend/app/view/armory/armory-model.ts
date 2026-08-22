@@ -6,11 +6,18 @@ import { useBlockAtom } from "@/app/store/global";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
 import { createMemo, type Accessor } from "solid-js";
 
-// "native_memory" deliberately does NOT reuse the word "memory" — that's
-// already the (confusingly-named, legacy) section id for the global-brain
-// tab below, distinct from a bundle's own "bundles" section (whose backing
-// component, MemoryManager, is itself a naming leftover — see
+// Section ids are internal and stay stable across renames (they're
+// persisted in block.meta["armory:section"] — changing an id would strand
+// a user's previously-selected tab back to "accounts"). "memory" is the
+// global-brain tab (label "Global Memory" below); "native_memory" is the
+// per-agent tab (label "Personal Memory" below) — both distinct from a
+// bundle's own "bundles" section (label "ABF"; its backing component,
+// MemoryManager, is itself a naming leftover — see
 // docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.3).
+// "Global Memory"/"Personal Memory" abstract away, for the user, that these
+// are two structurally different backing systems (is_global Memory bundles
+// vs. the harness's own native memory files) — see
+// docs/specs/SPEC_ARMORY_MEMORY_GLOBAL_PERSONAL_RENAME_2026_08_22.md.
 export type ArmorySection = "accounts" | "memory" | "skills" | "mcp" | "bundles" | "native_memory";
 
 // Label text only (not icon/tooltip, which stay armory-view.tsx's own
@@ -20,11 +27,11 @@ export type ArmorySection = "accounts" | "memory" | "skills" | "mcp" | "bundles"
 // too, so the two can never drift out of sync.
 export const ARMORY_SECTION_LABELS: Record<ArmorySection, string> = {
     accounts: "Accounts",
-    memory: "Memories",
+    memory: "Global Memory",
     skills: "Skills",
     mcp: "MCP Servers",
     bundles: "ABF",
-    native_memory: "Native Memory",
+    native_memory: "Personal Memory",
 };
 
 function isArmorySection(v: unknown): v is ArmorySection {

@@ -299,7 +299,7 @@ export const AgentNativeMemoryModal = (props: AgentNativeMemoryModalProps): JSX.
 
             <PrimitiveListDetail
                 showDetail={inDetail()}
-                backLabel="Memories"
+                backLabel="Personal Memory"
                 onBack={() => model.clearSelection()}
                 list={listView}
                 detail={detailView}
