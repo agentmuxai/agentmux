@@ -59,7 +59,14 @@
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
     color: var(--main-text-color);
     font-size: 12px;
-    zoom: var(--zoomfactor);
+    // Deliberately NOT `zoom: var(--zoomfactor)` — this element is
+    // Portal'd (document.body) and positioned via `computeMenuPosition`
+    // from an anchor rect that's ALREADY real, post-chrome-zoom pixels
+    // (the trigger button lives under `.status-bar`, which itself
+    // legitimately self-zooms as an in-flow container). Self-zooming this
+    // element too double-applies the same factor to its own already-real
+    // `left`/`top`/`width`, offsetting AND shrinking it — see
+    // docs/specs/SPEC_STATUS_BAR_POPOVER_DOUBLE_ZOOM_OFFSET_2026_08_22.md.
     // Above the status bar and above browser panes — sits in the same
     // stacking tier as the modal overlays. pane-overlay.ts clips the
     // pane HWND beneath this rect so the DOM content paints on top.
