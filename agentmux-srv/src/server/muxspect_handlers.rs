@@ -216,6 +216,142 @@ pub async fn handle_muxspect_describe(
     .into_response()
 }
 
+#[derive(serde::Deserialize)]
+pub struct MuxspectFindQuery {
+    pub block_id: Option<String>,
+    pub agent: Option<String>,
+}
+
+/// `GET /api/v1/muxspect/find?block_id=X` or `?agent=X` — Ext 4 of
+/// `docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md`:
+/// "which running instance(s), if any, have a controller or subagent
+/// dispatch matching block_id/agent X" — the query that debugging session
+/// needed and had no tool for, ending in manual filesystem/env-var
+/// archaeology across every channel by hand.
+///
+/// Checks THIS instance first (host tier, no network) via the same
+/// `ProcessBroker::list()` `handle_muxspect_list` uses (so "found" here
+/// means the same thing `muxspect list` would show, not a different
+/// existence check invented for this endpoint) and, for an `agent` query,
+/// `reactive_handler.list_agents()` (same source `handle_muxspect_conversations`'s
+/// host tier and `verify-sender` use).
+///
+/// Then checks every OTHER channel via the shared reactive registry
+/// (`resolve_shared_reactive_dir` + `list_all_shared` — the exact mechanism
+/// `handle_muxspect_conversations`'s cross-channel tier already uses, see
+/// that handler's own doc comment for the security rationale) WITHOUT any
+/// network call at all for basic existence: `AgentEntry` already carries
+/// `block_id`/`agent_id`/`channel`/`local_url`, so a match there already
+/// answers "which channel" before any forwarding happens. Only a MATCHED
+/// cross-channel entry gets a forwarded `describe` call (same
+/// single-forwarded-hop / timeout discipline as the conversations handler)
+/// to fill in process/controller detail — unmatched channels cost nothing.
+///
+/// Always 200 — zero results is a legitimate answer ("not found on this
+/// host, in any known channel"), not an error, same posture as every other
+/// handler in this file. `results` can have more than one entry only if the
+/// same block_id/agent name somehow exists in more than one place at once
+/// (a real, worth-surfacing anomaly, not something to silently collapse to
+/// the first match).
+pub async fn handle_muxspect_find(
+    State(state): State<AppState>,
+    Query(q): Query<MuxspectFindQuery>,
+) -> impl IntoResponse {
+    if q.block_id.as_deref().unwrap_or("").is_empty() && q.agent.as_deref().unwrap_or("").is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "provide block_id or agent" })),
+        )
+            .into_response();
+    }
+
+    let mut results: Vec<serde_json::Value> = Vec::new();
+    let own_channel = std::env::var("AGENTMUX_CHANNEL").unwrap_or_else(|_| "stable".to_string());
+
+    // Host tier — no network, same source handle_muxspect_list/
+    // handle_muxspect_conversations already use.
+    for status in state.process_broker.list() {
+        let block_matches = q.block_id.as_deref().is_some_and(|b| b == status.block_id);
+        let agent_matches = q
+            .agent
+            .as_deref()
+            .and_then(|name| {
+                state
+                    .reactive_handler
+                    .list_agents()
+                    .into_iter()
+                    .find(|r| r.block_id == status.block_id && r.agent_id.eq_ignore_ascii_case(name))
+            })
+            .is_some();
+        if !block_matches && !agent_matches {
+            continue;
+        }
+        results.push(json!({
+            "tier": "host",
+            "channel": own_channel,
+            "block_id": status.block_id,
+            "found": true,
+            "process_status": &status,
+        }));
+    }
+
+    // Cross-channel tier — AgentEntry already carries block_id/agent_id, so
+    // matching costs zero network calls; only a match gets forwarded.
+    if let Some(shared_dir) = crate::registry::resolve_shared_reactive_dir() {
+        let local_url = state.local_web_url.clone();
+        let matches: Vec<_> = crate::backend::reactive::registry::list_all_shared(&shared_dir)
+            .into_iter()
+            .filter(|e| e.channel != own_channel && e.local_url != local_url)
+            .filter(|e| {
+                q.block_id.as_deref().is_some_and(|b| b == e.block_id)
+                    || q.agent.as_deref().is_some_and(|name| e.agent_id.eq_ignore_ascii_case(name))
+            })
+            .collect();
+
+        let mut join_set = tokio::task::JoinSet::new();
+        for entry in matches {
+            let http_client = state.http_client.clone();
+            join_set.spawn(async move {
+                let fetch = http_client
+                    .get(format!("{}/api/v1/muxspect/describe", entry.local_url))
+                    .header("X-AuthKey", &entry.auth_key)
+                    .query(&[("block_id", entry.block_id.as_str())])
+                    .send();
+
+                let describe = match tokio::time::timeout(
+                    std::time::Duration::from_millis(CROSS_CHANNEL_PREVIEW_TIMEOUT_MS),
+                    fetch,
+                )
+                .await
+                {
+                    Ok(Ok(resp)) if resp.status().is_success() => resp.json::<serde_json::Value>().await.ok(),
+                    _ => None, // timeout/connect/parse failure: still report the match, just without detail
+                };
+
+                json!({
+                    "tier": "cross-channel",
+                    "channel": entry.channel,
+                    "block_id": entry.block_id,
+                    "agent_id": entry.agent_id,
+                    "found": true,
+                    "describe": describe,
+                })
+            });
+        }
+        while let Some(res) = join_set.join_next().await {
+            if let Ok(value) = res {
+                results.push(value);
+            }
+        }
+    }
+
+    Json(json!({
+        "query": { "block_id": q.block_id, "agent": q.agent },
+        "results": results,
+    }))
+    .into_response()
+}
+
 /// A `ToolNode`'s status stays `"running"` this long (matches the
 /// frontend's own `TOOL_PROMOTION_MS`, `frontend/app/view/agent/activity/
 /// tool-adapter.ts`) before it's eligible to be flagged `stuck` here — a
