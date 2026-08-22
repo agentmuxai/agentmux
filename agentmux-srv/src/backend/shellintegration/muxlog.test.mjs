@@ -38,7 +38,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { checkLiveness, filterByInstance, glob, matchesOwnChannel, pickCandidate, printLastLines, renderLine, siblingDataDir } from "./muxlog.mjs";
+import { checkLiveness, filterByInstance, glob, matchesOwnChannel, pickCandidate, printLastLines, renderLine, siblingCandidateDirs } from "./muxlog.mjs";
 
 let root;
 
@@ -305,15 +305,16 @@ describe("muxlog printLastLines return value (Ext 6's verdict count)", () => {
     });
 });
 
-describe("muxlog siblingDataDir", () => {
-    it("swaps a trailing 'logs' segment for 'data'", () => {
+describe("muxlog siblingCandidateDirs", () => {
+    it("returns both the 'data' and 'cef-cache' siblings of a trailing 'logs' segment", () => {
         const logs = path.join("channels", "chan-a", "versions", "0.55.19", "logs");
         const data = path.join("channels", "chan-a", "versions", "0.55.19", "data");
-        expect(siblingDataDir(logs)).toBe(data);
+        const cefCache = path.join("channels", "chan-a", "versions", "0.55.19", "cef-cache");
+        expect(siblingCandidateDirs(logs)).toEqual([data, cefCache]);
     });
 
-    it("returns null for a directory that isn't named 'logs'", () => {
-        expect(siblingDataDir(path.join("channels", "chan-a", "versions", "0.55.19", "data"))).toBeNull();
+    it("returns an empty array for a directory that isn't named 'logs'", () => {
+        expect(siblingCandidateDirs(path.join("channels", "chan-a", "versions", "0.55.19", "data"))).toEqual([]);
     });
 });
 
@@ -334,9 +335,11 @@ describe("muxlog checkLiveness", () => {
     function makeInstance() {
         const logDir = path.join(root, "logs");
         const dataDir = path.join(root, "data");
+        const cefCacheDir = path.join(root, "cef-cache");
         fs.mkdirSync(logDir, { recursive: true });
         fs.mkdirSync(dataDir, { recursive: true });
-        return { logDir, dataDir };
+        fs.mkdirSync(cefCacheDir, { recursive: true });
+        return { logDir, dataDir, cefCacheDir };
     }
 
     // A real HTTP server answering GET /health with the exact shape
@@ -402,6 +405,17 @@ describe("muxlog checkLiveness", () => {
         const { logDir, dataDir } = makeInstance();
         const port = await listenWithHealthResponse();
         fs.writeFileSync(path.join(dataDir, "ipc-port"), `${port}:some-token`);
+        expect(await checkLiveness(logDir)).toBe("live");
+    });
+
+    // reagent P1 on PR #2752: agentmux-cef/src/lib.rs writes the port file
+    // to the `cef-cache` sibling (not `data`) for `task dev` instances
+    // (is_dev_build_exe branch) — checking only `data` always reports '?'
+    // for the primary dev workflow, even when it's genuinely live.
+    it("returns 'live' via a port file in the 'cef-cache' sibling (task dev's actual layout)", async () => {
+        const { logDir, cefCacheDir } = makeInstance();
+        const port = await listenWithHealthResponse();
+        fs.writeFileSync(path.join(cefCacheDir, "ipc-port"), `${port}:some-token`);
         expect(await checkLiveness(logDir)).toBe("live");
     });
 

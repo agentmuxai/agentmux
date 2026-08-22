@@ -87,7 +87,7 @@ muxlog srv --since 2026-06-15T23:30 cat        # a time window
 
 | Recipe | What it shows |
 |--------|---------------|
-| `muxlog ls` | every instance's logs: target, version, source (`shared` / `dev:<branch>` / `channel:…`), **LIVE** (`live`/`dead`/`?` — a real check, not inferred from log mtime: probes the instance's own `ipc-port-*` file with a `GET /health` request; `?` means genuinely unknown, e.g. no per-channel data dir found, never a liveness verdict of its own), age, size, path |
+| `muxlog ls` | every instance's logs: target, version, source (`shared` / `dev:<branch>` / `channel:…`), **LIVE** (`live`/`dead`/`?` — a real check, not inferred from log mtime: probes the instance's own `ipc-port-*` file with a `GET /health` request, checking both the `data` and `cef-cache` sibling dirs since `agentmux-cef` writes the port file to `cef-cache` for `task dev` instances and to `data` for portable/installed builds; `?` means genuinely unknown, e.g. neither sibling dir found, never a liveness verdict of its own), age, size, path |
 | `muxlog mem` (alias `doctor`) | system **commit-free** + derived pressure level (the OOM-relevant ceiling, not physical RAM) + the count and footprint of live AgentMux processes — makes multi-instance commit pressure visible before the cliff (`SPEC_MEMORY_PRESSURE_SUPERVISION_2026_06_16` §5.G) |
 | `muxlog errors` | ERROR + WARN across the active host and sidecar |
 | `muxlog bridge` | the startup handshake — `Loading URL`, `Injected IPC …`, `backend-ready`, `window.api`, `Bootstrap failed` — correlated in time, so a reconnect loop is obvious at a glance |

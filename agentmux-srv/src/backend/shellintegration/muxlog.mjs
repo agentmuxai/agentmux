@@ -228,16 +228,24 @@ function follow(file, opt) {
 // A log's mtime says "something was written recently," not "this instance is
 // running right now" — the two look identical for a process that just died.
 // agentmux-cef already writes a real, checkable liveness signal per instance:
-// `<data-dir>/ipc-port-<hash>` (agentmux-launcher/src/second_instance.rs),
-// containing `port:token` for the host's IPC HTTP server. We don't replicate
-// the launcher's FNV-1a dir_hash to compute the exact filename — glob for
-// any `ipc-port-*` in the sibling `data` dir instead, cheaper and
-// forward-compatible if the hash scheme ever changes.
+// `<port-file-dir>/ipc-port-<hash>` (agentmux-cef/src/lib.rs), containing
+// `port:token` for the host's IPC HTTP server. We don't replicate the exact
+// hash to compute the filename — glob for any `ipc-port*` file instead,
+// cheaper and forward-compatible if the hash scheme ever changes.
+//
+// Reagent P1 on PR #2752: `port_file_dir` is NOT always the `data` sibling.
+// agentmux-cef/src/lib.rs writes it to `p.cef_cache_dir` for `task dev`
+// instances (`is_dev_build_exe` branch) and to `AGENTMUX_DATA_DIR` (==
+// `DataPaths.data_dir`, the `data` sibling) for portable/installed builds.
+// `logs`/`data`/`cef-cache` are always siblings under the same version dir
+// (agentmux-common/src/data_paths.rs) regardless of build type, so check
+// both siblings rather than trying to infer dev-vs-portable from the path.
 //
 // Exported (pure logic split from the fs/net I/O) for muxlog.test.mjs.
-export function siblingDataDir(logDir) {
-    if (path.basename(logDir) !== "logs") return null;
-    return path.join(path.dirname(logDir), "data");
+export function siblingCandidateDirs(logDir) {
+    if (path.basename(logDir) !== "logs") return [];
+    const parent = path.dirname(logDir);
+    return [path.join(parent, "data"), path.join(parent, "cef-cache")];
 }
 
 // Reagent P2 on PR #2742: a raw TCP connect only proves SOMETHING is
@@ -262,16 +270,14 @@ async function probePort(port, timeoutMs = 300) {
     }
 }
 
-// "live" | "dead" | "?" — "?" means genuinely unknown (no sibling data dir,
+// "live" | "dead" | "?" — "?" means genuinely unknown (no sibling data/cef-cache dir,
 // no port file, or unreadable/malformed contents), never a liveness verdict
 // of its own. Async — the only I/O-bound piece of muxlog; every caller
 // awaits a Promise.all of these so probes for different instances run
 // concurrently instead of serially piling up 300ms timeouts.
 export async function checkLiveness(logDir) {
-    const dataDir = siblingDataDir(logDir);
-    if (!dataDir) return "?";
-    let entries;
-    try { entries = fs.readdirSync(dataDir); } catch { return "?"; }
+    const candidateDirs = siblingCandidateDirs(logDir);
+    if (candidateDirs.length === 0) return "?";
     // Reagent P1 on PR #2742: a dev-mode data dir is keyed by BRANCH, not
     // version, and a crashed (non-graceful-exit) process's port file is
     // never cleaned up (agentmux-cef/src/lib.rs writes it once at startup;
@@ -285,16 +291,18 @@ export async function checkLiveness(logDir) {
     // filename "ipc-port" (no trailing hyphen) when AGENTMUX_IPC_HASH is
     // unset (the task dev:standalone no-launcher path) — startsWith
     // "ipc-port-" alone misses that exact literal.
-    const portFiles = entries.filter((n) => n === "ipc-port" || n.startsWith("ipc-port-"));
-    if (portFiles.length === 0) return "?";
-    const ports = portFiles
-        .map((name) => {
+    const ports = [];
+    for (const dir of candidateDirs) {
+        let entries;
+        try { entries = fs.readdirSync(dir); } catch { continue; }
+        for (const name of entries) {
+            if (name !== "ipc-port" && !name.startsWith("ipc-port-")) continue;
             let contents;
-            try { contents = fs.readFileSync(path.join(dataDir, name), "utf8"); } catch { return null; }
+            try { contents = fs.readFileSync(path.join(dir, name), "utf8"); } catch { continue; }
             const port = parseInt(contents.trim().split(":")[0], 10);
-            return Number.isFinite(port) && port > 0 && port <= 65535 ? port : null;
-        })
-        .filter((p) => p !== null);
+            if (Number.isFinite(port) && port > 0 && port <= 65535) ports.push(port);
+        }
+    }
     if (ports.length === 0) return "?";
     const results = await Promise.all(ports.map((p) => probePort(p)));
     return results.some(Boolean) ? "live" : "dead";
