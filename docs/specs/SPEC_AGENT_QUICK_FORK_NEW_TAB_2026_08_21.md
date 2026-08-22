@@ -314,7 +314,7 @@ is narrower and different from the original draft's Phase 1:
 
 | Phase | Deliverable | Depends on |
 |---|---|---|
-| **1** | Fix the two confirmed bugs blocking correctness even for the *existing* fork flow: (a) wire `continueSessionId`/`forkSession: true` into the fork path's `launchAgentDefinition` call (§2 — currently missing entirely), (b) fix `template.rs`'s fork-count filter to walk the lineage root instead of the immediate parent (§4.5) | — |
+| **1** ✅ | Fix the two confirmed bugs blocking correctness even for the *existing* fork flow: (a) wire `continueSessionId`/`forkSession: true` into the fork path's `launchAgentDefinition` call (§2 — currently missing entirely), (b) fix `template.rs`'s fork-count filter to walk the lineage root instead of the immediate parent (§4.5) — **landed**, also fixed a third bug found while implementing (b): the suggested name was built from the immediate parent's own name, not the lineage root's, so even a correctly-counted fork of a fork produced "AgentX #2 #3" instead of the flat "AgentX #3" | — |
 | **2** | Wire the quick-fork action itself: `NewTab` (capture the returned tab id) → `launchAgentDefinition(forkedDef, {continueSessionId, forkSession: true, ...}, newTabId)` — explicit tab id, not ambient active-tab state (§4.1) | Phase 1 |
 | **3** | UX polish: right-click affordance, keybinding, auto tab title, non-Claude fallback messaging | Phase 2 |
 | **4** | Long-press/confirmation variant exposing the identity choice (§5) | Phase 2 |

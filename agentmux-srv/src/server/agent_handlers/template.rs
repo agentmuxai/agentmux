@@ -26,6 +26,64 @@ use crate::backend::storage::{AgentDefinition, AgentContent, AgentSkill};
 
 use super::super::AppState;
 
+/// Resolve a definition's **fork**-lineage root by walking `parent_id`.
+///
+/// `parent_id` is overloaded in this schema: `agentdefcreatefromtemplate`
+/// sets it to the *template's* id for every freshly-instantiated user
+/// agent (see that handler below), not just `forkagentdefinition`'s actual
+/// forks — so two unrelated agents both created fresh from the same
+/// template share a `parent_id`, but are not forks of each other. The one
+/// field that reliably distinguishes an actual fork is `branch_label`:
+/// `forkagentdefinition` always sets it (non-empty); `agentdefcreatefromtemplate`
+/// always leaves it empty. Walk upward only while the current node is
+/// itself a fork (non-empty `branch_label`); stop at the first non-fork
+/// ancestor (a template, or a first-generation user agent) — that's the
+/// lineage's root for fork-counting purposes. Confirmed bug this fixes
+/// (Codex's review of PR #2721, docs/specs/SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md
+/// §2): the naming rule requires a flat, lineage-wide counter ("AgentX #2"
+/// → "AgentX #3"), but the previous `parent_id == source_id` filter only
+/// counted immediate children, so forking a fork produced "AgentX #2 #2".
+fn fork_lineage_root_id(defs: &[AgentDefinition], start_id: &str) -> String {
+    let mut current = start_id.to_string();
+    loop {
+        match defs.iter().find(|a| a.id == current) {
+            Some(def) if !def.branch_label.is_empty() && !def.parent_id.is_empty() => {
+                current = def.parent_id.clone();
+            }
+            _ => return current,
+        }
+    }
+}
+
+/// Build the flat, lineage-wide "#N" auto-suggestion for forking `source`.
+///
+/// Two bugs, both from the same root cause (no lineage-root resolution),
+/// fixed together: (1) the existing-fork count must include every fork
+/// anywhere in the lineage, not just `source`'s immediate children —
+/// otherwise forking a fork undercounts and can repeat a number; (2) the
+/// suggested name must be built from the lineage **root's** name, not
+/// `source`'s own (possibly already-suffixed) name — otherwise forking
+/// "AgentX #2" produces "AgentX #2 #3" instead of the flat "AgentX #3"
+/// `SPEC_AGENT_NAMING_AND_ADDRESSING_HOST_LAN_WAN_2026_08_22.md` §4.5
+/// requires. If the root can't be found (should not happen — `source`
+/// itself is always in `defs`), falls back to `source`'s own name rather
+/// than panicking.
+fn suggest_fork_name(defs: &[AgentDefinition], source: &AgentDefinition) -> String {
+    let root_id = fork_lineage_root_id(defs, &source.id);
+    let root_name = defs
+        .iter()
+        .find(|a| a.id == root_id)
+        .map(|a| a.name.as_str())
+        .unwrap_or(source.name.as_str());
+    let existing_fork_count = defs
+        .iter()
+        .filter(|a| {
+            a.is_seeded == 0 && !a.branch_label.is_empty() && fork_lineage_root_id(defs, &a.id) == root_id
+        })
+        .count();
+    format!("{root_name} #{}", existing_fork_count + 2)
+}
+
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // agentdefcreatefromtemplate → clone a seeded template into a new
     // user-owned definition (Phase 1 two-tier picker —
@@ -340,13 +398,10 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .unwrap_or(0);
 
                 // branch_label is the fork's full display name when provided.
-                // When empty, auto-generate "Name #N" based on existing fork count.
+                // When empty, auto-generate a flat, lineage-wide "Name #N"
+                // (see suggest_fork_name's doc comment).
                 let fork_name = if cmd.branch_label.is_empty() {
-                    let existing_fork_count = all_defs
-                        .iter()
-                        .filter(|a| a.parent_id == cmd.source_id && a.is_seeded == 0)
-                        .count();
-                    format!("{} #{}", source.name, existing_fork_count + 2)
+                    suggest_fork_name(&all_defs, &source)
                 } else {
                     cmd.branch_label.clone()
                 };
@@ -470,11 +525,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .find(|a| a.id == cmd.source_id)
                     .ok_or_else(|| format!("forkagentdefinitionsuggest: source not found: {}", cmd.source_id))?;
 
-                let existing_fork_count = all
-                    .iter()
-                    .filter(|a| a.parent_id == cmd.source_id && a.is_seeded == 0)
-                    .count();
-                let suggested_label = format!("{} #{}", source.name, existing_fork_count + 2);
+                let suggested_label = suggest_fork_name(&all, source);
 
                 let result = ForkAgentDefinitionSuggestResult { suggested_label };
                 Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
@@ -679,5 +730,70 @@ mod tests {
             fork.provider, "claude",
             "fork must carry the source's REAL (bundle-resolved) provider, not the drifted `codex` column"
         );
+    }
+
+    // #2721 Phase 1 (Codex's review) — the auto-suggested name must be a
+    // flat, lineage-wide counter off the ROOT's name, not the immediate
+    // parent's (possibly already-suffixed) name. Forking a fork used to
+    // produce "Drifted Template #2 #2" (immediate-parent-only count) or
+    // even "Drifted Template #2 #3" (root-based count, but still built off
+    // the parent's own name) — the correct result is the flat
+    // "Drifted Template #3".
+    #[tokio::test]
+    async fn forking_a_fork_produces_a_flat_lineage_wide_name() {
+        let state = test_state();
+        seed_bundle(&state, "bundle-claude", "claude");
+        seed_drifted_template(&state, "root-1", "bundle-claude");
+
+        let (engine, mut output_rx) = WshRpcEngine::new();
+        register(&engine, &state);
+
+        let fork_once = |engine: &Arc<WshRpcEngine>, source_id: &str| {
+            engine.handle_message(RpcMessage {
+                command: COMMAND_FORK_AGENT_DEFINITION.to_string(),
+                reqid: "req".to_string(),
+                data: Some(serde_json::json!({ "source_id": source_id, "branch_label": "" })),
+                ..Default::default()
+            });
+        };
+
+        fork_once(&engine, "root-1");
+        let resp1 = tokio::time::timeout(std::time::Duration::from_secs(2), output_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(resp1.error.is_empty(), "unexpected error: {}", resp1.error);
+        let fork1: AgentDefinition = serde_json::from_value(resp1.data.expect("expected result data")).unwrap();
+        assert_eq!(fork1.name, "Drifted Template #2");
+
+        fork_once(&engine, &fork1.id);
+        let resp2 = tokio::time::timeout(std::time::Duration::from_secs(2), output_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(resp2.error.is_empty(), "unexpected error: {}", resp2.error);
+        let fork2: AgentDefinition = serde_json::from_value(resp2.data.expect("expected result data")).unwrap();
+        assert_eq!(
+            fork2.name, "Drifted Template #3",
+            "forking a fork must produce a flat, lineage-wide name — not \"#2 #2\" (immediate-parent-only \
+             count) or \"#2 #3\" (root-based count off the parent's own already-suffixed name)"
+        );
+
+        // The suggest RPC (used to preview the name before the user
+        // confirms) must agree with what an actual fork would produce.
+        engine.handle_message(RpcMessage {
+            command: COMMAND_FORK_AGENT_DEFINITION_SUGGEST.to_string(),
+            reqid: "req-suggest".to_string(),
+            data: Some(serde_json::json!({ "source_id": fork2.id })),
+            ..Default::default()
+        });
+        let resp3 = tokio::time::timeout(std::time::Duration::from_secs(2), output_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(resp3.error.is_empty(), "unexpected error: {}", resp3.error);
+        let suggestion: ForkAgentDefinitionSuggestResult =
+            serde_json::from_value(resp3.data.expect("expected result data")).unwrap();
+        assert_eq!(suggestion.suggested_label, "Drifted Template #4");
     }
 }

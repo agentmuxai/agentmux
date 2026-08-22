@@ -22,6 +22,7 @@ import { realAccountIdOrEmpty } from "./identity-carry-over";
 import { refreshAccountCache } from "@/app/view/identity/identity-model";
 import { dimAgentColor, isValidAgentColor, pickAgentColor } from "./agent-color";
 import { parseSeedZoom } from "./agent-zoom-seed";
+import { resolveForkSessionArgs } from "./fork-session-args";
 import { HISTORY_TAB_FOR_META_KEY, openOrFocusHistoryTab } from "./open-history-tab";
 
 export class AgentViewModel implements ViewModel {
@@ -414,16 +415,14 @@ export class AgentViewModel implements ViewModel {
             cliArgs.push(...agent.provider_flags.split(/\s+/).filter(Boolean));
         }
         // In-pane tabs, Phase 4 — see LaunchOverrides.forkSession's own doc
-        // comment. Review finding: `--fork-session` is Claude Code CLI
-        // syntax, validated ONLY for Claude
-        // (SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15 §6.4's empirical
-        // gate) — gating on "any provider with a resumeFlag" wrongly also
-        // matched gemini (`-r`) and muxcode (`--resume`), passing an
-        // unsupported flag to CLIs that were never validated to accept it.
-        // Every other provider (including those two) silently falls back
-        // to "fork = fresh definition, fresh start" — no flag, no error,
-        // exactly the graceful fallback §6.4 called for.
-        if (overrides?.forkSession && provider.id === "claude") {
+        // comment, and fork-session-args.ts's doc comment for the two real
+        // bugs (reagent + Codex, PR #2725) this resolution now guards
+        // against. `--fork-session` is Claude Code CLI syntax, validated
+        // ONLY for Claude (SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15
+        // §6.4's empirical gate) — every other provider falls back to a
+        // true fresh start (no session id at all, not a plain resume).
+        const forkSessionArgs = resolveForkSessionArgs(overrides, provider.id);
+        if (forkSessionArgs.appendForkFlag) {
             cliArgs.push("--fork-session");
         }
 
@@ -592,7 +591,11 @@ export class AgentViewModel implements ViewModel {
             // ensures any session id the CLI later emits on stdout
             // overrides whatever value lands here on subsequent
             // turns.
-            const continueSid = overrides?.continueSessionId?.trim() ?? "";
+            // See fork-session-args.ts / forkSessionArgs above — already
+            // resolved the fork-vs-plain-reattach session id, including
+            // dropping it entirely when a fork was requested for a
+            // provider that can't fork-session (Codex's review of #2725).
+            const continueSid = forkSessionArgs.continueSessionId;
 
             // Per-agent zoom persistence (SPEC_AGENT_ZOOM_PERSISTENCE_2026_06_22.md):
             // seed term:zoom from the agent's saved ui:zoom (already loaded

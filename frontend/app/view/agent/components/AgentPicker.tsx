@@ -406,6 +406,25 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                     (await refreshAccountCache()).map((a) => a.id)
                 ),
                 memoryId: row.memory_id,
+                // Carry the parent conversation's history forward — without
+                // these two, forking only clones the agent *definition*
+                // (config/instructions/skills) and starts a brand new
+                // conversation, silently dropping the whole point of a
+                // "fork" (SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md §2).
+                // `forkSession: true` is what makes launchAgentDefinition
+                // append `--fork-session` (Claude only; every other
+                // provider's launchAgentDefinition ignores both fields and
+                // falls back to a true fresh start — reagent + Codex's
+                // review of PR #2725 found that used to not hold: passing
+                // `forkSession` with an empty session id pushed a bare
+                // `--fork-session` with nothing to resume from, and for a
+                // non-Claude provider `continueSessionId` alone (with
+                // `forkSession` silently ignored) resumed the SAME live
+                // session as the parent instead of falling back — both
+                // fixed at the source in launchAgentDefinition, and guarded
+                // here too: only request a fork when there's an actual
+                // session to fork from.
+                ...(row.session_id ? { continueSessionId: row.session_id, forkSession: true } : {}),
             });
         } finally {
             setLaunching(null);
