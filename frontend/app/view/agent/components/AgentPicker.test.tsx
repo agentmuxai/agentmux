@@ -6,7 +6,7 @@
  * (SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md — Phase 1).
  *
  * Covered:
- *  - the card grid (the "+ New from template" tier) only renders
+ *  - the card grid (the "New Agent" tier) only renders
  *    definitions with `is_seeded === 1` — user-owned agents go to the
  *    `MyAgentsList` sibling above the grid (mocked in this file).
  *  - clicking a template card opens the `create-from-template` modal
@@ -260,11 +260,11 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         expect(screen.queryByTestId("agent-card-user-maks")).toBeNull();
     });
 
-    it("renders the '+ New from template' section header", async () => {
+    it("renders the 'New Agent' section header", async () => {
         const model = makeMockModel();
         render(() => <AgentPicker model={model as any} />);
         const header = await screen.findByTestId("agent-templates-header");
-        expect(header).toHaveTextContent("New from template");
+        expect(header).toHaveTextContent("New Agent");
     });
 
     // #2594 follow-up: harness-vs-model explanation in the new-agent pane.

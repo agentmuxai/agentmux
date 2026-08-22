@@ -20,9 +20,8 @@
  */
 
 import { createMemo, onMount, Show, type JSX } from "solid-js";
-import { DualProviderLogo } from "@/element/DualProviderLogo";
+import { ProviderLogo } from "@/element/ProviderLogo";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
-import { resolveEffectiveVendor } from "../providers/catalog";
 
 interface AgentCardProps {
     agent: AgentDefinition;
@@ -119,12 +118,15 @@ export const AgentCard = (props: AgentCardProps): JSX.Element => {
             aria-disabled={props.disabled}
             aria-label={`Launch ${caption()}`}
         >
-            <DualProviderLogo
-                harness={props.agent.provider}
-                vendor={resolveEffectiveVendor(props.agent.provider, props.agent.model_vendor_base_url)}
-                size={28}
-                class="agent-card-icon"
-            />
+            {/* Harness icon only — no vendor badge. This section is
+                explicitly about picking a harness (see the section hint
+                text in AgentPicker.tsx: "you'll pick which model it uses
+                next"), so the vendor badge DualProviderLogo overlays is
+                redundant here. MyAgentsList.tsx (an already-launched
+                agent, where the model vendor is a real, relevant fact
+                about that specific instance) still uses DualProviderLogo
+                with its badge, unchanged. */}
+            <ProviderLogo provider={props.agent.provider} size={28} class="agent-card-icon" />
             <span class="agent-card-info">
                 <span class="agent-card-title">{title()}</span>
                 <span class="agent-card-caption">{caption()}</span>
