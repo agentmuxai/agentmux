@@ -9,10 +9,17 @@
  * §1/§2/§3) removed the "Identities" tab (folded into the agent-pane's own
  * Identity tab — see agent-identity-links-panel.test.tsx), renamed "Memory"
  * to "Memories", and reordered the rail to
- * Accounts, Memories, Skills, MCP Servers, ABF. These tests guard the
- * rail contents directly; `ArmorySection`'s type-level rejection of
- * `"identities"` is checked at compile time below (no runtime assertion
- * needed for that part).
+ * Accounts, Memories, Skills, MCP Servers, ABF.
+ *
+ * docs/specs/SPEC_ARMORY_MEMORY_GLOBAL_PERSONAL_RENAME_2026_08_22.md renamed
+ * "Memories" to "Global Memory" and "Native Memory" to "Personal Memory",
+ * and moved Personal Memory up to sit right below Global Memory (both now
+ * adjacent, just below Accounts) — one user-facing "Memory" concept split
+ * by scope, abstracting away the two structurally different backing
+ * systems. Current rail order: Accounts, Global Memory, Personal Memory,
+ * Skills, MCP Servers, ABF. These tests guard the rail contents directly;
+ * `ArmorySection`'s type-level rejection of `"identities"` is checked at
+ * compile time below (no runtime assertion needed for that part).
  */
 
 import { createSignal } from "solid-js";
@@ -101,17 +108,24 @@ describe("ArmoryView rail", () => {
         expect(container.querySelector(".bundle-manager-pane--identity")).not.toBeInTheDocument();
     });
 
-    it("labels the brain tab 'Memories' (renamed from 'Memory')", () => {
+    it("labels the brain tab 'Global Memory' (renamed from 'Memories')", () => {
         renderArmory();
-        expect(screen.getAllByText("Memories").length).toBeGreaterThan(0);
+        expect(screen.getAllByText("Global Memory").length).toBeGreaterThan(0);
+        expect(screen.queryByText("Memories")).not.toBeInTheDocument();
         expect(screen.queryByText("Memory")).not.toBeInTheDocument();
     });
 
-    it("orders the rail as Accounts, Memories, Skills, MCP Servers, ABF, Native Memory", () => {
+    it("labels the native-memory tab 'Personal Memory' (renamed from 'Native Memory')", () => {
+        renderArmory();
+        expect(screen.getAllByText("Personal Memory").length).toBeGreaterThan(0);
+        expect(screen.queryByText("Native Memory")).not.toBeInTheDocument();
+    });
+
+    it("orders the rail as Accounts, Global Memory, Personal Memory, Skills, MCP Servers, ABF", () => {
         renderArmory();
         const rail = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-rail" });
         const labels = Array.from(rail.querySelectorAll("button span")).map((el) => el.textContent);
-        expect(labels).toEqual(["Accounts", "Memories", "Skills", "MCP Servers", "ABF", "Native Memory"]);
+        expect(labels).toEqual(["Accounts", "Global Memory", "Personal Memory", "Skills", "MCP Servers", "ABF"]);
     });
 });
 

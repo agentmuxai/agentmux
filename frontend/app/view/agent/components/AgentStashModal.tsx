@@ -13,7 +13,13 @@
  *                   New bindings are created from the agent-launch flow;
  *                   see that component's own doc comment for why this tab
  *                   is not a create/edit surface.
- *   - Memory      — the native-memory browser (AgentNativeMemoryModal).
+ *   - Personal Memory — the native-memory browser (AgentNativeMemoryModal),
+ *                   same feature/RPCs as the Armory rail's "Personal
+ *                   Memory" tab (native-memory-manager.tsx) — this is the
+ *                   per-agent entry point, that one the cross-agent entry
+ *                   point, one source of truth either way. Labels kept in
+ *                   sync deliberately — see
+ *                   docs/specs/SPEC_ARMORY_MEMORY_GLOBAL_PERSONAL_RENAME_2026_08_22.md.
  *   - MCP Servers — the standalone MCP Server primitive (AgentMcpModal).
  *   - Skills      — the standalone Skill primitive (AgentSkillsModal).
  *   - Startup     — select an existing Bundle as Session Context's
@@ -65,7 +71,7 @@ export const AgentStashModal = (props: AgentStashModalProps): JSX.Element => {
     // primitive yet).
     const tabs: StashTabDef[] = [
         { id: "accounts", label: "Accounts", icon: "key" },
-        { id: "memory", label: "Memories", icon: "brain" },
+        { id: "memory", label: "Personal Memory", icon: "brain" },
         { id: "mcp", label: "MCP Servers", icon: "plug" },
         { id: "skills", label: "Skills", icon: "wand-magic-sparkles" },
         // layer-group: same icon armory-view.tsx's RAIL uses for "ABF" —
