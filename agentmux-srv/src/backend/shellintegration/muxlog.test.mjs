@@ -6,7 +6,7 @@
 // data for the other two — no mocking needed, no network, no process.exit).
 // Runs as part of `npm test` (vitest), same discipline as muxspect.test.mjs.
 //
-// Pins two fixes from docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md:
+// Pins three fixes/features from docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md:
 // - §2.2/§2.3: the channels/ log-discovery glob had one wildcard segment more
 //   than any real on-disk channel-build layout actually has
 //   (`channels/*/versions/*/*/logs` vs. the real `channels/*/versions/*/logs`),
@@ -17,12 +17,17 @@
 //   `swarm` resolved to a stale same-version sibling's log on the very first
 //   live repro. `pickCandidate` now prefers a candidate matching the
 //   caller's own $AGENTMUX_CHANNEL when no explicit `-i` is given.
+// - Ext 3: `muxlog ls` inferred liveness from log mtime alone (a dead
+//   process's log looks identical to a live-but-idle one). checkLiveness()
+//   TCP-probes the real `ipc-port-*` file agentmux-cef already writes per
+//   instance.
 
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { filterByInstance, glob, matchesOwnChannel, pickCandidate, printLastLines, renderLine } from "./muxlog.mjs";
+import { checkLiveness, filterByInstance, glob, matchesOwnChannel, pickCandidate, printLastLines, renderLine, siblingDataDir } from "./muxlog.mjs";
 
 let root;
 
@@ -286,5 +291,82 @@ describe("muxlog printLastLines return value (Ext 6's verdict count)", () => {
     it("returns 0 for a file with no matching lines", () => {
         fs.writeFileSync(file, JSON.stringify({ timestamp: "2026-08-22T00:00:00Z", level: "INFO", fields: { message: "no match here" }, target: "x" }) + "\n");
         expect(printLastLines(file, 200, { dispatch: "dispatch-nonexistent" }, true)).toBe(0);
+    });
+});
+
+describe("muxlog siblingDataDir", () => {
+    it("swaps a trailing 'logs' segment for 'data'", () => {
+        const logs = path.join("channels", "chan-a", "versions", "0.55.19", "logs");
+        const data = path.join("channels", "chan-a", "versions", "0.55.19", "data");
+        expect(siblingDataDir(logs)).toBe(data);
+    });
+
+    it("returns null for a directory that isn't named 'logs'", () => {
+        expect(siblingDataDir(path.join("channels", "chan-a", "versions", "0.55.19", "data"))).toBeNull();
+    });
+});
+
+describe("muxlog checkLiveness", () => {
+    let root;
+    let server;
+
+    beforeEach(() => {
+        root = fs.mkdtempSync(path.join(os.tmpdir(), "muxlog-liveness-test-"));
+    });
+
+    afterEach(() => {
+        fs.rmSync(root, { recursive: true, force: true });
+        server?.close();
+        server = undefined;
+    });
+
+    function makeInstance() {
+        const logDir = path.join(root, "logs");
+        const dataDir = path.join(root, "data");
+        fs.mkdirSync(logDir, { recursive: true });
+        fs.mkdirSync(dataDir, { recursive: true });
+        return { logDir, dataDir };
+    }
+
+    function listenOnEphemeralPort() {
+        return new Promise((resolve) => {
+            server = net.createServer();
+            server.listen(0, "127.0.0.1", () => resolve(server.address().port));
+        });
+    }
+
+    it("returns '?' when there's no sibling data dir at all", async () => {
+        const logDir = path.join(root, "logs");
+        fs.mkdirSync(logDir, { recursive: true });
+        // no "data" dir created
+        expect(await checkLiveness(logDir)).toBe("?");
+    });
+
+    it("returns '?' when the data dir exists but has no ipc-port-* file", async () => {
+        const { logDir } = makeInstance();
+        expect(await checkLiveness(logDir)).toBe("?");
+    });
+
+    it("returns '?' for a malformed port file (no ':' separator, or non-numeric port)", async () => {
+        const { logDir, dataDir } = makeInstance();
+        fs.writeFileSync(path.join(dataDir, "ipc-port-abc123"), "not-a-port-file");
+        expect(await checkLiveness(logDir)).toBe("?");
+    });
+
+    it("returns 'live' when something is actually listening on the recorded port", async () => {
+        const { logDir, dataDir } = makeInstance();
+        const port = await listenOnEphemeralPort();
+        fs.writeFileSync(path.join(dataDir, "ipc-port-abc123"), `${port}:some-token`);
+        expect(await checkLiveness(logDir)).toBe("live");
+    });
+
+    it("returns 'dead' when the recorded port has nothing listening on it", async () => {
+        const { logDir, dataDir } = makeInstance();
+        // Bind then immediately close — the port is very likely free again,
+        // and nothing else in this test process will grab it in between.
+        const port = await listenOnEphemeralPort();
+        await new Promise((resolve) => server.close(resolve));
+        fs.writeFileSync(path.join(dataDir, "ipc-port-abc123"), `${port}:some-token`);
+        expect(await checkLiveness(logDir)).toBe("dead");
     });
 });
