@@ -154,6 +154,8 @@ function createWebSpeechVoiceSession(): VoiceSession {
     };
 }
 
+type VoiceEngineMode = "webspeech" | "whisper-local" | "groq";
+
 let _session: VoiceSession | null = null;
 // Which resolved mode `_session` was actually built for. Must be the FULL
 // three-way resolution, not just "webspeech vs. whisper" — createWhisperVoiceSession()
@@ -162,19 +164,9 @@ let _session: VoiceSession | null = null;
 // change needs a rebuild too, even though both route through that same
 // factory function. Collapsing them to one "whisper" bucket here would miss
 // exactly that transition.
-let _sessionMode: "webspeech" | "whisper-local" | "groq" | null = null;
+let _sessionMode: VoiceEngineMode | null = null;
 
-/**
- * Settings -> Recording's engine picker (#2751) made `voice:engine` a live,
- * user-facing switch for the first time — previously it was settings.json-only
- * and effectively required an app restart to notice. `getVoiceSession()`'s
- * singleton cache never accounted for the setting changing mid-session: the
- * Whisper engine's `isLocal` (webm vs. 16kHz WAV capture) is captured once at
- * construction, so switching engines left the frontend still recording in the
- * old format while the backend immediately started expecting the new one —
- * recording silently breaks until a full reload. Found in PR #2751 review.
- */
-export function getVoiceSession(): VoiceSession {
+function resolveVoiceEngineMode(): VoiceEngineMode {
     // Engine selection (SPEC_VOICE_STT_ENGINE_2026_06_20.md §5): the Web Speech
     // recognizer can't transcribe in CEF (closed-source Google service), so it's
     // used ONLY when explicitly opted into via `voice:engine: "webspeech"` AND
@@ -184,19 +176,71 @@ export function getVoiceSession(): VoiceSession {
     const hasWebSpeech =
         typeof window !== "undefined" &&
         !!((window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition);
-    const resolvedMode: "webspeech" | "whisper-local" | "groq" =
-        engine === "webspeech" && hasWebSpeech ? "webspeech" : engine === "whisper-local" ? "whisper-local" : "groq";
+    if (engine === "webspeech" && hasWebSpeech) return "webspeech";
+    if (engine === "whisper-local") return "whisper-local";
+    return "groq";
+}
 
+/**
+ * Settings -> Recording's engine picker (#2751) made `voice:engine` a live,
+ * user-facing switch for the first time — previously it was settings.json-only
+ * and effectively required an app restart to notice. Rebuilds the underlying
+ * session (stopping any in-progress capture cleanly) when the resolved engine
+ * no longer matches what it was built for.
+ */
+function ensureVoiceSession(): VoiceSession {
+    const resolvedMode = resolveVoiceEngineMode();
     if (_session && _sessionMode !== resolvedMode) {
-        // The engine changed since this session was built — tear it down
-        // (stopping any in-progress capture cleanly) rather than leave a
-        // stale-mode session running.
         if (_session.isListening()) _session.toggleListening();
         _session = null;
     }
-    if (_session) return _session;
-
-    _session = resolvedMode === "webspeech" ? createWebSpeechVoiceSession() : createWhisperVoiceSession();
-    _sessionMode = resolvedMode;
+    if (!_session) {
+        _session = resolvedMode === "webspeech" ? createWebSpeechVoiceSession() : createWhisperVoiceSession();
+        _sessionMode = resolvedMode;
+    }
     return _session;
+}
+
+const NULL_STRING_SIGNAL: SignalAtom<string | null> = createSignalAtom<string | null>(null);
+
+/** A SignalAtom that always reads/writes through to whichever session is
+ * CURRENT at call time (via `ensureVoiceSession()`), rather than one fixed
+ * session captured at creation. This is what makes the facade below safe for
+ * long-lived callers to cache once: `resolveVoiceEngineMode()` reads the live
+ * `voice:engine` setting on every read, so any reactive scope that calls a
+ * facade signal (e.g. a component's JSX) automatically re-subscribes to
+ * whichever underlying session is current, and re-runs when the engine
+ * setting itself changes — not just when the old session's own signal fires
+ * (which stops happening the moment that session is discarded). */
+function facadeSignal<T>(pick: (s: VoiceSession) => SignalAtom<T> | undefined, fallback: SignalAtom<T>): SignalAtom<T> {
+    const read = (() => (pick(ensureVoiceSession()) ?? fallback)()) as SignalAtom<T>;
+    (read as any)._set = (v: T) => (pick(ensureVoiceSession()) ?? fallback)._set(v);
+    return read;
+}
+
+let _facade: VoiceSession | null = null;
+
+/**
+ * Returns a STABLE facade object (same identity forever) so long-lived
+ * callers that cache the return value once at component setup — MicButton.tsx,
+ * AgentFooter.tsx, both `const voice = getVoiceSession()` at the top of the
+ * component body, not re-invoked per render — still always operate on
+ * whichever underlying session is current. An earlier version of this fix
+ * (this same PR) rebuilt the underlying session correctly but returned it
+ * directly, so only call sites that invoke `getVoiceSession()` fresh on every
+ * use (keymodel.ts's global hotkey handler) actually observed the rebuild;
+ * the primary per-pane mic-button path did not. Found in PR #2751 re-review.
+ */
+export function getVoiceSession(): VoiceSession {
+    if (_facade) return _facade;
+    _facade = {
+        isListening: facadeSignal((s) => s.isListening, createSignalAtom(false)),
+        currentTargetId: facadeSignal((s) => s.currentTargetId, createSignalAtom<string | null>(null)),
+        lastError: facadeSignal((s) => s.lastError, NULL_STRING_SIGNAL),
+        lastErrorDetail: facadeSignal((s) => s.lastErrorDetail, NULL_STRING_SIGNAL),
+        isAvailable: () => ensureVoiceSession().isAvailable(),
+        toggleListening: () => ensureVoiceSession().toggleListening(),
+        registerPane: (blockId, handle) => ensureVoiceSession().registerPane(blockId, handle),
+    };
+    return _facade;
 }
