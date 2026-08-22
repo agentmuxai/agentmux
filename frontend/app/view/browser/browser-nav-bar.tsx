@@ -172,13 +172,54 @@ export function BrowserNavBar(props: {
     const [bookmarks, setBookmarks] = createSignal<BrowserBookmark[]>([]);
     const [bookmarksLoading, setBookmarksLoading] = createSignal(false);
     const [bookmarksError, setBookmarksError] = createSignal<string | null>(null);
+    // True once loadBookmarks() has resolved successfully at least once in
+    // this pane's lifetime. Gates the "Loading…" placeholder to the very
+    // first fetch only — see loadBookmarks' comment below for why later
+    // opens must NOT flip bookmarksLoading (ReAgent P1, PR #2733).
+    const [hasLoadedBookmarksOnce, setHasLoadedBookmarksOnce] = createSignal(false);
+
+    /** Field-by-field equality, not reference equality — used to decide
+     *  whether a fresh RPC read actually changed anything worth
+     *  re-rendering for (see loadBookmarks below). */
+    const bookmarkListsEqual = (a: BrowserBookmark[], b: BrowserBookmark[]): boolean =>
+        a.length === b.length &&
+        a.every((item, i) => {
+            const other = b[i];
+            return (
+                item.id === other.id &&
+                item.title === other.title &&
+                item.url === other.url &&
+                item.favicon_url === other.favicon_url
+            );
+        });
 
     const loadBookmarks = async () => {
-        setBookmarksLoading(true);
+        // Only show the transient "Loading…" placeholder before the very
+        // first successful load in this pane's lifetime. Every subsequent
+        // menu-open refresh keeps rendering the last-known list while the
+        // fresh fetch resolves in the background — flipping
+        // bookmarksLoading on every open (as this used to, unconditionally)
+        // forced bookmarkMenuItems' createMemo to rebuild a fresh
+        // MenuItem[] (fresh <BookmarkFavicon> elements) TWICE per open, and
+        // since Solid's <For> (inside FlyoutMenu) diffs by reference, that
+        // tore down and remounted every saved bookmark's <img> — reloading
+        // every favicon over the network on every single menu open, not
+        // just the first (ReAgent P1, PR #2733).
+        if (!hasLoadedBookmarksOnce()) setBookmarksLoading(true);
         setBookmarksError(null);
         try {
             const result = await RpcApi.ListBookmarksCommand(TabRpcClient);
-            setBookmarks(result.bookmarks ?? []);
+            const next = result.bookmarks ?? [];
+            // Skip the signal write entirely when nothing actually
+            // changed — keeps the same array/object references so
+            // bookmarkMenuItems' memo doesn't rerun and <For> never
+            // touches the DOM for unchanged rows. A real change (another
+            // window added/removed/edited a bookmark since last open)
+            // still updates normally.
+            if (!bookmarkListsEqual(bookmarks(), next)) {
+                setBookmarks(next);
+            }
+            setHasLoadedBookmarksOnce(true);
         } catch (e) {
             setBookmarksError(`Failed to load bookmarks: ${(e as Error).message ?? e}`);
         } finally {
@@ -242,6 +283,11 @@ export function BrowserNavBar(props: {
     // icon as-is and falls back to the default fa-${icon} rendering for the
     // pinned toggle row / placeholder rows, which still use string icons.
     const bookmarkMenuItems = createMemo<MenuItem[]>(() => {
+        // Only true before the first-ever successful loadBookmarks() call
+        // (see its own comment) — every later menu open keeps rendering
+        // the previous list below instead of bouncing through this branch,
+        // so saved bookmarks' <img> favicons are never torn down and
+        // remounted just because the menu was reopened.
         if (bookmarksLoading()) {
             // No icon here (deliberately): FlyoutMenu's default item
             // renderer only ever applies `fa-solid fa-fw fa-${item.icon}` —
