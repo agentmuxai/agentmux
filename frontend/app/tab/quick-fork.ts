@@ -15,6 +15,7 @@ import { createBlockOnModel, resolveBlockDef, waitForLayoutModel } from "./tab-p
 import { HISTORY_SOURCE_BLOCK_ID_META_KEY, HISTORY_TAB_FOR_META_KEY } from "@/app/view/agent/open-history-tab";
 import { resolveEffectiveLaunchProvider } from "@/app/view/agent/agent-launch-env";
 import { PROVIDERS, resolveProviderAlias } from "@/app/view/agent/providers";
+import { lastLinkedAccountId } from "@/app/view/agent/providers/provider-id-aliases";
 import { Logger } from "@/util/logger";
 
 /** Block-meta key the non-Claude fallback banner (`ForkProviderFallbackBanner`,
@@ -215,27 +216,28 @@ export async function quickForkTabToNewTab(
         // via opts.inheritIdentity looks up the SOURCE's own bound link
         // directly (this flow has a definitionId, not a RecentSessionRow).
         //
-        // reagent's review of this PR: ListAgentIdentitiesCommand returns
-        // EVERY provider's link for the source agent (`ORDER BY provider`,
-        // agentmux-srv/src/backend/storage/identities.rs) — a source
-        // commonly holds links for two providers at once (e.g. a `github`
-        // account for git plus an `anthropic` account for the LLM CLI), so
-        // blindly taking index 0 could inherit the wrong-provider account
-        // and get it persisted under the FORK's provider by
-        // launchAgentDefinition's write-through LinkAgentIdentityCommand
-        // call (agent-model.ts), breaking credential resolution instead of
-        // inheriting it. Filter to the link matching the fork's own
-        // canonical provider first — same alias-canonicalized-on-both-sides
-        // comparison bind-to-agent-menu.ts's computeBindCandidates already
-        // uses for this exact class of bug (codex-P1-on-#2377).
+        // Uses `lastLinkedAccountId`, not a raw `.find()` — reagent's
+        // SECOND round of review on this PR caught that a plain `.find()`
+        // (even alias-canonicalized) still picks the FIRST matching row,
+        // but `db_agent_identity_links` keys on the raw (agent_id,
+        // provider) pair, so a migrated agent can hold BOTH a canonical
+        // row ("claude") and a legacy-alias row ("claude-code") for the
+        // same effective provider at once. The backend's real spawn-time
+        // injection iterates rows in that same raw-provider order and
+        // overwrites via HashMap::insert, so the LAST row silently wins in
+        // practice — exactly the mismatch `lastLinkedAccountId`'s own doc
+        // comment describes and requires every "account this agent uses
+        // for this provider" lookup to go through (already true of
+        // launch-flow.ts and useAgentControllerStatus.ts; this call site
+        // was the new one that reintroduced the bug class from
+        // codex-P1-on-#2377).
         let accountId = "";
         if (opts?.inheritIdentity) {
             try {
                 const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
                     agent_id: active.definitionId,
                 });
-                const link = links.find((l) => resolveProviderAlias(l.provider) === canonicalForkProvider);
-                accountId = link?.account_id ?? "";
+                accountId = lastLinkedAccountId(links, provider?.id ?? canonicalForkProvider) ?? "";
             } catch (e: any) {
                 Logger.warn("quick-fork", "failed to resolve source identity to inherit", { error: String(e) });
             }

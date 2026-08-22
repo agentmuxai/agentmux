@@ -353,13 +353,31 @@ describe("quickForkTabToNewTab", () => {
             expect(overrides.accountId).toBe("");
         });
 
-        it("matches providers via canonical alias resolution, not exact string equality", async () => {
+        it("matches a legacy-alias provider row via lastLinkedAccountId's own canonicalization, not exact string equality", async () => {
             resolveEffectiveLaunchProvider.mockResolvedValue("claude");
-            resolveProviderAlias.mockImplementation((id: string) => (id === "claude-legacy" || id === "claude" ? "claude" : id));
-            listAgentIdentitiesCommand.mockResolvedValue([{ account_id: "acct-legacy", provider: "claude-legacy" }]);
+            listAgentIdentitiesCommand.mockResolvedValue([{ account_id: "acct-legacy", provider: "claude-code" }]);
             await quickForkTabToNewTab("tab-1", { inheritIdentity: true });
             const overrides = launchAgentDefinition.mock.calls[0][1];
             expect(overrides.accountId).toBe("acct-legacy");
+        });
+
+        // reagent's SECOND round of review on PR #2735: db_agent_identity_links
+        // keys on the raw (agent_id, provider) pair, so a migrated agent can
+        // hold BOTH a canonical row ("claude") and a legacy-alias row
+        // ("claude-code") at once. The real backend spawn resolver iterates
+        // in raw-provider order and overwrites via HashMap::insert, so the
+        // LAST canonical-equivalent row silently wins — a plain first-match
+        // `.find()` would pick the wrong one. Must go through
+        // lastLinkedAccountId, not a raw `.find()`, to match that.
+        it("picks the LAST canonical-equivalent row when both a canonical and legacy-alias row exist, not the first", async () => {
+            resolveEffectiveLaunchProvider.mockResolvedValue("claude");
+            listAgentIdentitiesCommand.mockResolvedValue([
+                { account_id: "acct-alias", provider: "claude-code" }, // alphabetically first
+                { account_id: "acct-canonical", provider: "claude" },
+            ]);
+            await quickForkTabToNewTab("tab-1", { inheritIdentity: true });
+            const overrides = launchAgentDefinition.mock.calls[0][1];
+            expect(overrides.accountId).toBe("acct-canonical");
         });
 
         it("falls back to unbound (best-effort, not thrown) when ListAgentIdentitiesCommand rejects", async () => {
