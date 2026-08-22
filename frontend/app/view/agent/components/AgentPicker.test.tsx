@@ -47,6 +47,8 @@ vi.mock("@/app/store/rpc-api", () => {
         AgentDefUnhideCommand: vi.fn().mockResolvedValue({ ok: true }),
         AgentDefListHiddenTemplatesCommand: vi.fn().mockResolvedValue([]),
         ListMemoriesCommand: vi.fn().mockResolvedValue([]),
+        // Fork flow (#2721 Phase 1 — continueSessionId/forkSession wiring).
+        ForkAgentDefinitionCommand: vi.fn(),
     };
     return { RpcApi };
 });
@@ -131,11 +133,55 @@ vi.mock("./HiddenTemplatesSection", () => ({
     HiddenTemplatesSection: () => null,
 }));
 
-vi.mock("./MyAgentsList", () => ({
-    MyAgentsList: (props: any) => (
-        <div data-testid="my-agents-list-mock" data-name-filter={props.nameFilter?.() ?? ""} />
-    ),
-}));
+vi.mock("./MyAgentsList", () => {
+    // Defined inline (not module-scope) so vi.mock's top-of-file hoisting
+    // doesn't read the fixture before its declaration runs — same reasoning
+    // as the ContextMenuModel mock above.
+    const forkSourceRow = {
+        instance_id: "inst-user-maks",
+        instance_name: "Maks",
+        definition_id: "user-maks",
+        definition_name: "Maks",
+        provider: "claude",
+        working_directory: "",
+        identity_id: "",
+        identity_name: "",
+        memory_id: "",
+        memory_name: "",
+        block_id_hint: "",
+        session_id: "sid-parent-123",
+        preview: "",
+        node_count: 0,
+        last_active_at: 0,
+        has_snapshot: false,
+        agent_created_at: 0,
+        started_at: 0,
+    };
+    // reagent's review of PR #2725 — a row whose agent is open but hasn't
+    // emitted a CLI session id yet (session_id empty). Forking this must
+    // not request a session fork at all (no session to fork from).
+    const forkSourceRowNoSession = { ...forkSourceRow, session_id: "" };
+    return {
+        MyAgentsList: (props: any) => (
+            <div data-testid="my-agents-list-mock" data-name-filter={props.nameFilter?.() ?? ""}>
+                {/* Fires the real onFork prop (AgentPicker.tsx's handleFork) with
+                    fixed fixture rows — MyAgentsList's own multi-step
+                    fork-prompt UI (prompt -> naming -> confirm) is out of scope
+                    for this file; this exercises the function under test
+                    directly. */}
+                <button data-testid="fork-trigger" onClick={() => props.onFork?.(forkSourceRow, "X #2")}>
+                    fork
+                </button>
+                <button
+                    data-testid="fork-trigger-no-session"
+                    onClick={() => props.onFork?.(forkSourceRowNoSession, "X #2")}
+                >
+                    fork (no session)
+                </button>
+            </div>
+        ),
+    };
+});
 
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { AgentPicker } from "./AgentPicker";
@@ -368,6 +414,52 @@ describe("AgentPicker — two-tier layout (Phase 1)", () => {
         await req.onCreatedAndLaunch("new-def-id", "id-work", "mem-notes", "Mary", "host", "");
         const [, overrides] = model.launchAgentDefinition.mock.calls[0];
         expect(overrides.model).toBeUndefined();
+    });
+
+    // #2721 Phase 1 — forking used to clone only the agent *definition* and
+    // start a brand-new conversation, silently dropping the whole point of
+    // a fork (the parent's history). continueSessionId + forkSession are
+    // what makes launchAgentDefinition append --fork-session so the new
+    // block resumes-then-diverges instead of starting fresh.
+    it("handleFork carries the parent session forward via continueSessionId + forkSession", async () => {
+        const forkedDef = baseDef({ id: "forked-def", slug: "x-2", name: "X #2", parent_id: "user-maks" });
+        vi.mocked(RpcApi.ForkAgentDefinitionCommand).mockResolvedValue(forkedDef);
+
+        const model = makeMockModel();
+        render(() => <AgentPicker model={model as any} />);
+        const forkTrigger = await screen.findByTestId("fork-trigger");
+        fireEvent.click(forkTrigger);
+
+        await waitFor(() => expect(model.launchAgentDefinition).toHaveBeenCalledTimes(1));
+        expect(RpcApi.ForkAgentDefinitionCommand).toHaveBeenCalledWith(
+            {},
+            { source_id: "user-maks", branch_label: "X #2" }
+        );
+        const [launchedDef, overrides] = model.launchAgentDefinition.mock.calls[0];
+        expect(launchedDef.id).toBe("forked-def");
+        expect(overrides.continueSessionId).toBe("sid-parent-123");
+        expect(overrides.forkSession).toBe(true);
+    });
+
+    // reagent's review of PR #2725 — a row whose agent hasn't emitted a
+    // CLI session id yet must not request a session fork at all (nothing
+    // to fork from); omitting both fields lets launchAgentDefinition fall
+    // back to its normal fresh-start defaults instead of forcing a bare
+    // --fork-session with no session, or a false "forkSession: true" that
+    // implies a carryover that can't actually happen.
+    it("handleFork omits continueSessionId/forkSession when the row has no session id yet", async () => {
+        const forkedDef = baseDef({ id: "forked-def", slug: "x-2", name: "X #2", parent_id: "user-maks" });
+        vi.mocked(RpcApi.ForkAgentDefinitionCommand).mockResolvedValue(forkedDef);
+
+        const model = makeMockModel();
+        render(() => <AgentPicker model={model as any} />);
+        const forkTrigger = await screen.findByTestId("fork-trigger-no-session");
+        fireEvent.click(forkTrigger);
+
+        await waitFor(() => expect(model.launchAgentDefinition).toHaveBeenCalledTimes(1));
+        const [, overrides] = model.launchAgentDefinition.mock.calls[0];
+        expect(overrides.continueSessionId).toBeUndefined();
+        expect(overrides.forkSession).toBeUndefined();
     });
 
     // #2594 — AgentPicker's install-check/prereq-probe/cache-invalidation
