@@ -75,6 +75,7 @@ import { AgentPicker, useAgentDefinitions, useOpenDefinitionMap } from "./compon
 import { AgentQuestionPanel } from "./components/AgentQuestionPanel";
 import { AgentSearchBar } from "./components/AgentSearchBar";
 import { AgentShellSubblock } from "./components/AgentShellSubblock";
+import { ForkProviderFallbackBanner } from "./components/ForkProviderFallbackBanner";
 import { PaneRow } from "./components/PaneRow";
 import { PendingMessagesPanel } from "./components/PendingMessagesPanel";
 import { ResizableDetailsDrawer } from "./components/ResizableDetailsDrawer";
@@ -2204,6 +2205,11 @@ const AgentPresentationView = ({
                     dispatchPane(model.blockId, { type: "StreamSubscribe", at: Date.now() }, "user");
                 }}
             />
+            {/* Non-Claude quick-fork fallback note — SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md
+                §4.4. Set once on the new block's meta right after a fork
+                lands with no `--fork-session` support; stays for the pane's
+                lifetime, no dismiss button (quick-fork.ts). */}
+            <ForkProviderFallbackBanner meta={() => block()?.meta} />
 
             {/* Pinned activity dock — long-running shells (and later crons /
                 subagents) sit just above the composer so task status is adjacent

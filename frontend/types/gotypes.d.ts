@@ -1547,6 +1547,11 @@ declare global {
         // and the view model can react to it (armory-model.ts/warden-model.ts).
         "armory:section"?: "accounts" | "memory" | "skills" | "mcp" | "bundles" | "native_memory";
         "warden:section"?: "host" | "lan" | "internet" | "audit" | "supervisor";
+        // Set once by quick-fork.ts right after a fork lands on a provider
+        // with no --fork-session equivalent and a parent session existed to
+        // lose; ForkProviderFallbackBanner (agent-view.tsx) reads it.
+        // SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md §4.4.
+        "quickfork:noHistoryFallback"?: boolean;
     };
 
     // tsgenmeta.MethodMeta
