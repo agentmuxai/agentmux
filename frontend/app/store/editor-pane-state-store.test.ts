@@ -501,6 +501,33 @@ describe("editor-pane-state-store (slice #10, Phase 1A)", () => {
         expect(canonicalizePath("")).toBe("");
     });
 
+    // Regression for a live-repro'd bug (2026-08-22): Rust's
+    // Path::canonicalize() unconditionally prepends `\\?\` on Windows.
+    // EditorFileWatcher's editor:file_changed WPS event carries that
+    // prefixed path; without stripping it here, it can never compare
+    // equal to a tab's own (never-prefixed) filePath, so live-reload
+    // silently never fires on Windows at all.
+    it("canonicalizePath strips Windows' \\\\?\\ extended-length prefix so it matches the un-prefixed form", () => {
+        const prefixed = canonicalizePath("\\\\?\\C:\\Users\\asafe\\AppData\\Local\\Temp\\probe.md");
+        const unprefixed = canonicalizePath("C:\\Users\\asafe\\AppData\\Local\\Temp\\probe.md");
+        expect(prefixed).toBe(unprefixed);
+        expect(prefixed).toBe("c:/Users/asafe/AppData/Local/Temp/probe.md");
+    });
+
+    // Codex P2 on PR #2739: an earlier version of this fix stripped the
+    // \\?\UNC\ prefix but then let the pre-existing doubled-slash collapse
+    // eat the UNC authority marker too, producing "/server/share/..." — a
+    // current-drive-rooted path on Windows, not a usable network path. The
+    // leading "//" must survive so WatchEditorFileCommand/ReadEditorFileCommand
+    // get back something that still actually resolves to the share.
+    it("canonicalizePath strips the \\\\?\\UNC\\ variant while preserving the UNC authority marker", () => {
+        const prefixed = canonicalizePath("\\\\?\\UNC\\server\\share\\file.md");
+        const plainUnc = canonicalizePath("\\\\server\\share\\file.md");
+        expect(prefixed.startsWith("\\\\?\\")).toBe(false);
+        expect(prefixed).toBe("//server/share/file.md");
+        expect(prefixed).toBe(plainUnc);
+    });
+
     it("slot dispatch path: OpenFile via dispatch updates the snapshot", () => {
         registerEditorPane("blk-x");
         const events = dispatch("blk-x", { type: "OpenFile", path: "C:/foo.ts" });
