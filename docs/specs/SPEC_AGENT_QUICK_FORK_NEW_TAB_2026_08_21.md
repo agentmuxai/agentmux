@@ -324,12 +324,32 @@ so no LAN/WAN qualifier is ever shown — that only becomes relevant if a
 future capability forks directly onto a remote peer, at which point the
 naming spec's tiering (§4.1 there) already covers it without change here.
 
-## 5. Identity: resolving the open question prior specs left unsettled
+## 5. Identity: resolving the open question prior specs left unsettled — **revised 2026-08-22**
 
 **Routing/signing identity (`AGENTMUX_AGENT_ID`, jekt key) is never shared** — this
 falls out of forking the definition regardless of any choice made here (§2). The
 only real decision is **credential identity** (Armory account bindings /
-`db_agent_identity_links`):
+`db_agent_identity_links`).
+
+> **Second correction (2026-08-22, repo-owner-directed).** The original
+> table below described the "inherit" option as "copy rows" and framed it
+> as a meaningfully riskier alternative to "unbound." That premise was
+> wrong: `LinkAgentIdentityCommand` never copies a credential — it only
+> inserts a `db_agent_identity_links` row pointing at an `account_id`. The
+> actual credential (OAuth config dir or keychain entry) lives at a path
+> keyed by `account_id` alone (`identities_dir().join(account_id)`), so
+> *any* agent linked to that account — whether via the fork's own new link
+> or the parent's pre-existing one — reads and writes the exact same
+> shared credential. There is no independent, "safer" copy to withhold by
+> defaulting to unbound; "inherit" and "unbound" aren't a
+> risk/no-risk pair, they're "point the fork at the same shared resource"
+> vs. "don't." Given that, offering both as separate menu actions added a
+> decision with no real safety difference on the other side of it.
+> **Corrected: quick-fork always inherits the source's own bound account,
+> unconditionally** — the second "Quick-fork (inherit identity)" menu
+> entry from Phase 4 was removed; there is now exactly one "Quick-fork"
+> action. The table and "Decision" text immediately below are kept for the
+> historical record of the original (superseded) reasoning.
 
 | Option | Behavior | Risk |
 |---|---|---|
@@ -337,12 +357,13 @@ only real decision is **credential identity** (Armory account bindings /
 | **Unbound (default, recommended)** | Forked agent starts with no Armory bindings, same as any newly-created definition; falls back to the global, non-identity-bound `provider_auth_dir()` path (`agent_open.rs`), matching what a plain agent spawn already does today | Fork may not be able to push/PR under the same identity as the parent without a manual re-bind step |
 | **Explicit choice at fork time** | The long-press/confirmation variant (§4.3) lets the user pick "same identity" or "unbound" per-fork | Adds one decision to the non-default path only — doesn't slow down the common case |
 
-**Decision: unbound by default, explicit opt-in to inherit.** Matches this
-codebase's existing default-secure posture elsewhere (e.g. Armory account
-isolation defaulting to isolated-by-channel per `SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md`)
-and avoids a "quick" action having a non-obvious credential-sharing side effect.
-A user who explicitly wants the clone to act as the same GitHub identity opts in
-via the confirmation variant, not the default one-click path.
+**Original decision (superseded): unbound by default, explicit opt-in to inherit.**
+Matches this codebase's existing default-secure posture elsewhere (e.g. Armory
+account isolation defaulting to isolated-by-channel per
+`SPEC_ISOLATED_AUTH_DEFAULT_BY_CHANNEL_2026_08_06.md`) and avoids a "quick"
+action having a non-obvious credential-sharing side effect. A user who
+explicitly wants the clone to act as the same GitHub identity opts in via the
+confirmation variant, not the default one-click path.
 
 ## 6. Phasing
 
@@ -355,7 +376,7 @@ is narrower and different from the original draft's Phase 1:
 | **1** ✅ | Fix the two confirmed bugs blocking correctness even for the *existing* fork flow: (a) wire `continueSessionId`/`forkSession: true` into the fork path's `launchAgentDefinition` call (§2 — currently missing entirely), (b) fix `template.rs`'s fork-count filter to walk the lineage root instead of the immediate parent (§4.5) — **landed**, also fixed a third bug found while implementing (b): the suggested name was built from the immediate parent's own name, not the lineage root's, so even a correctly-counted fork of a fork produced "AgentX #2 #3" instead of the flat "AgentX #3" | — |
 | **2** ✅ (destination corrected 2026-08-22) | Wire the quick-fork action itself. **Originally shipped landing the fork in a brand-new top-level window tab** (`WorkspaceService.CreateTab`) triggered from the window tab-strip's own right-click menu; **corrected per the notice at the top of this document** to land as a new sibling block pushed onto the SOURCE pane's own `blockStack` (`pushBlockOntoStack` — the same primitive `open-history-tab.ts`'s "Agent History" entry and the pane tab strip's own "+" already use), triggered from `AgentViewModel.getBodyContextMenuItems` right next to "Agent History". The launch reuses `this.launchAgentDefinition` directly (the method's own view-model instance, since the trigger now lives inside that same class) via its pre-existing `targetBlockId` override param — no `targetTabId` override needed post-correction, since the destination never leaves the current window tab. | Phase 1 |
 | **3** ✅ | The non-Claude fallback note: `quick-fork.ts`'s `quickForkAgent` sets `FORK_NO_HISTORY_FALLBACK_META_KEY` on the new block once launch succeeds when the fork's effective provider doesn't support `--fork-session` and there was a session to lose; `ForkProviderFallbackBanner` (`agent-view.tsx`) reads it, cloned from `AgentDisconnectedBanner`'s no-dismiss-button pattern since there's no seam to push a synthesized message into the new pane's conversation before its own stream mounts. **The `Cmd:Shift:t` keybinding and the tab-strip "+" split-button from the original draft were both removed/dropped as part of the destination correction** — see §4.3. | Phase 2 |
-| **4** ✅ | Confirmation variant exposing the identity choice (§5): a second "Quick-fork (inherit identity)" entry in the body context menu alongside the default quick-fork, calling `quickForkAgent(this, {inheritIdentity: true})`. Resolves the SOURCE definition's own bound account via `ListAgentIdentitiesCommand` (`db_agent_identity_links`), filtered to the fork's own canonical effective provider via `lastLinkedAccountId` (`provider-id-aliases.ts`) — not a raw `.find()` (two review rounds on PR #2735 caught, respectively, taking the wrong-provider link and taking the wrong ROW among same-provider links when a canonical + legacy-alias row both exist). | Phase 2 |
+| **4** ✅ (simplified 2026-08-22) | **Originally shipped** as a confirmation variant exposing the identity choice (§5): a second "Quick-fork (inherit identity)" entry in the body context menu alongside the default quick-fork. **Corrected per §5's second correction notice** — the "unbound" vs. "inherit" choice was never actually a safety trade-off (binding doesn't copy the credential either way), so the second menu entry was removed; `quickForkAgent` now always resolves and inherits the SOURCE definition's own bound account via `ListAgentIdentitiesCommand` (`db_agent_identity_links`), filtered to the fork's own canonical effective provider via `lastLinkedAccountId` (`provider-id-aliases.ts`) — not a raw `.find()` (two review rounds on PR #2735 caught, respectively, taking the wrong-provider link and taking the wrong ROW among same-provider links when a canonical + legacy-alias row both exist). | Phase 2 |
 
 Phase 1 is **not optional polish** — without it, quick-fork (and the existing
 in-pane fork prompt) both silently produce fresh-start clones with no

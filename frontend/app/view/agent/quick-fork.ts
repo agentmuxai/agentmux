@@ -65,15 +65,24 @@ export interface QuickForkModel {
  * Full independent identity (new `AgentDefinition`, never shares
  * `AGENTMUX_AGENT_ID` or a jekt signing key with the source, per
  * `template.rs`'s `forkagentdefinition` handler), conversation history
- * carried forward via `continueSessionId`/`forkSession`, Armory/credential
- * identity left **unbound by default** (spec §5) unless `opts.inheritIdentity`
- * is explicitly set — sourced from the SOURCE definition's own bound account
- * via `ListAgentIdentitiesCommand`, filtered to the fork's own canonical
- * effective provider through `lastLinkedAccountId` (NOT a raw `.find()` —
- * `db_agent_identity_links` can hold both a canonical and a legacy-alias row
- * for the same provider at once; `lastLinkedAccountId`'s own doc comment
- * covers why the LAST such row, not the first, matches the real backend
- * spawn resolver).
+ * carried forward via `continueSessionId`/`forkSession`.
+ *
+ * Always inherits the source's own bound Armory account (spec §5, revised
+ * 2026-08-22) — sourced via `ListAgentIdentitiesCommand`, filtered to the
+ * fork's own canonical effective provider through `lastLinkedAccountId`
+ * (NOT a raw `.find()` — `db_agent_identity_links` can hold both a
+ * canonical and a legacy-alias row for the same provider at once;
+ * `lastLinkedAccountId`'s own doc comment covers why the LAST such row, not
+ * the first, matches the real backend spawn resolver). There is no
+ * meaningfully "safer, unbound" alternative to offer as a separate action:
+ * binding never copies the underlying credential — `LinkAgentIdentityCommand`
+ * only inserts a `db_agent_identity_links` row; the actual OAuth config dir
+ * / keychain entry lives at a path keyed by `account_id`
+ * (`identities_dir().join(account_id)`), so every agent linked to that
+ * account already reads and writes the exact same shared credential
+ * regardless of whether the fork or the source requested the link. The
+ * original two-button design (unbound-by-default + an opt-in "inherit
+ * identity" variant) was removed for this reason.
  *
  * When the fork's effective provider (resolved through its bound bundle,
  * same as `launchAgentDefinition` itself does) doesn't support
@@ -89,10 +98,7 @@ export interface QuickForkModel {
  *   self-contained-failure-handling convention (this has no wrapping caller
  *   of its own to push a notification on `false`).
  */
-export async function quickForkAgent(
-    model: QuickForkModel,
-    opts?: { inheritIdentity?: boolean },
-): Promise<boolean> {
+export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
     const meta = WOS.getObjectValue<Block>(WOS.makeORef("block", model.blockId))?.meta;
     const definitionId = meta?.["agentId"] as string | undefined;
     if (!definitionId) {
@@ -157,20 +163,19 @@ export async function quickForkAgent(
         const canonicalForkProvider = resolveProviderAlias(effectiveProvider);
         const provider = PROVIDERS[effectiveProvider] ?? PROVIDERS[canonicalForkProvider];
 
-        // Spec §5 decision: unbound by default, not the source's bound
-        // account — a "quick" one-click action shouldn't silently fan out
-        // credential access to a second agent. opts.inheritIdentity opts
-        // in, looking up the SOURCE's own bound link directly.
+        // Spec §5 (revised 2026-08-22): always inherit the source's own
+        // bound account — see this function's doc comment for why an
+        // "unbound" alternative wouldn't actually be a safer/different
+        // option (binding never copies the credential; it's shared by
+        // account_id regardless of who links to it).
         let accountId = "";
-        if (opts?.inheritIdentity) {
-            try {
-                const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
-                    agent_id: definitionId,
-                });
-                accountId = lastLinkedAccountId(links, provider?.id ?? canonicalForkProvider) ?? "";
-            } catch (e: any) {
-                Logger.warn("quick-fork", "failed to resolve source identity to inherit", { error: String(e) });
-            }
+        try {
+            const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
+                agent_id: definitionId,
+            });
+            accountId = lastLinkedAccountId(links, provider?.id ?? canonicalForkProvider) ?? "";
+        } catch (e: any) {
+            Logger.warn("quick-fork", "failed to resolve source identity to inherit", { error: String(e) });
         }
 
         // Non-Claude fallback note — only relevant when there was actually

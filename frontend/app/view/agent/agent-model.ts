@@ -822,10 +822,6 @@ export class AgentViewModel implements ViewModel {
                 label: "Quick-fork",
                 click: () => void quickForkAgent(this),
             },
-            {
-                label: "Quick-fork (inherit identity)",
-                click: () => void quickForkAgent(this, { inheritIdentity: true }),
-            },
             { type: "separator" },
         ];
     }
