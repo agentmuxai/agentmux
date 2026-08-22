@@ -27,6 +27,7 @@ import { createSignalAtom } from "@/util/util";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { getApi } from "@/app/store/app-api";
 import { getSettingsKeyAtom } from "@/app/store/global";
+import { computeRms } from "./audioLevel";
 import type { PaneVoiceHandle, VoiceSession } from "./useVoiceInput";
 
 // VAD tuning. RMS below SILENCE_RMS for >= SILENCE_MS after speech ends an
@@ -41,7 +42,7 @@ const LEVEL_POLL_MS = 100;
 const WAV_SAMPLE_RATE = 16_000; // whisper.cpp requires 16 kHz mono
 
 /** Pick the best MediaRecorder mime the runtime supports (opus preferred). */
-function pickMime(): string {
+export function pickMime(): string {
     const candidates = [
         "audio/webm;codecs=opus",
         "audio/webm",
@@ -89,6 +90,7 @@ export function createWhisperVoiceSession(): VoiceSession {
     const isListening = createSignalAtom(false);
     const currentTargetId = createSignalAtom<string | null>(null);
     const lastError = createSignalAtom<string | null>(null);
+    const lastErrorDetail = createSignalAtom<string | null>(null);
 
     // Capture mode is fixed for the session: whisper-local → WAV, else webm.
     const isLocal = getSettingsKeyAtom("voice:engine")() === "whisper-local";
@@ -107,6 +109,7 @@ export function createWhisperVoiceSession(): VoiceSession {
             isListening,
             currentTargetId,
             lastError,
+            lastErrorDetail,
             isAvailable: () => false,
             toggleListening: () => {},
             registerPane: () => {},
@@ -164,22 +167,40 @@ export function createWhisperVoiceSession(): VoiceSession {
                 body: blob,
             });
             handle.setInterim("");
-            if (resp.status === 501) {
-                fail("service-not-allowed"); // backend not configured
-                return;
-            }
             if (!resp.ok) {
-                lastError._set("service-not-allowed");
-                window.dispatchEvent(new CustomEvent("voice-input-error", { detail: "service-not-allowed" }));
+                // Thread the server's actual error body through as a detail —
+                // additive: existing coarse `lastError` categories used by
+                // MicButton.tsx's tooltip stay unchanged, this only adds a
+                // detail string for surfaces that want it (the Settings ->
+                // Recording test-mic panel).
+                lastErrorDetail._set(await readErrorDetail(resp));
+                if (resp.status === 501) {
+                    fail("service-not-allowed"); // backend not configured
+                } else {
+                    lastError._set("service-not-allowed");
+                    window.dispatchEvent(new CustomEvent("voice-input-error", { detail: "service-not-allowed" }));
+                }
                 return;
             }
+            lastErrorDetail._set(null);
             const data = (await resp.json()) as { text?: string };
             const text = (data.text || "").trim();
             if (text) handle.appendFinal(text);
-        } catch {
+        } catch (e) {
             handle.setInterim("");
             lastError._set("service-not-allowed");
+            lastErrorDetail._set(e instanceof Error ? e.message : null);
             window.dispatchEvent(new CustomEvent("voice-input-error", { detail: "service-not-allowed" }));
+        }
+    };
+
+    /** Read `{ "error": "..." }` from a non-OK transcribe response, best-effort. */
+    const readErrorDetail = async (resp: Response): Promise<string | null> => {
+        try {
+            const data = (await resp.json()) as { error?: string };
+            return data.error ?? null;
+        } catch {
+            return null;
         }
     };
 
@@ -229,14 +250,7 @@ export function createWhisperVoiceSession(): VoiceSession {
 
     const pollLevel = () => {
         if (!analyser) return;
-        const buf = new Uint8Array(analyser.fftSize);
-        analyser.getByteTimeDomainData(buf);
-        let sum = 0;
-        for (let i = 0; i < buf.length; i++) {
-            const v = (buf[i] - 128) / 128;
-            sum += v * v;
-        }
-        if (vadShouldCut(Math.sqrt(sum / buf.length))) {
+        if (vadShouldCut(computeRms(analyser))) {
             if (recorder && recorder.state !== "inactive") recorder.stop();
         }
     };
@@ -310,7 +324,12 @@ export function createWhisperVoiceSession(): VoiceSession {
 
     const startCapture = async () => {
         try {
-            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            // voice:inputDeviceId (Settings -> Recording device picker):
+            // absent/"default" keeps the original unconstrained behavior.
+            const deviceId = getSettingsKeyAtom("voice:inputDeviceId")();
+            const audioConstraint: boolean | MediaTrackConstraints =
+                deviceId && deviceId !== "default" ? { deviceId: { exact: deviceId } } : true;
+            stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint });
         } catch (e: any) {
             const name = e?.name || "";
             if (name === "NotAllowedError" || name === "SecurityError") fail("not-allowed");
@@ -360,6 +379,7 @@ export function createWhisperVoiceSession(): VoiceSession {
         isListening,
         currentTargetId,
         lastError,
+        lastErrorDetail,
         isAvailable: () => true,
         toggleListening,
         registerPane: (blockId, handle) => {

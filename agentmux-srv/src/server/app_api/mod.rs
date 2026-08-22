@@ -42,6 +42,7 @@ mod memory;
 mod skill;
 mod mcp;
 mod bookmarks;
+mod voice;
 pub(crate) mod fleet;
 
 /// Register all App API handlers on the RPC engine.
@@ -58,6 +59,7 @@ pub fn register_app_api_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     skill::register(engine, state);
     mcp::register(engine, state);
     bookmarks::register(engine, state);
+    voice::register(engine, state);
     fleet::register(engine, state);
 }
 

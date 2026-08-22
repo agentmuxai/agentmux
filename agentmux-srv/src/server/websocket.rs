@@ -100,7 +100,8 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
     {
         let t = std::time::Instant::now();
         let config = state.config_watcher.get_full_config();
-        if let Ok(config_val) = serde_json::to_value(config.as_ref()) {
+        if let Ok(mut config_val) = serde_json::to_value(config.as_ref()) {
+            crate::backend::wconfig::redact_full_config_for_renderer(&mut config_val);
             let config_event = json!({
                 "eventtype": "rpc",
                 "data": {
@@ -618,7 +619,10 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
             Box::pin(async move {
                 let config = cw.get_full_config();
                 match serde_json::to_value(config.as_ref()) {
-                    Ok(v) => Ok(Some(v)),
+                    Ok(mut v) => {
+                        crate::backend::wconfig::redact_full_config_for_renderer(&mut v);
+                        Ok(Some(v))
+                    }
                     Err(e) => Err(format!("failed to serialize config: {}", e)),
                 }
             })
@@ -1392,7 +1396,8 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
 
                 // 4. Broadcast updated config now — no waiting for fs watcher
                 let config = cw.get_full_config();
-                if let Ok(config_val) = serde_json::to_value(config.as_ref()) {
+                if let Ok(mut config_val) = serde_json::to_value(config.as_ref()) {
+                    crate::backend::wconfig::redact_full_config_for_renderer(&mut config_val);
                     let event = crate::backend::eventbus::WSEventType {
                         eventtype: crate::backend::eventbus::WS_EVENT_RPC.to_string(),
                         oref: String::new(),

@@ -8,6 +8,7 @@ export type SettingsSection =
     | "window"
     | "terminal"
     | "sounds"
+    | "recording"
     | "advanced";
 
 // Label text only, hoisted here so viewName can read it without importing
@@ -19,6 +20,7 @@ export const SETTINGS_SECTION_LABELS: Record<SettingsSection, string> = {
     window: "Window & Panes",
     terminal: "Terminal",
     sounds: "Sounds",
+    recording: "Recording",
     advanced: "Advanced",
 };
 

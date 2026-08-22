@@ -261,7 +261,8 @@ fn reload_and_broadcast(
     // Broadcast updated config to all connected clients (same format as initial config push)
     let config = config_watcher.get_full_config();
     let client_count = event_bus.connection_count();
-    if let Ok(config_val) = serde_json::to_value(config.as_ref()) {
+    if let Ok(mut config_val) = serde_json::to_value(config.as_ref()) {
+        crate::backend::wconfig::redact_full_config_for_renderer(&mut config_val);
         let event = WSEventType {
             eventtype: WS_EVENT_RPC.to_string(),
             oref: String::new(),

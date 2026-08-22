@@ -24,6 +24,7 @@ import { MiscApi } from "./misc";
 import { ReactiveApi } from "./reactive";
 import { SessionApi } from "./session";
 import { SkillApi } from "./skill";
+import { VoiceApi } from "./voice";
 import { WorkspaceApi } from "./workspace";
 
 export type { OAuthFlowStatus } from "./types";
@@ -51,4 +52,5 @@ export const RpcApi = {
     ...FleetApi,
     ...ReactiveApi,
     ...BookmarksApi,
+    ...VoiceApi,
 };

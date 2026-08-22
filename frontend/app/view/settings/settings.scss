@@ -335,6 +335,44 @@
     }
 }
 
+// ── Masked key field ────────────────────────────────────────────────────────
+
+.setting-masked-key {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.setting-masked-key-dots {
+    font-family: monospace;
+    letter-spacing: 2px;
+    opacity: 0.8;
+}
+
+.setting-masked-key-btn {
+    flex: 0 0 auto;
+    padding: 3px 10px;
+    border: 1px solid var(--border-color, rgba(127, 127, 127, 0.3));
+    border-radius: 4px;
+    background: transparent;
+    color: var(--main-text-color);
+    cursor: default;
+    font-size: 0.8rem;
+
+    &:hover:not(:disabled) {
+        background: var(--panel-bg-alt, rgba(127, 127, 127, 0.08));
+    }
+
+    &:disabled {
+        opacity: 0.4;
+    }
+
+    &--primary {
+        border-color: var(--accent-color, #58a6ff);
+        color: var(--accent-color, #58a6ff);
+    }
+}
+
 // ── Slider ────────────────────────────────────────────────────────────────────
 
 .setting-slider {
@@ -420,6 +458,70 @@
             opacity: 0.85;
             background: var(--hover-bg-color, rgba(255, 255, 255, 0.04));
         }
+    }
+}
+
+// ── Path field (Settings -> Recording) ───────────────────────────────────────
+
+.setting-path-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    .setting-text {
+        flex: 1 1 auto;
+    }
+}
+
+.setting-path-status {
+    flex: 0 0 auto;
+    width: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.7;
+
+    &--found {
+        color: var(--success-color, #3fb950);
+    }
+
+    &--not-found {
+        color: var(--error-color, #f85149);
+    }
+}
+
+// ── Mic test (Settings -> Recording) ─────────────────────────────────────────
+
+.setting-mic-test {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 0;
+}
+
+.setting-mic-test-meter {
+    flex: 1 1 auto;
+    height: 8px;
+    border-radius: 4px;
+    background: var(--panel-bg-alt, rgba(127, 127, 127, 0.15));
+    overflow: hidden;
+}
+
+.setting-mic-test-meter-fill {
+    height: 100%;
+    background: var(--accent-color, #58a6ff);
+    transition: width 0.1s linear;
+}
+
+.setting-mic-test-result {
+    margin-top: 4px;
+    padding: 8px 10px;
+    border-radius: 4px;
+    background: var(--panel-bg-alt, rgba(127, 127, 127, 0.08));
+    font-size: 0.85rem;
+
+    &--error {
+        color: var(--error-color, #f85149);
     }
 }
 

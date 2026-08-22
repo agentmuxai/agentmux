@@ -400,6 +400,11 @@ pub const COMMAND_MEMORY_WRITE: &str = "memory.write";
 pub const COMMAND_BOOKMARKS_LIST: &str = "bookmarks.list";
 pub const COMMAND_BOOKMARKS_SET: &str = "bookmarks.set";
 
+// Settings -> Recording section: live path-existence check for the local
+// whisper.cpp CLI/model file config. See
+// docs/specs/SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md §3.
+pub const COMMAND_VOICE_CHECK_PATH: &str = "voice.checkPath";
+
 // App API — v1 standalone Skill primitives
 pub const COMMAND_SKILL_LIST: &str = "skill.list";
 pub const COMMAND_SKILL_GET: &str = "skill.get";
