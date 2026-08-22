@@ -42,6 +42,8 @@ See also:
 | [SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17](SPEC_AGENT_API_FIRST_CLASS_SURFACE_2026_06_17.md) | App-API `agent.*` surface (open/fork/define) |
 | [SPEC_APP_API_AGENT_DEFINE_2026_06_06](SPEC_APP_API_AGENT_DEFINE_2026_06_06.md) | `agent.define` RPC |
 | [SPEC_MULTI_SESSION_AGENT_FORK_2026_06_06](SPEC_MULTI_SESSION_AGENT_FORK_2026_06_06.md) | Agent fork / continuation across sessions |
+| [SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21](SPEC_AGENT_QUICK_FORK_NEW_TAB_2026_08_21.md) | Quick-fork an agent into a new tab (hot clone, full identity) |
+| [SPEC_AGENT_NAMING_AND_ADDRESSING_HOST_LAN_WAN_2026_08_22](SPEC_AGENT_NAMING_AND_ADDRESSING_HOST_LAN_WAN_2026_08_22.md) | Display naming/addressing scheme shared by the fork and pane-mirror specs |
 | [SPEC_AGENT_GLOBAL_PORTABILITY_2026-06-16](SPEC_AGENT_GLOBAL_PORTABILITY_2026-06-16.md) | Agent definitions shared across workspaces |
 | [SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13](SPEC_CROSS_CHANNEL_AGENT_PERSISTENCE_2026-06-13.md) | Cross-channel conversation continuity |
 | [SPEC_ASK_USER_QUESTION_2026_06_15](SPEC_ASK_USER_QUESTION_2026_06_15.md) | `ask_user_question` tool |
@@ -128,6 +130,7 @@ See also:
 | [SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16](SPEC_MUXBUS_AGENT_DISCOVERY_AND_PERSISTENT_DELIVERY_2026_06_16.md) | Agent discovery + persistent delivery |
 | [SPEC_OBJ_UPDATE_BRIDGE_2026-05-14](SPEC_OBJ_UPDATE_BRIDGE_2026-05-14.md) | Obj-update bridge (sidecar↔renderer) |
 | [SPEC_CROSS_PROCESS_DISPATCH_2026-05-01](SPEC_CROSS_PROCESS_DISPATCH_2026-05-01.md) | Cross-process dispatch architecture |
+| [SPEC_AGENT_PANE_CROSS_CHANNEL_LAN_WAN_SYNC_2026_08_21](SPEC_AGENT_PANE_CROSS_CHANNEL_LAN_WAN_SYNC_2026_08_21.md) | Mirrored agent panes across channels/LAN/WAN — reuses the jekt trust model for input authorization |
 
 ## Packaging / Build
 
