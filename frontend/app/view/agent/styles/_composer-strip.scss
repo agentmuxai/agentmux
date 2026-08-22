@@ -488,6 +488,32 @@
     50%       { opacity: 0.4; }
 }
 
+// Tier 3 countdown text ("~4.2k to auto-compact") — reuses
+// `.agent-composer-strip-ctx--{band}`'s own color-band classes for the
+// same coloring (deliberately, so the countdown text and the raw context
+// text always agree on color without duplicating the band→color mapping);
+// this block adds only what's specific to the countdown span itself.
+.agent-composer-strip-ctx-countdown {
+    font-family: var(--termfontfamily, monospace);
+    font-size: 10px;
+    white-space: nowrap;
+    opacity: 0.8;
+
+    // Proactive escalation once the critical band is crossed (spec §7 Tier
+    // 3) — bold weight + a leading warning glyph, layered on top of the
+    // pulse animation `.agent-composer-strip-ctx--critical` already
+    // applies (reused above), rather than a separate full-width banner
+    // element that would need its own container-query wiring in this
+    // already-fragile tiered-wrap layout (see file header comment).
+    &--critical {
+        font-weight: 600;
+
+        &::before {
+            content: "⚠ ";
+        }
+    }
+}
+
 // Logged-in/out tag — sits between the context text and the Shell toggle.
 // Simple dot + label, same neutral-chrome-with-a-color-accent treatment as
 // the process badge above rather than a loud filled pill, so it doesn't
