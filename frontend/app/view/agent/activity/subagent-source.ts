@@ -39,6 +39,16 @@ async function refresh(): Promise<void> {
 void refresh();
 waveEventSubscribe({ eventType: "subagent:spawned", handler: () => void refresh() });
 waveEventSubscribe({ eventType: "subagent:completed", handler: () => void refresh() });
+// Without this, a subagent the backend reconciles from active to abandoned
+// (parent turn already ended — see `reconcile_stale_subagents`, which runs
+// on every pane reopen with a persisted session id, i.e. exactly the app-
+// restart case) never refreshes here: the dock keeps showing the stale
+// pre-restart snapshot ("running", with a frozen timestamp/event count)
+// until some UNRELATED subagent happens to spawn/complete and trigger a
+// refresh — which, for an otherwise-idle pane, may never happen. Mirrors
+// `dispatch-source.ts`'s identical fix (reagent/codex, PR #2676) for the
+// sibling dispatch-card singleton, which this module predates.
+waveEventSubscribe({ eventType: "subagent:abandoned", handler: () => void refresh() });
 waveEventSubscribe({
     eventType: "subagent:named",
     handler: (event: WaveEvent) => {
