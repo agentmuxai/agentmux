@@ -85,6 +85,10 @@ async fn main() {
     // docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.5.
     backend::native_memory_drift::spawn(state.fs_watch_pool.clone(), state.wstore.clone(), state.id_store.clone());
 
+    // Retention/GC for native-memory version history — see
+    // docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §7.1.
+    backend::native_memory_retention::spawn(state.id_store.clone());
+
     // Start persistent cron scheduler — load enabled jobs from DB, fire any
     // that missed their window (FIRE_ONCE_NOW), schedule all for future fires.
     state.cron_scheduler.start().await;

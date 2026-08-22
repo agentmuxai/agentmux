@@ -626,10 +626,21 @@ distinct from the Armory-shaped work this spec actually does.
 
 ## 7. Open questions for the human operator
 
-1. **Retention/GC.** Should old versions ever be pruned (age-based,
-   count-based per file), or retained forever? No pruning is proposed in
-   v1 (§4.1) — flag if unbounded growth is a concern for long-lived agents
-   with frequent memory writes.
+1. **Retention/GC — RESOLVED (2026-08-22, operator-confirmed).** Hybrid
+   age + min-count floor: a version is pruned only once it is both older
+   than 90 days AND ranked beyond the 50 most-recent versions for its
+   `(agent_id, filename)` — so a rarely-touched file never loses its
+   entire history purely because every version happens to be old, and a
+   hyperactive file never grows unbounded purely because every version
+   happens to be recent. Implemented as
+   `Store::agent_native_memory_version_prune` (single SQL statement using
+   `ROW_NUMBER() OVER`, `agentmux-srv/src/backend/storage/agent_native_memory_versions.rs`)
+   plus a new daily background sweep,
+   `agentmux-srv/src/backend/native_memory_retention.rs` (`MIN_KEEP = 50`,
+   `MAX_AGE_MS = 90 days`), spawned once at startup in `main.rs` alongside
+   `native_memory_drift`'s own sweeps. Deliberately a much slower cadence
+   (24h) than drift detection's 30s — pruning is housekeeping, not
+   latency-sensitive.
 2. **Should a `source: 'jekt'` write ever be blocked outright** (not just
    flagged) when the triggering jekt's `TIER=sensitive` with
    `ESCALATE=required` per the current jekt trust rules — i.e., should

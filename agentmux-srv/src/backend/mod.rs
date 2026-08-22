@@ -22,6 +22,7 @@ pub mod editor_file_watcher;
 pub mod fs_watch;
 pub mod media_file_watcher;
 pub mod native_memory_drift;
+pub mod native_memory_retention;
 pub mod ijson;
 pub mod docsite;
 pub mod eventbus;

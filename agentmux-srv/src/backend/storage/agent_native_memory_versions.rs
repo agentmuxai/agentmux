@@ -335,6 +335,53 @@ impl Store {
         }
     }
 
+    /// Every distinct `(agent_id, filename)` pair with at least one recorded
+    /// version — the retention sweep's (`native_memory_retention.rs`) work
+    /// list, so it doesn't need its own separate source of "which files
+    /// have history" (the version table itself is authoritative for that).
+    pub fn agent_native_memory_version_list_distinct_files(&self) -> Result<Vec<(String, String)>, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT DISTINCT agent_id, filename FROM db_agent_native_memory_versions")?;
+        let rows = stmt
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
+    /// Prune old versions of `(agent_id, filename)` per the hybrid
+    /// age + min-count-floor retention policy
+    /// (`native_memory_retention.rs`, spec §7.1): a version is deleted only
+    /// if it is BOTH older than `max_age_ms` AND ranked beyond the
+    /// `min_keep` most-recent versions for this file — so a rarely-touched
+    /// file never loses its entire history purely because every version
+    /// happens to be old, and a hyperactive file never grows unbounded
+    /// purely because every version happens to be recent. Returns the
+    /// number of rows deleted.
+    pub fn agent_native_memory_version_prune(
+        &self,
+        agent_id: &str,
+        filename: &str,
+        min_keep: u32,
+        max_age_ms: i64,
+    ) -> Result<usize, StoreError> {
+        let cutoff = now_ms() - max_age_ms;
+        let conn = self.conn.lock().unwrap();
+        let deleted = conn.execute(
+            "DELETE FROM db_agent_native_memory_versions
+             WHERE id IN (
+                 SELECT id FROM (
+                     SELECT id, created_at,
+                            ROW_NUMBER() OVER (ORDER BY created_at DESC, rowid DESC) AS rn
+                     FROM db_agent_native_memory_versions
+                     WHERE agent_id = ?1 AND filename = ?2
+                 )
+                 WHERE rn > ?3 AND created_at < ?4
+             )",
+            params![agent_id, filename, min_keep, cutoff],
+        )?;
+        Ok(deleted)
+    }
+
     /// Read one version's full content by id — for diff/revert, which need
     /// exactly one or two full bodies, not a whole file's history.
     pub fn agent_native_memory_version_get(
@@ -619,5 +666,131 @@ mod tests {
         assert!(first.is_some());
         assert_eq!(second, None, "a second call observing the same already-recorded content must be a no-op");
         assert_eq!(store.agent_native_memory_version_list("agent-1", "MEMORY.md").unwrap().len(), 1);
+    }
+
+    const DAY_MS: i64 = 24 * 60 * 60 * 1000;
+
+    /// Test-only helper: backdate a version's `created_at` directly (the
+    /// public insert API always stamps `now_ms()` — retention policy can
+    /// only be exercised against real elapsed time otherwise, which would
+    /// make these tests either slow or flaky).
+    fn backdate(store: &Store, version_id: &str, days_ago: i64) {
+        let conn = store.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE db_agent_native_memory_versions SET created_at = ?1 WHERE id = ?2",
+            params![now_ms() - days_ago * DAY_MS, version_id],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn prune_leaves_a_file_with_fewer_versions_than_the_floor_untouched() {
+        let store = shared_store();
+        for i in 0..5 {
+            let v = store
+                .agent_native_memory_version_insert("agent-1", "MEMORY.md", &format!("v{i}"), "human", "{}", "")
+                .unwrap();
+            backdate(&store, &v.id, 1000); // ancient, but under the count floor
+        }
+        let deleted = store.agent_native_memory_version_prune("agent-1", "MEMORY.md", 50, 90 * DAY_MS).unwrap();
+        assert_eq!(deleted, 0);
+        assert_eq!(store.agent_native_memory_version_list("agent-1", "MEMORY.md").unwrap().len(), 5);
+    }
+
+    #[test]
+    fn prune_keeps_the_min_keep_newest_versions_even_when_all_are_old() {
+        let store = shared_store();
+        for i in 0..8 {
+            let v = store
+                .agent_native_memory_version_insert("agent-1", "MEMORY.md", &format!("v{i}"), "human", "{}", "")
+                .unwrap();
+            backdate(&store, &v.id, 1000);
+        }
+        let deleted = store.agent_native_memory_version_prune("agent-1", "MEMORY.md", 3, 90 * DAY_MS).unwrap();
+        assert_eq!(deleted, 5, "floor of 3 must survive out of 8, even though every version is ancient");
+        let remaining = store.agent_native_memory_version_list("agent-1", "MEMORY.md").unwrap();
+        assert_eq!(remaining.len(), 3);
+        // The 3 survivors must be the newest 3 (v5, v6, v7 — insertion order).
+        assert_eq!(remaining[0].content_hash, content_hash("v7"));
+        assert_eq!(remaining[1].content_hash, content_hash("v6"));
+        assert_eq!(remaining[2].content_hash, content_hash("v5"));
+    }
+
+    #[test]
+    fn prune_leaves_a_version_beyond_the_floor_alone_if_it_is_still_young() {
+        let store = shared_store();
+        // 5 versions, all inserted "now" (age 0) — none old enough to prune,
+        // even with a floor of 1 that would otherwise expose 4 of them.
+        for i in 0..5 {
+            store
+                .agent_native_memory_version_insert("agent-1", "MEMORY.md", &format!("v{i}"), "human", "{}", "")
+                .unwrap();
+        }
+        let deleted = store.agent_native_memory_version_prune("agent-1", "MEMORY.md", 1, 90 * DAY_MS).unwrap();
+        assert_eq!(deleted, 0, "young versions must survive regardless of the count floor");
+        assert_eq!(store.agent_native_memory_version_list("agent-1", "MEMORY.md").unwrap().len(), 5);
+    }
+
+    #[test]
+    fn prune_deletes_only_versions_both_beyond_the_floor_and_past_the_age_cutoff() {
+        let store = shared_store();
+        // 5 old versions (beyond a floor of 2, past the age cutoff) + 2 kept
+        // by the floor (also old, but protected by min_keep) — mixing both
+        // guards in one file to prove they combine with AND, not OR.
+        let mut ids = Vec::new();
+        for i in 0..7 {
+            let v = store
+                .agent_native_memory_version_insert("agent-1", "MEMORY.md", &format!("v{i}"), "human", "{}", "")
+                .unwrap();
+            backdate(&store, &v.id, 100); // past a 90-day cutoff
+            ids.push(v.id);
+        }
+        let deleted = store.agent_native_memory_version_prune("agent-1", "MEMORY.md", 2, 90 * DAY_MS).unwrap();
+        assert_eq!(deleted, 5);
+        assert_eq!(store.agent_native_memory_version_list("agent-1", "MEMORY.md").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn prune_scopes_to_the_requested_agent_and_filename_only() {
+        let store = shared_store();
+        let v_a = store
+            .agent_native_memory_version_insert("agent-1", "MEMORY.md", "a", "human", "{}", "")
+            .unwrap();
+        backdate(&store, &v_a.id, 200);
+        let v_b = store
+            .agent_native_memory_version_insert("agent-2", "MEMORY.md", "b", "human", "{}", "")
+            .unwrap();
+        backdate(&store, &v_b.id, 200);
+
+        let deleted = store.agent_native_memory_version_prune("agent-1", "MEMORY.md", 0, 90 * DAY_MS).unwrap();
+        assert_eq!(deleted, 1);
+        assert!(store.agent_native_memory_version_list("agent-1", "MEMORY.md").unwrap().is_empty());
+        assert_eq!(store.agent_native_memory_version_list("agent-2", "MEMORY.md").unwrap().len(), 1, "a different agent's version must be untouched");
+    }
+
+    #[test]
+    fn list_distinct_files_returns_each_agent_filename_pair_once() {
+        let store = shared_store();
+        store.agent_native_memory_version_insert("agent-1", "a.md", "v1", "human", "{}", "").unwrap();
+        store.agent_native_memory_version_insert("agent-1", "a.md", "v2", "human", "{}", "").unwrap();
+        store.agent_native_memory_version_insert("agent-1", "b.md", "v1", "human", "{}", "").unwrap();
+        store.agent_native_memory_version_insert("agent-2", "a.md", "v1", "human", "{}", "").unwrap();
+
+        let mut files = store.agent_native_memory_version_list_distinct_files().unwrap();
+        files.sort();
+        assert_eq!(
+            files,
+            vec![
+                ("agent-1".to_string(), "a.md".to_string()),
+                ("agent-1".to_string(), "b.md".to_string()),
+                ("agent-2".to_string(), "a.md".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn list_distinct_files_is_empty_when_no_versions_exist() {
+        let store = shared_store();
+        assert!(store.agent_native_memory_version_list_distinct_files().unwrap().is_empty());
     }
 }
