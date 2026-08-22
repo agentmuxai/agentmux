@@ -70,7 +70,23 @@ pub(crate) fn rebuild_output_idx(
     };
 
     while read_pos < output_size as i64 {
-        let (_, chunk) = fs.read_at(block_id, "output", read_pos, WIN).ok()?;
+        let (_, chunk) = match fs.read_at(block_id, "output", read_pos, WIN) {
+            Ok(v) => v,
+            Err(e) => {
+                // codex P2 on #2724: every exit path must log a terminal
+                // event (with duration) — an unmatched "starting" event with
+                // no completion reads as "still running," easy to mistake
+                // for a rebuild that was active throughout an incident when
+                // it actually failed fast and returned immediately.
+                tracing::warn!(
+                    block_id = %block_id,
+                    error = %e,
+                    duration_ms = started.elapsed().as_millis() as u64,
+                    "output.idx rebuild failed: read_at error"
+                );
+                return None;
+            }
+        };
         if chunk.is_empty() {
             break;
         }
@@ -108,7 +124,12 @@ pub(crate) fn rebuild_output_idx(
             Some(line_count)
         }
         Err(e) => {
-            tracing::warn!(block_id = %block_id, error = %e, "output.idx rebuild write failed");
+            tracing::warn!(
+                block_id = %block_id,
+                error = %e,
+                duration_ms = started.elapsed().as_millis() as u64,
+                "output.idx rebuild write failed"
+            );
             None
         }
     }
