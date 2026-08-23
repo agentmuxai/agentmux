@@ -1,5 +1,34 @@
 # AgentMux Version History
 
+## 0.55.21 — 2026-08-22
+
+- feat(tabs): quick-fork keybinding, non-Claude fallback banner, and inherit-identity variant
+- fix(statusbar): stop double-applying chrome zoom to status bar popovers
+- fix(muxlog): srv logs honor AGENTMUX_LOG_DIR, fix channels/ glob depth mismatch
+- fix(muxlog): prefer caller's own $AGENTMUX_CHANNEL over global freshest when resolving a log
+- fix(editor): strip Windows' verbatim prefix so live-reload matching works
+- fix(jekt): match plural forms of whole-word sensitive keywords
+- feat(muxlog): ls gains a LIVE column via real TCP liveness probe of each instance's ipc-port
+- docs(claude): PR title Agent@host prefix for shared-identity agents
+- feat(settings): add drag-and-drop file-attach controls to Advanced section
+- feat(muxspect): cross-instance find — which channel has this block_id/agent
+- fix(tabs): move quick-fork from the window tab-strip into the per-agent pane, landing forks as a sibling pane tab
+- feat(agent-config): protect a pre-existing project CLAUDE.md from being overwritten
+- feat(settings): add agent watchdog threshold controls to Terminal section
+- feat(muxspect): stamp every response with x-agentmux-srv-version, self-diagnosing stale-build 404s
+- feat(muxlog): swarm -d/--dispatch <id> filters + prints a correlated match-count verdict
+- feat(settings): add Recording/Input section — voice engine config, device picker, test-your-mic
+- fix(voice): redact groqApiKey from renderer, fix engine-switch/test-cancel bugs
+- fix(agent): stop 'Agent unresponsive' from firing during legitimate context compaction
+- fix(agent): propagate resumed session_id to shared cross-channel registry
+- fix(tabs): quick-fork always inherits identity, dropping the redundant second menu item
+- fix(subagent-watcher): watch the identity-bound Claude config dir, not a stale spawn-time snapshot
+- feat(fleet): FleetBroadcast reaches cross-channel/LAN/WAN targets, not just this instance
+- feat(layout): generalize the tab-content reveal gate to leaf/pane scope, fixing flicker on +, Quick Fork, and Agent History
+- feat(fleet): FleetBulkStop reaches cross-channel targets, not just this instance
+- feat(muxspect): Phase B policy infrastructure + jekt tier enforcement for transcript_request
+
+
 ## 0.55.20 — 2026-08-22
 
 - feat(mcp): add CaptureWindow tool for cross-instance/OS window screenshots
