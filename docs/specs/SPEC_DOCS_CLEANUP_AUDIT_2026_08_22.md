@@ -181,7 +181,7 @@ unlike the 686/103-file spec directories.
 
 ## 3. What this spec does NOT try to solve
 
-- **A full manual status-audit of all ~824 spec files** (`docs/specs/` +
+- **A full manual status-audit of all ~847 spec files** (`docs/specs/` +
   `docs/specs/archive/` + top-level `specs/` + `specs/archive/`) — at a ~40%
   stale rate on the (small, `docs/specs/`-only) sample, that's plausibly
   300+ files needing a corrected Status line. That's not a "cleanup pass,"
@@ -229,7 +229,7 @@ has since been fixed without a resolution note (mirroring §5.3's method) —
 only worth doing if Phase 3 turns up a pattern suggesting this family has the
 same problem; not committing to it here without evidence.
 
-### 5.5 Explicitly deferred — the full ~824-file spec audit
+### 5.5 Explicitly deferred — the full ~847-file spec audit
 Given the ~40% stale rate found on a 15-file `docs/specs/`-only sample, a
 defensible estimate is several hundred specs need a corrected Status line
 across all four directories combined. Doing this by hand, spec-by-spec,
@@ -256,7 +256,7 @@ user wants to commit to that scale of effort, not started here.
    more file sampling.
 2. **Appetite for §5.5's full audit** — this spec deliberately scopes Phase
    1 to the 6 files already identified and double-checked in §2.1, not a
-   commitment to fix an estimated 300+ stale specs across ~824 files.
+   commitment to fix an estimated 300+ stale specs across ~847 files.
    Confirm whether that larger effort is wanted (and at what scale/budget)
    before committing to it — and if so, budget real per-file verification
    time, not a repeat of this spec's own §2.2 mistake.
