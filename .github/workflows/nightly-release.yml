@@ -44,6 +44,15 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
+          # actions/checkout otherwise leaves a git-config extraheader
+          # (Authorization: token <GITHUB_TOKEN>) for github.com that
+          # silently overrides the URL-embedded NIGHTLY_TAG_PAT credential
+          # used by the push step below — a well-known checkout gotcha for
+          # any job that needs to push with a different identity than the
+          # default token. Without this, the push would authenticate as
+          # GITHUB_TOKEN (read-only per this job's `permissions:` block)
+          # and fail every run.
+          persist-credentials: false
 
       - name: Find latest pending release commit and tag it if needed
         env:
@@ -52,7 +61,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          match=$(git log HEAD --grep='^chore: release v[0-9]' -E -n 1 --format='%H%x09%s' || true)
+          # Filter on the formatted SUBJECT only, not `git log --grep`,
+          # which matches anywhere in the full commit message — a merge
+          # commit whose body happens to mention an old release title
+          # (real example in this repo's history: 919b9327, "Merge pull
+          # request #1983 from .../release-v0.50.3", whose body's second
+          # line is "chore: release v0.50.3") would otherwise be selected
+          # ahead of the actual latest release commit.
+          match=$(git log HEAD --format='%H%x09%s' | grep -m1 -E $'\tchore: release v[0-9]+\\.[0-9]+\\.[0-9]+' || true)
           if [ -z "$match" ]; then
             echo "No \`chore: release\` commit found on main at all — nothing to do." | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
