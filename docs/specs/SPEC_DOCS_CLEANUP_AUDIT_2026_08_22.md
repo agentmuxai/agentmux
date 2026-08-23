@@ -63,10 +63,15 @@ already shipped**, confirmed against actual code:
   totals are implemented in `AgentComposerStrip.tsx`.
 - `SPEC_AGENT_STARTUP_SEQUENCE_2026_04_16.md` — core startup flow long since
   built.
-- `SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24.md` — partially done (a `styles/`
-  split directory now exists) but `agent-view.scss` itself is still 387
-  lines; the header doesn't reflect the partial state at all, which is worse
-  than either extreme (a reader can't tell it's half-done).
+- `SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24.md` — **correction, made while
+  executing this spec's own Phase 1**: originally characterized here as
+  "partially done... half-done" based on `agent-view.scss` still being 387
+  lines. A closer read (the file is now almost entirely `@use` imports of 28
+  split files matching this spec's target names, with the remaining ~350
+  lines being legitimate root-layout rules, not unmigrated component
+  styles) found it's actually essentially complete, not half-done. Another
+  instance of this spec's own shallow-verification problem (§2.2) — line
+  count alone wasn't enough evidence; fixed once the file was actually read.
 
 I found this exact same rot on a smaller scale earlier this session:
 `SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md` still said "Status:

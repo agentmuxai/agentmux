@@ -1,7 +1,7 @@
 # SPEC: Agent Pane Session Cost/Token Totals
 
 **Date:** 2026-07-02
-**Status:** Proposed
+**Status:** implemented — shipped in #1920. Verified 2026-08-23: `reducer.ts`'s `accumulateStats()` function cites this spec by filename in its own doc comment; a distinct `sessionTotals` field (separate from the per-turn `sessionStats` this spec's bug report describes) is wired into `AgentComposerStrip.tsx` and `agent-view.tsx:2225`.
 **Area:** Agent pane (frontend)
 **Severity:** P2 — misleading UI, no data loss
 
