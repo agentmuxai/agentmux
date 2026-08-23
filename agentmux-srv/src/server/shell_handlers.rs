@@ -38,6 +38,13 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // otherwise tell a live spawn apart from a replay of an already-long-
     // exited shell, which was flashing stale rows in the Activity Dock.
     // See docs/retro/retro-activity-dock-stale-shell-flash-on-load-2026-08-22.md.
+    //
+    // Reports `known: false` (rather than collapsing into `running: false`,
+    // like the MCP-facing HTTP route does) when no registry entry exists yet
+    // — the shell may simply not have finished spawning/registering (see
+    // `get_status_if_known`'s doc comment for the exact race this closes:
+    // reagent P1 on PR #2770, a genuinely live shell misreported as already
+    // exited). The frontend treats `known: false` as "don't correct."
     let shell_sessions_status = state.shell_sessions.clone();
     engine.register_handler(
         COMMAND_SHELL_STATUS,
@@ -46,12 +53,20 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             Box::pin(async move {
                 let req: CommandShellStatusData = serde_json::from_value(data)
                     .map_err(|e| format!("shellstatus: {e}"))?;
-                let s = registry.get_status(&req.shell_id);
-                Ok(Some(serde_json::json!({
-                    "running": s.running,
-                    "exit_code": s.exit_code,
-                    "line_count": s.line_count,
-                })))
+                match registry.get_status_if_known(&req.shell_id) {
+                    Some(s) => Ok(Some(serde_json::json!({
+                        "known": true,
+                        "running": s.running,
+                        "exit_code": s.exit_code,
+                        "line_count": s.line_count,
+                    }))),
+                    None => Ok(Some(serde_json::json!({
+                        "known": false,
+                        "running": false,
+                        "exit_code": null,
+                        "line_count": 0,
+                    }))),
+                }
             })
         }),
     );
@@ -418,6 +433,7 @@ mod tests {
         let state = crate::server::tests::test_state();
         seed_status(&state, "sh-running", true, None);
         let data = call_shellstatus(&state, "sh-running").await;
+        assert_eq!(data["known"], serde_json::json!(true));
         assert_eq!(data["running"], serde_json::json!(true));
         assert_eq!(data["line_count"], serde_json::json!(3));
         assert!(data.get("exit_code").map_or(true, |v| v.is_null()));
@@ -428,6 +444,7 @@ mod tests {
         let state = crate::server::tests::test_state();
         seed_status(&state, "sh-exited", false, Some(0));
         let data = call_shellstatus(&state, "sh-exited").await;
+        assert_eq!(data["known"], serde_json::json!(true));
         assert_eq!(data["running"], serde_json::json!(false));
         assert_eq!(data["exit_code"], serde_json::json!(0));
     }
@@ -437,14 +454,24 @@ mod tests {
         let state = crate::server::tests::test_state();
         seed_status(&state, "sh-failed", false, Some(1));
         let data = call_shellstatus(&state, "sh-failed").await;
+        assert_eq!(data["known"], serde_json::json!(true));
         assert_eq!(data["running"], serde_json::json!(false));
         assert_eq!(data["exit_code"], serde_json::json!(1));
     }
 
+    // Reagent P1 on PR #2770: a shell with no registry entry at all — either
+    // a genuinely unknown id, OR (the actual race that motivated this)
+    // `shell_node_create` was published but the runner hasn't reached
+    // `register_full` yet (still spawning the child process). Both look
+    // identical to this handler, and BOTH must report `known: false`, not
+    // the same shape as a genuinely exited shell — otherwise a live shell
+    // caught in that race gets misreported as failed for its entire run
+    // (ShellChunkAppend never restores a status once set).
     #[tokio::test]
-    async fn shellstatus_unknown_id_reports_not_running_no_exit_code() {
+    async fn shellstatus_unknown_id_reports_known_false() {
         let state = crate::server::tests::test_state();
         let data = call_shellstatus(&state, "sh-never-existed").await;
+        assert_eq!(data["known"], serde_json::json!(false));
         assert_eq!(data["running"], serde_json::json!(false));
         assert!(data.get("exit_code").map_or(true, |v| v.is_null()));
     }
