@@ -221,9 +221,20 @@ describe("PaneTabStrip — animateWidth (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_202
 
     beforeEach(() => {
         currentWidth = 100;
-        vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
-            () => ({ width: currentWidth }) as DOMRect
-        );
+        // Element-aware, not a flat stub: when `style.width` is explicitly
+        // set (mid-FLIP, or an in-flight transition's pinned target),
+        // report THAT value — matching a real browser's behavior and
+        // exercising the exact "measuring a still-pinned width returns a
+        // stale/corrupted value" hazard reagent's review of PR #2768
+        // caught. When cleared, reports `currentWidth` (the test's stand-
+        // in for "the DOM's true natural size for the current tab count").
+        vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+            this: HTMLElement
+        ) {
+            const explicit = this.style.width;
+            const px = explicit ? parseFloat(explicit) : NaN;
+            return { width: Number.isNaN(px) ? currentWidth : px } as DOMRect;
+        });
         vi.useFakeTimers();
     });
 
@@ -335,5 +346,48 @@ describe("PaneTabStrip — animateWidth (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_202
         await Promise.resolve();
         const strip = container.querySelector(".pane-tab-strip") as HTMLElement;
         expect(strip.style.width).toBe("");
+    });
+
+    it("re-targets to the current tab count's true natural width when a second change arrives before the first transition's cleanup timeout fires (reagent's review of PR #2768)", async () => {
+        const [tabs, setTabs] = createSignal<T[]>([TABS[0]]);
+        const { container } = render(() => (
+            <PaneTabStrip
+                tabs={tabs()}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                onActivate={vi.fn()}
+                animateWidth
+            />
+        ));
+        await Promise.resolve(); // mount: records natural width 100, no animation
+
+        const strip = container.querySelector(".pane-tab-strip") as HTMLElement;
+
+        // First change: 1 -> 2 tabs, natural width grows to 180.
+        currentWidth = 180;
+        setTabs(TABS);
+        await Promise.resolve();
+        expect(strip.style.width).toBe("180px"); // mid-transition, still pinned to this target
+
+        // Second change arrives WHILE the first transition's cleanup timer
+        // is still pending (no timer has fired yet, width is still pinned
+        // to "180px"): 2 -> 3 tabs, natural width grows again to 260. The
+        // bug this regresses: measuring the still-pinned "180px" as if it
+        // were the new tab count's natural width, comparing it against the
+        // stale lastMeasuredWidth of 180, finding them equal, and silently
+        // doing nothing — leaving the strip stuck at 180px (correct for 2
+        // tabs, wrong for the now-current 3) until the ORIGINAL timer fired.
+        currentWidth = 260;
+        setTabs([TABS[0], TABS[1], { id: "c", label: "gamma" }]);
+        await Promise.resolve();
+
+        expect(strip.style.width).toBe("260px");
+        expect(strip.style.transition).toBe("width 160ms ease-out");
+
+        // And it must still clear correctly afterward, not get stuck.
+        vi.advanceTimersByTime(200);
+        expect(strip.style.width).toBe("");
+        expect(strip.style.transition).toBe("");
     });
 });

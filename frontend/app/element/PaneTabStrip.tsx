@@ -119,6 +119,21 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
     // ones. `lastMeasuredWidth !== undefined` below is what actually
     // distinguishes "first run, no prior measurement" from "no-op, sizes
     // matched" — not `on`'s own defer option.
+    //
+    // reagent's review of PR #2768: a second tabs.length change arriving
+    // before the FIRST transition's cleanup timeout fires used to measure
+    // `newWidth` while `el.style.width` was still pinned to the first
+    // transition's in-flight interpolated value — reading garbage instead
+    // of the true natural width for the current tab count, then holding at
+    // a width unrelated to either state until the trailing timeout finally
+    // cleared it. Fixed by clearing any still-pinned width/transition
+    // FIRST (`wasAnimating` below) before measuring `newWidth`, and using
+    // the box's actual current visual position (not the stale
+    // `lastMeasuredWidth` target) as the hold point when interrupting an
+    // in-flight transition — `lastMeasuredWidth` itself is only a valid
+    // "before" reference for the SETTLED case, where layout is already
+    // lazily dirty from Solid's DOM patch by the time this effect runs and
+    // there's no other way to recover the pre-change size at all.
     createEffect(
         on(
             () => props.tabs.length,
@@ -126,15 +141,17 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                 if (!props.animateWidth) return;
                 const el = stripRef;
                 if (!el) return;
+                const wasAnimating = widthResetTimeout !== undefined;
+                const holdWidth = wasAnimating ? el.getBoundingClientRect().width : lastMeasuredWidth;
+                clearTimeout(widthResetTimeout);
+                el.style.transition = "none";
+                el.style.width = "";
+                // Forces the reflow that reveals the TRUE natural width for
+                // the current tab count — only trustworthy once the line
+                // above has cleared any lingering override.
                 const newWidth = el.getBoundingClientRect().width;
-                if (
-                    lastMeasuredWidth !== undefined &&
-                    lastMeasuredWidth !== newWidth &&
-                    !atoms.prefersReducedMotionAtom()
-                ) {
-                    clearTimeout(widthResetTimeout);
-                    el.style.transition = "none";
-                    el.style.width = `${lastMeasuredWidth}px`;
+                if (holdWidth !== undefined && holdWidth !== newWidth && !atoms.prefersReducedMotionAtom()) {
+                    el.style.width = `${holdWidth}px`;
                     el.getBoundingClientRect(); // force reflow before the transition kicks in
                     el.style.transition = `width ${WIDTH_TRANSITION_MS}ms ease-out`;
                     el.style.width = `${newWidth}px`;
