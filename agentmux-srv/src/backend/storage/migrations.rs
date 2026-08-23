@@ -213,7 +213,26 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 8;
 ///        memory-version-history PR, which independently claimed v24 for
 ///        an unrelated table (see that entry above for the same class of
 ///        collision this codebase has hit before, e.g. v20→v22).
-pub const OBJECT_SCHEMA_VERSION: i64 = 25;
+///   v26 — db_agent_definitions.conversation_visibility (TEXT, default
+///        'private') + db_conversation_trust_grants: `muxspect` Phase B/C's
+///        per-agent disclosure policy for an incoming cross-tier
+///        `transcript_request` jekt (LAN/WAN conversation visibility —
+///        docs/specs/SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md,
+///        jekt tier rules confirmed in
+///        docs/specs/SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md).
+///        One of "private" (default, auto-deny)/"trusted_peers" (auto-
+///        approve an allow-listed requester)/"ask" (force human
+///        escalation). Also dual-written to `db_agents` (mirrors
+///        `auto_continue_enabled`'s treatment exactly — a simple per-agent
+///        opt-in-style setting, unlike `memory_id`/`model_vendor_base_url`,
+///        which use a differently-named column there). Deliberately NOT
+///        added to `DefinitionRecordV1`'s cross-channel wire format —
+///        channel-local only, same precedent as those two fields; a
+///        cross-channel-reopened agent starts back at the safe "private"
+///        default. `db_conversation_trust_grants` mirrors
+///        `db_lan_peer_pubkey_pins`'s exact shape (own module,
+///        get/set-style methods, case-insensitive agent_id lookups).
+pub const OBJECT_SCHEMA_VERSION: i64 = 26;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -807,6 +826,24 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             name       TEXT NOT NULL,
             member_ids TEXT NOT NULL DEFAULT '[]',
             created_at INTEGER NOT NULL DEFAULT 0
+        );
+
+        -- v26: allowlist for a responding agent's 'trusted_peers'
+        -- conversation_visibility mode — see OBJECT_SCHEMA_VERSION's v26
+        -- doc comment above. Mirrors db_lan_peer_pubkey_pins's exact shape
+        -- (own module, get/set-style methods, case-insensitive agent_id
+        -- lookups). `agent_id` is the RESPONDING agent (whose transcript
+        -- may be disclosed); `granted_peer_agent_id` is the requester it
+        -- trusts; `tier` records which delivery tier the grant applies to
+        -- ('lan'/'wan') since a grant for one tier's cryptographic
+        -- identity guarantee should not be silently assumed to hold for a
+        -- weaker one.
+        CREATE TABLE IF NOT EXISTS db_conversation_trust_grants (
+            agent_id             TEXT NOT NULL,
+            granted_peer_agent_id TEXT NOT NULL,
+            tier                 TEXT NOT NULL,
+            granted_at           INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (agent_id, granted_peer_agent_id, tier)
         );",
     )?;
 
@@ -888,6 +925,13 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         // comment for why, and OBJECT_SCHEMA_VERSION's v19 entry.
         "ALTER TABLE db_agent_definitions ADD COLUMN memory_id TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_agents ADD COLUMN default_memory_id TEXT NOT NULL DEFAULT ''",
+        // v26: muxspect Phase B/C per-agent conversation-disclosure policy —
+        // see OBJECT_SCHEMA_VERSION's v26 doc comment above. Dual-written
+        // to db_agents under the SAME column name (a simple opt-in-style
+        // setting, like auto_continue_enabled above — not a differently-
+        // named-on-db_agents case like memory_id/default_memory_id).
+        "ALTER TABLE db_agent_definitions ADD COLUMN conversation_visibility TEXT NOT NULL DEFAULT 'private'",
+        "ALTER TABLE db_agents ADD COLUMN conversation_visibility TEXT NOT NULL DEFAULT 'private'",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();

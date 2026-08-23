@@ -199,6 +199,7 @@ pub fn seed_agents(wstore: &Arc<Store>) -> Result<SeedReport, StoreError> {
             model_vendor_base_url: String::new(), // manifest doesn't declare this yet
             auto_continue_enabled: 0,
             memory_id: String::new(),
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
         };
         wstore.agent_def_insert(&mut agent)?;
 
@@ -449,6 +450,7 @@ fn reseed_if_needed(
             model_vendor_base_url: String::new(), // manifest doesn't declare this yet
             auto_continue_enabled: 0,
             memory_id: String::new(),
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
         };
 
         if let Some(existing_agent) = existing_map.get(agent_def.id.as_str()) {
@@ -560,6 +562,7 @@ mod tests {
             auto_continue_enabled: 0,
             model_vendor_base_url: String::new(),
             memory_id: String::new(),
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
         };
         wstore.agent_def_insert(&mut def).unwrap();
     }
