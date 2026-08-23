@@ -1,8 +1,8 @@
 # SPEC — Settings: new "Recording / Input" section (mic setup, engine config, test-your-mic)
 
 **Date:** 2026-08-19
-**Type:** Feature (design proposal — not yet implemented)
-**Status:** Draft
+**Type:** Feature
+**Status:** implemented — merged in #2751 (2026-08-22), plus two follow-up review rounds fixing a renderer-side plaintext-key leak (`voice:groqApiKey` was reaching the renderer unredacted despite this doc's own "never sent to the renderer" claim below — see `agentmux-srv/src/backend/wconfig/redact.rs`), an engine-switch bug affecting already-open panes, and the whisper-local/model-path selector logic. See `frontend/app/view/settings/sections/recording-section.tsx` for the shipped implementation; details below are the original design and may differ in small particulars from what landed.
 **Scope:** New `frontend/app/view/settings/sections/recording-section.tsx` (+ registration in `settings-view.tsx`/`settings-model.ts`), a small new backend validation endpoint, and light refactors to `frontend/app/hook/whisperVoiceEngine.ts` and `frontend/app-init.ts`'s error-toast copy. No change to the capture/transcribe architecture itself.
 
 ## Problem
