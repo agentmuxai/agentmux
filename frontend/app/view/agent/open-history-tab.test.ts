@@ -119,17 +119,21 @@ describe("openOrFocusHistoryTab reveal gate (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER
         vi.clearAllMocks();
         getNodeByBlockId.mockReturnValue({ id: "node-1", data: { blockStack: ["live-block"] } });
         getObjectValue.mockReturnValue(undefined);
+        holdLeafRevealGate.mockReturnValue(1);
     });
 
     afterEach(() => {
         vi.restoreAllMocks();
     });
 
-    it("holds and schedules the lift on the pane's own node id for the create-new-tab path", async () => {
+    it("holds the gate on the pane's own node id for the create-new-tab path, and schedules the lift with the SAME generation token", async () => {
+        holdLeafRevealGate.mockReturnValue(7);
         rpcCall.mockResolvedValue({ block_id: "history-block-1" });
         await openOrFocusHistoryTab({ currentBlockId: "live-block", agentId: "agent-1" });
         expect(holdLeafRevealGate).toHaveBeenCalledWith("node-1");
-        expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1");
+        // Codex's review of PR #2761: the returned generation token must be
+        // threaded through unchanged so tab-reveal.ts can detect staleness.
+        expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1", 7);
     });
 
     it("holds and schedules the lift for the already-open switch-to-existing path too", async () => {
@@ -139,14 +143,14 @@ describe("openOrFocusHistoryTab reveal gate (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER
         getNodeByBlockId.mockReturnValue({ id: "node-1", data: { blockStack: ["live-block", "history-block-1"] } });
         await openOrFocusHistoryTab({ currentBlockId: "live-block", agentId: "agent-1" });
         expect(holdLeafRevealGate).toHaveBeenCalledWith("node-1");
-        expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1");
+        expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1", 1);
         expect(rpcCall).not.toHaveBeenCalled();
     });
 
     it("schedules the lift even when the pane.open RPC rejects", async () => {
         rpcCall.mockRejectedValue(new Error("boom"));
         await openOrFocusHistoryTab({ currentBlockId: "live-block", agentId: "agent-1" });
-        expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1");
+        expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1", 1);
     });
 
     it("does not hold the gate at all when the pane's own node can't be found", async () => {

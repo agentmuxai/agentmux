@@ -92,6 +92,7 @@ describe("quickForkAgent", () => {
         setMetaCommand.mockResolvedValue(undefined);
         closeBlockInStack.mockResolvedValue(undefined);
         deleteBlock.mockResolvedValue(undefined);
+        holdLeafRevealGate.mockReturnValue(1);
     });
 
     afterEach(() => {
@@ -144,10 +145,15 @@ describe("quickForkAgent", () => {
     // not just the final pushBlockOntoStack remount), and always revealed
     // again on every exit path.
     describe("reveal gate (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22)", () => {
-        it("holds the gate on the source pane's own node id before any RPC, and schedules the lift once settled", async () => {
+        it("holds the gate on the source pane's own node id before any RPC, and schedules the lift (with the SAME generation token) once settled", async () => {
+            holdLeafRevealGate.mockReturnValue(7);
             await quickForkAgent(model);
             expect(holdLeafRevealGate).toHaveBeenCalledWith("node-1");
-            expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1");
+            // Codex's review of PR #2761: the generation token returned by
+            // holdLeafRevealGate must be threaded through unchanged, not a
+            // fresh/undefined value — that's what lets tab-reveal.ts detect
+            // a stale (superseded or already-resolved) generation.
+            expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1", 7);
             // Held before scheduled, and the whole RPC chain runs in between.
             expect(holdLeafRevealGate.mock.invocationCallOrder[0])
                 .toBeLessThan(forkAgentDefinitionCommand.mock.invocationCallOrder[0]);
@@ -159,19 +165,19 @@ describe("quickForkAgent", () => {
             forkAgentDefinitionCommand.mockRejectedValue(new Error("boom"));
             await quickForkAgent(model);
             expect(holdLeafRevealGate).toHaveBeenCalledWith("node-1");
-            expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1");
+            expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1", 1);
         });
 
         it("schedules the lift even when launchAgentDefinition reports failure", async () => {
             launchAgentDefinition.mockResolvedValue(false);
             await quickForkAgent(model);
-            expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1");
+            expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1", 1);
         });
 
         it("schedules the lift even when launchAgentDefinition rejects", async () => {
             launchAgentDefinition.mockRejectedValue(new Error("boom"));
             await quickForkAgent(model);
-            expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1");
+            expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1", 1);
         });
 
         it("does not hold the gate at all when there's no live agent to fork", async () => {

@@ -200,6 +200,26 @@ export function scheduleRevealLift(): void {
 }
 
 // ─── Leaf-scoped gate (generalization — SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22) ──
+//
+// Generation-token design (Codex's review of PR #2761 caught two real races
+// in an earlier, generation-less version of this gate):
+//
+//   1. Two overlapping operations on the SAME node id (e.g. two rapid "+"
+//      clicks before the first's RPC resolves) — the OLDER operation's
+//      `finally`-scheduled lift must not touch the gate the NEWER
+//      operation now owns, or the pane reveals mid-second-operation.
+//   2. A single SLOW operation whose own `holdLeafRevealGate` safety-net
+//      timer fires (revealing the pane) before the operation actually
+//      finishes — the later `scheduleLeafRevealLift` call must not re-hide
+//      an already-revealed pane, or the user sees a jarring
+//      visible→hidden→visible sequence.
+//
+// Every `holdLeafRevealGate` call mints a fresh generation number for its
+// node id and returns it; the paired `scheduleLeafRevealLift` call takes it
+// back. A call is a no-op whenever its generation is stale — either a NEWER
+// generation has since started (case 1), or its OWN generation already
+// resolved once, by timeout or settle (case 2, tracked via
+// `leafResolvedGeneration`).
 
 const [gatingNodeIds, setGatingNodeIds] = createSignal<ReadonlySet<string>>(new Set());
 export { gatingNodeIds };
@@ -209,6 +229,17 @@ export { gatingNodeIds };
  *  `scheduleOnSettle` detector. At most one entry per node id; a new
  *  hold/schedule call for the same id cancels and replaces it. */
 const leafCancels = new Map<string, () => void>();
+
+/** The generation number of the MOST RECENT `holdLeafRevealGate` call for
+ *  a given node id. */
+const leafGeneration = new Map<string, number>();
+
+/** The highest generation number that has ALREADY had its gate lifted
+ *  (by settle-detection or its own hold's safety-net timeout) for a given
+ *  node id. A `scheduleLeafRevealLift` call for a generation at or below
+ *  this is a no-op — re-hiding an already-revealed pane is worse than
+ *  leaving it visible while a slow operation finishes. */
+const leafResolvedGeneration = new Map<string, number>();
 
 function addGatingNode(nodeId: string): void {
     setGatingNodeIds((prev) => {
@@ -233,6 +264,29 @@ function cancelLeaf(nodeId: string): void {
     leafCancels.delete(nodeId);
 }
 
+function currentLeafGeneration(nodeId: string): number {
+    return leafGeneration.get(nodeId) ?? 0;
+}
+
+/** True if `generation` is no longer the one this node id's gate should
+ *  listen to — see the two race cases in the module doc comment above. */
+function isLeafGenerationStale(nodeId: string, generation: number): boolean {
+    return (
+        generation !== currentLeafGeneration(nodeId) ||
+        generation <= (leafResolvedGeneration.get(nodeId) ?? 0)
+    );
+}
+
+/** Common "this generation is done" path for both the hold-timeout and the
+ *  settle-detected outcomes. A no-op if a newer generation has since taken
+ *  over — that generation owns the gate now and will resolve it itself. */
+function resolveLeafGeneration(nodeId: string, generation: number): void {
+    leafCancels.delete(nodeId);
+    if (generation !== currentLeafGeneration(nodeId)) return;
+    leafResolvedGeneration.set(nodeId, generation);
+    removeGatingNode(nodeId);
+}
+
 /**
  * Pin a single leaf's reveal gate up, by layout node id — the block-stack
  * analog of `holdRevealGate()`. Use before the async work that precedes a
@@ -240,35 +294,37 @@ function cancelLeaf(nodeId: string): void {
  * or resolving the block to attach), so the leaf stays hidden through the
  * whole operation instead of revealing mid-flight.
  *
- * Same pairing contract as `holdRevealGate()`: callers MUST follow up with
- * `scheduleLeafRevealLift(nodeId)` (typically in a `finally`), and get the
- * same MAX_GATE_MS safety-net fallback if they don't.
+ * @returns an opaque generation token. Callers MUST pass it to the paired
+ *   `scheduleLeafRevealLift(nodeId, generation)` call (typically in a
+ *   `finally`) — see the module doc comment above for why a raw
+ *   `scheduleLeafRevealLift(nodeId)` with no generation would be unsafe
+ *   once two operations can overlap on the same node id. Also gets the
+ *   same MAX_GATE_MS safety-net fallback as `holdRevealGate()` if the
+ *   paired call never arrives.
  */
-export function holdLeafRevealGate(nodeId: string): void {
+export function holdLeafRevealGate(nodeId: string): number {
     addGatingNode(nodeId);
     cancelLeaf(nodeId);
-    const timer = setTimeout(() => {
-        leafCancels.delete(nodeId);
-        removeGatingNode(nodeId);
-    }, MAX_GATE_MS);
+    const generation = currentLeafGeneration(nodeId) + 1;
+    leafGeneration.set(nodeId, generation);
+    const timer = setTimeout(() => resolveLeafGeneration(nodeId, generation), MAX_GATE_MS);
     leafCancels.set(nodeId, () => clearTimeout(timer));
+    return generation;
 }
 
 /**
- * Mark one leaf's gate active and start watching for clean frames.
- * Idempotent per node id — a second call for the same `nodeId` before the
- * first completes resets that leaf's own detector; it never touches any
- * other leaf's (`scheduleOnSettle` is a fresh, independently-cancellable
- * instance per call).
+ * Mark one leaf's gate active and start watching for clean frames, for the
+ * generation token returned by the paired `holdLeafRevealGate` call. A
+ * no-op if that generation is stale (superseded by a newer hold, or
+ * already resolved by its own hold's safety-net timeout) — see the module
+ * doc comment above.
  */
-export function scheduleLeafRevealLift(nodeId: string): void {
+export function scheduleLeafRevealLift(nodeId: string, generation: number): void {
+    if (isLeafGenerationStale(nodeId, generation)) return;
     addGatingNode(nodeId);
     cancelLeaf(nodeId);
     const cancel = scheduleOnSettle(
-        () => {
-            leafCancels.delete(nodeId);
-            removeGatingNode(nodeId);
-        },
+        () => resolveLeafGeneration(nodeId, generation),
         { settleMs: SETTLE_MS, maxMs: MAX_GATE_MS },
     );
     leafCancels.set(nodeId, cancel);

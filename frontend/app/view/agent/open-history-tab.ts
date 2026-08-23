@@ -87,7 +87,7 @@ async function openOrFocusHistoryTabImpl(opts: { currentBlockId: string; agentId
     // pane.open + pushBlockOntoStack for a fresh one) force the same
     // remount `layoutStack.ts`'s own doc comment describes.
     // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md.
-    holdLeafRevealGate(node.id);
+    const revealGen = holdLeafRevealGate(node.id);
     try {
         const stack = node.data?.blockStack?.length ? node.data.blockStack : [currentBlockId];
         const existing = stack.find((id) => isHistoryTabFor(id, agentId));
@@ -144,6 +144,6 @@ async function openOrFocusHistoryTabImpl(opts: { currentBlockId: string; agentId
         pushBlockOntoStack(layoutModel, freshNode.id, paneOpenResult.block_id);
     } finally {
         // Pair with holdLeafRevealGate above — runs on every exit path.
-        scheduleLeafRevealLift(node.id);
+        scheduleLeafRevealLift(node.id, revealGen);
     }
 }

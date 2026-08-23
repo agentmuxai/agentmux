@@ -297,7 +297,14 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
         if (!node) return;
         const stack = node.data?.blockStack?.length ? node.data.blockStack : [model.blockId];
         if (stack.includes(targetBlockId)) {
+            // Switching to an ALREADY-OPEN pill forces the same remount as
+            // creating a new one — layoutStack.ts's setActiveBlockInStack
+            // evicts the NodeModel just like pushBlockOntoStack does.
+            // Codex's review of PR #2761 caught that this path (unlike
+            // create-new) had no reveal gate at all.
+            const gen = holdLeafRevealGate(node.id);
             setActiveBlockInStack(layoutModel, node.id, targetBlockId);
+            scheduleLeafRevealLift(node.id, gen);
         } else {
             refocusNode(targetBlockId);
         }
@@ -317,7 +324,7 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
         // trip plus pushBlockOntoStack's forced remount (layoutStack.ts's
         // own doc comment) is exactly the piecemeal-paint flicker
         // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22 addresses.
-        holdLeafRevealGate(initialNode.id);
+        const revealGen = holdLeafRevealGate(initialNode.id);
         try {
             let paneOpenResult: { block_id: string };
             try {
@@ -352,7 +359,7 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
             // Pair with holdLeafRevealGate above — runs on every exit path
             // (success, RPC failure, pane-closed-mid-flight) so the leaf
             // never stays hidden forever.
-            scheduleLeafRevealLift(initialNode.id);
+            scheduleLeafRevealLift(initialNode.id, revealGen);
         }
     };
     // × on a tab (also middle-click, via PaneTabStrip's onMouseDown).

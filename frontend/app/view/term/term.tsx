@@ -25,6 +25,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { baseName, consumeDragPaths, copyFilesToDir } from "@/util/dnd";
 import { closeBlockInStack, getLayoutModelForStaticTab, pushBlockOntoStack, setActiveBlockInStack } from "@/layout/index";
+import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reveal";
 
 // TermResyncHandler: watches connection status changes and resyncs the terminal controller.
 // Also resyncs when the backend restarts — local terminals have no connStatus change on restart,
@@ -134,7 +135,14 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
         if (targetBlockId === activeBlockId()) return;
         const node = layoutModel.getNodeByBlockId(blockId);
         if (!node) return;
+        // Switching to an already-open shell-tab pill forces the same
+        // remount as pushing a new one onto the stack (layoutStack.ts's
+        // setActiveBlockInStack evicts the NodeModel). Codex's review of
+        // PR #2761 caught the agent-pane analog of this same gap.
+        // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md.
+        const gen = holdLeafRevealGate(node.id);
         setActiveBlockInStack(layoutModel, node.id, targetBlockId);
+        scheduleLeafRevealLift(node.id, gen);
     };
     const handleTermTabClose = (targetBlockId: string) => {
         const node = layoutModel.getNodeByBlockId(blockId);
@@ -142,38 +150,47 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
         void closeBlockInStack(layoutModel, node.id, targetBlockId);
     };
     const handleTermTabAdd = async () => {
-        if (!layoutModel.getNodeByBlockId(blockId)) return;
-        // New tab inherits the CURRENT tab's cwd, matching how a real
-        // terminal's "new tab" usually starts in the same directory rather
-        // than some unrelated default.
-        const cwd = blockData()?.meta?.["cmd:cwd"] as string | undefined;
+        const initialNode = layoutModel.getNodeByBlockId(blockId);
+        if (!initialNode) return;
+        // Hide this pane while the new tab settles — same pushBlockOntoStack
+        // -forced remount handleNewAgentTab (agent-view.tsx) gates against.
+        // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md.
+        const revealGen = holdLeafRevealGate(initialNode.id);
         try {
-            const paneOpenResult = await TabRpcClient.rpcCall(
-                "pane.open",
-                { view: "term", cwd: cwd || undefined, skip_placement: true },
-                {},
-            ) as { block_id: string };
-            // Review finding (Codex): this pane could have closed while the
-            // RPC above was in flight — re-resolve the node fresh rather
-            // than trusting a pre-await reference. If it's gone, the
-            // skip_placement block we just created has nowhere to attach
-            // to; delete it instead of leaving an orphaned, unreachable
-            // PTY/block behind.
-            const node = layoutModel.getNodeByBlockId(blockId);
-            if (!node) {
-                await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
-                return;
+            // New tab inherits the CURRENT tab's cwd, matching how a real
+            // terminal's "new tab" usually starts in the same directory rather
+            // than some unrelated default.
+            const cwd = blockData()?.meta?.["cmd:cwd"] as string | undefined;
+            try {
+                const paneOpenResult = await TabRpcClient.rpcCall(
+                    "pane.open",
+                    { view: "term", cwd: cwd || undefined, skip_placement: true },
+                    {},
+                ) as { block_id: string };
+                // Review finding (Codex): this pane could have closed while the
+                // RPC above was in flight — re-resolve the node fresh rather
+                // than trusting a pre-await reference. If it's gone, the
+                // skip_placement block we just created has nowhere to attach
+                // to; delete it instead of leaving an orphaned, unreachable
+                // PTY/block behind.
+                const node = layoutModel.getNodeByBlockId(blockId);
+                if (!node) {
+                    await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
+                    return;
+                }
+                pushBlockOntoStack(layoutModel, node.id, paneOpenResult.block_id);
+            } catch (e: unknown) {
+                pushNotification({
+                    icon: "fa-triangle-exclamation",
+                    title: "New terminal tab failed",
+                    message: e instanceof Error ? e.message : String(e),
+                    timestamp: new Date().toISOString(),
+                    type: "error",
+                    expiration: Date.now() + 8000,
+                });
             }
-            pushBlockOntoStack(layoutModel, node.id, paneOpenResult.block_id);
-        } catch (e: unknown) {
-            pushNotification({
-                icon: "fa-triangle-exclamation",
-                title: "New terminal tab failed",
-                message: e instanceof Error ? e.message : String(e),
-                timestamp: new Date().toISOString(),
-                type: "error",
-                expiration: Date.now() + 8000,
-            });
+        } finally {
+            scheduleLeafRevealLift(initialNode.id, revealGen);
         }
     };
 

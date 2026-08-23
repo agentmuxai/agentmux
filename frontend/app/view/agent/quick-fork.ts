@@ -133,7 +133,7 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
     // pushBlockOntoStack-forced remount `handleNewAgentTab`/
     // `openOrFocusHistoryTab` are also gated against.
     // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md.
-    holdLeafRevealGate(node.id);
+    const revealGen = holdLeafRevealGate(node.id);
 
     // Declared outside the try so the catch block below can tell whether a
     // block was actually pushed onto the stack before the failure — only
@@ -281,6 +281,6 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
         }
     } finally {
         // Pair with holdLeafRevealGate above — runs on every exit path.
-        scheduleLeafRevealLift(node.id);
+        scheduleLeafRevealLift(node.id, revealGen);
     }
 }
