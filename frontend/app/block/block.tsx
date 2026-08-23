@@ -14,6 +14,7 @@ import { ErrorBoundary } from "@/element/errorboundary";
 import { CenteredDiv } from "@/element/quickelems";
 import { NodeModel, useDebouncedNodeInnerRect } from "@/layout/index";
 import {
+    atoms,
     counterInc,
     getBlockComponentModel,
     registerBlockComponentModel,
@@ -24,12 +25,18 @@ import { focusedBlockId } from "@/util/focusutil";
 import { isBlank, useAtomValueSafe } from "@/util/util";
 import clsx from "clsx";
 import type { JSX } from "solid-js";
-import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, Suspense } from "solid-js";
+import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, Suspense } from "solid-js";
 import "./block.scss";
 import "./pane-size-badge.scss";
 import { BlockErrorBoundary } from "./BlockErrorBoundary";
 import { BlockFrame } from "./blockframe";
 import { blockViewToIcon, blockViewToName } from "./blockutil";
+
+// Matches BrainSpinner.scss's own `.is-fading` opacity transition duration —
+// Block's ready()-gate cross-fade (below) reuses the same visual timing as
+// every other BrainSpinner fade in this codebase (agent-view.tsx's loading
+// overlay and picker-fade, AgentPicker's own overlay).
+const READY_GATE_FADE_MS = 200;
 
 function makeViewModel(blockId: string, blockView: string, nodeModel: NodeModel): ViewModel {
     // Migration shims:
@@ -293,6 +300,52 @@ function Block(props: BlockProps): JSX.Element {
 
     const ready = createMemo(() => !loading() && !isBlank(props.nodeModel.blockId) && blockData() != null && viewModel() != null);
 
+    // Cross-fade the ready()-gate BrainSpinner out on top of the real
+    // content instead of an instant hard cut (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md
+    // §2.3/§4 Option B) — this is generic over every block type (agent,
+    // terminal, browser, ...), unlike agent-view.tsx's picker-fade which is
+    // agent-specific. `spinnerVisible`'s initial value is read once, at
+    // this component's own construction: if `ready()` is already true at
+    // mount (data arrived before the first paint), there's no spinner-to-
+    // content transition to smooth, so it should start false.
+    const [spinnerVisible, setSpinnerVisible] = createSignal(!ready());
+    const [spinnerFading, setSpinnerFading] = createSignal(false);
+    let spinnerFadeRaf: number | undefined;
+    let spinnerFadeTimeout: ReturnType<typeof setTimeout> | undefined;
+    onCleanup(() => {
+        if (spinnerFadeRaf !== undefined) cancelAnimationFrame(spinnerFadeRaf);
+        clearTimeout(spinnerFadeTimeout);
+    });
+    createEffect(
+        on(
+            ready,
+            (isReady) => {
+                if (spinnerFadeRaf !== undefined) cancelAnimationFrame(spinnerFadeRaf);
+                clearTimeout(spinnerFadeTimeout);
+                if (isReady) {
+                    if (!spinnerVisible()) return; // already past the transition
+                    // One rAF so the spinner paints at full opacity at
+                    // least once before the fade starts — flipping
+                    // straight to the "is-fading" class in this same tick
+                    // would apply opacity:0 on the very first paint, with
+                    // nothing to visibly transition from.
+                    spinnerFadeRaf = requestAnimationFrame(() => setSpinnerFading(true));
+                    spinnerFadeTimeout = setTimeout(() => {
+                        setSpinnerVisible(false);
+                        setSpinnerFading(false);
+                    }, READY_GATE_FADE_MS);
+                } else {
+                    // Not ready anymore (e.g. the view type changed out
+                    // from under this block) — show the spinner again
+                    // immediately, no fade needed going this direction.
+                    setSpinnerFading(false);
+                    setSpinnerVisible(true);
+                }
+            },
+            { defer: true }
+        )
+    );
+
     // Per-block ErrorBoundary: a renderer fault in this pane only blanks
     // THIS pane, not the whole tab. See retro
     // docs/retro/retro-agent-pane-cascade-replacechild-2026-05-23.md.
@@ -301,18 +354,36 @@ function Block(props: BlockProps): JSX.Element {
     // graph, which may be half-flushed.
     const viewTypeStr = createMemo(() => blockData()?.meta?.view);
     return (
-        <Show when={ready()} fallback={<BrainSpinner />}>
-            <BlockErrorBoundary
-                blockId={props.nodeModel.blockId}
-                viewType={viewTypeStr()}
-                onClose={props.nodeModel.onClose}
-            >
-                {props.preview
-                    ? <BlockPreview nodeModel={props.nodeModel} viewModel={viewModel()} preview={props.preview} />
-                    : <BlockFull nodeModel={props.nodeModel} viewModel={viewModel()} preview={props.preview} />
-                }
-            </BlockErrorBoundary>
-        </Show>
+        <>
+            <Show when={ready()}>
+                <BlockErrorBoundary
+                    blockId={props.nodeModel.blockId}
+                    viewType={viewTypeStr()}
+                    onClose={props.nodeModel.onClose}
+                >
+                    {props.preview
+                        ? <BlockPreview nodeModel={props.nodeModel} viewModel={viewModel()} preview={props.preview} />
+                        : <BlockFull nodeModel={props.nodeModel} viewModel={viewModel()} preview={props.preview} />
+                    }
+                </BlockErrorBoundary>
+            </Show>
+            {/* Applied the instant ready() flips true (same render as the
+                real content appearing) so this never sits in normal flow
+                alongside it, even for one frame — see is-overlay's
+                counterpart in agent-view.tsx's picker-fade. */}
+            <Show when={spinnerVisible()}>
+                <div
+                    class="block-ready-gate-host"
+                    classList={{
+                        "is-overlay": ready(),
+                        "is-fading": spinnerFading(),
+                        "is-reduced-motion": atoms.prefersReducedMotionAtom(),
+                    }}
+                >
+                    <BrainSpinner fading={spinnerFading()} />
+                </div>
+            </Show>
+        </>
     );
 }
 

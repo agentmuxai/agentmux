@@ -698,3 +698,41 @@
         margin-top: auto;
     }
 }
+
+// Cross-fades Block's ready()-gate BrainSpinner out on top of the real
+// content instead of an instant hard cut (block.tsx's spinnerVisible/
+// spinnerFading state). See
+// docs/specs/SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.3.
+//
+// Always height:100%/width:100% regardless of overlay state — this div
+// wraps BrainSpinner in both the normal (not-ready-yet, no transition) and
+// overlay (fading out atop the now-ready real content) cases.
+.block-ready-gate-host {
+    height: 100%;
+    width: 100%;
+
+    &.is-overlay {
+        position: absolute;
+        inset: 0;
+        // .block (BlockFrame's own root, block.scss above) has no z-index
+        // of its own (position: relative only, no stacking context via
+        // z-index) — default stacking order already puts this positioned
+        // sibling above it. An explicit low value here just documents that
+        // intent and keeps this comparable to the other reveal-gate hosts
+        // (agent-picker-host: 1, agent-pane-loading-overlay: 1) sharing the
+        // same "stack above plain in-flow pane content" role.
+        z-index: 1;
+        pointer-events: none;
+        transition: opacity 200ms ease-out;
+
+        &.is-fading {
+            opacity: 0;
+        }
+
+        // Same reduced-motion override as .brain-spinner.is-reduced-motion
+        // elsewhere — instant hide, no animated fade.
+        &.is-reduced-motion {
+            transition: none;
+        }
+    }
+}

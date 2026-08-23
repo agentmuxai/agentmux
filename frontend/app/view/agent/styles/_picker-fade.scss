@@ -1,0 +1,40 @@
+// Copyright 2026, AgentMux Corp.
+// SPDX-License-Identifier: Apache-2.0
+
+// Cross-fades AgentPicker out on top of AgentPresentationView instead of an
+// instant hard cut when a blank "+" tab's picker launches an agent in place
+// (agent-view.tsx's pickerVisible/pickerFadingOut state). See
+// docs/specs/SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.3.
+//
+// Always height:100%/width:100% regardless of overlay state — this div
+// wraps AgentPicker in both the normal (no transition happening) and
+// overlay cases, and AgentPicker's own root (.agent-view) needs a definite
+// percentage-height ancestor to resolve against either way.
+.agent-picker-host {
+    height: 100%;
+    width: 100%;
+
+    &.is-overlay {
+        position: absolute;
+        inset: 0;
+        // Below .pane-tab-strip (var(--z-pane-overlay, 4)) so the strip/"+"
+        // stay usable during the fade; above AgentPresentationView's own
+        // root .agent-view (z-index: 0, agent-view.scss) so the picker
+        // actually covers it while fading — both true siblings of this div
+        // under .agent-pane-stack-content.
+        z-index: 1;
+        pointer-events: none;
+        transition: opacity 200ms ease-out;
+
+        &.is-fading {
+            opacity: 0;
+        }
+
+        // Same reduced-motion override as .brain-spinner.is-reduced-motion /
+        // .agent-pane-loading-overlay.is-reduced-motion — instant hide, no
+        // animated fade.
+        &.is-reduced-motion {
+            transition: none;
+        }
+    }
+}

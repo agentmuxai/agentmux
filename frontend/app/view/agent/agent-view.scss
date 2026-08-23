@@ -31,6 +31,7 @@
 @use "styles/decision-panel";
 @use "styles/shell-node";
 @use "styles/loading-overlay";
+@use "styles/picker-fade";
 
 // Wrapper stack for the pane-level tab strip (AgentViewWrapper): strip on
 // top, content region filling the remainder. ModalLayer's mount is a plain

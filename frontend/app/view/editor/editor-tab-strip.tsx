@@ -57,6 +57,11 @@ export function EditorTabStrip(props: Props): JSX.Element {
             // and inner zoom, both of which default to 1/28px when this prop
             // is omitted) automatically. Passing zoomAtom here compounds it
             // (zoomAtom()²) — caught in review on PR #2566.
+            //
+            // This strip stays genuinely shrink-to-fit (no full-width
+            // override, unlike the agent pane) — safe to animate.
+            // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.4.
+            animateWidth
             getId={(tab) => tab.id}
             getLabel={basenameOf}
             getTooltip={(tab) =>

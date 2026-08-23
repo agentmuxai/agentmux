@@ -560,6 +560,10 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
                 tabs={visibleTermTabs()}
                 activeId={activeBlockId()}
                 zoomFactor={model.termZoomAtom}
+                // Unlike the agent pane, this strip stays genuinely
+                // shrink-to-fit (no full-width override) — safe to animate.
+                // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.4.
+                animateWidth
                 getId={(t) => t.blockId}
                 getLabel={(t) => t.label}
                 onActivate={handleTermTabSwitch}
