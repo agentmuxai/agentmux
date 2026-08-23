@@ -41,38 +41,58 @@ to.
    *request* at all today, and this closes that gap specifically for the
    one new jekt type this feature introduces.
 2. **`ESCALATE=required` for `transcript_request` is NOT relaxed by a
-   verified sender** — the one deliberate exception to the 2026-08-17
-   narrowing. A valid signature (`TRUST=host-verified`/`lan-verified`,
-   `SIG=verified`) proves *who* is asking, which is exactly what the
-   08-17 relaxation is for (nothing further to ask a human about once
-   identity is proven). Here the open question is different: *whether the
-   requested content should be disclosed at all* — a question identity
-   proof doesn't answer. `transcript_request` is therefore the first (and,
-   as of this writing, only) jekt content-type where `ESCALATE=required`
-   holds even for a cryptographically verified sender.
+   verified sender — but only when the RESPONDING agent's own
+   `conversation_visibility` is `ask`, or `trusted_peers` with a
+   non-allow-listed requester.** This is narrower than "every
+   `transcript_request`, unconditionally" — that broader phrasing
+   appeared in an earlier draft of this document and in the PR that
+   introduced it, and was incorrect; corrected after reagent's review
+   caught it (round 2, PR #2763) against the source design's own table
+   (`SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`'s
+   `conversation_visibility` table): `private` and `trusted_peers`
+   (allow-listed) are fully auto-resolved by that mode's own design
+   intent, regardless of sender verification — this exception never
+   applies to those, and the ordinary `ESCALATE=none`-for-verified-senders
+   behavior is unaffected for them. A valid signature
+   (`TRUST=host-verified`/`lan-verified`, `SIG=verified`) proves *who* is
+   asking, which is exactly what the 08-17 relaxation is for (nothing
+   further to ask a human about once identity is proven). Under
+   `ask`/non-allow-listed-`trusted_peers`, the open question is different:
+   *whether the requested content should be disclosed at all* — a
+   question identity proof doesn't answer.
+
+No blind spot for the agent reading the marker despite this depending on
+a local per-agent setting: `ESCALATE` is computed server-side against the
+RESPONDING agent's own `conversation_visibility` before the marker ever
+reaches it — the responding agent IS the one reading its own incoming
+`transcript_request`, so this is never "I need visibility into some OTHER
+agent's private setting," the same "authoritative, don't cross-reference
+it yourself" property every other `ESCALATE` value already carries.
 
 ## 3. Scope — why this doesn't reopen 2026-08-17 generally
 
 This is a narrow, named exception for one specific jekt content-type
-(`transcript_request`), not a rollback of the 08-17 relaxation itself.
-Every other `TIER=sensitive` case (declared-sensitive, keyword match,
-active-forgery) keeps exactly the behavior CLAUDE.md already documents —
-`ESCALATE=none` still applies to a verified sender for all of THOSE cases.
-Only the new `transcript_request` type carves out this one exception,
+(`transcript_request`), in exactly two of its three response modes — not
+a rollback of the 08-17 relaxation itself, and not even universal within
+this one new jekt type. Every other `TIER=sensitive` case (declared-
+sensitive, keyword match, active-forgery), and `transcript_request` under
+`private`/allow-listed-`trusted_peers`, all keep exactly the behavior
+CLAUDE.md already documents — `ESCALATE=none` still applies to a verified
+sender for all of those. Only `transcript_request` under
+`ask`/non-allow-listed-`trusted_peers` carves out this one exception,
 because it's answering a fundamentally different kind of question
 (disclosure, not identity) than every rule the 08-17 relaxation was
 designed around.
 
-In practice, most `transcript_request`s never reach a human at all: they're
-auto-resolved by the *responding* agent's own `conversation_visibility`
-setting (`private` auto-denies, `trusted_peers` auto-approves an
-allow-listed requester) before the ESCALATE flag would matter to a
-general-purpose agent reading jekt markers — that's `muxspect`'s own
+In practice, most `transcript_request`s never reach a human at all: `private`
+and allow-listed-`trusted_peers` are auto-resolved by the *responding*
+agent's own `conversation_visibility` setting — that's `muxspect`'s own
 dedicated request/response handling, not a change to general jekt
-reasoning. `ESCALATE=required`'s "stop and ask a human" semantics apply in
-the remaining case: `conversation_visibility: ask`, or a `trusted_peers`
-requester who isn't allow-listed — exactly where a human decision is
-actually needed.
+reasoning. `ESCALATE=required`'s "stop and ask a human" semantics apply
+in the remaining case — `conversation_visibility: ask`, or a
+`trusted_peers` requester who isn't allow-listed — exactly where a human
+decision is actually needed, and exactly where rule 2 above actually
+applies.
 
 ## 4. CLAUDE.md change
 

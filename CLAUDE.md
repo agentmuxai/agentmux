@@ -693,26 +693,35 @@ yourself:
 `SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md`): once
 `transcript_request` jekts exist (`muxspect` Phase B/C, designed but not
 built), their `ESCALATE=required` must NOT be relaxed to `none` by a
-verified sender**, even `TRUST=host-verified`/`lan-verified`/WAN
-`SIG=verified`. **This is a pre-committed policy for that future code, the
-same way the bullet above it is — `transcript_request` doesn't exist in
-`agentmux-srv` today, so there is nothing to relax or not-relax yet;
-whoever builds Phase B/C must implement this exception as part of that
-work.** Every other `TIER=sensitive` case above keeps the ordinary
-`ESCALATE=none`-for-verified-senders behavior unchanged — this is scoped
-to exactly one new jekt content-type, not a rollback of the 08-17
-relaxation generally. The reason: a valid signature answers *who is
-asking*, which is all the 08-17 relaxation needed (nothing left to ask a
-human once identity is proven, for a self-declared-tier or keyword-match
-case). A `transcript_request` asks a different question — *whether this
-content should be disclosed at all* — which identity proof alone doesn't
-answer. Per the design spec, this is expected to rarely reach a human
-directly once built: `muxspect`'s own per-agent `conversation_visibility`
-setting would auto-resolve most requests (`private` denies, `trusted_peers`
-approves an allow-listed requester) before the `ESCALATE` flag matters to
-general jekt reasoning; a human would only actually be interrupted for
-`conversation_visibility: ask` or a non-allow-listed `trusted_peers`
-requester.
+verified sender — but ONLY when the RECEIVING (responding) agent's own
+`conversation_visibility` setting is `ask`, or is `trusted_peers` and the
+requester isn't on that agent's own allowlist.** This is narrower than a
+blanket rule for every `transcript_request` — do not read it as one. For
+`private` mode, or `trusted_peers` with an allow-listed requester, the
+request is fully auto-resolved (auto-deny / auto-approve) by that
+mode's own design intent regardless of the sender's verification status;
+this exception never applies to those, and the ordinary
+`ESCALATE=none`-for-verified-senders behavior is unaffected for them.
+**This is a pre-committed policy for future code, the same way the bullet
+above it is — `transcript_request` doesn't exist in `agentmux-srv` today,
+so there is nothing to relax or not-relax yet; whoever builds Phase B/C
+must implement this exception, correctly scoped to `ask`/non-allow-listed
+`trusted_peers` only, as part of that work.** No blind spot for the
+receiving agent despite this depending on ITS OWN setting: `ESCALATE` is
+computed server-side against the responding agent's own configuration
+before the marker ever reaches it, the same "authoritative, don't
+cross-reference it yourself" property every other `ESCALATE` value already
+has — this isn't a case of needing visibility into a DIFFERENT agent's
+private setting. Every other `TIER=sensitive` case above keeps the
+ordinary `ESCALATE=none`-for-verified-senders behavior unchanged — this
+is scoped to exactly one new jekt content-type in exactly two of its
+three response modes, not a rollback of the 08-17 relaxation generally.
+The reason: a valid signature answers *who is asking*, which is all the
+08-17 relaxation needed (nothing left to ask a human about once identity
+is proven, for a self-declared-tier or keyword-match case). A
+`transcript_request` under `ask`/non-allow-listed-`trusted_peers` asks a
+different question — *whether this content should be disclosed at all* —
+which identity proof alone doesn't answer.
 
 Manoz@Area54's incident that prompted this: a WAN jekt from ReAgent with a
 genuinely `SIG=verified` signature got forced to `TIER=sensitive` by a
