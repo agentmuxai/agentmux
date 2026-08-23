@@ -9,6 +9,7 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { createRoot } from "solid-js";
 import {
+    clearLeafRevealGate,
     gatingNodeIds,
     holdLeafRevealGate,
     holdRevealGate,
@@ -297,5 +298,40 @@ describe("tab-reveal leaf-scoped gate", () => {
         expect(read(gatingNodeIds).has("node-a")).toBe(false);
         vi.advanceTimersByTime(200);
         expect(read(gatingNodeIds).has("node-a")).toBe(false);
+    });
+
+    // reagent's review of PR #2761: leafCancels/leafGeneration/
+    // leafResolvedGeneration are otherwise only ever added to or
+    // overwritten, never deleted — clearLeafRevealGate is the cleanup hook
+    // wired from closeNode (layoutMagnify.ts) when a node id is gone for good.
+    describe("clearLeafRevealGate", () => {
+        test("removes a currently-gated node id from gatingNodeIds and cancels its pending timer", () => {
+            holdLeafRevealGate("node-a");
+            expect(read(gatingNodeIds).has("node-a")).toBe(true);
+
+            clearLeafRevealGate("node-a");
+            expect(read(gatingNodeIds).has("node-a")).toBe(false);
+
+            // The cancelled hold's own MAX_GATE_MS timer must not fire and
+            // re-add the node after cleanup.
+            vi.advanceTimersByTime(900);
+            expect(read(gatingNodeIds).has("node-a")).toBe(false);
+        });
+
+        test("a stale generation's schedule call is still a no-op after clearLeafRevealGate (no resurrection)", () => {
+            const gen = holdLeafRevealGate("node-a");
+            clearLeafRevealGate("node-a");
+
+            // Same node id, fresh use afterward (e.g. a new pane created and
+            // reusing a previously-cleared node id) — the OLD generation's
+            // stale schedule call must not resurrect gating for it.
+            scheduleLeafRevealLift("node-a", gen);
+            expect(read(gatingNodeIds).has("node-a")).toBe(false);
+        });
+
+        test("is a harmless no-op for a node id that was never gated", () => {
+            expect(() => clearLeafRevealGate("node-never-gated")).not.toThrow();
+            expect(read(gatingNodeIds).has("node-never-gated")).toBe(false);
+        });
     });
 });

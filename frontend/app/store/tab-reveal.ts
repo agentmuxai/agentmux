@@ -31,7 +31,11 @@
 //     doc comment already anticipated exactly this need ("wrong for N
 //     agent panes each waiting on their own settle, since concurrent
 //     callers would clobber each other's detector"), pre-built as a
-//     per-instance-cancellable primitive for it.
+//     per-instance-cancellable primitive for it. `clearLeafRevealGate(nodeId)`
+//     must be called when a node is permanently removed from the layout
+//     tree (wired from `closeNode` in `layoutMagnify.ts`) — otherwise the
+//     per-node bookkeeping Maps below grow unboundedly over a long-running
+//     session (reagent's review of PR #2761).
 //
 // Reduced-motion behaviour: the reveal is unanimated regardless, so
 // `prefers-reduced-motion` users get the same behaviour. No special
@@ -328,4 +332,26 @@ export function scheduleLeafRevealLift(nodeId: string, generation: number): void
         { settleMs: SETTLE_MS, maxMs: MAX_GATE_MS },
     );
     leafCancels.set(nodeId, cancel);
+}
+
+/**
+ * Drop all reveal-gate bookkeeping for a layout node id that no longer
+ * exists — `leafCancels`/`leafGeneration`/`leafResolvedGeneration` are
+ * otherwise only ever added to or overwritten, never deleted, so a
+ * long-running session with many pane splits/closes would grow these Maps
+ * unboundedly (reagent's review of PR #2761). Call this from wherever a
+ * node is permanently removed from the layout tree — `closeNode`
+ * (`layoutMagnify.ts`) is the one place every close path (block-stack pop,
+ * ordinary pane close, drag tear-off) funnels through.
+ *
+ * Safe to call for a node that was never gated (all three lookups are
+ * no-ops) or is mid-gate (cancels its pending timer/detector first, same
+ * as a fresh hold/schedule would, so no dangling callback fires for a
+ * node id that's already gone).
+ */
+export function clearLeafRevealGate(nodeId: string): void {
+    cancelLeaf(nodeId);
+    leafGeneration.delete(nodeId);
+    leafResolvedGeneration.delete(nodeId);
+    removeGatingNode(nodeId);
 }
