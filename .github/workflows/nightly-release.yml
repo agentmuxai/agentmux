@@ -83,7 +83,20 @@ jobs:
             exit 1
           fi
 
-          if git ls-remote --exit-code --tags origin "refs/tags/${version}" >/dev/null 2>&1; then
+          # persist-credentials: false (above) means `origin` has no auth
+          # configured, so this read must authenticate itself explicitly
+          # rather than relying on an anonymous request. Falls back to a
+          # plain `origin` read only when NIGHTLY_TAG_PAT isn't set yet
+          # (bootstrap period) — works today since this repo is public, but
+          # an authenticated read is correct regardless of that and doesn't
+          # depend on the repo staying public.
+          if [ -n "${NIGHTLY_TAG_PAT:-}" ]; then
+            remote="https://x-access-token:${NIGHTLY_TAG_PAT}@github.com/${REPO}.git"
+          else
+            remote="origin"
+          fi
+
+          if git ls-remote --exit-code --tags "$remote" "refs/tags/${version}" >/dev/null 2>&1; then
             echo "Latest release commit (\`${version}\`, \`${sha:0:9}\`) is already tagged — nothing pending. Skipping." | tee -a "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
@@ -97,6 +110,8 @@ jobs:
           git config user.name "agentmux-nightly-release"
           git config user.email "nightly-release@agentmux.ai"
           git tag -a "$version" "$sha" -m "Release ${version} (nightly automation)"
-          git push "https://x-access-token:${NIGHTLY_TAG_PAT}@github.com/${REPO}.git" "$version"
+          # $remote is guaranteed PAT-authenticated here — the NIGHTLY_TAG_PAT
+          # empty-check above already exited if it weren't set.
+          git push "$remote" "$version"
 
           echo "Pushed tag \`${version}\` — release.yml and container-image.yml should start momentarily." | tee -a "$GITHUB_STEP_SUMMARY"
