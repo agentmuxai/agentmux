@@ -528,6 +528,16 @@ pub fn build_router(state: AppState) -> Router {
         // scoping — fleet actions target OTHER agents' panes by design, so
         // "own pane only" doesn't apply here the way it does to `ui/*`.
         .route("/api/v1/fleet/bulk-stop", post(handle_fleet_bulk_stop))
+        // Cross-channel bulk-stop forward target
+        // (SPEC_FLEET_BULK_STOP_CROSS_CHANNEL_2026_08_22.md): when
+        // `fleet_bulk_stop_impl` can't find a target block_id in ITS OWN
+        // in-process controller registry, it checks the shared
+        // cross-channel registry and forwards here — same trust model as
+        // `/agentmux/reactive/inject`'s own cross-channel forward (same
+        // host, same user, the target channel's own auth_key from the
+        // shared registry). Loopback-only by construction: the caller only
+        // ever forwards to a `local_url` it already verified is loopback.
+        .route("/agentmux/agent/stop", post(handle_agent_stop_forward))
         .route("/api/messaging/status", get(messaging_handlers::handle_status))
         .route("/api/messaging/discord/send", post(messaging_handlers::handle_discord_send))
         .route("/api/messaging/telegram/send", post(messaging_handlers::handle_telegram_send))
@@ -1132,8 +1142,30 @@ async fn handle_fleet_bulk_stop(
     State(state): State<AppState>,
     Json(req): Json<crate::backend::rpc_types::CommandFleetBulkStopData>,
 ) -> impl IntoResponse {
-    let result = app_api::fleet::fleet_bulk_stop_impl(&state, req.targets, req.signal.as_deref(), req.staged);
+    let result = app_api::fleet::fleet_bulk_stop_impl(&state, req.targets, req.signal.as_deref(), req.staged).await;
     (StatusCode::OK, Json(result)).into_response()
+}
+
+#[derive(serde::Deserialize)]
+struct AgentStopForwardRequest {
+    block_id: String,
+    signal: Option<String>,
+}
+
+/// `POST /agentmux/agent/stop` — the cross-channel bulk-stop forward
+/// target. See `fleet_bulk_stop_impl`'s doc comment for the caller side;
+/// this is just `stop_one_agent_block` run against THIS instance's own
+/// (in-process) controller registry, for a target the CALLING channel
+/// couldn't find in its own — same one-hop-forward shape as
+/// `/agentmux/reactive/inject`'s cross-channel tier, no further forwarding.
+async fn handle_agent_stop_forward(
+    State(_state): State<AppState>,
+    Json(req): Json<AgentStopForwardRequest>,
+) -> impl IntoResponse {
+    match app_api::agent_io::stop_one_agent_block(&req.block_id, req.signal.as_deref()) {
+        Ok(result) => (StatusCode::OK, Json(serde_json::json!({ "success": true, "result": result }))).into_response(),
+        Err(e) => (StatusCode::OK, Json(serde_json::json!({ "success": false, "error": e }))).into_response(),
+    }
 }
 
 #[derive(serde::Deserialize)]

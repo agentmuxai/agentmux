@@ -26,7 +26,13 @@ use super::AppState;
 use crate::server::cli_handlers::resolve_cli_on_path;
 
 mod agent_open;
-mod agent_io;
+// pub(crate): `server/mod.rs`'s `/agentmux/agent/stop` handler (the
+// cross-channel bulk-stop forward target,
+// SPEC_FLEET_BULK_STOP_CROSS_CHANNEL_2026_08_22.md) calls
+// `stop_one_agent_block` directly — same function `fleet_bulk_stop_impl`
+// already uses for a LOCAL target, reused rather than duplicated for a
+// forwarded one.
+pub(crate) mod agent_io;
 mod agent_define;
 /// Re-exported so the human-facing creation/edit RPC handlers
 /// (`server::agent_handlers::template`/`core`) can reuse the same
