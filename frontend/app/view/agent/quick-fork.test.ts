@@ -49,6 +49,13 @@ vi.mock("@/app/store/services", () => ({
     ObjectService: { DeleteBlock: (...args: unknown[]) => deleteBlock(...args) },
 }));
 
+const holdLeafRevealGate = vi.fn();
+const scheduleLeafRevealLift = vi.fn();
+vi.mock("@/app/store/tab-reveal", () => ({
+    holdLeafRevealGate: (...args: unknown[]) => holdLeafRevealGate(...args),
+    scheduleLeafRevealLift: (...args: unknown[]) => scheduleLeafRevealLift(...args),
+}));
+
 const resolveEffectiveLaunchProvider = vi.fn();
 vi.mock("@/app/view/agent/agent-launch-env", () => ({
     resolveEffectiveLaunchProvider: (...args: unknown[]) => resolveEffectiveLaunchProvider(...args),
@@ -130,6 +137,48 @@ describe("quickForkAgent", () => {
         expect(targetBlockId).toBe("new-block-1");
         expect(targetTabId).toBe("tab-1");
         expect(result).toBe(true);
+    });
+
+    // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22: the pane must be
+    // hidden for the whole duration of the fork (every RPC in the chain,
+    // not just the final pushBlockOntoStack remount), and always revealed
+    // again on every exit path.
+    describe("reveal gate (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22)", () => {
+        it("holds the gate on the source pane's own node id before any RPC, and schedules the lift once settled", async () => {
+            await quickForkAgent(model);
+            expect(holdLeafRevealGate).toHaveBeenCalledWith("node-1");
+            expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1");
+            // Held before scheduled, and the whole RPC chain runs in between.
+            expect(holdLeafRevealGate.mock.invocationCallOrder[0])
+                .toBeLessThan(forkAgentDefinitionCommand.mock.invocationCallOrder[0]);
+            expect(scheduleLeafRevealLift.mock.invocationCallOrder[0])
+                .toBeGreaterThan(launchAgentDefinition.mock.invocationCallOrder[0]);
+        });
+
+        it("schedules the lift even when ForkAgentDefinitionCommand rejects", async () => {
+            forkAgentDefinitionCommand.mockRejectedValue(new Error("boom"));
+            await quickForkAgent(model);
+            expect(holdLeafRevealGate).toHaveBeenCalledWith("node-1");
+            expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1");
+        });
+
+        it("schedules the lift even when launchAgentDefinition reports failure", async () => {
+            launchAgentDefinition.mockResolvedValue(false);
+            await quickForkAgent(model);
+            expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1");
+        });
+
+        it("schedules the lift even when launchAgentDefinition rejects", async () => {
+            launchAgentDefinition.mockRejectedValue(new Error("boom"));
+            await quickForkAgent(model);
+            expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1");
+        });
+
+        it("does not hold the gate at all when there's no live agent to fork", async () => {
+            getObjectValue.mockReturnValue(undefined);
+            await quickForkAgent(model);
+            expect(holdLeafRevealGate).not.toHaveBeenCalled();
+        });
     });
 
     // Codex's review of PR #2746: the several RPCs this function awaits

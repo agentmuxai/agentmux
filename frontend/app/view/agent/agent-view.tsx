@@ -54,6 +54,7 @@ import {
     pushBlockOntoStack,
     setActiveBlockInStack,
 } from "@/layout/index";
+import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reveal";
 import { getTrail } from "@/log/render-trail";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, type JSX } from "solid-js";
@@ -310,36 +311,49 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
     // pane's own stack. No modal, no implicit fork of the current
     // conversation.
     const handleNewAgentTab = async (): Promise<void> => {
-        if (!layoutModel.getNodeByBlockId(model.blockId)) return;
-        let paneOpenResult: { block_id: string };
+        const initialNode = layoutModel.getNodeByBlockId(model.blockId);
+        if (!initialNode) return;
+        // Hide this pane while the new tab settles — pane.open's RPC round
+        // trip plus pushBlockOntoStack's forced remount (layoutStack.ts's
+        // own doc comment) is exactly the piecemeal-paint flicker
+        // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22 addresses.
+        holdLeafRevealGate(initialNode.id);
         try {
-            paneOpenResult = (await TabRpcClient.rpcCall(
-                "pane.open",
-                { view: "agent", skip_placement: true, meta: { view: "agent" } },
-                {}
-            )) as { block_id: string };
-        } catch (e: unknown) {
-            pushNotification({
-                icon: "fa-triangle-exclamation",
-                title: "New tab failed",
-                message: e instanceof Error ? e.message : String(e),
-                timestamp: new Date().toISOString(),
-                type: "error",
-                expiration: Date.now() + 8000,
-            });
-            return;
+            let paneOpenResult: { block_id: string };
+            try {
+                paneOpenResult = (await TabRpcClient.rpcCall(
+                    "pane.open",
+                    { view: "agent", skip_placement: true, meta: { view: "agent" } },
+                    {}
+                )) as { block_id: string };
+            } catch (e: unknown) {
+                pushNotification({
+                    icon: "fa-triangle-exclamation",
+                    title: "New tab failed",
+                    message: e instanceof Error ? e.message : String(e),
+                    timestamp: new Date().toISOString(),
+                    type: "error",
+                    expiration: Date.now() + 8000,
+                });
+                return;
+            }
+            // This pane could have closed while the RPC above was in flight —
+            // re-resolve the node fresh rather than trusting a pre-await
+            // reference. If it's gone, the skip_placement block we just
+            // created has nowhere to attach to; delete it instead of leaving
+            // an orphaned, unreachable block behind.
+            const node = layoutModel.getNodeByBlockId(model.blockId);
+            if (!node) {
+                await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
+                return;
+            }
+            pushBlockOntoStack(layoutModel, node.id, paneOpenResult.block_id);
+        } finally {
+            // Pair with holdLeafRevealGate above — runs on every exit path
+            // (success, RPC failure, pane-closed-mid-flight) so the leaf
+            // never stays hidden forever.
+            scheduleLeafRevealLift(initialNode.id);
         }
-        // This pane could have closed while the RPC above was in flight —
-        // re-resolve the node fresh rather than trusting a pre-await
-        // reference. If it's gone, the skip_placement block we just
-        // created has nowhere to attach to; delete it instead of leaving
-        // an orphaned, unreachable block behind.
-        const node = layoutModel.getNodeByBlockId(model.blockId);
-        if (!node) {
-            await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
-            return;
-        }
-        pushBlockOntoStack(layoutModel, node.id, paneOpenResult.block_id);
     };
     // × on a tab (also middle-click, via PaneTabStrip's onMouseDown).
     // Mirrors term.tsx's handleTermTabClose: resolve the block's OWNING

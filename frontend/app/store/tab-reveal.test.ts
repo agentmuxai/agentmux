@@ -8,7 +8,14 @@
 
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { createRoot } from "solid-js";
-import { holdRevealGate, scheduleRevealLift, tabSwitching } from "./tab-reveal";
+import {
+    gatingNodeIds,
+    holdLeafRevealGate,
+    holdRevealGate,
+    scheduleLeafRevealLift,
+    scheduleRevealLift,
+    tabSwitching,
+} from "./tab-reveal";
 
 function read<T>(signal: () => T): T {
     let val!: T;
@@ -127,5 +134,113 @@ describe("tab-reveal gate", () => {
         // but under the hold's own safety net.
         vi.advanceTimersByTime(500);
         expect(read(tabSwitching)).toBe(true);
+    });
+});
+
+// Leaf-scoped gate (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22) — same
+// detector primitive as the whole-tab gate above, but keyed per layout
+// node id instead of one global boolean, so more than one pane can be
+// independently settling at once (e.g. two block-stack pushes in
+// different panes of the same tab).
+describe("tab-reveal leaf-scoped gate", () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+        (globalThis as { PerformanceObserver?: unknown }).PerformanceObserver = undefined;
+    });
+
+    afterEach(() => {
+        // Drain any leaf handles left gating from a test that didn't
+        // schedule its own lift.
+        scheduleLeafRevealLift("node-a");
+        scheduleLeafRevealLift("node-b");
+        vi.advanceTimersByTime(1000);
+        vi.useRealTimers();
+    });
+
+    test("holdLeafRevealGate adds the node id to gatingNodeIds", () => {
+        expect(read(gatingNodeIds).has("node-a")).toBe(false);
+        holdLeafRevealGate("node-a");
+        expect(read(gatingNodeIds).has("node-a")).toBe(true);
+    });
+
+    test("holdLeafRevealGate keeps the node gated across long awaits", () => {
+        holdLeafRevealGate("node-a");
+        vi.advanceTimersByTime(500); // past SETTLE_MS, under MAX_GATE_MS
+        expect(read(gatingNodeIds).has("node-a")).toBe(true);
+    });
+
+    test("holdLeafRevealGate safety-lifts after MAX_GATE_MS if no schedule follows", () => {
+        holdLeafRevealGate("node-a");
+        vi.advanceTimersByTime(900); // past MAX_GATE_MS=800
+        expect(read(gatingNodeIds).has("node-a")).toBe(false);
+    });
+
+    test("scheduleLeafRevealLift after holdLeafRevealGate eventually lifts via fallback", () => {
+        holdLeafRevealGate("node-a");
+        vi.advanceTimersByTime(500);
+        expect(read(gatingNodeIds).has("node-a")).toBe(true);
+        scheduleLeafRevealLift("node-a");
+        vi.advanceTimersByTime(400);
+        expect(read(gatingNodeIds).has("node-a")).toBe(true);
+        vi.advanceTimersByTime(500);
+        expect(read(gatingNodeIds).has("node-a")).toBe(false);
+    });
+
+    test("two different node ids gate and lift completely independently", () => {
+        // node-a's own MAX_GATE_MS window is armed at t=0 (fires at t=800)
+        // and deliberately left alone (no re-hold/schedule) so it lifts
+        // via its own safety net — node-b is held/rescheduled AFTER that
+        // point so its window doesn't coincide with node-a's.
+        holdLeafRevealGate("node-a");
+        holdLeafRevealGate("node-b");
+        vi.advanceTimersByTime(700); // t=700 — neither has hit its 800ms cap yet
+        expect(read(gatingNodeIds).has("node-a")).toBe(true);
+        expect(read(gatingNodeIds).has("node-b")).toBe(true);
+
+        // Push node-b's window out further without touching node-a.
+        holdLeafRevealGate("node-b");
+        vi.advanceTimersByTime(200); // t=900 — node-a's original 800ms cap has passed
+        expect(read(gatingNodeIds).has("node-a")).toBe(false);
+        // node-b was re-held at t=700, so its cap is at t=1500 — still gated.
+        expect(read(gatingNodeIds).has("node-b")).toBe(true);
+
+        // Now lift node-b.
+        scheduleLeafRevealLift("node-b");
+        vi.advanceTimersByTime(900);
+        expect(read(gatingNodeIds).has("node-b")).toBe(false);
+    });
+
+    test("holdLeafRevealGate cancels a pending fallback timer from a prior schedule on the SAME node only", () => {
+        scheduleLeafRevealLift("node-a");
+        holdLeafRevealGate("node-b");
+        vi.advanceTimersByTime(400);
+        holdLeafRevealGate("node-a");
+        vi.advanceTimersByTime(500);
+        // node-a's re-hold cancelled its own prior schedule's fallback —
+        // still gated via the new hold's own safety net.
+        expect(read(gatingNodeIds).has("node-a")).toBe(true);
+    });
+
+    test("the whole-tab gate and a leaf gate are fully independent of each other", () => {
+        // Both armed at t=0 (fires at t=800 if left alone). The leaf is
+        // re-held at t=700 to push its own window past the point where
+        // the tab gate is checked, proving one lifting doesn't touch the
+        // other (rather than both coincidentally expiring together).
+        holdRevealGate();
+        holdLeafRevealGate("node-a");
+        expect(read(tabSwitching)).toBe(true);
+        expect(read(gatingNodeIds).has("node-a")).toBe(true);
+
+        vi.advanceTimersByTime(700); // t=700 — neither has hit its cap yet
+        holdLeafRevealGate("node-a"); // re-arm node-a's window to fire at t=1500
+
+        vi.advanceTimersByTime(200); // t=900 — tab's original 800ms cap has passed
+        expect(read(tabSwitching)).toBe(false);
+        // The tab lifting via its own cap must not affect the leaf gate.
+        expect(read(gatingNodeIds).has("node-a")).toBe(true);
+
+        scheduleLeafRevealLift("node-a");
+        vi.advanceTimersByTime(900);
+        expect(read(gatingNodeIds).has("node-a")).toBe(false);
     });
 });

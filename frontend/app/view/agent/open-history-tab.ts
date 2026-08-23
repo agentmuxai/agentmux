@@ -18,13 +18,16 @@
  * callable from anywhere, including a ViewModel method that has no
  * reactive-owner scope of its own.
  *
- * Spec: SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.1.
+ * Spec: SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.1,
+ * SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md (the leaf-scoped reveal
+ * gate wrapping both the create-new and switch-to-existing paths below).
  */
 
 import { getLayoutModelForStaticTab, pushBlockOntoStack, setActiveBlockInStack } from "@/layout/index";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { ObjectService } from "@/app/store/services";
 import { pushNotification, WOS } from "@/app/store/global";
+import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reveal";
 
 /** Block-meta key marking a block as a read-only history reader for the
  *  named agent, rather than a live launch. Never set alongside a live
@@ -79,57 +82,68 @@ async function openOrFocusHistoryTabImpl(opts: { currentBlockId: string; agentId
     const node = layoutModel.getNodeByBlockId(currentBlockId);
     if (!node) return;
 
-    const stack = node.data?.blockStack?.length ? node.data.blockStack : [currentBlockId];
-    const existing = stack.find((id) => isHistoryTabFor(id, agentId));
-    if (existing) {
-        setActiveBlockInStack(layoutModel, node.id, existing);
-        return;
-    }
-
-    // Copy the display fields AgentHistoryTabView reads off ITS OWN block
-    // meta (mirrors how the live pane reads its own `agentOutputFormat`/
-    // `agentName` — same read shape, different block) — a bare
-    // `agent:historyTabFor` block otherwise has no provider/name info of
-    // its own, since it's never actually launched.
-    const liveMeta = WOS.getObjectValue<Block>(WOS.makeORef("block", currentBlockId))?.meta;
-
-    let paneOpenResult: { block_id: string };
+    // Hide this pane while it settles — both branches below
+    // (setActiveBlockInStack for an already-open history tab, or
+    // pane.open + pushBlockOntoStack for a fresh one) force the same
+    // remount `layoutStack.ts`'s own doc comment describes.
+    // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md.
+    holdLeafRevealGate(node.id);
     try {
-        paneOpenResult = (await TabRpcClient.rpcCall(
-            "pane.open",
-            {
-                view: "agent",
-                skip_placement: true,
-                meta: {
-                    view: "agent",
-                    agentId,
-                    [HISTORY_TAB_FOR_META_KEY]: agentId,
-                    [HISTORY_SOURCE_BLOCK_ID_META_KEY]: currentBlockId,
-                    agentOutputFormat: liveMeta?.["agentOutputFormat"],
-                    agentName: liveMeta?.["agentName"],
-                },
-            },
-            {},
-        )) as { block_id: string };
-    } catch (e: unknown) {
-        pushNotification({
-            icon: "fa-triangle-exclamation",
-            title: "Agent History failed to open",
-            message: e instanceof Error ? e.message : String(e),
-            timestamp: new Date().toISOString(),
-            type: "error",
-            expiration: Date.now() + 8000,
-        });
-        return;
-    }
+        const stack = node.data?.blockStack?.length ? node.data.blockStack : [currentBlockId];
+        const existing = stack.find((id) => isHistoryTabFor(id, agentId));
+        if (existing) {
+            setActiveBlockInStack(layoutModel, node.id, existing);
+            return;
+        }
 
-    // The pane could have closed while the RPC above was in flight —
-    // re-resolve fresh rather than trusting the pre-await `node` reference
-    // (same defensive check as AgentViewWrapper's handleNewAgentTab).
-    const freshNode = layoutModel.getNodeByBlockId(currentBlockId);
-    if (!freshNode) {
-        await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
-        return;
+        // Copy the display fields AgentHistoryTabView reads off ITS OWN block
+        // meta (mirrors how the live pane reads its own `agentOutputFormat`/
+        // `agentName` — same read shape, different block) — a bare
+        // `agent:historyTabFor` block otherwise has no provider/name info of
+        // its own, since it's never actually launched.
+        const liveMeta = WOS.getObjectValue<Block>(WOS.makeORef("block", currentBlockId))?.meta;
+
+        let paneOpenResult: { block_id: string };
+        try {
+            paneOpenResult = (await TabRpcClient.rpcCall(
+                "pane.open",
+                {
+                    view: "agent",
+                    skip_placement: true,
+                    meta: {
+                        view: "agent",
+                        agentId,
+                        [HISTORY_TAB_FOR_META_KEY]: agentId,
+                        [HISTORY_SOURCE_BLOCK_ID_META_KEY]: currentBlockId,
+                        agentOutputFormat: liveMeta?.["agentOutputFormat"],
+                        agentName: liveMeta?.["agentName"],
+                    },
+                },
+                {},
+            )) as { block_id: string };
+        } catch (e: unknown) {
+            pushNotification({
+                icon: "fa-triangle-exclamation",
+                title: "Agent History failed to open",
+                message: e instanceof Error ? e.message : String(e),
+                timestamp: new Date().toISOString(),
+                type: "error",
+                expiration: Date.now() + 8000,
+            });
+            return;
+        }
+
+        // The pane could have closed while the RPC above was in flight —
+        // re-resolve fresh rather than trusting the pre-await `node`
+        // reference (same defensive check as AgentViewWrapper's handleNewAgentTab).
+        const freshNode = layoutModel.getNodeByBlockId(currentBlockId);
+        if (!freshNode) {
+            await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
+            return;
+        }
+        pushBlockOntoStack(layoutModel, freshNode.id, paneOpenResult.block_id);
+    } finally {
+        // Pair with holdLeafRevealGate above — runs on every exit path.
+        scheduleLeafRevealLift(node.id);
     }
-    pushBlockOntoStack(layoutModel, freshNode.id, paneOpenResult.block_id);
 }

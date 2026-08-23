@@ -96,6 +96,8 @@ See also:
 | [SPEC_REACTIVE_WORKSPACE_SYNC_2026-05-14](SPEC_REACTIVE_WORKSPACE_SYNC_2026-05-14.md) | Workspace state sync to sidecar |
 | [SPEC_MODAL_COMPACT_VARIANT_2026_05_25](SPEC_MODAL_COMPACT_VARIANT_2026_05_25.md) | Compact modal variant |
 | [SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11](SPEC_PANE_OVERLAY_AUTO_CLIP_2026_05_11.md) | Overlay clipping |
+| [SPEC_TAB_CONTENT_REVEAL_GATE](SPEC_TAB_CONTENT_REVEAL_GATE.md) | Whole-tab-switch paint-cascade flicker fix (hide-until-settled gate) |
+| [SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22](SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md) | Generalizes the reveal gate to leaf/pane scope — fixes flicker on "+", Quick Fork, Agent History |
 
 ## Authentication / OAuth
 
