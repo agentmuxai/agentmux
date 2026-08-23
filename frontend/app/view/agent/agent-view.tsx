@@ -54,6 +54,7 @@ import {
     pushBlockOntoStack,
     setActiveBlockInStack,
 } from "@/layout/index";
+import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reveal";
 import { getTrail } from "@/log/render-trail";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, type JSX } from "solid-js";
@@ -296,7 +297,14 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
         if (!node) return;
         const stack = node.data?.blockStack?.length ? node.data.blockStack : [model.blockId];
         if (stack.includes(targetBlockId)) {
+            // Switching to an ALREADY-OPEN pill forces the same remount as
+            // creating a new one — layoutStack.ts's setActiveBlockInStack
+            // evicts the NodeModel just like pushBlockOntoStack does.
+            // Codex's review of PR #2761 caught that this path (unlike
+            // create-new) had no reveal gate at all.
+            const gen = holdLeafRevealGate(node.id);
             setActiveBlockInStack(layoutModel, node.id, targetBlockId);
+            scheduleLeafRevealLift(node.id, gen);
         } else {
             refocusNode(targetBlockId);
         }
@@ -310,36 +318,49 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
     // pane's own stack. No modal, no implicit fork of the current
     // conversation.
     const handleNewAgentTab = async (): Promise<void> => {
-        if (!layoutModel.getNodeByBlockId(model.blockId)) return;
-        let paneOpenResult: { block_id: string };
+        const initialNode = layoutModel.getNodeByBlockId(model.blockId);
+        if (!initialNode) return;
+        // Hide this pane while the new tab settles — pane.open's RPC round
+        // trip plus pushBlockOntoStack's forced remount (layoutStack.ts's
+        // own doc comment) is exactly the piecemeal-paint flicker
+        // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22 addresses.
+        const revealGen = holdLeafRevealGate(initialNode.id);
         try {
-            paneOpenResult = (await TabRpcClient.rpcCall(
-                "pane.open",
-                { view: "agent", skip_placement: true, meta: { view: "agent" } },
-                {}
-            )) as { block_id: string };
-        } catch (e: unknown) {
-            pushNotification({
-                icon: "fa-triangle-exclamation",
-                title: "New tab failed",
-                message: e instanceof Error ? e.message : String(e),
-                timestamp: new Date().toISOString(),
-                type: "error",
-                expiration: Date.now() + 8000,
-            });
-            return;
+            let paneOpenResult: { block_id: string };
+            try {
+                paneOpenResult = (await TabRpcClient.rpcCall(
+                    "pane.open",
+                    { view: "agent", skip_placement: true, meta: { view: "agent" } },
+                    {}
+                )) as { block_id: string };
+            } catch (e: unknown) {
+                pushNotification({
+                    icon: "fa-triangle-exclamation",
+                    title: "New tab failed",
+                    message: e instanceof Error ? e.message : String(e),
+                    timestamp: new Date().toISOString(),
+                    type: "error",
+                    expiration: Date.now() + 8000,
+                });
+                return;
+            }
+            // This pane could have closed while the RPC above was in flight —
+            // re-resolve the node fresh rather than trusting a pre-await
+            // reference. If it's gone, the skip_placement block we just
+            // created has nowhere to attach to; delete it instead of leaving
+            // an orphaned, unreachable block behind.
+            const node = layoutModel.getNodeByBlockId(model.blockId);
+            if (!node) {
+                await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
+                return;
+            }
+            pushBlockOntoStack(layoutModel, node.id, paneOpenResult.block_id);
+        } finally {
+            // Pair with holdLeafRevealGate above — runs on every exit path
+            // (success, RPC failure, pane-closed-mid-flight) so the leaf
+            // never stays hidden forever.
+            scheduleLeafRevealLift(initialNode.id, revealGen);
         }
-        // This pane could have closed while the RPC above was in flight —
-        // re-resolve the node fresh rather than trusting a pre-await
-        // reference. If it's gone, the skip_placement block we just
-        // created has nowhere to attach to; delete it instead of leaving
-        // an orphaned, unreachable block behind.
-        const node = layoutModel.getNodeByBlockId(model.blockId);
-        if (!node) {
-            await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
-            return;
-        }
-        pushBlockOntoStack(layoutModel, node.id, paneOpenResult.block_id);
     };
     // × on a tab (also middle-click, via PaneTabStrip's onMouseDown).
     // Mirrors term.tsx's handleTermTabClose: resolve the block's OWNING
@@ -347,11 +368,29 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
     // that block; last member closes the pane), for a cross-pane fork tab
     // it's that other pane (same semantics apply there). closeBlockInStack
     // guards against a blockId that isn't a member, so a stale tab entry
-    // can't close the wrong thing.
+    // can't close the wrong thing. Gated the same as handleTabSwitch, and
+    // ONLY when targetBlockId is the resolved node's own active member
+    // (reagent's follow-up review of PR #2761: gating unconditionally hides
+    // the leaf's real, unchanging content for the close+settle window when
+    // closing a background tab, since gatingNodeIds() hides the whole node
+    // regardless of whether a remount is actually about to happen) —
+    // popping the ACTIVE member out of a multi-member stack reassigns
+    // activeBlockId and evicts the NodeModel, the identical forced-remount
+    // pattern as switching; popping a background member changes nothing
+    // visible. Note: `node` here may be a different pane than this
+    // component's own (the cross-pane fork tab case), so this checks the
+    // resolved node's own activeBlockId, not this pane's activeBlockId().
     const handleTabClose = (targetBlockId: string) => {
         const node = layoutModel.getNodeByBlockId(targetBlockId);
         if (!node) return;
-        void closeBlockInStack(layoutModel, node.id, targetBlockId);
+        if (node.data?.activeBlockId !== targetBlockId) {
+            void closeBlockInStack(layoutModel, node.id, targetBlockId);
+            return;
+        }
+        const gen = holdLeafRevealGate(node.id);
+        void closeBlockInStack(layoutModel, node.id, targetBlockId).finally(() => {
+            scheduleLeafRevealLift(node.id, gen);
+        });
     };
     // Double-click a tab to rename it (only meaningful once it has launched
     // an agent — a still-blank picker tab has nothing to rename). TWO writes
