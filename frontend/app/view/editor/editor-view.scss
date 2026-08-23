@@ -604,7 +604,11 @@
 // scrollbar gutter when content already fits.
 .content.editor-preview-markdown-content {
     padding: 16px 24px;
-    overflow-y: auto;
+    // Shorthand, not just overflow-y: the base `.content { overflow: scroll }`
+    // rule (markdown.scss) sets BOTH axes — overriding only overflow-y left
+    // overflow-x: scroll in effect, permanently reserving a horizontal
+    // scrollbar even when content fits (codex P2 on PR #2774).
+    overflow: auto;
 }
 
 .editor-preview-markdown-content {
