@@ -230,6 +230,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     model_vendor_base_url: chosen_model_vendor_base_url,
                     auto_continue_enabled: 0,
                     memory_id: String::new(),
+                    // Fail-closed default, not inherited from the template —
+                    // same convention as auto_start/use_ambient_login/
+                    // auto_continue_enabled above (opt-in settings reset on
+                    // a fresh clone, not carried over).
+                    conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
                 };
                 wstore
                     .agent_def_insert(&mut new_def)
@@ -449,6 +454,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     model_vendor_base_url: source.model_vendor_base_url.clone(),
                     auto_continue_enabled: 0,
                     memory_id: String::new(),
+                    // Fail-closed default, not inherited from source — same
+                    // convention as use_ambient_login/auto_continue_enabled
+                    // above (opt-in settings reset on a fork, not carried
+                    // over, even though other config like container image
+                    // and model vendor IS inherited).
+                    conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
                 };
                 wstore
                     .agent_def_insert(&mut fork)
@@ -630,6 +641,7 @@ mod tests {
     // "claude". A correct clone/fork must carry "claude", not "codex".
     fn seed_drifted_template(state: &AppState, def_id: &str, bundle_id: &str) {
         let mut def = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: def_id.to_string(),
             slug: String::new(),
             name: "Drifted Template".to_string(),

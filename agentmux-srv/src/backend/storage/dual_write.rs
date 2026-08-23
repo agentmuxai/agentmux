@@ -78,7 +78,7 @@ impl Store {
                 created_at, updated_at, is_seeded, user_hidden,
                 container_image, container_volumes, container_name,
                 use_ambient_login, model_vendor_base_url, auto_continue_enabled,
-                default_memory_id
+                default_memory_id, conversation_visibility
              ) VALUES (
                 ?1, ?2, ?3, ?4,
                 ?5, ?6,
@@ -89,7 +89,7 @@ impl Store {
                 ?20, ?21, ?22, ?23,
                 ?24, ?25, ?26,
                 ?27, ?28, ?29,
-                ?30
+                ?30, ?31
              )
              ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
@@ -118,7 +118,8 @@ impl Store {
                 use_ambient_login = excluded.use_ambient_login,
                 model_vendor_base_url = excluded.model_vendor_base_url,
                 auto_continue_enabled = excluded.auto_continue_enabled,
-                default_memory_id = excluded.default_memory_id",
+                default_memory_id = excluded.default_memory_id,
+                conversation_visibility = excluded.conversation_visibility",
             params![
                 def.id,
                 def.name,
@@ -150,6 +151,7 @@ impl Store {
                 def.model_vendor_base_url,
                 def.auto_continue_enabled,
                 def.memory_id,
+                def.conversation_visibility,
             ],
         )?;
         Ok(())
@@ -647,7 +649,8 @@ impl Store {
                     agent_type, environment, agent_bus_id, is_seeded,
                     accounts, parent_id, branch_label, updated_at,
                     user_hidden, container_image, container_volumes, container_name,
-                    use_ambient_login, model_vendor_base_url, auto_continue_enabled, memory_id
+                    use_ambient_login, model_vendor_base_url, auto_continue_enabled, memory_id,
+                    conversation_visibility
              FROM db_agent_definitions WHERE id = ?1",
         )?;
         let result = stmt.query_row(params![id], |row| {
@@ -681,6 +684,7 @@ impl Store {
                 model_vendor_base_url: row.get(26)?,
                 auto_continue_enabled: row.get(27)?,
                 memory_id: row.get(28)?,
+                conversation_visibility: row.get(29)?,
             })
         });
         match result {

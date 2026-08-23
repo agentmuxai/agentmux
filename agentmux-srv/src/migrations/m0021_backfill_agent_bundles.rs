@@ -254,6 +254,7 @@ mod tests {
 
     fn insert_def(wstore: &Store, name: &str) -> String {
         let mut def = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: format!("test-{name}"),
             slug: String::new(),
             name: name.to_string(),
@@ -290,6 +291,7 @@ mod tests {
 
     fn insert_def_with_provider(wstore: &Store, name: &str, provider: &str) -> String {
         let mut def = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: format!("test-{name}"),
             slug: String::new(),
             name: name.to_string(),
@@ -525,6 +527,7 @@ mod tests {
             let shared_tmp = tempfile::NamedTempFile::new().unwrap();
             let wstore = Store::open(tmp.path()).unwrap();
             let mut def_a = AgentDefinition {
+                conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
                 id: "test-twin-a".to_string(),
                 slug: String::new(),
                 name: "Twin".to_string(),

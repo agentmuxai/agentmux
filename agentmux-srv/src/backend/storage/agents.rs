@@ -169,6 +169,27 @@ pub struct AgentDefinition {
     /// decision about how the two interact). Schema v19.
     #[serde(default)]
     pub memory_id: String,
+    /// This agent's own disclosure policy for an incoming cross-tier
+    /// `transcript_request` jekt (`muxspect` Phase B/C — LAN/WAN
+    /// conversation visibility, `SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md`,
+    /// jekt tier rules confirmed in `SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md`).
+    /// One of `"private"` (default — auto-deny, fail-closed), `"trusted_peers"`
+    /// (auto-approve only a requester in `db_conversation_trust_grants`), or
+    /// `"ask"` (force human escalation, never auto-respond). Schema v26.
+    /// Channel-local only, like `model_vendor_base_url`/`memory_id` above —
+    /// deliberately NOT added to `DefinitionRecordV1`'s cross-channel wire
+    /// format yet; a cross-channel-reopened agent starts back at the safe
+    /// `"private"` default rather than carrying a stale value. Known
+    /// limitation, not a bug — same precedent as those two fields.
+    #[serde(default = "default_conversation_visibility")]
+    pub conversation_visibility: String,
+}
+
+/// `AgentDefinition::conversation_visibility`'s serde default — the safe,
+/// fail-closed value for any row/context that doesn't specify one
+/// (including every pre-existing row before this column existed).
+pub fn default_conversation_visibility() -> String {
+    "private".to_string()
 }
 
 /// Derive a filesystem-safe slug from a display name. Lowercase,
@@ -351,7 +372,8 @@ impl Store {
                     agent_type, environment, agent_bus_id, is_seeded,
                     accounts, parent_id, branch_label, updated_at,
                     user_hidden, container_image, container_volumes, container_name,
-                    use_ambient_login, model_vendor_base_url, auto_continue_enabled, memory_id
+                    use_ambient_login, model_vendor_base_url, auto_continue_enabled, memory_id,
+                    conversation_visibility
              FROM db_agent_definitions
              WHERE is_seeded = 0 AND parent_id = ?1
              ORDER BY updated_at DESC, created_at DESC",
@@ -412,7 +434,8 @@ impl Store {
                     agent_type, environment, agent_bus_id, is_seeded,
                     accounts, parent_id, branch_label, updated_at,
                     user_hidden, container_image, container_volumes, container_name,
-                    use_ambient_login, model_vendor_base_url, auto_continue_enabled, memory_id
+                    use_ambient_login, model_vendor_base_url, auto_continue_enabled, memory_id,
+                    conversation_visibility
              FROM db_agent_definitions
              WHERE id = ?1",
         )?;
@@ -435,7 +458,7 @@ impl Store {
                         accounts, parent_template_id, branch_label, updated_at,
                         user_hidden, container_image, container_volumes, container_name,
                         use_ambient_login, model_vendor_base_url, auto_continue_enabled,
-                        default_memory_id
+                        default_memory_id, conversation_visibility
                  FROM db_agents
                  ORDER BY updated_at DESC, created_at ASC",
             )?;
@@ -496,6 +519,16 @@ impl Store {
             if let Some(existing) = by_id.get(&def.id) {
                 def.model_vendor_base_url = existing.model_vendor_base_url.clone();
                 def.memory_id = existing.memory_id.clone();
+                // conversation_visibility is the identical channel-local-only
+                // case (SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md
+                // Phase B/C, jekt rules SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md)
+                // — DefinitionRecordV1 doesn't carry it, so without this the
+                // global overlay would silently reset every agent's
+                // disclosure policy back to "private" on every list read,
+                // even though "private" is a safe fail-closed default (this
+                // preserves the ADMINISTRATOR'S actual configured choice,
+                // not just avoiding a crash).
+                def.conversation_visibility = existing.conversation_visibility.clone();
             }
             by_id.insert(def.id.clone(), def);
         }
@@ -633,9 +666,9 @@ impl Store {
              idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
              is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden,
              container_image, container_volumes, container_name, use_ambient_login,
-             model_vendor_base_url, auto_continue_enabled, memory_id)
+             model_vendor_base_url, auto_continue_enabled, memory_id, conversation_visibility)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                     ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
+                     ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)",
             params![
                 agent.id,
                 agent.slug,
@@ -675,6 +708,7 @@ impl Store {
                 agent.model_vendor_base_url,
                 agent.auto_continue_enabled,
                 agent.memory_id,
+                agent.conversation_visibility,
             ],
         )?;
         // Persist the stamped updated_at before we leave the lock so the
@@ -800,7 +834,8 @@ impl Store {
                         agent_type, environment, agent_bus_id, is_seeded,
                         accounts, parent_id, branch_label, updated_at,
                         user_hidden, container_image, container_volumes, container_name,
-                        use_ambient_login, model_vendor_base_url, auto_continue_enabled, memory_id
+                        use_ambient_login, model_vendor_base_url, auto_continue_enabled, memory_id,
+                        conversation_visibility
                  FROM db_agent_definitions
                  WHERE (lower(trim(name)) = ?1 OR slug = ?2)
                    AND is_seeded = 0
@@ -850,10 +885,10 @@ impl Store {
                     idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
                     is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden,
                     container_image, container_volumes, container_name, use_ambient_login,
-                    model_vendor_base_url, auto_continue_enabled, memory_id)
+                    model_vendor_base_url, auto_continue_enabled, memory_id, conversation_visibility)
                  VALUES
                    (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16,
-                    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29)",
+                    ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30)",
                 params![
                     agent.id, agent.slug, agent.name, agent.icon, agent.provider,
                     agent.description, agent.working_directory, agent.shell,
@@ -868,6 +903,7 @@ impl Store {
                     agent.model_vendor_base_url,
                     agent.auto_continue_enabled,
                     agent.memory_id,
+                    agent.conversation_visibility,
                 ],
             )?;
             agent.created_at
@@ -1232,7 +1268,7 @@ impl Store {
                  agent_type=?11, environment=?12, agent_bus_id=?13, accounts=?14, updated_at=?15,
                  container_image=?17, container_volumes=?18, container_name=?19,
                  use_ambient_login=?20, branch_label=?21, model_vendor_base_url=?22,
-                 auto_continue_enabled=?23
+                 auto_continue_enabled=?23, conversation_visibility=?24
                  WHERE id=?16",
                 params![
                     agent.name,
@@ -1258,6 +1294,7 @@ impl Store {
                     agent.branch_label,
                     agent.model_vendor_base_url,
                     agent.auto_continue_enabled,
+                    agent.conversation_visibility,
                 ],
             )?
         };
@@ -2477,6 +2514,7 @@ fn map_agent_definition_row(row: &rusqlite::Row) -> rusqlite::Result<AgentDefini
         model_vendor_base_url: row.get(26)?,
         auto_continue_enabled: row.get(27)?,
         memory_id: row.get(28)?,
+        conversation_visibility: row.get(29)?,
     })
 }
 
@@ -2525,6 +2563,7 @@ fn test_agent_def(
         model_vendor_base_url: model_vendor_base_url.to_string(),
         auto_continue_enabled: 0,
         memory_id: String::new(),
+        conversation_visibility: default_conversation_visibility(),
     }
 }
 
@@ -2840,10 +2879,10 @@ mod tests {
                  idle_timeout_minutes, created_at, agent_type, environment, agent_bus_id,
                  is_seeded, accounts, parent_id, branch_label, updated_at, user_hidden,
                  container_image, container_volumes, container_name, use_ambient_login,
-                 model_vendor_base_url, auto_continue_enabled, memory_id)
+                 model_vendor_base_url, auto_continue_enabled, memory_id, conversation_visibility)
                  VALUES ('only-in-legacy', 'only-in-legacy', 'OnlyLegacy', '', 'claude', '',
                  '', '', '', 0, 0, 0, 1, 'standalone', '', '', 0, '', '', '', 1, 0, '', '[]', '',
-                 0, '', 0, '')",
+                 0, '', 0, '', 'private')",
                 [],
             )
             .unwrap();

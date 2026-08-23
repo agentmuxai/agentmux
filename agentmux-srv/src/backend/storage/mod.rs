@@ -15,6 +15,7 @@ pub mod agents;
 pub mod agents_consolidate;
 pub mod background_tasks;
 pub mod content;
+pub mod conversation_trust_grants;
 pub mod cron;
 pub mod def_registry_mirror;
 pub mod dual_write;

@@ -157,6 +157,7 @@ mod tests {
 
     fn insert_def(wstore: &Store, name: &str) -> String {
         let mut def = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: format!("test-{name}"),
             slug: String::new(),
             name: name.to_string(),
