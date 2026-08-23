@@ -115,7 +115,13 @@ impl ShellSessionRegistry {
     // the Broker, unlike this registry) purges their `shell:<id>` persisted
     // WaveEvent history so the broker's persist_map key set stays bounded
     // in step with this registry's own MAX_EXITED_STATUS cap.
-    fn register_full(
+    //
+    // `pub(crate)` (rather than private) so `server::shell_handlers`'s own
+    // tests can seed a running/exited shell directly, without spawning a
+    // real child process, to exercise the `shellstatus` RPC handler's JSON
+    // shape end-to-end for both branches — the same pre-tested primitive
+    // this module's own tests already use, not duplicated logic.
+    pub(crate) fn register_full(
         &self,
         shell_id: String,
         stop_tx: oneshot::Sender<()>,
@@ -220,11 +226,32 @@ impl ShellSessionRegistry {
     }
 
     /// Return a snapshot of the shell's status. Returns `running: false` if unknown.
+    /// Existing, documented contract for `POST /api/v1/shell/status` (the MCP
+    /// `ShellStatus` tool) — do not change: an agent calling this for an id
+    /// it doesn't recognize expects a plain "not running" answer, not an error.
     pub fn get_status(&self, shell_id: &str) -> ShellStatusInfo {
         self.status_map.lock()
             .get(shell_id)
             .map(|arc| arc.lock().clone())
             .unwrap_or_default()
+    }
+
+    /// Like [`Self::get_status`], but `None` when no entry exists at all —
+    /// distinguishing "genuinely unknown" from "known, and not running."
+    ///
+    /// Needed by the `shellstatus` RPC command (unlike the MCP tool above,
+    /// which is fine collapsing "unknown" into "not running"): `register_full`
+    /// only runs after the runner task spawns the child process, but
+    /// `shell_node_create` is published to the frontend BEFORE that task is
+    /// even scheduled (`handle_shell_create` in server/mod.rs). A caller that
+    /// checks status immediately after seeing `shell_node_create` can race
+    /// ahead of registration — reagent P1 on PR #2770: collapsing that race
+    /// window into `running: false` was indistinguishable from a genuinely
+    /// already-exited shell, so a fast, still-registering, genuinely LIVE
+    /// shell (e.g. a real `task dev`) could be shown as failed in the
+    /// Activity Dock for its entire run.
+    pub(crate) fn get_status_if_known(&self, shell_id: &str) -> Option<ShellStatusInfo> {
+        self.status_map.lock().get(shell_id).map(|arc| arc.lock().clone())
     }
 
     /// List every currently-RUNNING shell across all blocks — the Swarm

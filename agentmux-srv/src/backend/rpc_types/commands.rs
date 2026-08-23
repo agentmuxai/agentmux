@@ -104,6 +104,11 @@ pub const COMMAND_AGENT_STOP: &str = "agentstop";
 pub const COMMAND_SHELL_EXEC: &str = "shellexec";
 /// Stop a running persistent shell node (Phase 3) — UI stop button.
 pub const COMMAND_SHELL_STOP: &str = "shellstop";
+/// Query a persistent shell node's current running state (Phase 3) —
+/// used by useShellNodeStream to resolve a `shell_node_create` replay's
+/// TRUE current status instead of assuming "running" (see
+/// docs/retro/retro-activity-dock-stale-shell-flash-on-load-2026-08-22.md).
+pub const COMMAND_SHELL_STATUS: &str = "shellstatus";
 pub const COMMAND_WRITE_AGENT_CONFIG: &str = "writeagentconfig";
 pub const COMMAND_RESOLVE_CLI: &str = "resolvecli";
 pub const COMMAND_CHECK_CLI_AUTH: &str = "checkcliauth";
