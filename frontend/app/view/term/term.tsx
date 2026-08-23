@@ -144,13 +144,23 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
         setActiveBlockInStack(layoutModel, node.id, targetBlockId);
         scheduleLeafRevealLift(node.id, gen);
     };
-    // Gated the same as handleTermTabSwitch above (reagent's follow-up
-    // review of PR #2761): closing the active member of a multi-member
-    // stack reassigns activeBlockId and evicts the NodeModel, the same
-    // forced-remount pattern as switching. SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md.
+    // Gated the same as handleTermTabSwitch above, and ONLY when
+    // targetBlockId is the stack's own active member (reagent's follow-up
+    // review of PR #2761: gating unconditionally hides the pane's real,
+    // unchanging content during the close+settle window when closing a
+    // background tab, since gatingNodeIds() hides the whole node
+    // regardless of whether a remount is actually about to happen) —
+    // closing the ACTIVE member of a multi-member stack reassigns
+    // activeBlockId and evicts the NodeModel, the same forced-remount
+    // pattern as switching; closing a background member changes nothing
+    // visible. SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md.
     const handleTermTabClose = (targetBlockId: string) => {
         const node = layoutModel.getNodeByBlockId(blockId);
         if (!node) return;
+        if (node.data?.activeBlockId !== targetBlockId) {
+            void closeBlockInStack(layoutModel, node.id, targetBlockId);
+            return;
+        }
         const gen = holdLeafRevealGate(node.id);
         void closeBlockInStack(layoutModel, node.id, targetBlockId).finally(() => {
             scheduleLeafRevealLift(node.id, gen);

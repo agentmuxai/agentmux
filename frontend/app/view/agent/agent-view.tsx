@@ -368,13 +368,25 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
     // that block; last member closes the pane), for a cross-pane fork tab
     // it's that other pane (same semantics apply there). closeBlockInStack
     // guards against a blockId that isn't a member, so a stale tab entry
-    // can't close the wrong thing. Gated the same as handleTabSwitch
-    // (reagent's follow-up review of PR #2761): popping the active member
-    // out of a multi-member stack reassigns activeBlockId and evicts the
-    // NodeModel, the identical forced-remount pattern as switching.
+    // can't close the wrong thing. Gated the same as handleTabSwitch, and
+    // ONLY when targetBlockId is the resolved node's own active member
+    // (reagent's follow-up review of PR #2761: gating unconditionally hides
+    // the leaf's real, unchanging content for the close+settle window when
+    // closing a background tab, since gatingNodeIds() hides the whole node
+    // regardless of whether a remount is actually about to happen) —
+    // popping the ACTIVE member out of a multi-member stack reassigns
+    // activeBlockId and evicts the NodeModel, the identical forced-remount
+    // pattern as switching; popping a background member changes nothing
+    // visible. Note: `node` here may be a different pane than this
+    // component's own (the cross-pane fork tab case), so this checks the
+    // resolved node's own activeBlockId, not this pane's activeBlockId().
     const handleTabClose = (targetBlockId: string) => {
         const node = layoutModel.getNodeByBlockId(targetBlockId);
         if (!node) return;
+        if (node.data?.activeBlockId !== targetBlockId) {
+            void closeBlockInStack(layoutModel, node.id, targetBlockId);
+            return;
+        }
         const gen = holdLeafRevealGate(node.id);
         void closeBlockInStack(layoutModel, node.id, targetBlockId).finally(() => {
             scheduleLeafRevealLift(node.id, gen);
