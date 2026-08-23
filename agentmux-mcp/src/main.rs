@@ -297,11 +297,11 @@ const FLEET_LIST_TOOL: &str = r#"{
 
 const FLEET_BROADCAST_TOOL: &str = r#"{
   "name": "FleetBroadcast",
-  "description": "Send the SAME message to many agents at once by block_id (get these from FleetList). Delivers each one individually and signed, exactly like SendMessage would — this is a convenience loop, not a new delivery mechanism. Returns JSON {succeeded: [block_id...], failed: [{id, error}...]} — always check `failed`, a partial failure is common (e.g. one target went offline) and is never silently dropped.",
+  "description": "Send the SAME message to many agents at once (get targets from FleetList). Delivers each one individually and signed, exactly like SendMessage would — this is a convenience loop, not a new delivery mechanism. Targets reach every tier FleetList/DiscoverAgents can see: a host or cross-channel target is its block_id; a LAN or WAN target (no block_id exists for those — they're not local blocks) is its agent NAME instead — pass whichever FleetList gave you for that entry. Returns JSON {succeeded: [target...], failed: [{id, error}...]} — always check `failed`, a partial failure is common (e.g. one target went offline) and is never silently dropped.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "targets": { "type": "array", "items": { "type": "string" }, "description": "block_id values to send to (from FleetList)" },
+      "targets": { "type": "array", "items": { "type": "string" }, "description": "block_id (host/cross-channel) or agent name (LAN/WAN) values to send to — from FleetList" },
       "message": { "type": "string", "description": "Message text to inject into each target's conversation" }
     },
     "required": ["targets", "message"]
@@ -1117,6 +1117,47 @@ fn generate_jekt_msgid() -> String {
     format!("{}-{}-{}", now.as_millis(), std::process::id(), n)
 }
 
+/// `FleetBroadcast`'s block_id -> agent-name resolution
+/// (REPORT_CROSS_INSTANCE_CONTROL_ROBUSTNESS_AUDIT_2026_08_22.md): a `/agentmux/discovery`
+/// response's `host.addressable` AND `host.cross_channel` sections both
+/// carry a `block_id` — `addressable` under `agent_id`/`block_id`,
+/// `cross_channel` (a different channel on this same host) under
+/// `name`/`block_id`. A block_id is unique across channels on one host, so
+/// both are folded into one map, not kept separate. `lan`/`wan` entries
+/// carry no `block_id` at all (they're not local blocks) — a target for
+/// those tiers is never in this map, and the caller falls back to treating
+/// it as a literal agent name instead (see the `FleetBroadcast` handler).
+///
+/// Pure (no I/O) — extracted so it's unit-testable without a live discovery
+/// endpoint.
+fn build_block_to_agent_map(discovery: &Value) -> std::collections::HashMap<String, String> {
+    let mut map: std::collections::HashMap<String, String> = discovery
+        .get("host")
+        .and_then(|h| h.get("addressable"))
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|e| {
+                    let agent_id = e.get("agent_id")?.as_str()?.to_string();
+                    let block_id = e.get("block_id")?.as_str()?.to_string();
+                    Some((block_id, agent_id))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    if let Some(arr) = discovery.get("host").and_then(|h| h.get("cross_channel")).and_then(|v| v.as_array()) {
+        for e in arr {
+            if let (Some(name), Some(block_id)) = (
+                e.get("name").and_then(|v| v.as_str()),
+                e.get("block_id").and_then(|v| v.as_str()),
+            ) {
+                map.insert(block_id.to_string(), name.to_string());
+            }
+        }
+    }
+    map
+}
+
 /// Build the id/timestamp/host-signature/LAN-signature quadruple for an
 /// outgoing jekt (SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md §2.2,
 /// SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.3). Reads this process's OWN
@@ -1709,7 +1750,7 @@ async fn call_tool(
                 .filter_map(|v| v.as_str().map(str::to_string))
                 .collect::<Vec<_>>();
             if targets.is_empty() {
-                anyhow::bail!("targets must be a non-empty array of block_id strings");
+                anyhow::bail!("targets must be a non-empty array of block_id (host/cross-channel) or agent name (LAN/WAN) strings");
             }
             let message = arguments
                 .get("message")
@@ -1743,6 +1784,22 @@ async fn call_tool(
             // it before signing/injecting (Codex P1 + reagent P0, PR #2687
             // review — every advertised call failed "agent not found"
             // without this).
+            //
+            // REPORT_CROSS_INSTANCE_CONTROL_ROBUSTNESS_AUDIT_2026_08_22.md:
+            // `host.addressable` alone missed `host.cross_channel` entries
+            // (a different channel on this SAME host — those genuinely have
+            // a `block_id` in this host's namespace, discovery just wasn't
+            // being read for it) and LAN/WAN entries (which have NO
+            // `block_id` at all — only an agent name, since they're not
+            // local blocks). Both are folded in below: `cross_channel`
+            // extends the same block_id->name map (identical shape), and
+            // any target string that doesn't match ANY known block_id falls
+            // through to being used AS a literal agent name — safe because
+            // `/agentmux/reactive/inject`'s own cross-tier cascade
+            // (cross-channel -> LAN -> WAN muxbus relay,
+            // `server/reactive.rs`) already resolves by name across every
+            // tier; an invalid name just fails the same "not found" way it
+            // always did.
             let discovery_url = format!("{}/agentmux/discovery", local_url.trim_end_matches('/'));
             let discovery_resp = client
                 .get(&discovery_url)
@@ -1759,20 +1816,7 @@ async fn call_tool(
                 .json()
                 .await
                 .map_err(|e| anyhow::anyhow!("discovery response parse failed: {e}"))?;
-            let block_to_agent: std::collections::HashMap<String, String> = discovery
-                .get("host")
-                .and_then(|h| h.get("addressable"))
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|e| {
-                            let agent_id = e.get("agent_id")?.as_str()?.to_string();
-                            let block_id = e.get("block_id")?.as_str()?.to_string();
-                            Some((block_id, agent_id))
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+            let block_to_agent = build_block_to_agent_map(&discovery);
 
             // Same signed single-target delivery SendMessage uses, looped
             // once per target — only this process holds AGENTMUX_JEKT_KEY,
@@ -1801,13 +1845,15 @@ async fn call_tool(
                 }
                 for target in chunk {
                     let target = target.clone();
-                    let Some(target_agent) = block_to_agent.get(&target).cloned() else {
-                        failed.push(json!({
-                            "id": target,
-                            "error": "no registered agent for this block (not a live agent pane, or not yet registered)"
-                        }));
-                        continue;
-                    };
+                    // LAN/WAN discovery entries carry no block_id at all
+                    // (they're not local blocks) — a target that doesn't
+                    // match any known block_id is used AS the agent name
+                    // directly, letting `/agentmux/reactive/inject`'s own
+                    // cross-tier cascade attempt it. This can never make a
+                    // genuinely-wrong block_id succeed silently: it still
+                    // fails, just via the inject endpoint's own "agent not
+                    // found" rather than this pre-check.
+                    let target_agent = block_to_agent.get(&target).cloned().unwrap_or_else(|| target.clone());
                     let (request_id, ts_secs, jekt_sig, lan_sig) =
                         sign_outgoing_jekt(source_agent.as_deref(), &target_agent, message);
                     let req = InjectRequest {
@@ -3247,5 +3293,75 @@ mod tests {
     #[test]
     fn parse_interval_clamps_minimum() {
         assert_eq!(parse_interval("1s").unwrap(), Duration::from_secs(10)); // clamp to 10s
+    }
+
+    // REPORT_CROSS_INSTANCE_CONTROL_ROBUSTNESS_AUDIT_2026_08_22.md:
+    // FleetBroadcast's block_id resolution originally only read
+    // `host.addressable`, silently failing every `host.cross_channel`
+    // target even though it carries a real block_id in the same namespace.
+    #[test]
+    fn build_block_to_agent_map_includes_host_addressable() {
+        let discovery = serde_json::json!({
+            "host": {
+                "addressable": [
+                    { "agent_id": "Korp", "block_id": "block-1" },
+                ],
+            },
+        });
+        let map = build_block_to_agent_map(&discovery);
+        assert_eq!(map.get("block-1").map(String::as_str), Some("Korp"));
+    }
+
+    #[test]
+    fn build_block_to_agent_map_includes_host_cross_channel() {
+        let discovery = serde_json::json!({
+            "host": {
+                "addressable": [],
+                "cross_channel": [
+                    { "name": "Loap", "channel": "dev-other", "local_url": "http://127.0.0.1:9999", "block_id": "block-2" },
+                ],
+            },
+        });
+        let map = build_block_to_agent_map(&discovery);
+        assert_eq!(map.get("block-2").map(String::as_str), Some("Loap"));
+    }
+
+    #[test]
+    fn build_block_to_agent_map_merges_both_sections_without_dropping_either() {
+        let discovery = serde_json::json!({
+            "host": {
+                "addressable": [
+                    { "agent_id": "Korp", "block_id": "block-1" },
+                ],
+                "cross_channel": [
+                    { "name": "Loap", "channel": "dev-other", "local_url": "http://127.0.0.1:9999", "block_id": "block-2" },
+                ],
+            },
+        });
+        let map = build_block_to_agent_map(&discovery);
+        assert_eq!(map.len(), 2);
+        assert_eq!(map.get("block-1").map(String::as_str), Some("Korp"));
+        assert_eq!(map.get("block-2").map(String::as_str), Some("Loap"));
+    }
+
+    #[test]
+    fn build_block_to_agent_map_ignores_lan_and_wan_sections_gracefully() {
+        // lan/wan entries carry no block_id at all — this must never panic
+        // on their differently-shaped entries, and must simply not resolve
+        // them (the caller falls back to using the raw target as an agent
+        // name for those).
+        let discovery = serde_json::json!({
+            "host": { "addressable": [] },
+            "lan": [{ "instance_id": "x", "agents": ["RemoteAgent"] }],
+            "wan": { "subscribed_agents": ["CloudAgent"] },
+        });
+        let map = build_block_to_agent_map(&discovery);
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn build_block_to_agent_map_handles_missing_sections() {
+        let map = build_block_to_agent_map(&serde_json::json!({}));
+        assert!(map.is_empty());
     }
 }
