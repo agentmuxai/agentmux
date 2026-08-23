@@ -15,7 +15,13 @@ auto-approve, invisible to the target agent), the `ask`-mode
 approve/deny CLI, the `RequestTranscript`/`PollTranscriptRequest` MCP
 tools, and per-request-type rate limiting are still not built — see that
 spec's §3 for why deferring those specifically was a safe scope cut, not a
-gap. Phase C (WAN) not yet started.
+gap. Phase C (WAN) tier enforcement now also implemented — see
+`SPEC_MUXSPECT_PHASE_C_WAN_TIER_ENFORCEMENT_2026_08_22.md` (the same rule
+1/rule 2 computation, now also wired into the WAN delivery path,
+`muxbus::cloud_subscriber`, which bypasses `handle_reactive_inject`/HTTP
+entirely). Phase C's own WAN-specific differences (settings-UI guidance,
+no-cache `ask` approval, bench-tuned `max_lines`) are all N/A until the
+same deferred auto-responder/settings-UI pieces above are built.
 **Motivated by:** direct request — agents need a fast way to see what every
 other agent (this host, other channels on this host, LAN, connected WAN) is
 currently saying/doing, without manual filesystem archaeology or a

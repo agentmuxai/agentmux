@@ -941,7 +941,7 @@ async fn sync_agent_reactive(
             _ => None,
         };
 
-        let req = InjectionRequest {
+        let mut req = InjectionRequest {
             target_agent: agent_id.to_string(),
             message: inj.message.clone(),
             source_agent: inj.source_agent.clone(),
@@ -955,6 +955,15 @@ async fn sync_agent_reactive(
             reagent_key_id: inj.reagent_key_id.clone(),
             ..Default::default()
         };
+        // Phase C (muxspect Phase B/C conversation visibility,
+        // SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md): this WAN
+        // delivery path calls `Handler::inject_message` directly and never
+        // goes through `server/reactive.rs::handle_reactive_inject`/HTTP at
+        // all — without also resolving these two fields HERE, a
+        // WAN-delivered `transcript_request` would silently skip both the
+        // forced-TIER=sensitive rule and the escalate-forcing rule
+        // entirely, not just get a weaker version of them.
+        crate::server::reactive::resolve_transcript_request_tier_fields(wstore, &mut req);
         let delivery = handler.inject_message(req);
         tracing::debug!(
             injection_id = %inj.id,

@@ -387,16 +387,25 @@ fn resolve_delivery_tier(auth_via: super::ReactiveAuthVia, claimed: Option<&str>
 /// `transcript_request_escalate_forced` — see both fields' own doc comments
 /// (`backend/reactive/types.rs`) and
 /// `SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md`. Lives here (not
-/// `Handler::inject_message_inner`) because it needs `AppState::wstore` —
+/// `Handler::inject_message_inner`) because it needs `Store` access —
 /// `Handler` has no `Store` access "by design," same reason
 /// `sig_verified`/`lan_verified` are resolved by this same caller before
 /// the request reaches the handler.
+///
+/// Takes `wstore: &Arc<Store>` directly (not `&AppState`) so
+/// `muxbus::cloud_subscriber::sync_agent_reactive` — the WAN delivery path,
+/// which calls `Handler::inject_message` directly and never goes through
+/// `handle_reactive_inject`/HTTP at all — can call this exact same
+/// resolution too (`pub(crate)`). Phase C (WAN) needs the identical rule 1/
+/// rule 2 computation this function already does; without also wiring it
+/// in there, a WAN-delivered `transcript_request` would silently skip both
+/// rules entirely, not just get weaker ones.
 ///
 /// Always re-parses `req.message` itself — never trusts anything the
 /// client might have set on these two fields (impossible anyway, since
 /// both are `#[serde(skip_deserializing)]`, but this function is the one
 /// place that actually computes their real value from scratch).
-fn resolve_transcript_request_tier_fields(state: &AppState, req: &mut InjectionRequest) {
+pub(crate) fn resolve_transcript_request_tier_fields(wstore: &std::sync::Arc<crate::backend::storage::store::Store>, req: &mut InjectionRequest) {
     let Some(transcript_req) = agentmux_common::transcript_request::parse_transcript_request(&req.message) else {
         return;
     };
@@ -408,8 +417,7 @@ fn resolve_transcript_request_tier_fields(state: &AppState, req: &mut InjectionR
     // display `name` (same cross-namespace hazard already documented at
     // this file's Supervisor-nudge opt-in check just above, which this
     // mirrors exactly).
-    let visibility = state
-        .wstore
+    let visibility = wstore
         .agent_def_list()
         .ok()
         .and_then(|defs| defs.into_iter().find(|d| d.slug.eq_ignore_ascii_case(&req.target_agent)))
@@ -421,8 +429,7 @@ fn resolve_transcript_request_tier_fields(state: &AppState, req: &mut InjectionR
         "ask" => true,
         "trusted_peers" => {
             let requester = req.source_agent.as_deref().unwrap_or("");
-            let granted = state
-                .wstore
+            let granted = wstore
                 .conversation_trust_grant_check(&req.target_agent, requester, tier)
                 .unwrap_or(false);
             !granted
@@ -505,7 +512,7 @@ mod transcript_request_tier_resolution_tests {
             message: "just chatting".to_string(),
             ..Default::default()
         };
-        resolve_transcript_request_tier_fields(&state, &mut req);
+        resolve_transcript_request_tier_fields(&state.wstore, &mut req);
         assert!(!req.is_transcript_request);
         assert!(!req.transcript_request_escalate_forced);
     }
@@ -515,7 +522,7 @@ mod transcript_request_tier_resolution_tests {
         let state = test_state();
         insert_agent_def(&state, "agent1", "private");
         let mut req = base_req("agent1");
-        resolve_transcript_request_tier_fields(&state, &mut req);
+        resolve_transcript_request_tier_fields(&state.wstore, &mut req);
         assert!(req.is_transcript_request);
         assert!(!req.transcript_request_escalate_forced);
     }
@@ -525,7 +532,7 @@ mod transcript_request_tier_resolution_tests {
         let state = test_state();
         insert_agent_def(&state, "agent1", "ask");
         let mut req = base_req("agent1");
-        resolve_transcript_request_tier_fields(&state, &mut req);
+        resolve_transcript_request_tier_fields(&state.wstore, &mut req);
         assert!(req.is_transcript_request);
         assert!(req.transcript_request_escalate_forced);
     }
@@ -535,7 +542,7 @@ mod transcript_request_tier_resolution_tests {
         let state = test_state();
         insert_agent_def(&state, "agent1", "trusted_peers");
         let mut req = base_req("agent1");
-        resolve_transcript_request_tier_fields(&state, &mut req);
+        resolve_transcript_request_tier_fields(&state.wstore, &mut req);
         assert!(
             req.transcript_request_escalate_forced,
             "an un-granted requester must still force escalation under trusted_peers mode"
@@ -548,7 +555,7 @@ mod transcript_request_tier_resolution_tests {
         insert_agent_def(&state, "agent1", "trusted_peers");
         state.wstore.conversation_trust_grant_add("agent1", "requester", "lan").unwrap();
         let mut req = base_req("agent1");
-        resolve_transcript_request_tier_fields(&state, &mut req);
+        resolve_transcript_request_tier_fields(&state.wstore, &mut req);
         assert!(
             !req.transcript_request_escalate_forced,
             "an allow-listed requester on the SAME tier must not force escalation"
@@ -562,10 +569,48 @@ mod transcript_request_tier_resolution_tests {
         // Granted for WAN, but this request arrives on LAN (base_req's default).
         state.wstore.conversation_trust_grant_add("agent1", "requester", "wan").unwrap();
         let mut req = base_req("agent1");
-        resolve_transcript_request_tier_fields(&state, &mut req);
+        resolve_transcript_request_tier_fields(&state.wstore, &mut req);
         assert!(
             req.transcript_request_escalate_forced,
             "a grant for one tier's identity guarantee must never be assumed to cover a different tier"
+        );
+    }
+
+    // Phase C (WAN): this function is tier-generic — these two tests pin
+    // that WAN delivery gets the identical treatment LAN already has,
+    // since `sync_agent_reactive` (the WAN delivery path,
+    // `muxbus/cloud_subscriber.rs`) calls this exact function directly.
+    #[tokio::test]
+    async fn wan_tier_transcript_request_forces_sensitive_same_as_lan() {
+        let state = test_state();
+        insert_agent_def(&state, "agent1", "private");
+        let mut req = InjectionRequest {
+            target_agent: "agent1".to_string(),
+            message: transcript_request_message(),
+            source_agent: Some("requester".to_string()),
+            delivery_tier: Some("wan".to_string()),
+            ..Default::default()
+        };
+        resolve_transcript_request_tier_fields(&state.wstore, &mut req);
+        assert!(req.is_transcript_request, "rule 1 must fire on WAN exactly like every other tier");
+    }
+
+    #[tokio::test]
+    async fn wan_tier_trusted_peers_grant_on_the_matching_tier_relaxes_escalation() {
+        let state = test_state();
+        insert_agent_def(&state, "agent1", "trusted_peers");
+        state.wstore.conversation_trust_grant_add("agent1", "requester", "wan").unwrap();
+        let mut req = InjectionRequest {
+            target_agent: "agent1".to_string(),
+            message: transcript_request_message(),
+            source_agent: Some("requester".to_string()),
+            delivery_tier: Some("wan".to_string()),
+            ..Default::default()
+        };
+        resolve_transcript_request_tier_fields(&state.wstore, &mut req);
+        assert!(
+            !req.transcript_request_escalate_forced,
+            "a WAN grant checked against an actual WAN request must relax escalation, same as LAN's matching-tier case"
         );
     }
 
@@ -613,7 +658,7 @@ mod transcript_request_tier_resolution_tests {
             state_clone.wstore.agent_def_insert(&mut def).unwrap();
         }
         let mut req = base_req("agent1");
-        resolve_transcript_request_tier_fields(&state, &mut req);
+        resolve_transcript_request_tier_fields(&state.wstore, &mut req);
         assert!(req.transcript_request_escalate_forced, "lookup must match by slug \"agent1\", not the unrelated display name");
     }
 
@@ -622,7 +667,7 @@ mod transcript_request_tier_resolution_tests {
         let state = test_state();
         // No AgentDefinition inserted at all for this target.
         let mut req = base_req("no-such-agent");
-        resolve_transcript_request_tier_fields(&state, &mut req);
+        resolve_transcript_request_tier_fields(&state.wstore, &mut req);
         assert!(req.is_transcript_request, "rule 1 (forced sensitive) applies regardless of whether the target is known");
         assert!(!req.transcript_request_escalate_forced, "an unknown agent defaults to the safe 'private' behavior for the escalate-forcing question");
     }
@@ -645,7 +690,7 @@ pub(super) async fn handle_reactive_inject(
     verify_jekt_signature(&state, &mut req);
     verify_reagent_signature(&mut req, now_unix_secs());
     verify_lan_signature(&state, &mut req).await;
-    resolve_transcript_request_tier_fields(&state, &mut req);
+    resolve_transcript_request_tier_fields(&state.wstore, &mut req);
 
     // 1. Try local ReactiveHandler first (fast path — same instance).
     let resp = state.reactive_handler.inject_message(req.clone());
