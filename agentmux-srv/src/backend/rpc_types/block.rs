@@ -285,6 +285,12 @@ pub struct CommandShellStopData {
     pub shell_id: String,
 }
 
+/// Data for ShellStatusCommand — query a shell's current running state by id.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandShellStatusData {
+    pub shell_id: String,
+}
+
 /// A file to write as part of agent config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfigFile {

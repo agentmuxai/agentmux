@@ -115,7 +115,13 @@ impl ShellSessionRegistry {
     // the Broker, unlike this registry) purges their `shell:<id>` persisted
     // WaveEvent history so the broker's persist_map key set stays bounded
     // in step with this registry's own MAX_EXITED_STATUS cap.
-    fn register_full(
+    //
+    // `pub(crate)` (rather than private) so `server::shell_handlers`'s own
+    // tests can seed a running/exited shell directly, without spawning a
+    // real child process, to exercise the `shellstatus` RPC handler's JSON
+    // shape end-to-end for both branches — the same pre-tested primitive
+    // this module's own tests already use, not duplicated logic.
+    pub(crate) fn register_full(
         &self,
         shell_id: String,
         stop_tx: oneshot::Sender<()>,
