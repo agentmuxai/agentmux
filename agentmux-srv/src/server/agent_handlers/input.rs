@@ -15,6 +15,40 @@ use crate::backend::blockcontroller;
 
 use super::super::AppState;
 
+/// Per-agent git commit identity env vars for a spawned agent process
+/// (2026-08-22, docs/retro/retro-shared-git-identity-committer-misattribution-2026-08-22.md).
+///
+/// Without this, `git commit` falls through to whatever user.name/
+/// user.email happens to be sitting in a shared multi-agent host's
+/// `~/.gitconfig` -- one agent's real identity, silently baked into every
+/// OTHER agent's commits too. `agentmux-cloud`'s review-notification
+/// consumer resolves "who committed this" via GitHub's own commit->account
+/// auto-linking (`commit.author.login`), not the raw git commit metadata
+/// directly -- so whichever agent's *real, GitHub-verified* email is
+/// sitting in the shared config silently receives every other agent's
+/// committer notifications too (confirmed live: every commit across 9+
+/// PRs from 4 different agents on one host resolved to a single agent's
+/// account this way).
+///
+/// `GIT_AUTHOR_*`/`GIT_COMMITTER_*` env vars take precedence over
+/// config-file `user.name`/`user.email` at commit time (git's own
+/// behavior) -- scoped to just the spawned process tree, same pattern as
+/// `AGENTMUX_AGENT_ID`. The email intentionally uses a non-existent
+/// `.local` domain: GitHub can't link it to any real account, so an agent
+/// with no dedicated PAT registered (the common case -- see this repo's
+/// `CLAUDE.md`, "Which GitHub account am I acting as?") simply drops out
+/// of `commit.author.login` lookups entirely instead of resolving to
+/// someone else's real, verified identity.
+fn git_identity_env_vars(agent_id: &str) -> [(&'static str, String); 4] {
+    let git_email = format!("{}@agentmux.local", agent_id.to_lowercase());
+    [
+        ("GIT_AUTHOR_NAME", agent_id.to_string()),
+        ("GIT_COMMITTER_NAME", agent_id.to_string()),
+        ("GIT_AUTHOR_EMAIL", git_email.clone()),
+        ("GIT_COMMITTER_EMAIL", git_email),
+    ]
+}
+
 pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // subprocessspawn → spawn agent CLI as subprocess for a single turn
     let wstore_spawn = state.wstore.clone();
@@ -261,6 +295,16 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                 if !env_vars.contains_key("MUXBUS_AGENT_ID") {
                     if let Some(agent_id) = env_vars.get("AGENTMUX_AGENT_ID").cloned() {
                         env_vars.insert("MUXBUS_AGENT_ID".to_string(), agent_id);
+                    }
+                }
+                // Per-agent git commit identity -- see git_identity_env_vars()
+                // doc comment. Still overridable per the same "user-provided
+                // values take precedence" rule as every other var here.
+                if let Some(agent_id) = env_vars.get("AGENTMUX_AGENT_ID").cloned() {
+                    for (key, value) in git_identity_env_vars(&agent_id) {
+                        if !env_vars.contains_key(key) {
+                            env_vars.insert(key.to_string(), value);
+                        }
                     }
                 }
                 // PATH includes BOTH bundled tools dir (portable
@@ -588,4 +632,61 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
             })
         }),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::git_identity_env_vars;
+
+    #[test]
+    fn maps_agent_id_to_name_and_placeholder_email() {
+        let vars = git_identity_env_vars("korp");
+        let map: std::collections::HashMap<&str, String> = vars.into_iter().collect();
+        assert_eq!(map["GIT_AUTHOR_NAME"], "korp");
+        assert_eq!(map["GIT_COMMITTER_NAME"], "korp");
+        assert_eq!(map["GIT_AUTHOR_EMAIL"], "korp@agentmux.local");
+        assert_eq!(map["GIT_COMMITTER_EMAIL"], "korp@agentmux.local");
+    }
+
+    #[test]
+    fn lowercases_email_but_preserves_display_name_casing() {
+        // AGENTMUX_AGENT_ID is natural display casing (e.g. "Korp", per
+        // SPEC_PR_TITLE_AGENT_HOST_PREFIX_2026_08_22.md's distinction
+        // between the tag's lowercase machine-key and the title's natural
+        // casing) -- the git *name* field should read naturally too, but
+        // the email's local-part must stay lowercase so it can never
+        // collide with a differently-cased but same agent (git/GitHub
+        // treat email local-parts as effectively case-sensitive strings
+        // for linking purposes; we want exactly one canonical email per
+        // agent regardless of what casing happened to be in the block's
+        // agentName metadata at spawn time).
+        let vars = git_identity_env_vars("Korp");
+        let map: std::collections::HashMap<&str, String> = vars.into_iter().collect();
+        assert_eq!(map["GIT_AUTHOR_NAME"], "Korp");
+        assert_eq!(map["GIT_AUTHOR_EMAIL"], "korp@agentmux.local");
+    }
+
+    #[test]
+    fn distinct_agents_get_distinct_non_colliding_identities() {
+        let a = git_identity_env_vars("agenty");
+        let b = git_identity_env_vars("smike");
+        let a_map: std::collections::HashMap<&str, String> = a.into_iter().collect();
+        let b_map: std::collections::HashMap<&str, String> = b.into_iter().collect();
+        assert_ne!(a_map["GIT_AUTHOR_EMAIL"], b_map["GIT_AUTHOR_EMAIL"]);
+        assert_ne!(a_map["GIT_AUTHOR_NAME"], b_map["GIT_AUTHOR_NAME"]);
+    }
+
+    #[test]
+    fn email_domain_is_not_a_real_github_verifiable_domain() {
+        // Load-bearing for the fix's safety property: this must NOT be a
+        // domain GitHub could ever link to a real account (see the
+        // git_identity_env_vars doc comment) -- asserting the exact
+        // domain here so a future edit can't accidentally change it to
+        // something real (e.g. "users.noreply.github.com") without this
+        // test catching it.
+        let vars = git_identity_env_vars("camper");
+        let map: std::collections::HashMap<&str, String> = vars.into_iter().collect();
+        assert!(map["GIT_AUTHOR_EMAIL"].ends_with("@agentmux.local"));
+        assert!(map["GIT_COMMITTER_EMAIL"].ends_with("@agentmux.local"));
+    }
 }
