@@ -1,5 +1,17 @@
 # AgentMux Version History
 
+## 0.55.22 — 2026-08-23
+
+- fix(muxspect): wire transcript_request jekt tier enforcement into the WAN delivery path (Phase C)
+- feat(layout): cross-fade the remaining pane-mount hard cuts (Phase 3-4)
+- fix(editor): align markdown preview scrollbar to the pane edge, matching source mode
+- fix(agent): stop Activity Dock flashing stale shell rows on pane load
+- feat(ci): nightly workflow auto-tags and publishes the latest pending version bump
+- fix(agent-spawn): inject per-agent git commit identity, stop misattributing every agent's commits to whoever's real identity sits in the shared machine gitconfig
+- fix(activity-dock): coalesce event-triggered refreshes to stop a pane-reopen request storm
+- fix(editor): use a real native scrollbar for markdown preview, matching source exactly
+
+
 ## 0.55.21 — 2026-08-22
 
 - feat(tabs): quick-fork keybinding, non-Claude fallback banner, and inherit-identity variant
