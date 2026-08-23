@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
-    COMMAND_SHELL_EXEC, COMMAND_SHELL_STOP,
-    CommandShellExecData, ShellExecResult, CommandShellStopData,
+    COMMAND_SHELL_EXEC, COMMAND_SHELL_STOP, COMMAND_SHELL_STATUS,
+    CommandShellExecData, ShellExecResult, CommandShellStopData, CommandShellStatusData,
 };
 use crate::backend::base::{expand_home_dir_safe, msys_to_windows_path};
 
@@ -27,6 +27,46 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let stopped = registry.stop(&req.shell_id);
                 tracing::info!(shell_id = %req.shell_id, stopped, "shellstop");
                 Ok(Some(serde_json::json!({ "stopped": stopped })))
+            })
+        }),
+    );
+
+    // shellstatus → query a shell's current running state. Used by
+    // useShellNodeStream to resolve the TRUE status of a shell whose
+    // `shell_node_create` event is being replayed on pane mount/reconnect
+    // (persist:64 ring), instead of assuming "running" — the frontend can't
+    // otherwise tell a live spawn apart from a replay of an already-long-
+    // exited shell, which was flashing stale rows in the Activity Dock.
+    // See docs/retro/retro-activity-dock-stale-shell-flash-on-load-2026-08-22.md.
+    //
+    // Reports `known: false` (rather than collapsing into `running: false`,
+    // like the MCP-facing HTTP route does) when no registry entry exists yet
+    // — the shell may simply not have finished spawning/registering (see
+    // `get_status_if_known`'s doc comment for the exact race this closes:
+    // reagent P1 on PR #2770, a genuinely live shell misreported as already
+    // exited). The frontend treats `known: false` as "don't correct."
+    let shell_sessions_status = state.shell_sessions.clone();
+    engine.register_handler(
+        COMMAND_SHELL_STATUS,
+        Box::new(move |data, _ctx| {
+            let registry = shell_sessions_status.clone();
+            Box::pin(async move {
+                let req: CommandShellStatusData = serde_json::from_value(data)
+                    .map_err(|e| format!("shellstatus: {e}"))?;
+                match registry.get_status_if_known(&req.shell_id) {
+                    Some(s) => Ok(Some(serde_json::json!({
+                        "known": true,
+                        "running": s.running,
+                        "exit_code": s.exit_code,
+                        "line_count": s.line_count,
+                    }))),
+                    None => Ok(Some(serde_json::json!({
+                        "known": false,
+                        "running": false,
+                        "exit_code": null,
+                        "line_count": 0,
+                    }))),
+                }
             })
         }),
     );
@@ -348,4 +388,91 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::rpc_types::RpcMessage;
+    use crate::backend::shell_node::ShellStatusInfo;
+    use parking_lot::Mutex;
+
+    // Seed a shell status directly (mirrors shell_node.rs's own
+    // register_running_for_block/register_exited test helpers) — avoids
+    // spawning a real child process just to exercise the RPC handler's
+    // JSON shape.
+    fn seed_status(state: &AppState, shell_id: &str, running: bool, exit_code: Option<i32>) {
+        let (tx, _rx) = tokio::sync::oneshot::channel::<()>();
+        let status = Arc::new(Mutex::new(ShellStatusInfo {
+            running,
+            exit_code,
+            line_count: 3,
+            ..Default::default()
+        }));
+        state.shell_sessions.register_full(shell_id.to_string(), tx, None, status);
+    }
+
+    async fn call_shellstatus(state: &AppState, shell_id: &str) -> serde_json::Value {
+        let (engine, mut output_rx) = WshRpcEngine::new();
+        register_shell_handlers(&engine, state);
+        engine.handle_message(RpcMessage {
+            command: "shellstatus".to_string(),
+            reqid: "req-shellstatus".to_string(),
+            data: Some(serde_json::json!({ "shell_id": shell_id })),
+            ..Default::default()
+        });
+        let resp = tokio::time::timeout(std::time::Duration::from_secs(1), output_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        resp.data.unwrap()
+    }
+
+    #[tokio::test]
+    async fn shellstatus_reports_running_shell() {
+        let state = crate::server::tests::test_state();
+        seed_status(&state, "sh-running", true, None);
+        let data = call_shellstatus(&state, "sh-running").await;
+        assert_eq!(data["known"], serde_json::json!(true));
+        assert_eq!(data["running"], serde_json::json!(true));
+        assert_eq!(data["line_count"], serde_json::json!(3));
+        assert!(data.get("exit_code").map_or(true, |v| v.is_null()));
+    }
+
+    #[tokio::test]
+    async fn shellstatus_reports_exited_shell_with_exit_code() {
+        let state = crate::server::tests::test_state();
+        seed_status(&state, "sh-exited", false, Some(0));
+        let data = call_shellstatus(&state, "sh-exited").await;
+        assert_eq!(data["known"], serde_json::json!(true));
+        assert_eq!(data["running"], serde_json::json!(false));
+        assert_eq!(data["exit_code"], serde_json::json!(0));
+    }
+
+    #[tokio::test]
+    async fn shellstatus_reports_exited_err_shell() {
+        let state = crate::server::tests::test_state();
+        seed_status(&state, "sh-failed", false, Some(1));
+        let data = call_shellstatus(&state, "sh-failed").await;
+        assert_eq!(data["known"], serde_json::json!(true));
+        assert_eq!(data["running"], serde_json::json!(false));
+        assert_eq!(data["exit_code"], serde_json::json!(1));
+    }
+
+    // Reagent P1 on PR #2770: a shell with no registry entry at all — either
+    // a genuinely unknown id, OR (the actual race that motivated this)
+    // `shell_node_create` was published but the runner hasn't reached
+    // `register_full` yet (still spawning the child process). Both look
+    // identical to this handler, and BOTH must report `known: false`, not
+    // the same shape as a genuinely exited shell — otherwise a live shell
+    // caught in that race gets misreported as failed for its entire run
+    // (ShellChunkAppend never restores a status once set).
+    #[tokio::test]
+    async fn shellstatus_unknown_id_reports_known_false() {
+        let state = crate::server::tests::test_state();
+        let data = call_shellstatus(&state, "sh-never-existed").await;
+        assert_eq!(data["known"], serde_json::json!(false));
+        assert_eq!(data["running"], serde_json::json!(false));
+        assert!(data.get("exit_code").map_or(true, |v| v.is_null()));
+    }
 }
