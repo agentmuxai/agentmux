@@ -1,6 +1,6 @@
 # SPEC — Agent tool-call tones (subliminal "talking" voice)
 
-**Status:** implemented — core feature shipped in commit `4bda9ce88` ("per-tool-call subliminal tone voice"), with several follow-up settings/UI fixes since (#2668, #2669, #2689). Verified 2026-08-23: `frontend/app/notification/sound/tool-tones.ts` implements the exact G-major-pentatonic design this spec specifies; the `notify:tooltones:scope` setting (`all`/`focused`) matches §3.3's design.
+**Status:** implemented — core feature shipped in #1301 ("sound notifications + per-tool subliminal voice", commit `4bda9ce88`), with several follow-up settings/UI fixes since (#2668, #2669, #2689). Verified 2026-08-23: `frontend/app/notification/sound/tool-tones.ts` implements the exact G-major-pentatonic design this spec specifies; the `notify:tooltones:scope` setting (`all`/`focused`) matches §3.3's design. (First pass of this status correction cited only the bare commit hash, not a PR number — Codex correctly flagged that as insufficient per this repo's own lifecycle rule; #1301 found on a second search.)
 **Date:** 2026-06-05
 **Author:** agent2
 **Builds on:** `docs/specs/SPEC_SOUND_NOTIFICATIONS_2026_06_05.md` (v1 sound subsystem — bus, player, settings plumbing)
