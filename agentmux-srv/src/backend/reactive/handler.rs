@@ -581,9 +581,12 @@ impl Handler {
         // verified sender when the RESPONDING agent's own
         // conversation_visibility is `ask` (or `trusted_peers` with a
         // non-allow-listed requester) — `req.transcript_request_escalate_forced`,
-        // resolved server-side in `handle_reactive_inject` against that
-        // agent's own setting (meaningless/always-false unless
-        // `is_transcript_request` is also true). A valid signature answers
+        // resolved server-side by `resolve_transcript_request_tier_fields`
+        // against that agent's own setting, called from both delivery paths
+        // that reach `Handler` (`handle_reactive_inject` for
+        // host/cross-channel/LAN, `muxbus::cloud_subscriber::sync_agent_reactive`
+        // for WAN) — meaningless/always-false unless `is_transcript_request`
+        // is also true. A valid signature answers
         // *who is asking*, not *whether this content should be disclosed* —
         // identity proof alone doesn't relax that question, unlike every
         // other TIER=sensitive case above.
