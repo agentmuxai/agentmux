@@ -34,6 +34,17 @@ on:
 permissions:
   contents: read
 
+# Without this, an overlapping workflow_dispatch run and the automatic
+# workflow_run trigger (or two workflow_run firings) could both read the
+# same untagged pending release and race to tag/push it. The second push
+# would just fail (tag already exists) rather than corrupt anything, but
+# it's an easily-avoided race for a job with a push side effect. Queue
+# rather than cancel — killing a run mid-push could leave a tag pushed
+# with no corresponding downstream build ever having started.
+concurrency:
+  group: nightly-release
+  cancel-in-progress: false
+
 jobs:
   detect-and-tag:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
