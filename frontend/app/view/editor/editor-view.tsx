@@ -911,7 +911,10 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                                 }
                             >
                                 <div class="editor-preview-content">
-                                    <Markdown textAtom={() => liveDoc()} />
+                                    <Markdown
+                                        textAtom={() => liveDoc()}
+                                        contentClass="editor-preview-markdown-content"
+                                    />
                                 </div>
                             </div>
                         </Show>
