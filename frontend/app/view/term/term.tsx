@@ -144,10 +144,17 @@ function TerminalView(props: ViewComponentProps<TermViewModel>): JSX.Element {
         setActiveBlockInStack(layoutModel, node.id, targetBlockId);
         scheduleLeafRevealLift(node.id, gen);
     };
+    // Gated the same as handleTermTabSwitch above (reagent's follow-up
+    // review of PR #2761): closing the active member of a multi-member
+    // stack reassigns activeBlockId and evicts the NodeModel, the same
+    // forced-remount pattern as switching. SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md.
     const handleTermTabClose = (targetBlockId: string) => {
         const node = layoutModel.getNodeByBlockId(blockId);
         if (!node) return;
-        void closeBlockInStack(layoutModel, node.id, targetBlockId);
+        const gen = holdLeafRevealGate(node.id);
+        void closeBlockInStack(layoutModel, node.id, targetBlockId).finally(() => {
+            scheduleLeafRevealLift(node.id, gen);
+        });
     };
     const handleTermTabAdd = async () => {
         const initialNode = layoutModel.getNodeByBlockId(blockId);

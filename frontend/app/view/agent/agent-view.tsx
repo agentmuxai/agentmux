@@ -368,11 +368,17 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
     // that block; last member closes the pane), for a cross-pane fork tab
     // it's that other pane (same semantics apply there). closeBlockInStack
     // guards against a blockId that isn't a member, so a stale tab entry
-    // can't close the wrong thing.
+    // can't close the wrong thing. Gated the same as handleTabSwitch
+    // (reagent's follow-up review of PR #2761): popping the active member
+    // out of a multi-member stack reassigns activeBlockId and evicts the
+    // NodeModel, the identical forced-remount pattern as switching.
     const handleTabClose = (targetBlockId: string) => {
         const node = layoutModel.getNodeByBlockId(targetBlockId);
         if (!node) return;
-        void closeBlockInStack(layoutModel, node.id, targetBlockId);
+        const gen = holdLeafRevealGate(node.id);
+        void closeBlockInStack(layoutModel, node.id, targetBlockId).finally(() => {
+            scheduleLeafRevealLift(node.id, gen);
+        });
     };
     // Double-click a tab to rename it (only meaningful once it has launched
     // an agent — a still-blank picker tab has nothing to rename). TWO writes
