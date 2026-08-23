@@ -120,6 +120,12 @@ import { useAgentStream } from "./useAgentStream";
 // cursor, recolor arbitrary regions, or otherwise corrupt the shared terminal's
 // rendered state (this text is not our own trusted output; it's shell-command
 // output the user chose to run).
+// Matches BrainSpinner.scss's own `.is-fading` opacity transition duration —
+// the AgentPicker->AgentPresentationView cross-fade (AgentViewWrapper, below)
+// reuses the same visual timing so the two fades feel like one brand moment
+// rather than two differently-tuned animations back to back.
+const PICKER_FADE_OUT_MS = 200;
+
 const ANSI_SEQUENCE_RE = new RegExp(
     "[\\u001B\\u009B][[\\]()#;?]*(?:(?:(?:(?:;[-a-zA-Z\\d/#&.:=?%@~_]+)*|" +
         "[a-zA-Z\\d]+(?:;[-a-zA-Z\\d/#&.:=?%@~_]*)*)?\\u0007)|" +
@@ -166,6 +172,54 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
     // back: closing this reading posture is closing the tab, not swapping
     // content in place. See SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.1.
     const isHistoryTab = () => !!block()?.meta?.[HISTORY_TAB_FOR_META_KEY];
+
+    // Cross-fade AgentPicker -> AgentPresentationView instead of an instant
+    // hard cut when this SAME block gains an agentId in place (launching an
+    // agent from a blank "+" tab's picker — no block-stack mutation, no
+    // node remount, so PR #2761's leaf reveal gate never covers this
+    // transition at all). SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md
+    // §2.3/§4 Option B. `pickerVisible`'s initial value is read once, at
+    // this component's own construction — correct either way: if agentId()
+    // is already set at mount (a fresh remount straight into a launched
+    // agent), there's no picker-to-content transition to smooth, so it
+    // should start false; if empty, the fallback below needs to render.
+    const [pickerVisible, setPickerVisible] = createSignal(!agentId());
+    const [pickerFadingOut, setPickerFadingOut] = createSignal(false);
+    let pickerFadeRaf: number | undefined;
+    let pickerFadeTimeout: ReturnType<typeof setTimeout> | undefined;
+    onCleanup(() => {
+        if (pickerFadeRaf !== undefined) cancelAnimationFrame(pickerFadeRaf);
+        clearTimeout(pickerFadeTimeout);
+    });
+    createEffect(
+        on(
+            agentId,
+            (id) => {
+                if (pickerFadeRaf !== undefined) cancelAnimationFrame(pickerFadeRaf);
+                clearTimeout(pickerFadeTimeout);
+                if (id) {
+                    if (!pickerVisible()) return; // already past the transition
+                    // One rAF so the picker paints at full opacity at least
+                    // once before the fade starts — flipping straight to
+                    // the "is-fading" class in this same tick would apply
+                    // opacity:0 on the very first paint, with nothing to
+                    // visibly transition from.
+                    pickerFadeRaf = requestAnimationFrame(() => setPickerFadingOut(true));
+                    pickerFadeTimeout = setTimeout(() => {
+                        setPickerVisible(false);
+                        setPickerFadingOut(false);
+                    }, PICKER_FADE_OUT_MS);
+                } else {
+                    // Lost the agentId (not a normal path, but stay
+                    // correct) — show the picker again immediately, no
+                    // fade needed going this direction.
+                    setPickerFadingOut(false);
+                    setPickerVisible(true);
+                }
+            },
+            { defer: true }
+        )
+    );
 
     // Portal target for the marching-ants progress bar (below) — the bar's
     // own working-state/turn-phase reads live inside AgentPresentationView
@@ -499,14 +553,39 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
                     <Show
                         when={isHistoryTab()}
                         fallback={
-                            <Show when={agentId()} fallback={<AgentPicker model={model} />}>
-                                <AgentPresentationView
-                                    model={model}
-                                    agentId={agentId()}
-                                    agentDefinitions={agentDefinitions}
-                                    progressBarMount={progressBarSlot}
-                                />
-                            </Show>
+                            <>
+                                <Show when={agentId()}>
+                                    <AgentPresentationView
+                                        model={model}
+                                        agentId={agentId()}
+                                        agentDefinitions={agentDefinitions}
+                                        progressBarMount={progressBarSlot}
+                                    />
+                                </Show>
+                                {/* Cross-fades out on top of AgentPresentationView
+                                    once agentId() is set, instead of the two
+                                    Shows above hard-swapping instantly — see
+                                    pickerVisible/pickerFadingOut above.
+                                    SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.3. */}
+                                <Show when={pickerVisible()}>
+                                    <div
+                                        class="agent-picker-host"
+                                        classList={{
+                                            // Applied the instant agentId()
+                                            // is set (same render as
+                                            // AgentPresentationView
+                                            // appearing) so this never sits
+                                            // in normal flow alongside it,
+                                            // even for one frame.
+                                            "is-overlay": !!agentId(),
+                                            "is-fading": pickerFadingOut(),
+                                            "is-reduced-motion": atoms.prefersReducedMotionAtom(),
+                                        }}
+                                    >
+                                        <AgentPicker model={model} />
+                                    </div>
+                                </Show>
+                            </>
                         }
                     >
                         {/* No progressBarMount here — a history tab is a

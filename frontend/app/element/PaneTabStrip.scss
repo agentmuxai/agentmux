@@ -25,6 +25,17 @@
     display: inline-flex;
     align-self: flex-start;
     max-width: 100%;
+    // Width-transition-on-tab-count-change (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md
+    // §2.4) is implemented in PaneTabStrip.tsx via measured JS (a FLIP-
+    // style hold-old-width/force-reflow/transition-to-new-width), NOT here
+    // — a plain CSS `transition: width` (even with `interpolate-size:
+    // allow-keywords`) never fires for this case: `width` stays `auto` the
+    // whole time here, only its DOM-content-driven USED value changes, and
+    // CSS transitions only animate a discrete SPECIFIED-value change
+    // (Codex's review of PR #2768). See PaneTabStrip.tsx's `animateWidth`
+    // prop and its own comment for the full mechanism, including why it's
+    // opt-in per consumer rather than automatic here.
+    //
     // Real, un-zoomed pixels — deliberately NOT `zoom: var(--pane-tab-strip-zoom)`
     // here. See docs/specs/SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md
     // §A.1-§A.2: `window-header.*.scss` already hit a real platform
