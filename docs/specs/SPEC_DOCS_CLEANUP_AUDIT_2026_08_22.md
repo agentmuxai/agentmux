@@ -28,14 +28,15 @@ worth.
 | `docs/specs/` (top level) | **686** |
 | `docs/specs/archive/` | 26 |
 | `docs/specs/evidence/` | 3 |
-| top-level `specs/` | **103** |
+| top-level `specs/` (top level) | **102** |
+| top-level `specs/archive/` | **33** — missed in the first pass of this audit, caught by review; see §2.3 |
 | `docs/retro/` | 158 |
 | `docs/analysis/` | 132 |
 | `docs/reports/` | 40 |
 | `docs/status/` | 13 |
 | `.changesets/` (pending) | 18 |
 
-Total across just the spec/retro/analysis/report/status families: **~1,161
+Total across just the spec/retro/analysis/report/status families: **~1,211
 files.** A full manual audit of all of them is not a reasonable ask of any
 single pass, human or agent — §5 scopes what's actually worth doing now vs.
 what needs its own tooling.
@@ -72,50 +73,88 @@ I found this exact same rot on a smaller scale earlier this session:
 Draft... not yet implemented" three days after it shipped in #2751 — I
 corrected that one directly (§5.1 covers doing the equivalent at scale).
 
-### 2.2 Duplicate/superseding specs never marked as such
+### 2.2 Retracted: "duplicate specs never marked as such" — the original claim was wrong
 
-The lifecycle convention has a `superseded` status with a mandatory
-`**Superseded-by:**` pointer specifically to prevent this — it isn't being
-used. Found (dates confirm which came first):
+**This section originally claimed five pairs of same-subsystem, close-dated
+specs were undocumented duplicates.** A PR review (Codex, on the PR carrying
+this spec) caught that the bundles pair's actual superseded-by targets were
+different documents entirely — which prompted re-checking all five pairs
+against their own file content instead of just matching on topic + date
+proximity (the method originally used, and the actual mistake). Result: **all
+five were wrong**:
 
-- `docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md` and
-  `docs/specs/archive/SPEC_TRUST_CENTER_RENAME_2026_07_02.md` — same date,
-  near-identical title, both archived with no cross-reference.
-- `docs/specs/archive/SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md` →
-  `docs/specs/archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md` (9 days
-  apart, same topic).
-- `docs/specs/archive/SPEC_SHARED_BUNDLES_AND_DEFINITIONS_2026_05_19.md` →
-  `docs/specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md` (3 days apart).
-- `docs/specs/SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md` →
-  `docs/specs/SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md` (~6 weeks apart,
-  sequential evolution of the same bundle subsystem).
-- `docs/specs/ARCHITECTURE_ARMORY_2026_07_20.md` vs.
-  `docs/specs/ARCHITECTURE_ARMORY_FOUNDATION_CONSOLIDATION_2026_08_19.md` (1
-  month apart, same subsystem).
+- `SPEC_TRUST_CENTER_RENAME_2026_07_02.md` already states *"Superseded by
+  `SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md`"* in its own archive
+  banner. Already correctly cross-referenced.
+- `SPEC_OAUTH_IN_IDENTITY_BUNDLES_2026_05_13.md` already states *"Superseded
+  by `SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md`"*. Already correctly
+  cross-referenced.
+- `SPEC_SHARED_BUNDLES_AND_DEFINITIONS_2026_05_19.md` is superseded by
+  `SPEC_GLOBAL_IDENTITY_MEMORY_DRONE_2026_06_24.md` (not by
+  `SPEC_BUNDLE_MANAGEMENT_2026_05_22.md`, which is itself superseded by
+  `specs/archive/SPEC_TRUST_CENTER_2026_06_15.md`) — the Codex-caught error.
+  Sharing a subsystem and nearby dates doesn't make two docs successive
+  versions of each other.
+- `SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md` and
+  `SPEC_BUNDLE_AS_CONTAINER_V2_2026_08_17.md` are both explicitly sequential
+  phases of the *same* governing proposal
+  (`specs/PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md`) — the second
+  builds on the first (v2 of a container model, referencing v1's shipped
+  primitives), not a replacement of it. Not a duplicate at all.
+- `ARCHITECTURE_ARMORY_2026_07_20.md` and
+  `ARCHITECTURE_ARMORY_FOUNDATION_CONSOLIDATION_2026_08_19.md`: the latter's
+  own header lists the former under **Related**, not as something it
+  replaces — one is a living reference doc, the other an explicit
+  incremental "north star" that cites the reference doc as background. Not
+  a duplicate.
 
-A reader hitting the older doc in any of these pairs has no way to know a
-newer, authoritative version exists — exactly the failure mode `superseded` +
-`Superseded-by:` was designed to prevent.
+**Net result: I have zero verified examples of this problem right now.**
+The lifecycle convention's `superseded` status + mandatory
+`**Superseded-by:**` pointer may still be worth double-checking at scale
+(§5.5's deferred full audit would surface real cases if any exist), but this
+spec no longer claims to have found any, and the Phase 1 action item to add
+pointers for these five pairs (originally in §5.1) is withdrawn.
 
-### 2.3 The directory convention itself is inconsistently applied
+### 2.3 Corrected: TWO archive directories are both active, not one "wrong" one
 
-`docs/specs/README.md` states specs move to `specs/archive/` once
-implementation is complete. In practice, archived specs land in
-`docs/specs/archive/` instead (26 files there today) — the README describes
-a flow that isn't what's actually happening. Either the README is wrong or
-the archiving has been happening in the wrong place; **this needs a decision
-before any bulk-move cleanup, not a unilateral pick** — see Open Question 1.
+**Original claim (wrong):** archived specs only land in `docs/specs/archive/`
+(26 files) despite the README saying `specs/archive/`, implying the README
+was simply never followed. **Corrected after Codex flagged this**: a
+top-level `specs/archive/` also exists, and holds **33 files** — more than
+`docs/specs/archive/`'s 26. Both are real, both are in active use. This
+isn't "the README is wrong," it's two archive locations I hadn't fully
+checked.
 
-### 2.4 `CLAUDE.md`'s own claim about top-level `specs/` is stale
+A closer look at both suggests (not yet confirmed) a two-tier explanation
+rather than a conflict: files across *both* directories carry the same
+`"> **Archived 2026-07-12.** ... Consolidated tracking: issue #2024."` banner
+— e.g. `docs/specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md` and
+`specs/archive/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md` both
+have it. That reads like a single 2026-07-12 consolidation event (issue
+#2024) added archived-banners to specs wherever they already physically
+lived, rather than moving everything into one canonical folder — plausibly
+`specs/archive/` holds specs that had already been promoted to the approved
+`specs/` tier before being archived (matching the README's stated flow
+exactly), while `docs/specs/archive/` holds specs archived directly from
+draft stage, without ever going through the `specs/` promotion step. **This
+is a hypothesis, not a confirmed finding** — it would need reading issue
+#2024 itself or more of the consolidation's own history to confirm. Flagged
+as Open Question 1, replacing the original (wrong) "pick one" framing.
 
-`CLAUDE.md` says: *"Old specs in `specs/` use `AGENTBUS_*` — those are
-historical documents describing the predecessor service."* Checked: only
-**5 of 103** files in `specs/` actually mention `AGENTBUS`. The other 98 cover
-still-relevant, still-referenced areas (Armory, MCP/Skills primitives) —
-`CLAUDE.md` itself elsewhere points to `specs/SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md`
-as current guidance in the same file that calls the directory "old." This is
-a documentation bug in a file every agent reads as ground truth for how to
-behave — worth fixing independent of anything else in this spec (see §5.2).
+### 2.4 Withdrawn: the `CLAUDE.md` / `specs/` AGENTBUS claim
+
+**Original claim:** `CLAUDE.md`'s line *"Old specs in `specs/` use
+`AGENTBUS_*`... those are historical documents"* is stale because only 5 of
+103 files in `specs/` actually mention `AGENTBUS`. **Withdrawn** — Codex's
+review correctly pushed back: the sentence says *"old specs"* (a subset),
+not *"all specs"*; counting total `AGENTBUS` mentions across the whole
+directory doesn't establish that the sentence is inaccurate about the subset
+it's actually describing. My original reasoning conflated "most files in
+`specs/` aren't AGENTBUS-related" (true, and unremarkable — a directory can
+contain both current and superseded material) with "the sentence claims all
+files are AGENTBUS-related" (never actually claimed). No fix recommended
+here; the corresponding Phase 2 action item (§4, originally item 2) is
+withdrawn along with it.
 
 ### 2.5 `docs/status/` has apparently-still-open items with no resolution marker
 
@@ -142,9 +181,10 @@ unlike the 686/103-file spec directories.
 
 ## 3. What this spec does NOT try to solve
 
-- **A full manual status-audit of all 789 spec files** (`docs/specs/` +
-  top-level `specs/`) — at a ~40% stale rate on the sample, that's plausibly
-  300+ files needing a corrected Status line. That's not a "cleanup pass," 
+- **A full manual status-audit of all ~824 spec files** (`docs/specs/` +
+  `docs/specs/archive/` + top-level `specs/` + `specs/archive/`) — at a ~40%
+  stale rate on the (small, `docs/specs/`-only) sample, that's plausibly
+  300+ files needing a corrected Status line. That's not a "cleanup pass,"
   it's a multi-day project of its own. §5 scopes a bounded, high-value subset
   instead.
 - **Auto-deleting anything.** Every action below is move-to-archive or
@@ -156,31 +196,25 @@ unlike the 686/103-file spec directories.
 
 ## 4. Proposed changes to the convention itself (before any bulk pass)
 
-1. **Reconcile the archive-location mismatch (§2.3).** Recommend: keep
-   `docs/specs/archive/` as the real destination (it's where the actual
-   archiving has been happening, 26 files' worth of precedent) and fix
-   `docs/specs/README.md` to say so, rather than trying to migrate 26
-   already-archived files to match a README that was seemingly never
-   followed. This is a one-line doc fix, not a file-mover.
-2. **Fix `CLAUDE.md`'s stale characterization of `specs/`** (§2.4) — replace
-   the "old, AGENTBUS-only" framing with something accurate (e.g. "approved
-   specs move here from `docs/specs/` once ready for implementation; most are
-   current and actively referenced — only a handful of pre-`muxbus`-rename
-   docs use the historical `AGENTBUS_*` naming").
+Both original items in this section (§2.3's archive-location "fix" and
+§2.4's `CLAUDE.md` fix) are **withdrawn** — see the corrections in §2.3/§2.4
+above. Nothing here is confidently recommended yet; §2.3's two-tier
+hypothesis would need confirming (reading issue #2024) before any
+convention change is proposed.
 
 ## 5. Phased execution plan
 
 ### 5.1 Phase 1 — targeted status-header correction (bounded, do now)
 Re-verify and correct the Status line on the exact 6 stale specs identified
-in §2.1 (concrete, already-confirmed list — no further investigation needed)
-plus the 5 duplicate/superseded pairs from §2.2 (10 files, add
-`Superseded-by:` pointers). **11-16 files total, fully specified above** —
-small enough to execute directly as a follow-up to this spec, not a new
-research phase.
+in §2.1 (concrete, already-confirmed list, double-checked against current
+headers before finalizing this spec — no further investigation needed).
+**6 files** — the 5 duplicate/superseded-pair file edits originally proposed
+here are withdrawn along with §2.2's retracted claim.
 
-### 5.2 Phase 2 — the two documentation-bug fixes from §4
-Both are single-file edits (`docs/specs/README.md`, `CLAUDE.md`). Do
-alongside Phase 1.
+### 5.2 Phase 2 — withdrawn
+Both documentation-bug fixes this phase covered (§4's original items 1 and
+2) are withdrawn per §2.3/§2.4's corrections. Nothing to execute here unless
+§2.3's hypothesis is confirmed and turns into an actual recommendation.
 
 ### 5.3 Phase 3 — `docs/status/` resolution sweep (small, bounded)
 Only 13 files. For each: check whether the underlying issue is actually
@@ -195,38 +229,48 @@ has since been fixed without a resolution note (mirroring §5.3's method) —
 only worth doing if Phase 3 turns up a pattern suggesting this family has the
 same problem; not committing to it here without evidence.
 
-### 5.5 Explicitly deferred — the full 789-file spec audit
-Given the ~40% stale rate found on a 15-file sample, a defensible estimate is
-several hundred specs need a corrected Status line. Doing this by hand,
-spec-by-spec, doesn't scale. Recommend (not designed in full here, flagged
-for its own follow-up): a batch process — one agent per spec (or per small
-batch) checks "does the described feature/file exist in current code?" and
-proposes a corrected Status line for human review, rather than auto-editing
-686+103 files unattended. This is genuinely a job suited to a fan-out
-workflow (many independent, identical-shaped checks) rather than sequential
-manual work — flagged as a candidate if the user wants to commit to that
-scale of effort, not started here.
+### 5.5 Explicitly deferred — the full ~824-file spec audit
+Given the ~40% stale rate found on a 15-file `docs/specs/`-only sample, a
+defensible estimate is several hundred specs need a corrected Status line
+across all four directories combined. Doing this by hand, spec-by-spec,
+doesn't scale, **and this spec's own track record in §2.2/§2.3/§2.4 is a
+concrete warning against doing it via quick pattern-matching**: shallow
+topic/date matching produced five confidently-stated but false claims in
+this very document, caught only because a reviewer checked the actual file
+content. Any batch process for the full audit must verify against real file
+content (the way §2.1's spot-check did, and the way §2.2's re-check should
+have from the start), not proximity heuristics. Recommend (not designed in
+full here, flagged for its own follow-up): one agent per spec (or small
+batch) reads the spec, checks whether its described feature/file exists in
+current code AND whether the spec's own text already contains a
+Superseded-by/Archived banner, and proposes a corrected Status line for
+human review — never auto-editing unattended. Flagged as a candidate if the
+user wants to commit to that scale of effort, not started here.
 
 ## Open questions
 
-1. **Archive-location convention (§2.3/§4.1)** — confirm before touching
-   anything: is `docs/specs/archive/` the intended real destination (this
-   spec's recommendation), or was the README's `specs/archive/` the actual
-   intent and the 26 existing archived files are themselves misplaced and
-   need moving? These are different remediations.
+1. **Archive-location convention (§2.3)** — confirm the two-tier hypothesis
+   (promoted-then-archived specs in `specs/archive/` vs. archived-from-draft
+   specs in `docs/specs/archive/`) before proposing any convention change —
+   likely needs reading the issue #2024 consolidation history itself, not
+   more file sampling.
 2. **Appetite for §5.5's full audit** — this spec deliberately scopes Phase
-   1 to the 11-16 files already identified by name, not a commitment to
-   fix all ~300 estimated stale specs. Confirm whether that larger effort is
-   wanted (and at what scale/budget) before committing to it.
+   1 to the 6 files already identified and double-checked in §2.1, not a
+   commitment to fix an estimated 300+ stale specs across ~824 files.
+   Confirm whether that larger effort is wanted (and at what scale/budget)
+   before committing to it — and if so, budget real per-file verification
+   time, not a repeat of this spec's own §2.2 mistake.
 
 ## References
 
-- `docs/specs/README.md` — the stated directory-flow convention this spec
-  found inconsistently followed.
+- `docs/specs/README.md` — the stated directory-flow convention; §2.3's
+  corrected finding means this needs re-reading against the two-tier
+  hypothesis, not treated as simply "wrong."
 - `docs/specs/SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md` — origin of the
   closed Status enum and its own warning about status rot.
 - `docs/specs/SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md` — corrected
   earlier this session as a concrete single-file example of exactly the
-  pattern this spec quantifies at scale.
-- `CLAUDE.md` — contains the stale `specs/`-is-legacy claim this spec
-  recommends fixing (§2.4/§4.2).
+  status-rot pattern §2.1 quantifies at scale.
+- PR review comments on the PR carrying this spec (Codex) — caught the
+  false claims in §2.2/§2.3/§2.4; retained here as the actual source of
+  those corrections rather than silently rewritten away.
