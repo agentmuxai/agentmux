@@ -231,6 +231,48 @@ backend/frontend tests for the new `known` field. Re-verified: `cargo test
 -p agentmux-srv` (2750 passed), `npx tsc --noEmit` (clean), `npx vitest run`
 (new shellStatusCorrection tests: 5/5 passed).
 
+**Round 3 — P1, same underlying pattern, a different pair of racers.**
+ReAgent's re-review of the round-2 commit (and, per its own report,
+matching a finding chatgpt-codex-connector had already left on the same
+line) caught that the fix STILL had an unguarded race: the synthesized
+`ShellStatusCommand` correction and the shell's REAL exit/stop event
+(delivered independently via the already-subscribed `shell:<id>` chunk
+ring) have no ordering guarantee relative to EACH OTHER either. If the real
+event won that race — the shell genuinely exits or is stopped by the user
+before the status RPC resolves — the correction callback still fired
+unconditionally once its promise settled, overwriting the already-correct
+row (right status, including `"stopped"`, which `ShellStatusResponse` has
+no way to express at all — only `exited-ok`/`exited-err`; and the real
+exact `exitedAt`) with a stale, less-accurate synthesized one (wrong
+status, `exitedAt` hardcoded to `spawnedAt`). `ShellStatusUpdate` in the
+reducer overwrites a node's status unconditionally, so nothing would have
+undone the corruption on its own.
+
+**Fix:** a `reallyResolved` `Set<string>` in the hook's closure, populated
+the instant a shell's real exit/stop event lands (`handleShellChunk`'s
+`exit` branch). The correction callback checks it FIRST, before applying
+anything: if the real event already landed, skip — trust it, never
+overwrite. Safe by construction under JS's single-threaded execution model:
+the check and the (conditional) push both run synchronously within the
+same callback invocation, so no other event handler can interleave between
+"check the set" and "act on it." The reverse order (correction lands first,
+real event arrives later) was already safe without this guard — the real
+event's own unconditional overwrite is exactly the desired behavior when
+authoritative data arrives after a synthesized guess.
+
+Added a genuine ordering test (`useShellNodeStream.test.ts`, new
+`describe` block, mocking `waveEventSubscribe`/`ShellStatusCommand` and
+controlling the status-RPC promise's resolution timing directly) proving
+the guard actually suppresses the stale correction — not merely that the
+two happen to agree: the test resolves the status check with a
+DELIBERATELY wrong "already exited, code 1" reading after the real
+`stopped` event has already landed, and asserts `pushShellExit` was still
+called exactly once (the real one). A second test confirms the correction
+still applies normally when it resolves with no real event racing it at
+all. Re-verified: `cargo test -p agentmux-srv` (2750 passed), `npx tsc
+--noEmit` (clean), `npx vitest run` (7/7 in this file, including the 2 new
+ordering tests).
+
 ---
 
 ## What This Is NOT

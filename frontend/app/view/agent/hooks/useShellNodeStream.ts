@@ -89,6 +89,22 @@ export function shellStatusCorrection(
 }
 
 export function useShellNodeStream(opts: UseShellNodeStreamOptions): void {
+    // Shell ids whose REAL terminal event (from the per-shell shell:<id>
+    // ring — handleShellChunk's exit branch below) has already landed. The
+    // ShellStatusCommand correction below and this real exit/stop event are
+    // two independent async round trips with no ordering guarantee either
+    // way; once the real one lands, it must never be overwritten by the
+    // synthesized correction arriving after it — the real event carries the
+    // true status (including "stopped", which ShellStatusResponse has no
+    // way to express at all) and exact exitedAt, while the synthesized one
+    // only distinguishes exited-ok/exited-err and stands in spawnedAt as a
+    // proxy timestamp. reagent P1 round 3 on PR #2770 / codex on the same
+    // line: without this guard, a shell that legitimately exits/stops for
+    // real BEFORE the status check resolves gets its correct row stomped by
+    // a stale, less-accurate one moments later (ShellStatusUpdate in the
+    // reducer overwrites unconditionally, regardless of current status).
+    const reallyResolved = new Set<string>();
+
     // shell_chunk handler — used by the per-shell subscriptions. The payload
     // always carries `shell_id`, so one handler routes correctly. Chunks are
     // delivered via a SINGLE scope (`shell:<id>`); there is no longer a separate
@@ -108,6 +124,7 @@ export function useShellNodeStream(opts: UseShellNodeStreamOptions): void {
             const status: ShellNode["status"] = d.stopped === true
                 ? "stopped"
                 : exitCode === 0 ? "exited-ok" : "exited-err";
+            reallyResolved.add(shellId);
             opts.queue.pushShellExit(shellId, status, exitCode, d.timestamp ?? Date.now());
             opts.queue.scheduleFlush();
             return;
@@ -192,6 +209,12 @@ export function useShellNodeStream(opts: UseShellNodeStreamOptions): void {
             // just queued ever actually paints.
             RpcApi.ShellStatusCommand(TabRpcClient, { shell_id: shellId })
                 .then((status) => {
+                    // The real exit/stop event (a separate, independently-
+                    // racing async round trip via the per-shell scope
+                    // subscribed above) already landed and is authoritative
+                    // — never overwrite it with this synthesized guess. See
+                    // `reallyResolved`'s doc comment.
+                    if (reallyResolved.has(shellId)) return;
                     const correction = shellStatusCorrection(status, spawnedAt);
                     if (!correction) return;
                     opts.queue.pushShellExit(
