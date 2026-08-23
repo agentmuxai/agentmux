@@ -172,7 +172,7 @@ unlike the 686/103-file spec directories.
 
 ### 5.1 Phase 1 — targeted status-header correction (bounded, do now)
 Re-verify and correct the Status line on the exact 6 stale specs identified
-in §2.2 (concrete, already-confirmed list — no further investigation needed)
+in §2.1 (concrete, already-confirmed list — no further investigation needed)
 plus the 5 duplicate/superseded pairs from §2.2 (10 files, add
 `Superseded-by:` pointers). **11-16 files total, fully specified above** —
 small enough to execute directly as a follow-up to this spec, not a new
