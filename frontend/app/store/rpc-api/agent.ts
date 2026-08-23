@@ -390,11 +390,18 @@ export const AgentApi = {
     // in the block's recent history) instead of assuming "running" — the
     // create event itself carries no status, so without this the dock
     // briefly shows every already-long-exited shell as live on load.
+    //
+    // `known: false` means the backend has no registry entry for this id at
+    // all — either a genuinely unknown id, or (the case that matters here)
+    // the shell's runner hasn't reached registration yet, still spawning
+    // the child process. Callers must NOT treat `known: false` as "exited" —
+    // that misreported a genuinely live, freshly-spawned shell as failed for
+    // its entire run (reagent P1 on PR #2770).
     ShellStatusCommand(
         client: RpcClient,
         data: { shell_id: string },
         opts?: RpcOpts,
-    ): Promise<{ running: boolean; exit_code?: number; line_count: number }> {
+    ): Promise<{ known: boolean; running: boolean; exit_code?: number; line_count: number }> {
         return client.rpcCall("shellstatus", data, opts);
     },
 

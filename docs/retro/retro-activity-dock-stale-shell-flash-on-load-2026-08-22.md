@@ -1,11 +1,13 @@
 # Retro: Activity Dock flashes stale shell rows on every pane load
 
 **Date:** 2026-08-22
-**Severity:** Low — cosmetic only, no data loss, nothing re-executed. But it's
-the second time this exact symptom has been reported by the user (first as
-"old long-running processes that are socked" while diagnosing a separate
-cross-channel resume bug, then again directly during manual verification of
-that bug's fix).
+**Severity:** Low for the original bug — cosmetic only, no data loss, nothing
+re-executed. It's the second time this exact symptom has been reported by the
+user (first as "old long-running processes that are socked" while diagnosing
+a separate cross-channel resume bug, then again directly during manual
+verification of that bug's fix). Note the FIX's first draft briefly
+introduced something more severe — see "Review findings" below — caught and
+closed before merge.
 **Observed by:** Camper (Claude agent), reported directly by the user during
 manual testing of PR #2755: "what about the dock items? they show and then
 disappear."
@@ -174,11 +176,60 @@ longer the ONLY path to a correct status.
   both correctly no-op; clean exit, nonzero exit, and missing-exit-code all
   map to the right terminal status/exit code.
 
-Full verification: `cargo test -p agentmux-srv` (2691 passed, 0 failed, up
-from 2687 before this fix), `npx tsc --noEmit` (clean), `npx vitest run`
-(2965 passed; one unrelated `tool-renderers/registry.test.ts` timeout
-confirmed as a pre-existing flake under full-suite parallel load — passes
-cleanly in isolation, no relation to this change).
+Full verification: `cargo test -p agentmux-srv` (2750 passed, 0 failed),
+`npx tsc --noEmit` (clean), `npx vitest run` (2965 passed; one unrelated
+`tool-renderers/registry.test.ts` timeout confirmed as a pre-existing flake
+under full-suite parallel load — passes cleanly in isolation, no relation to
+this change).
+
+---
+
+## Review findings (PR #2770)
+
+ReAgent's review of the initial fix caught a real regression before merge —
+worse than the bug this PR set out to fix, and correctly blocked it:
+
+**P1 — a genuinely live shell could be misreported as failed for its entire
+run.** `handle_shell_create` (`server/mod.rs`) publishes `shell_node_create`
+to the frontend, then `tokio::spawn`s the runner task fire-and-forget —
+`ShellSessionRegistry::register_full` (the call that actually creates the
+registry entry `get_status` reads) only happens once that task reaches it,
+AFTER spawning the real child process. There is no ordering guarantee
+between "frontend receives shell_node_create and fires its status check"
+and "runner reaches register_full." If the status RPC round-trip completed
+first, `get_status` returned its "unknown" default (`running: false,
+exit_code: None`) — byte-for-byte identical to the shape a genuinely
+already-exited shell produces. `shellStatusCorrection` then pushed a false
+`exited-err` correction for a real, live, freshly-spawned shell (e.g. an
+actual `task dev`). Since nothing in the reducer ever restores a status
+once set (`ShellChunkAppend` only appends log content, never flips status
+back), that shell would show as failed in the Activity Dock for its ENTIRE
+real run, until/unless it happened to exit for real later.
+
+**Fix:** added `ShellSessionRegistry::get_status_if_known`, returning
+`Option<ShellStatusInfo>` — `None` when no registry entry exists at all,
+distinct from `Some(status)` with `running: false`. The existing
+`get_status` (used by the MCP-facing `POST /api/v1/shell/status` HTTP
+route) is untouched — that route's documented contract already treats an
+unrecognized id as "not running," which is the correct answer for an agent
+calling `ShellStatus` on an id it made up, and changing it would be a
+breaking change to an unrelated caller. The NEW `shellstatus` RPC command
+(the only consumer that needs the three-way distinction) reports a `known`
+boolean; `known: false` means "don't correct" — the frontend's
+`shellStatusCorrection` now takes `{ known, running, exit_code? }` and
+returns `null` (no correction) whenever `!known`, exactly like it already
+did for a fully-failed RPC call. This closes the race safely: a live shell
+caught mid-registration now correctly falls back to "stay running, let the
+real exit-chunk replay correct it later if needed" — the same degraded-but-
+safe behavior this PR started from for the narrow cases it doesn't fully
+eliminate (see Prevention/Follow-ups below), rather than a false positive.
+
+Added 1 backend test (`shellstatus_unknown_id_reports_known_false`,
+replacing the now-redundant original unknown-id test) confirming `known:
+false` for any id without a registry entry, and updated all existing
+backend/frontend tests for the new `known` field. Re-verified: `cargo test
+-p agentmux-srv` (2750 passed), `npx tsc --noEmit` (clean), `npx vitest run`
+(new shellStatusCorrection tests: 5/5 passed).
 
 ---
 

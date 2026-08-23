@@ -56,9 +56,16 @@ interface ShellNodeCreateData {
  * visible flash of stale rows on every load. See
  * docs/retro/retro-activity-dock-stale-shell-flash-on-load-2026-08-22.md.
  *
- * Returns `null` when no correction is needed: the shell is genuinely still
- * running, or the status check itself failed (best-effort — the real exit
- * event, if any, still corrects this later on its own, just not as fast).
+ * Returns `null` when no correction is needed: `status.known` is `false`
+ * (no registry entry yet — do NOT treat this as "exited") or the shell is
+ * genuinely still running. `known: false` is not a rare edge case: since
+ * `shell_node_create` publishes BEFORE the runner even reaches
+ * registration (see server/mod.rs's `handle_shell_create`), a live,
+ * freshly-spawned shell routinely has no registry entry yet at the exact
+ * moment this check runs. Treating that the same as "confirmed exited"
+ * would misreport a genuinely-running shell (e.g. a real `task dev`) as
+ * failed for its entire run, since nothing ever restores a status once
+ * set — reagent P1 round 2 on PR #2770.
  *
  * `fallbackTimestamp` (the shell's own creation timestamp from the
  * `shell_node_create` payload) stands in for the real exit time, which
@@ -70,10 +77,10 @@ interface ShellNodeCreateData {
  * `shell:<id>` chunk-ring replay delivers its actual exit event.
  */
 export function shellStatusCorrection(
-    status: { running: boolean; exit_code?: number } | null,
+    status: { known: boolean; running: boolean; exit_code?: number },
     fallbackTimestamp: number,
 ): { status: "exited-ok" | "exited-err"; exitCode: number; exitedAt: number } | null {
-    if (status === null || status.running) return null;
+    if (!status.known || status.running) return null;
     return {
         status: status.exit_code === 0 ? "exited-ok" : "exited-err",
         exitCode: status.exit_code ?? -1,
