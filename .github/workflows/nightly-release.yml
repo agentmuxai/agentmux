@@ -1,0 +1,86 @@
+name: Nightly Release — Auto-Publish Pending Version Bump
+
+# Automates the ONE step of the release process that's still manual today:
+# after a `chore: release vX.Y.Z` commit merges to main, someone has to
+# remember to `git tag vX.Y.Z && git push origin vX.Y.Z` before anything
+# actually gets built or published. This workflow does exactly that step,
+# nightly, and nothing else — see docs/specs/SPEC_NIGHTLY_RELEASE_CHANNEL_2026_08_23.md.
+#
+# It does NOT run `task release`, does NOT touch .changesets/, and does NOT
+# decide a version bump — it only finds the most recent `chore: release`
+# commit on main and tags it if (and only if) that tag doesn't exist yet.
+# If two bump commits land before either is tagged, only the newest is
+# tagged (matches how a human doing this manually would behave).
+#
+# Once tagged, the existing release.yml (build + GitHub Release + landing
+# page dispatch) and container-image.yml fire completely unmodified, exactly
+# as they do for a manual tag push.
+#
+# REQUIRES repo secret NIGHTLY_TAG_PAT: a PAT (contents:write is enough)
+# belonging to a service/bot identity — NOT a stand-in for the default
+# GITHUB_TOKEN. GitHub does not allow a push/tag event made by the default
+# GITHUB_TOKEN to trigger *other* workflows' `on: push` listeners (the
+# anti-recursion guard) — if this workflow pushed the tag using
+# GITHUB_TOKEN, release.yml and container-image.yml would silently never
+# fire. Until NIGHTLY_TAG_PAT is provisioned, this workflow will find and
+# attempt to tag a pending release but the push step will fail.
+
+on:
+  workflow_run:
+    workflows: ["CI — nightly cross-platform build + test"]
+    types: [completed]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  detect-and-tag:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main (full history)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Find latest pending release commit and tag it if needed
+        env:
+          NIGHTLY_TAG_PAT: ${{ secrets.NIGHTLY_TAG_PAT }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          match=$(git log HEAD --grep='^chore: release v[0-9]' -E -n 1 --format='%H%x09%s' || true)
+          if [ -z "$match" ]; then
+            echo "No \`chore: release\` commit found on main at all — nothing to do." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          sha="${match%%$'\t'*}"
+          subject="${match#*$'\t'}"
+          version=$(grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' <<<"$subject" || true)
+
+          if [ -z "$version" ]; then
+            echo "Found a release commit but couldn't parse a version out of its subject: \`$subject\`" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          if git ls-remote --exit-code --tags origin "refs/tags/${version}" >/dev/null 2>&1; then
+            echo "Latest release commit (\`${version}\`, \`${sha:0:9}\`) is already tagged — nothing pending. Skipping." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [ -z "${NIGHTLY_TAG_PAT:-}" ]; then
+            echo "::error::Found untagged pending release ${version} (${sha:0:9}), but NIGHTLY_TAG_PAT is not set — cannot push a tag that will trigger release.yml/container-image.yml (the default GITHUB_TOKEN can't do this, see this file's header comment)." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          echo "Tagging ${sha:0:9} as ${version}" | tee -a "$GITHUB_STEP_SUMMARY"
+          git config user.name "agentmux-nightly-release"
+          git config user.email "nightly-release@agentmux.ai"
+          git tag -a "$version" "$sha" -m "Release ${version} (nightly automation)"
+          git push "https://x-access-token:${NIGHTLY_TAG_PAT}@github.com/${REPO}.git" "$version"
+
+          echo "Pushed tag \`${version}\` — release.yml and container-image.yml should start momentarily." | tee -a "$GITHUB_STEP_SUMMARY"
