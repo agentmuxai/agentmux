@@ -4,8 +4,18 @@
 **Author:** Camper
 **Status:** Phase A implemented. Phase B/C's CLAUDE.md jekt rule change
 confirmed live 2026-08-22 — see `SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md`
-and `CLAUDE.md`'s jekt security rules section. Phase B/C implementation
-tracked separately, not yet built.
+and `CLAUDE.md`'s jekt security rules section. Phase B's policy
+infrastructure and jekt-rule enforcement are now implemented — see
+`SPEC_MUXSPECT_PHASE_B_POLICY_AND_TIER_ENFORCEMENT_2026_08_22.md`
+(`conversation_visibility` setting, `db_conversation_trust_grants`, the
+`transcript_request`/`transcript_response` wire payload, and the actual
+`TIER=sensitive`/`ESCALATE=required` computation this whole spec exists to
+gate). The auto-resolve short-circuit (private auto-deny / trusted_peers
+auto-approve, invisible to the target agent), the `ask`-mode
+approve/deny CLI, the `RequestTranscript`/`PollTranscriptRequest` MCP
+tools, and per-request-type rate limiting are still not built — see that
+spec's §3 for why deferring those specifically was a safe scope cut, not a
+gap. Phase C (WAN) not yet started.
 **Motivated by:** direct request — agents need a fast way to see what every
 other agent (this host, other channels on this host, LAN, connected WAN) is
 currently saying/doing, without manual filesystem archaeology or a

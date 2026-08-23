@@ -220,6 +220,36 @@ pub struct InjectionRequest {
     /// (`docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md` §2.4/§2.5).
     #[serde(skip_deserializing, default, skip_serializing_if = "Option::is_none")]
     pub lan_verified: Option<bool>,
+    /// Server-computed: this jekt's `message` is a `transcript_request`
+    /// payload (`agentmux_common::transcript_request::parse_transcript_request`)
+    /// — `muxspect` Phase B/C's LAN/WAN conversation-visibility protocol.
+    /// `#[serde(skip_deserializing)]`, same guarantee as `sig_verified`
+    /// etc.: no attacker-supplied JSON body can force or suppress this —
+    /// `handle_reactive_inject` always recomputes it by re-parsing `message`
+    /// itself, ignoring anything the client claims. Forces `TIER=sensitive`
+    /// unconditionally when `true`, regardless of trust
+    /// (`SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md` rule 1) — a
+    /// content-disclosure *request* isn't caught by the existing credential/
+    /// destructive-keyword scan at all.
+    #[serde(skip_deserializing, default)]
+    pub is_transcript_request: bool,
+    /// Server-computed: when `is_transcript_request` is also `true`, whether
+    /// the RESPONDING agent's (`target_agent`'s) own `conversation_visibility`
+    /// setting is `ask`, or `trusted_peers` with a requester not on that
+    /// agent's own allowlist — i.e. a case that genuinely needs a human
+    /// decision, per `SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md`
+    /// rule 2. When `true`, `ESCALATE=required` is NOT relaxed to `none`
+    /// even for a cryptographically verified sender (the one named
+    /// exception to the 2026-08-17 relaxation) — unlike every other
+    /// `TIER=sensitive` case, where a verified sender's identity answers
+    /// the only open question. Meaningless (always `false`) when
+    /// `is_transcript_request` is `false`. Resolved in
+    /// `handle_reactive_inject` (has `AppState::wstore`, unlike
+    /// `Handler::inject_message`, which has no `Store` access "by design")
+    /// — same "resolve in the caller with Store access, pass the outcome
+    /// through" pattern `sig_verified`/`lan_verified` already establish.
+    #[serde(skip_deserializing, default)]
+    pub transcript_request_escalate_forced: bool,
 }
 
 /// Response from a message injection attempt.

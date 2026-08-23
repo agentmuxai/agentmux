@@ -383,6 +383,251 @@ fn resolve_delivery_tier(auth_via: super::ReactiveAuthVia, claimed: Option<&str>
     }
 }
 
+/// Server-side resolution of `InjectionRequest::is_transcript_request` /
+/// `transcript_request_escalate_forced` — see both fields' own doc comments
+/// (`backend/reactive/types.rs`) and
+/// `SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md`. Lives here (not
+/// `Handler::inject_message_inner`) because it needs `AppState::wstore` —
+/// `Handler` has no `Store` access "by design," same reason
+/// `sig_verified`/`lan_verified` are resolved by this same caller before
+/// the request reaches the handler.
+///
+/// Always re-parses `req.message` itself — never trusts anything the
+/// client might have set on these two fields (impossible anyway, since
+/// both are `#[serde(skip_deserializing)]`, but this function is the one
+/// place that actually computes their real value from scratch).
+fn resolve_transcript_request_tier_fields(state: &AppState, req: &mut InjectionRequest) {
+    let Some(transcript_req) = agentmux_common::transcript_request::parse_transcript_request(&req.message) else {
+        return;
+    };
+    let _ = transcript_req; // request_id/max_lines belong to the (not-yet-built) auto-responder, not tier resolution.
+    req.is_transcript_request = true;
+
+    // Match on the RESPONDING agent's (target_agent's) own slug — the
+    // stable, AGENTMUX_AGENT_ID-derived identifier, NOT the renameable
+    // display `name` (same cross-namespace hazard already documented at
+    // this file's Supervisor-nudge opt-in check just above, which this
+    // mirrors exactly).
+    let visibility = state
+        .wstore
+        .agent_def_list()
+        .ok()
+        .and_then(|defs| defs.into_iter().find(|d| d.slug.eq_ignore_ascii_case(&req.target_agent)))
+        .map(|d| d.conversation_visibility)
+        .unwrap_or_else(crate::backend::storage::agents::default_conversation_visibility);
+
+    let tier = req.delivery_tier.as_deref().unwrap_or("host");
+    req.transcript_request_escalate_forced = match visibility.as_str() {
+        "ask" => true,
+        "trusted_peers" => {
+            let requester = req.source_agent.as_deref().unwrap_or("");
+            let granted = state
+                .wstore
+                .conversation_trust_grant_check(&req.target_agent, requester, tier)
+                .unwrap_or(false);
+            !granted
+        }
+        // "private" and any unrecognized value: fail-closed on the
+        // ESCALATE-forcing question too — an agent def loaded from a
+        // channel/registry state older than this feature (or IS
+        // genuinely "private") never had a chance to opt into
+        // relaxation, so it gets none. Rule 1's forced TIER=sensitive
+        // still applies regardless (set above) — only this ADDITIONAL
+        // escalate-forcing rule reads "private" as "no need to force it
+        // beyond the ordinary verified-sender relaxation," since a
+        // "private" agent auto-denies (once the responder auto-resolve
+        // is built) and was never going to disclose anything either way.
+        _ => false,
+    };
+}
+
+#[cfg(test)]
+mod transcript_request_tier_resolution_tests {
+    use super::*;
+    use crate::backend::storage::store::AgentDefinition;
+    use crate::server::tests::test_state;
+
+    fn insert_agent_def(state: &AppState, slug: &str, conversation_visibility: &str) {
+        let mut def = AgentDefinition {
+            id: uuid::Uuid::new_v4().to_string(),
+            slug: slug.to_string(),
+            name: slug.to_string(),
+            icon: String::new(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: "standalone".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
+            auto_continue_enabled: 0,
+            memory_id: String::new(),
+            conversation_visibility: conversation_visibility.to_string(),
+        };
+        state.wstore.agent_def_insert(&mut def).unwrap();
+    }
+
+    fn transcript_request_message() -> String {
+        r#"{"type":"transcript_request","request_id":"r1","max_lines":50}"#.to_string()
+    }
+
+    fn base_req(target: &str) -> InjectionRequest {
+        InjectionRequest {
+            target_agent: target.to_string(),
+            message: transcript_request_message(),
+            source_agent: Some("requester".to_string()),
+            delivery_tier: Some("lan".to_string()),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn ordinary_message_never_sets_either_field() {
+        let state = test_state();
+        let mut req = InjectionRequest {
+            target_agent: "agent1".to_string(),
+            message: "just chatting".to_string(),
+            ..Default::default()
+        };
+        resolve_transcript_request_tier_fields(&state, &mut req);
+        assert!(!req.is_transcript_request);
+        assert!(!req.transcript_request_escalate_forced);
+    }
+
+    #[tokio::test]
+    async fn private_visibility_does_not_force_escalate() {
+        let state = test_state();
+        insert_agent_def(&state, "agent1", "private");
+        let mut req = base_req("agent1");
+        resolve_transcript_request_tier_fields(&state, &mut req);
+        assert!(req.is_transcript_request);
+        assert!(!req.transcript_request_escalate_forced);
+    }
+
+    #[tokio::test]
+    async fn ask_visibility_forces_escalate() {
+        let state = test_state();
+        insert_agent_def(&state, "agent1", "ask");
+        let mut req = base_req("agent1");
+        resolve_transcript_request_tier_fields(&state, &mut req);
+        assert!(req.is_transcript_request);
+        assert!(req.transcript_request_escalate_forced);
+    }
+
+    #[tokio::test]
+    async fn trusted_peers_without_a_grant_forces_escalate() {
+        let state = test_state();
+        insert_agent_def(&state, "agent1", "trusted_peers");
+        let mut req = base_req("agent1");
+        resolve_transcript_request_tier_fields(&state, &mut req);
+        assert!(
+            req.transcript_request_escalate_forced,
+            "an un-granted requester must still force escalation under trusted_peers mode"
+        );
+    }
+
+    #[tokio::test]
+    async fn trusted_peers_with_a_matching_grant_does_not_force_escalate() {
+        let state = test_state();
+        insert_agent_def(&state, "agent1", "trusted_peers");
+        state.wstore.conversation_trust_grant_add("agent1", "requester", "lan").unwrap();
+        let mut req = base_req("agent1");
+        resolve_transcript_request_tier_fields(&state, &mut req);
+        assert!(
+            !req.transcript_request_escalate_forced,
+            "an allow-listed requester on the SAME tier must not force escalation"
+        );
+    }
+
+    #[tokio::test]
+    async fn trusted_peers_grant_on_a_different_tier_still_forces_escalate() {
+        let state = test_state();
+        insert_agent_def(&state, "agent1", "trusted_peers");
+        // Granted for WAN, but this request arrives on LAN (base_req's default).
+        state.wstore.conversation_trust_grant_add("agent1", "requester", "wan").unwrap();
+        let mut req = base_req("agent1");
+        resolve_transcript_request_tier_fields(&state, &mut req);
+        assert!(
+            req.transcript_request_escalate_forced,
+            "a grant for one tier's identity guarantee must never be assumed to cover a different tier"
+        );
+    }
+
+    #[tokio::test]
+    async fn matches_on_slug_not_display_name() {
+        let state = test_state();
+        // Insert with a slug matching the target, but a DIFFERENT display name —
+        // the lookup must key off slug (the stable AGENTMUX_AGENT_ID-derived
+        // identifier), same cross-namespace hazard the Supervisor-nudge
+        // opt-in check just above this function already guards against.
+        let state_clone = &state;
+        {
+            let mut def = AgentDefinition {
+                id: uuid::Uuid::new_v4().to_string(),
+                slug: "agent1".to_string(),
+                name: "Totally Different Display Name".to_string(),
+                icon: String::new(),
+                provider: "claude".to_string(),
+                description: String::new(),
+                working_directory: String::new(),
+                shell: String::new(),
+                provider_flags: String::new(),
+                auto_start: 0,
+                restart_on_crash: 0,
+                idle_timeout_minutes: 0,
+                created_at: 0,
+                agent_type: "standalone".to_string(),
+                environment: String::new(),
+                agent_bus_id: String::new(),
+                is_seeded: 0,
+                accounts: String::new(),
+                parent_id: String::new(),
+                branch_label: String::new(),
+                updated_at: 0,
+                user_hidden: 0,
+                container_image: String::new(),
+                container_volumes: "[]".to_string(),
+                container_name: String::new(),
+                use_ambient_login: 0,
+                model_vendor_base_url: String::new(),
+                auto_continue_enabled: 0,
+                memory_id: String::new(),
+                conversation_visibility: "ask".to_string(),
+            };
+            state_clone.wstore.agent_def_insert(&mut def).unwrap();
+        }
+        let mut req = base_req("agent1");
+        resolve_transcript_request_tier_fields(&state, &mut req);
+        assert!(req.transcript_request_escalate_forced, "lookup must match by slug \"agent1\", not the unrelated display name");
+    }
+
+    #[tokio::test]
+    async fn unknown_target_agent_fails_closed_to_private_defaults() {
+        let state = test_state();
+        // No AgentDefinition inserted at all for this target.
+        let mut req = base_req("no-such-agent");
+        resolve_transcript_request_tier_fields(&state, &mut req);
+        assert!(req.is_transcript_request, "rule 1 (forced sensitive) applies regardless of whether the target is known");
+        assert!(!req.transcript_request_escalate_forced, "an unknown agent defaults to the safe 'private' behavior for the escalate-forcing question");
+    }
+}
+
 pub(super) async fn handle_reactive_inject(
     State(state): State<AppState>,
     Extension(auth_via): Extension<super::ReactiveAuthVia>,
@@ -400,6 +645,7 @@ pub(super) async fn handle_reactive_inject(
     verify_jekt_signature(&state, &mut req);
     verify_reagent_signature(&mut req, now_unix_secs());
     verify_lan_signature(&state, &mut req).await;
+    resolve_transcript_request_tier_fields(&state, &mut req);
 
     // 1. Try local ReactiveHandler first (fast path — same instance).
     let resp = state.reactive_handler.inject_message(req.clone());

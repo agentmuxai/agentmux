@@ -466,6 +466,7 @@ pub(crate) async fn agent_define_core(
         model_vendor_base_url: cmd_model_vendor_base_url.clone(),
         auto_continue_enabled: 0,
         memory_id: String::new(),
+        conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
     };
 
     // Atomic check-then-insert.
@@ -1169,6 +1170,7 @@ mod memory_version_impl_tests {
 
     fn agent_def(id: &str, working_directory: &str) -> crate::backend::storage::AgentDefinition {
         crate::backend::storage::AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: id.to_string(),
             slug: id.to_string(),
             name: "Test Agent".to_string(),
@@ -2580,6 +2582,7 @@ mod identity_self_accounts_tests {
         let state = test_state();
 
         let mut def = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: uuid::Uuid::new_v4().to_string(),
             slug: String::new(),
             name: "test agent".to_string(),
@@ -2654,6 +2657,7 @@ mod identity_self_accounts_tests {
 
         let state = test_state();
         let mut def = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: uuid::Uuid::new_v4().to_string(),
             slug: "agenty".to_string(),
             name: "AgentY".to_string(),

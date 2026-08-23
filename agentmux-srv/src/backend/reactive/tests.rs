@@ -924,6 +924,125 @@ async fn test_handler_inject_lan_clean_content_not_forced_sensitive() {
     assert!(payload.contains("TIER=coord"), "{payload}");
 }
 
+// SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md rule 1: is_transcript_request
+// forces TIER=sensitive unconditionally, even on host delivery with an
+// otherwise-clean message and no declared tier — the one new category
+// alongside declared-sensitive/keyword-match.
+#[tokio::test]
+async fn test_handler_inject_transcript_request_forces_sensitive_tier() {
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |_block_id: &str, _data: &[u8]| Ok(())));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: r#"{"type":"transcript_request","request_id":"r1","max_lines":50}"#.to_string(),
+        source_agent: Some("korp".to_string()),
+        request_id: Some("req-tr-1".to_string()),
+        delivery_tier: Some("host".to_string()),
+        is_transcript_request: true,
+        ..Default::default()
+    });
+
+    assert!(resp.success);
+    assert_eq!(
+        resp.effective_tier.as_deref(),
+        Some("sensitive"),
+        "a transcript_request must be forced sensitive even on host tier with clean content and no declared tier"
+    );
+}
+
+// Rule 2: a verified sender's identity ordinarily relaxes ESCALATE to
+// `none` (requires_stop == false) — transcript_request is the one named
+// exception WHEN transcript_request_escalate_forced is true (the
+// responding agent's own conversation_visibility is `ask`, or
+// `trusted_peers` with a non-allow-listed requester).
+#[tokio::test]
+async fn test_handler_inject_transcript_request_escalate_forced_survives_a_verified_sender() {
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |_block_id: &str, _data: &[u8]| Ok(())));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: r#"{"type":"transcript_request","request_id":"r1","max_lines":50}"#.to_string(),
+        source_agent: Some("korp".to_string()),
+        request_id: Some("req-tr-2".to_string()),
+        delivery_tier: Some("lan".to_string()),
+        is_transcript_request: true,
+        transcript_request_escalate_forced: true,
+        lan_verified: Some(true), // cryptographically verified sender
+        ..Default::default()
+    });
+
+    assert!(resp.success);
+    assert_eq!(resp.effective_tier.as_deref(), Some("sensitive"));
+    assert_eq!(
+        resp.requires_stop,
+        Some(true),
+        "transcript_request_escalate_forced must survive a verified sender — unlike every other sensitive-tier case"
+    );
+}
+
+// The mirror-image proof: when transcript_request_escalate_forced is
+// false (the responding agent's own conversation_visibility is `private`
+// or an allow-listed `trusted_peers` requester), a verified sender's
+// identity relaxes ESCALATE to `none` same as any other sensitive-tier
+// case — the exception in rule 2 is opt-in per-response, not blanket for
+// the whole jekt type.
+#[tokio::test]
+async fn test_handler_inject_transcript_request_verified_sender_relaxes_when_not_forced() {
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |_block_id: &str, _data: &[u8]| Ok(())));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: r#"{"type":"transcript_request","request_id":"r1","max_lines":50}"#.to_string(),
+        source_agent: Some("korp".to_string()),
+        request_id: Some("req-tr-3".to_string()),
+        delivery_tier: Some("lan".to_string()),
+        is_transcript_request: true,
+        transcript_request_escalate_forced: false,
+        lan_verified: Some(true),
+        ..Default::default()
+    });
+
+    assert!(resp.success);
+    assert_eq!(resp.effective_tier.as_deref(), Some("sensitive"), "rule 1 still forces the tier regardless");
+    assert_eq!(
+        resp.requires_stop,
+        Some(false),
+        "an unforced transcript_request from a verified sender relaxes normally, same as any other sensitive case"
+    );
+}
+
+// An unverified sender's transcript_request must still require STOP
+// regardless of transcript_request_escalate_forced — that flag only ever
+// ADDS to the escalation requirement, never removes the ordinary
+// unverified-sender STOP rule every other sensitive jekt already has.
+#[tokio::test]
+async fn test_handler_inject_transcript_request_unverified_sender_still_requires_stop() {
+    let mut handler = Handler::new();
+    handler.set_input_sender(Arc::new(move |_block_id: &str, _data: &[u8]| Ok(())));
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    let resp = handler.inject_message(InjectionRequest {
+        target_agent: "agent1".to_string(),
+        message: r#"{"type":"transcript_request","request_id":"r1","max_lines":50}"#.to_string(),
+        source_agent: Some("korp".to_string()),
+        request_id: Some("req-tr-4".to_string()),
+        delivery_tier: Some("lan".to_string()),
+        is_transcript_request: true,
+        transcript_request_escalate_forced: false,
+        lan_verified: None, // no signature attempted at all
+        ..Default::default()
+    });
+
+    assert!(resp.success);
+    assert_eq!(resp.requires_stop, Some(true), "an unverified sender must still require STOP, same as any other sensitive jekt");
+}
+
 // Rule 4 (keyword match) is completely unaffected by the narrowing — this is
 // the negative-control proof for LAN specifically.
 #[tokio::test]

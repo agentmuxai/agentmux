@@ -411,6 +411,17 @@ declare global {
          * see ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.1.
          */
         memory_id?: string;
+        /**
+         * This agent's own disclosure policy for an incoming cross-tier
+         * `transcript_request` jekt (`muxspect` Phase B/C — LAN/WAN
+         * conversation visibility). One of "private" (default,
+         * auto-deny) / "trusted_peers" (auto-approve an allow-listed
+         * requester) / "ask" (force human escalation). Channel-local
+         * only, like model_vendor_base_url/memory_id above — a
+         * cross-channel-reopened agent starts back at the safe
+         * "private" default. Schema v26.
+         */
+        conversation_visibility?: string;
     };
 
     // ── v6: identity, instance, junction ────────────────────────────────────

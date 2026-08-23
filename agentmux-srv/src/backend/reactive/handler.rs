@@ -526,11 +526,21 @@ impl Handler {
         // docs/specs/SPEC_JEKT_LAN_TIER_SIGNING_2026_08_15.md §2.4/§2.5.
         let is_lan_sig_invalid = delivery_tier == "lan" && req.lan_verified == Some(false);
         let is_unverified_sender = req.sig_verified == Some(false);
+        // SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md rule 1: a
+        // transcript_request (muxspect Phase B/C's LAN/WAN conversation-
+        // visibility protocol) is forced sensitive unconditionally, on any
+        // tier, regardless of trust — the existing credential/destructive-
+        // keyword scan (is_sensitive_message) doesn't catch a content-
+        // disclosure *request* at all. `req.is_transcript_request` is
+        // server-computed in `handle_reactive_inject` by re-parsing
+        // `message` itself (never attacker-settable — see its own doc
+        // comment), so this can't be spoofed by a client claiming/denying it.
         let is_sensitive = is_network_tier_sig_invalid
             || is_lan_sig_invalid
             || is_unverified_sender
             || matches!(declared_tier, Some(super::types::JektTier::Sensitive))
-            || is_sensitive_message(&sanitized);
+            || is_sensitive_message(&sanitized)
+            || req.is_transcript_request;
         let effective_tier = if is_sensitive { "sensitive" } else {
             declared_tier.map_or("coord", |t| match t {
                 super::types::JektTier::Info => "info",
@@ -565,7 +575,20 @@ impl Handler {
         let is_cryptographically_verified = req.sig_verified == Some(true)
             || req.reagent_verified == Some(true)
             || req.lan_verified == Some(true);
-        let requires_stop = is_sensitive && !is_cryptographically_verified;
+        // SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md rule 2: the
+        // ONE named exception to the verified-sender relaxation above. A
+        // transcript_request's ESCALATE=required is not relaxed by a
+        // verified sender when the RESPONDING agent's own
+        // conversation_visibility is `ask` (or `trusted_peers` with a
+        // non-allow-listed requester) — `req.transcript_request_escalate_forced`,
+        // resolved server-side in `handle_reactive_inject` against that
+        // agent's own setting (meaningless/always-false unless
+        // `is_transcript_request` is also true). A valid signature answers
+        // *who is asking*, not *whether this content should be disclosed* —
+        // identity proof alone doesn't relax that question, unlike every
+        // other TIER=sensitive case above.
+        let requires_stop = is_sensitive
+            && (!is_cryptographically_verified || req.transcript_request_escalate_forced);
         let priority = req.priority.as_deref().unwrap_or("normal");
 
         // Wrap in JEKT marker block (structured tag + human-readable header).

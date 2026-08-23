@@ -292,6 +292,7 @@
         let store = make_store();
 
         let mut a1 = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "id-a".to_string(),
             slug: String::new(),
             name: "Agent X".to_string(),
@@ -362,6 +363,7 @@
         let store = make_store();
 
         let mut a1 = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "id-a".to_string(),
             slug: "explicit".to_string(),
             name: "First".to_string(),
@@ -427,6 +429,7 @@
 
     fn sample_agent(id: &str, slug: &str) -> AgentDefinition {
         AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: id.to_string(),
             slug: slug.to_string(),
             name: id.to_string(),
@@ -2616,6 +2619,7 @@
     fn dual_write_agent_def_insert_seeded_creates_template_row() {
         let store = make_store();
         let mut def = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "tpl-dw-seeded".to_string(),
             slug: String::new(),
             name: "Coder".to_string(),
@@ -2659,6 +2663,7 @@
         let store = make_store();
         // Seed the template first so the FK exists in the old table.
         let mut tpl = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "tpl-parent".to_string(),
             slug: String::new(),
             name: "Coder".to_string(),
@@ -2708,6 +2713,7 @@
     fn dual_write_agent_def_update_refreshes_name_in_db_agents() {
         let store = make_store();
         let mut def = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "tpl-update".to_string(),
             slug: String::new(),
             name: "Old Name".to_string(),
@@ -2758,6 +2764,7 @@
     fn dual_write_agent_def_update_persists_branch_label_change() {
         let store = make_store();
         let mut def = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "fork-rename-test".to_string(),
             slug: String::new(),
             name: "Fork Name".to_string(),
@@ -2805,6 +2812,7 @@
     fn dual_write_agent_def_delete_removes_db_agents_row() {
         let store = make_store();
         let mut def = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "tpl-del".to_string(),
             slug: String::new(),
             name: "Goner".to_string(),
@@ -2846,6 +2854,7 @@
         let store = make_store();
         // Seed template.
         let mut tpl = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "tpl-for-inst".to_string(),
             slug: String::new(),
             name: "Coder".to_string(),
@@ -2935,6 +2944,7 @@
         let store = make_store();
         // Seed a template.
         let mut tpl = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "tpl-folded".to_string(),
             slug: String::new(),
             name: "Coder".to_string(),
@@ -3033,6 +3043,7 @@
     fn dual_write_instance_set_hidden_flips_user_hidden_bit() {
         let store = make_store();
         let mut tpl = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "tpl-hide".to_string(),
             slug: String::new(),
             name: "Coder".to_string(),
@@ -3093,6 +3104,7 @@
     fn dual_write_instance_delete_drops_db_agents_row() {
         let store = make_store();
         let mut tpl = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "tpl-instdel".to_string(),
             slug: String::new(),
             name: "Coder".to_string(),
@@ -3151,6 +3163,7 @@
     fn dual_write_instance_repoint_updates_parent_template_id() {
         let store = make_store();
         let mut tpl_a = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "tpl-A".to_string(),
             slug: String::new(),
             name: "A".to_string(),
@@ -3221,6 +3234,7 @@
         let store = make_store();
         for id in &["s1", "s2", "s3"] {
             let mut d = AgentDefinition {
+                conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
                 id: id.to_string(),
                 slug: String::new(),
                 name: id.to_string(),
@@ -3266,6 +3280,7 @@
         let store = make_store();
         // Seeded template.
         let mut tpl = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "tpl-keep-check".to_string(),
             slug: String::new(),
             name: "TplCheck".to_string(),
@@ -3343,6 +3358,7 @@
         let store = make_store();
         // Template, user-clone def of it, instance on the user-clone.
         let mut tpl = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "tpl-rt".to_string(),
             slug: String::new(),
             name: "Tpl".to_string(),

@@ -424,6 +424,7 @@ mod tests {
         let config_b = tempfile::tempdir().unwrap();
         for (id, dir) in [("sweep-agent-a", config_a.path()), ("sweep-agent-b", config_b.path())] {
             let mut def = crate::backend::storage::AgentDefinition {
+                conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
                 id: id.to_string(),
                 slug: id.to_string(),
                 name: "Test".to_string(),

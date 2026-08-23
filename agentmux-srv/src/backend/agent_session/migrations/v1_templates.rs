@@ -296,6 +296,11 @@ pub fn migrate_promote_template_sessions_v1(
                 model_vendor_base_url: template.model_vendor_base_url.clone(),
                 auto_continue_enabled: 0,
                 memory_id: String::new(),
+                // Safe fail-closed default, not inherited from the template —
+                // same convention as auto_continue_enabled/use_ambient_login
+                // just above (opt-in settings reset, not carried over, on a
+                // fresh instantiation).
+                conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             };
             if let Err(e) = wstore.agent_def_insert(&mut new_def) {
                 tracing::warn!(

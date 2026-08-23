@@ -393,6 +393,7 @@ mod recent_sessions_tests {
         // db_agents fold semantics require the seed shape to avoid
         // the collision.
         let def = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "def-claude".to_string(),
             slug: "claude-code".to_string(),
             name: "Claude Code".to_string(),
@@ -717,6 +718,7 @@ mod recent_sessions_tests {
 
         // One seeded template + one already-user-owned definition.
         let mut tpl = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "tpl-claude".to_string(),
             slug: String::new(),
             name: "Claude Code".to_string(),
@@ -750,6 +752,7 @@ mod recent_sessions_tests {
         wstore.agent_def_insert(&mut tpl).unwrap();
 
         let mut user_a = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "user-a".to_string(),
             slug: String::new(),
             name: "Maks".to_string(),

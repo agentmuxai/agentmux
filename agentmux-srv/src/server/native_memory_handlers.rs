@@ -1404,6 +1404,7 @@ mod tests {
 
     fn agent_def(id: &str, working_directory: &str) -> AgentDefinition {
         AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: id.to_string(),
             slug: id.to_string(),
             name: "Test Agent".to_string(),
@@ -2159,6 +2160,7 @@ mod tests {
         let state = crate::server::tests::test_state();
         let config_dir = tempfile::tempdir().unwrap();
         let mut def = crate::backend::storage::AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "dup-agent".to_string(),
             slug: "dup-agent".to_string(),
             name: "Test".to_string(),
