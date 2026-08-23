@@ -13,6 +13,7 @@ import {
 } from "./types";
 import { setTransform } from "./utils";
 import type { LayoutModel } from "./layoutModel";
+import { clearLeafRevealGate } from "@/app/store/tab-reveal";
 
 /**
  * Toggle magnification of a given node.
@@ -49,6 +50,7 @@ export async function closeNode(model: LayoutModel, nodeId: string) {
             model.updateTree(false);
             model.setter(model.localTreeStateAtom, { ...model.treeState });
             model.persistToBackend();
+            clearLeafRevealGate(nodeId);
             await model.onNodeDelete?.(ephemeralNode.data);
             return;
         }
@@ -65,6 +67,10 @@ export async function closeNode(model: LayoutModel, nodeId: string) {
     };
 
     model.treeReducer(deleteAction);
+    // Drop any leaf reveal-gate bookkeeping keyed on this now-gone node id
+    // — otherwise tab-reveal.ts's per-node Maps grow unboundedly over a
+    // long-running session (reagent's review of PR #2761).
+    clearLeafRevealGate(nodeId);
 
     await model.onNodeDelete?.(nodeToDelete.data);
 }

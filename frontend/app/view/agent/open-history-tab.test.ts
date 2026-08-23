@@ -44,6 +44,13 @@ vi.mock("@/app/store/global", () => ({
     },
 }));
 
+const holdLeafRevealGate = vi.fn();
+const scheduleLeafRevealLift = vi.fn();
+vi.mock("@/app/store/tab-reveal", () => ({
+    holdLeafRevealGate: (...args: unknown[]) => holdLeafRevealGate(...args),
+    scheduleLeafRevealLift: (...args: unknown[]) => scheduleLeafRevealLift(...args),
+}));
+
 describe("openOrFocusHistoryTab concurrency (reagent P2 / codex P2 on PR #2539)", () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -101,5 +108,54 @@ describe("openOrFocusHistoryTab concurrency (reagent P2 / codex P2 on PR #2539)"
         ]);
 
         expect(rpcCall).toHaveBeenCalledTimes(2);
+    });
+});
+
+// SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22: both the "already open,
+// just switch" and "not open yet, create it" paths force the same
+// pushBlockOntoStack/setActiveBlockInStack remount, so both must be gated.
+describe("openOrFocusHistoryTab reveal gate (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22)", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        getNodeByBlockId.mockReturnValue({ id: "node-1", data: { blockStack: ["live-block"] } });
+        getObjectValue.mockReturnValue(undefined);
+        holdLeafRevealGate.mockReturnValue(1);
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it("holds the gate on the pane's own node id for the create-new-tab path, and schedules the lift with the SAME generation token", async () => {
+        holdLeafRevealGate.mockReturnValue(7);
+        rpcCall.mockResolvedValue({ block_id: "history-block-1" });
+        await openOrFocusHistoryTab({ currentBlockId: "live-block", agentId: "agent-1" });
+        expect(holdLeafRevealGate).toHaveBeenCalledWith("node-1");
+        // Codex's review of PR #2761: the returned generation token must be
+        // threaded through unchanged so tab-reveal.ts can detect staleness.
+        expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1", 7);
+    });
+
+    it("holds and schedules the lift for the already-open switch-to-existing path too", async () => {
+        getObjectValue.mockImplementation((oref: string) =>
+            oref === "block:history-block-1" ? { meta: { "agent:historyTabFor": "agent-1" } } : undefined,
+        );
+        getNodeByBlockId.mockReturnValue({ id: "node-1", data: { blockStack: ["live-block", "history-block-1"] } });
+        await openOrFocusHistoryTab({ currentBlockId: "live-block", agentId: "agent-1" });
+        expect(holdLeafRevealGate).toHaveBeenCalledWith("node-1");
+        expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1", 1);
+        expect(rpcCall).not.toHaveBeenCalled();
+    });
+
+    it("schedules the lift even when the pane.open RPC rejects", async () => {
+        rpcCall.mockRejectedValue(new Error("boom"));
+        await openOrFocusHistoryTab({ currentBlockId: "live-block", agentId: "agent-1" });
+        expect(scheduleLeafRevealLift).toHaveBeenCalledWith("node-1", 1);
+    });
+
+    it("does not hold the gate at all when the pane's own node can't be found", async () => {
+        getNodeByBlockId.mockReturnValue(undefined);
+        await openOrFocusHistoryTab({ currentBlockId: "live-block", agentId: "agent-1" });
+        expect(holdLeafRevealGate).not.toHaveBeenCalled();
     });
 });
