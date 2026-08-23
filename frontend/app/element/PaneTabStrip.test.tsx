@@ -8,7 +8,8 @@
 
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { createSignal } from "solid-js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PaneTabStrip } from "./PaneTabStrip";
 
@@ -206,5 +207,133 @@ describe("PaneTabStrip", () => {
         const user = userEvent.setup();
         await user.dblClick(screen.getByText("beta"));
         expect(onDbl).toHaveBeenCalledWith(TABS[1]);
+    });
+});
+
+// SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.4 / Codex's review of
+// PR #2768: a plain CSS `transition: width` never fires for this box (width
+// stays `auto` the whole time — only its DOM-content-driven USED size
+// changes), so the width transition is implemented as a measured, JS-driven
+// FLIP instead. `getBoundingClientRect` is mocked so jsdom's lack of real
+// layout doesn't matter — only the values these tests hand it do.
+describe("PaneTabStrip — animateWidth (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.4)", () => {
+    let currentWidth = 100;
+
+    beforeEach(() => {
+        currentWidth = 100;
+        vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+            () => ({ width: currentWidth }) as DOMRect
+        );
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+        vi.useRealTimers();
+    });
+
+    it("does nothing when animateWidth is not passed (default false, e.g. the agent pane's full-width strip)", async () => {
+        const [tabs, setTabs] = createSignal<T[]>([TABS[0]]);
+        const { container } = render(() => (
+            <PaneTabStrip
+                tabs={tabs()}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                onActivate={vi.fn()}
+            />
+        ));
+        await Promise.resolve();
+        const strip = container.querySelector(".pane-tab-strip") as HTMLElement;
+        currentWidth = 200;
+        setTabs(TABS);
+        await Promise.resolve();
+        expect(strip.style.width).toBe("");
+    });
+
+    it("holds the old measured width, then transitions to the new one on a tabs.length change", async () => {
+        const [tabs, setTabs] = createSignal<T[]>([TABS[0]]);
+        const { container } = render(() => (
+            <PaneTabStrip
+                tabs={tabs()}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                onActivate={vi.fn()}
+                animateWidth
+            />
+        ));
+        await Promise.resolve(); // flush the mount-time measurement (records 100, no animation)
+        const strip = container.querySelector(".pane-tab-strip") as HTMLElement;
+        expect(strip.style.width).toBe("");
+
+        currentWidth = 180;
+        setTabs(TABS); // tabs.length: 1 -> 2
+        await Promise.resolve();
+        expect(strip.style.width).toBe("180px");
+        expect(strip.style.transition).toBe("width 160ms ease-out");
+    });
+
+    it("clears the inline width/transition after the transition duration elapses", async () => {
+        const [tabs, setTabs] = createSignal<T[]>([TABS[0]]);
+        const { container } = render(() => (
+            <PaneTabStrip
+                tabs={tabs()}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                onActivate={vi.fn()}
+                animateWidth
+            />
+        ));
+        await Promise.resolve();
+        const strip = container.querySelector(".pane-tab-strip") as HTMLElement;
+
+        currentWidth = 180;
+        setTabs(TABS);
+        await Promise.resolve();
+        expect(strip.style.width).toBe("180px");
+
+        vi.advanceTimersByTime(200);
+        expect(strip.style.width).toBe("");
+        expect(strip.style.transition).toBe("");
+    });
+
+    it("does not animate when the measured width is unchanged", async () => {
+        const [tabs, setTabs] = createSignal<T[]>([TABS[0]]);
+        const { container } = render(() => (
+            <PaneTabStrip
+                tabs={tabs()}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                onActivate={vi.fn()}
+                animateWidth
+            />
+        ));
+        await Promise.resolve();
+        const strip = container.querySelector(".pane-tab-strip") as HTMLElement;
+
+        // currentWidth stays 100 — a tabs.length change that happens not to
+        // move the measured box (e.g. padding absorbed it).
+        setTabs(TABS);
+        await Promise.resolve();
+        expect(strip.style.width).toBe("");
+    });
+
+    it("does not animate on the initial mount even if animateWidth is set", async () => {
+        const { container } = render(() => (
+            <PaneTabStrip
+                tabs={TABS}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                onActivate={vi.fn()}
+                animateWidth
+            />
+        ));
+        await Promise.resolve();
+        const strip = container.querySelector(".pane-tab-strip") as HTMLElement;
+        expect(strip.style.width).toBe("");
     });
 });

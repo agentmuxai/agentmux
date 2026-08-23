@@ -25,23 +25,17 @@
     display: inline-flex;
     align-self: flex-start;
     max-width: 100%;
-    // Smooth the strip's own shrink-to-fit width when a tab pill appears/
-    // disappears (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.4) —
-    // previously an instant snap the moment `visibleTabs()` went from empty
-    // to non-empty (or back), which could occlude previously-visible pane
-    // chrome underneath with no transition softening it (the strip floats
-    // over content, see the overlay comment on `.agent-pane-stack-content`
-    // above). `interpolate-size: allow-keywords` (stable since Chromium
-    // 129 — this app bundles CEF 148, see the workspace `Cargo.toml`) lets
-    // the browser animate `width`'s own auto-computed (shrink-to-fit)
-    // value across the DOM change, with no JS measurement needed. No local
-    // `prefers-reduced-motion` override needed here, unlike this spec's
-    // other (BrainSpinner-driven) fades — this app's global
-    // `.prefers-reduced-motion * { transition: none !important; }` reset
-    // (app.scss) already suppresses any plain `transition` declaration
-    // like this one.
-    interpolate-size: allow-keywords;
-    transition: width 160ms ease-out;
+    // Width-transition-on-tab-count-change (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md
+    // §2.4) is implemented in PaneTabStrip.tsx via measured JS (a FLIP-
+    // style hold-old-width/force-reflow/transition-to-new-width), NOT here
+    // — a plain CSS `transition: width` (even with `interpolate-size:
+    // allow-keywords`) never fires for this case: `width` stays `auto` the
+    // whole time here, only its DOM-content-driven USED value changes, and
+    // CSS transitions only animate a discrete SPECIFIED-value change
+    // (Codex's review of PR #2768). See PaneTabStrip.tsx's `animateWidth`
+    // prop and its own comment for the full mechanism, including why it's
+    // opt-in per consumer rather than automatic here.
+    //
     // Real, un-zoomed pixels — deliberately NOT `zoom: var(--pane-tab-strip-zoom)`
     // here. See docs/specs/SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md
     // §A.1-§A.2: `window-header.*.scss` already hit a real platform
