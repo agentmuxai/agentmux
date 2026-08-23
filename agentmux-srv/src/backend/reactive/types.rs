@@ -225,8 +225,11 @@ pub struct InjectionRequest {
     /// — `muxspect` Phase B/C's LAN/WAN conversation-visibility protocol.
     /// `#[serde(skip_deserializing)]`, same guarantee as `sig_verified`
     /// etc.: no attacker-supplied JSON body can force or suppress this —
-    /// `handle_reactive_inject` always recomputes it by re-parsing `message`
-    /// itself, ignoring anything the client claims. Forces `TIER=sensitive`
+    /// `resolve_transcript_request_tier_fields` always recomputes it by
+    /// re-parsing `message` itself, ignoring anything the client claims.
+    /// Called from both delivery paths that reach `Handler`:
+    /// `handle_reactive_inject` for host/cross-channel/LAN, and
+    /// `muxbus::cloud_subscriber::sync_agent_reactive` for WAN. Forces `TIER=sensitive`
     /// unconditionally when `true`, regardless of trust
     /// (`SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md` rule 1) — a
     /// content-disclosure *request* isn't caught by the existing credential/
@@ -243,11 +246,14 @@ pub struct InjectionRequest {
     /// exception to the 2026-08-17 relaxation) — unlike every other
     /// `TIER=sensitive` case, where a verified sender's identity answers
     /// the only open question. Meaningless (always `false`) when
-    /// `is_transcript_request` is `false`. Resolved in
-    /// `handle_reactive_inject` (has `AppState::wstore`, unlike
-    /// `Handler::inject_message`, which has no `Store` access "by design")
-    /// — same "resolve in the caller with Store access, pass the outcome
-    /// through" pattern `sig_verified`/`lan_verified` already establish.
+    /// `is_transcript_request` is `false`. Resolved by
+    /// `resolve_transcript_request_tier_fields` (has `Store` access, unlike
+    /// `Handler::inject_message`, which has none "by design") — called from
+    /// both delivery paths that reach `Handler`: `handle_reactive_inject`
+    /// for host/cross-channel/LAN, and
+    /// `muxbus::cloud_subscriber::sync_agent_reactive` for WAN — same
+    /// "resolve in the caller with Store access, pass the outcome through"
+    /// pattern `sig_verified`/`lan_verified` already establish.
     #[serde(skip_deserializing, default)]
     pub transcript_request_escalate_forced: bool,
 }
