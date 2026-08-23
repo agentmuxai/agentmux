@@ -384,6 +384,20 @@ export const AgentApi = {
         return client.rpcCall("shellstop", data, opts);
     },
 
+    // Query a persistent shell node's TRUE current running state. Used by
+    // useShellNodeStream to resolve a replayed `shell_node_create` event
+    // (persist:64 ring, fires on every pane mount/reconnect for every shell
+    // in the block's recent history) instead of assuming "running" — the
+    // create event itself carries no status, so without this the dock
+    // briefly shows every already-long-exited shell as live on load.
+    ShellStatusCommand(
+        client: RpcClient,
+        data: { shell_id: string },
+        opts?: RpcOpts,
+    ): Promise<{ running: boolean; exit_code?: number; line_count: number }> {
+        return client.rpcCall("shellstatus", data, opts);
+    },
+
     AgentStopCommand(client: RpcClient, data: CommandAgentStopData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("agentstop", data, opts);
     },
