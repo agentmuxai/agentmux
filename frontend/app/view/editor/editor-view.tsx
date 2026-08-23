@@ -914,6 +914,7 @@ export function EditorViewComponent(props: ViewComponentProps<EditorViewModel>):
                                     <Markdown
                                         textAtom={() => liveDoc()}
                                         contentClass="editor-preview-markdown-content"
+                                        nativeScrollbar
                                     />
                                 </div>
                             </div>

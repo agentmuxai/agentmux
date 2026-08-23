@@ -115,3 +115,36 @@ already wired through to `.content` for this exact purpose.
 - Manual: spot-check another `<Markdown>` consumer (e.g. an agent chat
   message) to confirm its scrollbar/padding is unaffected, since
   `.editor-preview-markdown-content` is scoped to the editor's call site only.
+
+## 6. Follow-up: native scrollbar, not just repositioned (same day)
+
+Repositioning (§3) put the OverlayScrollbars track at the right spot, but it's
+still visually a different scrollbar technology than Source mode's plain
+native CodeMirror scrollbar — a JS-rendered overlay track with `autoHide:
+"leave"` fade behavior, thinner-looking than a real webkit scrollbar even at
+the same declared `--os-size`/`width` (7px both). Requested follow-up: make
+Preview use the exact same scrollbar as Source, not just a same-sized one in
+the same place.
+
+**Fix:** `<Markdown>` gains a new `nativeScrollbar` prop
+(`frontend/app/element/markdown.tsx`). When set, `onMount` skips calling
+`OverlayScrollbars(contentsEl, ...)` entirely, leaving `.content`'s plain CSS
+`overflow` to render a real native/webkit scrollbar — styled by the exact
+same universal `*::-webkit-scrollbar` rule (`app.scss:87-90`) CodeMirror's
+`.cm-scroller` already uses. The heading-anchor-scroll effect (`focusedHeading`)
+was updated to fall back to `contentsEl` directly as the scroll viewport when
+`contentsOs` is null, so in-page anchor links (`[text](#heading)`) still work
+in native mode.
+
+Editor preview passes `nativeScrollbar` at its one call site
+(`editor-view.tsx`). `editor-view.scss`'s `.content.editor-preview-markdown-content`
+override switches `overflow-y` from the base `.content { overflow: scroll }`
+to `auto` (matching CodeMirror's `.cm-scroller` default — no reserved
+scrollbar gutter when content already fits).
+
+No other `<Markdown>` consumer passes `nativeScrollbar` — everyone else keeps
+OverlayScrollbars unchanged (default `false`).
+
+Verified live via `task dev`: Source and Preview scrollbars are now visually
+identical (same width, same native browser rendering, no auto-hide fade
+behavior difference).
