@@ -376,6 +376,21 @@
             overflow: hidden;
             font-family: var(--fixed-font, monospace);
             font-size: 12px;
+            // Overrides the global `tab-size: 4` from reset.scss (inherited
+            // by every preview here — Read/Write/Edit/Diff, Shiki and plain-
+            // fallback paths alike — since nothing in between re-declares
+            // it). A literal tab left over after dedent.ts strips the
+            // COMMON leading-indent prefix (SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md)
+            // is RELATIVE indentation the source file actually uses — at
+            // the global 4-wide (or the browser's 8-wide UA default,
+            // wherever nothing overrides it) a tab-indented preview reads
+            // noticeably wider than the same file's space-indented sibling.
+            // 2 matches this app's own soft-tab width elsewhere. Scoped to
+            // this shared tool-preview ancestor only, not reset.scss itself
+            // — the Editor pane's CodeMirror instance intentionally keeps
+            // the global default (its own tabSize facet already agrees
+            // with reset.scss's 4; changing that is a separate concern).
+            tab-size: 2;
             // Quick smooth transition on all collapse-related properties.
             // Per 2026-05-26 user request — the prior instant-snap (no
             // max-height transition) felt jittery during auto-collapse

@@ -24,6 +24,18 @@ marker as ignorable exactly like a blank line.
 **Related:** `SPEC_TOOL_PREVIEW_SCROLLBAR_EDGE_PADDING_2026_08_08.md`
 (refinement #1 of this series — this is refinement #2)
 
+**Follow-up (2026-08-24):** tab-indented previews rendered noticeably wider
+than space-indented ones — `dedent.ts` only strips the COMMON leading
+prefix (deliberately never conflating tabs with spaces, §3.3), so a literal
+tab in the RELATIVE indentation that's left over was rendering at the
+global `tab-size: 4` (`reset.scss`, inherited app-wide, including the
+Editor pane's CodeMirror instance). Fixed as a CSS-only change, not a
+`dedent.ts` change: `tab-size: 2` scoped to `.agent-tool-panel`
+(`frontend/app/view/agent/styles/_document-nodes.scss`) — the shared
+ancestor of every Read/Write/Edit/Diff preview path (Shiki and plain-
+fallback alike) — rather than the global `reset.scss` rule, so the Editor
+pane keeps its own 4-wide default unaffected.
+
 ---
 
 ## 1. Report
