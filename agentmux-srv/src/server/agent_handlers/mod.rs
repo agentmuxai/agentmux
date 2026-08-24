@@ -461,6 +461,7 @@ mod recent_sessions_tests {
             sort_order: 0,
             created_at: 0,
             updated_at: 0,
+            is_system: false,
         };
         wstore.bundle_memory_upsert(&memory).unwrap();
 

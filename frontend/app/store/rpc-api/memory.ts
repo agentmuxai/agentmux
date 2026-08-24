@@ -48,6 +48,26 @@ export const MemoryApi = {
         return client.rpcCall("reorderglobalbrain", data, opts);
     },
 
+    // System-tier Global Memory — see
+    // docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md. The ONLY
+    // commands that can write is_system=true; deliberately separate from
+    // UpsertMemoryCommand/DeleteMemoryCommand.
+    UpsertSystemMemoryCommand(
+        client: RpcClient,
+        data: Partial<Memory>,
+        opts?: RpcOpts,
+    ): Promise<Memory> {
+        return client.rpcCall("upsertsystemmemory", data, opts);
+    },
+
+    DeleteSystemMemoryCommand(
+        client: RpcClient,
+        data: { id: string },
+        opts?: RpcOpts,
+    ): Promise<{ deleted: boolean }> {
+        return client.rpcCall("deletesystemmemory", data, opts);
+    },
+
     NativeMemoryListCommand(client: RpcClient, data: { agent_id: string }, opts?: RpcOpts): Promise<NativeMemoryListResult> {
         return client.rpcCall("agent:memory:list", data, opts);
     },

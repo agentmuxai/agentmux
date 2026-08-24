@@ -252,11 +252,17 @@ export class MemoryViewModel implements ViewModel {
         void this.refresh();
     }
 
-    /** Re-fetch the full list. Called on mount and after each mutation. */
+    /** Re-fetch the full list. Called on mount and after each mutation.
+     *  Excludes is_system rows — this is the generic Bundle Manager
+     *  (Armory "Memories" tab), not the dedicated Global Memory system-tier
+     *  editor; showing a system entry here would let a human open it and
+     *  have any edit silently rejected by bundle_memory_upsert's guard.
+     *  reagent P1, PR #2782 — see
+     *  docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md. */
     async refresh(): Promise<void> {
         try {
             const list = await RpcApi.ListMemoriesCommand(TabRpcClient, {});
-            this.setMemories(list);
+            this.setMemories(list.filter((m) => !m.is_system));
             this.setError(null);
         } catch (e) {
             this.setError(`Failed to load ABF bundles: ${(e as Error).message ?? e}`);

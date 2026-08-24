@@ -280,6 +280,7 @@ fn seed_memories(wstore: &Arc<Store>, manifest: &SeedManifest) -> Result<usize, 
             sort_order: idx as i64,
             created_at: now,
             updated_at: now,
+            is_system: false,
         };
         // Use warn-and-skip rather than ? so a user bundle whose name
         // collides with the seeded name (UNIQUE constraint on name) does

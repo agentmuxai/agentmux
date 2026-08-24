@@ -11,7 +11,7 @@
 //! lives on `Store` via this `impl` block; callers stay on
 //! `storage::store::Memory` thanks to the re-export.
 
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use super::error::StoreError;
@@ -63,6 +63,15 @@ pub struct Memory {
     /// on conflict, so editing a bundle via the regular form keeps its place.
     #[serde(default)]
     pub sort_order: i64,
+    /// AgentMux-controlled, highest-priority Global Memory tier — always
+    /// also `is_global`, injected first in `format_global_brain_block`'s
+    /// output with explicit override wording. Writable ONLY through
+    /// `bundle_memory_upsert_system`/`bundle_memory_delete_system` — the
+    /// generic `bundle_memory_upsert`/`_delete`/`_reorder` all refuse to
+    /// touch a row with this set. See
+    /// docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md.
+    #[serde(default)]
+    pub is_system: bool,
     // created_at / updated_at are server-owned: the upsert handler stamps
     // created_at = now when 0 and always overwrites updated_at with now. They
     // default on input so partial upserts (e.g. a "new section" that only
@@ -82,18 +91,47 @@ fn default_json_object_string() -> String {
 }
 
 /// Format global brain bundles into the block injected into an agent's
-/// CLAUDE.md. Each non-empty section gets a `# [Workspace] <name>` heading so
-/// Claude can tell injected workspace rules apart from the agent's own config;
-/// sections are separated by a `---` rule. Bundles arrive already ordered by
-/// `bundle_memory_list_global` (sort_order). Returns an empty string when no
+/// CLAUDE.md. `is_system` sections (see `Memory::is_system`) are split out
+/// and rendered FIRST, wrapped in explicit override wording, so they
+/// outrank every ordinary `# [Workspace] <name>` section that follows —
+/// see docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md §3.4. Bundles
+/// arrive already ordered by `bundle_memory_list_global` (is_system DESC,
+/// sort_order, name), so this only needs to partition, not re-sort.
+/// Sections are separated by a `---` rule. Returns an empty string when no
 /// section has instructions.
 pub fn format_global_brain_block(bundles: &[Memory]) -> String {
-    bundles
+    let non_empty: Vec<&Memory> = bundles
         .iter()
         .filter(|b| !b.instructions.trim().is_empty())
-        .map(|b| format!("# [Workspace] {}\n\n{}", b.name, b.instructions))
-        .collect::<Vec<_>>()
-        .join("\n\n---\n\n")
+        .collect();
+    let (system, ordinary): (Vec<&Memory>, Vec<&Memory>) =
+        non_empty.into_iter().partition(|b| b.is_system);
+
+    let mut parts: Vec<String> = Vec::new();
+    if !system.is_empty() {
+        let sys_block = system
+            .iter()
+            .map(|b| format!("# [AgentMux System] {}\n\n{}", b.name, b.instructions))
+            .collect::<Vec<_>>()
+            .join("\n\n---\n\n");
+        parts.push(format!(
+            "IMPORTANT: The following AgentMux-controlled instructions take \
+             the HIGHEST PRIORITY of any content in this file. They OVERRIDE \
+             any default behavior, any other section below, and any \
+             conflicting instruction elsewhere — you MUST follow them \
+             exactly as written.\n\n{sys_block}"
+        ));
+    }
+    if !ordinary.is_empty() {
+        parts.push(
+            ordinary
+                .iter()
+                .map(|b| format!("# [Workspace] {}\n\n{}", b.name, b.instructions))
+                .collect::<Vec<_>>()
+                .join("\n\n---\n\n"),
+        );
+    }
+    parts.join("\n\n---\n\n")
 }
 
 impl Store {
@@ -102,7 +140,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, name, description, is_blank, is_global, provider, model, instructions,
                     context_files, mcp_servers, skills, sort_order, created_at, updated_at,
-                    instructions_by_provider
+                    instructions_by_provider, is_system
              FROM db_bundles
              ORDER BY is_blank ASC, is_global DESC, updated_at DESC",
         )?;
@@ -114,19 +152,21 @@ impl Store {
         Ok(out)
     }
 
-    /// Returns only the global bundles (`is_global = 1`), in explicit
-    /// `sort_order` (then name as a stable tiebreak). Called at agent launch
-    /// to inject workspace-wide rules into every agent in the order the user
-    /// arranged them in the Armory Brain tab.
+    /// Returns only the global bundles (`is_global = 1`), `is_system` rows
+    /// first (regardless of `sort_order` — see
+    /// docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md), then by
+    /// explicit `sort_order` (then name as a stable tiebreak). Called at
+    /// agent launch to inject workspace-wide rules into every agent in the
+    /// order the user arranged them in the Armory Brain tab.
     pub fn bundle_memory_list_global(&self) -> Result<Vec<Memory>, StoreError> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, name, description, is_blank, is_global, provider, model, instructions,
                     context_files, mcp_servers, skills, sort_order, created_at, updated_at,
-                    instructions_by_provider
+                    instructions_by_provider, is_system
              FROM db_bundles
              WHERE is_global = 1
-             ORDER BY sort_order ASC, name ASC",
+             ORDER BY is_system DESC, sort_order ASC, name ASC",
         )?;
         let iter = stmt.query_map([], map_memory_row)?;
         let mut out = Vec::new();
@@ -141,7 +181,7 @@ impl Store {
         let mut stmt = conn.prepare(
             "SELECT id, name, description, is_blank, is_global, provider, model, instructions,
                     context_files, mcp_servers, skills, sort_order, created_at, updated_at,
-                    instructions_by_provider
+                    instructions_by_provider, is_system
              FROM db_bundles WHERE id = ?1",
         )?;
         let result = stmt.query_row(params![id], map_memory_row);
@@ -152,18 +192,48 @@ impl Store {
         }
     }
 
+    /// Look up just the `is_system` flag for `id`, without decoding a full
+    /// `Memory` row. Shared by every guard in this file that needs to know
+    /// "is the EXISTING row (if any) a system entry" before deciding
+    /// whether to allow a write through the generic path.
+    fn bundle_is_system(&self, conn: &rusqlite::Connection, id: &str) -> Result<Option<bool>, StoreError> {
+        let existing: Option<i64> = conn
+            .query_row(
+                "SELECT is_system FROM db_bundles WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        Ok(existing.map(|v| v != 0))
+    }
+
+    /// Generic Global Memory upsert — used by the ordinary Armory editor,
+    /// the per-agent Bundle editor, ABF import, and internal seeding.
+    /// Refuses outright to touch an existing `is_system=1` row (content
+    /// included, not just the flag) — see
+    /// docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md §3.2. Use
+    /// `bundle_memory_upsert_system` to create/edit a system entry.
     pub fn bundle_memory_upsert(&self, memory: &Memory) -> Result<(), StoreError> {
         let conn = self.conn.lock().unwrap();
+        if self.bundle_is_system(&conn, &memory.id)? == Some(true) {
+            return Err(StoreError::Other(
+                "cannot modify a system Global Memory entry via the generic bundle upsert path"
+                    .to_string(),
+            ));
+        }
         conn.execute(
             // sort_order is deliberately NOT in the ON CONFLICT update set:
             // it is owned by `bundle_memory_reorder`, so editing a bundle
             // through the regular Memory form never disturbs its position in
-            // the global brain.
+            // the global brain. is_system is hardcoded to 0 on insert (this
+            // path can never CREATE a system row) and omitted from the
+            // update set entirely (an existing row's tier — always 0, given
+            // the guard above — is never touched here either).
             "INSERT INTO db_bundles
                 (id, name, description, is_blank, is_global, provider, model, instructions,
                  context_files, mcp_servers, skills, sort_order, created_at, updated_at,
-                 instructions_by_provider)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+                 instructions_by_provider, is_system)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, 0)
              ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 description = excluded.description,
@@ -197,7 +267,62 @@ impl Store {
         Ok(())
     }
 
-    /// Delete a Memory bundle. Refuses to delete the blank singleton.
+    /// The ONLY path that can write `is_system=1`. Refuses the mirror-image
+    /// case of `bundle_memory_upsert`'s guard: converting an EXISTING
+    /// non-system row into a system one by id collision is not allowed —
+    /// `id` must be either brand new or already a system entry.
+    /// `is_blank`/`is_global`/`is_system` are hardcoded (not read from
+    /// `memory`) so this method can never produce anything other than a
+    /// well-formed system row regardless of what the caller passed in.
+    pub fn bundle_memory_upsert_system(&self, memory: &Memory) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        if self.bundle_is_system(&conn, &memory.id)? == Some(false) {
+            return Err(StoreError::Other(
+                "cannot convert an existing non-system Global Memory entry into a system entry"
+                    .to_string(),
+            ));
+        }
+        conn.execute(
+            "INSERT INTO db_bundles
+                (id, name, description, is_blank, is_global, provider, model, instructions,
+                 context_files, mcp_servers, skills, sort_order, created_at, updated_at,
+                 instructions_by_provider, is_system)
+             VALUES (?1, ?2, ?3, 0, 1, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1)
+             ON CONFLICT(id) DO UPDATE SET
+                name = excluded.name,
+                description = excluded.description,
+                is_global = 1,
+                is_system = 1,
+                provider = excluded.provider,
+                model = excluded.model,
+                instructions = excluded.instructions,
+                context_files = excluded.context_files,
+                mcp_servers = excluded.mcp_servers,
+                skills = excluded.skills,
+                updated_at = excluded.updated_at,
+                instructions_by_provider = excluded.instructions_by_provider",
+            params![
+                memory.id,
+                memory.name,
+                memory.description,
+                memory.provider,
+                memory.model,
+                memory.instructions,
+                memory.context_files,
+                memory.mcp_servers,
+                memory.skills,
+                memory.sort_order,
+                memory.created_at,
+                memory.updated_at,
+                memory.instructions_by_provider,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Delete a Memory bundle. Refuses to delete the blank singleton, a
+    /// seeded bundle, or (new) a system entry — use
+    /// `bundle_memory_delete_system` for the last case.
     pub fn bundle_memory_delete(&self, id: &str) -> Result<bool, StoreError> {
         if id == "blank" {
             return Err(StoreError::Other(
@@ -213,23 +338,41 @@ impl Store {
             ));
         }
         let conn = self.conn.lock().unwrap();
+        if self.bundle_is_system(&conn, id)? == Some(true) {
+            return Err(StoreError::Other(
+                "cannot delete a system Global Memory entry via the generic delete path; use bundle_memory_delete_system".to_string(),
+            ));
+        }
         let rows = conn.execute("DELETE FROM db_bundles WHERE id = ?1", params![id])?;
+        Ok(rows > 0)
+    }
+
+    /// The ONLY path that can remove an `is_system=1` row — structurally
+    /// incapable of deleting anything else, even if misused.
+    pub fn bundle_memory_delete_system(&self, id: &str) -> Result<bool, StoreError> {
+        let conn = self.conn.lock().unwrap();
+        let rows = conn.execute(
+            "DELETE FROM db_bundles WHERE id = ?1 AND is_system = 1",
+            params![id],
+        )?;
         Ok(rows > 0)
     }
 
     /// Assign `sort_order` to the given bundle ids in the order supplied
     /// (position 0, 1, 2, …). Drives the Armory global brain ordering,
     /// which in turn controls CLAUDE.md injection order. Ids not present in
-    /// the table are skipped silently (a concurrently-deleted section is not
-    /// an error). Runs in a single transaction so a partial reorder never
-    /// lands. Returns the number of rows updated.
+    /// the table, OR present but `is_system=1`, are skipped silently — a
+    /// system row's position is fixed (always first, see
+    /// `bundle_memory_list_global`) and never disturbed by the generic
+    /// reorder command. Runs in a single transaction so a partial reorder
+    /// never lands. Returns the number of rows updated.
     pub fn bundle_memory_reorder(&self, ordered_ids: &[String]) -> Result<usize, StoreError> {
         let mut conn = self.conn.lock().unwrap();
         let tx = conn.transaction()?;
         let mut updated = 0usize;
         {
             let mut stmt =
-                tx.prepare("UPDATE db_bundles SET sort_order = ?1 WHERE id = ?2")?;
+                tx.prepare("UPDATE db_bundles SET sort_order = ?1 WHERE id = ?2 AND is_system = 0")?;
             for (idx, id) in ordered_ids.iter().enumerate() {
                 updated += stmt.execute(params![idx as i64, id])?;
             }
@@ -256,5 +399,6 @@ fn map_memory_row(row: &rusqlite::Row) -> rusqlite::Result<Memory> {
         created_at: row.get(12)?,
         updated_at: row.get(13)?,
         instructions_by_provider: row.get(14)?,
+        is_system: row.get::<_, i64>(15)? != 0,
     })
 }

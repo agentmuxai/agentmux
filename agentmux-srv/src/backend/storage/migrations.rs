@@ -52,7 +52,11 @@ use super::error::StoreError;
 ///        the mirror in v6 only ever holds the current value, with no way
 ///        to see what a file contained before its last write. See
 ///        docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md.
-pub const SHARED_STORE_SCHEMA_VERSION: i64 = 8;
+///   v9 — db_bundles.is_system: AgentMux-controlled, highest-priority
+///        Global Memory tier — see OBJECT_SCHEMA_VERSION's v27 doc
+///        comment (objects.db, above run_object_schema) for the full
+///        design; this store just needs schema parity.
+pub const SHARED_STORE_SCHEMA_VERSION: i64 = 9;
 
 /// `user_version` value stamped into `objects.db` after `run_object_schema`.
 /// The flat schema reset the counter to 1 (the pre-flatten chain never set
@@ -232,7 +236,18 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 8;
 ///        default. `db_conversation_trust_grants` mirrors
 ///        `db_lan_peer_pubkey_pins`'s exact shape (own module,
 ///        get/set-style methods, case-insensitive agent_id lookups).
-pub const OBJECT_SCHEMA_VERSION: i64 = 26;
+///   v27 — db_bundles.is_system: an AgentMux-controlled, highest-priority
+///        Global Memory tier (INTEGER, default 0). A system row is always
+///        also is_global=1 (enforced in code, not a CHECK constraint —
+///        see `bundle_memory_upsert_system`). Writable only through the
+///        dedicated `upsertsystemmemory`/`deletesystemmemory` RPCs and
+///        `Store::bundle_memory_upsert_system`/`_delete_system` — the
+///        generic `bundle_memory_upsert`/`_delete`/`_reorder` all refuse
+///        to touch an is_system=1 row. Injected first in
+///        `format_global_brain_block`'s output, wrapped in explicit
+///        override wording, ahead of every ordinary Global Memory
+///        section. See docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md.
+pub const OBJECT_SCHEMA_VERSION: i64 = 27;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -449,7 +464,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             skills        TEXT NOT NULL DEFAULT '[]',
             sort_order    INTEGER NOT NULL DEFAULT 0,
             created_at    INTEGER NOT NULL DEFAULT 0,
-            updated_at    INTEGER NOT NULL DEFAULT 0
+            updated_at    INTEGER NOT NULL DEFAULT 0,
+            is_system     INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_bundles_is_blank
             ON db_bundles(is_blank);
@@ -932,6 +948,9 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         // named-on-db_agents case like memory_id/default_memory_id).
         "ALTER TABLE db_agent_definitions ADD COLUMN conversation_visibility TEXT NOT NULL DEFAULT 'private'",
         "ALTER TABLE db_agents ADD COLUMN conversation_visibility TEXT NOT NULL DEFAULT 'private'",
+        // v27: AgentMux-controlled, highest-priority Global Memory tier —
+        // see OBJECT_SCHEMA_VERSION's v27 doc comment above.
+        "ALTER TABLE db_bundles ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
@@ -1087,7 +1106,8 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
             skills        TEXT NOT NULL DEFAULT '[]',
             sort_order    INTEGER NOT NULL DEFAULT 0,
             created_at    INTEGER NOT NULL DEFAULT 0,
-            updated_at    INTEGER NOT NULL DEFAULT 0
+            updated_at    INTEGER NOT NULL DEFAULT 0,
+            is_system     INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_ss_bundles_is_blank
             ON db_bundles(is_blank);
@@ -1221,6 +1241,9 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
         "ALTER TABLE db_cron_jobs ADD COLUMN max_age_secs INTEGER",
         // v7: provider-scoped bundle instructions (ABF v0.2 §2.2).
         "ALTER TABLE db_bundles ADD COLUMN instructions_by_provider TEXT NOT NULL DEFAULT '{}'",
+        // v9: AgentMux-controlled, highest-priority Global Memory tier —
+        // see OBJECT_SCHEMA_VERSION's v27 doc comment above.
+        "ALTER TABLE db_bundles ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
@@ -1261,7 +1284,17 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
 ///        read path (mirroring what v2 did for db_accounts) is not blocked
 ///        on a missing table. See
 ///        docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md.
-pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 3;
+///   v4 — db_bundles.is_system, for schema parity with OBJECT_SCHEMA_VERSION
+///        v27 / SHARED_STORE_SCHEMA_VERSION v9 (same column, same reasoning
+///        as v3 above — this store's `db_bundles` copy is not an actively-
+///        written duplicate either). Real ALTER TABLE ADD COLUMN added to
+///        `run_identity_store_schema` in the same change, so this counter
+///        MUST bump alongside it — an unbumped counter would leave an
+///        existing identity-store.db stamped at the old user_version
+///        forever, silently defeating check_schema_compat/stamp_version's
+///        forward-compat lock for this one store (reagent P1, PR #2782).
+///        See docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md.
+pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 4;
 
 /// Initialize (or re-validate) the `~/.agentmux/shared/identity-store.db`
 /// schema — the permanently-global store introduced by
@@ -1346,7 +1379,8 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
             skills        TEXT NOT NULL DEFAULT '[]',
             sort_order    INTEGER NOT NULL DEFAULT 0,
             created_at    INTEGER NOT NULL DEFAULT 0,
-            updated_at    INTEGER NOT NULL DEFAULT 0
+            updated_at    INTEGER NOT NULL DEFAULT 0,
+            is_system     INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_ids_bundles_is_blank
             ON db_bundles(is_blank);
@@ -1447,6 +1481,18 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
             (id, name, description, is_blank, created_at, updated_at)
          VALUES ('blank', '__blank__', 'Vanilla CLI — no instructions, no context', 1, 0, 0);",
     )?;
+
+    // Additive column added after this store's tables were first created —
+    // same idempotent pattern as run_shared_store_schema's own ALTER loop.
+    // db_bundles.is_system: see OBJECT_SCHEMA_VERSION's v27 doc comment.
+    if let Err(e) = conn.execute_batch(
+        "ALTER TABLE db_bundles ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0",
+    ) {
+        let msg = e.to_string();
+        if !msg.contains("duplicate column") {
+            return Err(e.into());
+        }
+    }
 
     Ok(())
 }

@@ -183,6 +183,7 @@ impl Migration for M0021BackfillAgentBundles {
                 sort_order: 0,
                 created_at: now,
                 updated_at: now,
+                is_system: false,
             };
             bundle_store
                 .bundle_memory_upsert(&bundle)

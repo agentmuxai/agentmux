@@ -11,6 +11,7 @@ use crate::backend::rpc::engine::WshRpcEngine;
 use crate::backend::rpc_types::{
     COMMAND_LIST_MEMORIES, COMMAND_GET_MEMORY,
     COMMAND_UPSERT_MEMORY, COMMAND_DELETE_MEMORY, COMMAND_REORDER_GLOBAL_BRAIN,
+    COMMAND_UPSERT_SYSTEM_MEMORY, COMMAND_DELETE_SYSTEM_MEMORY,
     CommandGetMemoryData, CommandDeleteMemoryData, CommandReorderGlobalBrainData,
 };
 use crate::backend::storage::store::Memory;
@@ -149,4 +150,85 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
+    // ---- System-tier Global Memory — see
+    // docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md. Deliberately
+    // separate commands from the four above (never wired to any MCP tool)
+    // so the ordinary Global Memory editor and every other generic
+    // bundle-writing surface can never reach an is_system row.
+
+    let wstore = state.id_store.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_UPSERT_SYSTEM_MEMORY,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                let mut memory: Memory = serde_json::from_value(data)
+                    .map_err(|e| format!("upsertsystemmemory: {e}"))?;
+                if memory.id.is_empty() {
+                    memory.id = uuid::Uuid::new_v4().to_string();
+                }
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
+                if memory.created_at == 0 {
+                    memory.created_at = now;
+                }
+                memory.updated_at = now;
+                wstore
+                    .bundle_memory_upsert_system(&memory)
+                    .map_err(|e| format!("upsertsystemmemory: {e}"))?;
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: "memories:changed".to_string(),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
+                // Return the row actually persisted, not the client-supplied
+                // struct — bundle_memory_upsert_system hardcodes
+                // is_blank/is_global/is_system server-side regardless of
+                // what `memory` carried (e.g. the frontend's saveSystemEdit
+                // sends only id/name/instructions, so `memory.is_global`/
+                // `is_system` deserialize to false via #[serde(default)]).
+                // Echoing `memory` back would misreport both to any caller
+                // that trusts the response instead of refetching. reagent
+                // P2, PR #2782.
+                let saved = wstore
+                    .bundle_memory_get(&memory.id)
+                    .map_err(|e| format!("upsertsystemmemory: {e}"))?
+                    .ok_or_else(|| format!("upsertsystemmemory: row {} vanished after upsert", memory.id))?;
+                Ok(Some(serde_json::to_value(&saved).unwrap_or_default()))
+            })
+        }),
+    );
+
+    let wstore = state.id_store.clone();
+    let broker = state.broker.clone();
+    engine.register_handler(
+        COMMAND_DELETE_SYSTEM_MEMORY,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let broker = broker.clone();
+            Box::pin(async move {
+                let cmd: CommandDeleteMemoryData = serde_json::from_value(data)
+                    .map_err(|e| format!("deletesystemmemory: {e}"))?;
+                let deleted = wstore
+                    .bundle_memory_delete_system(&cmd.id)
+                    .map_err(|e| format!("deletesystemmemory: {e}"))?;
+                if deleted {
+                    broker.publish(crate::backend::wps::WaveEvent {
+                        event: "memories:changed".to_string(),
+                        scopes: vec![],
+                        sender: String::new(),
+                        persist: 0,
+                        data: None,
+                    });
+                }
+                Ok(Some(json!({ "deleted": deleted })))
+            })
+        }),
+    );
 }

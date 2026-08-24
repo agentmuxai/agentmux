@@ -851,7 +851,9 @@ const AgentRefEditor = (p: {
                     onChange={(e) => setRef({ memoryId: e.currentTarget.value })}
                 >
                     <option value="">— blank —</option>
-                    <For each={(memories() ?? []).filter((m) => !m.is_blank)}>
+                    {/* is_system entries are AgentMux-controlled workspace policy,
+                        not a selectable per-agent bundle (reagent P1, PR #2782). */}
+                    <For each={(memories() ?? []).filter((m) => !m.is_blank && !m.is_system)}>
                         {(memory) => <option value={memory.id}>{memory.name}</option>}
                     </For>
                 </select>

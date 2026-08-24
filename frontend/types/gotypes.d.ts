@@ -497,6 +497,13 @@ declare global {
         sort_order?: number;
         created_at: number;
         updated_at: number;
+        /** AgentMux-controlled, highest-priority Global Memory tier — always
+         *  also is_global, injected first with explicit override wording.
+         *  Writable only through upsertsystemmemory/deletesystemmemory; the
+         *  ordinary upsertmemory/deletememory/reorderglobalbrain all refuse
+         *  to touch a row with this set. See
+         *  docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md. */
+        is_system?: boolean;
     };
 
     // ── Browser pane bookmarks ───────────────────────────────────────────

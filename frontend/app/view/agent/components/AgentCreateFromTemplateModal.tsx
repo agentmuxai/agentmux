@@ -244,7 +244,9 @@ export const AgentCreateFromTemplateModalPanel = (
     // fallback provider and never reconsider once the real one lands.
     // `accountTouched` (mirroring runtimeTouched/modelTouched above)
     // stops the re-pick once the user has made an explicit choice.
-    const realMemories = createMemo(() => memories().filter((m) => !m.is_blank));
+    // is_system entries are AgentMux-controlled workspace policy, not a
+    // selectable per-agent bundle (reagent P1, PR #2782).
+    const realMemories = createMemo(() => memories().filter((m) => !m.is_blank && !m.is_system));
     let accountTouched = false;
     createEffect(() => {
         if (accountTouched) return;

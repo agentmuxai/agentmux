@@ -64,6 +64,57 @@ function SectionEditor(props: { model: GlobalBrainViewModel; isNew: boolean }): 
     );
 }
 
+/** Inline editor card for the system tier — a separate component (not a
+ *  parameterized SectionEditor) so its state is never accidentally wired to
+ *  the ordinary draft signals. See
+ *  docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md §3.5. */
+function SystemSectionEditor(props: { model: GlobalBrainViewModel; isNew: boolean }): JSX.Element {
+    const { model } = props;
+    return (
+        <div class="global-brain-editor global-brain-editor-system">
+            <label class="global-brain-field">
+                <span class="global-brain-field-label">Name</span>
+                <input
+                    class="global-brain-input"
+                    type="text"
+                    value={model.draftSystemNameAtom()}
+                    onInput={(e) => model.setDraftSystemName(e.currentTarget.value)}
+                    onContextMenu={showTextInputContextMenu}
+                    placeholder="e.g. AgentMux Policy"
+                />
+            </label>
+            <label class="global-brain-field">
+                <span class="global-brain-field-label">Content</span>
+                <textarea
+                    class="global-brain-textarea"
+                    rows={8}
+                    value={model.draftSystemInstructionsAtom()}
+                    onInput={(e) => model.setDraftSystemInstructions(e.currentTarget.value)}
+                    onContextMenu={showTextInputContextMenu}
+                    placeholder="Markdown injected FIRST into every agent's CLAUDE.md, wrapped in explicit override wording."
+                    spellcheck={false}
+                />
+            </label>
+            <div class="global-brain-editor-actions">
+                <button
+                    class="global-brain-btn"
+                    disabled={model.savingAtom()}
+                    onClick={() => model.cancelEditSystem()}
+                >
+                    Cancel
+                </button>
+                <button
+                    class="global-brain-btn global-brain-btn-primary"
+                    disabled={model.savingAtom() || !model.draftSystemNameAtom().trim()}
+                    onClick={() => void model.saveSystemEdit()}
+                >
+                    {model.savingAtom() ? "Saving…" : props.isNew ? "Add system entry" : "Save"}
+                </button>
+            </div>
+        </div>
+    );
+}
+
 export const GlobalBrainManager = (): JSX.Element => {
     const model = new GlobalBrainViewModel();
     onCleanup(() => model.dispose());
@@ -93,8 +144,71 @@ export const GlobalBrainManager = (): JSX.Element => {
                 <div class="global-brain-error">{model.errorAtom()}</div>
             </Show>
 
+            {/* System tier — pinned above ordinary sections, always injected
+                first with override wording. No move up/down: position is
+                fixed server-side regardless of what a reorder call sends.
+                See docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md. */}
+            <div class="global-brain-sections global-brain-sections-system">
+                <For each={model.systemSectionsAtom()}>
+                    {(section) => (
+                        <div
+                            class="global-brain-section global-brain-section-system"
+                            classList={{ "is-editing": model.editingSystemIdAtom() === section.id }}
+                        >
+                            <Show
+                                when={model.editingSystemIdAtom() === section.id}
+                                fallback={
+                                    <div class="global-brain-section-row">
+                                        <div class="global-brain-section-main">
+                                            <span class="global-brain-system-badge" title="AgentMux-controlled, highest priority">
+                                                AgentMux
+                                            </span>
+                                            <span class="global-brain-section-name">
+                                                {section.name}
+                                            </span>
+                                        </div>
+                                        <div class="global-brain-section-actions">
+                                            <button
+                                                class="global-brain-btn"
+                                                onClick={() => model.startEditSystem(section)}
+                                            >
+                                                Edit
+                                            </button>
+                                            <button
+                                                class="global-brain-btn global-brain-btn-danger"
+                                                title="Delete this system entry"
+                                                onClick={() => void model.removeSystem(section.id)}
+                                            >
+                                                Remove
+                                            </button>
+                                        </div>
+                                    </div>
+                                }
+                            >
+                                <SystemSectionEditor model={model} isNew={false} />
+                            </Show>
+                        </div>
+                    )}
+                </For>
+
+                <Show when={model.editingSystemIdAtom() === NEW_SECTION_ID}>
+                    <div class="global-brain-section global-brain-section-system is-editing">
+                        <SystemSectionEditor model={model} isNew={true} />
+                    </div>
+                </Show>
+
+                <Show when={model.systemSectionsAtom().length === 0 && model.editingSystemIdAtom() === null}>
+                    <button
+                        class="global-brain-btn global-brain-btn-system-add"
+                        onClick={() => model.startNewSystem()}
+                    >
+                        + Add AgentMux system entry
+                    </button>
+                </Show>
+            </div>
+
             <div class="global-brain-sections">
-                <For each={model.sectionsAtom()}>
+                <For each={model.ordinarySectionsAtom()}>
                     {(section, i) => (
                         <div
                             class="global-brain-section"
@@ -126,7 +240,7 @@ export const GlobalBrainManager = (): JSX.Element => {
                                             <button
                                                 class="global-brain-icon-btn"
                                                 title="Move down"
-                                                disabled={i() === model.sectionsAtom().length - 1}
+                                                disabled={i() === model.ordinarySectionsAtom().length - 1}
                                                 onClick={() => void model.move(section.id, 1)}
                                             >
                                                 ↓
@@ -162,7 +276,7 @@ export const GlobalBrainManager = (): JSX.Element => {
                     </div>
                 </Show>
 
-                <Show when={model.sectionsAtom().length === 0 && model.editingIdAtom() === null}>
+                <Show when={model.ordinarySectionsAtom().length === 0 && model.editingIdAtom() === null}>
                     <div class="global-brain-empty">
                         No global sections yet. Add one to give every agent shared context.
                     </div>

@@ -185,9 +185,17 @@ export function accountsForProvider(state: LaunchFlowState, providerId: string):
     return state.accounts.list.filter((a) => a.provider === providerId);
 }
 
-/** Real (non-blank) memory bundles. */
+/** Real (non-blank), non-system memory bundles — excludes is_system rows
+ *  the same way every sibling bundle-picker filter in the app does
+ *  (AgentLaunchModal's own dropdown, AgentStartupModal, drone-view,
+ *  MemoryViewModel.refresh). Without this, AgentLaunchModal's default-pick
+ *  effect (`firstReal = realMemories(flow.state)[0]`) could auto-select a
+ *  system Global Memory entry as memoryId — an id with no matching
+ *  <option> in that same dropdown, and one bundle_memory_upsert would
+ *  permanently refuse to let the launched agent's own bundle editor
+ *  modify. reagent P1, PR #2782. */
 export function realMemories(state: LaunchFlowState): Memory[] {
-    return state.memories.list.filter((m) => !m.is_blank);
+    return state.memories.list.filter((m) => !m.is_blank && !m.is_system);
 }
 
 /** True when the form is a continuation of a prior named agent

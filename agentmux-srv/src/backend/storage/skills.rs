@@ -1016,6 +1016,7 @@ mod effective_skills_tests {
                 sort_order: 0,
                 created_at: 1_700_000_000_000,
                 updated_at: 1_700_000_000_000,
+                is_system: false,
             })
             .unwrap();
     }
@@ -1183,6 +1184,7 @@ mod bundle_ref_tests {
                 sort_order: 0,
                 created_at: 1_700_000_000_000,
                 updated_at: 1_700_000_000_000,
+                is_system: false,
             })
             .unwrap();
     }
