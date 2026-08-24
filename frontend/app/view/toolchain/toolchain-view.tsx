@@ -12,6 +12,7 @@ import { EXTERNAL_WIDGETS, widgetCliCommandForPlatform } from "@/app/view/agent/
 import { getProviderList } from "@/app/view/agent/providers";
 import { ensureCapability, getCapability, isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
+import { SystemToolInstallInline } from "./SystemToolInstallInline";
 import type { ToolchainViewModel } from "./toolchain-model";
 import "./toolchain-view.scss";
 
@@ -248,6 +249,27 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
     // blocked under CEF's Permissions-Policy. See SPEC_UNIFIED_CLIPBOARD_2026_05_18.md §3.3.
     const copy = (cmd?: string) => { if (cmd) void clipboardWriteText(cmd).catch(() => {}); };
 
+    // Tool ids the backend's system-install catalog actually covers
+    // (system_install_handlers.rs) — everything else (today: docker,
+    // provider CLIs) keeps the existing open-URL-only "Install ↗"
+    // behavior unchanged. See docs/specs/SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md.
+    const SYSTEM_INSTALLABLE_IDS = new Set(["git", "node", "npm", "python"]);
+    const [expandedInstalls, setExpandedInstalls] = createSignal<ReadonlySet<string>>(new Set());
+    const toggleInstallPanel = (id: string) => {
+        setExpandedInstalls((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
+        });
+    };
+    const handleInstallClick = (row: ToolRow) => {
+        if (row.kind === "core" && SYSTEM_INSTALLABLE_IDS.has(row.id)) {
+            toggleInstallPanel(row.id);
+        } else {
+            open(row.installUrl);
+        }
+    };
+
     const renderRow = (row: ToolRow): JSX.Element => (
         <div class="toolchain-row" classList={{ "toolchain-row--missing": !row.loading && !row.found }}>
             <i class={`toolchain-row-icon fa-solid fa-${row.icon}`} aria-hidden="true" />
@@ -291,11 +313,23 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
                         </button>
                     </div>
                 </Show>
+                <Show when={expandedInstalls().has(row.id)}>
+                    <SystemToolInstallInline
+                        toolId={row.id}
+                        onInstalled={() => {
+                            toggleInstallPanel(row.id);
+                            const idx = rows.findIndex((r) => r.id === row.id);
+                            if (idx !== -1) void probe(idx, { force: true });
+                        }}
+                    />
+                </Show>
             </div>
             <div class="toolchain-row-actions">
                 <Show when={!row.loading && !row.found && row.installUrl}>
-                    <button class="toolchain-btn" onClick={() => open(row.installUrl)}>
-                        Install <i class="fa-solid fa-arrow-up-right-from-square" />
+                    <button class="toolchain-btn" onClick={() => handleInstallClick(row)}>
+                        {row.kind === "core" && SYSTEM_INSTALLABLE_IDS.has(row.id)
+                            ? "Install"
+                            : <>Install <i class="fa-solid fa-arrow-up-right-from-square" /></>}
                     </button>
                 </Show>
                 <Show when={row.docsUrl}>
