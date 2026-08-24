@@ -133,12 +133,26 @@ export function useSubagentBackfillGate(
         // cycle that hasn't determined anything yet.
         setSettled(false);
 
-        safetyTimer = setTimeout(() => {
-            console.log(
-                `[useSubagentBackfillGate] block ${blockId}: no backfill "done" after ${SETTLE_SAFETY_TIMEOUT_MS}ms, revealing anyway`
-            );
-            setSettled(true);
-        }, SETTLE_SAFETY_TIMEOUT_MS);
+        // reagentx P2 (PR #2781, round 7): re-armed on EVERY "started", not
+        // just this initial wiring — `backfill_generation` (scan.rs)
+        // explicitly supports a later, legitimate overlapping
+        // re-registration for the same block re-closing this gate (a fresh
+        // "started" arriving well after the first cycle already settled).
+        // A safety net that only ever fires once per mount would leave
+        // that LATER cycle with no rescue at all if its own "done" is
+        // somehow never observed (e.g. a dropped WS connection) — settled
+        // would then stay false, and the BrainSpinner gated, for the rest
+        // of this mount's life.
+        const armSafetyTimer = () => {
+            clearTimeout(safetyTimer);
+            safetyTimer = setTimeout(() => {
+                console.log(
+                    `[useSubagentBackfillGate] block ${blockId}: no backfill "done" after ${SETTLE_SAFETY_TIMEOUT_MS}ms, revealing anyway`
+                );
+                setSettled(true);
+            }, SETTLE_SAFETY_TIMEOUT_MS);
+        };
+        armSafetyTimer();
 
         let receivedLiveEvent = false;
         const scheduleSettle = () => {
@@ -153,6 +167,7 @@ export function useSubagentBackfillGate(
             if (status === "started") {
                 clearTimeout(settleTimer);
                 setSettled(false);
+                armSafetyTimer();
             } else if (status === "done") {
                 scheduleSettle();
             }

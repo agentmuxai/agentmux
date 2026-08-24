@@ -209,4 +209,28 @@ describe("useSubagentBackfillGate", () => {
         await vi.advanceTimersByTimeAsync(250);
         expect(settled()).toBe(true);
     });
+
+    // reagentx P2 (PR #2781, round 7): the safety net used to only ever
+    // arm once, at initial wiring — a legitimate LATER "started" (e.g. an
+    // overlapping re-registration backfill_generation, scan.rs, explicitly
+    // supports) re-closed the gate with no rescue left if that cycle's own
+    // "done" never arrived.
+    it("re-arms the safety net for a later 'started' after the first cycle already settled", async () => {
+        vi.useFakeTimers();
+        const { settled } = mount("agent", true);
+
+        // First cycle settles normally.
+        rpcHub.resolve?.([{ data: { status: "done" } }]);
+        await vi.advanceTimersByTimeAsync(250);
+        expect(settled()).toBe(true);
+
+        // A later, legitimate re-registration re-closes the gate...
+        hub.handler?.({ data: { status: "started" } });
+        expect(settled()).toBe(false);
+
+        // ...and this time "done" never arrives. Without a re-armed safety
+        // net this would stay gated forever.
+        await vi.advanceTimersByTimeAsync(20_000);
+        expect(settled()).toBe(true);
+    });
 });
