@@ -1,20 +1,34 @@
-name: Nightly Release — Auto-Publish Pending Version Bump
+name: Nightly Release — Auto-Publish Pending Version Bump (manual fallback)
 
-# Automates the ONE step of the release process that's still manual today:
-# after a `chore: release vX.Y.Z` commit merges to main, someone has to
-# remember to `git tag vX.Y.Z && git push origin vX.Y.Z` before anything
-# actually gets built or published. This workflow does exactly that step,
-# nightly, and nothing else — see docs/specs/SPEC_NIGHTLY_RELEASE_CHANNEL_2026_08_23.md.
+# HISTORY: this workflow originally auto-tagged the latest pending
+# `chore: release vX.Y.Z` commit via a `workflow_run` trigger chained off
+# another nightly workflow's completion. Confirmed (via direct GitHub API
+# investigation — see docs/reports/REPORT_NIGHTLY_RELEASE_STUCK_AT_0_55_21_2026_08_24.md)
+# that trigger never fired automatically, even once, despite every
+# checkable precondition (name match, listener present on `main` well
+# before the upstream run, upstream run itself succeeding) being satisfied.
+#
+# The actual automated tag-and-publish responsibility now lives in
+# a5af/shared-infrastructure's gh-reporter Lambda instead — it already runs
+# reliably on its own AWS EventBridge schedule (every 30 min, not just
+# nightly) and already has the GitHub API credentials this needs. See
+# a5af/shared-infrastructure's docs/specs/GH_REPORTER_RELEASE_AUTO_TAG_SPEC_2026_08_24.md
+# for the design, and docs/specs/SPEC_NIGHTLY_RELEASE_CHANNEL_2026_08_23.md
+# in this repo for the original (now superseded, for the tagging half only)
+# design.
+#
+# This workflow is KEPT, not deleted, as a manual escape hatch — e.g. if
+# gh-reporter's Lambda or its PAT is ever down, someone can still run this
+# by hand (Actions tab → "Run workflow") exactly as it always worked. The
+# automatic `workflow_run` trigger is removed rather than left in place:
+# leaving two independent "automatic" taggers active would be redundant
+# (harmless in the common case — the second one just finds "already
+# tagged" and no-ops — but confusing) now that gh-reporter is the one that
+# actually works.
 #
 # It does NOT run `task release`, does NOT touch .changesets/, and does NOT
 # decide a version bump — it only finds the most recent `chore: release`
 # commit on main and tags it if (and only if) that tag doesn't exist yet.
-# If two bump commits land before either is tagged, only the newest is
-# tagged (matches how a human doing this manually would behave).
-#
-# Once tagged, the existing release.yml (build + GitHub Release + landing
-# page dispatch) and container-image.yml fire completely unmodified, exactly
-# as they do for a manual tag push.
 #
 # REQUIRES repo secret NIGHTLY_TAG_PAT: a PAT (contents:write is enough)
 # belonging to a service/bot identity — NOT a stand-in for the default
@@ -22,32 +36,28 @@ name: Nightly Release — Auto-Publish Pending Version Bump
 # GITHUB_TOKEN to trigger *other* workflows' `on: push` listeners (the
 # anti-recursion guard) — if this workflow pushed the tag using
 # GITHUB_TOKEN, release.yml and container-image.yml would silently never
-# fire. Until NIGHTLY_TAG_PAT is provisioned, this workflow will find and
-# attempt to tag a pending release but the push step will fail.
+# fire.
 
 on:
-  workflow_run:
-    workflows: ["CI — nightly cross-platform build + test"]
-    types: [completed]
   workflow_dispatch: {}
 
 permissions:
   contents: read
 
-# Without this, an overlapping workflow_dispatch run and the automatic
-# workflow_run trigger (or two workflow_run firings) could both read the
-# same untagged pending release and race to tag/push it. The second push
-# would just fail (tag already exists) rather than corrupt anything, but
-# it's an easily-avoided race for a job with a push side effect. Queue
-# rather than cancel — killing a run mid-push could leave a tag pushed
-# with no corresponding downstream build ever having started.
+# Two overlapping manual `workflow_dispatch` runs could both read the same
+# untagged pending release and race to tag/push it — the second push would
+# just fail (tag already exists) rather than corrupt anything, but it's an
+# easily-avoided race for a job with a push side effect. Queue rather than
+# cancel — killing a run mid-push could leave a tag pushed with no
+# corresponding downstream build ever having started. This guard predates
+# the removal of the automatic workflow_run trigger below, but stays —
+# cheap insurance regardless of how many trigger types remain.
 concurrency:
   group: nightly-release
   cancel-in-progress: false
 
 jobs:
   detect-and-tag:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout main (full history)
