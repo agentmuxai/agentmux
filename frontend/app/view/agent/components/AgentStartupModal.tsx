@@ -46,10 +46,12 @@ export const AgentStartupModal = (props: AgentStartupModalProps): JSX.Element =>
         .catch(() => setSelectedId(null))
         .finally(() => setLoaded(true));
 
-    // Non-blank bundles only — "blank" is the vanilla-CLI sentinel with no
-    // instructions worth surfacing here (same filter convention used by the
-    // launch modal's own bundle picker).
-    const selectable = () => (bundles() ?? []).filter((m) => !m.is_blank);
+    // Non-blank, non-system bundles only — "blank" is the vanilla-CLI
+    // sentinel with no instructions worth surfacing here (same filter
+    // convention used by the launch modal's own bundle picker); is_system
+    // entries are AgentMux-controlled workspace policy, not a selectable
+    // per-agent bundle (reagent P1, PR #2782).
+    const selectable = () => (bundles() ?? []).filter((m) => !m.is_blank && !m.is_system);
     const selectedBundle = () => selectable().find((m) => m.id === selectedId());
 
     const handleChange = async (id: string): Promise<void> => {

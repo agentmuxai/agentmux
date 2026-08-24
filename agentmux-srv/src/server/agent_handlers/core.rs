@@ -779,6 +779,7 @@ mod tests {
             sort_order: 0,
             created_at: 0,
             updated_at: 0,
+            is_system: false,
         };
         state.id_store.bundle_memory_upsert(&bundle).unwrap();
     }

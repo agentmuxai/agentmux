@@ -2113,6 +2113,7 @@ mod tests {
             sort_order: 0,
             created_at: 0,
             updated_at: 0,
+            is_system: false,
         };
         let export = super::super::bundle_export::export_bundle(&bundle, &[]);
         let zip_bytes = super::super::bundle_export::zip_bundle_export(&export).unwrap();

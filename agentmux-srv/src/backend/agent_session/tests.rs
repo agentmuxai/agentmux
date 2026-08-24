@@ -671,6 +671,7 @@ fn template_promote_resolves_provider_through_the_templates_bundle_not_the_drift
         sort_order: 0,
         created_at: 0,
         updated_at: 0,
+        is_system: false,
     };
     wstore.bundle_memory_upsert(&bundle).unwrap();
 

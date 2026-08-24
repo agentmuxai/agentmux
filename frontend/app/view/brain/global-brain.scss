@@ -110,6 +110,47 @@
     border: 1px dashed var(--border-color);
 }
 
+// ── System tier ──────────────────────────────────────────────────────────────
+// AgentMux-controlled, highest-priority Global Memory entries — visually
+// distinct from ordinary sections so a human editing regular Global Memory
+// never confuses the two. See
+// docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md §3.5.
+
+.global-brain-sections-system {
+    margin-bottom: var(--space-1);
+}
+
+.global-brain-section-system {
+    border-color: var(--accent-color);
+    background: color-mix(in srgb, var(--accent-color) 6%, transparent);
+
+    &.is-editing {
+        border-color: var(--accent-color);
+        box-shadow: 0 0 0 1px var(--accent-color);
+    }
+}
+
+.global-brain-system-badge {
+    flex-shrink: 0;
+    padding: 1px var(--space-1-5);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--button-text-color);
+    background: var(--accent-color);
+}
+
+.global-brain-editor-system {
+    border-left: 2px solid var(--accent-color);
+}
+
+.global-brain-btn-system-add {
+    align-self: flex-start;
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+}
+
 // ── Inline editor ────────────────────────────────────────────────────────────
 
 .global-brain-editor {
