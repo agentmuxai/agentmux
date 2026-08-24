@@ -14,6 +14,8 @@
  * SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md.
  */
 
+import { TRUNCATED_MARKER } from "./output-cap";
+
 /** Leading run of spaces/tabs. `\r` is deliberately excluded so a CRLF
  *  line's trailing `\r` (see `splitLines`) never gets treated as part of
  *  the indent. */
@@ -24,6 +26,20 @@ const LEADING_WHITESPACE_RE = /^[ \t]*/;
  *  occur in practice, but isn't assumed away — degrades to the plain
  *  dedent path rather than corrupting a subset of lines. */
 const NUMBERED_LINE_RE = /^\s*\d+\t/;
+
+/** Is `line` ignorable for common-indent purposes — a blank line, or
+ *  `capText`'s char-budget truncation marker (`output-cap.ts`)? Both can
+ *  land inside otherwise-uniformly-indented preview text: a blank line
+ *  carries no indentation signal, and the marker is a column-0 line
+ *  injected by capping, not real file content. Either would otherwise force
+ *  the common prefix to empty (or, for the numbered Read variant, break the
+ *  "every non-blank line is numbered" check and fall through to a
+ *  whole-text dedent that finds no common prefix at all) — so both are
+ *  excluded from the computation and left unstripped in the output, exactly
+ *  like a blank line already was. */
+function isIgnorableForIndent(line: string): boolean {
+    return line.trim() === "" || line === TRUNCATED_MARKER;
+}
 
 /** Split on `\n`, tolerating a CRLF source (`\r` stays attached to each
  *  line here; callers that need to inspect content should trim it, but
@@ -36,18 +52,19 @@ function splitLines(text: string): string[] {
 }
 
 /** Literal longest-common-leading-whitespace prefix across `lines`,
- *  ignoring blank (whitespace-only) lines for the computation — a blank
- *  line carries no indentation signal and would otherwise force the
- *  common prefix to empty for an all-but-one-blank-line snippet. Compared
- *  as a literal string prefix (not by counting tab-equivalent columns), so
- *  tabs and spaces are never conflated: `"\t\tfoo"` and `"    foo"` share
- *  no common prefix and dedent is correctly a no-op — there is no reliable
- *  way to know how wide a tab renders, so guessing would sometimes be
- *  wrong; declining to dedent is always safe. */
+ *  ignoring lines {@link isIgnorableForIndent} flags (blank lines, and
+ *  `capText`'s truncation marker) for the computation — neither carries an
+ *  indentation signal and either would otherwise force the common prefix to
+ *  empty for an otherwise-uniformly-indented snippet. Compared as a literal
+ *  string prefix (not by counting tab-equivalent columns), so tabs and
+ *  spaces are never conflated: `"\t\tfoo"` and `"    foo"` share no common
+ *  prefix and dedent is correctly a no-op — there is no reliable way to know
+ *  how wide a tab renders, so guessing would sometimes be wrong; declining
+ *  to dedent is always safe. */
 function commonLeadingWhitespace(lines: readonly string[]): string {
     let common: string | null = null;
     for (const line of lines) {
-        if (line.trim() === "") continue; // blank line — no signal
+        if (isIgnorableForIndent(line)) continue;
         const indent = LEADING_WHITESPACE_RE.exec(line)![0];
         if (common === null) {
             common = indent;
@@ -63,13 +80,13 @@ function commonLeadingWhitespace(lines: readonly string[]): string {
     return common ?? "";
 }
 
-/** Strip `prefix` (a literal leading-whitespace run) from every non-blank
- *  line of `lines`; blank lines pass through unchanged (there is nothing
- *  to strip, and forcing them to `""` would be indistinguishable from
- *  already-empty input — they already read as empty either way). */
+/** Strip `prefix` (a literal leading-whitespace run) from every line of
+ *  `lines` that isn't {@link isIgnorableForIndent}; blank lines and the
+ *  truncation marker pass through unchanged — there is nothing meaningful
+ *  to strip from either. */
 function stripPrefixFromLines(lines: readonly string[], prefix: string): string[] {
     if (prefix === "") return lines.slice();
-    return lines.map((line) => (line.trim() === "" ? line : line.slice(prefix.length)));
+    return lines.map((line) => (isIgnorableForIndent(line) ? line : line.slice(prefix.length)));
 }
 
 /**
@@ -104,14 +121,20 @@ export function stripCommonIndent(text: string): string {
 export function stripCommonIndentNumbered(text: string): string {
     if (!text) return text;
     const lines = splitLines(text);
-    const nonBlank = lines.filter((l) => l.trim() !== "");
-    const allNumbered = nonBlank.length > 0 && nonBlank.every((l) => NUMBERED_LINE_RE.test(l));
+    // Blank lines AND the truncation marker are excluded from the
+    // "every line is numbered" check, same rationale as everywhere else in
+    // this file: neither is real Read content, so requiring either to match
+    // the `<N>\t` shape would wrongly reject an otherwise-fully-numbered,
+    // truncated body and fall through to a whole-text dedent that finds no
+    // common prefix at all (every real line still starts with a digit).
+    const relevant = lines.filter((l) => !isIgnorableForIndent(l));
+    const allNumbered = relevant.length > 0 && relevant.every((l) => NUMBERED_LINE_RE.test(l));
     if (!allNumbered) return stripCommonIndent(text);
 
     const numberPrefixes: string[] = [];
     const codes: string[] = [];
     for (const line of lines) {
-        if (line.trim() === "") {
+        if (isIgnorableForIndent(line)) {
             numberPrefixes.push("");
             codes.push(line);
             continue;

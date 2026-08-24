@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import { stripCommonIndent, stripCommonIndentNumbered, stripCommonIndentSharedPrefix } from "./dedent";
+import { TRUNCATED_MARKER } from "./output-cap";
 
 describe("stripCommonIndent", () => {
     it("strips a uniform space indent to flush, preserving relative levels", () => {
@@ -61,6 +62,12 @@ describe("stripCommonIndent", () => {
         const out = stripCommonIndent(input);
         expect(out).toBe("outer();\n  inner();\nouter2();");
     });
+
+    it("ignores capText's truncation marker line when computing the common prefix, and leaves it unstripped", () => {
+        const input = `    a();\n    b();\n${TRUNCATED_MARKER}`;
+        const out = stripCommonIndent(input);
+        expect(out).toBe(`a();\nb();\n${TRUNCATED_MARKER}`);
+    });
 });
 
 describe("stripCommonIndentNumbered", () => {
@@ -107,6 +114,12 @@ describe("stripCommonIndentNumbered", () => {
         const input = "9\t    a();\n10\t    b();\n100\t    c();";
         const out = stripCommonIndentNumbered(input);
         expect(out).toBe("9\ta();\n10\tb();\n100\tc();");
+    });
+
+    it("ignores a trailing truncation marker so the numbered-shape check still passes and the code still dedents", () => {
+        const input = `80\t    a();\n81\t    b();\n${TRUNCATED_MARKER}`;
+        const out = stripCommonIndentNumbered(input);
+        expect(out).toBe(`80\ta();\n81\tb();\n${TRUNCATED_MARKER}`);
     });
 });
 

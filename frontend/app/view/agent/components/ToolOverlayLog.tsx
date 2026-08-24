@@ -27,7 +27,7 @@ import { DiffViewer } from "./DiffViewer";
 import { HighlightedCode } from "./HighlightedCode";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { capChars, createChunkCapper, createSpinnerCollapser, capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
-import { stripCommonIndentNumbered } from "./dedent";
+import { stripCommonIndent, stripCommonIndentNumbered } from "./dedent";
 import { detectLanguage } from "./detectLanguage";
 import {
     registerToolRenderer,
@@ -519,12 +519,14 @@ function renderWrite(node: ToolNode): JSX.Element {
     const content: string | undefined = (node.params as any).content;
     const bytes: number | undefined = (node.result as any)?.bytesWritten;
     const capped = content ? capText(content, MAX_TOOL_OUTPUT_LINES, "head") : null;
-    // Same helper as Read (SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §3.2.3) —
-    // a whole written file almost always starts at column 0 already (the
-    // numbered variant falls through to a no-op plain dedent when no line
-    // matches the "<N>\t" shape, which every Write body hits), so this is
-    // included for uniformity rather than because Write is commonly indented.
-    const dedentedText = capped ? stripCommonIndentNumbered(capped.text) : "";
+    // Plain dedent, NOT the Read-specific numbered variant
+    // (SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §3.2.3) — Write content has no
+    // CLI-added "<N>\t" line-number prefix, so stripCommonIndentNumbered's
+    // heuristic would misfire on a genuine tab-delimited file (TSV/BED/GTF)
+    // whose every non-blank line happens to start with digits+tab, silently
+    // dropping that real leading column. stripCommonIndent has no such
+    // ambiguity and is a no-op for the common already-flush case anyway.
+    const dedentedText = capped ? stripCommonIndent(capped.text) : "";
     const isMarkdown = filePath.endsWith(".md") || filePath.endsWith(".mdx");
     return (
         <div class="agent-tool-write">
