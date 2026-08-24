@@ -11,8 +11,19 @@ build `0.55.21+gf59bb43b7`) was used as a live, real trace — not a synthetic
 repro. Evidence is direct log correlation (host `[fe]` console-bridge lines +
 `agentmux-srv` log), not inference from behavior alone.
 **Status:** root-caused with high confidence (precise counts + code paths
-confirmed on both frontend and backend); **no fix implemented** — this is an
-analysis writeup, not a PR. See §6 for concrete, unimplemented fix directions.
+confirmed on both frontend and backend). **Fixed** — §6 option 1 (frontend-only
+debounce, no backend change) shipped same-day in
+[PR #2773](https://github.com/agentmuxai/agentmux/pull/2773) as
+`frontend/app/view/agent/activity/debounced-refresh.ts`, wired into both
+`dispatch-source.ts` and `subagent-source.ts`; see
+`docs/specs/SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23.md` for the
+shipped design. Verified directly (2026-08-24): both modules route every
+`subagent:*`/`dispatch:updated` handler through the shared debounce, and the
+full activity test suite (77 tests) passes, including dedicated burst-collapse
+and sustained-burst/max-wait-ceiling coverage. §6 options 2-4 below remain
+unimplemented follow-ups, not required for the storm itself. This document is
+being left otherwise unedited (as the original incident analysis) — this
+status line is the only change.
 
 ---
 
