@@ -1149,6 +1149,89 @@ fn scan_session_subagents_is_a_noop_for_an_unknown_session_id() {
     std::fs::remove_dir_all(&config_dir).ok();
 }
 
+// ── subagent:backfill_status (docs/retro/retro-activity-dock-flicker-survives-debounce-fix-2026-08-24.md) ──
+
+/// `scan_session_subagents` must publish "started" then "done", in that
+/// order, regardless of whether the target session directory is actually
+/// found -- the whole point is to bracket the pane's own backfill attempt,
+/// not to report whether anything was backfilled.
+#[test]
+fn scan_session_subagents_publishes_started_then_done_when_session_is_found() {
+    let config_dir = std::env::temp_dir()
+        .join(format!("amx-scan-backfill-status-found-{}", now_millis()));
+    let target_session = "target-session-uuid";
+    let target_dir = config_dir.join("projects").join("ws-enc").join(target_session).join("subagents");
+    std::fs::create_dir_all(&target_dir).unwrap();
+    std::fs::write(
+        target_dir.join("agent-wanted.jsonl"),
+        "{\"type\":\"result\",\"result\":\"done\"}\n",
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    let broker = Arc::new(crate::backend::wps::Broker::new());
+    watcher.set_broker(broker.clone());
+    watcher.scan_session_subagents("parent-1", "block-status-found", &config_dir, target_session);
+
+    let history = broker.read_event_history(
+        crate::backend::wps::EVENT_SUBAGENT_BACKFILL_STATUS,
+        "block:block-status-found",
+        10,
+    );
+    let statuses: Vec<Option<&str>> = history
+        .iter()
+        .map(|e| e.data.as_ref().and_then(|d| d.get("status")).and_then(|v| v.as_str()))
+        .collect();
+    assert_eq!(statuses, vec![Some("started"), Some("done")], "got: {statuses:?}");
+
+    std::fs::remove_dir_all(&config_dir).ok();
+}
+
+/// The other half: even when the session directory is never found at all
+/// (the existing `..._is_a_noop_for_an_unknown_session_id` case above),
+/// "done" must still fire -- a pane whose backfill attempt found nothing
+/// must not be left permanently gated as "still backfilling."
+#[test]
+fn scan_session_subagents_publishes_started_then_done_when_session_is_not_found() {
+    let config_dir = std::env::temp_dir()
+        .join(format!("amx-scan-backfill-status-notfound-{}", now_millis()));
+    std::fs::create_dir_all(config_dir.join("projects")).unwrap();
+
+    let watcher = fixture_watcher();
+    let broker = Arc::new(crate::backend::wps::Broker::new());
+    watcher.set_broker(broker.clone());
+    watcher.scan_session_subagents("parent-1", "block-status-notfound", &config_dir, "never-existed");
+
+    let history = broker.read_event_history(
+        crate::backend::wps::EVENT_SUBAGENT_BACKFILL_STATUS,
+        "block:block-status-notfound",
+        10,
+    );
+    let statuses: Vec<Option<&str>> = history
+        .iter()
+        .map(|e| e.data.as_ref().and_then(|d| d.get("status")).and_then(|v| v.as_str()))
+        .collect();
+    assert_eq!(statuses, vec![Some("started"), Some("done")], "got: {statuses:?}");
+
+    std::fs::remove_dir_all(&config_dir).ok();
+}
+
+/// A `SubagentWatcher` built via bare `fixture_watcher()` (no `set_broker`
+/// call) must not panic -- every existing test in this file already
+/// exercises this implicitly, but this pins the "no broker wired" no-op
+/// posture explicitly, matching `self_ref`'s established convention.
+#[test]
+fn scan_session_subagents_does_not_panic_without_a_broker_wired() {
+    let config_dir = std::env::temp_dir()
+        .join(format!("amx-scan-backfill-status-nobroker-{}", now_millis()));
+    std::fs::create_dir_all(config_dir.join("projects")).unwrap();
+
+    let watcher = fixture_watcher();
+    watcher.scan_session_subagents("parent-1", "block-1", &config_dir, "never-existed");
+
+    std::fs::remove_dir_all(&config_dir).ok();
+}
+
 // ── scan_subagents_dir backfill cap (docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md) ──
 //
 // A long-lived pane's subagents/ directory accumulates forever; without a

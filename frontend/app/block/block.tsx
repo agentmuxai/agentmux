@@ -31,6 +31,7 @@ import "./pane-size-badge.scss";
 import { BlockErrorBoundary } from "./BlockErrorBoundary";
 import { BlockFrame } from "./blockframe";
 import { blockViewToIcon, blockViewToName } from "./blockutil";
+import { useSubagentBackfillGate } from "@/app/view/agent/hooks/useSubagentBackfillGate";
 
 // Matches BrainSpinner.scss's own `.is-fading` opacity transition duration —
 // Block's ready()-gate cross-fade (below) reuses the same visual timing as
@@ -298,7 +299,17 @@ function Block(props: BlockProps): JSX.Element {
         }
     });
 
-    const ready = createMemo(() => !loading() && !isBlank(props.nodeModel.blockId) && blockData() != null && viewModel() != null);
+    // Only agent blocks ever have subagent history to backfill; a no-op
+    // for every other view type (see the hook's own doc comment).
+    const subagentBackfillSettled = useSubagentBackfillGate(props.nodeModel.blockId, viewType);
+    const ready = createMemo(
+        () =>
+            !loading() &&
+            !isBlank(props.nodeModel.blockId) &&
+            blockData() != null &&
+            viewModel() != null &&
+            subagentBackfillSettled()
+    );
 
     // Cross-fade the ready()-gate BrainSpinner out on top of the real
     // content instead of an instant hard cut (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md

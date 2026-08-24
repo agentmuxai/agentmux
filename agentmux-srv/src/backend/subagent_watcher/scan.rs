@@ -16,6 +16,24 @@ use super::parse::file_mtime;
 use super::types::*;
 use super::SubagentWatcher;
 use crate::backend::eventbus::{WSEventType, WS_EVENT_RPC};
+use crate::backend::wps;
+
+/// Publish a `wps::EVENT_SUBAGENT_BACKFILL_STATUS` ping, scoped to this
+/// pane's own block id. No-op if `self.broker` was never wired (tests, or a
+/// `SubagentWatcher` built via bare `new()`) -- see the `broker` field's own
+/// doc comment in `mod.rs`. See
+/// docs/retro/retro-activity-dock-flicker-survives-debounce-fix-2026-08-24.md
+/// section 5.
+fn publish_backfill_status(watcher: &SubagentWatcher, parent_block_id: &str, status: &str) {
+    let Some(broker) = watcher.broker.lock().unwrap().clone() else { return };
+    broker.publish(wps::WaveEvent {
+        event: wps::EVENT_SUBAGENT_BACKFILL_STATUS.to_string(),
+        scopes: vec![format!("block:{}", parent_block_id)],
+        sender: String::new(),
+        persist: 2,
+        data: Some(json!({ "status": status })),
+    });
+}
 
 impl SubagentWatcher {
     /// Backfill subagents that already existed before this pane (re)opened,
@@ -35,6 +53,25 @@ impl SubagentWatcher {
     /// level; in that case this intentionally finds nothing rather than
     /// falling back to scanning everything.
     pub fn scan_session_subagents(
+        &self,
+        parent_agent: &str,
+        parent_block_id: &str,
+        config_dir: &Path,
+        session_id: &str,
+    ) {
+        // "started"/"done" wrap the whole call unconditionally, regardless
+        // of which of `scan_session_subagents_inner`'s several return paths
+        // is actually taken (nothing found at all, or found-and-processed)
+        // -- see `publish_backfill_status`'s own doc comment. A pane whose
+        // block has no persisted session id never calls this at all (see
+        // the caller in `server/reactive.rs`), so it never sees either
+        // status and its `ready()` gate is unaffected by this signal.
+        publish_backfill_status(self, parent_block_id, "started");
+        self.scan_session_subagents_inner(parent_agent, parent_block_id, config_dir, session_id);
+        publish_backfill_status(self, parent_block_id, "done");
+    }
+
+    fn scan_session_subagents_inner(
         &self,
         parent_agent: &str,
         parent_block_id: &str,

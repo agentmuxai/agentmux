@@ -141,6 +141,20 @@ pub struct SubagentWatcher {
     /// case rather than panicking, matching this module's existing
     /// "unknown/untracked -> safe no-op" convention (see `set_display_name`).
     self_ref: Mutex<Option<std::sync::Weak<SubagentWatcher>>>,
+    /// The scoped, persisted WPS broker -- used only for
+    /// `subagent:backfill_status` (`scan.rs`'s `publish_backfill_status`),
+    /// so a pane can query "is my own backfill still in progress" via
+    /// `EventReadHistoryCommand` rather than relying solely on live-event
+    /// timing (mirrors the identical `agent-resume-retry` design,
+    /// `docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md`
+    /// section 6.2). Deliberately separate from `event_bus` above (the raw,
+    /// unscoped, unpersisted WS fan-out every OTHER event in this module
+    /// uses) -- this one event specifically needs the scope+persist
+    /// semantics only `wps::Broker` provides. `None` until `set_broker` is
+    /// called (bootstrap only, after both this watcher and the broker
+    /// exist) -- every test call site built via bare `new()` skips this
+    /// event entirely rather than panicking, same posture as `self_ref`.
+    broker: Mutex<Option<Arc<crate::backend::wps::Broker>>>,
 }
 
 impl SubagentWatcher {
@@ -154,7 +168,15 @@ impl SubagentWatcher {
             pending_activity: Mutex::new(HashMap::new()),
             naming_triggered: Mutex::new(std::collections::HashSet::new()),
             self_ref: Mutex::new(None),
+            broker: Mutex::new(None),
         }
+    }
+
+    /// Wire in the shared WPS broker post-construction (bootstrap only) --
+    /// see the `broker` field's own doc comment for why this is optional
+    /// and set separately rather than a constructor parameter.
+    pub fn set_broker(&self, broker: Arc<crate::backend::wps::Broker>) {
+        *self.broker.lock().unwrap() = Some(broker);
     }
 
     /// Create a new SubagentWatcher and return it wrapped in Arc. Also
