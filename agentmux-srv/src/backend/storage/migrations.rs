@@ -1284,7 +1284,17 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
 ///        read path (mirroring what v2 did for db_accounts) is not blocked
 ///        on a missing table. See
 ///        docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md.
-pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 3;
+///   v4 — db_bundles.is_system, for schema parity with OBJECT_SCHEMA_VERSION
+///        v27 / SHARED_STORE_SCHEMA_VERSION v9 (same column, same reasoning
+///        as v3 above — this store's `db_bundles` copy is not an actively-
+///        written duplicate either). Real ALTER TABLE ADD COLUMN added to
+///        `run_identity_store_schema` in the same change, so this counter
+///        MUST bump alongside it — an unbumped counter would leave an
+///        existing identity-store.db stamped at the old user_version
+///        forever, silently defeating check_schema_compat/stamp_version's
+///        forward-compat lock for this one store (reagent P1, PR #2782).
+///        See docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md.
+pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 4;
 
 /// Initialize (or re-validate) the `~/.agentmux/shared/identity-store.db`
 /// schema — the permanently-global store introduced by
