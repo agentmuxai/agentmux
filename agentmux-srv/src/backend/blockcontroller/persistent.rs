@@ -3380,7 +3380,15 @@ impl PersistentSubprocessController {
                                         held_error_line,
                                         attempted_sid,
                                     );
-                                } else if let Some(line) = held_error_line {
+                                } else {
+                                    // reagentx P2 on PR #2776: the controller
+                                    // itself is already gone — no retry will
+                                    // ever fire for this batch, so any
+                                    // "Reconnecting…" left showing from an
+                                    // earlier attempt on this same block must
+                                    // be resolved here; nothing else will.
+                                    publish_resume_retry_status(&broker_wait, &block_id_wait, "resolved");
+                                    if let Some(line) = held_error_line {
                                     // The controller itself is already gone
                                     // (weak ref invalidated) — nothing can
                                     // retry this batch at all, so flush
@@ -3396,6 +3404,7 @@ impl PersistentSubprocessController {
                                             filestore_wait.as_ref(),
                                             global_output_zone_wait.as_deref(),
                                         );
+                                    }
                                     }
                                 }
                             }
