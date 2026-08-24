@@ -187,7 +187,20 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     persist: 0,
                     data: None,
                 });
-                Ok(Some(serde_json::to_value(&memory).unwrap_or_default()))
+                // Return the row actually persisted, not the client-supplied
+                // struct — bundle_memory_upsert_system hardcodes
+                // is_blank/is_global/is_system server-side regardless of
+                // what `memory` carried (e.g. the frontend's saveSystemEdit
+                // sends only id/name/instructions, so `memory.is_global`/
+                // `is_system` deserialize to false via #[serde(default)]).
+                // Echoing `memory` back would misreport both to any caller
+                // that trusts the response instead of refetching. reagent
+                // P2, PR #2782.
+                let saved = wstore
+                    .bundle_memory_get(&memory.id)
+                    .map_err(|e| format!("upsertsystemmemory: {e}"))?
+                    .ok_or_else(|| format!("upsertsystemmemory: row {} vanished after upsert", memory.id))?;
+                Ok(Some(serde_json::to_value(&saved).unwrap_or_default()))
             })
         }),
     );

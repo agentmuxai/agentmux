@@ -194,7 +194,9 @@ export class GlobalBrainViewModel {
                     instructions,
                 });
                 // Append the new section to the end of the order.
-                const order = [...this.sectionsAtom().map((s) => s.id), saved.id];
+                // ordinarySectionsAtom, not sectionsAtom — see move()'s doc
+                // comment above (reagent P1, PR #2782).
+                const order = [...this.ordinarySectionsAtom().map((s) => s.id), saved.id];
                 await RpcApi.ReorderGlobalBrainCommand(TabRpcClient, { ids: order });
             } else {
                 const existing = this.allAtom().find((m) => m.id === editingId);
@@ -225,7 +227,11 @@ export class GlobalBrainViewModel {
         this.setError(null);
         try {
             await RpcApi.UpsertMemoryCommand(TabRpcClient, { ...bundle, is_global: true });
-            const order = [...this.sectionsAtom().map((s) => s.id), id];
+            // ordinarySectionsAtom, not sectionsAtom — the backend's reorder
+            // command silently skips is_system ids (reorderglobalbrain's own
+            // AND is_system = 0 guard), so including one here is pointless
+            // at best. reagent P1, PR #2782 (same root cause as move() below).
+            const order = [...this.ordinarySectionsAtom().map((s) => s.id), id];
             await RpcApi.ReorderGlobalBrainCommand(TabRpcClient, { ids: order });
             await this.refresh();
         } catch (e) {
@@ -250,7 +256,16 @@ export class GlobalBrainViewModel {
 
     /** Move a section one slot earlier/later and persist the new order. */
     async move(id: string, dir: -1 | 1): Promise<void> {
-        const ids = this.sectionsAtom().map((s) => s.id);
+        // ordinarySectionsAtom, not sectionsAtom — the manager's up/down
+        // buttons are indexed against ordinarySectionsAtom (its length
+        // bounds i()), and the backend's reorder command silently skips
+        // is_system ids. Building this list from the combined sectionsAtom
+        // (unsorted with system-first) could swap an ordinary row with an
+        // adjacent system id, sending a reorder payload where the backend
+        // drops the system id and the two ordinary rows' relative order
+        // never actually changes — a button the UI enabled doing nothing.
+        // reagent P1, PR #2782.
+        const ids = this.ordinarySectionsAtom().map((s) => s.id);
         const i = ids.indexOf(id);
         const j = i + dir;
         if (i === -1 || j < 0 || j >= ids.length) return;
