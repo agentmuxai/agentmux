@@ -287,6 +287,27 @@ fn prune_block_prunes_matching_pending_activity_and_leaves_others() {
     assert!(pending.contains_key("wf_2"));
 }
 
+/// reagentx P2 (PR #2781, round 3): `backfill_generation` is keyed by
+/// `parent_block_id` like every other per-block map `prune_block` already
+/// cleans up above -- without pruning it too, every distinct block that
+/// ever called `scan_session_subagents` would leak an entry for the life
+/// of the srv process.
+#[test]
+fn prune_block_prunes_matching_backfill_generation_and_leaves_others() {
+    let watcher = fixture_watcher();
+    {
+        let mut gens = watcher.backfill_generation.lock().unwrap();
+        gens.insert("block-1".to_string(), 3);
+        gens.insert("block-2".to_string(), 1);
+    }
+
+    watcher.prune_block("block-1");
+
+    let gens = watcher.backfill_generation.lock().unwrap();
+    assert!(!gens.contains_key("block-1"));
+    assert!(gens.contains_key("block-2"));
+}
+
 #[test]
 fn prune_block_on_unknown_block_is_noop_and_returns_false() {
     let watcher = fixture_watcher();

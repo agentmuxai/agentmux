@@ -654,6 +654,17 @@ impl SubagentWatcher {
         }
         drop(pending);
 
+        // reagentx P2 (PR #2781, round 3): `backfill_generation` is keyed
+        // by `parent_block_id` (see its own doc comment) but was never
+        // pruned here like every other per-block map above — every
+        // distinct block_id that ever called `scan_session_subagents` left
+        // a permanent entry for the life of the srv process, even after
+        // the block was deleted. Not counted toward `pruned` below —
+        // that return value is specifically about DERIVED subagent/
+        // dispatch data clients might need to refresh over, not internal
+        // bookkeeping with no client-visible effect.
+        self.backfill_generation.lock().unwrap().remove(block_id);
+
         self.unwatch_block(block_id);
 
         if pruned {
