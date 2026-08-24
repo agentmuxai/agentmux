@@ -27,6 +27,7 @@ import { DiffViewer } from "./DiffViewer";
 import { HighlightedCode } from "./HighlightedCode";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { capChars, createChunkCapper, createSpinnerCollapser, capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
+import { stripCommonIndentNumbered } from "./dedent";
 import { detectLanguage } from "./detectLanguage";
 import {
     registerToolRenderer,
@@ -461,6 +462,13 @@ function renderRead(node: ToolNode): JSX.Element {
     // the conversation DOM; HighlightedCode stays simple (it injects
     // innerHTML, so capping here is cleaner than inside it).
     const capped = content ? capText(content, MAX_TOOL_OUTPUT_LINES, "head") : null;
+    // Strip indentation common to every VISIBLE line — computed after
+    // capping so a deeper hidden tail can't reduce the dedent of what's
+    // actually shown (SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §3.2.1). Claude
+    // Code's Read result lines are "<N>\t<code>"; the numbered variant
+    // splits off that prefix before dedenting so the line-number gutter
+    // itself is untouched.
+    const dedentedText = capped ? stripCommonIndentNumbered(capped.text) : "";
     // Render markdown files as formatted markdown, matching renderWrite. Without
     // this a .md Read shows raw source instead of a rendered preview.
     const isMarkdown = filePath.endsWith(".md") || filePath.endsWith(".mdx");
@@ -479,14 +487,17 @@ function renderRead(node: ToolNode): JSX.Element {
                     when={isMarkdown}
                     fallback={
                         <HighlightedCode
-                            code={capped!.text}
+                            code={dedentedText}
+                            // Language detection reads the RAW (non-dedented) first
+                            // line — shebang/content sniffing should see the file
+                            // as-is; only the displayed text is dedented.
                             lang={detectLanguage(filePath, capped!.text.split("\n")[0])}
                             class="agent-tool-read-content"
                         />
                     }
                 >
                     <div class="agent-tool-read-content agent-tool-read-md">
-                        <Markdown text={capped!.text} />
+                        <Markdown text={dedentedText} />
                     </div>
                 </Show>
                 <Show when={capped!.hiddenLines > 0}>
@@ -508,6 +519,12 @@ function renderWrite(node: ToolNode): JSX.Element {
     const content: string | undefined = (node.params as any).content;
     const bytes: number | undefined = (node.result as any)?.bytesWritten;
     const capped = content ? capText(content, MAX_TOOL_OUTPUT_LINES, "head") : null;
+    // Same helper as Read (SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §3.2.3) —
+    // a whole written file almost always starts at column 0 already (the
+    // numbered variant falls through to a no-op plain dedent when no line
+    // matches the "<N>\t" shape, which every Write body hits), so this is
+    // included for uniformity rather than because Write is commonly indented.
+    const dedentedText = capped ? stripCommonIndentNumbered(capped.text) : "";
     const isMarkdown = filePath.endsWith(".md") || filePath.endsWith(".mdx");
     return (
         <div class="agent-tool-write">
@@ -522,14 +539,14 @@ function renderWrite(node: ToolNode): JSX.Element {
                     when={isMarkdown}
                     fallback={
                         <HighlightedCode
-                            code={capped!.text}
+                            code={dedentedText}
                             lang={detectLanguage(filePath, capped!.text.split("\n")[0])}
                             class="agent-tool-write-content"
                         />
                     }
                 >
                     <div class="agent-tool-write-content agent-tool-write-md">
-                        <Markdown text={capped!.text} />
+                        <Markdown text={dedentedText} />
                     </div>
                 </Show>
                 <Show when={capped!.hiddenLines > 0}>

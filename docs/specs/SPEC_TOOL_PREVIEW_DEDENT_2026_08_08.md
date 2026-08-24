@@ -1,7 +1,12 @@
 # SPEC: Tool preview common-indentation stripping (dedent)
 
 **Date:** 2026-08-08
-**Status:** proposed — verified unimplemented as of 2026-08-10 (sibling refinement #2467 shipped; this one did not).
+**Status:** implemented 2026-08-24. `stripCommonIndentSharedPrefix` was added
+as a third exported helper (not spelled out in §3.1's two-function sketch) to
+keep the Edit call site's "one shared prefix across two related strings"
+concern inside this module rather than duplicated at the DiffViewer call
+site. Live-pane visual verification (§5) not yet done as of this PR — see
+the PR body for why, and do it before/at merge if practical.
 **Scope:** `frontend/app/view/agent/components/ToolOverlayLog.tsx`,
 `frontend/app/view/agent/components/DiffViewer.tsx`, one new shared util
 (+ tests)
