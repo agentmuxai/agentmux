@@ -13,15 +13,19 @@
  * the agent's turn forever: any question the user hasn't touched by zero is
  * filled in with its recommended option and the (possibly-merged) answer is
  * submitted automatically. See §2.3 for why this merges rather than
- * disarming on first interaction. Hovering the panel hides the countdown and
- * pauses the underlying deadline for a flat 15s from that hover, then
+ * disarming on first interaction. Hovering the panel — or, as of the
+ * keyboard-pause spec below, pressing any key while focus is inside the
+ * panel (Tab-navigating options, typing into "Other") — hides the countdown
+ * and pauses the underlying deadline for a flat 15s from that trigger, then
  * unconditionally resumes at a fresh timeout regardless of whether the mouse
- * is still there — a bounded, self-resuming pause, not the permanent disarm
- * §2.3/§5.1 rejected. See the hover-pause spec above.
+ * or keyboard is still active — a bounded, self-resuming pause, not the
+ * permanent disarm §2.3/§5.1 rejected. Both triggers share one mechanism —
+ * see the keyboard-pause spec below.
  *
  * Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md,
  * docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md,
- * docs/specs/SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md.
+ * docs/specs/SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md,
+ * docs/specs/SPEC_ASK_USER_QUESTION_TIMEOUT_KEYBOARD_PAUSE_2026_08_20.md.
  */
 
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, type Accessor, type JSX } from "solid-js";
@@ -404,6 +408,23 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
         // DOM (an option, the "Other" input, or the panel root itself) —
         // mirrors AgentDecisionPanel's `inPanel` (AgentDecisionPanel.tsx:208).
         const inPanel = !!rootRef && !!target && rootRef.contains(target);
+
+        // Any keydown that lands inside this panel counts as engagement,
+        // the same as a mouseenter — reuses the exact same pause mechanism
+        // (hide the countdown, resume unconditionally after a flat
+        // HOVER_HIDE_GRACE_MS) rather than a parallel one, so a user
+        // answering entirely by keyboard (Tab between options, typing into
+        // "Other") gets the same breathing room a mouse-hovering user
+        // already does. Scoped to `inPanel`, NOT the broader `paneRoot`
+        // scope Escape uses below — a keystroke elsewhere in this pane
+        // (the chat composer, Ctrl+F) isn't engagement with this question.
+        // Deliberately unconditional on which key, including Enter/Escape:
+        // both already tear down or reset this same pause state via their
+        // own existing paths immediately below/in `defer()`, so firing this
+        // first for them is a harmless, immediately-superseded no-op, not
+        // worth special-casing out. See
+        // SPEC_ASK_USER_QUESTION_TIMEOUT_KEYBOARD_PAUSE_2026_08_20.md §2.
+        if (inPanel) onPanelPointerEnter();
 
         if (e.key === "Enter" && !e.shiftKey) {
             // Outside the panel, don't hijack Enter from a real editable
