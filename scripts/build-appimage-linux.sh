@@ -23,6 +23,9 @@
 #                                       see CLAUDE.md "AppImage .DirIcon" memory)
 #     install-linux-desktop.sh        → invoked by AppRun on first run to register
 #                                       the user's desktop entry + hicolor icons
+#     install-userns-apparmor-fix.sh  → pkexec-invoked helper installing the
+#                                       AppArmor userns exception (see
+#                                       docs/specs/SPEC_LINUX_SANDBOX_APPARMOR_USERNS_2026_08_23.md)
 #     assets/linux/...                → source-of-truth tree the installer reads
 #     usr/bin/agentmux-launcher       → entry point execed by AppRun; supervises srv + host
 #     usr/bin/agentmux-cef             → CEF host binary; launcher's find_cef_binary final fallback
@@ -207,6 +210,13 @@ cp scripts/linux-apprun.sh "$APPDIR/AppRun"
 chmod +x "$APPDIR/AppRun"
 cp scripts/install-linux-desktop.sh "$APPDIR/install-linux-desktop.sh"
 chmod +x "$APPDIR/install-linux-desktop.sh"
+# Privileged one-time helper for the AppArmor userns-restriction fix
+# (docs/specs/SPEC_LINUX_SANDBOX_APPARMOR_USERNS_2026_08_23.md) — invoked
+# via pkexec from agentmux-cef's linux_sandbox::run_pkexec_fix(), which
+# resolves this path via $APPDIR (same top-level-of-AppDir convention as
+# install-linux-desktop.sh above, not a subdirectory).
+cp scripts/install-userns-apparmor-fix.sh "$APPDIR/install-userns-apparmor-fix.sh"
+chmod +x "$APPDIR/install-userns-apparmor-fix.sh"
 # install-linux-desktop.sh resolves REPO_ROOT as `<script_dir>/..`. Inside
 # the AppImage the script lives at AppDir/install-linux-desktop.sh, so its
 # REPO_ROOT becomes AppDir. The script then reads assets/linux/... → place
