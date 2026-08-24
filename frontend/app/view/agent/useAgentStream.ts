@@ -52,6 +52,7 @@ import { useToolChunkStream } from "./hooks/useToolChunkStream";
 import { useShellNodeStream } from "./hooks/useShellNodeStream";
 import { useCompactionStream } from "./hooks/useCompactionStream";
 import { useDockClearStream } from "./hooks/useDockClearStream";
+import { useResumeRetryStream } from "./hooks/useResumeRetryStream";
 import { useBackgroundTaskRegistry } from "./hooks/useBackgroundTaskRegistry";
 import { useTurnLifecycle } from "./hooks/useTurnLifecycle";
 import { usePendingMessageAcceptance } from "./hooks/usePendingMessageAcceptance";
@@ -246,6 +247,7 @@ export function useAgentStream({
     // model.dispatchDoc (disposal-safe), not the raw dispatch, since this
     // WPS handler can fire after the pane unregisters.
     useDockClearStream({ blockId, model });
+    useResumeRetryStream({ blockId, model });
     // Seeds/refreshes attachedTask from the durable db_background_tasks
     // registry — see that hook's own module doc comment for why this is
     // additive-only (never clears) relative to the transcript-derived path.

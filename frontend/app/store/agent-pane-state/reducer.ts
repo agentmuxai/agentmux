@@ -1318,6 +1318,23 @@ export function update(
                 events: [{ type: "registry-attached-task-cleared" }],
             };
         }
+
+        // ── Stale-`--resume` reconnect axis
+        // (STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md §6.2) ──
+        case "ResumeRetryStarted": {
+            if (state.reconnecting) return { state, events: [] };
+            return {
+                state: { ...state, reconnecting: { startedAt: command.at } },
+                events: [{ type: "resume-retry-started", at: command.at }],
+            };
+        }
+        case "ResumeRetryResolved": {
+            if (!state.reconnecting) return { state, events: [] };
+            return {
+                state: { ...state, reconnecting: null },
+                events: [{ type: "resume-retry-resolved" }],
+            };
+        }
     }
 }
 

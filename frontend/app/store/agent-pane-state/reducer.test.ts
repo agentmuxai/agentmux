@@ -2880,6 +2880,48 @@ describe("agent-pane-state reducer", () => {
         });
     });
 
+    // docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md
+    // §6.2 — mirrors the Attached task axis above (same shape, same
+    // idempotent edge-trigger semantics), but for the backend's
+    // stale-`--resume` retry/recovery signal instead.
+    describe("Stale-resume reconnect axis (ResumeRetryStarted / ResumeRetryResolved)", () => {
+        it("initial state: reconnecting null", () => {
+            const s = mk();
+            expect(s.reconnecting).toBeNull();
+        });
+
+        it("ResumeRetryStarted sets reconnecting with the given timestamp", () => {
+            const s = mk();
+            const r = update(s, { type: "ResumeRetryStarted", at: 100 });
+            expect(r.state.reconnecting).toEqual({ startedAt: 100 });
+            expect(r.events).toEqual([{ type: "resume-retry-started", at: 100 }]);
+        });
+
+        it("ResumeRetryStarted is idempotent — a cascaded retry doesn't reset startedAt", () => {
+            let s = mk();
+            s = update(s, { type: "ResumeRetryStarted", at: 100 }).state;
+            const r = update(s, { type: "ResumeRetryStarted", at: 200 });
+            expect(r.state).toBe(s); // same-ref no-op
+            expect(r.state.reconnecting).toEqual({ startedAt: 100 });
+            expect(r.events).toEqual([]);
+        });
+
+        it("ResumeRetryResolved clears an in-progress reconnect", () => {
+            let s = mk();
+            s = update(s, { type: "ResumeRetryStarted", at: 100 }).state;
+            const r = update(s, { type: "ResumeRetryResolved" });
+            expect(r.state.reconnecting).toBeNull();
+            expect(r.events).toEqual([{ type: "resume-retry-resolved" }]);
+        });
+
+        it("ResumeRetryResolved is idempotent when already null", () => {
+            const s = mk();
+            const r = update(s, { type: "ResumeRetryResolved" });
+            expect(r.state).toBe(s);
+            expect(r.events).toEqual([]);
+        });
+    });
+
     // SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md — folds
     // useAgentFailure's local failure state into the reducer so a backend
     // failure classification unconditionally ends a working turn, instead
