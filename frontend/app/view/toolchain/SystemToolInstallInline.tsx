@@ -36,6 +36,13 @@ interface SystemToolInstallInlineProps {
     /** Fires once, on a successful install — the caller re-probes its
      *  own row/prereq state (this component doesn't know how). */
     onInstalled: () => void;
+    /** Fires once, when resolution completes as unavailable (no package
+     *  manager detected/usable on this machine) — callers use this to
+     *  collapse/hide whatever toggle exposed this panel so a user who
+     *  clicked "install now" doesn't end up staring at a permanently
+     *  blank expanded area with no visible fallback. reagent P2,
+     *  PR #2790. */
+    onUnavailable?: () => void;
 }
 
 export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JSX.Element => {
@@ -63,6 +70,7 @@ export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JS
             if (disposed) return;
             if (!r.available) {
                 setPhase("unavailable");
+                props.onUnavailable?.();
                 return;
             }
             setCommandPreview(r.commandPreview);
@@ -72,7 +80,10 @@ export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JS
             // Treat a failed probe the same as "unavailable" — the
             // caller's link+copy-command fallback is always a safe
             // landing spot, never a dead end.
-            if (!disposed) setPhase("unavailable");
+            if (!disposed) {
+                setPhase("unavailable");
+                props.onUnavailable?.();
+            }
         }
     });
 

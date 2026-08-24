@@ -48,6 +48,26 @@ describe("SystemToolInstallInline", () => {
         expect(container.textContent).toBe("");
     });
 
+    it("calls onUnavailable when resolution reports no installable command, so callers can hide their toggle", async () => {
+        resolveMock.mockResolvedValue({ available: false });
+        const onUnavailable = vi.fn();
+        const { SystemToolInstallInline } = await import("./SystemToolInstallInline");
+        render(() => (
+            <SystemToolInstallInline toolId="git" onInstalled={() => {}} onUnavailable={onUnavailable} />
+        ));
+        await waitFor(() => expect(onUnavailable).toHaveBeenCalledTimes(1));
+    });
+
+    it("calls onUnavailable when the resolve RPC itself throws", async () => {
+        resolveMock.mockRejectedValue(new Error("boom"));
+        const onUnavailable = vi.fn();
+        const { SystemToolInstallInline } = await import("./SystemToolInstallInline");
+        render(() => (
+            <SystemToolInstallInline toolId="git" onInstalled={() => {}} onUnavailable={onUnavailable} />
+        ));
+        await waitFor(() => expect(onUnavailable).toHaveBeenCalledTimes(1));
+    });
+
     it("renders the resolved command as a consent step before installing anything", async () => {
         resolveMock.mockResolvedValue({
             available: true,

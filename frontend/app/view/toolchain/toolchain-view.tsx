@@ -270,6 +270,24 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
             return next;
         });
     };
+    // Rows confirmed unavailable (no package manager detected/usable on
+    // this machine) — hides the "or install it now" toggle for that row
+    // once known, so a user who clicked it doesn't end up staring at a
+    // permanently blank expanded area with no visible fallback (the
+    // primary "Install ↗" button/link stays visible regardless either
+    // way — this only hides the SECONDARY one-click toggle). Populated
+    // reactively from SystemToolInstallInline's onUnavailable, so the
+    // very first click can still briefly expand before collapsing —
+    // this repo has no eager per-row pre-check today. reagent P2, PR #2790.
+    const [unavailableInstalls, setUnavailableInstalls] = createSignal<ReadonlySet<string>>(new Set());
+    const markUnavailable = (id: string) => {
+        setExpandedInstalls((prev) => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+        });
+        setUnavailableInstalls((prev) => new Set(prev).add(id));
+    };
 
     const renderRow = (row: ToolRow): JSX.Element => (
         <div class="toolchain-row" classList={{ "toolchain-row--missing": !row.loading && !row.found }}>
@@ -314,7 +332,12 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
                         </button>
                     </div>
                 </Show>
-                <Show when={!row.loading && !row.found && row.kind === "core" && SYSTEM_INSTALLABLE_IDS.has(row.id)}>
+                <Show
+                    when={
+                        !row.loading && !row.found && row.kind === "core" &&
+                        SYSTEM_INSTALLABLE_IDS.has(row.id) && !unavailableInstalls().has(row.id)
+                    }
+                >
                     <button
                         type="button"
                         class="toolchain-link-btn toolchain-link-btn--install-now"
@@ -330,6 +353,7 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
                                 const idx = rows.findIndex((r) => r.id === row.id);
                                 if (idx !== -1) void probe(idx, { force: true });
                             }}
+                            onUnavailable={() => markUnavailable(row.id)}
                         />
                     </Show>
                 </Show>

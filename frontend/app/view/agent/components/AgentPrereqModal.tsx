@@ -54,6 +54,21 @@ export const AgentPrereqModalPanel = (props: AgentPrereqModalPanelProps): JSX.El
             return next;
         });
     };
+    // Hides the "or install it now" toggle once resolution confirms
+    // there's nothing to offer (no package manager detected/usable) —
+    // the primary install-URL link above stays visible regardless
+    // either way; this only prevents the SECONDARY toggle from lingering
+    // as a button that expands to a permanently blank panel. reagent P2,
+    // PR #2790.
+    const [unavailableInstalls, setUnavailableInstalls] = createSignal<ReadonlySet<string>>(new Set());
+    const markUnavailable = (tool: string) => {
+        setExpandedInstalls((prev) => {
+            const next = new Set(prev);
+            next.delete(tool);
+            return next;
+        });
+        setUnavailableInstalls((prev) => new Set(prev).add(tool));
+    };
 
     return (
         <>
@@ -88,7 +103,7 @@ export const AgentPrereqModalPanel = (props: AgentPrereqModalPanelProps): JSX.El
                                         {req.installLinkText}
                                         <span class="agent-prereq-modal-link-arrow" aria-hidden="true"> ↗</span>
                                     </a>
-                                    <Show when={SYSTEM_INSTALLABLE_IDS.has(req.tool)}>
+                                    <Show when={SYSTEM_INSTALLABLE_IDS.has(req.tool) && !unavailableInstalls().has(req.tool)}>
                                         <button
                                             type="button"
                                             class="agent-prereq-modal-link"
@@ -103,6 +118,7 @@ export const AgentPrereqModalPanel = (props: AgentPrereqModalPanelProps): JSX.El
                                                     toggleInstallPanel(req.tool);
                                                     props.onRefresh();
                                                 }}
+                                                onUnavailable={() => markUnavailable(req.tool)}
                                             />
                                         </Show>
                                     </Show>

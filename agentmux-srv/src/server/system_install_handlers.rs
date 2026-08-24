@@ -277,6 +277,15 @@ async fn resolve_install_step(tool_id: &str) -> Option<SystemInstallStep> {
         resolve_brew_step(tool_id)
     } else {
         let pm = detect_linux_package_manager().await?;
+        // Same class of check as the Windows/winget and macOS/brew
+        // branches above: a package manager being present doesn't mean
+        // `pkexec` (this module's one elevation mechanism on Linux, §3.1)
+        // is too — minimal containers, some WSL distros, and server
+        // images without a desktop/polkit stack routinely have apt/dnf
+        // but no pkexec. Without this check, `available: true` would be
+        // reported with a command that fails to spawn instead of falling
+        // back to the link+copy-command UI. reagent P2, PR #2790.
+        resolve_tool_path("pkexec").await?;
         resolve_linux_step(tool_id, pm)
     }
 }
