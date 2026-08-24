@@ -306,17 +306,29 @@ function Block(props: BlockProps): JSX.Element {
         }
     });
 
-    // Only agent blocks ever have subagent history to backfill; a no-op
-    // for every other view type (see the hook's own doc comment).
+    const ready = createMemo(() => !loading() && !isBlank(props.nodeModel.blockId) && blockData() != null && viewModel() != null);
+
+    // reagentx P0 (PR #2781, round 5): a DEADLOCK, not a flip-flop. Folding
+    // `subagentBackfillSettled()` directly into `ready()` above (round 4)
+    // meant `<Show when={ready()}>` (below) would never mount `BlockFull`
+    // at all for a persisted-session agent block — but `BlockFull` /
+    // `AgentPresentationView` mounting is the ONLY thing that ever calls
+    // `registerAgent` (agent-view.tsx), which is the ONLY thing that ever
+    // triggers `scan_session_subagents` (the ONLY source of the
+    // "started"/"done" this gate waits for). `ready()` needed
+    // `subagentBackfillSettled()` to become true; `subagentBackfillSettled()`
+    // needed `ready()` to become true first. Fixed by decoupling: `ready()`
+    // (content mounting, unchanged from before this whole feature) no
+    // longer depends on backfill status at all — the real content mounts
+    // exactly as it always did, which is what lets it register and
+    // actually trigger the backfill. Only the SPINNER OVERLAY's own
+    // visibility (below) additionally waits on backfill settling, sitting
+    // on top of the now-already-mounted (registering, backfilling) content
+    // underneath — matching the retro's own framing ("the pulsing brain
+    // until everything is ready") literally: a brain covering already-live
+    // content, not a gate blocking that content from existing at all.
     const subagentBackfillSettled = useSubagentBackfillGate(props.nodeModel.blockId, viewType, hasPersistedSession);
-    const ready = createMemo(
-        () =>
-            !loading() &&
-            !isBlank(props.nodeModel.blockId) &&
-            blockData() != null &&
-            viewModel() != null &&
-            subagentBackfillSettled()
-    );
+    const spinnerReady = createMemo(() => ready() && subagentBackfillSettled());
 
     // Cross-fade the ready()-gate BrainSpinner out on top of the real
     // content instead of an instant hard cut (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md
@@ -347,7 +359,7 @@ function Block(props: BlockProps): JSX.Element {
         clearTimeout(spinnerFadeTimeout);
     });
     createEffect(() => {
-        const isReady = ready();
+        const isReady = spinnerReady();
         if (spinnerFadeRaf !== undefined) cancelAnimationFrame(spinnerFadeRaf);
         clearTimeout(spinnerFadeTimeout);
         if (!spinnerGateInitialized) {
