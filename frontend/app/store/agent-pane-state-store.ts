@@ -26,6 +26,7 @@ import {
     type InitPhase,
     initialState,
     type PaneFailure,
+    type ResumeRetryState,
     type TurnPhase,
     workingFromPhase,
 } from "./agent-pane-state/types";
@@ -116,6 +117,14 @@ export interface AgentPaneProjections {
      * See docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md.
      */
     registryAttachedTaskSince?: (next: number | null) => void;
+    /**
+     * Live "reconnecting after a stale `--resume` session id" state, or
+     * null. Reducer-owned (see `AgentPaneState.reconnecting` /
+     * `ResumeRetryStarted` / `ResumeRetryResolved`). Drives the
+     * "Reconnecting…" status chip + elapsed counter, mirroring `compacting`.
+     * See docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md §6.2.
+     */
+    reconnecting?: (next: ResumeRetryState | null) => void;
 }
 
 interface Slot {
@@ -353,6 +362,7 @@ export function dispatch(
     proj("compacting", prev.compacting, slot.state.compacting, slot.proj.compacting);
     proj("attachedTask", prev.attachedTask, slot.state.attachedTask, slot.proj.attachedTask);
     proj("registryAttachedTaskSince", prev.registryAttachedTaskSince, slot.state.registryAttachedTaskSince, slot.proj.registryAttachedTaskSince);
+    proj("reconnecting", prev.reconnecting, slot.state.reconnecting, slot.proj.reconnecting);
 
     if (cascadeSetter != null) {
         console.warn(

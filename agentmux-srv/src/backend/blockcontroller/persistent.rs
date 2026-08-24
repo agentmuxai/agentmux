@@ -83,6 +83,42 @@ fn session_outcome_line(
     )
 }
 
+/// Publish a `wps::EVENT_AGENT_RESUME_RETRY` status ping — a free function
+/// (not a method) for the same reason `session_outcome_line` above is one:
+/// callable from the stdout-reader/process-waiter match arms, which only
+/// hold `_read`/`_wait`-suffixed clones, not `&self`. `status` is `"retrying"`
+/// (set when a stale `--resume` is detected and a retry/recovery attempt is
+/// about to fire) or `"resolved"` (set the moment the retry's outcome —
+/// Fresh or Resumed — is actually known). See
+/// `docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md` §6.2.
+/// No-ops if `broker` is `None` (tests / non-wired controllers), same
+/// posture as every other best-effort WPS publish in this file.
+fn publish_resume_retry_status(broker: &Option<Arc<wps::Broker>>, block_id: &str, status: &str) {
+    let Some(broker) = broker else { return };
+    let mut data = serde_json::json!({ "status": status });
+    if status == "retrying" {
+        data["startedAt"] = serde_json::Value::String(chrono::Utc::now().to_rfc3339());
+    }
+    broker.publish(wps::WaveEvent {
+        event: wps::EVENT_AGENT_RESUME_RETRY.to_string(),
+        scopes: vec![format!("block:{}", block_id)],
+        sender: String::new(),
+        // `persist: 2`, not 1 — `Broker::persist_event` trims history down
+        // to exactly this many MOST RECENT events per (event, scope): a
+        // bare `persist: 1` would let the "resolved" publish immediately
+        // evict "retrying" from history, so a pane that (re)subscribes in
+        // the narrow window right after resolution sees only "resolved"
+        // with no record a retry ever happened — harmless for the simple
+        // "currently reconnecting?" check, but makes this event's own
+        // history useless for anything else. 2 keeps the latest
+        // retrying→resolved pair together; a later cascaded "retrying"
+        // still correctly evicts the OLDER pair's "retrying", not this
+        // one's "resolved".
+        persist: 2,
+        data: Some(data),
+    });
+}
+
 /// Resolve the muxbus address (the agent's display name) from a spawn env map.
 /// `AGENTMUX_AGENT_ID` (= `agent.name`, set at block creation) is canonical;
 /// `WAVEMUX_AGENT_ID` is the legacy fallback. Returns `None` — i.e. not
@@ -1612,6 +1648,10 @@ impl PersistentSubprocessController {
         held_error_line: Option<String>,
         attempted_sid: String,
     ) {
+        // "Reconnecting…" starts here regardless of which branch below is
+        // taken — the user-visible gap begins the moment a retry is known
+        // to be needed, not once recovery search finishes. See §6.2.
+        publish_resume_retry_status(&self.broker, &self.block_id, "retrying");
         let recovered = self.find_recovery_session_id(&config);
         config.session_id = recovered.clone().unwrap_or_default();
         match &recovered {
@@ -1628,17 +1668,25 @@ impl PersistentSubprocessController {
             // `ConfirmedRetry` → this same function again, where
             // `find_recovery_session_id`'s poison guard refuses to
             // re-recover the identical dead id and this arm's `None`
-            // branch below correctly emits `Fresh` instead.
+            // branch below correctly emits `Fresh` instead. "Reconnecting…"
+            // is deliberately NOT resolved here — the eventual
+            // `EmitSessionOutcome` handling (stdout-reader / process-exit
+            // match arms) is what clears it, once the CLI actually confirms
+            // this recovered id one way or the other.
             Some(_) => {}
             // No recovery candidate — this IS genuinely, unambiguously a
             // fresh conversation, decided right now. Safe to emit
             // immediately: nothing downstream can turn this back into a
-            // resume.
-            None => self.emit_session_outcome_now(
-                persistent_resume::SessionOutcome::Fresh,
-                attempted_sid,
-                None,
-            ),
+            // resume. Also resolves "Reconnecting…" immediately, in step
+            // with the outcome itself.
+            None => {
+                publish_resume_retry_status(&self.broker, &self.block_id, "resolved");
+                self.emit_session_outcome_now(
+                    persistent_resume::SessionOutcome::Fresh,
+                    attempted_sid,
+                    None,
+                )
+            }
         }
         let Some(first) = (!entries.is_empty()).then(|| entries.remove(0)) else {
             // Nothing to retry at all (shouldn't happen in practice —
@@ -2724,6 +2772,11 @@ impl PersistentSubprocessController {
                                         attempted_sid,
                                         actual_sid,
                                     } => {
+                                        // The retry (if any led here) is now resolved one
+                                        // way or the other — clear "Reconnecting…". A no-op
+                                        // publish (still fine) when this outcome came from a
+                                        // plain first-time resume that was never retried.
+                                        publish_resume_retry_status(&broker_read, &block_id_read, "resolved");
                                         if let Some(ref broker) = broker_read {
                                             let line = session_outcome_line(outcome, attempted_sid, actual_sid);
                                             super::shell::handle_append_block_file(
@@ -3248,6 +3301,7 @@ impl PersistentSubprocessController {
                                 attempted_sid,
                                 actual_sid,
                             } => {
+                                publish_resume_retry_status(&broker_wait, &block_id_wait, "resolved");
                                 if let Some(ref broker) = broker_wait {
                                     let line = session_outcome_line(outcome, attempted_sid, actual_sid);
                                     super::shell::handle_append_block_file(
@@ -3262,6 +3316,13 @@ impl PersistentSubprocessController {
                             }
                             persistent_resume::ResumeEffect::PersistImmediately(line)
                             | persistent_resume::ResumeEffect::FlushErrorLine(line) => {
+                                // Safety net: a "Reconnecting…" left showing from
+                                // an earlier retry attempt on this same block must
+                                // not get stuck forever just because THIS exit
+                                // ended up genuinely non-retryable — a harmless
+                                // no-op publish in the (common) case where no
+                                // retry was in flight at all.
+                                publish_resume_retry_status(&broker_wait, &block_id_wait, "resolved");
                                 if let Some(ref broker) = broker_wait {
                                     super::shell::handle_append_block_file(
                                         broker,
@@ -3310,7 +3371,7 @@ impl PersistentSubprocessController {
                                 if let Some(ctrl) = self_ref_wait.upgrade() {
                                     tracing::warn!(
                                         block_id = %block_id_wait,
-                                        "stale --resume session id caused this exit — retrying fresh, without --resume"
+                                        "stale --resume session id caused this exit — retrying now (find_recovery_session_id may still resume a real, on-disk session rather than starting blank)"
                                     );
                                     ctrl.retry_after_resume_failure(
                                         my_generation_wait,
@@ -3319,7 +3380,15 @@ impl PersistentSubprocessController {
                                         held_error_line,
                                         attempted_sid,
                                     );
-                                } else if let Some(line) = held_error_line {
+                                } else {
+                                    // reagentx P2 on PR #2776: the controller
+                                    // itself is already gone — no retry will
+                                    // ever fire for this batch, so any
+                                    // "Reconnecting…" left showing from an
+                                    // earlier attempt on this same block must
+                                    // be resolved here; nothing else will.
+                                    publish_resume_retry_status(&broker_wait, &block_id_wait, "resolved");
+                                    if let Some(line) = held_error_line {
                                     // The controller itself is already gone
                                     // (weak ref invalidated) — nothing can
                                     // retry this batch at all, so flush
@@ -3335,6 +3404,7 @@ impl PersistentSubprocessController {
                                             filestore_wait.as_ref(),
                                             global_output_zone_wait.as_deref(),
                                         );
+                                    }
                                     }
                                 }
                             }
@@ -3510,6 +3580,21 @@ impl PersistentSubprocessController {
                         Self::set_status(&mut inner, STATUS_DONE);
                     }
                     drop(inner);
+
+                    // reagentx P1 on PR #2776: a user-initiated Stop can
+                    // land at any point, including mid stale-`--resume`
+                    // retry — "Reconnecting…" has no other clearing path on
+                    // this branch (unlike `compacting`, which several
+                    // turn-end transitions defensively reset), so without
+                    // this it would stick on-screen forever with a growing
+                    // counter, and a later retry on the same pane would
+                    // wrongly keep the stale `startedAt` (ResumeRetryStarted
+                    // is a no-op while already reconnecting). Unconditional
+                    // and un-gated by `is_current_generation` on purpose —
+                    // a harmless no-op when nothing was reconnecting, and
+                    // the pane is stopping either way, so there's no
+                    // "which generation" ambiguity worth encoding here.
+                    publish_resume_retry_status(&broker_wait, &block_id_wait, "resolved");
 
                     // Flush a held-back error line now, if the resume
                     // state machine produced one — the `StopRequested`
@@ -5390,6 +5475,114 @@ mod send_input_tests {
         assert!(
             !content.contains("agentmux_session_outcome"),
             "must not claim any outcome until the CLI actually confirms the recovered id — got: {content:?}"
+        );
+    }
+
+    /// docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md
+    /// §6.2: a stale-`--resume` retry must publish a "Reconnecting…" status
+    /// ping so the pane can show *something* during the gap instead of going
+    /// silent. When no recovery candidate exists, the retry AND its
+    /// resolution are both known synchronously in the same call — both
+    /// pings must land, in order.
+    #[test]
+    fn retry_after_resume_failure_publishes_retrying_then_resolved_when_no_recovery_found() {
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let filestore = Arc::new(FileStore::open_in_memory().unwrap());
+        let block_id = "block-reconnecting-no-recovery".to_string();
+        let c = PersistentSubprocessController::new(
+            "tab".to_string(),
+            block_id.clone(),
+            Some(broker.clone()),
+            None,
+            None,
+            Some(filestore),
+        );
+        let config = PersistentSpawnConfig {
+            cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+            cli_args: vec![],
+            working_dir: String::new(),
+            env_vars: HashMap::new(),
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: "dead-sid".to_string(),
+            message_id: None,
+        };
+        c.retry_after_resume_failure(1, config, vec![qentry(1, "{}")], None, "dead-sid".to_string());
+
+        let history = broker.read_event_history(
+            crate::backend::wps::EVENT_AGENT_RESUME_RETRY,
+            &format!("block:{block_id}"),
+            10,
+        );
+        let statuses: Vec<Option<&str>> = history
+            .iter()
+            .map(|e| e.data.as_ref().and_then(|d| d.get("status")).and_then(|v| v.as_str()))
+            .collect();
+        assert_eq!(
+            statuses,
+            vec![Some("retrying"), Some("resolved")],
+            "expected retrying then resolved, got: {statuses:?}"
+        );
+        let retrying_data = history[0].data.as_ref().unwrap();
+        assert!(
+            retrying_data.get("startedAt").and_then(|v| v.as_str()).is_some(),
+            "the retrying ping must carry a startedAt timestamp for the frontend's elapsed-time readout"
+        );
+    }
+
+    /// The other half of the pair above: when a recovery candidate IS found,
+    /// only "retrying" fires within this call — "resolved" is deferred to
+    /// whichever `EmitSessionOutcome` handling site eventually confirms the
+    /// recovered id (or rejects it, cascading into another retry — which
+    /// would republish "retrying" again, not "resolved").
+    #[test]
+    fn retry_after_resume_failure_only_publishes_retrying_when_recovery_is_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_dir = tmp.path().to_string_lossy().to_string();
+        let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
+        let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+        let dir = tmp.path().join("projects").join(&slug);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
+
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let filestore = Arc::new(FileStore::open_in_memory().unwrap());
+        let block_id = "block-reconnecting-with-recovery".to_string();
+        let c = PersistentSubprocessController::new(
+            "tab".to_string(),
+            block_id.clone(),
+            Some(broker.clone()),
+            None,
+            None,
+            Some(filestore),
+        );
+        let mut env_vars = HashMap::new();
+        env_vars.insert("CLAUDE_CONFIG_DIR".to_string(), config_dir);
+        let config = PersistentSpawnConfig {
+            cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+            cli_args: vec![],
+            working_dir,
+            env_vars,
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: "d019e2e4-stale".to_string(),
+            message_id: None,
+        };
+        c.retry_after_resume_failure(1, config, vec![qentry(1, "{}")], None, "d019e2e4-stale".to_string());
+
+        let history = broker.read_event_history(
+            crate::backend::wps::EVENT_AGENT_RESUME_RETRY,
+            &format!("block:{block_id}"),
+            10,
+        );
+        let statuses: Vec<Option<&str>> = history
+            .iter()
+            .map(|e| e.data.as_ref().and_then(|d| d.get("status")).and_then(|v| v.as_str()))
+            .collect();
+        assert_eq!(
+            statuses,
+            vec![Some("retrying")],
+            "must not resolve yet — the CLI hasn't confirmed the recovered id — got: {statuses:?}"
         );
     }
 

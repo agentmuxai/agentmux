@@ -418,6 +418,15 @@
         color: var(--warning-color, #d9a441);
         font-weight: 500;
     }
+
+    // Live "Reconnecting… Ns" readout (a stale-`--resume` recovery in
+    // progress — STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md
+    // §6.2). Same treatment as `--compacting` — "notable but not an error,"
+    // not the failure-red used elsewhere for a genuine `AgentFailure`.
+    &--reconnecting {
+        color: var(--warning-color, #d9a441);
+        font-weight: 500;
+    }
 }
 
 .agent-composer-strip-process-badge {

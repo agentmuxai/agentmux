@@ -744,6 +744,7 @@ const AgentPresentationView = ({
                 compacting: a.compactingAtom[1],
                 attachedTask: a.attachedTaskAtom[1],
                 registryAttachedTaskSince: a.registryAttachedTaskSinceAtom[1],
+                reconnecting: a.reconnectingAtom[1],
             },
         });
         registerAgentActivity(model.blockId, a.turnPhaseAtom[0]);
@@ -2356,6 +2357,7 @@ const AgentPresentationView = ({
                 providerId={provider()?.id ?? ""}
                 agentMode={block()?.meta?.["agentMode"] as string | undefined}
                 compacting={agentAtoms().compactingAtom[0]()}
+                reconnecting={agentAtoms().reconnectingAtom[0]()}
                 // Route through handleSendMessage — same pattern as the
                 // SlashHelpPanel's onInvoke above, and for the same reason:
                 // this needs the same pre-TurnStart wasAlreadyWorking
