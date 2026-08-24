@@ -105,7 +105,6 @@ export function useSubagentBackfillGate(
     hasPersistedSession: Accessor<boolean>,
 ): Accessor<boolean> {
     const [settled, setSettled] = createSignal(false);
-    let wired = false;
     // reagentx P1 (PR #2781, round 8): whether "does this block have a
     // backfill coming at all" has already been decided for the CURRENT
     // "agent" stay. `hasPersistedSession()` is only read below while
@@ -139,7 +138,6 @@ export function useSubagentBackfillGate(
             // A genuine view-type change (e.g. "Replace With...") — allow a
             // later re-entry into "agent" to decide fresh (round 6).
             decided = false;
-            wired = false;
             setSettled(true);
             return;
         }
@@ -161,7 +159,6 @@ export function useSubagentBackfillGate(
             return;
         }
 
-        wired = true;
         setSettled(false);
 
         // reagentx P2 (PR #2781, round 7): re-armed on EVERY "started", not
@@ -240,17 +237,11 @@ export function useSubagentBackfillGate(
             });
 
         onCleanup(() => {
-            // reagentx P2 (PR #2781, round 6): must reset here, not stay
-            // true forever. `viewType()`/`hasPersistedSession()` changing
-            // away from "agent"+persisted-session (e.g. "Replace With...")
-            // tears this down via the effect's own re-run, but a LATER
-            // change back to "agent" must be able to re-wire from scratch
-            // — leaving `wired` stuck `true` would silently disable the
-            // gate for this block for the rest of its life (the `if
-            // (wired) return;` guard above would skip re-subscribing
-            // forever, leaving `settled` frozen at whatever it last
-            // resolved to).
-            wired = false;
+            // reagentx P2 (PR #2781, round 6): a genuine view-type change
+            // away from "agent" tears this down via the effect's own
+            // re-run — `decided` is reset in the `vt !== "agent"` branch
+            // above, so a LATER change back to "agent" re-wires from
+            // scratch rather than staying silently disabled forever.
             clearTimeout(settleTimer);
             clearTimeout(safetyTimer);
             try { unsub(); } catch { /* ignore */ }
