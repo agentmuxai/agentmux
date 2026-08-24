@@ -264,6 +264,13 @@ function Block(props: BlockProps): JSX.Element {
     // This prevents Solid.js from disposing ViewModel createMemo computations
     // that are owned by the effect when unrelated meta fields change.
     const viewType = createMemo(() => blockData()?.meta?.view);
+    // Whether this block has a persisted session id (`agent:sessionid`) --
+    // i.e. whether `scan_session_subagents` (agentmux-srv/src/server/reactive.rs)
+    // WILL definitely run for this block, not just whether it happens to have
+    // run yet. `useSubagentBackfillGate` needs this precise distinction — see
+    // its own doc comment (reagentx P0, PR #2781 round 4) for why inferring it
+    // from an empty history read alone is unsound.
+    const hasPersistedSession = createMemo(() => !!blockData()?.meta?.["agent:sessionid"]);
     const [viewModel, setViewModel] = createSignal<ViewModel>(null);
 
     // Ownership tracking (SPEC_DRAG_SESSION_ARCHITECTURE_REFACTOR §3.4):
@@ -301,7 +308,7 @@ function Block(props: BlockProps): JSX.Element {
 
     // Only agent blocks ever have subagent history to backfill; a no-op
     // for every other view type (see the hook's own doc comment).
-    const subagentBackfillSettled = useSubagentBackfillGate(props.nodeModel.blockId, viewType);
+    const subagentBackfillSettled = useSubagentBackfillGate(props.nodeModel.blockId, viewType, hasPersistedSession);
     const ready = createMemo(
         () =>
             !loading() &&
