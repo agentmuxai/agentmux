@@ -27,6 +27,13 @@ export interface CappedText {
     hiddenLines: number;
 }
 
+/** The literal marker line `capText` inserts when the char budget (not just
+ *  the line budget) trims a body — exported so callers that post-process
+ *  capped text (e.g. `dedent.ts`'s common-indent stripping) can recognize
+ *  and skip over it rather than treating it as a real, column-0 content
+ *  line. */
+export const TRUNCATED_MARKER = "…(truncated)";
+
 /**
  * Cap a text body to `max` lines, keeping the head or the tail. Logs and
  * command output use "tail" (the latest matters); file/diff content uses
@@ -56,8 +63,8 @@ export function capText(
     // marker so the rendered <pre> stays bounded regardless of line count.
     if (out.length > MAX_TOOL_OUTPUT_CHARS) {
         out = from === "tail"
-            ? "…(truncated)\n" + out.slice(out.length - MAX_TOOL_OUTPUT_CHARS)
-            : out.slice(0, MAX_TOOL_OUTPUT_CHARS) + "\n…(truncated)";
+            ? TRUNCATED_MARKER + "\n" + out.slice(out.length - MAX_TOOL_OUTPUT_CHARS)
+            : out.slice(0, MAX_TOOL_OUTPUT_CHARS) + "\n" + TRUNCATED_MARKER;
     }
     return { text: out, hiddenLines };
 }
@@ -70,7 +77,7 @@ export function capText(
  */
 export function capChars(text: string, max: number = MAX_TOOL_OUTPUT_CHARS): string {
     if (text.length <= max) return text;
-    return "…(truncated)\n" + text.slice(text.length - max);
+    return TRUNCATED_MARKER + "\n" + text.slice(text.length - max);
 }
 
 export interface CappedChunks<T> {
