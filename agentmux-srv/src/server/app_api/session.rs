@@ -192,8 +192,24 @@ pub(crate) async fn generate_pushed_activity_summary(
 /// Ambient-call purpose tag for the on-demand, once-per-definition activity
 /// summary used as the AgentPicker's "My Agents" conversation-preview
 /// fallback — see `generate_definition_activity_summary` below and
-/// `db_agent_activity_summaries` (OBJECT_SCHEMA_VERSION v27).
+/// `db_agent_activity_summaries` (OBJECT_SCHEMA_VERSION v28).
 const AMBIENT_PURPOSE_DEFINITION_SUMMARY: &str = "definition_summary";
+
+/// Max simultaneous Haiku CLI spawns for definition-summary generation.
+/// Deliberately its OWN semaphore, not `pull_call_semaphore()` (reagent P1,
+/// PR #2786): that one is reserved for live, user-turn-triggered pull RPCs
+/// specifically so background bursts don't queue behind or block them (see
+/// its own doc comment above) — this call is background-triggered (a
+/// `listrecentsessions` poll, not a direct user action), the same class as
+/// `activity_watcher.rs`'s pushed-summary sweep, which likewise gets its
+/// own dedicated semaphore rather than sharing this one. Capped at 1: this
+/// is best-effort background fill-in, not latency-sensitive.
+const MAX_CONCURRENT_DEFINITION_SUMMARIES: usize = 1;
+
+fn definition_summary_semaphore() -> &'static tokio::sync::Semaphore {
+    static SEM: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    SEM.get_or_init(|| tokio::sync::Semaphore::new(MAX_CONCURRENT_DEFINITION_SUMMARIES))
+}
 
 /// Generate (and persist) a short activity summary for a definition whose
 /// AgentPicker row has no structured `output.state.json` conversation
@@ -234,13 +250,12 @@ pub(crate) async fn generate_definition_activity_summary(
     };
     let cancel = guard.cancellation();
 
-    // Same cross-block concurrency cap as every other on-demand ambient
-    // caller (subagent/dispatch naming) — a picker load with many
-    // snapshot-less rows shouldn't spawn unbounded concurrent Haiku CLIs.
+    // Background-call semaphore, not `pull_call_semaphore()` — see
+    // `definition_summary_semaphore`'s own doc comment above.
     let permit = tokio::select! {
         biased;
         _ = cancel.cancelled() => None,
-        permit = pull_call_semaphore().acquire() => permit.ok(),
+        permit = definition_summary_semaphore().acquire() => permit.ok(),
     };
     let Some(_permit) = permit else {
         drop(guard);

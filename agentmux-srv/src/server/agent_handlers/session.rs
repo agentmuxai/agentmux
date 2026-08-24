@@ -24,6 +24,18 @@ use crate::backend::storage::store::{AgentDefinition, AgentIdentityLink, AgentIn
 use super::super::AppState;
 use super::read_session_preview;
 
+/// At-most-once-per-process-lifetime claim set for definition-summary
+/// generation attempts triggered from `listrecentsessions` — see the call
+/// site below and `db_agent_activity_summaries` (OBJECT_SCHEMA_VERSION
+/// v28). `HashSet::insert` returns `true` only the first time a given
+/// `definition_id` is claimed; every later call for the same id (a repeat
+/// poll of "My Agents") sees `false` and does not re-spawn.
+fn definition_summary_attempted() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static SET: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    SET.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+}
+
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // ---- Recent sessions (cascade follow-up 2026-05-23) ----
     //
@@ -395,16 +407,35 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             Ok(Some(existing)) if !existing.summary.is_empty() => {
                                 preview = existing.summary;
                             }
-                            Ok(None) => {
+                            // `insert` returns `true` only the FIRST time this
+                            // definition_id is claimed for this process's
+                            // lifetime — mirrors `SubagentWatcher.naming_triggered`'s
+                            // "claim once regardless of success/failure"
+                            // pattern (reagent P1, PR #2786). Without this,
+                            // `ambient::gateway().admit()` alone only
+                            // coalesces CONCURRENT triggers, not sequential
+                            // ones — a definition that can never be
+                            // summarized (no cmd meta, no raw output, CLI
+                            // failure) would otherwise be re-spawned on
+                            // EVERY subsequent listrecentsessions call (tab
+                            // visibility regain, agents:changed refetch, …)
+                            // forever. A successful generation is unaffected
+                            // by this gate: it persists to
+                            // db_agent_activity_summaries, which the branch
+                            // above already checks first.
+                            // `Ok(Some(existing))` with an empty `summary`
+                            // shouldn't occur in normal operation (a row is
+                            // only ever inserted once generation succeeds —
+                            // see the table's own doc comment) but is
+                            // handled the same as `Ok(None)` regardless,
+                            // rather than relying on that invariant to make
+                            // the match exhaustive.
+                            Ok(None) | Ok(Some(_))
+                                if definition_summary_attempted().lock().unwrap().insert(inst.definition_id.clone()) =>
+                            {
                                 // Fire-and-forget: generation (a real Haiku
                                 // CLI round-trip) must not block this
-                                // response. The gateway's admit() coalesces
-                                // concurrent triggers for the same
-                                // definition_id, so spawning here on every
-                                // request that finds nothing persisted yet
-                                // is safe — only the first spawn actually
-                                // runs the CLI; later ones are turned away
-                                // as StaleOnArrival.
+                                // response.
                                 let wstore_bg = wstore.clone();
                                 let filestore_bg = filestore.clone();
                                 let broker_bg = broker.clone();
@@ -421,7 +452,22 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                     .await;
                                 });
                             }
-                            _ => {}
+                            Ok(None) | Ok(Some(_)) => {
+                                // Already attempted this process lifetime —
+                                // no-op, same as any other row without a
+                                // persisted summary.
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    error = %e,
+                                    definition_id = %inst.definition_id,
+                                    "listrecentsessions: agent_activity_summary_get failed — \
+                                     row keeps its plain fallback preview text"
+                                );
+                                if !degraded.contains(&"activity_summary") {
+                                    degraded.push("activity_summary");
+                                }
+                            }
                         }
                     }
 
@@ -944,5 +990,29 @@ mod tests {
         let row = &result.rows[0];
         assert!(!row.has_snapshot);
         assert_eq!(row.preview, "", "no summary persisted yet — preview must stay empty, not fabricated");
+    }
+
+    /// reagent P1, PR #2786: without a dedup gate, a definition that can
+    /// never be summarized (no cmd meta, no raw output, CLI failure) gets
+    /// re-spawned on every `listrecentsessions` poll forever —
+    /// `ambient::gateway().admit()` alone only coalesces CONCURRENT
+    /// triggers, not sequential ones, since its guard drops (freeing the
+    /// slot) the moment one call finishes. This tests
+    /// `definition_summary_attempted()`'s claim set directly rather than
+    /// the RPC dispatch (which can't observe whether a background
+    /// `tokio::spawn` happened without mocking the Haiku CLI) — a unique
+    /// id avoids cross-test interference with the process-wide static set.
+    #[test]
+    fn definition_summary_attempted_claims_a_definition_id_at_most_once() {
+        let id = "def-dedup-test-unique-9f3a1b".to_string();
+        assert!(
+            definition_summary_attempted().lock().unwrap().insert(id.clone()),
+            "first claim for a fresh id must succeed"
+        );
+        assert!(
+            !definition_summary_attempted().lock().unwrap().insert(id.clone()),
+            "second claim for the same id must be rejected — this is the fix for \
+             reagent's unbounded-retry finding on PR #2786"
+        );
     }
 }
