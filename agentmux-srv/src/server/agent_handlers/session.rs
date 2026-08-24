@@ -441,15 +441,42 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 let broker_bg = broker.clone();
                                 let definition_id_bg = inst.definition_id.clone();
                                 let block_id_bg = inst.block_id.clone();
+                                let provider_id_bg = def.map(|d| d.provider.clone()).unwrap_or_default();
                                 tokio::spawn(async move {
-                                    crate::server::app_api::session::generate_definition_activity_summary(
+                                    let result = crate::server::app_api::session::generate_definition_activity_summary(
                                         &wstore_bg,
                                         &filestore_bg,
                                         &broker_bg,
                                         &definition_id_bg,
                                         &block_id_bg,
+                                        &provider_id_bg,
                                     )
                                     .await;
+                                    // reagent P2, PR #2786: at minimum, log the
+                                    // spend so it's observable — no UI-facing
+                                    // total exists for ANY background-triggered
+                                    // ambient call today (dispatch_name/
+                                    // subagent_name via trigger_eager_naming,
+                                    // generate_pushed_activity_summary all
+                                    // discard their own returned tokens the
+                                    // same way; only the live, RPC-response
+                                    // pull paths — session:activity_summary,
+                                    // session:next_prompt_suggestion — thread
+                                    // usage to the frontend, since only they
+                                    // have a response channel to thread it
+                                    // through). A real aggregate sink for
+                                    // background ambient spend is a separate,
+                                    // cross-cutting follow-up, not scoped to
+                                    // this one call site.
+                                    if let Some((_, tokens)) = result {
+                                        if let Some(tokens) = tokens {
+                                            tracing::debug!(
+                                                definition_id = %definition_id_bg,
+                                                ?tokens,
+                                                "listrecentsessions: definition activity summary generated"
+                                            );
+                                        }
+                                    }
                                 });
                             }
                             Ok(None) | Ok(Some(_)) => {

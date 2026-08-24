@@ -211,6 +211,36 @@ fn definition_summary_semaphore() -> &'static tokio::sync::Semaphore {
     SEM.get_or_init(|| tokio::sync::Semaphore::new(MAX_CONCURRENT_DEFINITION_SUMMARIES))
 }
 
+/// Read-only CLI path lookup for `provider_id` — checks the versioned
+/// local-install dir, then falls back to system PATH. Deliberately never
+/// installs anything (unlike the `resolvecli` RPC handler / `agent_open.rs`'s
+/// launch-time resolution, which both trigger an npm install as a fallback):
+/// this is a best-effort BACKGROUND call, not a user-initiated launch —
+/// silently installing a CLI as a side effect of a picker preview summary
+/// would be a surprising, unwanted cost. Returns `None` (not an error) for
+/// an unknown provider or a CLI that isn't already available either way;
+/// the caller treats that the same as any other unresolvable case.
+async fn resolve_provider_cli_path_readonly(provider_id: &str) -> Option<String> {
+    const AGENTMUX_VERSION: &str = env!("CARGO_PKG_VERSION");
+    let provider = crate::backend::providers::get_provider(provider_id)?;
+    let paths = agentmux_common::DataPaths::from_env()?;
+    let provider_dir = paths
+        .home_dir
+        .join("instances")
+        .join(format!("v{AGENTMUX_VERSION}"))
+        .join("cli")
+        .join(provider.id);
+    let npm_bin = if cfg!(windows) {
+        provider_dir.join("node_modules").join(".bin").join(format!("{}.cmd", provider.cli_command))
+    } else {
+        provider_dir.join("node_modules").join(".bin").join(provider.cli_command)
+    };
+    if npm_bin.exists() {
+        return Some(npm_bin.to_string_lossy().to_string());
+    }
+    crate::server::cli_handlers::resolve_cli_on_path(provider.cli_command).await
+}
+
 /// Generate (and persist) a short activity summary for a definition whose
 /// AgentPicker row has no structured `output.state.json` conversation
 /// snapshot to preview — legacy rows predating snapshot persistence, per
@@ -227,21 +257,34 @@ fn definition_summary_semaphore() -> &'static tokio::sync::Semaphore {
 /// in-flight call here (unlike the pull/pushed activity-summary RPCs,
 /// which regenerate every turn for a LIVE conversation).
 ///
+/// CLI path resolution (reagent P1, PR #2786): the row shape this feature
+/// actually targets is a CLOSED pane — `DeleteBlock`
+/// (`sagas::delete_block::run`) removes the `Block` row entirely on pane
+/// close while the instance row and raw filestore output survive. For such
+/// rows there is no live block to read `cmd`/`cmd:env` meta from at all, so
+/// this prefers the block record when it still exists (richer: carries the
+/// per-block auth env the CLI needs) and falls back to
+/// `resolve_provider_cli_path_readonly` + an EMPTY auth env otherwise —
+/// best-effort: a provider that needs per-block injected credentials (no
+/// ambient/global login available) fails the Haiku call cleanly (`None`,
+/// same as any other unresolvable case here), not a wrong result.
+///
 /// Fire-and-forget by design: the caller (`listrecentsessions`) spawns this
 /// in the background and does not await it inline. The row that triggered
 /// generation still shows its existing fallback text on THIS response; on
 /// success this broadcasts `agents:changed`, which `MyAgentsList.tsx`
 /// already refetches on, picking up the now-persisted summary on the next
 /// load. Returns `None` (nothing persisted, nothing broadcast) when there's
-/// no raw output to summarize, the block/CLI path isn't resolvable, this
-/// call was superseded/capped, or the CLI failed — the caller treats all of
-/// these as "still nothing to show," not an error.
+/// no raw output to summarize, the CLI path isn't resolvable, this call was
+/// superseded/capped, or the CLI failed — the caller treats all of these as
+/// "still nothing to show," not an error.
 pub(crate) async fn generate_definition_activity_summary(
     wstore: &Store,
     filestore: &crate::backend::storage::filestore::FileStore,
     broker: &Arc<crate::backend::wps::Broker>,
     definition_id: &str,
     block_id: &str,
+    provider_id: &str,
 ) -> Option<(String, Option<crate::agents::TokenCounts>)> {
     let key = crate::ambient::AmbientCallKey::new(definition_id.to_string(), AMBIENT_PURPOSE_DEFINITION_SUMMARY);
     let guard = match crate::ambient::gateway().admit(key, 1) {
@@ -267,18 +310,27 @@ pub(crate) async fn generate_definition_activity_summary(
         return None;
     };
 
-    let block: Block = match wstore.get(block_id) {
-        Ok(Some(b)) => b,
+    let (cli_path, meta): (String, MetaMapType) = match wstore.get::<Block>(block_id) {
+        Ok(Some(block)) => {
+            let p = obj::meta_get_string(&block.meta, "cmd", "");
+            if p.is_empty() {
+                let Some(p) = resolve_provider_cli_path_readonly(provider_id).await else {
+                    drop(guard);
+                    return None;
+                };
+                (p, MetaMapType::new())
+            } else {
+                (p, block.meta.clone())
+            }
+        }
         _ => {
-            drop(guard);
-            return None;
+            let Some(p) = resolve_provider_cli_path_readonly(provider_id).await else {
+                drop(guard);
+                return None;
+            };
+            (p, MetaMapType::new())
         }
     };
-    let cli_path = obj::meta_get_string(&block.meta, "cmd", "");
-    if cli_path.is_empty() {
-        drop(guard);
-        return None;
-    }
 
     let prompt = format!(
         "Summarize in 12 words or fewer what this conversation/session was \
@@ -288,7 +340,7 @@ pub(crate) async fn generate_definition_activity_summary(
          Recent activity:\n\n{digest}"
     );
 
-    let result = invoke_ambient_haiku_call(&cli_path, &prompt, &block.meta, cancel).await.ok();
+    let result = invoke_ambient_haiku_call(&cli_path, &prompt, &meta, cancel).await.ok();
     drop(guard);
 
     let (summary, tokens) = result?;
@@ -1156,6 +1208,22 @@ mod build_session_title_prompt_tests {
         assert!(prompt.contains("repeat it back EXACTLY, unchanged"));
         assert!(prompt.contains("OVERALL GOAL"));
         assert!(!prompt.contains("what is currently being worked on"));
+    }
+}
+
+/// reagent P1, PR #2786: `generate_definition_activity_summary` falls back
+/// to this resolver when the instance's `Block` row is gone (the closed-
+/// pane case this feature actually targets). Only the cheap, deterministic
+/// "unknown provider" early return is exercised here — the filesystem/PATH
+/// probing branches depend on this machine's actual CLI install state and
+/// aren't meaningfully unit-testable without mocking the filesystem.
+#[cfg(test)]
+mod resolve_provider_cli_path_readonly_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn unknown_provider_returns_none_without_touching_the_filesystem() {
+        assert!(resolve_provider_cli_path_readonly("not-a-real-provider-xyz").await.is_none());
     }
 }
 
