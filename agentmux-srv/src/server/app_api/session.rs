@@ -189,6 +189,116 @@ pub(crate) async fn generate_pushed_activity_summary(
     result.filter(|(summary, _)| !summary.is_empty())
 }
 
+/// Ambient-call purpose tag for the on-demand, once-per-definition activity
+/// summary used as the AgentPicker's "My Agents" conversation-preview
+/// fallback — see `generate_definition_activity_summary` below and
+/// `db_agent_activity_summaries` (OBJECT_SCHEMA_VERSION v27).
+const AMBIENT_PURPOSE_DEFINITION_SUMMARY: &str = "definition_summary";
+
+/// Generate (and persist) a short activity summary for a definition whose
+/// AgentPicker row has no structured `output.state.json` conversation
+/// snapshot to preview — legacy rows predating snapshot persistence, per
+/// `has_snapshot` in `agent_handlers::session::listrecentsessions`. Built
+/// from the instance's raw terminal capture (the `"output"` filestore file,
+/// written unconditionally by the CLI pipeline, independent of the newer
+/// structured snapshot), reusing `read_recent_activity_digest` — the same
+/// extraction `generate_pushed_activity_summary` above uses.
+///
+/// One-shot per definition, not per-turn: `generation` is always the
+/// constant `1`, mirroring `generate_subagent_name`'s cache-once posture —
+/// the caller only invokes this when `agent_activity_summary_get` found
+/// nothing persisted yet, so there is no "newer turn" to supersede an
+/// in-flight call here (unlike the pull/pushed activity-summary RPCs,
+/// which regenerate every turn for a LIVE conversation).
+///
+/// Fire-and-forget by design: the caller (`listrecentsessions`) spawns this
+/// in the background and does not await it inline. The row that triggered
+/// generation still shows its existing fallback text on THIS response; on
+/// success this broadcasts `agents:changed`, which `MyAgentsList.tsx`
+/// already refetches on, picking up the now-persisted summary on the next
+/// load. Returns `None` (nothing persisted, nothing broadcast) when there's
+/// no raw output to summarize, the block/CLI path isn't resolvable, this
+/// call was superseded/capped, or the CLI failed — the caller treats all of
+/// these as "still nothing to show," not an error.
+pub(crate) async fn generate_definition_activity_summary(
+    wstore: &Store,
+    filestore: &crate::backend::storage::filestore::FileStore,
+    broker: &Arc<crate::backend::wps::Broker>,
+    definition_id: &str,
+    block_id: &str,
+) -> Option<(String, Option<crate::agents::TokenCounts>)> {
+    let key = crate::ambient::AmbientCallKey::new(definition_id.to_string(), AMBIENT_PURPOSE_DEFINITION_SUMMARY);
+    let guard = match crate::ambient::gateway().admit(key, 1) {
+        crate::ambient::Admission::Proceed(guard) => guard,
+        crate::ambient::Admission::StaleOnArrival => return None,
+    };
+    let cancel = guard.cancellation();
+
+    // Same cross-block concurrency cap as every other on-demand ambient
+    // caller (subagent/dispatch naming) — a picker load with many
+    // snapshot-less rows shouldn't spawn unbounded concurrent Haiku CLIs.
+    let permit = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => None,
+        permit = pull_call_semaphore().acquire() => permit.ok(),
+    };
+    let Some(_permit) = permit else {
+        drop(guard);
+        return None;
+    };
+
+    let Some(digest) = read_recent_activity_digest(filestore, block_id) else {
+        drop(guard);
+        return None;
+    };
+
+    let block: Block = match wstore.get(block_id) {
+        Ok(Some(b)) => b,
+        _ => {
+            drop(guard);
+            return None;
+        }
+    };
+    let cli_path = obj::meta_get_string(&block.meta, "cmd", "");
+    if cli_path.is_empty() {
+        drop(guard);
+        return None;
+    }
+
+    let prompt = format!(
+        "Summarize in 12 words or fewer what this conversation/session was \
+         about, based on the raw terminal output below. Plain text only — \
+         no markdown, no code fences, no backticks, no quotes, no \
+         punctuation at the end, no preamble.\n\n\
+         Recent activity:\n\n{digest}"
+    );
+
+    let result = invoke_ambient_haiku_call(&cli_path, &prompt, &block.meta, cancel).await.ok();
+    drop(guard);
+
+    let (summary, tokens) = result?;
+    let summary = summary.trim().to_string();
+    if summary.is_empty() {
+        return None;
+    }
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    if wstore.agent_activity_summary_set(definition_id, &summary, now).is_ok() {
+        broker.publish(crate::backend::wps::WaveEvent {
+            event: "agents:changed".to_string(),
+            scopes: vec![],
+            sender: String::new(),
+            persist: 0,
+            data: None,
+        });
+    }
+
+    Some((summary, tokens))
+}
+
 /// Ambient-call purpose tag for the on-demand subagent display name (see
 /// `generate_subagent_name`). One-shot per subagent — `generation` is always
 /// the constant `1` since a name, once generated, is cached on

@@ -247,7 +247,27 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 9;
 ///        `format_global_brain_block`'s output, wrapped in explicit
 ///        override wording, ahead of every ordinary Global Memory
 ///        section. See docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md.
-pub const OBJECT_SCHEMA_VERSION: i64 = 27;
+///   v28 — db_agent_activity_summaries: one-shot, on-demand Haiku-generated
+///        activity summary per `definition_id`, used as the AgentPicker's
+///        "My Agents" conversation-preview fallback when a row has no
+///        structured `output.state.json` snapshot to preview (legacy rows
+///        predating snapshot persistence — see `has_snapshot` in
+///        `listrecentsessions`, `agent_handlers/session.rs`). Generated
+///        from the instance's raw `"output"` filestore file (present even
+///        when the newer structured snapshot isn't) via the same shared
+///        Ambient Model Call gateway `dispatch_name`/`term:ambient_summary`
+///        already use (`invoke_ambient_haiku_call`,
+///        `docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md`).
+///        Generated lazily (first picker load that needs it, not on every
+///        turn) and cached forever once non-empty — mirrors
+///        `SubAgent.display_name`'s cache-once posture, not
+///        `term:ambient_summary`'s per-turn refresh. Renumbered from an
+///        earlier v27 — merged alongside the Global Memory system-tier PR
+///        (#2782), which independently claimed v27 for an unrelated
+///        column (same collision class as this file's own v20→v22 and
+///        v24→v25 history, see those entries above). See
+///        docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md §5a.
+pub const OBJECT_SCHEMA_VERSION: i64 = 28;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -860,6 +880,17 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             tier                 TEXT NOT NULL,
             granted_at           INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (agent_id, granted_peer_agent_id, tier)
+        );
+
+        -- v27: one-shot, on-demand activity summary per definition — see
+        -- OBJECT_SCHEMA_VERSION's v27 doc comment above. `summary` is empty
+        -- only transiently (a row is only ever inserted once generation
+        -- succeeds); there is no 'pending' state stored here — an absent
+        -- row IS the pending state.
+        CREATE TABLE IF NOT EXISTS db_agent_activity_summaries (
+            definition_id TEXT PRIMARY KEY,
+            summary       TEXT NOT NULL DEFAULT '',
+            updated_at    INTEGER NOT NULL DEFAULT 0
         );",
     )?;
 
