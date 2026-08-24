@@ -106,31 +106,62 @@ export function useSubagentBackfillGate(
 ): Accessor<boolean> {
     const [settled, setSettled] = createSignal(false);
     let wired = false;
+    // reagentx P1 (PR #2781, round 8): whether "does this block have a
+    // backfill coming at all" has already been decided for the CURRENT
+    // "agent" stay. `hasPersistedSession()` is only read below while
+    // `!decided` — so once it's been consulted once, it's no longer a
+    // tracked dependency of this effect, and a LATER change to it can't
+    // trigger a re-run that reconsiders the decision. This matters because
+    // `hasPersistedSession()` genuinely DOES flip false→true for the most
+    // common flow in the whole app: a brand-new (non-continued) agent
+    // conversation is created with `agent:sessionid: ""` (agent-model.ts),
+    // so at mount there's correctly nothing to backfill — but the instant
+    // the CLI's first turn captures a real session id, `persist_session_id`
+    // (core.rs) writes it to block meta and broadcasts `waveobj:update`,
+    // which is EXACTLY the same signal this hook reads to decide
+    // `hasPersistedSession()`. Without freezing the decision, that ordinary
+    // mid-conversation write re-triggered this effect, re-closed the gate
+    // over already-live, already-streaming content, and — since
+    // `scan_session_subagents` is a ONE-TIME, registration-time-only check
+    // (server/reactive.rs) that is never retroactively re-run once a
+    // session id shows up later — no "started"/"done" event could ever
+    // arrive to reopen it, so the BrainSpinner incorrectly reappeared for
+    // the full 20s safety-timeout on essentially every first message of
+    // every new agent conversation.
+    let decided = false;
     let settleTimer: ReturnType<typeof setTimeout> | undefined;
     let safetyTimer: ReturnType<typeof setTimeout> | undefined;
 
     createEffect(() => {
         const vt = viewType();
         if (vt === undefined) return; // not yet resolved — stay gated, nothing to decide yet
-        if (vt !== "agent" || !hasPersistedSession()) {
-            // Only an agent block WITH a persisted session id ever gets a
-            // backfill_status event at all (server/reactive.rs gates
-            // scan_session_subagents on the exact same condition) —
-            // resolve immediately for everything else, rather than via the
-            // same async path. See this module's own doc comment (round 4)
-            // for why this must be known synchronously, not inferred from
-            // an empty history read.
+        if (vt !== "agent") {
+            // A genuine view-type change (e.g. "Replace With...") — allow a
+            // later re-entry into "agent" to decide fresh (round 6).
+            decided = false;
+            wired = false;
             setSettled(true);
             return;
         }
-        if (wired) return;
+        if (decided) return;
+        decided = true;
+
+        if (!hasPersistedSession()) {
+            // Only an agent block WITH a persisted session id ever gets a
+            // backfill_status event at all (server/reactive.rs gates
+            // scan_session_subagents on the exact same condition) —
+            // resolve immediately, rather than via the same async path.
+            // See this module's own doc comment (round 4) for why this
+            // must be known synchronously, not inferred from an empty
+            // history read. Deliberately NOT re-evaluated later (see
+            // `decided`'s own doc comment, round 8) — a session id
+            // appearing after this point is an ordinary mid-conversation
+            // write, not evidence a backfill is now pending.
+            setSettled(true);
+            return;
+        }
+
         wired = true;
-        // Reset to the pessimistic default for this fresh wiring cycle —
-        // `settled` may still be `true` from a PRIOR resolution (either a
-        // previous non-agent/no-session period, per round 6's `wired`
-        // reset above, or an earlier completed backfill this same effect
-        // already settled). That stale value must never leak into a new
-        // cycle that hasn't determined anything yet.
         setSettled(false);
 
         // reagentx P2 (PR #2781, round 7): re-armed on EVERY "started", not

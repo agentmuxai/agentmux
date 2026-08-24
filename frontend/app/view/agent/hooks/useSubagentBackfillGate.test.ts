@@ -233,4 +233,37 @@ describe("useSubagentBackfillGate", () => {
         await vi.advanceTimersByTimeAsync(20_000);
         expect(settled()).toBe(true);
     });
+
+    // reagentx P1 (PR #2781, round 8): hasPersistedSession() genuinely
+    // flips false -> true mid-life for the single most common flow in the
+    // app -- a brand-new agent conversation starts with no session id
+    // (nothing to backfill, correctly resolves immediately), then the
+    // CLI's first turn captures a real one and persist_session_id writes
+    // it to block meta. scan_session_subagents is a one-time,
+    // registration-time-only check that is never retroactively re-run once
+    // a session id shows up later, so this must never reopen the gate.
+    it("does NOT re-close the gate when hasPersistedSession flips true after already resolving (new-conversation flow)", async () => {
+        vi.useFakeTimers();
+        const [hasSession, setHasSession] = createSignal(false);
+        let settled: () => boolean = () => false;
+        createRoot(() => {
+            settled = useSubagentBackfillGate("block-1", () => "agent", hasSession);
+        });
+
+        // No persisted session yet — resolves immediately, no subscription.
+        expect(settled()).toBe(true);
+        expect(hub.handler).toBeNull();
+
+        // The CLI captures a real session id mid-conversation — an
+        // ordinary write, not evidence a backfill is now pending.
+        setHasSession(true);
+        expect(settled()).toBe(true);
+        expect(hub.handler).toBeNull();
+
+        // Confirm it's not merely "not yet" — advancing time must not
+        // reveal a subscription/gate appearing later either.
+        await vi.advanceTimersByTimeAsync(20_000);
+        expect(settled()).toBe(true);
+        expect(hub.handler).toBeNull();
+    });
 });
