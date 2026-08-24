@@ -3,9 +3,13 @@
 **Date:** 2026-08-24
 **Reported by:** repo owner, on `0.55.23` — "the docked items still show, then
 disappear... it should be the pulsating brain until everything is ready."
-**Status:** root-caused; **no fix implemented** — this is an analysis writeup
-per the request ("figure out why... write retro to file"). See §5 for
-concrete, unimplemented fix directions.
+**Status:** root-caused and **fixed**, same day — §5 options 1+2
+(scoped/persisted `subagent:backfill_status` WPS event + gating
+`block.tsx`'s `ready()`/BrainSpinner on it) implemented in the PR this retro
+shipped alongside (`agenta/subagent-backfill-gate-brainspinner`). §5 option 3
+(a larger debounce ceiling) was not needed once 1+2 landed. Left below
+exactly as originally written (the analysis, not the fix, is the retro) —
+this status line is the only change.
 
 ---
 
