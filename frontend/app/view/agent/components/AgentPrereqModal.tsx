@@ -9,10 +9,11 @@
  * SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md.
  */
 
-import { For, type JSX } from "solid-js";
+import { createSignal, For, Show, type JSX } from "solid-js";
 
 import { Button } from "@/element/button";
 import { getApi } from "@/app/store/global";
+import { SystemToolInstallInline } from "@/app/view/toolchain/SystemToolInstallInline";
 
 interface MissingPrereq {
     tool: string;
@@ -20,6 +21,12 @@ interface MissingPrereq {
     installUrl: string;
     installLinkText: string;
 }
+
+// Tool ids the backend's system-install catalog covers
+// (system_install_handlers.rs) — anything else keeps the existing
+// link-only row unchanged. See
+// docs/specs/SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md.
+const SYSTEM_INSTALLABLE_IDS = new Set(["git", "node", "npm", "python"]);
 
 interface AgentPrereqModalPanelProps {
     agent: AgentDefinition;
@@ -37,6 +44,30 @@ export const AgentPrereqModalPanel = (props: AgentPrereqModalPanelProps): JSX.El
             // Fall through — if external-open fails, the link is at
             // least visible in the modal as text the user can copy.
         }
+    };
+
+    const [expandedInstalls, setExpandedInstalls] = createSignal<ReadonlySet<string>>(new Set());
+    const toggleInstallPanel = (tool: string) => {
+        setExpandedInstalls((prev) => {
+            const next = new Set(prev);
+            if (next.has(tool)) next.delete(tool); else next.add(tool);
+            return next;
+        });
+    };
+    // Hides the "or install it now" toggle once resolution confirms
+    // there's nothing to offer (no package manager detected/usable) —
+    // the primary install-URL link above stays visible regardless
+    // either way; this only prevents the SECONDARY toggle from lingering
+    // as a button that expands to a permanently blank panel. reagent P2,
+    // PR #2790.
+    const [unavailableInstalls, setUnavailableInstalls] = createSignal<ReadonlySet<string>>(new Set());
+    const markUnavailable = (tool: string) => {
+        setExpandedInstalls((prev) => {
+            const next = new Set(prev);
+            next.delete(tool);
+            return next;
+        });
+        setUnavailableInstalls((prev) => new Set(prev).add(tool));
     };
 
     return (
@@ -72,6 +103,25 @@ export const AgentPrereqModalPanel = (props: AgentPrereqModalPanelProps): JSX.El
                                         {req.installLinkText}
                                         <span class="agent-prereq-modal-link-arrow" aria-hidden="true"> ↗</span>
                                     </a>
+                                    <Show when={SYSTEM_INSTALLABLE_IDS.has(req.tool) && !unavailableInstalls().has(req.tool)}>
+                                        <button
+                                            type="button"
+                                            class="agent-prereq-modal-link"
+                                            onClick={() => toggleInstallPanel(req.tool)}
+                                        >
+                                            or install it now ↓
+                                        </button>
+                                        <Show when={expandedInstalls().has(req.tool)}>
+                                            <SystemToolInstallInline
+                                                toolId={req.tool}
+                                                onInstalled={() => {
+                                                    toggleInstallPanel(req.tool);
+                                                    props.onRefresh();
+                                                }}
+                                                onUnavailable={() => markUnavailable(req.tool)}
+                                            />
+                                        </Show>
+                                    </Show>
                                 </div>
                             </li>
                         )}

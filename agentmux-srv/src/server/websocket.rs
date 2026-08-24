@@ -1430,6 +1430,14 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
     // docs/specs/SPEC_AGENT_INSTALL_STAGE_2026_05_17.md)
     super::install_handlers::register_install_handlers(engine, &state);
 
+    // System-toolchain install handlers (toolchain.resolve_install_command /
+    // toolchain.install_system_tool — see
+    // docs/specs/SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md). Shares
+    // state.install_sessions with the handlers just above (same
+    // InstallSessionRegistry — install.cancel already works unchanged for
+    // these sessions too, no new cancel command needed).
+    super::system_install_handlers::register_system_install_handlers(engine, &state);
+
     // App API handlers (agent.open, agent.send, agent.stop, agent.status, agent.list, agent.output)
     super::app_api::register_app_api_handlers(engine, &state);
 

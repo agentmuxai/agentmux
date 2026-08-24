@@ -57,6 +57,13 @@ export interface CoreTool {
     installCommand?: Partial<Record<Platform, string>>;
     /** Homebrew formula — enables the P3 one-click install when brew exists. */
     brewFormula?: string;
+    /** winget package identifier (e.g. "Git.Git") — mirrors `brewFormula`'s
+     *  role on Windows. Display-only, like `brewFormula`: the backend's own
+     *  fixed catalog (`system_install_handlers.rs`) is the execution-
+     *  authoritative copy — this field is never sent to the backend, only
+     *  used to decide whether to show the one-click Install action. See
+     *  docs/specs/SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md. */
+    wingetId?: string;
     /** What "available" means for this tool. Defaults to `"path"` when omitted. */
     checkKind?: CheckKind;
 }
@@ -90,8 +97,13 @@ export const CORE_TOOLS: CoreTool[] = [
         description: "JavaScript runtime — required to install & run the npm-based agent CLIs.",
         docsUrl: "https://nodejs.org/",
         installUrls: { windows: NODE_DOWNLOAD, macos: NODE_DOWNLOAD, linux: NODE_DOWNLOAD },
-        installCommand: { macos: "brew install node", linux: "sudo apt install -y nodejs npm" },
+        installCommand: {
+            windows: "winget install --id OpenJS.NodeJS.LTS -e",
+            macos: "brew install node",
+            linux: "sudo apt install -y nodejs npm",
+        },
         brewFormula: "node",
+        wingetId: "OpenJS.NodeJS.LTS",
     },
     {
         id: "npm",
@@ -101,8 +113,20 @@ export const CORE_TOOLS: CoreTool[] = [
         description: "Node package manager — ships with Node.js; installs the agent CLIs.",
         docsUrl: "https://docs.npmjs.com/",
         installUrls: { windows: NODE_DOWNLOAD, macos: NODE_DOWNLOAD, linux: NODE_DOWNLOAD },
-        installCommand: { macos: "brew install node", linux: "sudo apt install -y nodejs npm" },
+        // Same target as "node" above — npm ships bundled with Node, there
+        // is no separate winget/brew/apt package for it. The one-click
+        // Install action for this row re-triggers the same backend
+        // resolution as node's (both resolve to the same tool_id-keyed
+        // catalog entry server-side); modeled as two rows here only
+        // because the Toolchain modal displays them as two detectable
+        // binaries, not because they install separately.
+        installCommand: {
+            windows: "winget install --id OpenJS.NodeJS.LTS -e",
+            macos: "brew install node",
+            linux: "sudo apt install -y nodejs npm",
+        },
         brewFormula: "node",
+        wingetId: "OpenJS.NodeJS.LTS",
     },
     {
         id: "git",
@@ -117,8 +141,13 @@ export const CORE_TOOLS: CoreTool[] = [
             macos: "https://git-scm.com/download/mac",
             linux: "https://git-scm.com/download/linux",
         },
-        installCommand: { macos: "brew install git", linux: "sudo apt install -y git" },
+        installCommand: {
+            windows: "winget install --id Git.Git -e",
+            macos: "brew install git",
+            linux: "sudo apt install -y git",
+        },
         brewFormula: "git",
+        wingetId: "Git.Git",
     },
     {
         id: "docker",
@@ -155,11 +184,12 @@ export const CORE_TOOLS: CoreTool[] = [
             linux: "https://www.python.org/downloads/source/",
         },
         installCommand: {
-            windows: "winget install Python.Python.3.12",
+            windows: "winget install --id Python.Python.3.12 -e",
             macos: "brew install python@3.12",
             linux: "sudo apt install -y python3 python3-pip python3-venv",
         },
         brewFormula: "python@3.12",
+        wingetId: "Python.Python.3.12",
     },
     {
         id: "uv",

@@ -12,6 +12,7 @@ import { EXTERNAL_WIDGETS, widgetCliCommandForPlatform } from "@/app/view/agent/
 import { getProviderList } from "@/app/view/agent/providers";
 import { ensureCapability, getCapability, isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
+import { SystemToolInstallInline } from "./SystemToolInstallInline";
 import type { ToolchainViewModel } from "./toolchain-model";
 import "./toolchain-view.scss";
 
@@ -248,6 +249,46 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
     // blocked under CEF's Permissions-Policy. See SPEC_UNIFIED_CLIPBOARD_2026_05_18.md §3.3.
     const copy = (cmd?: string) => { if (cmd) void clipboardWriteText(cmd).catch(() => {}); };
 
+    // Tool ids the backend's system-install catalog COULD cover
+    // (system_install_handlers.rs) — this only ever ADDS a one-click
+    // option alongside the existing "Install ↗" link/copy-command UI,
+    // never replaces it. Even for these ids, the backend may still
+    // resolve `available: false` on this specific machine (macOS without
+    // brew, Linux without a recognized package manager) — in that case
+    // `SystemToolInstallInline` renders nothing and the existing
+    // installUrl button is the ONLY visible action, exactly as before
+    // this feature existed. Codex P2, PR #2790 (an earlier version of
+    // this file made the Install ↗ button itself conditionally stop
+    // opening the URL for these ids, which was a dead end whenever the
+    // backend couldn't resolve a command).
+    const SYSTEM_INSTALLABLE_IDS = new Set(["git", "node", "npm", "python"]);
+    const [expandedInstalls, setExpandedInstalls] = createSignal<ReadonlySet<string>>(new Set());
+    const toggleInstallPanel = (id: string) => {
+        setExpandedInstalls((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
+        });
+    };
+    // Rows confirmed unavailable (no package manager detected/usable on
+    // this machine) — hides the "or install it now" toggle for that row
+    // once known, so a user who clicked it doesn't end up staring at a
+    // permanently blank expanded area with no visible fallback (the
+    // primary "Install ↗" button/link stays visible regardless either
+    // way — this only hides the SECONDARY one-click toggle). Populated
+    // reactively from SystemToolInstallInline's onUnavailable, so the
+    // very first click can still briefly expand before collapsing —
+    // this repo has no eager per-row pre-check today. reagent P2, PR #2790.
+    const [unavailableInstalls, setUnavailableInstalls] = createSignal<ReadonlySet<string>>(new Set());
+    const markUnavailable = (id: string) => {
+        setExpandedInstalls((prev) => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+        });
+        setUnavailableInstalls((prev) => new Set(prev).add(id));
+    };
+
     const renderRow = (row: ToolRow): JSX.Element => (
         <div class="toolchain-row" classList={{ "toolchain-row--missing": !row.loading && !row.found }}>
             <i class={`toolchain-row-icon fa-solid fa-${row.icon}`} aria-hidden="true" />
@@ -290,6 +331,31 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
                             <i class="fa-solid fa-copy" />
                         </button>
                     </div>
+                </Show>
+                <Show
+                    when={
+                        !row.loading && !row.found && row.kind === "core" &&
+                        SYSTEM_INSTALLABLE_IDS.has(row.id) && !unavailableInstalls().has(row.id)
+                    }
+                >
+                    <button
+                        type="button"
+                        class="toolchain-link-btn toolchain-link-btn--install-now"
+                        onClick={() => toggleInstallPanel(row.id)}
+                    >
+                        or install it now
+                    </button>
+                    <Show when={expandedInstalls().has(row.id)}>
+                        <SystemToolInstallInline
+                            toolId={row.id}
+                            onInstalled={() => {
+                                toggleInstallPanel(row.id);
+                                const idx = rows.findIndex((r) => r.id === row.id);
+                                if (idx !== -1) void probe(idx, { force: true });
+                            }}
+                            onUnavailable={() => markUnavailable(row.id)}
+                        />
+                    </Show>
                 </Show>
             </div>
             <div class="toolchain-row-actions">
