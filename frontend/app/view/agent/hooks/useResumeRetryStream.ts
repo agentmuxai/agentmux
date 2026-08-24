@@ -74,10 +74,25 @@ export function useResumeRetryStream(opts: UseResumeRetryStreamOptions): void {
         opts.model.dispatchPane(command, "system");
     };
 
+    // reagentx P2 (PR #2776, round 3): the mount-time history read below is
+    // async and can resolve AFTER a live event already landed — e.g. a
+    // slightly-stale "retrying" snapshot arriving just after the matching
+    // live "resolved" already cleared `reconnecting`. Applying it at that
+    // point would incorrectly re-set `reconnecting` with a stale
+    // `startedAt` and nothing left to ever clear it (`ResumeRetryStarted`
+    // only no-ops when ALREADY reconnecting, not against a timestamp/order
+    // check). Once ANY live event has landed, it is by construction more
+    // current than a history snapshot taken at mount time, so the
+    // still-in-flight read is simply discarded rather than applied.
+    let receivedLiveEvent = false;
+
     const unsub = waveEventSubscribe({
         eventType: WpsEvent.AgentResumeRetry,
         scope: `block:${opts.blockId}`,
-        handler: (event: any) => applyEvent(event?.data),
+        handler: (event: any) => {
+            receivedLiveEvent = true;
+            applyEvent(event?.data);
+        },
     });
 
     // Explicit current-history read on mount — see this module's doc
@@ -91,6 +106,7 @@ export function useResumeRetryStream(opts: UseResumeRetryStreamOptions): void {
         maxitems: 1,
     })
         .then((history) => {
+            if (receivedLiveEvent) return;
             const latest = history?.[history.length - 1];
             if (latest) applyEvent(latest.data);
         })
