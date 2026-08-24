@@ -38,6 +38,34 @@ Dev builds compile with `--features patched-libcef` automatically via `task buil
 
 See [`docs/cef-build/build-patched-libcef.md`](cef-build/build-patched-libcef.md) for building libcef from source.
 
+## Sandbox blocked by system policy
+
+AgentMux uses Chromium/CEF's kernel **user-namespace sandbox** on Linux (`--disable-setuid-sandbox` — see `agentmux-cef/src/app/mod.rs`), not the classic root-owned SUID `chrome-sandbox` binary. This is the right choice for an AppImage, which has no privileged install step to set up a SUID binary — but it depends on the kernel allowing unprivileged processes to create user namespaces at all.
+
+**Ubuntu backported an AppArmor restriction on exactly that** (originally landed in 23.10, later security-patched into 22.04/20.04 LTS too, ~early 2024) that blocks this for any Chromium/Electron/CEF-based application system-wide — this is not an AgentMux bug, and it hit Chrome itself, VS Code, Discord, Slack, and others the same way around the same time. A system that picks up this policy via `unattended-upgrades` will see AgentMux (and everything else using this sandboxing approach) stop working with no code change on either side.
+
+**What AgentMux does about it:** on launch, before ever attempting to start the browser engine, AgentMux checks whether unprivileged user-namespace creation actually works. If it's blocked, a dialog offers three choices:
+
+- **Fix it now** — installs a narrowly-scoped AppArmor exception (`/etc/apparmor.d/agentmux-userns`, granting only the `userns` capability to AgentMux's own binary path — not a system-wide policy change) via `pkexec` (the standard graphical `sudo` prompt on GNOME/KDE). One-time; the exception is written to match every current and future AgentMux version, so it doesn't need reinstalling after an update.
+- **Continue without sandbox this time** — proceeds for this session only, with the sandbox disabled (equivalent to `AGENTMUX_UNSAFE_NOSANDBOX=1`).
+- **Cancel** — exits.
+
+If neither `zenity` nor `kdialog` is available (headless / minimal window manager, no PolicyKit), AgentMux prints the same explanation to stderr and exits rather than silently proceeding either sandboxed-and-broken or silently unsandboxed.
+
+**Manual alternatives**, if you'd rather not use the dialog:
+
+```bash
+# One-time, narrowly-scoped fix (what "Fix it now" does):
+sudo bash install-userns-apparmor-fix.sh <path-to-a-file-containing-the-profile>
+# (the AppImage's Rust code generates the exact profile text — see
+# agentmux-cef/src/linux_sandbox.rs's build_apparmor_profile())
+
+# Or, run unsandboxed for one launch:
+AGENTMUX_UNSAFE_NOSANDBOX=1 ./AgentMux_*.AppImage
+```
+
+Full design: [`docs/specs/SPEC_LINUX_SANDBOX_APPARMOR_USERNS_2026_08_23.md`](specs/SPEC_LINUX_SANDBOX_APPARMOR_USERNS_2026_08_23.md).
+
 ## Log access
 
 ```bash

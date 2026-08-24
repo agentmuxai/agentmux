@@ -65,6 +65,17 @@ program exit (the `Drop` impl calls `cef_sandbox_destroy`).
 
 ### 4.2 Linux
 
+**2026-08-23 update:** "no setuid helper or extra init call is needed" below
+was true on kernels ≥3.8 as originally understood, but not unconditionally —
+Ubuntu (23.10, later backported to 22.04/20.04) added an AppArmor policy
+that blocks unprivileged user-namespace creation by default, breaking the
+namespace sandbox for any Chromium/CEF-based app system-wide unless the
+binary has an explicit AppArmor exception. See
+`docs/specs/SPEC_LINUX_SANDBOX_APPARMOR_USERNS_2026_08_23.md` for the
+recovery mechanism (a one-time, `pkexec`-installed AppArmor exception,
+scoped to survive AgentMux updates) — this doesn't change anything below,
+just narrows the "no setup needed" framing.
+
 Linux uses the Zygote process model with seccomp-BPF + kernel namespace
 isolation. No setuid helper or extra init call is needed on kernels ≥3.8 when
 the namespace sandbox is used. The correct flags are:
