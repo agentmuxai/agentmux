@@ -249,10 +249,18 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
     // blocked under CEF's Permissions-Policy. See SPEC_UNIFIED_CLIPBOARD_2026_05_18.md §3.3.
     const copy = (cmd?: string) => { if (cmd) void clipboardWriteText(cmd).catch(() => {}); };
 
-    // Tool ids the backend's system-install catalog actually covers
-    // (system_install_handlers.rs) — everything else (today: docker,
-    // provider CLIs) keeps the existing open-URL-only "Install ↗"
-    // behavior unchanged. See docs/specs/SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md.
+    // Tool ids the backend's system-install catalog COULD cover
+    // (system_install_handlers.rs) — this only ever ADDS a one-click
+    // option alongside the existing "Install ↗" link/copy-command UI,
+    // never replaces it. Even for these ids, the backend may still
+    // resolve `available: false` on this specific machine (macOS without
+    // brew, Linux without a recognized package manager) — in that case
+    // `SystemToolInstallInline` renders nothing and the existing
+    // installUrl button is the ONLY visible action, exactly as before
+    // this feature existed. Codex P2, PR #2790 (an earlier version of
+    // this file made the Install ↗ button itself conditionally stop
+    // opening the URL for these ids, which was a dead end whenever the
+    // backend couldn't resolve a command).
     const SYSTEM_INSTALLABLE_IDS = new Set(["git", "node", "npm", "python"]);
     const [expandedInstalls, setExpandedInstalls] = createSignal<ReadonlySet<string>>(new Set());
     const toggleInstallPanel = (id: string) => {
@@ -261,13 +269,6 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
             if (next.has(id)) next.delete(id); else next.add(id);
             return next;
         });
-    };
-    const handleInstallClick = (row: ToolRow) => {
-        if (row.kind === "core" && SYSTEM_INSTALLABLE_IDS.has(row.id)) {
-            toggleInstallPanel(row.id);
-        } else {
-            open(row.installUrl);
-        }
     };
 
     const renderRow = (row: ToolRow): JSX.Element => (
@@ -313,23 +314,30 @@ export function ToolchainView(_props: ViewComponentProps<ToolchainViewModel>): J
                         </button>
                     </div>
                 </Show>
-                <Show when={expandedInstalls().has(row.id)}>
-                    <SystemToolInstallInline
-                        toolId={row.id}
-                        onInstalled={() => {
-                            toggleInstallPanel(row.id);
-                            const idx = rows.findIndex((r) => r.id === row.id);
-                            if (idx !== -1) void probe(idx, { force: true });
-                        }}
-                    />
+                <Show when={!row.loading && !row.found && row.kind === "core" && SYSTEM_INSTALLABLE_IDS.has(row.id)}>
+                    <button
+                        type="button"
+                        class="toolchain-link-btn toolchain-link-btn--install-now"
+                        onClick={() => toggleInstallPanel(row.id)}
+                    >
+                        or install it now
+                    </button>
+                    <Show when={expandedInstalls().has(row.id)}>
+                        <SystemToolInstallInline
+                            toolId={row.id}
+                            onInstalled={() => {
+                                toggleInstallPanel(row.id);
+                                const idx = rows.findIndex((r) => r.id === row.id);
+                                if (idx !== -1) void probe(idx, { force: true });
+                            }}
+                        />
+                    </Show>
                 </Show>
             </div>
             <div class="toolchain-row-actions">
                 <Show when={!row.loading && !row.found && row.installUrl}>
-                    <button class="toolchain-btn" onClick={() => handleInstallClick(row)}>
-                        {row.kind === "core" && SYSTEM_INSTALLABLE_IDS.has(row.id)
-                            ? "Install"
-                            : <>Install <i class="fa-solid fa-arrow-up-right-from-square" /></>}
+                    <button class="toolchain-btn" onClick={() => open(row.installUrl)}>
+                        Install <i class="fa-solid fa-arrow-up-right-from-square" />
                     </button>
                 </Show>
                 <Show when={row.docsUrl}>

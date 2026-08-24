@@ -85,6 +85,14 @@ export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JS
     });
 
     const startInstall = async () => {
+        // Tear down any prior run (Retry path) — without this, retrying
+        // after a failure overwrites `unsub` with the new subscription's
+        // teardown, leaking the previous one (it's then never called,
+        // including on eventual component unmount). reagent P2, PR #2790.
+        if (unsub) {
+            unsub();
+            unsub = null;
+        }
         setPhase("installing");
         setError(null);
         setLines([]);

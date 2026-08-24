@@ -59,6 +59,19 @@ struct SystemInstallStep {
     /// this ("This will show a Windows permission prompt" / "This will
     /// ask for your password") — never used to skip or alter execution.
     needs_elevation: bool,
+    /// Binary name to re-probe after a successful package-manager exit
+    /// (git/node/python's real executable — "npm" verifies via "node",
+    /// same bundled-together reasoning as `claim_key_for_tool`). A
+    /// package manager reporting success does NOT mean this process's
+    /// own PATH can see the new binary yet: on Windows especially,
+    /// winget/MSI installers update the registry-backed PATH, but a
+    /// long-running process (this srv) only re-reads its environment at
+    /// startup, not via the registry-change broadcast a newly-spawned
+    /// process would pick up. Verifying here lets the success message
+    /// tell the truth instead of silently declaring "installed" right
+    /// before the caller's own immediate re-probe shows "still not
+    /// found" — Codex P1, PR #2790.
+    verify_bin: String,
 }
 
 /// Linux package managers this module knows how to drive, in detection
@@ -126,6 +139,19 @@ async fn detect_linux_package_manager() -> Option<LinuxPackageManager> {
     None
 }
 
+/// Binary name to re-probe after a successful install (see
+/// `SystemInstallStep::verify_bin`'s doc comment). `"npm"` verifies via
+/// `"node"` (bundled together, same reasoning as `claim_key_for_tool`);
+/// `"python"`'s real executable name differs by platform.
+fn verify_bin_for_tool(tool_id: &str, windows: bool) -> Option<&'static str> {
+    match tool_id {
+        "git" => Some("git"),
+        "node" | "npm" => Some("node"),
+        "python" => Some(if windows { "python" } else { "python3" }),
+        _ => None,
+    }
+}
+
 fn resolve_windows_step(tool_id: &str) -> Option<SystemInstallStep> {
     // winget package identifiers — see https://github.com/microsoft/winget-pkgs.
     // `node`/`npm` share one identifier: npm ships bundled with Node, so
@@ -156,6 +182,7 @@ fn resolve_windows_step(tool_id: &str) -> Option<SystemInstallStep> {
         // from a non-console GUI-launched process is an open, real-
         // hardware verification item, not yet confirmed.
         needs_elevation: true,
+        verify_bin: verify_bin_for_tool(tool_id, true)?.to_string(),
     })
 }
 
@@ -174,6 +201,7 @@ fn resolve_brew_step(tool_id: &str) -> Option<SystemInstallStep> {
         // Homebrew must not be run as root — this is the one platform
         // with no elevation step to build at all.
         needs_elevation: false,
+        verify_bin: verify_bin_for_tool(tool_id, false)?.to_string(),
     })
 }
 
@@ -211,6 +239,7 @@ fn resolve_linux_step(tool_id: &str, pm: LinuxPackageManager) -> Option<SystemIn
         program: "pkexec".to_string(),
         args,
         needs_elevation: true,
+        verify_bin: verify_bin_for_tool(tool_id, false)?.to_string(),
     })
 }
 
@@ -220,8 +249,28 @@ fn resolve_linux_step(tool_id: &str, pm: LinuxPackageManager) -> Option<SystemIn
 /// tool id, or — macOS/Linux only — no usable package manager found);
 /// callers must treat `None` as "fall back to the existing link+copy-
 /// command UI," never as an error.
+/// Normalizes which claim slot a tool_id occupies in
+/// `InstallSessionRegistry.active_system_tools`. `"npm"` shares Node's
+/// slot on every platform (§3.5: they resolve to the exact same
+/// winget/brew/apt-family package transaction — installing Node already
+/// gets npm), so starting installs from both rows concurrently must not
+/// be allowed to both pass the claim check and race two installs of the
+/// same package (winget/msi lock errors, duplicate install prompts).
+/// Codex P2, PR #2790.
+fn claim_key_for_tool(tool_id: &str) -> &str {
+    if tool_id == "npm" { "node" } else { tool_id }
+}
+
 async fn resolve_install_step(tool_id: &str) -> Option<SystemInstallStep> {
     if cfg!(windows) {
+        // Symmetric with the macOS/Linux branches below: confirm the
+        // package manager itself is actually present before resolving a
+        // command for it. Without this, a Windows machine lacking winget
+        // (rare, but real — pre-App-Installer Windows 10) would get
+        // `available: true` with a command that fails to spawn instead of
+        // gracefully falling back to the existing link+copy-command UI.
+        // reagent P1, PR #2790.
+        resolve_tool_path("winget").await?;
         resolve_windows_step(tool_id)
     } else if cfg!(target_os = "macos") {
         resolve_tool_path("brew").await?;
@@ -287,7 +336,8 @@ pub fn register_system_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppS
                         req.tool_id
                     )
                 })?;
-                if !registry.try_claim_system_tool(&req.tool_id) {
+                let claim_key = claim_key_for_tool(&req.tool_id).to_string();
+                if !registry.try_claim_system_tool(&claim_key) {
                     return Err(format!(
                         "toolchain.install_system_tool: {} is already being installed in another session",
                         req.tool_id
@@ -309,7 +359,7 @@ pub fn register_system_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppS
                     broker,
                     registry,
                     session_id.clone(),
-                    req.tool_id,
+                    claim_key,
                     step,
                     cancel_rx,
                 );
@@ -324,7 +374,10 @@ fn spawn_system_install_task(
     broker: Arc<Broker>,
     registry: Arc<crate::server::install_handlers::InstallSessionRegistry>,
     session_id: String,
-    tool_id: String,
+    // Already normalized via `claim_key_for_tool` by the caller — "npm"
+    // and "node" share this same key so a release here always matches
+    // whichever key was actually claimed.
+    claim_key: String,
     step: SystemInstallStep,
     mut cancel_rx: tokio::sync::oneshot::Receiver<()>,
 ) {
@@ -381,7 +434,7 @@ fn spawn_system_install_task(
             Err(e) => {
                 emit_done(&broker, false, Some(format!("spawn {}: {e}", step.program)));
                 registry.drop_session(&session_id);
-                registry.release_system_tool(&tool_id);
+                registry.release_system_tool(&claim_key);
                 return;
             }
         };
@@ -426,7 +479,30 @@ fn spawn_system_install_task(
                 let _ = stdout_task.await;
                 let _ = stderr_task.await;
                 match wait {
-                    Ok(s) if s.success() => emit_done(&broker, true, None),
+                    Ok(s) if s.success() => {
+                        // The package manager succeeding does NOT mean
+                        // THIS already-running process can see the new
+                        // binary yet — its own PATH was captured at
+                        // startup and isn't refreshed by a Windows
+                        // registry-change broadcast or a new login-shell
+                        // read. Re-probe with the same mechanism the
+                        // caller's post-install refresh will use, so a
+                        // stale-PATH case is explained here instead of
+                        // silently contradicting itself a moment later
+                        // when that refresh still reports "not found".
+                        // Codex P1, PR #2790.
+                        if resolve_tool_path(&step.verify_bin).await.is_none() {
+                            emit_line(
+                                &broker,
+                                format!(
+                                    "Note: {} finished successfully, but AgentMux's current session doesn't see \"{}\" yet — restart AgentMux to pick up the updated PATH.",
+                                    step.program, step.verify_bin
+                                ),
+                                "stdout",
+                            );
+                        }
+                        emit_done(&broker, true, None);
+                    }
                     Ok(s) => emit_done(&broker, false, Some(format!("{} exited {:?}", step.program, s.code()))),
                     Err(e) => emit_done(&broker, false, Some(format!("wait: {e}"))),
                 }
@@ -449,7 +525,7 @@ fn spawn_system_install_task(
         }
 
         registry.drop_session(&session_id);
-        registry.release_system_tool(&tool_id);
+        registry.release_system_tool(&claim_key);
     });
 }
 
