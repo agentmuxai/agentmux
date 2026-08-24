@@ -70,6 +70,52 @@ describe("buildConfigFiles — trigger sanitization", () => {
     });
 });
 
+// docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §7.
+describe("buildConfigFiles — provider-aware startup instructions filename", () => {
+    it("resolves the filename per providerId, per the researched table", () => {
+        const cases: Array<[string, string]> = [
+            ["claude", "CLAUDE.md"],
+            ["codex", "AGENTS.md"],
+            ["gemini", "GEMINI.md"],
+            ["qwen", "QWEN.md"],
+            ["copilot", "AGENTS.md"],
+            ["openclaw", "AGENTS.md"],
+            ["pi", ".pi/APPEND_SYSTEM.md"],
+            ["antigravity", "GEMINI.md"],
+            ["muxcode", "CLAUDE.md"],
+        ];
+        for (const [providerId, expectedFilename] of cases) {
+            const files = buildConfigFiles({ soul: "You are Aria." }, [], undefined, undefined, providerId);
+            const instructionsFiles = files.filter((f) => f.path === expectedFilename);
+            expect(instructionsFiles, `provider '${providerId}'`).toHaveLength(1);
+            expect(instructionsFiles[0].content).toContain("You are Aria.");
+        }
+    });
+
+    it("writes no instructions file for kimi — no confirmed native startup-instructions file", () => {
+        const files = buildConfigFiles(
+            { soul: "You are Aria.", agentmd: "## Instructions", memory: "Some memory" },
+            [],
+            undefined,
+            undefined,
+            "kimi",
+        );
+        const knownInstructionsFilenames = ["CLAUDE.md", "AGENTS.md", "GEMINI.md", "QWEN.md", ".pi/APPEND_SYSTEM.md"];
+        expect(files.some((f) => knownInstructionsFilenames.includes(f.path))).toBe(false);
+    });
+
+    it("writes no instructions file for an unrecognized providerId — never a silent CLAUDE.md fallback", () => {
+        const files = buildConfigFiles({ soul: "You are Aria." }, [], undefined, undefined, "not-a-real-provider");
+        const knownInstructionsFilenames = ["CLAUDE.md", "AGENTS.md", "GEMINI.md", "QWEN.md", ".pi/APPEND_SYSTEM.md"];
+        expect(files.some((f) => knownInstructionsFilenames.includes(f.path))).toBe(false);
+    });
+
+    it("falls back to CLAUDE.md when providerId is omitted — non-breaking for pre-existing call sites", () => {
+        const files = buildConfigFiles({ soul: "You are Aria." });
+        expect(files.some((f) => f.path === "CLAUDE.md")).toBe(true);
+    });
+});
+
 describe("renderSkillMd", () => {
     it("wraps content in YAML frontmatter with slug (as name) + description", () => {
         // First arg is the SLUG (matching the parent directory per the Agent

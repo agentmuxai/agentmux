@@ -335,6 +335,34 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         tracing::debug!(path = %file_path.display(), "wrote config file (ownership-aware)");
                         continue;
                     }
+                    // This RPC command carries no provider ID (`CommandWriteAgentConfigData`
+                    // is just `{working_dir, files}` — the frontend already
+                    // resolved everything), so a non-Claude provider's
+                    // startup-instructions file (AGENTS.md, GEMINI.md,
+                    // QWEN.md, .pi/APPEND_SYSTEM.md, ...) is recognized by
+                    // filename membership against the provider registry,
+                    // not a literal string match.
+                    if crate::backend::providers::is_known_startup_instructions_filename(&file.path) {
+                        // Still gets the same global-memory-bundle injection
+                        // CLAUDE.md gets above — otherwise a Codex/Gemini/etc.
+                        // agent launched from the picker would silently
+                        // receive no workspace-wide Global Memory content at
+                        // all.
+                        let content = inject_global_bundles(&file.content, &id_store);
+                        // Never overwrites a pre-existing file (codex P1, PR
+                        // #2788) — a simpler exists-guard than CLAUDE.md's
+                        // full ownership-aware materialization above; see
+                        // write_startup_instructions_respecting_existing's
+                        // own doc comment for why a fuller mechanism (the
+                        // @import-based side-file fallback) isn't attempted
+                        // here.
+                        crate::backend::agent_config::write_startup_instructions_respecting_existing(
+                            base_path, &file.path, &content,
+                        )
+                        .map_err(|e| format!("failed to write {}: {e}", file.path))?;
+                        tracing::debug!(path = %file_path.display(), "wrote config file (exists-guarded)");
+                        continue;
+                    }
                     // Create parent directories if needed
                     if let Some(parent) = file_path.parent() {
                         if !parent.exists() {

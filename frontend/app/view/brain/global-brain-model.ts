@@ -8,8 +8,14 @@
 //
 // A "section" is a Memory bundle with is_global=true. The global brain is
 // the ordered list of those sections; their instructions concatenate into
-// each agent's CLAUDE.md at launch (backend: format_global_brain_block).
-// Section order is the sort_order column, mutated via reorderglobalbrain.
+// each agent's startup instructions file at launch (backend:
+// format_global_brain_block) — CLAUDE.md, AGENTS.md, GEMINI.md, or similar
+// depending on the agent's provider (agent_config.rs's build_config_files,
+// resolved per-provider since
+// docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md; see
+// `filenameGroupsAtom`/`noFileProvidersAtom` below for the UI-facing
+// mapping). Section order is the sort_order column, mutated via
+// reorderglobalbrain.
 //
 // This model is block-free (same shape as MemoryViewModel) and drives off
 // the bundle_* RPCs. Mutations refresh the list afterwards; it does not
@@ -21,12 +27,14 @@
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { PROVIDERS } from "@/app/view/agent/providers";
 
 /** Sentinel editingId for the unsaved "new section" draft. */
 export const NEW_SECTION_ID = "__new__";
 
 /** Mirror of the backend format_global_brain_block — keep in sync so the
- *  preview matches exactly what lands in CLAUDE.md. `is_system` sections
+ *  preview matches exactly what lands in the agent's startup instructions
+ *  file. `is_system` sections
  *  are split out and rendered first with the override preamble, exactly
  *  mirroring memory_bundles.rs's split (SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md).
  *  Exported for direct unit testing against the Rust version's fixtures. */
@@ -52,6 +60,27 @@ export function formatGlobalBrainBlock(sections: Memory[]): string {
         parts.push(ordinary.map((s) => `# [Workspace] ${s.name}\n\n${s.instructions}`).join("\n\n---\n\n"));
     }
     return parts.join("\n\n---\n\n");
+}
+
+/** Groups every provider in the catalog by its resolved
+ *  `startupInstructionsFilename`, e.g. `claude`+`muxcode` → `"CLAUDE.md"`,
+ *  `gemini`+`antigravity` → `"GEMINI.md"`. Providers with no confirmed
+ *  native file (currently only `kimi`) are excluded here — see
+ *  `GlobalBrainViewModel.noFileProvidersAtom` for those. Order matches
+ *  `PROVIDERS`' own declaration order (insertion order), not alphabetical —
+ *  stable and deterministic without needing an extra sort.
+ *  Exported for direct unit testing.
+ *  See docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §3.4. */
+export function groupProvidersByStartupFilename(): { filename: string; providerNames: string[] }[] {
+    const groups = new Map<string, string[]>();
+    for (const provider of Object.values(PROVIDERS)) {
+        const filename = provider.startupInstructionsFilename;
+        if (!filename) continue;
+        const names = groups.get(filename) ?? [];
+        names.push(provider.displayName);
+        groups.set(filename, names);
+    }
+    return Array.from(groups.entries()).map(([filename, providerNames]) => ({ filename, providerNames }));
 }
 
 export class GlobalBrainViewModel {
@@ -80,7 +109,7 @@ export class GlobalBrainViewModel {
     errorAtom: Accessor<string | null> = this._error[0];
     setError = this._error[1];
 
-    private _showPreview = createSignal<boolean>(false);
+    private _showPreview = createSignal<boolean>(true);
     showPreviewAtom: Accessor<boolean> = this._showPreview[0];
     setShowPreview = this._showPreview[1];
 
@@ -110,8 +139,19 @@ export class GlobalBrainViewModel {
     ordinarySectionsAtom: Accessor<Memory[]>;
     /** Non-global, non-blank bundles eligible to promote into the brain. */
     candidatesAtom: Accessor<Memory[]>;
-    /** Combined CLAUDE.md preview block. */
+    /** Combined startup-instructions-file preview block. */
     previewAtom: Accessor<string>;
+    /** Providers grouped by resolved startup-instructions filename, e.g.
+     *  [{filename: "CLAUDE.md", providerNames: ["Claude Code", "Mux Code"]}, ...].
+     *  Static — derived from the PROVIDERS catalog, not per-workspace agent
+     *  data, so an operator sees the full mapping up front regardless of
+     *  which providers currently have a launched agent. See
+     *  docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §3.4. */
+    filenameGroupsAtom: Accessor<{ filename: string; providerNames: string[] }[]>;
+    /** Display names of providers with no confirmed startup-instructions
+     *  file (currently just Kimi) — surfaced as an explicit "not applied
+     *  to" callout rather than silently omitted. */
+    noFileProvidersAtom: Accessor<string[]>;
 
     constructor() {
         this.sectionsAtom = createMemo(() =>
@@ -135,6 +175,12 @@ export class GlobalBrainViewModel {
                 .sort((a, b) => a.name.localeCompare(b.name)),
         );
         this.previewAtom = createMemo(() => formatGlobalBrainBlock(this.sectionsAtom()));
+        this.filenameGroupsAtom = createMemo(() => groupProvidersByStartupFilename());
+        this.noFileProvidersAtom = createMemo(() =>
+            Object.values(PROVIDERS)
+                .filter((p) => !p.startupInstructionsFilename)
+                .map((p) => p.displayName),
+        );
         void this.refresh();
     }
 

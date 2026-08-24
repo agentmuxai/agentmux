@@ -528,7 +528,7 @@ export class AgentViewModel implements ViewModel {
         // already use — otherwise inter-agent messaging routes on
         // the definition name while everything else advertises the
         // instance name (caught by codex on PR #504).
-        const configFiles = buildConfigFiles(contentMap, skills, agent, instanceName);
+        const configFiles = buildConfigFiles(contentMap, skills, agent, instanceName, provider.id);
 
         const blockId = targetBlockId ?? this.blockId;
         const oref = WOS.makeORef("block", blockId);
