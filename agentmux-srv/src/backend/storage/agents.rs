@@ -1145,6 +1145,7 @@ impl Store {
             sort_order: 0,
             created_at: now,
             updated_at: now,
+            is_system: false,
         };
         self.bundle_memory_upsert(&bundle)?;
         Ok(bundle_id)
@@ -3045,6 +3046,7 @@ mod bundle_provisioning_store_separation_tests {
             sort_order: 0,
             created_at: 0,
             updated_at: 0,
+            is_system: false,
         };
         store.bundle_memory_upsert(&taken).unwrap();
 
@@ -3137,6 +3139,7 @@ mod bundle_provisioning_store_separation_tests {
             sort_order: 0,
             created_at: 0,
             updated_at: 0,
+            is_system: false,
         };
         store.bundle_memory_upsert(&bundle).unwrap();
         agent.memory_id = "bundle-empty-provider".to_string();

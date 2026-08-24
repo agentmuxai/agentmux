@@ -844,6 +844,7 @@
             sort_order: 0,
             created_at: 100,
             updated_at: 100,
+            is_system: false,
         };
         store.bundle_memory_upsert(&coder).unwrap();
 
@@ -884,6 +885,7 @@
             sort_order: order,
             created_at: 0,
             updated_at: 0,
+            is_system: false,
         };
         // Insert out of order: B at 0, A at 1.
         store.bundle_memory_upsert(&mk("g-a", "Alpha", 1)).unwrap();
@@ -920,6 +922,174 @@
         let block = super::super::format_global_brain_block(&g);
         let expected = "# [Workspace] Alpha\n\nedited\n\n---\n\n# [Workspace] Beta\n\nrules for Beta";
         assert_eq!(block, expected);
+    }
+
+    // ── v27 — system-tier Global Memory ──────────────────────────────────
+    // docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md
+
+    fn mk_ordinary(id: &str, name: &str, order: i64) -> Memory {
+        Memory {
+            id: id.to_string(),
+            name: name.to_string(),
+            description: String::new(),
+            is_blank: false,
+            is_global: true,
+            provider: String::new(),
+            model: String::new(),
+            instructions: format!("rules for {name}"),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: order,
+            created_at: 0,
+            updated_at: 0,
+            is_system: false,
+        }
+    }
+
+    /// Deliberately "wrong" `is_blank`/`is_global`/`is_system` — used to
+    /// verify `bundle_memory_upsert_system` hardcodes all three regardless
+    /// of what the caller's `Memory` struct set them to. Callers that need
+    /// a struct which already correctly *represents* a system entry (e.g.
+    /// to feed `format_global_brain_block` directly, bypassing storage)
+    /// should override `is_system` via struct-update syntax.
+    fn mk_system(id: &str, name: &str) -> Memory {
+        Memory {
+            id: id.to_string(),
+            name: name.to_string(),
+            description: String::new(),
+            is_blank: true,
+            is_global: false,
+            provider: String::new(),
+            model: String::new(),
+            instructions: format!("system rules for {name}"),
+            instructions_by_provider: "{}".to_string(),
+            context_files: "[]".to_string(),
+            mcp_servers: "[]".to_string(),
+            skills: "[]".to_string(),
+            sort_order: 0,
+            created_at: 0,
+            updated_at: 0,
+            is_system: false,
+        }
+    }
+
+    #[test]
+    fn bundle_memory_upsert_system_hardcodes_global_and_system_flags() {
+        let store = make_store();
+        store.bundle_memory_upsert_system(&mk_system("sys-1", "Policy")).unwrap();
+        let row = store.bundle_memory_get("sys-1").unwrap().unwrap();
+        assert!(row.is_global, "system rows are always global");
+        assert!(row.is_system);
+        assert!(!row.is_blank, "hardcoded false regardless of input");
+    }
+
+    #[test]
+    fn generic_upsert_refuses_to_touch_an_existing_system_row() {
+        let store = make_store();
+        store.bundle_memory_upsert_system(&mk_system("sys-1", "Policy")).unwrap();
+
+        // Content-only edit attempt via the generic path.
+        let mut tampered = mk_ordinary("sys-1", "Hijacked", 0);
+        tampered.is_system = false;
+        assert!(store.bundle_memory_upsert(&tampered).is_err());
+
+        // Row is untouched.
+        let row = store.bundle_memory_get("sys-1").unwrap().unwrap();
+        assert_eq!(row.name, "Policy");
+        assert!(row.is_system);
+    }
+
+    #[test]
+    fn system_upsert_refuses_to_convert_an_existing_non_system_row() {
+        let store = make_store();
+        store.bundle_memory_upsert(&mk_ordinary("g-a", "Alpha", 0)).unwrap();
+        let mut takeover = mk_system("g-a", "Stolen");
+        takeover.id = "g-a".to_string();
+        assert!(store.bundle_memory_upsert_system(&takeover).is_err());
+
+        let row = store.bundle_memory_get("g-a").unwrap().unwrap();
+        assert_eq!(row.name, "Alpha");
+        assert!(!row.is_system);
+    }
+
+    #[test]
+    fn generic_delete_refuses_a_system_row_dedicated_delete_only_removes_system_rows() {
+        let store = make_store();
+        store.bundle_memory_upsert_system(&mk_system("sys-1", "Policy")).unwrap();
+        store.bundle_memory_upsert(&mk_ordinary("g-a", "Alpha", 0)).unwrap();
+
+        assert!(store.bundle_memory_delete("sys-1").is_err());
+        assert!(store.bundle_memory_get("sys-1").unwrap().is_some());
+
+        // Dedicated delete is structurally incapable of removing a non-system row.
+        assert!(!store.bundle_memory_delete_system("g-a").unwrap());
+        assert!(store.bundle_memory_get("g-a").unwrap().is_some());
+
+        assert!(store.bundle_memory_delete_system("sys-1").unwrap());
+        assert!(store.bundle_memory_get("sys-1").unwrap().is_none());
+    }
+
+    #[test]
+    fn reorder_silently_skips_system_rows() {
+        let store = make_store();
+        store.bundle_memory_upsert_system(&mk_system("sys-1", "Policy")).unwrap();
+        store.bundle_memory_upsert(&mk_ordinary("g-a", "Alpha", 0)).unwrap();
+        store.bundle_memory_upsert(&mk_ordinary("g-b", "Beta", 1)).unwrap();
+
+        let updated = store
+            .bundle_memory_reorder(&["sys-1".to_string(), "g-b".to_string(), "g-a".to_string()])
+            .unwrap();
+        // Only the two ordinary ids actually update.
+        assert_eq!(updated, 2);
+        let sys = store.bundle_memory_get("sys-1").unwrap().unwrap();
+        assert_eq!(sys.sort_order, 0, "system row's sort_order is untouched");
+    }
+
+    #[test]
+    fn list_global_sorts_system_rows_first_regardless_of_sort_order_or_name() {
+        let store = make_store();
+        // Ordinary rows would otherwise sort before "Policy" alphabetically
+        // and by a lower sort_order — system-first must win regardless.
+        store.bundle_memory_upsert(&mk_ordinary("g-a", "Aaa", -1)).unwrap();
+        store.bundle_memory_upsert_system(&mk_system("sys-1", "Zzz")).unwrap();
+
+        let g = store.bundle_memory_list_global().unwrap();
+        assert_eq!(
+            g.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            vec!["sys-1", "g-a"]
+        );
+    }
+
+    #[test]
+    fn format_global_brain_block_puts_system_first_with_override_preamble() {
+        // format_global_brain_block reads each Memory's own is_system field
+        // directly (it doesn't go through storage) — unlike mk_system's
+        // deliberately-wrong default (see its own doc comment), this needs
+        // a struct that actually represents a system entry.
+        let sys = Memory { is_system: true, ..mk_system("sys-1", "Policy") };
+        let ord = mk_ordinary("g-a", "Alpha", 0);
+
+        let mixed = super::super::format_global_brain_block(&[sys.clone(), ord.clone()]);
+        assert!(mixed.starts_with("IMPORTANT: The following AgentMux-controlled instructions"));
+        assert!(mixed.contains("# [AgentMux System] Policy"));
+        assert!(mixed.contains("# [Workspace] Alpha"));
+        // System content appears before the ordinary section.
+        assert!(mixed.find("[AgentMux System]").unwrap() < mixed.find("[Workspace]").unwrap());
+        // Exactly one override preamble even with a single system entry.
+        assert_eq!(mixed.matches("HIGHEST PRIORITY").count(), 1);
+
+        let system_only = super::super::format_global_brain_block(&[sys.clone()]);
+        assert!(system_only.starts_with("IMPORTANT:"));
+        assert!(!system_only.contains("[Workspace]"));
+
+        let ordinary_only = super::super::format_global_brain_block(&[ord.clone()]);
+        assert!(!ordinary_only.contains("IMPORTANT:"));
+        assert!(ordinary_only.starts_with("# [Workspace] Alpha"));
+
+        let empty = super::super::format_global_brain_block(&[]);
+        assert_eq!(empty, "");
     }
 
     // ---- Registry parallel-write mirror (PR A) ----

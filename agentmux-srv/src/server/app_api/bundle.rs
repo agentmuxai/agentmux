@@ -166,6 +166,7 @@ mod check_provider_model_immutable_tests {
             sort_order: 0,
             created_at: 0,
             updated_at: 0,
+            is_system: false,
         }
     }
 
@@ -1047,6 +1048,7 @@ async fn bundle_import_for_agent_impl(
         sort_order: 0,
         created_at: now,
         updated_at: now,
+        is_system: false,
     };
     if let Err(e) = id_store.bundle_memory_upsert(&memory) {
         let rollback_errors = rollback_skills(&imported_skill_ids);
@@ -1454,6 +1456,7 @@ fn register_bundle_import(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     sort_order: 0,
                     created_at: now,
                     updated_at: now,
+                    is_system: false,
                 };
                 if let Err(e) = id_store.bundle_memory_upsert(&memory) {
                     // Codex P2, PR #2379: same rollback as above — the
@@ -2043,6 +2046,7 @@ async fn bundle_import_commit_impl(
                     sort_order: 0,
                     created_at: now,
                     updated_at: now,
+                    is_system: false,
                 };
                 if let Err(e) = id_store.bundle_memory_upsert(&memory) {
                     let rollback_errors = rollback_skills(&imported_skill_ids);
@@ -2720,6 +2724,7 @@ mod export_import_for_agent_tests {
             sort_order: 0,
             created_at: 0,
             updated_at: 0,
+            is_system: false,
         };
         state.id_store.bundle_memory_upsert(&bundle).unwrap();
         bundle

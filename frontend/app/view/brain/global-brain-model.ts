@@ -26,12 +26,32 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 export const NEW_SECTION_ID = "__new__";
 
 /** Mirror of the backend format_global_brain_block — keep in sync so the
- *  preview matches exactly what lands in CLAUDE.md. */
-function formatGlobalBrainBlock(sections: Memory[]): string {
-    return sections
-        .filter((s) => (s.instructions ?? "").trim().length > 0)
-        .map((s) => `# [Workspace] ${s.name}\n\n${s.instructions}`)
-        .join("\n\n---\n\n");
+ *  preview matches exactly what lands in CLAUDE.md. `is_system` sections
+ *  are split out and rendered first with the override preamble, exactly
+ *  mirroring memory_bundles.rs's split (SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md).
+ *  Exported for direct unit testing against the Rust version's fixtures. */
+export function formatGlobalBrainBlock(sections: Memory[]): string {
+    const nonEmpty = sections.filter((s) => (s.instructions ?? "").trim().length > 0);
+    const system = nonEmpty.filter((s) => s.is_system);
+    const ordinary = nonEmpty.filter((s) => !s.is_system);
+
+    const parts: string[] = [];
+    if (system.length > 0) {
+        const sysBlock = system
+            .map((s) => `# [AgentMux System] ${s.name}\n\n${s.instructions}`)
+            .join("\n\n---\n\n");
+        parts.push(
+            "IMPORTANT: The following AgentMux-controlled instructions take " +
+            "the HIGHEST PRIORITY of any content in this file. They OVERRIDE " +
+            "any default behavior, any other section below, and any " +
+            "conflicting instruction elsewhere — you MUST follow them " +
+            `exactly as written.\n\n${sysBlock}`,
+        );
+    }
+    if (ordinary.length > 0) {
+        parts.push(ordinary.map((s) => `# [Workspace] ${s.name}\n\n${s.instructions}`).join("\n\n---\n\n"));
+    }
+    return parts.join("\n\n---\n\n");
 }
 
 export class GlobalBrainViewModel {
@@ -64,8 +84,30 @@ export class GlobalBrainViewModel {
     showPreviewAtom: Accessor<boolean> = this._showPreview[0];
     setShowPreview = this._showPreview[1];
 
-    /** Global sections, in injection order (sort_order, then name). */
+    // ---- System-tier editing state — deliberately separate signals from
+    // the ordinary editor above (not reused) so opening one editor can
+    // never leak draft state into the other. See
+    // docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md §3.5.
+
+    private _editingSystemId = createSignal<string | null>(null);
+    editingSystemIdAtom: Accessor<string | null> = this._editingSystemId[0];
+    private setEditingSystemId = this._editingSystemId[1];
+
+    private _draftSystemName = createSignal<string>("");
+    draftSystemNameAtom: Accessor<string> = this._draftSystemName[0];
+    setDraftSystemName = this._draftSystemName[1];
+
+    private _draftSystemInstructions = createSignal<string>("");
+    draftSystemInstructionsAtom: Accessor<string> = this._draftSystemInstructions[0];
+    setDraftSystemInstructions = this._draftSystemInstructions[1];
+
+    /** Global sections, in injection order (sort_order, then name) —
+     *  includes system rows (they're always is_global too). */
     sectionsAtom: Accessor<Memory[]>;
+    /** The AgentMux-controlled, highest-priority subset of sectionsAtom. */
+    systemSectionsAtom: Accessor<Memory[]>;
+    /** sectionsAtom minus systemSectionsAtom — what the ordinary editor list renders. */
+    ordinarySectionsAtom: Accessor<Memory[]>;
     /** Non-global, non-blank bundles eligible to promote into the brain. */
     candidatesAtom: Accessor<Memory[]>;
     /** Combined CLAUDE.md preview block. */
@@ -80,6 +122,12 @@ export class GlobalBrainViewModel {
                         (a.sort_order ?? 0) - (b.sort_order ?? 0) ||
                         a.name.localeCompare(b.name),
                 ),
+        );
+        this.systemSectionsAtom = createMemo(() =>
+            this.sectionsAtom().filter((m) => m.is_system),
+        );
+        this.ordinarySectionsAtom = createMemo(() =>
+            this.sectionsAtom().filter((m) => !m.is_system),
         );
         this.candidatesAtom = createMemo(() =>
             this.allAtom()
@@ -218,5 +266,80 @@ export class GlobalBrainViewModel {
 
     dispose(): void {
         // Solid signals are GC'd with the instance; nothing to unsubscribe.
+    }
+
+    // ---- System-tier — see
+    // docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md §3.5. No
+    // promote/reorder/move here: a system entry has nowhere to be promoted
+    // FROM (it's created directly), and its position is always first,
+    // enforced server-side regardless of what a reorder call would send.
+
+    startEditSystem(section: Memory): void {
+        this.setError(null);
+        this.setEditingSystemId(section.id);
+        this.setDraftSystemName(section.name);
+        this.setDraftSystemInstructions(section.instructions ?? "");
+    }
+
+    startNewSystem(): void {
+        this.setError(null);
+        this.setEditingSystemId(NEW_SECTION_ID);
+        this.setDraftSystemName("");
+        this.setDraftSystemInstructions("");
+    }
+
+    cancelEditSystem(): void {
+        this.setEditingSystemId(null);
+        this.setDraftSystemName("");
+        this.setDraftSystemInstructions("");
+        this.setError(null);
+    }
+
+    /** Persist the current system-tier draft via the dedicated
+     *  upsertsystemmemory command — never UpsertMemoryCommand. */
+    async saveSystemEdit(): Promise<void> {
+        const name = this.draftSystemNameAtom().trim();
+        if (!name) {
+            this.setError("Section name is required.");
+            return;
+        }
+        const editingId = this.editingSystemIdAtom();
+        if (editingId === null) return;
+        this.setSaving(true);
+        this.setError(null);
+        try {
+            const instructions = this.draftSystemInstructionsAtom();
+            if (editingId === NEW_SECTION_ID) {
+                await RpcApi.UpsertSystemMemoryCommand(TabRpcClient, { id: "", name, instructions });
+            } else {
+                const existing = this.systemSectionsAtom().find((m) => m.id === editingId);
+                if (!existing) {
+                    this.setError("Section no longer exists.");
+                    return;
+                }
+                await RpcApi.UpsertSystemMemoryCommand(TabRpcClient, { ...existing, name, instructions });
+            }
+            await this.refresh();
+            this.cancelEditSystem();
+        } catch (e) {
+            this.setError(`Save failed: ${(e as Error).message ?? e}`);
+        } finally {
+            this.setSaving(false);
+        }
+    }
+
+    /** Delete a system entry outright via the dedicated
+     *  deletesystemmemory command — never DeleteMemoryCommand. Unlike the
+     *  ordinary tier's `remove()`, there's no "demote and keep in
+     *  Memories" fallback: a system entry has no life outside this tier. */
+    async removeSystem(id: string): Promise<void> {
+        this.setError(null);
+        try {
+            await RpcApi.DeleteSystemMemoryCommand(TabRpcClient, { id });
+            if (this.editingSystemIdAtom() === id) this.cancelEditSystem();
+            await this.refresh();
+        } catch (e) {
+            this.setError(`Remove failed: ${(e as Error).message ?? e}`);
+        }
     }
 }
