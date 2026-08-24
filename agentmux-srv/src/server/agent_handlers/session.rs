@@ -334,6 +334,18 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     Vec::new()
                 });
 
+                // docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md
+                // §4: when `agent_identity_list_all()` itself failed above,
+                // `links_by_agent` is empty for EVERY definition_id — not
+                // just the ones that genuinely have no bound identity —
+                // so every row would otherwise show the exact same
+                // "(ambient creds)" text a real unbound agent gets,
+                // making a source failure indistinguishable from a
+                // legitimate state. Computed once, outside the loop: this
+                // source only ever degrades before the loop starts, not
+                // per-row.
+                let identity_links_degraded = degraded.contains(&"identity_links");
+
                 // Build rows. Hits filestore once per instance; with
                 // raw_limit ≤ 500 and stat() being a single indexed
                 // SQLite query, the per-call cost is dominated by
@@ -356,6 +368,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             names.dedup();
                             names.join(", ")
                         }
+                        _ if identity_links_degraded => "(unknown account)".to_string(),
                         _ => "(ambient creds)".to_string(),
                     };
                     let memory_name = if inst.memory_id.is_empty() {
@@ -892,6 +905,46 @@ mod tests {
              (identity_list now tolerates it internally), got: {:?}",
             result.degraded
         );
+    }
+
+    /// docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md
+    /// §4: when `agent_identity_list_all()` itself fails, every row used to
+    /// fall back to the SAME "(ambient creds)" text a genuinely-unbound
+    /// agent gets — indistinguishable from a real backend failure. Forces
+    /// the failure by dropping `db_agent_identity_links` outright (a
+    /// deterministic way to make the query itself error, unlike the
+    /// per-row-tolerant `db_accounts` malformed-row case above) and asserts
+    /// every row instead shows the distinct "(unknown account)" text, with
+    /// `degraded` correctly reporting "identity_links".
+    #[tokio::test]
+    async fn identity_links_source_failure_uses_distinct_fallback_text_not_ambient_creds() {
+        let (state, engine, mut output_rx, _reg_dir, _def_dir) =
+            setup_with_n_cross_channel_agents(2);
+
+        {
+            let conn = state.wstore.conn().lock().unwrap();
+            conn.execute("DROP TABLE db_agent_identity_links", []).unwrap();
+        }
+
+        let resp = dispatch_list_recent_sessions(&engine, &mut output_rx).await;
+
+        assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
+        let result: ListRecentSessionsResult =
+            serde_json::from_value(resp.data.expect("expected result data")).unwrap();
+        assert_eq!(result.rows.len(), 2, "the identity_links failure must not zero out the whole list");
+        assert!(
+            result.degraded.contains(&"identity_links".to_string()),
+            "got: {:?}",
+            result.degraded
+        );
+        for row in &result.rows {
+            assert_eq!(
+                row.identity_name, "(unknown account)",
+                "a source FAILURE must read differently from a genuinely-unbound \
+                 agent's \"(ambient creds)\" — otherwise a backend outage looks \
+                 identical to a normal, healthy state"
+            );
+        }
     }
 
     /// Minimal local (not cross-channel registry) `AgentDefinition` —
