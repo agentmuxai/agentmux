@@ -109,37 +109,73 @@ AgentMux uses to isolate its browser engine. This is a known Ubuntu policy chang
 (unprivileged user namespaces restricted, ~2024+), not an AgentMux bug — see docs/linux.md.\n\n\
 Install a one-time fix (needs your password) so future launches load with the sandbox enabled?";
 
+/// CLI flag recognized as an internal, undocumented self-probe mode — see
+/// `run_internal_userns_probe_and_exit()`'s doc comment for why this exists
+/// and why it must be the exact same binary path the AppArmor profile
+/// confines (reagent P0: probing via the generic `unshare` utility tests a
+/// completely different, unconfined security context and would report
+/// "blocked" forever regardless of whether the fix actually worked).
+pub const INTERNAL_PROBE_USERNS_FLAG: &str = "--internal-probe-userns";
+
 #[cfg(target_os = "linux")]
 mod imp {
     use super::*;
     use std::process::Command;
 
-    /// Deterministically test whether unprivileged user-namespace creation
-    /// works on this system — the exact condition CEF's namespace sandbox
-    /// needs. This is the primary detection path (spec §4): it answers
-    /// "will the sandbox work" directly, without needing to know *why* it
-    /// might not (AppArmor policy, a container's own restrictions, an old
-    /// kernel) or guessing at CEF's internal failure signature.
+    /// Run the actual `unshare(CLONE_NEWUSER)` syscall and exit — called
+    /// from the very top of `lib.rs::run()`, before any other startup work,
+    /// when this process was re-exec'd with `INTERNAL_PROBE_USERNS_FLAG`.
     ///
-    /// Spawns the `unshare` utility (util-linux, present by default on
-    /// every real desktop Linux install) as a genuine subprocess rather
-    /// than calling `libc::unshare()` in-process: by the time this runs,
-    /// this process is very likely multithreaded (async runtime, CEF's own
-    /// internal threads), and `fork()` in a multithreaded process only
-    /// duplicates the calling thread — other threads' lock state is
-    /// undefined in the child. Spawning a subprocess sidesteps that hazard
-    /// entirely at the cost of a few milliseconds, irrelevant for a
-    /// one-time startup check.
+    /// Safe to call `libc::unshare()` directly in-process here (unlike the
+    /// general fork()-in-a-multithreaded-process hazard noted elsewhere in
+    /// this module) because a probe-mode process does nothing else at all
+    /// — it never spawns the async runtime, CEF, or any additional thread;
+    /// this function is the entire lifetime of the process.
+    pub fn run_internal_userns_probe_and_exit() -> ! {
+        // SAFETY: unshare() takes a single integer flag argument and
+        // touches no Rust-managed memory; this process has no other
+        // threads (see doc comment) so there is no concurrent state for
+        // the namespace change to race with.
+        let rc = unsafe { libc::unshare(libc::CLONE_NEWUSER) };
+        std::process::exit(if rc == 0 { 0 } else { 1 });
+    }
+
+    /// Deterministically test whether unprivileged user-namespace creation
+    /// works **for AgentMux's own confined binary path** — the exact
+    /// condition CEF's namespace sandbox needs. This is the primary
+    /// detection path (spec §4): it answers "will the sandbox work"
+    /// directly, without needing to know *why* it might not (AppArmor
+    /// policy, a container's own restrictions, an old kernel) or guessing
+    /// at CEF's internal failure signature.
+    ///
+    /// Re-execs the CURRENT binary (`current_exe()`) with
+    /// `INTERNAL_PROBE_USERNS_FLAG` rather than spawning the generic
+    /// `unshare` utility: `build_apparmor_profile()` grants the `userns`
+    /// rule to a path-matched profile scoped to AgentMux's own binary path
+    /// specifically — `/usr/bin/unshare` is a different binary with no such
+    /// grant, so probing it would test an entirely different, permanently
+    /// unconfined security context and report "blocked" identically before
+    /// and after the fix, on every launch, forever (reagent P0 on
+    /// PR #2783). Re-execing `current_exe()` ensures the probe subprocess
+    /// is matched by the exact same AppArmor profile rule CEF's own
+    /// renderer/GPU subprocess spawns will be.
+    ///
+    /// Spawning a subprocess (rather than calling `libc::unshare()`
+    /// directly in THIS process) sidesteps the fork()-in-a-multithreaded-
+    /// process hazard: by the time this runs, this process is very likely
+    /// multithreaded (async runtime, CEF's own internal threads), and
+    /// `fork()` only duplicates the calling thread — other threads' lock
+    /// state is undefined in the child. The re-exec'd child, in contrast,
+    /// is a fresh, single-purpose, single-threaded process (see
+    /// `run_internal_userns_probe_and_exit()`), so calling `unshare()`
+    /// directly there is sound.
     pub fn probe_userns_available() -> bool {
-        match Command::new("unshare")
-            .args(["--user", "--map-root-user", "true"])
-            .status()
-        {
+        let exe = match std::env::current_exe() {
+            Ok(p) => p,
+            Err(_) => return true, // can't even locate ourselves; don't block startup on this
+        };
+        match Command::new(exe).arg(INTERNAL_PROBE_USERNS_FLAG).status() {
             Ok(status) => status.success(),
-            // `unshare` itself missing is unusual enough (util-linux is
-            // essential on virtually every real distro) that asserting
-            // "blocked" on the strength of a missing probe tool would be
-            // over-claiming. Fall through to CEF's own exit code instead.
             Err(_) => true,
         }
     }
@@ -283,8 +319,22 @@ mod imp {
 
 #[cfg(target_os = "linux")]
 pub use imp::{
-    probe_userns_available, resolve_helper_script_path, run_pkexec_fix, show_userns_blocked_dialog,
+    probe_userns_available, resolve_helper_script_path, run_internal_userns_probe_and_exit,
+    run_pkexec_fix, show_userns_blocked_dialog,
 };
+
+/// Set (by lib.rs, once) when the current session is running with the
+/// sandbox explicitly disabled after the user chose "Continue without
+/// sandbox this time" — read by `client::display::on_title_change` to keep
+/// this security downgrade visible in the window title for the rest of the
+/// session (reagent/codex P2 on PR #2783: §5.3 of the spec requires a
+/// persistent, not-easily-missed indicator, not just a log line). A plain
+/// `AtomicBool` rather than a full flash-notification/banner plumb-through
+/// — the window title is the one UI surface the host can update directly
+/// without new frontend/IPC work, and is visible for the entire session by
+/// construction (can't be dismissed/scrolled away like a toast could).
+pub static RUNNING_UNSANDBOXED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 #[cfg(test)]
 mod tests {

@@ -12,7 +12,19 @@ impl AgentMuxHandler {
     pub(crate) fn on_title_change(&mut self, browser: Option<&mut Browser>, title: Option<&CefString>) {
         debug_assert_ne!(currently_on(ThreadId::UI), 0);
 
-        let title_str = title.map(|t| t.to_string()).unwrap_or_default();
+        // Only mutated on the target_os = "linux" branch below.
+        #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
+        let mut title_str = title.map(|t| t.to_string()).unwrap_or_default();
+        // Keep the "running unsandboxed" downgrade visible for the whole
+        // session, not just at the moment the user chose it — see
+        // linux_sandbox::RUNNING_UNSANDBOXED's doc comment.
+        #[cfg(target_os = "linux")]
+        if crate::linux_sandbox::RUNNING_UNSANDBOXED.load(std::sync::atomic::Ordering::Relaxed) {
+            title_str.push_str(" — Sandbox Disabled");
+        }
+        let had_title = title.is_some();
+        let owned_title = CefString::from(title_str.as_str());
+        let title: Option<&CefString> = if had_title { Some(&owned_title) } else { None };
 
         // Update the window title via CEF Views.
         let mut browser = browser.cloned();

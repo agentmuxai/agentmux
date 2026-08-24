@@ -152,6 +152,16 @@ fn launcher_is_genuine_parent() -> bool {
 /// `bootstrap.exe` before loading this DLL (Windows + sandbox feature), or
 /// `null_mut()` on all other platforms / sandbox-off builds.
 pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
+    // Internal self-probe mode (Linux userns-sandbox detection) — must be
+    // the very first check in this function, before anything else: a
+    // probe-mode process does nothing but this one syscall and exits, so
+    // none of the startup work below is relevant to it. See
+    // linux_sandbox::run_internal_userns_probe_and_exit()'s doc comment.
+    #[cfg(target_os = "linux")]
+    if std::env::args().any(|a| a == linux_sandbox::INTERNAL_PROBE_USERNS_FLAG) {
+        linux_sandbox::run_internal_userns_probe_and_exit();
+    }
+
     // Phase 0 (service supervision & recovery): suppress the Windows crash
     // modal so a fault terminates the process immediately instead of freezing
     // it behind an "Application Error" dialog. Must be the first statement —
@@ -200,7 +210,9 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     // gets dual file+stderr output; subprocesses exit before tracing is needed.
 
     // Escape hatch — read once here so both macOS subprocess sandbox init
-    // (below) and the browser-process Settings construction share the same value.
+    // (below) and the browser-process Settings construction share the same
+    // value. Only mutated on the target_os = "linux" branch below.
+    #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
     let mut force_no_sandbox = std::env::var("AGENTMUX_UNSAFE_NOSANDBOX")
         .map(|v| v.trim() == "1")
         .unwrap_or(false);
@@ -222,55 +234,86 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     #[cfg(all(target_os = "linux", feature = "sandbox"))]
     {
         let is_subprocess = std::env::args().any(|a| a.starts_with("--type="));
-        if !is_subprocess && !force_no_sandbox && !linux_sandbox::probe_userns_available() {
+        if !is_subprocess && !force_no_sandbox {
             use linux_sandbox::SandboxDialogChoice;
-            match linux_sandbox::show_userns_blocked_dialog() {
-                SandboxDialogChoice::FixNow => {
-                    let helper = linux_sandbox::resolve_helper_script_path();
-                    let fix_result = linux_sandbox::run_pkexec_fix(&helper);
-                    let now_available =
-                        fix_result.is_ok() && linux_sandbox::probe_userns_available();
-                    if !now_available {
-                        match &fix_result {
-                            Err(e) => eprintln!("AgentMux: sandbox fix did not resolve the restriction: {e}"),
-                            Ok(()) => eprintln!(
-                                "AgentMux: sandbox fix reported success but the restriction is \
-                                 still active — falling back to unsandboxed for this launch."
-                            ),
+            // Loop rather than a single check-then-act: re-probes at the
+            // top of every iteration (so a successful relaunch — see
+            // FixNow below — falls straight through without a dialog),
+            // and a FAILED fix attempt loops back to re-show the dialog
+            // instead of silently downgrading (reagent P1 on PR #2783 —
+            // the user asked to FIX it, not to run without a sandbox;
+            // never auto-disable on their behalf).
+            while !linux_sandbox::probe_userns_available() {
+                match linux_sandbox::show_userns_blocked_dialog() {
+                    SandboxDialogChoice::FixNow => {
+                        let helper = linux_sandbox::resolve_helper_script_path();
+                        match linux_sandbox::run_pkexec_fix(&helper) {
+                            Ok(()) => {
+                                // AppArmor confinement attaches at exec()
+                                // time only — this already-running process
+                                // can never benefit from the
+                                // newly-installed profile no matter what
+                                // we do next (reagent P0 on PR #2783).
+                                // Relaunch in place so the ENTIRE process
+                                // tree (this process and every CEF
+                                // subprocess it spawns) starts fresh under
+                                // the new profile.
+                                eprintln!(
+                                    "AgentMux: sandbox fix installed — relaunching to apply it."
+                                );
+                                let exe = std::env::current_exe()
+                                    .unwrap_or_else(|_| std::path::PathBuf::from("agentmux-cef"));
+                                let args: Vec<String> = std::env::args().skip(1).collect();
+                                use std::os::unix::process::CommandExt;
+                                let err = std::process::Command::new(&exe).args(&args).exec();
+                                // exec() replaces the process image and
+                                // never returns on success — reaching here
+                                // means it failed.
+                                eprintln!(
+                                    "AgentMux: relaunch failed after installing the fix ({err}) \
+                                     — please start AgentMux again manually."
+                                );
+                                std::process::exit(1);
+                            }
+                            Err(e) => {
+                                eprintln!("AgentMux: sandbox fix failed: {e}");
+                                // Loop back to the dialog rather than
+                                // falling through unsandboxed.
+                            }
                         }
+                    }
+                    SandboxDialogChoice::ContinueWithoutSandbox => {
                         // SAFETY: single-threaded at this point in startup —
-                        // before any additional threads (async runtime, CEF's
-                        // own internal threads) have been spawned, and gated
-                        // to the browser process only (subprocess roles never
-                        // reach this branch) — no concurrent env reader exists
-                        // yet for this mutation to race with.
+                        // before any additional threads (async runtime,
+                        // CEF's own internal threads) have been spawned,
+                        // and gated to the browser process only
+                        // (subprocess roles never reach this branch) — no
+                        // concurrent env reader exists yet for this
+                        // mutation to race with.
                         unsafe {
                             std::env::set_var("AGENTMUX_UNSAFE_NOSANDBOX", "1");
                         }
                         force_no_sandbox = true;
+                        // Keep the downgrade visible for the rest of the
+                        // session (window title) — reagent/codex P2 on
+                        // PR #2783.
+                        linux_sandbox::RUNNING_UNSANDBOXED
+                            .store(true, std::sync::atomic::Ordering::Relaxed);
+                        break;
                     }
-                    // else: fix worked — leave force_no_sandbox false, normal
-                    // sandboxed init proceeds below.
-                }
-                SandboxDialogChoice::ContinueWithoutSandbox => {
-                    // SAFETY: see above.
-                    unsafe {
-                        std::env::set_var("AGENTMUX_UNSAFE_NOSANDBOX", "1");
+                    SandboxDialogChoice::Cancel => {
+                        std::process::exit(1);
                     }
-                    force_no_sandbox = true;
-                }
-                SandboxDialogChoice::Cancel => {
-                    std::process::exit(1);
-                }
-                SandboxDialogChoice::NoDialogToolAvailable => {
-                    eprintln!(
-                        "AgentMux: the sandbox is blocked by a system AppArmor policy \
-                         (common on newer Ubuntu), and no dialog tool (zenity/kdialog) is \
-                         available to ask how to proceed. Set AGENTMUX_UNSAFE_NOSANDBOX=1 \
-                         to run without the sandbox, or see docs/linux.md for how to \
-                         install the proper fix."
-                    );
-                    std::process::exit(1);
+                    SandboxDialogChoice::NoDialogToolAvailable => {
+                        eprintln!(
+                            "AgentMux: the sandbox is blocked by a system AppArmor policy \
+                             (common on newer Ubuntu), and no dialog tool (zenity/kdialog) is \
+                             available to ask how to proceed. Set AGENTMUX_UNSAFE_NOSANDBOX=1 \
+                             to run without the sandbox, or see docs/linux.md for how to \
+                             install the proper fix."
+                        );
+                        std::process::exit(1);
+                    }
                 }
             }
         }
