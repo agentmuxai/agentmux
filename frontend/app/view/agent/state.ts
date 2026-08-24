@@ -30,7 +30,7 @@ import {
     StreamingState,
     TurnTokens,
 } from "./types";
-import type { AttachedTaskState, CompactionState, InitPhase, PaneFailure, TurnPhase } from "@/app/store/agent-pane-state/types";
+import type { AttachedTaskState, CompactionState, InitPhase, PaneFailure, ResumeRetryState, TurnPhase } from "@/app/store/agent-pane-state/types";
 
 /**
  * A signal pair: [getter, setter]
@@ -139,6 +139,14 @@ export interface AgentAtoms {
      * docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md.
      */
     registryAttachedTaskSinceAtom: SignalPair<number | null>;
+    /**
+     * Live "reconnecting after a stale `--resume` session id" state, or
+     * null. Reducer-owned (see `AgentPaneState.reconnecting`). Drives the
+     * "Reconnecting…" status chip + elapsed counter in `AgentComposerStrip`,
+     * mirroring `compactingAtom`. See
+     * docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md §6.2.
+     */
+    reconnectingAtom: SignalPair<ResumeRetryState | null>;
 }
 
 /**
@@ -208,5 +216,6 @@ export function createAgentAtoms(agentId: string): AgentAtoms {
         compactingAtom: createSignal<CompactionState | null>(null),
         attachedTaskAtom: createSignal<AttachedTaskState | null>(null),
         registryAttachedTaskSinceAtom: createSignal<number | null>(null),
+        reconnectingAtom: createSignal<ResumeRetryState | null>(null),
     };
 }

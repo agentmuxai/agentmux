@@ -44,6 +44,21 @@ pub const EVENT_AGENT_HEALTH: &str = "agenthealth";
 /// terminal `result` frame). Carries the classified `AgentFailure` so the pane
 /// shows the real cause instead of a bare exit code.
 pub const EVENT_AGENT_FAILURE: &str = "agentfailure";
+/// Fired by the persistent controller's stale-`--resume` recovery path
+/// (`retry_after_resume_failure` / `publish_resume_retry_status`,
+/// `docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md` §6.2)
+/// so the pane can show a "Reconnecting…" readout instead of going silent for
+/// the ~seconds-to-tens-of-seconds it can take the controller to detect a
+/// stale registry `session_id` and respawn against a recovered one.
+/// Payload: `{ "status": "retrying", "startedAt": "<rfc3339>" }` or
+/// `{ "status": "resolved" }`. `persist: 2` (unlike `compaction_started`'s
+/// `persist: 0`) is deliberate: both ends of this signal travel over this
+/// same WPS channel (there's no separate out-of-band completion marker the
+/// way `compact_boundary` is for compaction), so replaying the latest
+/// retrying→resolved pair to a freshly (re)subscribed pane is always the
+/// *correct* current state, not a stale echo — see
+/// `publish_resume_retry_status`'s own doc comment for why 2, not 1.
+pub const EVENT_AGENT_RESUME_RETRY: &str = "agent-resume-retry";
 /// Fired by `handle_shell_create` when a persistent shell is launched.
 /// Frontend creates the ShellNode row on receipt.
 /// Payload: `{ shell_id, cmd, cwd?, title, timestamp }`.

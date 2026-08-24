@@ -43,7 +43,7 @@
 
 import { useTick } from "@/app/hook/useTick";
 import { compactionThreshold } from "@/app/store/agent-pane-state/context-window";
-import type { CompactionState } from "@/app/store/agent-pane-state/types";
+import type { CompactionState, ResumeRetryState } from "@/app/store/agent-pane-state/types";
 import { formatCompactNumber, formatExactNumber } from "@/util/format-count";
 import { formatElapsedCompact } from "@/util/format-time";
 import { Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
@@ -152,6 +152,15 @@ interface AgentComposerStripProps {
      */
     compacting?: CompactionState | null;
     /**
+     * Live "reconnecting after a stale `--resume` session id" state, or
+     * null. While set, the center stats zone shows "Reconnecting…" plus a
+     * live elapsed counter — same treatment as `compacting`, so a stale-
+     * resume recovery (usually seconds, occasionally tens of seconds) never
+     * reads as a silent hang. See
+     * docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md §6.2.
+     */
+    reconnecting?: ResumeRetryState | null;
+    /**
      * Manually trigger compaction now, instead of waiting for the CLI's
      * own auto-compact threshold. Only meaningful for Claude — sends the
      * literal text "/compact" through the normal send-message path
@@ -204,7 +213,26 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         return c ? (tick(), Date.now() - c.startedAt) : 0;
     });
 
+    // Live elapsed time since a stale-`--resume` retry began — same
+    // stopwatch pattern as compactingElapsedMs above. Clears the moment
+    // `reconnecting` clears (the retry's outcome — Fresh or Resumed — is
+    // known); there's no separate finalized-duration node to hand off to,
+    // unlike compaction's transcript node.
+    const reconnectingElapsedMs = createMemo(() => {
+        const r = props.reconnecting;
+        return r ? (tick(), Date.now() - r.startedAt) : 0;
+    });
+
     const rightText = createMemo((): string => {
+        // Mutually exclusive with `compacting` by construction (a stale-
+        // resume retry only fires once the underlying process has already
+        // exited, at which point compaction can't still be in progress),
+        // but checked first regardless — a silent-gap recovery is the more
+        // easily mistaken-for-a-hang state, so it takes priority if both
+        // were ever somehow set.
+        if (props.reconnecting) {
+            return `Reconnecting…  ${formatElapsedCompact(reconnectingElapsedMs())}`;
+        }
         if (props.compacting) {
             return `Compacting…  ${formatElapsedCompact(compactingElapsedMs())}`;
         }
@@ -307,7 +335,10 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 <Show when={rightText()}>
                     <span
                         class="agent-composer-strip-stats"
-                        classList={{ "agent-composer-strip-stats--compacting": !!props.compacting }}
+                        classList={{
+                            "agent-composer-strip-stats--compacting": !!props.compacting,
+                            "agent-composer-strip-stats--reconnecting": !!props.reconnecting,
+                        }}
                     >
                         {rightText()}
                     </span>

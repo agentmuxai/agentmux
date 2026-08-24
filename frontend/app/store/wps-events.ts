@@ -26,6 +26,10 @@ export const WpsEvent = {
     // instant Claude Code begins compacting — see
     // docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md §4.2.
     CompactionStarted: "compaction_started",
+    // Published by the persistent controller's stale-`--resume` recovery
+    // path — `{status:"retrying"|"resolved"}`. See
+    // docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md §6.2.
+    AgentResumeRetry: "agent-resume-retry",
     BlockActivity: "block:activity",
     // Fired when a file open in at least one editor/preview tab changes on
     // disk. Payload: `{ path }` — a wake signal only, no content; handlers

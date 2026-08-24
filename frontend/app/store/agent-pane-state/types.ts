@@ -125,6 +125,21 @@ export interface AttachedTaskState {
 }
 
 /**
+ * Live "controller is recovering from a stale `--resume` session id" state,
+ * or `null` — set the instant the backend's stale-resume retry begins
+ * (`wps.EVENT_AGENT_RESUME_RETRY`, `{status:"retrying"}`), cleared once the
+ * retry's outcome (Fresh or Resumed) is actually known
+ * (`{status:"resolved"}`). Mirrors `AttachedTaskState`'s shape (a single
+ * `startedAt`, no staleness/generation gating needed) — unlike
+ * `CompactionState`'s completion signal, both ends of this one travel over
+ * the SAME reliable WPS channel, so there's no cross-channel race to guard
+ * against. See docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md §6.2.
+ */
+export interface ResumeRetryState {
+    startedAt: number;
+}
+
+/**
  * A classified backend failure (the `agentfailure` wave event's payload,
  * `AgentFailure` in `frontend/types/gotypes.d.ts`) currently surfaced for
  * this pane. Single source of truth for "is there an active failure" —
@@ -325,6 +340,13 @@ export interface AgentPaneState {
      */
     attachedTask: AttachedTaskState | null;
     /**
+     * Live "reconnecting after a stale `--resume` session id" state, or
+     * `null` — see {@link ResumeRetryState}. Owned exclusively by
+     * `ResumeRetryStarted`/`ResumeRetryResolved`, dispatched from
+     * `useResumeRetryStream.ts`.
+     */
+    reconnecting: ResumeRetryState | null;
+    /**
      * Earliest `started_at_ms` among this block's currently-`Running`
      * `db_background_tasks` rows (Phase A/B of
      * docs/specs/SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md),
@@ -377,6 +399,7 @@ export const initialState = (agentId: string): AgentPaneState => ({
     failure: null,
     compacting: null,
     attachedTask: null,
+    reconnecting: null,
     registryAttachedTaskSince: null,
     lastCompactionBoundaryAt: null,
 });
@@ -692,6 +715,22 @@ export type AgentPaneCommand =
      */
     | { type: "AttachedTaskCleared" }
 
+    // ── Stale-`--resume` reconnect axis
+    // (STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md §6.2) ──
+    /**
+     * `wps.EVENT_AGENT_RESUME_RETRY`'s `{status:"retrying"}` landed — a
+     * stale `--resume` was just detected and a retry/recovery attempt is
+     * about to fire. No-op (idempotent) if already reconnecting, mirroring
+     * `AttachedTaskObserved` — a cascaded second retry must not reset
+     * `startedAt` back to a later time.
+     */
+    | { type: "ResumeRetryStarted"; at: number }
+    /**
+     * `{status:"resolved"}` landed — the retry's outcome (Fresh or Resumed)
+     * is now known. No-op if already null.
+     */
+    | { type: "ResumeRetryResolved" }
+
     // ── Registry-derived attached-task floor (Phase C of
     // SPEC_BACKGROUND_TASK_DASHBOARD_INTELLIGENCE_2026_08_20.md) — see
     // `registryAttachedTaskSince`'s doc comment above for why this is a
@@ -906,7 +945,11 @@ export type AgentPaneEvent =
     /** `RegistryAttachedTaskObserved` set `state.registryAttachedTaskSince`. */
     | { type: "registry-attached-task-observed"; at: number }
     /** `RegistryAttachedTaskCleared` cleared `state.registryAttachedTaskSince`. */
-    | { type: "registry-attached-task-cleared" };
+    | { type: "registry-attached-task-cleared" }
+    /** `ResumeRetryStarted` set `state.reconnecting` (0→1 edge). */
+    | { type: "resume-retry-started"; at: number }
+    /** `ResumeRetryResolved` cleared `state.reconnecting` (1→0 edge). */
+    | { type: "resume-retry-resolved" };
 
 export interface ReducerResult {
     state: AgentPaneState;
