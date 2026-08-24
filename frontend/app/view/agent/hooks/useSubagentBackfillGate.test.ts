@@ -15,7 +15,7 @@
  * `createRoot` + mocked-`waveEventSubscribe` harness.
  */
 
-import { createRoot } from "solid-js";
+import { createRoot, createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const hub = vi.hoisted(() => ({
@@ -168,6 +168,44 @@ describe("useSubagentBackfillGate", () => {
             { data: { status: "done" } },
         ]);
         await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(250);
+        expect(settled()).toBe(true);
+    });
+
+    // reagentx P2 (PR #2781, round 6): `wired` used to be a plain closure
+    // flag that only ever flipped true, never reset on cleanup — so a
+    // block whose view changes away from "agent" (e.g. "Replace With...")
+    // and back again would never re-subscribe, leaving `settled` frozen at
+    // whatever it last resolved to and silently disabling the gate for the
+    // rest of that block's life.
+    it("re-wires correctly after the view type changes away from agent and back", async () => {
+        vi.useFakeTimers();
+        const [viewType, setViewType] = createSignal<string | undefined>("agent");
+        let settled: () => boolean = () => false;
+        createRoot(() => {
+            settled = useSubagentBackfillGate("block-1", viewType, () => true);
+        });
+
+        // First mount: stays gated (empty history, no live event yet).
+        rpcHub.resolve?.([]);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(settled()).toBe(false);
+
+        // View changes away from "agent" — resolves immediately (this
+        // block no longer has any backfill to wait on) and tears down the
+        // subscription.
+        setViewType("term");
+        expect(settled()).toBe(true);
+        expect(hub.handler).toBeNull();
+
+        // View changes back to "agent" — must re-wire from scratch, not
+        // silently stay settled=true forever.
+        rpcHub.resolve = null;
+        setViewType("agent");
+        expect(settled()).toBe(false);
+        expect(hub.handler).not.toBeNull();
+
+        rpcHub.resolve?.([{ data: { status: "done" } }]);
         await vi.advanceTimersByTimeAsync(250);
         expect(settled()).toBe(true);
     });

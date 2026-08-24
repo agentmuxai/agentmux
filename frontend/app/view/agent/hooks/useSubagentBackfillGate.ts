@@ -125,6 +125,13 @@ export function useSubagentBackfillGate(
         }
         if (wired) return;
         wired = true;
+        // Reset to the pessimistic default for this fresh wiring cycle —
+        // `settled` may still be `true` from a PRIOR resolution (either a
+        // previous non-agent/no-session period, per round 6's `wired`
+        // reset above, or an earlier completed backfill this same effect
+        // already settled). That stale value must never leak into a new
+        // cycle that hasn't determined anything yet.
+        setSettled(false);
 
         safetyTimer = setTimeout(() => {
             console.log(
@@ -187,6 +194,17 @@ export function useSubagentBackfillGate(
             });
 
         onCleanup(() => {
+            // reagentx P2 (PR #2781, round 6): must reset here, not stay
+            // true forever. `viewType()`/`hasPersistedSession()` changing
+            // away from "agent"+persisted-session (e.g. "Replace With...")
+            // tears this down via the effect's own re-run, but a LATER
+            // change back to "agent" must be able to re-wire from scratch
+            // — leaving `wired` stuck `true` would silently disable the
+            // gate for this block for the rest of its life (the `if
+            // (wired) return;` guard above would skip re-subscribing
+            // forever, leaving `settled` frozen at whatever it last
+            // resolved to).
+            wired = false;
             clearTimeout(settleTimer);
             clearTimeout(safetyTimer);
             try { unsub(); } catch { /* ignore */ }
