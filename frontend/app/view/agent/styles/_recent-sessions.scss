@@ -159,18 +159,25 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        flex-shrink: 0;
-        max-width: 60%;
+        // Was `flex-shrink: 0; max-width: 60%` when the account/identity
+        // name shared this row via `flex: 1` — now that it has its own
+        // line below (`.agent-recent-sessions-account`), line1 only holds
+        // the name + two small fixed-width badges, so the name can grow to
+        // fill the remaining space instead of being capped.
+        flex: 1;
+        min-width: 0;
     }
 
-    .agent-recent-sessions-meta {
+    // Account/identity name — own full-width line under line1, not
+    // squeezed into it via `flex: 1` next to the name anymore. See
+    // docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md §2.
+    .agent-recent-sessions-account {
         font-size: 11px;
         color: color-mix(in srgb, var(--secondary-text-color) 85%, transparent);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        flex: 1;
-        min-width: 0;
+        max-width: 100%;
     }
 
     .agent-recent-sessions-preview {
