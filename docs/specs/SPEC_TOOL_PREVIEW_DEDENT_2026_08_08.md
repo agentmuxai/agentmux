@@ -7,6 +7,17 @@ keep the Edit call site's "one shared prefix across two related strings"
 concern inside this module rather than duplicated at the DiffViewer call
 site. Live-pane visual verification (§5) not yet done as of this PR — see
 the PR body for why, and do it before/at merge if practical.
+
+Two issues found by reagent review on PR #2780, both fixed same-day: (1)
+`renderWrite` was calling the Read-specific numbered-line dedent variant on
+raw Write content, misreading a genuine tab-delimited data file's leading
+numeric column as a line-number gutter — switched to the plain
+`stripCommonIndent`. (2) `capText`'s char-budget truncation marker is a
+column-0 line that can land inside capped preview text and was not excluded
+from the common-prefix computation, silently defeating dedent (or, on the
+numbered Read path, the "every line numbered" check) for any node whose
+content exceeded `MAX_TOOL_OUTPUT_CHARS` — `dedent.ts` now treats the
+marker as ignorable exactly like a blank line.
 **Scope:** `frontend/app/view/agent/components/ToolOverlayLog.tsx`,
 `frontend/app/view/agent/components/DiffViewer.tsx`, one new shared util
 (+ tests)
