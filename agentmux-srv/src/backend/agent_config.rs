@@ -1015,6 +1015,89 @@ fn resolve_claude_md_side_paths(
 /// project (codex P1 on PR #2747, same defense-in-depth the other
 /// config-file write loops already apply to their own paths).
 ///
+/// First line AgentMux writes on any non-`CLAUDE.md` startup-instructions
+/// file it fully owns (freshly created, or one it wrote on a prior
+/// launch) — mirrors [`CLAUDE_MD_MANAGED_MARKER`]'s role for `CLAUDE.md`,
+/// generic across filenames since `AGENTS.md`/`GEMINI.md`/`QWEN.md`/pi's
+/// `APPEND_SYSTEM.md` don't each need distinct marker text. An HTML
+/// comment renders invisibly in every markdown viewer and every one of
+/// these providers reads its instructions file as plain text fed into a
+/// prompt, so a leading comment line is universally harmless regardless
+/// of provider — no per-provider syntax needed for the marker itself
+/// (only the `@import`-equivalent side-file fallback CLAUDE.md also gets
+/// would need that, and this function deliberately doesn't attempt it —
+/// see the doc comment below).
+const STARTUP_INSTRUCTIONS_MANAGED_MARKER: &str = "<!-- agentmux:managed-startup-instructions -->";
+
+/// Write a NON-`CLAUDE.md` startup-instructions file (`AGENTS.md`,
+/// `GEMINI.md`, `QWEN.md`, `.pi/APPEND_SYSTEM.md`, ...) WITHOUT ever
+/// overwriting a pre-existing, non-AgentMux-authored file at that path.
+///
+/// codex P1, PR #2788: before
+/// `docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md`,
+/// every provider's agent got `CLAUDE.md` written regardless of provider —
+/// wrong, but harmless to a real Codex/Gemini/etc. project, since AgentMux
+/// was never writing to the filename that project's own real `AGENTS.md`/
+/// `GEMINI.md` actually lived at. Once `build_config_files` started
+/// resolving the CORRECT native filename per provider, an unconditional
+/// write (the plain `std::fs::write` every other config file still uses)
+/// would silently destroy a pre-existing, user-authored project file the
+/// moment its name collided with the now-correctly-resolved target — a
+/// real, novel data-loss regression introduced BY fixing the filename,
+/// not present before.
+///
+/// Mirrors [`write_claude_md_respecting_ownership`]'s OWNED-vs-foreign
+/// marker check (freely regenerate if AgentMux wrote it, either freshly or
+/// on a prior launch; never touch it otherwise) — WITHOUT that function's
+/// `@import`-line side-file fallback offer for the foreign case. That
+/// fuller mechanism is deliberately Claude-Code-`@import`-syntax-specific;
+/// whether `AGENTS.md`/`GEMINI.md`/`QWEN.md`/pi's `APPEND_SYSTEM.md`
+/// support an equivalent include directive their own harness actually
+/// honors is unverified per-provider research this spec didn't do (§5/§6
+/// of the spec above). The tradeoff accepted here: if the target file is
+/// foreign, this agent's Soul/AgentMD/Memory content is simply not
+/// delivered via a file for this launch (logged, not silently dropped) —
+/// a real capability gap, but strictly safer than overwriting a stranger's
+/// file. Revisit once each provider's own include syntax is confirmed.
+pub fn write_startup_instructions_respecting_existing(
+    base_path: &std::path::Path,
+    filename: &str,
+    content: &str,
+) -> std::io::Result<()> {
+    let path = base_path.join(filename);
+
+    // `None` = genuinely no file yet. `Some(Ok(content))` = read fine.
+    // `Some(Err(_))` = exists but unreadable — MUST be treated the same as
+    // "foreign," never as "no file yet" (same reasoning as
+    // write_claude_md_respecting_ownership's own doc comment).
+    let existing = match std::fs::read_to_string(&path) {
+        Ok(content) => Some(Ok(content)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => Some(Err(e)),
+    };
+    let agentmux_owns_it =
+        matches!(&existing, Some(Ok(content)) if content.starts_with(STARTUP_INSTRUCTIONS_MANAGED_MARKER));
+
+    if agentmux_owns_it || existing.is_none() {
+        if let Some(parent) = path.parent() {
+            if !parent.exists() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+        let marked_content = format!("{STARTUP_INSTRUCTIONS_MANAGED_MARKER}\n\n{content}");
+        return std::fs::write(&path, marked_content);
+    }
+
+    tracing::warn!(
+        path = %path.display(),
+        "write_startup_instructions_respecting_existing: pre-existing, \
+         non-AgentMux-authored file — leaving it untouched; this agent's \
+         Global Memory/Soul/AgentMD content is not delivered via this file \
+         for this launch"
+    );
+    Ok(())
+}
+
 /// Shared by `agent.open` (`server/app_api/agent_open.rs`) and the
 /// `WriteAgentConfig` "click Launch" path (`server/editor_handlers.rs`) —
 /// per this module's own doc comment, the two config-materializing call
@@ -1836,6 +1919,88 @@ mod tests {
     fn inject_jekt_signing_keys_into_mcp_json_returns_none_on_malformed_json() {
         let store = crate::backend::storage::store::Store::open_in_memory().unwrap();
         assert!(inject_jekt_signing_keys_into_mcp_json("not json", &store, "aria").is_none());
+    }
+
+    // ============================================================
+    // write_startup_instructions_respecting_existing
+    // (SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md — codex P1, PR #2788)
+    // ============================================================
+
+    #[test]
+    fn startup_instructions_fresh_working_dir_writes_directly_with_the_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        write_startup_instructions_respecting_existing(dir.path(), "AGENTS.md", "Soul + AgentMD content")
+            .unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
+        assert!(content.starts_with(STARTUP_INSTRUCTIONS_MANAGED_MARKER));
+        assert!(content.contains("Soul + AgentMD content"));
+    }
+
+    #[test]
+    fn startup_instructions_agentmux_owned_file_is_freely_regenerated() {
+        let dir = tempfile::tempdir().unwrap();
+        write_startup_instructions_respecting_existing(dir.path(), "QWEN.md", "first version").unwrap();
+        write_startup_instructions_respecting_existing(dir.path(), "QWEN.md", "second version").unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("QWEN.md")).unwrap();
+        assert!(content.contains("second version"));
+        assert!(!content.contains("first version"), "regeneration must replace, not accumulate");
+    }
+
+    #[test]
+    fn startup_instructions_foreign_file_content_is_never_touched() {
+        // The exact regression codex P1 (PR #2788) flagged: a real project's
+        // own AGENTS.md must survive an agent launch untouched, byte for
+        // byte — no AgentMux marker, no partial merge, nothing.
+        let dir = tempfile::tempdir().unwrap();
+        let human_content = "# My real project\n\nHand-written AGENTS.md, no AgentMux involvement.";
+        std::fs::write(dir.path().join("AGENTS.md"), human_content).unwrap();
+
+        write_startup_instructions_respecting_existing(dir.path(), "AGENTS.md", "AgentMux's generated content")
+            .unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
+        assert_eq!(content, human_content, "every byte of the original file must survive");
+        assert!(!content.contains("AgentMux's generated content"));
+    }
+
+    #[test]
+    fn startup_instructions_foreign_empty_file_is_never_touched() {
+        // An empty pre-existing file (no marker) is still foreign — the
+        // decision hinges on the marker prefix, not on non-emptiness.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("GEMINI.md"), "").unwrap();
+
+        write_startup_instructions_respecting_existing(dir.path(), "GEMINI.md", "AgentMux's generated content")
+            .unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join("GEMINI.md")).unwrap();
+        assert_eq!(content, "");
+    }
+
+    #[test]
+    fn startup_instructions_non_utf8_file_is_treated_as_foreign_not_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("AGENTS.md");
+        std::fs::write(&path, [0x23, 0x20, 0xFF, 0xFE, 0x0A]).unwrap();
+        let raw_before = std::fs::read(&path).unwrap();
+
+        write_startup_instructions_respecting_existing(dir.path(), "AGENTS.md", "generated content").unwrap();
+
+        let raw_after = std::fs::read(&path).unwrap();
+        assert_eq!(raw_before, raw_after, "an unreadable file must be treated as foreign, never as absent");
+    }
+
+    #[test]
+    fn startup_instructions_creates_parent_directories_for_nested_paths() {
+        // pi's target is .pi/APPEND_SYSTEM.md — a nested path with no
+        // existing parent directory on a fresh working dir.
+        let dir = tempfile::tempdir().unwrap();
+        write_startup_instructions_respecting_existing(dir.path(), ".pi/APPEND_SYSTEM.md", "content").unwrap();
+
+        let content = std::fs::read_to_string(dir.path().join(".pi/APPEND_SYSTEM.md")).unwrap();
+        assert!(content.contains("content"));
     }
 
     // ============================================================

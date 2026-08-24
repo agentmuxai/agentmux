@@ -865,6 +865,21 @@ pub(super) fn write_agent_config_files(
             );
             continue;
         };
+        // Every OTHER provider's startup-instructions filename (AGENTS.md,
+        // GEMINI.md, QWEN.md, .pi/APPEND_SYSTEM.md) never overwrites a
+        // pre-existing file — codex P1, PR #2788: unlike CLAUDE.md's full
+        // ownership-aware materialization above, this is a plain
+        // exists-guard (see write_startup_instructions_respecting_existing's
+        // own doc comment for why a fuller mechanism isn't attempted here).
+        if crate::backend::providers::is_known_startup_instructions_filename(&file.filename) {
+            crate::backend::agent_config::write_startup_instructions_respecting_existing(
+                base_path,
+                &file.filename,
+                &file.content,
+            )
+            .map_err(|e| format!("failed to write {}: {e}", file.filename))?;
+            continue;
+        }
         if let Some(parent) = file_path.parent() {
             if !parent.exists() {
                 let _ = std::fs::create_dir_all(parent);

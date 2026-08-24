@@ -341,21 +341,28 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // startup-instructions file (AGENTS.md, GEMINI.md,
                     // QWEN.md, .pi/APPEND_SYSTEM.md, ...) is recognized by
                     // filename membership against the provider registry,
-                    // not a literal string match. Still gets the same
-                    // global-memory-bundle injection CLAUDE.md gets above —
-                    // otherwise a Codex/Gemini/etc. agent launched from the
-                    // picker would silently receive no workspace-wide
-                    // Global Memory content at all. No ownership-protection
-                    // equivalent yet for these (CLAUDE.md's protection is
-                    // deeply coupled to Claude Code's own `@import` syntax
-                    // for its fallback file — not something to hastily
-                    // generalize here); flagged as an explicit follow-up in
-                    // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §5.
-                    let content = if crate::backend::providers::is_known_startup_instructions_filename(&file.path) {
-                        inject_global_bundles(&file.content, &id_store)
-                    } else {
-                        file.content.clone()
-                    };
+                    // not a literal string match.
+                    if crate::backend::providers::is_known_startup_instructions_filename(&file.path) {
+                        // Still gets the same global-memory-bundle injection
+                        // CLAUDE.md gets above — otherwise a Codex/Gemini/etc.
+                        // agent launched from the picker would silently
+                        // receive no workspace-wide Global Memory content at
+                        // all.
+                        let content = inject_global_bundles(&file.content, &id_store);
+                        // Never overwrites a pre-existing file (codex P1, PR
+                        // #2788) — a simpler exists-guard than CLAUDE.md's
+                        // full ownership-aware materialization above; see
+                        // write_startup_instructions_respecting_existing's
+                        // own doc comment for why a fuller mechanism (the
+                        // @import-based side-file fallback) isn't attempted
+                        // here.
+                        crate::backend::agent_config::write_startup_instructions_respecting_existing(
+                            base_path, &file.path, &content,
+                        )
+                        .map_err(|e| format!("failed to write {}: {e}", file.path))?;
+                        tracing::debug!(path = %file_path.display(), "wrote config file (exists-guarded)");
+                        continue;
+                    }
                     // Create parent directories if needed
                     if let Some(parent) = file_path.parent() {
                         if !parent.exists() {
@@ -363,7 +370,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 .map_err(|e| format!("failed to create dir for {}: {e}", file.path))?;
                         }
                     }
-                    std::fs::write(&file_path, &content)
+                    std::fs::write(&file_path, &file.content)
                         .map_err(|e| format!("failed to write {}: {e}", file.path))?;
                     tracing::debug!(path = %file_path.display(), "wrote config file");
                 }

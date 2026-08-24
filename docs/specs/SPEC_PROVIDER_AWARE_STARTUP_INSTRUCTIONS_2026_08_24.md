@@ -304,6 +304,54 @@ instructions preview" (this conversation's prior turn) to reference the
 grouping, e.g. "Combined preview (same content, every applicable file)" —
 exact copy is an implementation-time judgment call, not load-bearing design.
 
+### 3.5 Ownership guard for non-`CLAUDE.md` files (codex P1, PR #2788)
+
+**Found during review, not in the original design pass.** §3.3's initial
+implementation wrote every recognized non-`CLAUDE.md` startup-instructions
+file via a plain, unconditional `std::fs::write` — the same path every
+other config file (`.mcp.json`, skill files) already used. Codex correctly
+flagged this as a genuine, novel data-loss regression: **before** this
+spec, every provider's agent got `CLAUDE.md` written regardless of
+provider — wrong, but harmless to a real Codex/Gemini/etc. project, since
+AgentMux was never writing to the filename that project's own real
+`AGENTS.md`/`GEMINI.md` actually lived at. Once the filename resolution
+became CORRECT per provider (§3.1-§3.3), an unconditional write would
+silently destroy a pre-existing, user-authored project file the moment its
+name collided with the now-correctly-resolved target.
+
+**Fix:** `write_startup_instructions_respecting_existing` — a new function
+mirroring `write_claude_md_respecting_ownership`'s OWNED-vs-foreign marker
+check (a new, generic `STARTUP_INSTRUCTIONS_MANAGED_MARKER` first-line
+comment, since `AGENTS.md`/`GEMINI.md`/`QWEN.md`/pi's `APPEND_SYSTEM.md`
+don't each need distinct marker text — an HTML comment renders invisibly
+in every markdown viewer and every one of these providers reads its
+instructions file as plain text fed into a prompt, so a leading comment
+line is universally harmless regardless of provider): if AgentMux wrote
+the file (fresh, or on a prior launch — detected via the marker), freely
+regenerate it; otherwise, never touch it, and this agent's Soul/AgentMD/
+Memory content is simply not delivered via that file for this launch
+(logged, not silently dropped).
+
+**Deliberately NOT replicated:** `write_claude_md_respecting_ownership`'s
+`@import`-line side-file fallback for the foreign case (write to a side
+file, offer an importable reference so a foreign file's owner can still
+opt in). That mechanism is Claude-Code-`@import`-syntax-specific;
+Copilot's own docs do confirm the identical `@relative/path` include
+syntax works inside `AGENTS.md` too, but whether Codex/Gemini/Qwen/pi's
+own harnesses recognize an equivalent directive in their own native files
+is unverified per-provider research this spec didn't do. Landing the
+simpler "freely regenerate if ours, never touch if foreign" guarantee now,
+without inventing an unverified per-provider include mechanism, is
+strictly safer than shipping the unconditional-write it replaces — and
+strictly safer than blocking this whole spec on that research. Revisit as
+a follow-up once each provider's own include syntax is confirmed (§5).
+
+Wired into both live write paths (`agent_open.rs`'s `write_agent_config_files`
+and `editor_handlers.rs`'s `WriteAgentConfig` handler), gated the same way
+as §3.3's global-memory-bundle-injection extension: via
+`providers::is_known_startup_instructions_filename(path)` membership
+against the registry, not a literal filename list to keep in sync by hand.
+
 ---
 
 ## 4. Resolved design decisions
@@ -332,16 +380,25 @@ exact copy is an implementation-time judgment call, not load-bearing design.
    provider (per #3 above); duplicating the preview text per filename would
    misleadingly suggest it does.
 6. **Ownership protection for non-Claude startup-instructions files —
-   resolved: not extended, explicitly flagged (§5).** `write_claude_md_respecting_ownership`
-   is deeply coupled to Claude Code's own `@import` line syntax for its
-   `.claude/AGENTMUX_MEMORY.md` fallback file (§1's cited mechanism) — a
-   syntax with no confirmed equivalent in AGENTS.md/GEMINI.md/QWEN.md
-   conventions. Generalizing it properly is separate, real design work
-   (per-provider import/include syntax research), not a mechanical
-   extension safe to rush inside this PR. Global-memory-bundle injection
-   IS extended to every recognized startup-instructions filename (§3.3) —
-   that part is filename-agnostic and safe to reuse as-is; only the
-   ownership/foreign-file-detection half is deferred.
+   resolved: a simpler marker-based exists-guard (§3.5), not the full
+   `write_claude_md_respecting_ownership` mechanism.** Originally landed as
+   "not extended, explicitly flagged" — codex P1 on PR #2788 correctly
+   caught that as a genuine data-loss regression (an unconditional write
+   could now destroy a pre-existing, user-authored `AGENTS.md`/`GEMINI.md`/
+   etc., something the old always-`CLAUDE.md` behavior never risked, since
+   it was never writing to the filename real projects actually used).
+   `write_claude_md_respecting_ownership`'s full mechanism (marker check
+   PLUS an `@import`-line side-file fallback for the foreign case) is
+   deeply coupled to Claude Code's own `@import` syntax — a syntax with no
+   confirmed equivalent in AGENTS.md/GEMINI.md/QWEN.md conventions, so
+   replicating THAT part remains deferred (§5). But the marker-check half
+   (freely regenerate what we own, never touch what we don't) needs no
+   per-provider syntax knowledge at all — an HTML comment as a leading
+   line is universally harmless plain text regardless of which harness
+   reads the file — so there was no reason to defer it too. Global-memory-
+   bundle injection IS extended to every recognized startup-instructions
+   filename (§3.3) — that part is filename-agnostic and safe to reuse
+   as-is.
 
 ---
 
@@ -361,11 +418,14 @@ exact copy is an implementation-time judgment call, not load-bearing design.
   materially different, larger change (alters `KIMI.launch_args`, requires
   synthesizing a YAML agent-file, is a new content-delivery *mechanism* not
   a filename fix) than this spec's scope. Real follow-up if ever prioritized.
-- Extending `write_claude_md_respecting_ownership`'s foreign-file
-  protection to non-Claude startup-instructions files — §4.6. Global-memory
-  injection IS extended to all of them (§3.3); only the ownership/foreign-
-  file-detection half (which needs a per-provider import-syntax answer
-  this spec didn't research) is deferred.
+- Extending `write_claude_md_respecting_ownership`'s `@import`-line
+  side-file fallback (the foreign-file recovery path, not the OWNED-vs-
+  foreign check itself — that part IS implemented, §3.5) to non-Claude
+  startup-instructions files — §4.6. A foreign `AGENTS.md`/`GEMINI.md`/
+  etc. is safely left untouched (§3.5), but unlike `CLAUDE.md`'s foreign
+  case, this agent's content isn't offered via any importable side file
+  either — it's simply not delivered for this launch. Needs a
+  per-provider import-syntax answer this spec didn't research.
 - A per-agent (as opposed to per-provider-class) override of the resolved
   filename — no stated need; every provider of a given class already gets
   a single, correct, non-configurable target.
@@ -414,6 +474,13 @@ path isn't 100% nailed down.
       still pass unmodified in behavior once given an explicit `"claude"`
       7th argument — regression guard that the new parameter doesn't
       change output for the already-covered claude-provider path.
+- [ ] `write_startup_instructions_respecting_existing` (§3.5): fresh
+      working dir writes directly with the marker; a marker-prefixed
+      (AgentMux-owned) file regenerates cleanly across multiple calls with
+      no accumulation; a foreign file (with or without prior content, incl.
+      an empty file) is never touched, byte for byte; a non-UTF-8 foreign
+      file is treated as foreign, not as absent; nested paths (`.pi/APPEND_SYSTEM.md`)
+      get their parent directory created on a fresh dir.
 
 **Frontend** (`agent-config-builder.test.ts`, `providers/*.test.ts`):
 - [ ] `PROVIDERS` catalog: same per-provider filename assertions as the
