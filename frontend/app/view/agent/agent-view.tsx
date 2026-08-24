@@ -178,48 +178,59 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
     // agent from a blank "+" tab's picker — no block-stack mutation, no
     // node remount, so PR #2761's leaf reveal gate never covers this
     // transition at all). SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md
-    // §2.3/§4 Option B. `pickerVisible`'s initial value is read once, at
-    // this component's own construction — correct either way: if agentId()
-    // is already set at mount (a fresh remount straight into a launched
-    // agent), there's no picker-to-content transition to smooth, so it
-    // should start false; if empty, the fallback below needs to render.
-    const [pickerVisible, setPickerVisible] = createSignal(!agentId());
+    // §2.3/§4 Option B.
+    //
+    // Same stuck-visible race as block.tsx's ready()-gate (see
+    // docs/retro/retro-block-ready-gate-spinner-stuck-visible-race-2026-08-23.md):
+    // seeding `pickerVisible` from `!agentId()` read once at construction,
+    // then relying on `on(agentId, ..., {defer: true})`'s first (swallowed)
+    // run to treat "agentId already set" as "nothing to do," is two
+    // different reads of `agentId()` taken at two different times. If
+    // `agentId()` resolves in the gap between them, the seed is never
+    // corrected. Fixed the same way: the first observation and the seed
+    // are now the same read, inside the same effect.
+    const [pickerVisible, setPickerVisible] = createSignal(true);
     const [pickerFadingOut, setPickerFadingOut] = createSignal(false);
     let pickerFadeRaf: number | undefined;
     let pickerFadeTimeout: ReturnType<typeof setTimeout> | undefined;
+    let pickerGateInitialized = false;
     onCleanup(() => {
         if (pickerFadeRaf !== undefined) cancelAnimationFrame(pickerFadeRaf);
         clearTimeout(pickerFadeTimeout);
     });
-    createEffect(
-        on(
-            agentId,
-            (id) => {
-                if (pickerFadeRaf !== undefined) cancelAnimationFrame(pickerFadeRaf);
-                clearTimeout(pickerFadeTimeout);
-                if (id) {
-                    if (!pickerVisible()) return; // already past the transition
-                    // One rAF so the picker paints at full opacity at least
-                    // once before the fade starts — flipping straight to
-                    // the "is-fading" class in this same tick would apply
-                    // opacity:0 on the very first paint, with nothing to
-                    // visibly transition from.
-                    pickerFadeRaf = requestAnimationFrame(() => setPickerFadingOut(true));
-                    pickerFadeTimeout = setTimeout(() => {
-                        setPickerVisible(false);
-                        setPickerFadingOut(false);
-                    }, PICKER_FADE_OUT_MS);
-                } else {
-                    // Lost the agentId (not a normal path, but stay
-                    // correct) — show the picker again immediately, no
-                    // fade needed going this direction.
-                    setPickerFadingOut(false);
-                    setPickerVisible(true);
-                }
-            },
-            { defer: true }
-        )
-    );
+    createEffect(() => {
+        const id = agentId();
+        if (pickerFadeRaf !== undefined) cancelAnimationFrame(pickerFadeRaf);
+        clearTimeout(pickerFadeTimeout);
+        if (!pickerGateInitialized) {
+            // First observation of `agentId()` for this mount: reflect it
+            // directly, no fade — there's nothing painted yet to fade from
+            // either way.
+            pickerGateInitialized = true;
+            setPickerVisible(!id);
+            setPickerFadingOut(false);
+            return;
+        }
+        if (id) {
+            if (!pickerVisible()) return; // already past the transition
+            // One rAF so the picker paints at full opacity at least once
+            // before the fade starts — flipping straight to the
+            // "is-fading" class in this same tick would apply opacity:0
+            // on the very first paint, with nothing to visibly transition
+            // from.
+            pickerFadeRaf = requestAnimationFrame(() => setPickerFadingOut(true));
+            pickerFadeTimeout = setTimeout(() => {
+                setPickerVisible(false);
+                setPickerFadingOut(false);
+            }, PICKER_FADE_OUT_MS);
+        } else {
+            // Lost the agentId (not a normal path, but stay correct) —
+            // show the picker again immediately, no fade needed going
+            // this direction.
+            setPickerFadingOut(false);
+            setPickerVisible(true);
+        }
+    });
 
     // Portal target for the marching-ants progress bar (below) — the bar's
     // own working-state/turn-phase reads live inside AgentPresentationView

@@ -25,7 +25,7 @@ import { focusedBlockId } from "@/util/focusutil";
 import { isBlank, useAtomValueSafe } from "@/util/util";
 import clsx from "clsx";
 import type { JSX } from "solid-js";
-import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, Suspense } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, Show, Suspense } from "solid-js";
 import "./block.scss";
 import "./pane-size-badge.scss";
 import { BlockErrorBoundary } from "./BlockErrorBoundary";
@@ -304,47 +304,63 @@ function Block(props: BlockProps): JSX.Element {
     // content instead of an instant hard cut (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md
     // §2.3/§4 Option B) — this is generic over every block type (agent,
     // terminal, browser, ...), unlike agent-view.tsx's picker-fade which is
-    // agent-specific. `spinnerVisible`'s initial value is read once, at
-    // this component's own construction: if `ready()` is already true at
-    // mount (data arrived before the first paint), there's no spinner-to-
-    // content transition to smooth, so it should start false.
-    const [spinnerVisible, setSpinnerVisible] = createSignal(!ready());
+    // agent-specific.
+    //
+    // An earlier version seeded `spinnerVisible` from `!ready()` read once
+    // at construction (synchronous), then relied on `on(ready, ...,
+    // {defer: true})`'s first (swallowed) run to treat "already ready" as
+    // "nothing to do." Those are two DIFFERENT reads of `ready()` taken at
+    // two different times — construction vs. the effect's first flush a
+    // render pass later — so a block whose data resolves in that gap (the
+    // common case for an already-warm cache) got seeded `true` and then
+    // never corrected: `defer` skips the one call that would have set it
+    // to `false`, and since `ready()` never changes again, nothing else
+    // ever runs it either. The spinner stayed mounted at full opacity
+    // indefinitely (see docs/retro/retro-block-ready-gate-spinner-stuck-visible-race-2026-08-23.md).
+    // Fixed by making the first observation of `ready()` and the seed the
+    // same read, inside the same effect — no gap for them to disagree in.
+    const [spinnerVisible, setSpinnerVisible] = createSignal(true);
     const [spinnerFading, setSpinnerFading] = createSignal(false);
     let spinnerFadeRaf: number | undefined;
     let spinnerFadeTimeout: ReturnType<typeof setTimeout> | undefined;
+    let spinnerGateInitialized = false;
     onCleanup(() => {
         if (spinnerFadeRaf !== undefined) cancelAnimationFrame(spinnerFadeRaf);
         clearTimeout(spinnerFadeTimeout);
     });
-    createEffect(
-        on(
-            ready,
-            (isReady) => {
-                if (spinnerFadeRaf !== undefined) cancelAnimationFrame(spinnerFadeRaf);
-                clearTimeout(spinnerFadeTimeout);
-                if (isReady) {
-                    if (!spinnerVisible()) return; // already past the transition
-                    // One rAF so the spinner paints at full opacity at
-                    // least once before the fade starts — flipping
-                    // straight to the "is-fading" class in this same tick
-                    // would apply opacity:0 on the very first paint, with
-                    // nothing to visibly transition from.
-                    spinnerFadeRaf = requestAnimationFrame(() => setSpinnerFading(true));
-                    spinnerFadeTimeout = setTimeout(() => {
-                        setSpinnerVisible(false);
-                        setSpinnerFading(false);
-                    }, READY_GATE_FADE_MS);
-                } else {
-                    // Not ready anymore (e.g. the view type changed out
-                    // from under this block) — show the spinner again
-                    // immediately, no fade needed going this direction.
-                    setSpinnerFading(false);
-                    setSpinnerVisible(true);
-                }
-            },
-            { defer: true }
-        )
-    );
+    createEffect(() => {
+        const isReady = ready();
+        if (spinnerFadeRaf !== undefined) cancelAnimationFrame(spinnerFadeRaf);
+        clearTimeout(spinnerFadeTimeout);
+        if (!spinnerGateInitialized) {
+            // First observation of `ready()` for this mount: reflect it
+            // directly, no fade — there's nothing painted yet to fade
+            // from either way.
+            spinnerGateInitialized = true;
+            setSpinnerVisible(!isReady);
+            setSpinnerFading(false);
+            return;
+        }
+        if (isReady) {
+            if (!spinnerVisible()) return; // already past the transition
+            // One rAF so the spinner paints at full opacity at least once
+            // before the fade starts — flipping straight to the
+            // "is-fading" class in this same tick would apply opacity:0
+            // on the very first paint, with nothing to visibly transition
+            // from.
+            spinnerFadeRaf = requestAnimationFrame(() => setSpinnerFading(true));
+            spinnerFadeTimeout = setTimeout(() => {
+                setSpinnerVisible(false);
+                setSpinnerFading(false);
+            }, READY_GATE_FADE_MS);
+        } else {
+            // Not ready anymore (e.g. the view type changed out from
+            // under this block) — show the spinner again immediately, no
+            // fade needed going this direction.
+            setSpinnerFading(false);
+            setSpinnerVisible(true);
+        }
+    });
 
     // Per-block ErrorBoundary: a renderer fault in this pane only blanks
     // THIS pane, not the whole tab. See retro
