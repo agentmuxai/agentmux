@@ -4,6 +4,7 @@
 //! Storage layer: SQLite-backed object store and file store.
 //! Port of Go's pkg/wstore and pkg/filestore.
 
+pub mod agent_activity_summaries;
 pub mod agent_credentials;
 pub mod agent_groups;
 pub mod agent_jekt_keys;

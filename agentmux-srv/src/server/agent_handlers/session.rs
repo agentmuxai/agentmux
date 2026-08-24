@@ -19,10 +19,22 @@ use crate::backend::rpc_types::{
     CommandAgentSessionArchiveData, AgentSessionArchiveResult,
     CommandAgentSessionListArchivesData, AgentArchiveRow,
 };
-use crate::backend::storage::store::{AgentIdentityLink, AgentInstance, IdentityAccount};
+use crate::backend::storage::store::{AgentDefinition, AgentIdentityLink, AgentInstance, IdentityAccount};
 
 use super::super::AppState;
 use super::read_session_preview;
+
+/// At-most-once-per-process-lifetime claim set for definition-summary
+/// generation attempts triggered from `listrecentsessions` — see the call
+/// site below and `db_agent_activity_summaries` (OBJECT_SCHEMA_VERSION
+/// v28). `HashSet::insert` returns `true` only the first time a given
+/// `definition_id` is claimed; every later call for the same id (a repeat
+/// poll of "My Agents") sees `false` and does not re-spawn.
+fn definition_summary_attempted() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static SET: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    SET.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+}
 
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // ---- Recent sessions (cascade follow-up 2026-05-23) ----
@@ -43,6 +55,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let id_store_lrs = state.id_store.clone();
     let identity_store_lrs = state.identity_store.clone();
     let filestore = state.filestore.clone();
+    let broker_lrs = state.broker.clone();
     engine.register_handler(
         COMMAND_LIST_RECENT_SESSIONS,
         Box::new(move |data, _ctx| {
@@ -50,6 +63,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let id_store = id_store_lrs.clone();
             let identity_store = identity_store_lrs.clone();
             let filestore = filestore.clone();
+            let broker = broker_lrs.clone();
             Box::pin(async move {
                 let t0 = std::time::Instant::now();
                 let cmd: CommandListRecentSessionsData =
@@ -357,7 +371,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // Stat first (cheap) — gives us the modts for
                     // sorting. Only fetch the full content if the
                     // snapshot exists.
-                    let (has_snapshot, last_active_at, preview, node_count) =
+                    let (has_snapshot, last_active_at, mut preview, node_count) =
                         if inst.block_id.is_empty() {
                             (false, inst.started_at, String::new(), 0usize)
                         } else {
@@ -377,6 +391,112 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 _ => (false, inst.started_at, String::new(), 0usize),
                             }
                         };
+
+                    // No structured snapshot to preview — fall back to a
+                    // once-per-definition, on-demand Haiku summary of the
+                    // instance's raw terminal output (see
+                    // docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md
+                    // §5a). Only meaningful for a LOCAL row with a real
+                    // block_id — a cross-channel row's synthetic empty
+                    // block_id has no local raw output to summarize either,
+                    // so it's left alone (still shows the plain fallback
+                    // text, which is accurate for that case: this channel
+                    // genuinely has nothing).
+                    if !has_snapshot && !inst.block_id.is_empty() {
+                        match wstore.agent_activity_summary_get(&inst.definition_id) {
+                            Ok(Some(existing)) if !existing.summary.is_empty() => {
+                                preview = existing.summary;
+                            }
+                            // `insert` returns `true` only the FIRST time this
+                            // definition_id is claimed for this process's
+                            // lifetime — mirrors `SubagentWatcher.naming_triggered`'s
+                            // "claim once regardless of success/failure"
+                            // pattern (reagent P1, PR #2786). Without this,
+                            // `ambient::gateway().admit()` alone only
+                            // coalesces CONCURRENT triggers, not sequential
+                            // ones — a definition that can never be
+                            // summarized (no cmd meta, no raw output, CLI
+                            // failure) would otherwise be re-spawned on
+                            // EVERY subsequent listrecentsessions call (tab
+                            // visibility regain, agents:changed refetch, …)
+                            // forever. A successful generation is unaffected
+                            // by this gate: it persists to
+                            // db_agent_activity_summaries, which the branch
+                            // above already checks first.
+                            // `Ok(Some(existing))` with an empty `summary`
+                            // shouldn't occur in normal operation (a row is
+                            // only ever inserted once generation succeeds —
+                            // see the table's own doc comment) but is
+                            // handled the same as `Ok(None)` regardless,
+                            // rather than relying on that invariant to make
+                            // the match exhaustive.
+                            Ok(None) | Ok(Some(_))
+                                if definition_summary_attempted().lock().unwrap().insert(inst.definition_id.clone()) =>
+                            {
+                                // Fire-and-forget: generation (a real Haiku
+                                // CLI round-trip) must not block this
+                                // response.
+                                let wstore_bg = wstore.clone();
+                                let filestore_bg = filestore.clone();
+                                let broker_bg = broker.clone();
+                                let definition_id_bg = inst.definition_id.clone();
+                                let block_id_bg = inst.block_id.clone();
+                                let provider_id_bg = def.map(|d| d.provider.clone()).unwrap_or_default();
+                                tokio::spawn(async move {
+                                    let result = crate::server::app_api::session::generate_definition_activity_summary(
+                                        &wstore_bg,
+                                        &filestore_bg,
+                                        &broker_bg,
+                                        &definition_id_bg,
+                                        &block_id_bg,
+                                        &provider_id_bg,
+                                    )
+                                    .await;
+                                    // reagent P2, PR #2786: at minimum, log the
+                                    // spend so it's observable — no UI-facing
+                                    // total exists for ANY background-triggered
+                                    // ambient call today (dispatch_name/
+                                    // subagent_name via trigger_eager_naming,
+                                    // generate_pushed_activity_summary all
+                                    // discard their own returned tokens the
+                                    // same way; only the live, RPC-response
+                                    // pull paths — session:activity_summary,
+                                    // session:next_prompt_suggestion — thread
+                                    // usage to the frontend, since only they
+                                    // have a response channel to thread it
+                                    // through). A real aggregate sink for
+                                    // background ambient spend is a separate,
+                                    // cross-cutting follow-up, not scoped to
+                                    // this one call site.
+                                    if let Some((_, tokens)) = result {
+                                        if let Some(tokens) = tokens {
+                                            tracing::debug!(
+                                                definition_id = %definition_id_bg,
+                                                ?tokens,
+                                                "listrecentsessions: definition activity summary generated"
+                                            );
+                                        }
+                                    }
+                                });
+                            }
+                            Ok(None) | Ok(Some(_)) => {
+                                // Already attempted this process lifetime —
+                                // no-op, same as any other row without a
+                                // persisted summary.
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    error = %e,
+                                    definition_id = %inst.definition_id,
+                                    "listrecentsessions: agent_activity_summary_get failed — \
+                                     row keeps its plain fallback preview text"
+                                );
+                                if !degraded.contains(&"activity_summary") {
+                                    degraded.push("activity_summary");
+                                }
+                            }
+                        }
+                    }
 
                     rows.push(RecentSessionRow {
                         instance_id: inst.id,
@@ -771,6 +891,155 @@ mod tests {
             "a single malformed row must not degrade the accounts source at all \
              (identity_list now tolerates it internally), got: {:?}",
             result.degraded
+        );
+    }
+
+    /// Minimal local (not cross-channel registry) `AgentDefinition` —
+    /// mirrors `agents.rs`'s own private `test_agent_def` test fixture
+    /// shape, duplicated here rather than widening that helper's
+    /// visibility for one caller.
+    fn local_agent_def(id: &str) -> AgentDefinition {
+        AgentDefinition {
+            id: id.to_string(),
+            slug: id.to_string(),
+            name: format!("Agent {id}"),
+            icon: String::new(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 1,
+            agent_type: "standalone".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 1,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            model_vendor_base_url: String::new(),
+            auto_continue_enabled: 0,
+            memory_id: String::new(),
+            conversation_visibility: "private".to_string(),
+        }
+    }
+
+    fn local_agent_instance(id: &str, definition_id: &str, block_id: &str) -> AgentInstance {
+        AgentInstance {
+            id: id.to_string(),
+            definition_id: definition_id.to_string(),
+            parent_instance_id: String::new(),
+            block_id: block_id.to_string(),
+            session_id: String::new(),
+            status: "available".to_string(),
+            github_context: String::new(),
+            started_at: 1,
+            ended_at: 0,
+            created_at: 1,
+            identity_id: String::new(),
+            memory_id: String::new(),
+            instance_name: id.to_string(),
+            working_directory: String::new(),
+            display_hidden: false,
+        }
+    }
+
+    /// docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md
+    /// §5a: a row with no structured `output.state.json` snapshot but a
+    /// PERSISTED `db_agent_activity_summaries` row for its definition must
+    /// surface that summary as `preview`, still reporting `has_snapshot:
+    /// false` (accurate — there genuinely is no structured snapshot; the
+    /// summary is a substitute, not a claim that one exists).
+    #[tokio::test]
+    async fn snapshot_less_row_uses_a_persisted_definition_summary_as_preview() {
+        let state = test_state();
+        let mut def = local_agent_def("def-local-1");
+        state.wstore.agent_def_insert(&mut def).unwrap();
+        state
+            .wstore
+            .instance_create(&local_agent_instance("inst-local-1", "def-local-1", "block-local-1"))
+            .unwrap();
+        state
+            .wstore
+            .agent_activity_summary_set("def-local-1", "Fixed the login race condition", 1000)
+            .unwrap();
+
+        let (engine, mut output_rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        let resp = dispatch_list_recent_sessions(&engine, &mut output_rx).await;
+
+        assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
+        let result: ListRecentSessionsResult =
+            serde_json::from_value(resp.data.expect("expected result data")).unwrap();
+        assert_eq!(result.rows.len(), 1);
+        let row = &result.rows[0];
+        assert!(!row.has_snapshot, "no output.state.json was ever written for this instance");
+        assert_eq!(
+            row.preview, "Fixed the login race condition",
+            "persisted definition summary must surface as the row's preview \
+             when there's no real snapshot to preview instead"
+        );
+    }
+
+    /// Counterpart to the above: when NOTHING is persisted yet for the
+    /// definition, the row's `preview` stays empty — the frontend's own
+    /// existing "(no conversation snapshot)" fallback text is unaffected.
+    /// Generation itself (a real Haiku CLI round-trip) is fire-and-forget
+    /// and not asserted here — this only locks in that a missing summary
+    /// never surfaces as a fabricated non-empty preview.
+    #[tokio::test]
+    async fn snapshot_less_row_with_no_persisted_summary_leaves_preview_empty() {
+        let state = test_state();
+        let mut def = local_agent_def("def-local-2");
+        state.wstore.agent_def_insert(&mut def).unwrap();
+        state
+            .wstore
+            .instance_create(&local_agent_instance("inst-local-2", "def-local-2", "block-local-2"))
+            .unwrap();
+
+        let (engine, mut output_rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        let resp = dispatch_list_recent_sessions(&engine, &mut output_rx).await;
+
+        assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
+        let result: ListRecentSessionsResult =
+            serde_json::from_value(resp.data.expect("expected result data")).unwrap();
+        assert_eq!(result.rows.len(), 1);
+        let row = &result.rows[0];
+        assert!(!row.has_snapshot);
+        assert_eq!(row.preview, "", "no summary persisted yet — preview must stay empty, not fabricated");
+    }
+
+    /// reagent P1, PR #2786: without a dedup gate, a definition that can
+    /// never be summarized (no cmd meta, no raw output, CLI failure) gets
+    /// re-spawned on every `listrecentsessions` poll forever —
+    /// `ambient::gateway().admit()` alone only coalesces CONCURRENT
+    /// triggers, not sequential ones, since its guard drops (freeing the
+    /// slot) the moment one call finishes. This tests
+    /// `definition_summary_attempted()`'s claim set directly rather than
+    /// the RPC dispatch (which can't observe whether a background
+    /// `tokio::spawn` happened without mocking the Haiku CLI) — a unique
+    /// id avoids cross-test interference with the process-wide static set.
+    #[test]
+    fn definition_summary_attempted_claims_a_definition_id_at_most_once() {
+        let id = "def-dedup-test-unique-9f3a1b".to_string();
+        assert!(
+            definition_summary_attempted().lock().unwrap().insert(id.clone()),
+            "first claim for a fresh id must succeed"
+        );
+        assert!(
+            !definition_summary_attempted().lock().unwrap().insert(id.clone()),
+            "second claim for the same id must be rejected — this is the fix for \
+             reagent's unbounded-retry finding on PR #2786"
         );
     }
 }
