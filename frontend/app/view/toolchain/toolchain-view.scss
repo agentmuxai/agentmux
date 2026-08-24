@@ -257,3 +257,8 @@
         background: var(--panel-bg-alt, rgba(127, 127, 127, 0.12));
     }
 }
+
+.toolchain-link-btn--install-now {
+    display: flex;
+    padding-left: 0;
+}
