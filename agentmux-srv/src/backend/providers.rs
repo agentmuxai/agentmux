@@ -108,6 +108,16 @@ pub struct ProviderConfig {
     /// to a custom endpoint independent of whether that endpoint's vendor
     /// is even listed here.
     pub supported_vendors: &'static [&'static str],
+    /// Path (relative to the agent's working directory) this provider
+    /// natively auto-discovers its startup instructions from — e.g.
+    /// `"CLAUDE.md"`, `"AGENTS.md"`, `".pi/APPEND_SYSTEM.md"`. `None` when
+    /// no native file-based convention is confirmed to exist (currently
+    /// only `kimi`) — `build_config_files` skips writing the instructions
+    /// file entirely in that case rather than writing inert content nobody
+    /// reads. Set only where independently verified against the provider's
+    /// own docs, not guessed — same discipline as `base_url_env_var` above.
+    /// See docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2.
+    pub startup_instructions_filename: Option<&'static str>,
 }
 
 impl ProviderConfig {
@@ -207,6 +217,7 @@ static CLAUDE: ProviderConfig = ProviderConfig {
     // (or proxied) backend — Bedrock, Vertex, OpenRouter, a custom proxy.
     base_url_env_var: Some("ANTHROPIC_BASE_URL"),
     supported_vendors: &["anthropic"],
+    startup_instructions_filename: Some("CLAUDE.md"),
 };
 
 static CODEX: ProviderConfig = ProviderConfig {
@@ -235,6 +246,10 @@ static CODEX: ProviderConfig = ProviderConfig {
     pinned_version: "0.116.0",
     base_url_env_var: None,
     supported_vendors: &["openai"],
+    // Confirmed: SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08.md §10.2 —
+    // "Codex's native project instruction discovery continues to load
+    // user/repository AGENTS.md files normally."
+    startup_instructions_filename: Some("AGENTS.md"),
 };
 
 static GEMINI: ProviderConfig = ProviderConfig {
@@ -257,6 +272,11 @@ static GEMINI: ProviderConfig = ProviderConfig {
     pinned_version: "0.32.1",
     base_url_env_var: None,
     supported_vendors: &["google"],
+    // Confirmed: Gemini CLI docs — context files default to GEMINI.md;
+    // AGENTS.md support exists but requires an explicit contextFileName
+    // override, so GEMINI.md is the correct default-behavior target. See
+    // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2.
+    startup_instructions_filename: Some("GEMINI.md"),
 };
 
 // Qwen Code — Alibaba's open-source coding agent, a fork of Gemini CLI.
@@ -295,6 +315,12 @@ static QWEN: ProviderConfig = ProviderConfig {
     // override mechanism, so this stays unset rather than guessed.
     base_url_env_var: None,
     supported_vendors: &["openrouter"],
+    // Confirmed: Qwen Code settings docs — QWEN.md is a built-in default
+    // contextFileName; AGENTS.md needs explicit config (open feature
+    // requests QwenLM/qwen-code#2006, #504 ask for it to become default,
+    // confirming it isn't yet). See
+    // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2.
+    startup_instructions_filename: Some("QWEN.md"),
 };
 
 static KIMI: ProviderConfig = ProviderConfig {
@@ -323,6 +349,19 @@ static KIMI: ProviderConfig = ProviderConfig {
     pinned_version: "",
     base_url_env_var: None,
     supported_vendors: &["moonshot"],
+    // Confirmed absence: docs/specs/KIMI_PROVIDER_INTEGRATION_SPEC.md
+    // already researched this — Kimi has no auto-read markdown convention
+    // ("does not appear to auto-read CLAUDE.md... skip KIMI.md
+    // generation"). Re-verified 2026-08-24: Kimi's only file-based prompt
+    // customization is --agent-file <yaml> with a system_prompt_path field
+    // (a CLI flag this provider's launch_args above doesn't pass), and an
+    // open, unshipped feature request (MoonshotAI/kimi-cli#1856) for a
+    // project-level system_prompt.md override. Writing any markdown file
+    // here would be inert output nobody reads — None, not a guessed
+    // filename. build_config_files skips the instructions file entirely
+    // for a provider with None here. See
+    // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2.
+    startup_instructions_filename: None,
 };
 
 static OPENCLAW: ProviderConfig = ProviderConfig {
@@ -358,6 +397,15 @@ static OPENCLAW: ProviderConfig = ProviderConfig {
     pinned_version: "2026.6.10",
     base_url_env_var: None,
     supported_vendors: &["openai", "anthropic", "google"],
+    // Confirmed convention, UNCONFIRMED path: docs.openclaw.ai/reference/AGENTS.default
+    // — AGENTS.md is a required bootstrap file OpenClaw itself creates,
+    // read from each agent's workspace at session start. Whether that
+    // workspace maps 1:1 onto AgentMux's own working_directory for an
+    // ACP-bridged `openclaw acp` session (vs. OpenClaw's own
+    // Gateway-daemon-managed sandbox) is not independently verified here —
+    // best-effort root-level AGENTS.md, flagged as a known gap. See
+    // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2, §6.
+    startup_instructions_filename: Some("AGENTS.md"),
 };
 
 static PI: ProviderConfig = ProviderConfig {
@@ -380,6 +428,14 @@ static PI: ProviderConfig = ProviderConfig {
     pinned_version: "0.73.1",
     base_url_env_var: None,
     supported_vendors: &["pi"],
+    // Confirmed: npmjs.com/package/@mariozechner/pi-coding-agent docs —
+    // .pi/SYSTEM.md REPLACES pi's default system prompt; .pi/APPEND_SYSTEM.md
+    // APPENDS to it. AgentMux's Soul+AgentMD+Memory content is additive
+    // background, not a full system-prompt replacement (pi's own default
+    // prompt carries pi's own tool-usage instructions) — APPEND_SYSTEM.md
+    // is the correct target, not SYSTEM.md. See
+    // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2.
+    startup_instructions_filename: Some(".pi/APPEND_SYSTEM.md"),
 };
 
 // Mux Code — AgentMux's first-party agentic coding CLI.
@@ -411,6 +467,11 @@ static MUX_CODE: ProviderConfig = ProviderConfig {
     pinned_version: "0.1.0",
     base_url_env_var: None,
     supported_vendors: &["ollama", "anthropic", "openai"],
+    // Confirmed by design intent: this provider's own doc comment above
+    // states it "emits claude-compatible stream-json NDJSON... handled
+    // without modification [by ClaudeTranslator]" — a deliberate
+    // compatibility choice by the same team that owns both, not a guess.
+    startup_instructions_filename: Some("CLAUDE.md"),
 };
 
 // GitHub Copilot CLI — Microsoft's coding agent. Runs in ACP mode via
@@ -437,6 +498,13 @@ static COPILOT: ProviderConfig = ProviderConfig {
     pinned_version: "1.0.65",
     base_url_env_var: None,
     supported_vendors: &["github"],
+    // Confirmed: GitHub Copilot CLI custom-instructions docs — supports
+    // AGENTS.md (root, single-file, no subdirectory needed) alongside
+    // .github/copilot-instructions.md, CLAUDE.md, GEMINI.md. AGENTS.md
+    // chosen as the one canonical target since Copilot has no single
+    // privileged default the way Gemini/Qwen do. See
+    // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2.
+    startup_instructions_filename: Some("AGENTS.md"),
 };
 
 // Antigravity (AGY) — Google's agentic coding CLI harness. Emits the same
@@ -466,6 +534,14 @@ static ANTIGRAVITY: ProviderConfig = ProviderConfig {
     pinned_version: "1.0.0",
     base_url_env_var: None,
     supported_vendors: &["google"],
+    // INFERRED, not independently doc-confirmed: Antigravity CLI's own
+    // settings live at ~/.gemini/antigravity-cli/settings.json — same
+    // ~/.gemini/ namespace root as Gemini CLI itself, consistent with this
+    // provider's own doc comment above (shares Gemini CLI's NDJSON
+    // schema). No explicit Antigravity docs page independently confirms
+    // GEMINI.md context-file behavior. Flagged as a known gap. See
+    // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2, §6.
+    startup_instructions_filename: Some("GEMINI.md"),
 };
 
 // ─── Static registry ─────────────────────────────────────────────────────────
@@ -538,6 +614,21 @@ pub fn get_provider(id: &str) -> Option<&'static ProviderConfig> {
     // Fall back to alias resolution.
     let canonical = ALIASES.get(id).copied()?;
     REGISTRY.get(canonical).copied()
+}
+
+/// Whether `path` matches ANY registered provider's
+/// `startup_instructions_filename` — used by the "click Launch" RPC write
+/// path (`editor_handlers.rs`'s `WriteAgentConfig` handler), which receives
+/// an already-built file list from the frontend with no accompanying
+/// provider ID, so it can't otherwise tell "this is the startup
+/// instructions file" from "this is some other config file" without either
+/// re-deriving the mapping itself (drift risk) or checking membership here
+/// (single source of truth). See
+/// docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §3.
+pub fn is_known_startup_instructions_filename(path: &str) -> bool {
+    REGISTRY
+        .values()
+        .any(|p| p.startup_instructions_filename == Some(path))
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -697,5 +788,40 @@ mod tests {
                 "provider '{id}' should not declare base_url_env_var yet (unverified)"
             );
         }
+    }
+
+    // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2's
+    // per-provider table, pinned so a future edit can't silently drift from
+    // the researched/cited values.
+    #[test]
+    fn startup_instructions_filename_matches_researched_table() {
+        let expected: &[(&str, Option<&str>)] = &[
+            ("claude", Some("CLAUDE.md")),
+            ("codex", Some("AGENTS.md")),
+            ("gemini", Some("GEMINI.md")),
+            ("qwen", Some("QWEN.md")),
+            ("copilot", Some("AGENTS.md")),
+            ("openclaw", Some("AGENTS.md")),
+            ("pi", Some(".pi/APPEND_SYSTEM.md")),
+            ("antigravity", Some("GEMINI.md")),
+            ("muxcode", Some("CLAUDE.md")),
+            ("kimi", None),
+        ];
+        for (id, filename) in expected {
+            let p = get_provider(id).unwrap_or_else(|| panic!("provider '{id}' not registered"));
+            assert_eq!(
+                p.startup_instructions_filename, *filename,
+                "provider '{id}' startup_instructions_filename mismatch"
+            );
+        }
+    }
+
+    #[test]
+    fn kimi_has_no_startup_instructions_filename() {
+        let p = get_provider("kimi").unwrap();
+        assert!(
+            p.startup_instructions_filename.is_none(),
+            "kimi has no confirmed native startup-instructions file — see SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2"
+        );
     }
 }
