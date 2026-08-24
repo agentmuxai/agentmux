@@ -266,13 +266,78 @@ mod imp {
             .join("install-userns-apparmor-fix.sh")
     }
 
+    /// Create the temp file holding the generated AppArmor profile that
+    /// `run_pkexec_fix` hands to the privileged helper, using a random
+    /// (not predictable), owner-only-readable, exclusively-created path.
+    ///
+    /// A fixed, predictable filename in the shared world-writable temp
+    /// directory (e.g. `agentmux-userns.profile`) is a real local
+    /// privilege-escalation vector (reagent P1 on PR #2783, missed in the
+    /// first fix pass): a local attacker who can predict the path can
+    /// pre-position a symlink or file there and win the race between this
+    /// unprivileged write and pkexec's privileged read, causing root to
+    /// install attacker-controlled content at
+    /// `/etc/apparmor.d/agentmux-userns`. Three independent mitigations,
+    /// not just one:
+    ///   1. Random suffix (kernel CSPRNG via `/dev/urandom`, falling back
+    ///      to PID+nanosecond-timestamp only if that's somehow
+    ///      unavailable) — an attacker can't pre-position anything at a
+    ///      path they can't predict in advance.
+    ///   2. `O_CREAT | O_EXCL` (`create_new(true)`) — atomically fails if
+    ///      the path already exists (e.g. a pre-positioned symlink),
+    ///      rather than following it.
+    ///   3. Mode `0o600` (owner read/write only) at creation time, so even
+    ///      within the narrow window before pkexec reads it, no other
+    ///      unprivileged user on the system can read or substitute it.
+    fn create_secure_temp_profile(contents: &str) -> Result<std::path::PathBuf, String> {
+        use std::io::{Read, Write};
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let mut random_bytes = [0u8; 16];
+        if std::fs::File::open("/dev/urandom")
+            .and_then(|mut f| f.read_exact(&mut random_bytes))
+            .is_err()
+        {
+            // /dev/urandom is present on every real Linux system; this
+            // fallback only guards against something like a minimal
+            // container image missing it. Weaker (PID + timestamp are far
+            // less entropy than a CSPRNG), but combined with O_EXCL + 0600
+            // below, still closes the "attacker pre-positions a file at a
+            // KNOWN path" attack this exists to prevent — it's the
+            // *predictability* that's the vulnerability, and neither
+            // source is predictable to an attacker in advance.
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos())
+                .unwrap_or(0);
+            let pid = std::process::id();
+            random_bytes[..4].copy_from_slice(&pid.to_ne_bytes());
+            random_bytes[4..8].copy_from_slice(&nanos.to_ne_bytes());
+        }
+        let suffix: String = random_bytes.iter().map(|b| format!("{b:02x}")).collect();
+        let profile_path =
+            std::env::temp_dir().join(format!("agentmux-userns-{suffix}.profile"));
+
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true) // O_EXCL — fail rather than follow a pre-existing path/symlink
+            .mode(0o600) // owner-only
+            .open(&profile_path)
+            .map_err(|e| format!("failed to create temp profile: {e}"))?;
+        file.write_all(contents.as_bytes())
+            .map_err(|e| format!("failed to write temp profile: {e}"))?;
+
+        Ok(profile_path)
+    }
+
     /// Run the pkexec-elevated one-time fix: writes `build_apparmor_profile()`'s
-    /// output to a temp file, then invokes the bundled helper script
-    /// (resolved via `resolve_helper_script_path()`) via `pkexec` to copy
-    /// it into place and reload AppArmor. The profile TEXT
-    /// lives only in `build_apparmor_profile()` (tested, §see module docs) —
-    /// the privileged helper script only does the mechanical copy+reload,
-    /// so there's a single source of truth for what the profile actually
+    /// output to a securely-created temp file (`create_secure_temp_profile`),
+    /// then invokes the bundled helper script (resolved via
+    /// `resolve_helper_script_path()`) via `pkexec` to copy it into place
+    /// and reload AppArmor. The profile TEXT lives only in
+    /// `build_apparmor_profile()` (tested, §see module docs) — the
+    /// privileged helper script only does the mechanical copy+reload, so
+    /// there's a single source of truth for what the profile actually
     /// grants rather than the same text duplicated in a bundled template
     /// that could drift from what Rust generates.
     ///
@@ -281,9 +346,7 @@ mod imp {
     /// cancelling the polkit password prompt both surface as Err with a
     /// message suitable for direct display.
     pub fn run_pkexec_fix(helper_script: &std::path::Path) -> Result<(), String> {
-        let profile_path = std::env::temp_dir().join("agentmux-userns.profile");
-        std::fs::write(&profile_path, build_apparmor_profile())
-            .map_err(|e| format!("failed to write temp profile: {e}"))?;
+        let profile_path = create_secure_temp_profile(&build_apparmor_profile())?;
 
         if !have_on_path("pkexec") {
             return Err(format!(
