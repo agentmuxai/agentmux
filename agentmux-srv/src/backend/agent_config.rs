@@ -44,11 +44,17 @@ pub struct AgentConfigFile {
 
 /// Build the list of config files to write to the agent working directory.
 ///
-/// Assembles `CLAUDE.md` from `soul` + `agentmd` + `memory` + skills index,
-/// writes each skill as a slash command under `.claude/commands/<trigger>.md`,
-/// writes `.claude/hooks.json` if a `hooks` content entry is present,
-/// auto-injects the AgentMux MCP server entry, and applies `{{VARIABLE}}`
-/// template substitution throughout.
+/// Assembles the startup instructions file (`CLAUDE.md`, `AGENTS.md`,
+/// `GEMINI.md`, ... — resolved per `provider_id` via
+/// `providers::get_provider(provider_id).startup_instructions_filename`;
+/// see docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md)
+/// from `soul` + `agentmd` + `memory` + skills index, writes each skill as
+/// a slash command under `.claude/commands/<trigger>.md`, writes
+/// `.claude/hooks.json` if a `hooks` content entry is present, auto-injects
+/// the AgentMux MCP server entry, and applies `{{VARIABLE}}` template
+/// substitution throughout. An unrecognized `provider_id`, or one with no
+/// confirmed native file (currently only `kimi`), gets no instructions
+/// file written at all — never a silent `CLAUDE.md` fallback.
 ///
 /// Mirrors `buildConfigFiles()` in `frontend/app/view/agent/agent-model.ts`.
 pub fn build_config_files(
@@ -58,6 +64,7 @@ pub fn build_config_files(
     agent_id: &str,
     agent_slug: &str,
     working_directory: &str,
+    provider_id: &str,
 ) -> Vec<AgentConfigFile> {
     let mut files: Vec<AgentConfigFile> = Vec::new();
 
@@ -72,28 +79,28 @@ pub fn build_config_files(
     template_vars.insert("DATE".to_string(), Utc::now().format("%Y-%m-%d").to_string());
 
     // ----------------------------------------------------------------
-    // Build CLAUDE.md: Soul + AgentMD + Memory + Skills index
+    // Build the startup instructions file: Soul + AgentMD + Memory + Skills index
     // ----------------------------------------------------------------
-    let mut claude_md_parts: Vec<String> = Vec::new();
+    let mut instructions_parts: Vec<String> = Vec::new();
 
     if let Some(soul) = content_map.get("soul") {
-        claude_md_parts.push(expand_template(soul, &template_vars));
+        instructions_parts.push(expand_template(soul, &template_vars));
     }
     if let Some(agentmd) = content_map.get("agentmd") {
-        if !claude_md_parts.is_empty() {
-            claude_md_parts.push("\n---\n".to_string());
+        if !instructions_parts.is_empty() {
+            instructions_parts.push("\n---\n".to_string());
         }
-        claude_md_parts.push(expand_template(agentmd, &template_vars));
+        instructions_parts.push(expand_template(agentmd, &template_vars));
     }
     if let Some(memory) = content_map.get("memory") {
-        claude_md_parts.push("\n# Memory\n".to_string());
-        claude_md_parts.push(memory.clone());
+        instructions_parts.push("\n# Memory\n".to_string());
+        instructions_parts.push(memory.clone());
     }
 
     // Append skill index with trigger references
     if !skills.is_empty() {
-        claude_md_parts.push("\n# Available Skills\n\n".to_string());
-        claude_md_parts.push("Use `/<trigger>` to invoke a skill.\n\n".to_string());
+        instructions_parts.push("\n# Available Skills\n\n".to_string());
+        instructions_parts.push("Use `/<trigger>` to invoke a skill.\n\n".to_string());
         for skill in skills {
             let trigger_part = if skill.trigger.is_empty() {
                 String::new()
@@ -105,15 +112,22 @@ pub fn build_config_files(
             } else {
                 format!(" \u{2014} {}", skill.description)
             };
-            claude_md_parts.push(format!("- **{}**{}{}\n", skill.name, trigger_part, desc_part));
+            instructions_parts.push(format!("- **{}**{}{}\n", skill.name, trigger_part, desc_part));
         }
     }
 
-    if !claude_md_parts.is_empty() {
-        files.push(AgentConfigFile {
-            filename: "CLAUDE.md".to_string(),
-            content: claude_md_parts.join(""),
-        });
+    // Resolved per-provider — `None` for an unrecognized provider_id or one
+    // with no confirmed native file (kimi) skips writing this file
+    // entirely rather than guessing "CLAUDE.md".
+    let instructions_filename = crate::backend::providers::get_provider(provider_id)
+        .and_then(|p| p.startup_instructions_filename);
+    if !instructions_parts.is_empty() {
+        if let Some(filename) = instructions_filename {
+            files.push(AgentConfigFile {
+                filename: filename.to_string(),
+                content: instructions_parts.join(""),
+            });
+        }
     }
 
     // ----------------------------------------------------------------
@@ -1263,7 +1277,7 @@ mod tests {
             "desc",
             "malicious content",
         )];
-        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria");
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria", "claude");
         assert!(
             files.iter().all(|f| !f.filename.contains("..")),
             "no config file path may contain '..': {:?}",
@@ -1330,11 +1344,85 @@ mod tests {
         content_map.insert("soul".to_string(), "You are {{AGENT}}.".to_string());
         content_map.insert("agentmd".to_string(), "## Instructions\nDo stuff.".to_string());
 
-        let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria", "/tmp/aria");
+        let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria", "/tmp/aria", "claude");
         let claude_md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
         assert!(claude_md.content.contains("You are Aria."));
         assert!(claude_md.content.contains("---"));
         assert!(claude_md.content.contains("## Instructions"));
+    }
+
+    // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §7:
+    // per-provider filename resolution, pinned against §2's researched
+    // table so it can't silently drift.
+    #[test]
+    fn test_build_config_files_resolves_provider_specific_filename() {
+        let cases: &[(&str, &str)] = &[
+            ("claude", "CLAUDE.md"),
+            ("codex", "AGENTS.md"),
+            ("gemini", "GEMINI.md"),
+            ("qwen", "QWEN.md"),
+            ("copilot", "AGENTS.md"),
+            ("openclaw", "AGENTS.md"),
+            ("pi", ".pi/APPEND_SYSTEM.md"),
+            ("antigravity", "GEMINI.md"),
+            ("muxcode", "CLAUDE.md"),
+        ];
+        for (provider_id, expected_filename) in cases {
+            let mut content_map = HashMap::new();
+            content_map.insert("soul".to_string(), "You are Aria.".to_string());
+            let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria", "/tmp/aria", provider_id);
+            let instructions_files: Vec<&str> = files
+                .iter()
+                .filter(|f| f.filename == *expected_filename)
+                .map(|f| f.content.as_str())
+                .collect();
+            assert_eq!(
+                instructions_files.len(),
+                1,
+                "provider '{provider_id}' should produce exactly one file named '{expected_filename}': {:?}",
+                files.iter().map(|f| &f.filename).collect::<Vec<_>>()
+            );
+            assert!(instructions_files[0].contains("You are Aria."));
+        }
+    }
+
+    #[test]
+    fn test_build_config_files_kimi_gets_no_instructions_file() {
+        // Confirmed absence (SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md
+        // §2): Kimi has no native file-based startup-instructions
+        // discovery — writing one would be inert output nobody reads.
+        let mut content_map = HashMap::new();
+        content_map.insert("soul".to_string(), "You are Aria.".to_string());
+        content_map.insert("agentmd".to_string(), "## Instructions".to_string());
+        content_map.insert("memory".to_string(), "Some memory content".to_string());
+        let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria", "/tmp/aria", "kimi");
+        assert!(
+            files.iter().all(|f| !f.filename.ends_with(".md") || f.filename.starts_with(".claude/")),
+            "kimi must get no top-level instructions file, even with soul/agentmd/memory content present: {:?}",
+            files.iter().map(|f| &f.filename).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_build_config_files_unrecognized_provider_gets_no_instructions_file() {
+        // An unrecognized provider_id (typo, not-yet-registered) must not
+        // silently fall back to "CLAUDE.md" — same no-op path as kimi.
+        // .claude/settings.json and .mcp.json are still written (they're
+        // provider-unconditional today, unaffected by this spec — §5's
+        // ".claude/-namespaced files... out of scope"), so this checks
+        // specifically for the absence of any known instructions filename,
+        // not an empty result.
+        let mut content_map = HashMap::new();
+        content_map.insert("soul".to_string(), "You are Aria.".to_string());
+        let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria", "/tmp/aria", "not-a-real-provider");
+        let known_instructions_filenames = [
+            "CLAUDE.md", "AGENTS.md", "GEMINI.md", "QWEN.md", ".pi/APPEND_SYSTEM.md",
+        ];
+        assert!(
+            !files.iter().any(|f| known_instructions_filenames.contains(&f.filename.as_str())),
+            "no instructions file should be written for an unrecognized provider: {:?}",
+            files.iter().map(|f| &f.filename).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -1345,7 +1433,7 @@ mod tests {
             make_skill("Test", "test", "Run tests", "Run: test suite"),
         ];
 
-        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria");
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria", "claude");
 
         // CLAUDE.md should have the skills index
         let claude_md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
@@ -1367,7 +1455,7 @@ mod tests {
             "1. Run tests\n2. Check migrations\n3. Deploy",
         )];
 
-        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria");
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria", "claude");
 
         // Materializes to .claude/skills/<slug>/SKILL.md, not .claude/commands/
         let skill_file = files
@@ -1405,7 +1493,7 @@ mod tests {
             "body",
         )];
 
-        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria");
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria", "claude");
         let skill_file = files
             .iter()
             .find(|f| f.filename.starts_with(".claude/skills/") && f.filename.ends_with("SKILL.md"))
@@ -1426,7 +1514,7 @@ mod tests {
         // display name (e.g. "Deploy Checklist") is spec-invalid.
         let content_map = HashMap::new();
         let skills = vec![make_agent_skill("Deploy Checklist", "desc", "body")];
-        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria");
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria", "claude");
         let skill_file = files.iter().find(|f| f.filename.ends_with("SKILL.md")).unwrap();
         assert!(skill_file.content.contains("name: \"deploy-checklist\""));
         assert!(!skill_file.content.contains("name: \"Deploy Checklist\""));
@@ -1438,7 +1526,7 @@ mod tests {
         // description; the UI permits creating a skill with none.
         let content_map = HashMap::new();
         let skills = vec![make_agent_skill("Deploy Checklist", "", "body")];
-        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria");
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria", "claude");
         let skill_file = files.iter().find(|f| f.filename.ends_with("SKILL.md")).unwrap();
         assert!(!skill_file.content.contains("description: \"\""), "empty description must not reach the spec-invalid empty string: {}", skill_file.content);
         assert!(skill_file.content.contains("description: \"No description provided.\""));
@@ -1451,7 +1539,7 @@ mod tests {
         let content_map = HashMap::new();
         let long_description = "x".repeat(2000);
         let skills = vec![make_agent_skill("Deploy Checklist", &long_description, "body")];
-        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria");
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria", "claude");
         let skill_file = files.iter().find(|f| f.filename.ends_with("SKILL.md")).unwrap();
         // Extract the description value between the quotes on its line.
         let desc_line = skill_file.content.lines().find(|l| l.starts_with("description: ")).unwrap();
@@ -1472,7 +1560,7 @@ mod tests {
             make_agent_skill("Deploy   Checklist", "Third skill", "body three"),
         ];
 
-        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria");
+        let files = build_config_files(&content_map, &skills, "Aria", "agent-1", "aria", "/tmp/aria", "claude");
 
         let skill_files: Vec<&AgentConfigFile> = files
             .iter()
@@ -1547,7 +1635,7 @@ mod tests {
             r#"{"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"my-audit"}]}]}"#
                 .to_string(),
         );
-        let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria", "/tmp/aria");
+        let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria", "/tmp/aria", "claude");
         let settings = files
             .iter()
             .find(|f| f.filename == ".claude/settings.json")
@@ -1588,7 +1676,7 @@ mod tests {
             r#"{"PreCompact":[{"matcher":"manual","hooks":[{"type":"command","command":"my-precompact-audit"}]}]}"#
                 .to_string(),
         );
-        let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria", "/tmp/aria");
+        let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria", "/tmp/aria", "claude");
         let settings = files
             .iter()
             .find(|f| f.filename == ".claude/settings.json")
@@ -1633,7 +1721,7 @@ mod tests {
             r#"{"hooks":{"PreCompact":[{"matcher":"auto","hooks":[{"type":"command","command":"my-settings-precompact"}]}]}}"#
                 .to_string(),
         );
-        let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria", "/tmp/aria");
+        let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria", "/tmp/aria", "claude");
         let settings = files
             .iter()
             .find(|f| f.filename == ".claude/settings.json")
@@ -1670,7 +1758,7 @@ mod tests {
     #[test]
     fn test_build_config_files_mcp_written() {
         let content_map = HashMap::new();
-        let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria", "/tmp/aria");
+        let files = build_config_files(&content_map, &[], "Aria", "agent-1", "aria", "/tmp/aria", "claude");
         let mcp = files.iter().find(|f| f.filename == ".mcp.json").unwrap();
         let parsed: Value = serde_json::from_str(&mcp.content).unwrap();
         assert!(parsed["mcpServers"]["agentmux"].is_object());
@@ -1694,6 +1782,7 @@ mod tests {
             "agent-1",
             "aria",
             "/home/user/my-project",
+            "claude",
         );
         let claude_md = files.iter().find(|f| f.filename == "CLAUDE.md").unwrap();
         assert!(claude_md.content.contains("I am aria, working in /home/user/my-project."));

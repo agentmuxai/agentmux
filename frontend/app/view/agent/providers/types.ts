@@ -140,4 +140,17 @@ export interface ProviderDefinition {
      * Rust's `ProviderConfig::supported_vendors`.
      */
     supportedVendors?: string[];
+    /**
+     * Path (relative to the agent's working directory) this provider
+     * natively auto-discovers its startup instructions from — e.g.
+     * `"CLAUDE.md"`, `"AGENTS.md"`, `".pi/APPEND_SYSTEM.md"`. Omitted when
+     * no native file-based convention is confirmed to exist (currently
+     * only `kimi`) — `buildConfigFiles` skips writing the instructions
+     * file entirely in that case. Mirrors Rust's
+     * `ProviderConfig::startup_instructions_filename` — set only where
+     * independently verified against the provider's own docs, not
+     * guessed. See
+     * docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2.
+     */
+    startupInstructionsFilename?: string;
 }

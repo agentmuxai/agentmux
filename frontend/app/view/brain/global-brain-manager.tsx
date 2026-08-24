@@ -5,8 +5,9 @@
 // PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md §4.2 naming decision — "the
 // brain" is a colloquial nickname, "Memory" is the canonical term). Presents
 // the workspace-wide global brain (is_global Memory bundles) as an ordered
-// list of editable sections that compose into every agent's CLAUDE.md at
-// launch.
+// list of editable sections that compose into every agent's startup
+// instructions file (CLAUDE.md, GEMINI.md, or similar, depending on
+// provider) at launch.
 //
 // Context-free: owns its own GlobalBrainViewModel and drives off the
 // bundle_* RPCs. Spec: specs/archive/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md.
@@ -40,7 +41,7 @@ function SectionEditor(props: { model: GlobalBrainViewModel; isNew: boolean }): 
                     value={model.draftInstructionsAtom()}
                     onInput={(e) => model.setDraftInstructions(e.currentTarget.value)}
                     onContextMenu={showTextInputContextMenu}
-                    placeholder="Markdown injected into every agent's CLAUDE.md under a # [Workspace] heading."
+                    placeholder="Markdown injected into every agent's startup instructions file under a # [Workspace] heading."
                     spellcheck={false}
                 />
             </label>
@@ -91,7 +92,7 @@ function SystemSectionEditor(props: { model: GlobalBrainViewModel; isNew: boolea
                     value={model.draftSystemInstructionsAtom()}
                     onInput={(e) => model.setDraftSystemInstructions(e.currentTarget.value)}
                     onContextMenu={showTextInputContextMenu}
-                    placeholder="Markdown injected FIRST into every agent's CLAUDE.md, wrapped in explicit override wording."
+                    placeholder="Markdown injected FIRST into every agent's startup instructions file, wrapped in explicit override wording."
                     spellcheck={false}
                 />
             </label>
@@ -131,7 +132,8 @@ export const GlobalBrainManager = (): JSX.Element => {
         <div class="global-brain">
             <p class="global-brain-intro">
                 Every agent inherits these sections at launch. They compose into the
-                agent's <code>CLAUDE.md</code> in order, each under a{" "}
+                agent's startup instructions file (e.g. <code>CLAUDE.md</code>,{" "}
+                <code>GEMINI.md</code>) in order, each under a{" "}
                 <code># [Workspace]</code> heading.
             </p>
 
@@ -305,12 +307,38 @@ export const GlobalBrainManager = (): JSX.Element => {
                 </Show>
             </div>
 
+            {/* Same content lands in every one of these files (it doesn't
+                diverge per provider) — this is visibility into WHERE it
+                lands, not N separate previews. See
+                docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §3.4. */}
+            <div class="global-brain-applies-to">
+                <span class="global-brain-applies-to-label">Applies to:</span>
+                <For each={model.filenameGroupsAtom()}>
+                    {(group) => (
+                        <span
+                            class="global-brain-applies-to-chip"
+                            title={group.providerNames.join(", ")}
+                        >
+                            <code>{group.filename}</code>
+                        </span>
+                    )}
+                </For>
+                <Show when={model.noFileProvidersAtom().length > 0}>
+                    <span
+                        class="global-brain-applies-to-chip global-brain-applies-to-chip-warning"
+                        title={`${model.noFileProvidersAtom().join(", ")}: no confirmed startup-instructions file yet — see SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2`}
+                    >
+                        not yet applied to: {model.noFileProvidersAtom().join(", ")}
+                    </span>
+                </Show>
+            </div>
+
             <div class="global-brain-preview">
                 <button
                     class="global-brain-preview-toggle"
                     onClick={() => model.setShowPreview(!model.showPreviewAtom())}
                 >
-                    {model.showPreviewAtom() ? "▾" : "▸"} Combined CLAUDE.md preview
+                    {model.showPreviewAtom() ? "▾" : "▸"} Combined preview (same content, every applicable file)
                 </button>
                 <Show when={model.showPreviewAtom()}>
                     <pre class="global-brain-preview-content">

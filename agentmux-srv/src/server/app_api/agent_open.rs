@@ -733,6 +733,7 @@ pub(super) fn write_agent_config_files(
         &agent.id,
         agent_slug,
         work_dir,
+        &agent.provider,
     );
 
     // v1 MCP: same rule. Globals + synthetic "agentmux" are always emitted; the

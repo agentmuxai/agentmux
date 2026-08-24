@@ -218,6 +218,38 @@
     cursor: default;
 }
 
+// ── Applies-to (SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §3.4) ──
+
+.global-brain-applies-to {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1-5);
+    padding-top: var(--space-1);
+}
+
+.global-brain-applies-to-label {
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
+
+.global-brain-applies-to-chip {
+    padding: 1px var(--space-1-5);
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+    background: var(--main-bg-color);
+    border: 1px solid var(--border-color);
+
+    code {
+        font-family: var(--fixed-font, monospace);
+    }
+}
+
+.global-brain-applies-to-chip-warning {
+    color: var(--warning-color, #b8860b);
+    border-color: var(--warning-color, #b8860b);
+}
+
 // ── Preview ──────────────────────────────────────────────────────────────────
 
 .global-brain-preview {

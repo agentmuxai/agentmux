@@ -335,6 +335,27 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         tracing::debug!(path = %file_path.display(), "wrote config file (ownership-aware)");
                         continue;
                     }
+                    // This RPC command carries no provider ID (`CommandWriteAgentConfigData`
+                    // is just `{working_dir, files}` — the frontend already
+                    // resolved everything), so a non-Claude provider's
+                    // startup-instructions file (AGENTS.md, GEMINI.md,
+                    // QWEN.md, .pi/APPEND_SYSTEM.md, ...) is recognized by
+                    // filename membership against the provider registry,
+                    // not a literal string match. Still gets the same
+                    // global-memory-bundle injection CLAUDE.md gets above —
+                    // otherwise a Codex/Gemini/etc. agent launched from the
+                    // picker would silently receive no workspace-wide
+                    // Global Memory content at all. No ownership-protection
+                    // equivalent yet for these (CLAUDE.md's protection is
+                    // deeply coupled to Claude Code's own `@import` syntax
+                    // for its fallback file — not something to hastily
+                    // generalize here); flagged as an explicit follow-up in
+                    // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §5.
+                    let content = if crate::backend::providers::is_known_startup_instructions_filename(&file.path) {
+                        inject_global_bundles(&file.content, &id_store)
+                    } else {
+                        file.content.clone()
+                    };
                     // Create parent directories if needed
                     if let Some(parent) = file_path.parent() {
                         if !parent.exists() {
@@ -342,7 +363,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                 .map_err(|e| format!("failed to create dir for {}: {e}", file.path))?;
                         }
                     }
-                    std::fs::write(&file_path, &file.content)
+                    std::fs::write(&file_path, &content)
                         .map_err(|e| format!("failed to write {}: {e}", file.path))?;
                     tracing::debug!(path = %file_path.display(), "wrote config file");
                 }
