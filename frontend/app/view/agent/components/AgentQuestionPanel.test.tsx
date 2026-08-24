@@ -90,6 +90,10 @@ function escapeOn(el: Element): void {
     el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
 }
 
+function keydownOn(el: Element, key = "Tab"): void {
+    el.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+}
+
 describe("AgentQuestionPanel keyboard handling", () => {
     it("does not submit on Enter before any option is selected", () => {
         const onAnswer = vi.fn();
@@ -441,5 +445,237 @@ describe("AgentQuestionPanel hover-pause (SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_P
 
         vi.advanceTimersByTime(30_000);
         expect(onAnswer).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("AgentQuestionPanel keyboard-pause (SPEC_ASK_USER_QUESTION_TIMEOUT_KEYBOARD_PAUSE_2026_08_20.md)", () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    const panel = () => screen.getByRole("group", { name: /Agent question/ });
+
+    it("hides the countdown immediately on a qualifying keydown inside the panel", () => {
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        vi.advanceTimersByTime(5_000); // 25s remaining
+        expect(screen.getByText(/Auto-selects recommended in 25s/)).toBeTruthy();
+
+        keydownOn(panel(), "Tab");
+        expect(screen.queryByText(/Auto-selects recommended in/)).toBeNull();
+    });
+
+    // Also serves as the regression guard mirroring the hover-pause spec's
+    // own §9 guard: no activity at all after this single keydown, and it
+    // still resumes and auto-submits on schedule rather than pausing
+    // indefinitely.
+    it("resumes at a fresh 30s exactly 15s after that keydown, then auto-submits on schedule with no further activity", () => {
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        vi.advanceTimersByTime(18_000); // 12s remaining
+        keydownOn(panel(), "Tab");
+
+        vi.advanceTimersByTime(10_000);
+        expect(screen.queryByText(/Auto-selects recommended in/)).toBeNull();
+        expect(onAnswer).not.toHaveBeenCalled();
+
+        vi.advanceTimersByTime(5_000);
+        expect(screen.getByText(/Auto-selects recommended in 30s/)).toBeTruthy();
+
+        vi.advanceTimersByTime(30_000);
+        expect(onAnswer).toHaveBeenCalledTimes(1);
+    });
+
+    // reagentx P1, PR #2787: an earlier version of this feature called
+    // onPanelPointerEnter() unconditionally on every qualifying keydown,
+    // including OS key-repeat while a key is held and every character of
+    // continuous typing. Unlike `mouseenter` — which a real browser only
+    // fires on an actual boundary-crossing, so it can't be spammed by normal
+    // use — `keydown` fires on every keystroke, so re-arming on each one let
+    // typing faster than 15s apart (or simply holding a key) suppress the
+    // auto-timeout indefinitely, breaking the "paused for at most one
+    // HOVER_HIDE_GRACE_MS window" safety invariant. Pin the fix: only the
+    // FIRST keydown of a burst (the transition into the paused state)
+    // (re)arms the window — later keydowns while still hidden are no-ops.
+    it("repeated keydowns while still hidden do not extend the window past one HOVER_HIDE_GRACE_MS (key-repeat/continuous-typing safety bound)", () => {
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        keydownOn(panel(), "Tab"); // first keydown — hides, starts the 15s window
+        vi.advanceTimersByTime(10_000); // 10s into the window, still hidden
+
+        // Simulates continuous typing / OS key-repeat: several more
+        // qualifying keydowns while already hidden. None of these should
+        // push the window out any further.
+        keydownOn(panel(), "a");
+        keydownOn(panel(), "b");
+        keydownOn(panel(), "c");
+
+        // Elapses exactly 15s after the FIRST keydown, unaffected by the
+        // later ones — the pause never got extended.
+        vi.advanceTimersByTime(5_000);
+        expect(screen.getByText(/Auto-selects recommended in 30s/)).toBeTruthy();
+    });
+
+    it("a keydown after the window resumes starts a fresh window (recursive re-engagement, mirrors the mouse 'recursive' case)", () => {
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        keydownOn(panel(), "Tab");
+        vi.advanceTimersByTime(15_000); // window elapses, resumes at a fresh 30s
+        expect(screen.getByText(/Auto-selects recommended in 30s/)).toBeTruthy();
+
+        keydownOn(panel(), "Tab"); // a fresh, post-resumption keydown re-arms the window
+        expect(screen.queryByText(/Auto-selects recommended in/)).toBeNull();
+
+        vi.advanceTimersByTime(14_000);
+        expect(screen.queryByText(/Auto-selects recommended in/)).toBeNull();
+        expect(onAnswer).not.toHaveBeenCalled();
+
+        vi.advanceTimersByTime(1_000); // t=15s from the second keydown — resumes again
+        expect(screen.getByText(/Auto-selects recommended in 30s/)).toBeTruthy();
+    });
+
+    it("a keydown targeting an element outside the panel but inside the pane does not hide the countdown", () => {
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => (
+            <div class="agent-view">
+                <textarea data-testid="composer" />
+                <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />
+            </div>
+        ));
+
+        vi.advanceTimersByTime(5_000); // 25s remaining
+        keydownOn(screen.getByTestId("composer"), "a");
+
+        expect(screen.getByText(/Auto-selects recommended in 25s/)).toBeTruthy();
+    });
+
+    it("keydown while minimized does not hide/pause anything", async () => {
+        const user = userEvent.setup({ delay: null });
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        await user.click(screen.getByRole("button", { name: /Answer later/ }));
+        keydownOn(document.body, "a");
+
+        // Minimized chip shows the countdown ticking normally, unaffected —
+        // hover-pause never applies to it and neither does this new trigger.
+        expect(screen.getByText(/auto-selects in 30s/)).toBeTruthy();
+
+        vi.advanceTimersByTime(30_000);
+        expect(onAnswer).toHaveBeenCalledTimes(1);
+    });
+
+    // codex P2, PR #2787: while minimized, `rootRef` is reassigned to the
+    // separate minimized `<button>`, so a keydown/focus landing directly on
+    // THAT button (not just elsewhere, like the document.body case above)
+    // used to read as "inside the panel" and incorrectly pause a countdown
+    // that's supposed to keep running unaffected while minimized.
+    it("keydown targeting the minimized button itself does not hide/pause anything", async () => {
+        const user = userEvent.setup({ delay: null });
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        await user.click(screen.getByRole("button", { name: /Answer later/ }));
+        keydownOn(screen.getByRole("button", { name: /Question waiting/ }), "Tab");
+
+        expect(screen.getByText(/auto-selects in 30s/)).toBeTruthy();
+
+        vi.advanceTimersByTime(30_000);
+        expect(onAnswer).toHaveBeenCalledTimes(1);
+    });
+
+    it("focus landing on the minimized button does not hide/pause anything", async () => {
+        const user = userEvent.setup({ delay: null });
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        await user.click(screen.getByRole("button", { name: /Answer later/ }));
+        fireEvent.focusIn(screen.getByRole("button", { name: /Question waiting/ }));
+
+        expect(screen.getByText(/auto-selects in 30s/)).toBeTruthy();
+
+        vi.advanceTimersByTime(30_000);
+        expect(onAnswer).toHaveBeenCalledTimes(1);
+    });
+
+    // codex P2, PR #2787: a real browser moves focus only AFTER a Tab
+    // keydown's default action runs, so the keydown that causes a
+    // keyboard-only user's first entry into the panel has `e.target` still
+    // pointed at whatever they were focused on *before* — outside the
+    // panel. `handleKey`'s own `inPanel` check necessarily misses that one
+    // event; the separate `focusin` listener (which fires once focus has
+    // actually landed) is what catches it.
+    it("focus landing inside the panel (e.g. via Tab) pauses the countdown even though the causing keydown's own target was outside", () => {
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        vi.advanceTimersByTime(5_000); // 25s remaining
+        expect(screen.getByText(/Auto-selects recommended in 25s/)).toBeTruthy();
+
+        fireEvent.focusIn(screen.getByRole("radio", { name: /Red/ }));
+        expect(screen.queryByText(/Auto-selects recommended in/)).toBeNull();
+    });
+
+    it("Enter fired inside the panel still submits, unaffected by the new pause trigger", async () => {
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        const user = userEvent.setup({ delay: null });
+        await user.click(screen.getByRole("radio", { name: /Red/ }));
+
+        enterOn(panel());
+        expect(onAnswer).toHaveBeenCalledTimes(1);
+        expect(onAnswer.mock.calls[0][0].answers_map["Pick a color"]).toBe("Red");
+    });
+
+    it("Escape fired inside the panel still defers, unaffected by the new pause trigger", () => {
+        const onAnswer = vi.fn();
+        const onDefer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onDefer={onDefer} />);
+
+        escapeOn(panel());
+        expect(onDefer).toHaveBeenCalledTimes(1);
+        expect(onAnswer).not.toHaveBeenCalled();
+    });
+
+    it("composes with a mouse-triggered pause: a keydown while already hidden does not extend the mouse-triggered window (single shared bound)", () => {
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        fireEvent.mouseEnter(panel());
+        vi.advanceTimersByTime(10_000); // 10s into the mouse-triggered 15s window, still hidden
+        keydownOn(panel(), "Tab"); // continued engagement via keyboard while already paused
+
+        // Elapses exactly 15s after the mouse entry, unaffected by the
+        // keydown — one shared `hidden` state, bounded to a single window
+        // regardless of which trigger(s) fired during it.
+        vi.advanceTimersByTime(5_000);
+        expect(screen.getByText(/Auto-selects recommended in 30s/)).toBeTruthy();
+        expect(onAnswer).not.toHaveBeenCalled();
+
+        // And a keydown AFTER that resumption still re-arms it normally,
+        // same as the standalone "recursive re-engagement" test above.
+        keydownOn(panel(), "Tab");
+        expect(screen.queryByText(/Auto-selects recommended in/)).toBeNull();
     });
 });
