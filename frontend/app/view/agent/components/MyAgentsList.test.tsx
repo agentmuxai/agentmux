@@ -13,6 +13,7 @@ import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { AgentSortOption } from "./AgentPickerFilterBar";
 import {
     EMPTY_FILTERED,
     EMPTY_GLOBAL,
@@ -320,6 +321,98 @@ describe("MyAgentsList — nameFilter (SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_1
         await Promise.resolve();
 
         expect(RpcApi.ListRecentSessionsCommand).not.toHaveBeenCalled();
+    });
+});
+
+describe("MyAgentsList — sortBy (docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md §3)", () => {
+    const namesInOrder = async (): Promise<string[]> => {
+        const entries = await screen.findAllByTestId("agent-my-agents-entry");
+        return entries.map((e) => e.querySelector(".agent-recent-sessions-name")?.textContent ?? "");
+    };
+
+    it('defaults to "recent" (most-recently-launched first) when sortBy is omitted — existing callers get the same client-side sort as the explicit default, not raw backend order', async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
+            makeRow({ instance_id: "a", instance_name: "Zebra", started_at: 1000 }),
+            makeRow({ instance_id: "b", instance_name: "Alpha", started_at: 2000 }),
+        ]));
+        render(() => <MyAgentsList onReattach={() => {}} />);
+        expect(await namesInOrder()).toEqual(["Alpha", "Zebra"]);
+    });
+
+    it('sorts by name (A→Z), case-insensitively, when sortBy is "name"', async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
+            makeRow({ instance_id: "a", instance_name: "zebra" }),
+            makeRow({ instance_id: "b", instance_name: "Alpha" }),
+            makeRow({ instance_id: "c", instance_name: "middle" }),
+        ]));
+        const [sortBy] = createSignal<AgentSortOption>("name");
+        render(() => <MyAgentsList sortBy={sortBy} onReattach={() => {}} />);
+        expect(await namesInOrder()).toEqual(["Alpha", "middle", "zebra"]);
+    });
+
+    it('sorts by most-recently-launched first when sortBy is "recent"', async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
+            makeRow({ instance_id: "a", instance_name: "Oldest", started_at: 1000 }),
+            makeRow({ instance_id: "b", instance_name: "Newest", started_at: 3000 }),
+            makeRow({ instance_id: "c", instance_name: "Middle", started_at: 2000 }),
+        ]));
+        const [sortBy] = createSignal<AgentSortOption>("recent");
+        render(() => <MyAgentsList sortBy={sortBy} onReattach={() => {}} />);
+        expect(await namesInOrder()).toEqual(["Newest", "Middle", "Oldest"]);
+    });
+
+    it('sorts Host before Sandbox (Container) before unknown when sortBy is "type", each group alphabetical', async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
+            makeRow({ instance_id: "a", instance_name: "Zulu Sandbox", agent_type: "container" }),
+            makeRow({ instance_id: "b", instance_name: "Bravo Host", agent_type: "host" }),
+            makeRow({ instance_id: "c", instance_name: "Alpha Host", agent_type: "host" }),
+            makeRow({ instance_id: "d", instance_name: "Unknown Type", agent_type: undefined }),
+        ]));
+        const [sortBy] = createSignal<AgentSortOption>("type");
+        render(() => <MyAgentsList sortBy={sortBy} onReattach={() => {}} />);
+        expect(await namesInOrder()).toEqual(["Alpha Host", "Bravo Host", "Zulu Sandbox", "Unknown Type"]);
+    });
+
+    it('groups the legacy "standalone" agent_type with Host, not with unrecognized types (Codex P2 on PR #2789)', async () => {
+        // "standalone" is the pre-container-feature default agent_type
+        // (default_agent_type() in backend/storage/agents.rs) — every
+        // non-"container" value is treated as the host controller at
+        // launch, so a "standalone" agent IS effectively a host agent.
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
+            makeRow({ instance_id: "a", instance_name: "Sandbox Agent", agent_type: "container" }),
+            makeRow({ instance_id: "b", instance_name: "Legacy Standalone", agent_type: "standalone" }),
+            makeRow({ instance_id: "c", instance_name: "Explicit Host", agent_type: "host" }),
+        ]));
+        const [sortBy] = createSignal<AgentSortOption>("type");
+        render(() => <MyAgentsList sortBy={sortBy} onReattach={() => {}} />);
+        expect(await namesInOrder()).toEqual(["Explicit Host", "Legacy Standalone", "Sandbox Agent"]);
+    });
+
+    it("re-sorts reactively when sortBy changes after mount", async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
+            makeRow({ instance_id: "a", instance_name: "Zebra", started_at: 2000 }),
+            makeRow({ instance_id: "b", instance_name: "Alpha", started_at: 1000 }),
+        ]));
+        const [sortBy, setSortBy] = createSignal<AgentSortOption>("recent");
+        render(() => <MyAgentsList sortBy={sortBy} onReattach={() => {}} />);
+        expect(await namesInOrder()).toEqual(["Zebra", "Alpha"]);
+        setSortBy("name");
+        await waitFor(async () => expect(await namesInOrder()).toEqual(["Alpha", "Zebra"]));
+    });
+
+    it("does not mutate the underlying fetched row array when sorting (stale-while-revalidate safety)", async () => {
+        const rows = [
+            makeRow({ instance_id: "a", instance_name: "Zebra", started_at: 1000 }),
+            makeRow({ instance_id: "b", instance_name: "Alpha", started_at: 2000 }),
+        ];
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult(rows));
+        const [sortBy] = createSignal<AgentSortOption>("name");
+        render(() => <MyAgentsList sortBy={sortBy} onReattach={() => {}} />);
+        await namesInOrder();
+        // The array vitest handed to the mock's resolved value must still be
+        // in ITS OWN original order — if the sort memo sorted in place
+        // instead of copying first, this would now read ["Alpha", "Zebra"].
+        expect(rows.map((r) => r.instance_name)).toEqual(["Zebra", "Alpha"]);
     });
 });
 

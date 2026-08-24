@@ -2,11 +2,17 @@
 
 **Date:** 2026-08-24
 **Author:** AgentY
-**Type:** Investigation + UX/architecture recommendations — no code changed yet
+**Type:** Investigation + UX/architecture recommendations, since implemented
+(§2, §3, §4 shipped; §5/§5a shipped separately — PR #2786)
 **Scope:** `frontend/app/view/agent/components/AgentPicker.tsx`,
 `AgentPickerFilterBar.tsx`, `MyAgentsList.tsx`,
 `frontend/app/view/agent/styles/_recent-sessions.scss`,
 `agentmux-srv/src/server/agent_handlers/session.rs`
+
+**Status update (2026-08-24, later same day):** §2 (field reorder), §3
+(sort control), and §4 (distinct account-failure text) implemented —
+see the PR that shipped this report's own recommendations. §5/§5a (the
+snapshot-preview fallback) shipped earlier, separately, as PR #2786.
 
 Prompted by direct user feedback: "a lot of the fields are out of order,"
 a request for name/launch-date/type sort controls at the right edge of the

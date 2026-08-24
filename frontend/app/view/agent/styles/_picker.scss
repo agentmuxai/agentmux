@@ -105,6 +105,47 @@
         }
     }
 
+    // Sort control — far right of the filter bar, after the input/clear
+    // button (`margin-left: auto` keeps it pinned right regardless of
+    // whether the clear button is currently rendered). See
+    // docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md §3.
+    .agent-picker-sort {
+        flex-shrink: 0;
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
+        padding-left: var(--space-2);
+        border-left: 1px solid var(--border-color);
+    }
+
+    .agent-picker-sort-label {
+        flex-shrink: 0;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        color: var(--secondary-text-color);
+        opacity: 0.75;
+    }
+
+    .agent-picker-sort-select {
+        background: var(--main-bg-color);
+        color: var(--main-text-color);
+        border: 1px solid var(--border-color);
+        border-radius: 0;
+        padding: 2px var(--space-1);
+        font-size: 12px;
+        font-family: inherit;
+        outline: none;
+        cursor: default;
+        transition: border-color 0.15s;
+
+        &:focus {
+            border-color: var(--accent-color);
+        }
+    }
+
     // Two-tier picker (Phase 1 — SPEC_AGENT_PICKER_TWO_TIER_2026_05_24.md):
     // the "+ New from template" section header sits between the My
     // Agents list and the templates card grid. Tuned to match the
