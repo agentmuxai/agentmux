@@ -1,5 +1,11 @@
 # AgentMux Version History
 
+## 0.55.23 — 2026-08-23
+
+- fix(agent): surface a Reconnecting… status during stale-resume retry
+- fix(agent-pane): stop the block-mount BrainSpinner overlay getting stuck visible forever
+
+
 ## 0.55.22 — 2026-08-23
 
 - fix(muxspect): wire transcript_request jekt tier enforcement into the WAN delivery path (Phase C)
