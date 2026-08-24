@@ -353,14 +353,30 @@ pub(crate) async fn generate_definition_activity_summary(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0);
-    if wstore.agent_activity_summary_set(definition_id, &summary, now).is_ok() {
-        broker.publish(crate::backend::wps::WaveEvent {
-            event: "agents:changed".to_string(),
-            scopes: vec![],
-            sender: String::new(),
-            persist: 0,
-            data: None,
-        });
+    match wstore.agent_activity_summary_set(definition_id, &summary, now) {
+        Ok(()) => {
+            broker.publish(crate::backend::wps::WaveEvent {
+                event: "agents:changed".to_string(),
+                scopes: vec![],
+                sender: String::new(),
+                persist: 0,
+                data: None,
+            });
+        }
+        Err(e) => {
+            // reagent P2, PR #2786: the caller's definition_summary_attempted()
+            // gate already permanently claims definition_id before spawning —
+            // a persistence failure here silently and permanently discards a
+            // successfully generated (and billed) summary with no diagnostic
+            // trail otherwise, unlike every other fallible store call this PR
+            // touches (agent_activity_summary_get's error path logs).
+            tracing::warn!(
+                error = %e,
+                definition_id = %definition_id,
+                "generate_definition_activity_summary: agent_activity_summary_set \
+                 failed — a successfully generated summary was discarded"
+            );
+        }
     }
 
     Some((summary, tokens))

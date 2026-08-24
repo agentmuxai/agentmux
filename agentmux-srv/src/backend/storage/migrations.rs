@@ -882,8 +882,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             PRIMARY KEY (agent_id, granted_peer_agent_id, tier)
         );
 
-        -- v27: one-shot, on-demand activity summary per definition — see
-        -- OBJECT_SCHEMA_VERSION's v27 doc comment above. `summary` is empty
+        -- v28: one-shot, on-demand activity summary per definition — see
+        -- OBJECT_SCHEMA_VERSION's v28 doc comment above. `summary` is empty
         -- only transiently (a row is only ever inserted once generation
         -- succeeds); there is no 'pending' state stored here — an absent
         -- row IS the pending state.
