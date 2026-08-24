@@ -724,6 +724,22 @@
         z-index: 1;
         pointer-events: none;
         transition: opacity 200ms ease-out;
+        // reagentx P0 (PR #2781, round 5): opaque, matching
+        // `_loading-overlay.scss`'s identical `.agent-pane-loading-overlay`
+        // precedent. Originally this div had no background at all — fine
+        // when `is-overlay` was only ever true for a brief ~200ms
+        // cross-fade (real content had JUST started rendering; a sliver of
+        // it bleeding through the transparent overlay for 200ms was
+        // basically imperceptible). Since the subagent-backfill gate
+        // decoupled real content mounting from this overlay's own
+        // visibility (content now mounts immediately; this overlay can
+        // stay up for seconds while the content underneath is already
+        // live and its Activity Dock is still settling), a transparent
+        // overlay would defeat the entire point — the dock's flicker
+        // would be fully visible around/through a bare spinner icon.
+        // Fades out as ONE unit with the icon via the existing `is-fading`
+        // opacity transition below, so removal is never a hard cut either.
+        background: var(--main-bg-color);
 
         &.is-fading {
             opacity: 0;

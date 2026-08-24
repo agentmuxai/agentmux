@@ -30,6 +30,10 @@ export const WpsEvent = {
     // path — `{status:"retrying"|"resolved"}`. See
     // docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md §6.2.
     AgentResumeRetry: "agent-resume-retry",
+    // Published by SubagentWatcher::scan_session_subagents (pane-reopen
+    // cold-backfill entry point) — `{status:"started"|"done"}`. See
+    // docs/retro/retro-activity-dock-flicker-survives-debounce-fix-2026-08-24.md §5.
+    SubagentBackfillStatus: "subagent:backfill_status",
     BlockActivity: "block:activity",
     // Fired when a file open in at least one editor/preview tab changes on
     // disk. Payload: `{ path }` — a wake signal only, no content; handlers

@@ -59,6 +59,19 @@ pub const EVENT_AGENT_FAILURE: &str = "agentfailure";
 /// *correct* current state, not a stale echo — see
 /// `publish_resume_retry_status`'s own doc comment for why 2, not 1.
 pub const EVENT_AGENT_RESUME_RETRY: &str = "agent-resume-retry";
+/// Fired by `SubagentWatcher::scan_session_subagents` (the pane-reopen
+/// cold-backfill entry point, `subagent_watcher/scan.rs`) so a pane can
+/// show its BrainSpinner overlay (`block.tsx`'s `ready()` gate) until its
+/// own subagent/dispatch history has actually finished backfilling, instead
+/// of exposing the Activity Dock's genuinely-changing intermediate states —
+/// see `docs/retro/retro-activity-dock-flicker-survives-debounce-fix-2026-08-24.md`
+/// §5 option 1/2. Payload: `{ "status": "started" | "done" }`. `persist: 2`,
+/// same rationale as `EVENT_AGENT_RESUME_RETRY` above — both ends travel
+/// over this one channel, so a mount-time `EventReadHistoryCommand` read
+/// (guarding the same "pane subscribed after the backend already finished"
+/// race that event's own hook already handles) always recovers the correct
+/// current status rather than a stale one.
+pub const EVENT_SUBAGENT_BACKFILL_STATUS: &str = "subagent:backfill_status";
 /// Fired by `handle_shell_create` when a persistent shell is launched.
 /// Frontend creates the ShellNode row on receipt.
 /// Payload: `{ shell_id, cmd, cwd?, title, timestamp }`.
