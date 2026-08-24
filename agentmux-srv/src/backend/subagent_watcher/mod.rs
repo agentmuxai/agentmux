@@ -155,6 +155,20 @@ pub struct SubagentWatcher {
     /// exist) -- every test call site built via bare `new()` skips this
     /// event entirely rather than panicking, same posture as `self_ref`.
     broker: Mutex<Option<Arc<crate::backend::wps::Broker>>>,
+    /// reagentx P2 (PR #2781): `scan_session_subagents` can be called twice
+    /// for the SAME `parent_block_id` in overlapping fashion (the same
+    /// block re-registered under a new `agent_id` -- see
+    /// `server/reactive.rs`'s caller comment -- while an earlier call for
+    /// that same block id is still mid-scan). Without this, an OLDER call's
+    /// "done" can publish after a NEWER call's "started" already fired,
+    /// prematurely clearing the `subagent:backfill_status` gate while the
+    /// newer scan is still running. Keyed by `parent_block_id`, incremented
+    /// at the start of every call; a call only publishes "done" if its own
+    /// captured generation is STILL the latest recorded one for that block
+    /// id when it finishes -- a stale call silently skips "done" entirely,
+    /// leaving the (correctly still-in-progress) gate to whichever call is
+    /// actually current. See `scan.rs`'s `scan_session_subagents`.
+    backfill_generation: Mutex<HashMap<String, u64>>,
 }
 
 impl SubagentWatcher {
@@ -169,6 +183,7 @@ impl SubagentWatcher {
             naming_triggered: Mutex::new(std::collections::HashSet::new()),
             self_ref: Mutex::new(None),
             broker: Mutex::new(None),
+            backfill_generation: Mutex::new(HashMap::new()),
         }
     }
 

@@ -12,29 +12,30 @@
  * §5, options 1-2.
  *
  * Generic over every block type by design (called unconditionally from
- * `block.tsx`, same as `ready()` itself) — internally a no-op for any block
- * whose `viewType()` isn't `"agent"`, since only agent panes ever have
- * subagent history to backfill in the first place.
+ * `block.tsx`, same as `ready()` itself) — resolves immediately for any
+ * block whose `viewType()` isn't `"agent"`, since only agent panes ever
+ * have subagent history to backfill in the first place.
  *
- * Mirrors `useResumeRetryStream.ts`'s exact shape and the same reagentx
- * round-2 fixes that hook went through: a live `waveEventSubscribe` PLUS an
- * explicit mount-time `EventReadHistoryCommand` read (since
- * `agentmux-srv/src/backend/subagent_watcher/scan.rs`'s backfill can
- * complete before this hook's subscription is even registered — the
- * backend's own scan runs synchronously inside the same reactive-
- * registration RPC handler that triggers this block's mount in the first
- * place), with the same "discard a stale history read that loses a race to
- * a live event" guard.
+ * reagentx P1 + codex P1 (PR #2781, round 2): an earlier version defaulted
+ * `settled` to `true` (only flipping `false` once a "started" status was
+ * actually observed, to avoid gating a fresh agent with nothing to
+ * backfill). That was backwards — `blockData()`/`viewModel()` (block.tsx)
+ * typically resolve from the local object store well before this hook's
+ * async subscribe+RPC round trip completes, so `ready()` would go
+ * true→false→true: briefly true (spinner fades, `<Show when={ready()}>`
+ * mounts the real content), then false once "started" actually lands. Codex
+ * traced the real damage: unmounting disposes `AgentPresentationView`,
+ * whose cleanup calls `handleAgentIdChange(blockId, undefined)` and
+ * unregisters the reactive agent — remounting on the next `ready()===true`
+ * re-registers it, which re-triggers ANOTHER backfill scan, which can cycle
+ * indefinitely. `ready()` must never go true before this hook has an actual
+ * answer. Fixed by defaulting to NOT settled for agent blocks specifically
+ * (monotonic: starts false, becomes true at most once per mount, never
+ * flips back) and resolving non-agent blocks to `true` explicitly and
+ * immediately, rather than via the same default.
  *
- * Defaults to `settled` (not gated) rather than pessimistically gating on
- * every agent block: a block with no persisted session id never has
- * `scan_session_subagents` called for it at all (see
- * `agentmux-srv/src/server/reactive.rs`), so it would never publish either
- * status and a pessimistic default would leave `ready()` stuck forever —
- * the exact "stuck BrainSpinner" failure class
- * `docs/retro/retro-block-ready-gate-spinner-stuck-visible-race-2026-08-23.md`
- * already fixed once. Only flips to "not settled" once a "started" status
- * is actually observed (live or historical).
+ * Mirrors `useResumeRetryStream.ts`'s live-subscribe + mount-time
+ * `EventReadHistoryCommand` read + discard-on-live-race shape.
  */
 
 import { createEffect, createSignal, onCleanup, type Accessor } from "solid-js";
@@ -54,21 +55,54 @@ export function resolveBackfillStatus(data: unknown): "started" | "done" | null 
     return status === "started" || status === "done" ? status : null;
 }
 
+/**
+ * codex P2 (PR #2781, round 2): the backend publishes "done" the instant
+ * its own file-scan returns, but `dispatch-source.ts`/`subagent-source.ts`
+ * only SCHEDULE their own trailing-edge-debounced `ListActive`/
+ * `ListDispatches` refresh in reaction to the same burst of events
+ * (`debounced-refresh.ts`, 100ms window) — so revealing the pane the
+ * instant "done" lands can still race ahead of the Activity Dock's own
+ * data actually catching up. Not a guarantee (a slow network response
+ * could still exceed this), but a pragmatic buffer comfortably covering
+ * the common case: 100ms debounce window + a healthy margin for the
+ * dock's own RPC round trip to resolve.
+ */
+const DOCK_SETTLE_BUFFER_MS = 250;
+
 export function useSubagentBackfillGate(blockId: string, viewType: Accessor<string | undefined>): Accessor<boolean> {
-    const [settled, setSettled] = createSignal(true);
+    const [settled, setSettled] = createSignal(false);
     let wired = false;
+    let settleTimer: ReturnType<typeof setTimeout> | undefined;
 
     createEffect(() => {
-        if (wired || viewType() !== "agent") return;
+        const vt = viewType();
+        if (vt === undefined) return; // not yet resolved — stay gated, nothing to decide yet
+        if (vt !== "agent") {
+            // Only agent panes ever get a backfill_status event at all —
+            // resolve immediately rather than via the same async path, so
+            // every non-agent block's `ready()` is completely unaffected
+            // by this hook (matches its pre-this-PR behavior exactly).
+            setSettled(true);
+            return;
+        }
+        if (wired) return;
         wired = true;
 
+        let receivedLiveEvent = false;
+        const scheduleSettle = () => {
+            clearTimeout(settleTimer);
+            settleTimer = setTimeout(() => setSettled(true), DOCK_SETTLE_BUFFER_MS);
+        };
         const applyStatus = (data: unknown) => {
             const status = resolveBackfillStatus(data);
-            if (status === "started") setSettled(false);
-            else if (status === "done") setSettled(true);
+            if (status === "started") {
+                clearTimeout(settleTimer);
+                setSettled(false);
+            } else if (status === "done") {
+                scheduleSettle();
+            }
         };
 
-        let receivedLiveEvent = false;
         const unsub = waveEventSubscribe({
             eventType: WpsEvent.SubagentBackfillStatus,
             scope: `block:${blockId}`,
@@ -85,7 +119,9 @@ export function useSubagentBackfillGate(blockId: string, viewType: Accessor<stri
         // subscription. `maxitems: 2` reads the latest started/done pair
         // (backend publishes with `persist: 2`); the last element is
         // current truth. An empty result means no backfill was ever
-        // triggered for this block — leave the default (`settled`) as-is.
+        // triggered for this block (e.g. a fresh agent with no persisted
+        // session id) — resolve settled immediately rather than waiting on
+        // an event that will never arrive.
         void RpcApi.EventReadHistoryCommand(TabRpcClient, {
             event: WpsEvent.SubagentBackfillStatus,
             scope: `block:${blockId}`,
@@ -94,15 +130,23 @@ export function useSubagentBackfillGate(blockId: string, viewType: Accessor<stri
             .then((history) => {
                 if (receivedLiveEvent) return;
                 const latest = history?.[history.length - 1];
-                if (latest) applyStatus(latest.data);
+                if (latest) {
+                    applyStatus(latest.data);
+                } else {
+                    setSettled(true);
+                }
             })
             .catch((e) => {
                 // Fail open, not stuck: an RPC error here must never gate
                 // `ready()` forever.
                 console.log("[useSubagentBackfillGate] failed to load initial backfill status", e);
+                setSettled(true);
             });
 
-        onCleanup(() => { try { unsub(); } catch { /* ignore */ } });
+        onCleanup(() => {
+            clearTimeout(settleTimer);
+            try { unsub(); } catch { /* ignore */ }
+        });
     });
 
     return settled;

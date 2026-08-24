@@ -1232,6 +1232,32 @@ fn scan_session_subagents_does_not_panic_without_a_broker_wired() {
     std::fs::remove_dir_all(&config_dir).ok();
 }
 
+/// reagentx P2 (PR #2781, round 2): two overlapping `scan_session_subagents`
+/// calls for the same `parent_block_id` (a block re-registered under a new
+/// `agent_id` while an earlier scan for it is still in flight, see
+/// `server/reactive.rs`'s caller comment) must not let the OLDER call's
+/// "done" fire after a NEWER call has already started -- that would
+/// prematurely clear the gate while the newer scan is still running. Tests
+/// `is_backfill_generation_current` directly rather than fabricating real
+/// thread-level concurrency in a synchronous unit test: the two
+/// end-to-end tests above already prove the ordinary (non-overlapping)
+/// single-caller path publishes "started" then "done" correctly.
+#[test]
+fn is_backfill_generation_current_returns_false_once_superseded() {
+    let watcher = fixture_watcher();
+    watcher.backfill_generation.lock().unwrap().insert("block-1".to_string(), 1);
+    assert!(watcher.is_backfill_generation_current("block-1", 1));
+
+    // A newer, overlapping call bumps the generation before generation 1's
+    // own scan has finished.
+    watcher.backfill_generation.lock().unwrap().insert("block-1".to_string(), 2);
+    assert!(
+        !watcher.is_backfill_generation_current("block-1", 1),
+        "generation 1 must now be considered superseded"
+    );
+    assert!(watcher.is_backfill_generation_current("block-1", 2));
+}
+
 // ── scan_subagents_dir backfill cap (docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md) ──
 //
 // A long-lived pane's subagents/ directory accumulates forever; without a

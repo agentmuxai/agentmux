@@ -59,16 +59,38 @@ impl SubagentWatcher {
         config_dir: &Path,
         session_id: &str,
     ) {
-        // "started"/"done" wrap the whole call unconditionally, regardless
-        // of which of `scan_session_subagents_inner`'s several return paths
-        // is actually taken (nothing found at all, or found-and-processed)
-        // -- see `publish_backfill_status`'s own doc comment. A pane whose
-        // block has no persisted session id never calls this at all (see
-        // the caller in `server/reactive.rs`), so it never sees either
-        // status and its `ready()` gate is unaffected by this signal.
+        // "started"/"done" wrap the whole call, regardless of which of
+        // `scan_session_subagents_inner`'s several return paths is actually
+        // taken (nothing found at all, or found-and-processed) -- see
+        // `publish_backfill_status`'s own doc comment. A pane whose block
+        // has no persisted session id never calls this at all (see the
+        // caller in `server/reactive.rs`), so it never sees either status
+        // and its `ready()` gate is unaffected by this signal.
+        //
+        // reagentx P2 (PR #2781): generation-gated "done" -- see
+        // `backfill_generation`'s own doc comment in `mod.rs`. "started" is
+        // always published unconditionally; a stale/superseded call's own
+        // "started" is harmless (the gate just stays closed either way).
+        let my_generation = {
+            let mut gens = self.backfill_generation.lock().unwrap();
+            let next = gens.get(parent_block_id).copied().unwrap_or(0) + 1;
+            gens.insert(parent_block_id.to_string(), next);
+            next
+        };
         publish_backfill_status(self, parent_block_id, "started");
         self.scan_session_subagents_inner(parent_agent, parent_block_id, config_dir, session_id);
-        publish_backfill_status(self, parent_block_id, "done");
+        if self.is_backfill_generation_current(parent_block_id, my_generation) {
+            publish_backfill_status(self, parent_block_id, "done");
+        }
+    }
+
+    /// Whether `generation` (captured at the start of one
+    /// `scan_session_subagents` call) is still the most recent generation
+    /// recorded for `parent_block_id` — i.e. no NEWER overlapping call has
+    /// started since. See `backfill_generation`'s own doc comment in
+    /// `mod.rs`.
+    pub(super) fn is_backfill_generation_current(&self, parent_block_id: &str, generation: u64) -> bool {
+        self.backfill_generation.lock().unwrap().get(parent_block_id).copied() == Some(generation)
     }
 
     fn scan_session_subagents_inner(
