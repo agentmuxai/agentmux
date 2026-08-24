@@ -287,6 +287,27 @@ fn prune_block_prunes_matching_pending_activity_and_leaves_others() {
     assert!(pending.contains_key("wf_2"));
 }
 
+/// reagentx P2 (PR #2781, round 3): `backfill_generation` is keyed by
+/// `parent_block_id` like every other per-block map `prune_block` already
+/// cleans up above -- without pruning it too, every distinct block that
+/// ever called `scan_session_subagents` would leak an entry for the life
+/// of the srv process.
+#[test]
+fn prune_block_prunes_matching_backfill_generation_and_leaves_others() {
+    let watcher = fixture_watcher();
+    {
+        let mut gens = watcher.backfill_generation.lock().unwrap();
+        gens.insert("block-1".to_string(), 3);
+        gens.insert("block-2".to_string(), 1);
+    }
+
+    watcher.prune_block("block-1");
+
+    let gens = watcher.backfill_generation.lock().unwrap();
+    assert!(!gens.contains_key("block-1"));
+    assert!(gens.contains_key("block-2"));
+}
+
 #[test]
 fn prune_block_on_unknown_block_is_noop_and_returns_false() {
     let watcher = fixture_watcher();
@@ -1147,6 +1168,115 @@ fn scan_session_subagents_is_a_noop_for_an_unknown_session_id() {
     assert!(watcher.list_active().is_empty(), "unknown session id must not fall back to scanning everything");
 
     std::fs::remove_dir_all(&config_dir).ok();
+}
+
+// ── subagent:backfill_status (docs/retro/retro-activity-dock-flicker-survives-debounce-fix-2026-08-24.md) ──
+
+/// `scan_session_subagents` must publish "started" then "done", in that
+/// order, regardless of whether the target session directory is actually
+/// found -- the whole point is to bracket the pane's own backfill attempt,
+/// not to report whether anything was backfilled.
+#[test]
+fn scan_session_subagents_publishes_started_then_done_when_session_is_found() {
+    let config_dir = std::env::temp_dir()
+        .join(format!("amx-scan-backfill-status-found-{}", now_millis()));
+    let target_session = "target-session-uuid";
+    let target_dir = config_dir.join("projects").join("ws-enc").join(target_session).join("subagents");
+    std::fs::create_dir_all(&target_dir).unwrap();
+    std::fs::write(
+        target_dir.join("agent-wanted.jsonl"),
+        "{\"type\":\"result\",\"result\":\"done\"}\n",
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    let broker = Arc::new(crate::backend::wps::Broker::new());
+    watcher.set_broker(broker.clone());
+    watcher.scan_session_subagents("parent-1", "block-status-found", &config_dir, target_session);
+
+    let history = broker.read_event_history(
+        crate::backend::wps::EVENT_SUBAGENT_BACKFILL_STATUS,
+        "block:block-status-found",
+        10,
+    );
+    let statuses: Vec<Option<&str>> = history
+        .iter()
+        .map(|e| e.data.as_ref().and_then(|d| d.get("status")).and_then(|v| v.as_str()))
+        .collect();
+    assert_eq!(statuses, vec![Some("started"), Some("done")], "got: {statuses:?}");
+
+    std::fs::remove_dir_all(&config_dir).ok();
+}
+
+/// The other half: even when the session directory is never found at all
+/// (the existing `..._is_a_noop_for_an_unknown_session_id` case above),
+/// "done" must still fire -- a pane whose backfill attempt found nothing
+/// must not be left permanently gated as "still backfilling."
+#[test]
+fn scan_session_subagents_publishes_started_then_done_when_session_is_not_found() {
+    let config_dir = std::env::temp_dir()
+        .join(format!("amx-scan-backfill-status-notfound-{}", now_millis()));
+    std::fs::create_dir_all(config_dir.join("projects")).unwrap();
+
+    let watcher = fixture_watcher();
+    let broker = Arc::new(crate::backend::wps::Broker::new());
+    watcher.set_broker(broker.clone());
+    watcher.scan_session_subagents("parent-1", "block-status-notfound", &config_dir, "never-existed");
+
+    let history = broker.read_event_history(
+        crate::backend::wps::EVENT_SUBAGENT_BACKFILL_STATUS,
+        "block:block-status-notfound",
+        10,
+    );
+    let statuses: Vec<Option<&str>> = history
+        .iter()
+        .map(|e| e.data.as_ref().and_then(|d| d.get("status")).and_then(|v| v.as_str()))
+        .collect();
+    assert_eq!(statuses, vec![Some("started"), Some("done")], "got: {statuses:?}");
+
+    std::fs::remove_dir_all(&config_dir).ok();
+}
+
+/// A `SubagentWatcher` built via bare `fixture_watcher()` (no `set_broker`
+/// call) must not panic -- every existing test in this file already
+/// exercises this implicitly, but this pins the "no broker wired" no-op
+/// posture explicitly, matching `self_ref`'s established convention.
+#[test]
+fn scan_session_subagents_does_not_panic_without_a_broker_wired() {
+    let config_dir = std::env::temp_dir()
+        .join(format!("amx-scan-backfill-status-nobroker-{}", now_millis()));
+    std::fs::create_dir_all(config_dir.join("projects")).unwrap();
+
+    let watcher = fixture_watcher();
+    watcher.scan_session_subagents("parent-1", "block-1", &config_dir, "never-existed");
+
+    std::fs::remove_dir_all(&config_dir).ok();
+}
+
+/// reagentx P2 (PR #2781, round 2): two overlapping `scan_session_subagents`
+/// calls for the same `parent_block_id` (a block re-registered under a new
+/// `agent_id` while an earlier scan for it is still in flight, see
+/// `server/reactive.rs`'s caller comment) must not let the OLDER call's
+/// "done" fire after a NEWER call has already started -- that would
+/// prematurely clear the gate while the newer scan is still running. Tests
+/// `is_backfill_generation_current` directly rather than fabricating real
+/// thread-level concurrency in a synchronous unit test: the two
+/// end-to-end tests above already prove the ordinary (non-overlapping)
+/// single-caller path publishes "started" then "done" correctly.
+#[test]
+fn is_backfill_generation_current_returns_false_once_superseded() {
+    let watcher = fixture_watcher();
+    watcher.backfill_generation.lock().unwrap().insert("block-1".to_string(), 1);
+    assert!(watcher.is_backfill_generation_current("block-1", 1));
+
+    // A newer, overlapping call bumps the generation before generation 1's
+    // own scan has finished.
+    watcher.backfill_generation.lock().unwrap().insert("block-1".to_string(), 2);
+    assert!(
+        !watcher.is_backfill_generation_current("block-1", 1),
+        "generation 1 must now be considered superseded"
+    );
+    assert!(watcher.is_backfill_generation_current("block-1", 2));
 }
 
 // ── scan_subagents_dir backfill cap (docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md) ──
