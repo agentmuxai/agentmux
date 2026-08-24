@@ -3572,6 +3572,21 @@ impl PersistentSubprocessController {
                     }
                     drop(inner);
 
+                    // reagentx P1 on PR #2776: a user-initiated Stop can
+                    // land at any point, including mid stale-`--resume`
+                    // retry — "Reconnecting…" has no other clearing path on
+                    // this branch (unlike `compacting`, which several
+                    // turn-end transitions defensively reset), so without
+                    // this it would stick on-screen forever with a growing
+                    // counter, and a later retry on the same pane would
+                    // wrongly keep the stale `startedAt` (ResumeRetryStarted
+                    // is a no-op while already reconnecting). Unconditional
+                    // and un-gated by `is_current_generation` on purpose —
+                    // a harmless no-op when nothing was reconnecting, and
+                    // the pane is stopping either way, so there's no
+                    // "which generation" ambiguity worth encoding here.
+                    publish_resume_retry_status(&broker_wait, &block_id_wait, "resolved");
+
                     // Flush a held-back error line now, if the resume
                     // state machine produced one — the `StopRequested`
                     // sent above guarantees `ProcessExited` resolves via
