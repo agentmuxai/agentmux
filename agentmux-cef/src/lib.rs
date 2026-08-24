@@ -22,6 +22,11 @@ mod events;
 mod ipc;
 mod launcher_event_bridge;
 mod launcher_ipc;
+// Not #[cfg]-gated at the mod-declaration level like macos_compat/macos_menu
+// below — this module deliberately mixes OS-agnostic pure logic (unit
+// tested on any host) with target_os = "linux"-gated OS interaction
+// (internally gated within the file itself). See its own doc comment.
+mod linux_sandbox;
 mod logging;
 mod parent_process;
 mod srv_event_bridge;
@@ -196,9 +201,80 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
 
     // Escape hatch — read once here so both macOS subprocess sandbox init
     // (below) and the browser-process Settings construction share the same value.
-    let force_no_sandbox = std::env::var("AGENTMUX_UNSAFE_NOSANDBOX")
+    let mut force_no_sandbox = std::env::var("AGENTMUX_UNSAFE_NOSANDBOX")
         .map(|v| v.trim() == "1")
         .unwrap_or(false);
+
+    // Linux-only, browser-process-only: proactively probe whether the
+    // kernel-namespace sandbox will actually work BEFORE ever attempting
+    // CefInitialize, and offer a one-time AppArmor fix (or an explicit,
+    // visible downgrade) instead of letting a doomed init attempt trail
+    // into the generic post-init-failure path further down (search this
+    // file for "CEF initialization failed"). Must be skipped for
+    // subprocess roles — CEF re-execs this same binary for every
+    // renderer/GPU/utility process, and showing a dialog from one of
+    // those would be wrong, and would multiply once per subprocess.
+    // `--type=` is the same subprocess-detection pattern already used
+    // twice further down in this function. No-op if the user already
+    // opted out themselves (their explicit choice takes precedence, and
+    // the probe would just be wasted work).
+    // See docs/specs/SPEC_LINUX_SANDBOX_APPARMOR_USERNS_2026_08_23.md.
+    #[cfg(all(target_os = "linux", feature = "sandbox"))]
+    {
+        let is_subprocess = std::env::args().any(|a| a.starts_with("--type="));
+        if !is_subprocess && !force_no_sandbox && !linux_sandbox::probe_userns_available() {
+            use linux_sandbox::SandboxDialogChoice;
+            match linux_sandbox::show_userns_blocked_dialog() {
+                SandboxDialogChoice::FixNow => {
+                    let helper = linux_sandbox::resolve_helper_script_path();
+                    let fix_result = linux_sandbox::run_pkexec_fix(&helper);
+                    let now_available =
+                        fix_result.is_ok() && linux_sandbox::probe_userns_available();
+                    if !now_available {
+                        match &fix_result {
+                            Err(e) => eprintln!("AgentMux: sandbox fix did not resolve the restriction: {e}"),
+                            Ok(()) => eprintln!(
+                                "AgentMux: sandbox fix reported success but the restriction is \
+                                 still active — falling back to unsandboxed for this launch."
+                            ),
+                        }
+                        // SAFETY: single-threaded at this point in startup —
+                        // before any additional threads (async runtime, CEF's
+                        // own internal threads) have been spawned, and gated
+                        // to the browser process only (subprocess roles never
+                        // reach this branch) — no concurrent env reader exists
+                        // yet for this mutation to race with.
+                        unsafe {
+                            std::env::set_var("AGENTMUX_UNSAFE_NOSANDBOX", "1");
+                        }
+                        force_no_sandbox = true;
+                    }
+                    // else: fix worked — leave force_no_sandbox false, normal
+                    // sandboxed init proceeds below.
+                }
+                SandboxDialogChoice::ContinueWithoutSandbox => {
+                    // SAFETY: see above.
+                    unsafe {
+                        std::env::set_var("AGENTMUX_UNSAFE_NOSANDBOX", "1");
+                    }
+                    force_no_sandbox = true;
+                }
+                SandboxDialogChoice::Cancel => {
+                    std::process::exit(1);
+                }
+                SandboxDialogChoice::NoDialogToolAvailable => {
+                    eprintln!(
+                        "AgentMux: the sandbox is blocked by a system AppArmor policy \
+                         (common on newer Ubuntu), and no dialog tool (zenity/kdialog) is \
+                         available to ask how to proceed. Set AGENTMUX_UNSAFE_NOSANDBOX=1 \
+                         to run without the sandbox, or see docs/linux.md for how to \
+                         install the proper fix."
+                    );
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
 
     // macOS sandbox availability: probe for libcef_sandbox.dylib to detect
     // whether we are running inside a packaged .app bundle. Two uses:
@@ -973,6 +1049,37 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
                             title.as_ptr(),
                             MB_OK | MB_ICONERROR,
                         );
+                    }
+                }
+                // Linux sibling of the Windows MessageBoxW block above — same
+                // reasoning: the web frontend can't render an error here since
+                // the host itself failed to start. This is the safety net for
+                // CEF init failures OTHER than the userns-sandbox-blocked case
+                // (that one is caught proactively, before ever reaching this
+                // init call — see the probe near the top of this function).
+                // Uses zenity/kdialog like linux_sandbox's dialog, but this is
+                // a plain info dialog (no privileged fix to offer here, unlike
+                // the userns case — this covers genuinely unknown failures).
+                #[cfg(target_os = "linux")]
+                {
+                    let body = format!(
+                        "AgentMux couldn't start its browser engine (CEF init failed, code {exit_code}).\n\n\
+                         Details were written to:\n    ~/.agentmux/logs/cef-debug.log\n\n\
+                         If this mentions a sandbox/userns/AppArmor error, see docs/linux.md."
+                    );
+                    let title = "AgentMux — startup failed";
+                    let shown = std::process::Command::new("zenity")
+                        .args(["--error", "--title", title, "--text", &body])
+                        .status()
+                        .map(|s| s.success() || s.code() == Some(1)) // zenity --error exits 1 on plain dismiss
+                        .unwrap_or(false)
+                        || std::process::Command::new("kdialog")
+                            .args(["--title", title, "--error", &body])
+                            .status()
+                            .map(|s| s.success())
+                            .unwrap_or(false);
+                    if !shown {
+                        eprintln!("{title}\n\n{body}");
                     }
                 }
                 std::process::exit(exit_code);
