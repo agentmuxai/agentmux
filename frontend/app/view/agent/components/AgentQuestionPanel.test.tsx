@@ -494,25 +494,55 @@ describe("AgentQuestionPanel keyboard-pause (SPEC_ASK_USER_QUESTION_TIMEOUT_KEYB
         expect(onAnswer).toHaveBeenCalledTimes(1);
     });
 
-    it("a second qualifying keydown mid-window restarts a fresh 15s window from that point", () => {
+    // reagentx P1, PR #2787: an earlier version of this feature called
+    // onPanelPointerEnter() unconditionally on every qualifying keydown,
+    // including OS key-repeat while a key is held and every character of
+    // continuous typing. Unlike `mouseenter` — which a real browser only
+    // fires on an actual boundary-crossing, so it can't be spammed by normal
+    // use — `keydown` fires on every keystroke, so re-arming on each one let
+    // typing faster than 15s apart (or simply holding a key) suppress the
+    // auto-timeout indefinitely, breaking the "paused for at most one
+    // HOVER_HIDE_GRACE_MS window" safety invariant. Pin the fix: only the
+    // FIRST keydown of a burst (the transition into the paused state)
+    // (re)arms the window — later keydowns while still hidden are no-ops.
+    it("repeated keydowns while still hidden do not extend the window past one HOVER_HIDE_GRACE_MS (key-repeat/continuous-typing safety bound)", () => {
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        keydownOn(panel(), "Tab"); // first keydown — hides, starts the 15s window
+        vi.advanceTimersByTime(10_000); // 10s into the window, still hidden
+
+        // Simulates continuous typing / OS key-repeat: several more
+        // qualifying keydowns while already hidden. None of these should
+        // push the window out any further.
+        keydownOn(panel(), "a");
+        keydownOn(panel(), "b");
+        keydownOn(panel(), "c");
+
+        // Elapses exactly 15s after the FIRST keydown, unaffected by the
+        // later ones — the pause never got extended.
+        vi.advanceTimersByTime(5_000);
+        expect(screen.getByText(/Auto-selects recommended in 30s/)).toBeTruthy();
+    });
+
+    it("a keydown after the window resumes starts a fresh window (recursive re-engagement, mirrors the mouse 'recursive' case)", () => {
         const onAnswer = vi.fn();
         const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
         render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
 
         keydownOn(panel(), "Tab");
-        vi.advanceTimersByTime(10_000); // 10s into the first 15s window
-        keydownOn(panel(), "a"); // a fresh keydown restarts the window
+        vi.advanceTimersByTime(15_000); // window elapses, resumes at a fresh 30s
+        expect(screen.getByText(/Auto-selects recommended in 30s/)).toBeTruthy();
 
-        // Would have resumed at t=15s under the original window — confirm
-        // it didn't, because the second keydown reset the clock to t=10+15=25s.
-        vi.advanceTimersByTime(5_000); // t=15s
+        keydownOn(panel(), "Tab"); // a fresh, post-resumption keydown re-arms the window
         expect(screen.queryByText(/Auto-selects recommended in/)).toBeNull();
 
-        vi.advanceTimersByTime(9_000); // t=24s — still inside the restarted window
+        vi.advanceTimersByTime(14_000);
         expect(screen.queryByText(/Auto-selects recommended in/)).toBeNull();
         expect(onAnswer).not.toHaveBeenCalled();
 
-        vi.advanceTimersByTime(1_000); // t=25s — restarted window elapses
+        vi.advanceTimersByTime(1_000); // t=15s from the second keydown — resumes again
         expect(screen.getByText(/Auto-selects recommended in 30s/)).toBeTruthy();
     });
 
@@ -549,6 +579,60 @@ describe("AgentQuestionPanel keyboard-pause (SPEC_ASK_USER_QUESTION_TIMEOUT_KEYB
         expect(onAnswer).toHaveBeenCalledTimes(1);
     });
 
+    // codex P2, PR #2787: while minimized, `rootRef` is reassigned to the
+    // separate minimized `<button>`, so a keydown/focus landing directly on
+    // THAT button (not just elsewhere, like the document.body case above)
+    // used to read as "inside the panel" and incorrectly pause a countdown
+    // that's supposed to keep running unaffected while minimized.
+    it("keydown targeting the minimized button itself does not hide/pause anything", async () => {
+        const user = userEvent.setup({ delay: null });
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        await user.click(screen.getByRole("button", { name: /Answer later/ }));
+        keydownOn(screen.getByRole("button", { name: /Question waiting/ }), "Tab");
+
+        expect(screen.getByText(/auto-selects in 30s/)).toBeTruthy();
+
+        vi.advanceTimersByTime(30_000);
+        expect(onAnswer).toHaveBeenCalledTimes(1);
+    });
+
+    it("focus landing on the minimized button does not hide/pause anything", async () => {
+        const user = userEvent.setup({ delay: null });
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        await user.click(screen.getByRole("button", { name: /Answer later/ }));
+        fireEvent.focusIn(screen.getByRole("button", { name: /Question waiting/ }));
+
+        expect(screen.getByText(/auto-selects in 30s/)).toBeTruthy();
+
+        vi.advanceTimersByTime(30_000);
+        expect(onAnswer).toHaveBeenCalledTimes(1);
+    });
+
+    // codex P2, PR #2787: a real browser moves focus only AFTER a Tab
+    // keydown's default action runs, so the keydown that causes a
+    // keyboard-only user's first entry into the panel has `e.target` still
+    // pointed at whatever they were focused on *before* — outside the
+    // panel. `handleKey`'s own `inPanel` check necessarily misses that one
+    // event; the separate `focusin` listener (which fires once focus has
+    // actually landed) is what catches it.
+    it("focus landing inside the panel (e.g. via Tab) pauses the countdown even though the causing keydown's own target was outside", () => {
+        const onAnswer = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+
+        vi.advanceTimersByTime(5_000); // 25s remaining
+        expect(screen.getByText(/Auto-selects recommended in 25s/)).toBeTruthy();
+
+        fireEvent.focusIn(screen.getByRole("radio", { name: /Red/ }));
+        expect(screen.queryByText(/Auto-selects recommended in/)).toBeNull();
+    });
+
     it("Enter fired inside the panel still submits, unaffected by the new pause trigger", async () => {
         const onAnswer = vi.fn();
         const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
@@ -573,25 +657,25 @@ describe("AgentQuestionPanel keyboard-pause (SPEC_ASK_USER_QUESTION_TIMEOUT_KEYB
         expect(onAnswer).not.toHaveBeenCalled();
     });
 
-    it("composes with a mouse-triggered pause: a keydown mid-hover-window restarts the same shared window", () => {
+    it("composes with a mouse-triggered pause: a keydown while already hidden does not extend the mouse-triggered window (single shared bound)", () => {
         const onAnswer = vi.fn();
         const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
         render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
 
         fireEvent.mouseEnter(panel());
-        vi.advanceTimersByTime(10_000); // 10s into the mouse-triggered 15s window
-        keydownOn(panel(), "Tab"); // restarts the same shared window from the keydown
+        vi.advanceTimersByTime(10_000); // 10s into the mouse-triggered 15s window, still hidden
+        keydownOn(panel(), "Tab"); // continued engagement via keyboard while already paused
 
-        // Would have resumed at t=15s under the original mouse-only window —
-        // confirm it didn't, because the keydown reset the clock to t=10+15=25s.
-        vi.advanceTimersByTime(5_000); // t=15s
-        expect(screen.queryByText(/Auto-selects recommended in/)).toBeNull();
-
-        vi.advanceTimersByTime(9_000); // t=24s — still inside the restarted window
-        expect(screen.queryByText(/Auto-selects recommended in/)).toBeNull();
+        // Elapses exactly 15s after the mouse entry, unaffected by the
+        // keydown — one shared `hidden` state, bounded to a single window
+        // regardless of which trigger(s) fired during it.
+        vi.advanceTimersByTime(5_000);
+        expect(screen.getByText(/Auto-selects recommended in 30s/)).toBeTruthy();
         expect(onAnswer).not.toHaveBeenCalled();
 
-        vi.advanceTimersByTime(1_000); // t=25s — restarted window elapses
-        expect(screen.getByText(/Auto-selects recommended in 30s/)).toBeTruthy();
+        // And a keydown AFTER that resumption still re-arms it normally,
+        // same as the standalone "recursive re-engagement" test above.
+        keydownOn(panel(), "Tab");
+        expect(screen.queryByText(/Auto-selects recommended in/)).toBeNull();
     });
 });

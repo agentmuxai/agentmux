@@ -309,3 +309,48 @@ generic helper, e.g. `keydownOn(el, key)`):
   proceeds to auto-submit at 0 if still untouched — the keyboard analog of
   the hover-pause spec's own "cursor parked, no further activity" manual
   check.
+
+---
+
+## 8. Post-review revisions (2026-08-24, PR #2787)
+
+Three gaps found during review, all fixed before merge:
+
+1. **reagentx P1 — unbounded pause via key-repeat/continuous typing.** §2.1's
+   "any qualifying keydown calls `onPanelPointerEnter()` directly" turned out
+   not to be a safe direct reuse: `mouseenter` only fires once per actual
+   boundary-crossing (a real browser can't spam it under normal use), but
+   `keydown` fires on every keystroke, including OS key-repeat and every
+   character typed. Re-arming unconditionally on each one meant typing
+   faster than 15s apart — or simply holding a key — suppressed the
+   auto-timeout indefinitely, breaking the "at most one `HOVER_HIDE_GRACE_MS`
+   window" invariant this spec's own §3 edge-case table claimed ("typing
+   alone does not extend the hide window"). **Fix:** gate the trigger on
+   `!hidden()` — only the transition *into* the paused state (re)arms the
+   window; further qualifying events while already hidden are no-ops. This
+   also revises §7's "second qualifying keydown mid-window restarts the
+   window" test expectation, which described the exact behavior being fixed
+   here — the corrected expectation is the opposite: a second keydown
+   *mid-window* does **not** restart it; only a keydown *after* the window
+   has actually resumed does.
+2. **Codex P2 — minimized chip not excluded.** §2.2 says the minimized chip
+   is excluded "for the identical reason" as the mouse trigger, but that
+   exclusion isn't automatic for keyboard: while minimized, `rootRef` is
+   reassigned to the minimized `<button>`, so a keydown/focus landing
+   directly on that focusable button read as `inPanel = true`. **Fix:**
+   also gate the trigger on `!minimized()`.
+3. **Codex P2 — Tab-into-panel from outside doesn't pause.** A real browser
+   moves focus only *after* a `Tab` keydown's default action runs, so the
+   keydown that causes a keyboard-only user's first entry into the panel has
+   `e.target` still pointed at whatever was focused before — outside the
+   panel. `handleKey`'s target-at-dispatch-time `inPanel` check necessarily
+   misses that one event. **Fix:** a second, separate `focusin` listener
+   (which bubbles and fires once focus has actually landed) reusing the same
+   gated check, registered in the same effect as the `keydown` listener.
+
+All three fixes share one helper, `maybePauseFor(target)` — computes
+`inPanel` and gates on `!minimized() && !hidden()` — called from both
+`handleKey` and the new `handleFocusIn`. §2.3's "extend `handleKey`, don't
+add a second listener" decision is narrowed by fix 3: it still holds for a
+second *keydown* listener, but a `focusin` listener addresses a distinct
+browser-timing gap `keydown` structurally cannot catch.
