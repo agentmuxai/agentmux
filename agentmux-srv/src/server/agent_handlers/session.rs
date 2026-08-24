@@ -296,8 +296,15 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let agent_identity_links = identity_store.agent_identity_list_all().unwrap_or_else(|e| {
                     tracing::warn!(
                         error = %e,
+                        // reagent P2, PR #2789: this fires alongside
+                        // degraded.push("identity_links") below, which the
+                        // row-building loop's own identity_links_degraded
+                        // check reads to show "(unknown account)" — NOT
+                        // "(ambient creds)" (that text is reserved for a
+                        // genuinely-unbound agent). Keep this message in
+                        // sync if that fallback text ever changes again.
                         "listrecentsessions: agent_identity_list_all failed — degrading to \
-                         empty (rows will show \"(ambient creds)\")"
+                         empty (rows will show \"(unknown account)\")"
                     );
                     degraded.push("identity_links");
                     Vec::new()

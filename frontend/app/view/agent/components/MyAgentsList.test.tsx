@@ -373,6 +373,21 @@ describe("MyAgentsList — sortBy (docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_
         expect(await namesInOrder()).toEqual(["Alpha Host", "Bravo Host", "Zulu Sandbox", "Unknown Type"]);
     });
 
+    it('groups the legacy "standalone" agent_type with Host, not with unrecognized types (Codex P2 on PR #2789)', async () => {
+        // "standalone" is the pre-container-feature default agent_type
+        // (default_agent_type() in backend/storage/agents.rs) — every
+        // non-"container" value is treated as the host controller at
+        // launch, so a "standalone" agent IS effectively a host agent.
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
+            makeRow({ instance_id: "a", instance_name: "Sandbox Agent", agent_type: "container" }),
+            makeRow({ instance_id: "b", instance_name: "Legacy Standalone", agent_type: "standalone" }),
+            makeRow({ instance_id: "c", instance_name: "Explicit Host", agent_type: "host" }),
+        ]));
+        const [sortBy] = createSignal<AgentSortOption>("type");
+        render(() => <MyAgentsList sortBy={sortBy} onReattach={() => {}} />);
+        expect(await namesInOrder()).toEqual(["Explicit Host", "Legacy Standalone", "Sandbox Agent"]);
+    });
+
     it("re-sorts reactively when sortBy changes after mount", async () => {
         vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
             makeRow({ instance_id: "a", instance_name: "Zebra", started_at: 2000 }),

@@ -62,8 +62,18 @@ import { RuntimeBadge } from "./RuntimeBadge";
 /** "type" sort groups Host before Sandbox (Container) before anything
  *  unrecognized, matching `RuntimeBadge`'s own known-runtime ordering —
  *  not alphabetical ("container" < "host" would put Sandbox first, which
- *  reads backwards next to the badge's own HOST/SANDBOX vocabulary). */
-const TYPE_SORT_RANK: Record<string, number> = { host: 0, container: 1 };
+ *  reads backwards next to the badge's own HOST/SANDBOX vocabulary).
+ *
+ *  Codex P2, PR #2789: `"standalone"` is the LEGACY default `agent_type`
+ *  (`default_agent_type()`, `backend/storage/agents.rs`) for definitions
+ *  predating the container feature, and every non-`"container"` value is
+ *  treated as the host controller at launch (`agent_open.rs`'s
+ *  `controller_type = if agent.agent_type == "container" {...} else {...}`)
+ *  — "standalone" IS a host agent, effectively, just under an older name.
+ *  Without this, legacy definitions would rank as "unknown" (last),
+ *  splitting them from genuinely host-labeled agents instead of grouping
+ *  correctly with them. */
+const TYPE_SORT_RANK: Record<string, number> = { host: 0, standalone: 0, container: 1 };
 const typeSortRank = (agentType: string): number => TYPE_SORT_RANK[agentType] ?? 2;
 
 function compareRows(sort: AgentSortOption, a: RecentSessionRow, b: RecentSessionRow): number {
