@@ -44,6 +44,19 @@ on:
 permissions:
   contents: read
 
+# Two overlapping manual `workflow_dispatch` runs could both read the same
+# untagged pending release and race to tag/push it — the second push would
+# just fail (tag already exists) rather than corrupt anything, but it's an
+# easily-avoided race for a job with a push side effect. Queue rather than
+# cancel — killing a run mid-push could leave a tag pushed with no
+# corresponding downstream build ever having started. Kept even though the
+# automatic workflow_run trigger (this guard's original reason for being)
+# is gone — reagent's review of PR #2784: cheap insurance regardless of how
+# many trigger types remain.
+concurrency:
+  group: nightly-release
+  cancel-in-progress: false
+
 jobs:
   detect-and-tag:
     runs-on: ubuntu-latest
