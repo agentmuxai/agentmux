@@ -43,9 +43,17 @@
  * Installed at BODY scope by the caller (mirrors `useToolChunkStream`/
  * `useCompactionStream`'s own convention) so the subscription tears down
  * even if the caller's own `onMount` early-returns.
+ *
+ * Returns the raw task list itself (not just the derived `since`) so a
+ * caller can also render registry-known rows the dock's own
+ * transcript-derived adapters have no way to see — see
+ * `activity/background-adapter.ts` and the report's Tier 1 recommendation
+ * (docs/reports/REPORT_AGENT_PANE_ACTIVITY_DOCK_ARCHITECTURE_ANALYSIS_2026_08_25.md).
+ * A failed refresh leaves the previously-returned list untouched (same
+ * best-effort posture as the `since` axis above) rather than clearing it.
  */
 
-import { onCleanup, onMount } from "solid-js";
+import { createSignal, onCleanup, onMount, type Accessor } from "solid-js";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { RpcApi } from "@/app/store/rpc-api";
@@ -67,7 +75,10 @@ export function resolveAttachedTaskObservation(tasks: BackgroundTaskView[]): num
     return Math.min(...running.map((t) => t.started_at_ms));
 }
 
-async function refresh(opts: UseBackgroundTaskRegistryOptions): Promise<void> {
+async function refresh(
+    opts: UseBackgroundTaskRegistryOptions,
+    setTasks: (tasks: BackgroundTaskView[]) => void
+): Promise<void> {
     let tasks: BackgroundTaskView[];
     try {
         tasks = await RpcApi.ListBackgroundTasksCommand(TabRpcClient, { blockid: opts.blockId });
@@ -77,6 +88,7 @@ async function refresh(opts: UseBackgroundTaskRegistryOptions): Promise<void> {
         // nothing user-visible to report on a single failed query.
         return;
     }
+    setTasks(tasks);
     const since = resolveAttachedTaskObservation(tasks);
     opts.model.dispatchPane(
         since != null ? { type: "RegistryAttachedTaskObserved", at: since } : { type: "RegistryAttachedTaskCleared" },
@@ -90,8 +102,9 @@ addWSReconnectHandler(() => {
     for (const cb of activeRefreshCallbacks) cb();
 });
 
-export function useBackgroundTaskRegistry(opts: UseBackgroundTaskRegistryOptions): void {
-    const doRefresh = () => { void refresh(opts); };
+export function useBackgroundTaskRegistry(opts: UseBackgroundTaskRegistryOptions): Accessor<BackgroundTaskView[]> {
+    const [tasks, setTasks] = createSignal<BackgroundTaskView[]>([]);
+    const doRefresh = () => { void refresh(opts, setTasks); };
 
     onMount(doRefresh);
 
@@ -104,4 +117,6 @@ export function useBackgroundTaskRegistry(opts: UseBackgroundTaskRegistryOptions
         handler: doRefresh,
     });
     onCleanup(() => { try { unsub(); } catch { /* ignore */ } });
+
+    return tasks;
 }

@@ -1492,7 +1492,10 @@ const AgentPresentationView = ({
     // owns dedup against in-flight history loads and the truncate-suppress
     // invariant that prevents the mid-session wipe bug.
     const pendingMessagesAtom = agentAtoms().pendingMessagesAtom;
-    useAgentStream({
+    // Forwarded to ActivityDock so it can render registry-known background
+    // tasks the transcript itself has no record of (Tier 1 of
+    // docs/reports/REPORT_AGENT_PANE_ACTIVITY_DOCK_ARCHITECTURE_ANALYSIS_2026_08_25.md).
+    const backgroundTasksAtom = useAgentStream({
         blockId: model.blockId,
         // Pass the per-pane model so the hook's dispatch sites are
         // default-safe against post-unmount races — the disposed-flag
@@ -2345,7 +2348,11 @@ const AgentPresentationView = ({
                 subagents) sit just above the composer so task status is adjacent
                 to where the user's attention already is. Moved from the top per
                 SPEC_ACTIVITY_DOCK_BOTTOM_MOVE_2026_06_20. */}
-            <ActivityDock documentAtom={agentAtoms().documentAtom} blockId={model.blockId} />
+            <ActivityDock
+                documentAtom={agentAtoms().documentAtom}
+                blockId={model.blockId}
+                backgroundTasksAtom={backgroundTasksAtom}
+            />
 
             {/* Composer status strip — single 28-32px row with live
                 activity ticker and Log button that toggles the log panel.
