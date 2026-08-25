@@ -129,3 +129,52 @@ describe("dispatch-source — refresh coalescing", () => {
         expect(callBackendServiceSpy).toHaveBeenCalledTimes(1);
     });
 });
+
+// docs/retro/retro-activity-dock-flicker-survives-debounce-fix-2026-08-24.md:
+// the debounce above coalesces request VOLUME, but each surviving call
+// during a burst is still a genuinely different, real, still-converging
+// snapshot — rows still visibly appear/vanish. backfill-tracker.ts closes
+// this by suppressing refresh entirely while ANY block's backfill is
+// reported in flight, firing exactly one once it's genuinely done.
+describe("dispatch-source — backfill-aware suppression", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    async function flushMicrotasks(): Promise<void> {
+        await Promise.resolve();
+        await Promise.resolve();
+    }
+
+    it("suppresses refresh entirely for events arriving while a backfill is in flight, firing exactly one once it settles", async () => {
+        await flushMicrotasks();
+        callBackendServiceSpy.mockClear();
+        callBackendServiceSpy.mockResolvedValue([]);
+
+        const backfillStatus = hub.handlers.get("subagent:backfill_status")!;
+        expect(backfillStatus).toBeDefined();
+        backfillStatus({ scopes: ["block:b1"], data: { status: "started" } });
+
+        const spawned = hub.handlers.get("subagent:spawned")!;
+        for (let i = 0; i < 50; i++) spawned({ data: {} });
+        await vi.advanceTimersByTimeAsync(1200); // well past both debounce windows
+        expect(callBackendServiceSpy).not.toHaveBeenCalled(); // suppressed, not just debounced
+
+        backfillStatus({ scopes: ["block:b1"], data: { status: "done" } });
+        await flushMicrotasks();
+        expect(callBackendServiceSpy).toHaveBeenCalledTimes(1); // exactly one, on settle
+    });
+
+    it("resumes ordinary debounced behavior for events after the backfill settles", async () => {
+        await flushMicrotasks();
+        const backfillStatus = hub.handlers.get("subagent:backfill_status")!;
+        backfillStatus({ scopes: ["block:b2"], data: { status: "started" } });
+        backfillStatus({ scopes: ["block:b2"], data: { status: "done" } });
+        await flushMicrotasks();
+
+        callBackendServiceSpy.mockClear();
+        callBackendServiceSpy.mockResolvedValue([]);
+        hub.handlers.get("subagent:spawned")!({ data: {} });
+        await vi.advanceTimersByTimeAsync(150);
+        expect(callBackendServiceSpy).toHaveBeenCalledTimes(1);
+    });
+});
