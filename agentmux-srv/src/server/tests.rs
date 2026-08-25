@@ -1909,30 +1909,30 @@ async fn layout_seeders_route_through_reducer_coherently() {
     // reducer-routed seeders — see
     // docs/investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md)
     // now prunes any seeded leaf whose block_id isn't live.
-    for bid in ["b-agent", "b-sysinfo", "b-swarm"] {
+    for bid in ["b-agent", "b-swarm", "b-armory", "b-sysinfo"] {
         srv_state.lock().await.blocks.insert(
             bid.to_string(),
             crate::state::BlockRecord { block_id: bid.to_string(), tab_id: tab1.clone() },
         );
     }
     let (tree, focused, leaforder) =
-        crate::backend::wcore::default_three_pane_tree("b-agent", "b-sysinfo", "b-swarm");
+        crate::backend::wcore::default_four_pane_tree("b-agent", "b-swarm", "b-armory", "b-sysinfo");
     crate::server::service::seed_layout_via_reducer(
         &state, &tab1, tree, focused, leaforder, String::new(),
     )
     .await
-    .expect("three-pane seed via reducer");
+    .expect("four-pane seed via reducer");
 
     let layout_oid = wstore.get::<Tab>(&tab1).unwrap().unwrap().layoutstate;
     let row = wstore.get::<LayoutState>(&layout_oid).unwrap().unwrap();
-    assert_eq!(row.leaforder.as_ref().unwrap().len(), 3);
+    assert_eq!(row.leaforder.as_ref().unwrap().len(), 4);
     assert!(!row.focusednodeid.is_empty(), "focus persisted");
     {
         let s = srv_state.lock().await;
         let rec = s.tabs.get(&tab1).expect("reducer knows tab1");
         assert_eq!(
             rec.rootnode, row.rootnode,
-            "TabRecord == db_layout after three-pane seed"
+            "TabRecord == db_layout after four-pane seed"
         );
         assert_eq!(rec.focused_node_id, row.focusednodeid);
     }
@@ -1983,7 +1983,7 @@ async fn layout_seeders_route_through_reducer_coherently() {
 async fn layout_seed_unknown_tab_errors() {
     let state = test_state();
     let (tree, focused, leaforder) =
-        crate::backend::wcore::default_three_pane_tree("a", "b", "c");
+        crate::backend::wcore::default_four_pane_tree("a", "b", "c", "d");
     let err = crate::server::service::seed_layout_via_reducer(
         &state, "ghost-tab", tree, focused, leaforder, String::new(),
     )

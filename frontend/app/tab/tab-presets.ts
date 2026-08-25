@@ -39,8 +39,11 @@ export type PresetNode = LeafNode | SplitNode;
 
 // ─── The default new-tab preset ──────────────────────────────────────────────
 //
-// agent on the left half; sysinfo top-right; swarm bottom-right. Mirrors
-// what the user described in the conversation that introduced this file.
+// agent on the left half; swarm / armory / sysinfo stacked top-to-bottom on
+// the right half (SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md — matches the
+// window-bootstrap default in agentmux-srv/src/backend/wcore/mod.rs's
+// default_four_pane_tree, a separate mechanism kept in sync by convention,
+// not shared code).
 // To change the defaults, edit *only* this constant — the applier and
 // every consumer of `createTab()` pick it up automatically.
 
@@ -51,8 +54,9 @@ export const DEFAULT_TAB_PRESET: PresetNode = {
         {
             split: "vertical",
             children: [
-                { widget: "defwidget@sysinfo" },
                 { widget: "defwidget@swarm" },
+                { widget: "defwidget@armory" },
+                { widget: "defwidget@sysinfo" },
             ],
         },
     ],
