@@ -256,21 +256,38 @@ side.** §2a's framing ("if AgentX's own identity bindings reciprocally
 include an account bound to AgentY's GitHub credential") assumed a pair of
 mirrored mis-bindings; what's actually there is a **single identity-provider
 account object, named "AgentX GitHub," visible/bound in both agents'
-`IdentityAccounts` lists simultaneously** — arguably a cleaner confirmation
-of a real resolver bug than a symmetric pair would have been, since there's
-no ambiguity about which agent "owns" it by name — it's mine by name, and
-AgentY's environment got it anyway.
+`IdentityAccounts` lists simultaneously**.
 
 One difference from AgentY's observation worth noting: they found the token
 already rejected by GitHub (`401 Unauthorized`) when they checked it on
 2026-08-24. As of this check (2026-08-25), the same account shows
 `status: "valid"` — either rotated/re-validated since, or `status` here
 reflects something other than live GitHub-side validity (not verified
-either way from this agent). Doesn't change the core finding: the same
-account record is reachable from both agent identities, which shouldn't be
-possible if bindings are meant to be exclusive per-agent.
+either way from this agent).
 
-This closes the loop §6 asked for. The actual fix still belongs where §5
-already said — the identity-resolver's account-binding logic
-(`identity/resolver/{inject.rs,provider.rs}`) — not in either agent's own
-`gh` workflow discipline.
+**Correction (Codex's review of the PR shipping this section): the
+paragraph originally here called this "a confirmed resolver bug." That
+overreached — struck and replaced.** Codex cited real code this section
+didn't check first: `IdentityAccount` is explicitly documented as a
+*reusable* credential (`identities.rs:103-105`); `agent_identity_link`'s own
+uniqueness constraint is scoped to `(agent_id, provider)` only — nothing
+prevents the same `account_id` from being linked to multiple different
+agents (`identities.rs:544-561`); and there's a dedicated test,
+`identity_delete_captures_all_affected_agents` (`identities.rs:894-928`),
+that deliberately links two different agents to one account and asserts
+both are correctly captured. Confirmed all three directly. **One account
+linked to two agents is tested, intentional, supported behavior — not
+evidence of a resolver malfunction.** The resolver injecting AgentY's
+`GITHUB_TOKEN` from "AgentX GitHub" is exactly what it's supposed to do
+*given that a link from AgentY to that account exists*.
+
+What this confirmation actually establishes, then, is narrower than §5
+concluded: the shared-account link is real (not a AgentY-side
+misobservation), but **whether that specific AgentY→"AgentX GitHub" link
+is a deliberate shared-credential setup or a mistaken/accidental binding is
+still completely open** — and that's the actual thing worth investigating
+next, not the resolver's binding-enforcement logic (which, per the code
+above, is working as designed). Concretely: check `db_agent_identity_links`
+for when/how that specific row was created, and by what — a manual UI
+action, a seeding/migration script, or something else — rather than
+assuming a code fix is needed in `identity/resolver/`.
