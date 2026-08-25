@@ -1,5 +1,23 @@
 # AgentMux Version History
 
+## 0.55.24 — 2026-08-24
+
+- fix(agent-pane): strip common indentation from mid-file tool previews
+- fix(agent): gate the BrainSpinner on subagent backfill so the Activity Dock never flickers
+- feat(armory): add AgentMux-controlled, highest-priority system tier to Global Memory
+- feat(linux): recover from AppArmor's unprivileged-userns sandbox restriction
+- fix(ci): move nightly release auto-tagging to gh-reporter (workflow_run trigger never fired)
+- fix(agent-pane): render tool-preview tabs at 2 spaces instead of the inherited 4
+- feat(agent-picker): on-demand Haiku activity summary fallback when no conversation snapshot exists
+- feat(agent-view): pause AskUserQuestion auto-timeout on keyboard activity, not just mouse hover
+- feat(agent,armory): write provider-specific startup instructions filenames (AGENTS.md, GEMINI.md, QWEN.md, ...) instead of always CLAUDE.md; surface the mapping in Global Memory
+- feat(agent-picker): sort control, reordered fields, distinct account-failure text
+- feat(toolchain): one-click install of git/Node/npm/Python via winget/brew/system package manager
+- fix(tabs): remove the active-tab color line spanning the whole tab strip
+- fix(armory,warden,settings): move the narrow-width responsive tab bar to the top of the pane; highlight ABF
+- feat(armory): surface ~/.claude/CLAUDE.md (read-only) in Global Memory
+
+
 ## 0.55.23 — 2026-08-23
 
 - fix(agent): surface a Reconnecting… status during stale-resume retry
