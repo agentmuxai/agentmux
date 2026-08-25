@@ -420,7 +420,7 @@
     }
 }
 
-// ── Bottom tab bar (xs only) ──────────────────────────────────────────────────
+// ── Tab bar, top of pane (xs only) ────────────────────────────────────────────
 
 .settings-tab-bar {
     display: none;
@@ -557,7 +557,7 @@
     }
 }
 
-// xs: bottom tab bar, stacked rows, full-width controls
+// xs: top tab bar, stacked rows, full-width controls
 @container settings (max-width: 479px) {
     .settings-view {
         flex-direction: column;

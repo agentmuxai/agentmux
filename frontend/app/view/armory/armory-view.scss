@@ -95,7 +95,7 @@
     }
 }
 
-// ── Bottom tab bar (xs only) ─────────────────────────────────────────────────
+// ── Tab bar, top of pane (xs only) ────────────────────────────────────────────
 
 .bundle-manager-tab-bar {
     display: none;
@@ -170,7 +170,7 @@
     }
 }
 
-// xs: hide rail, show bottom tab bar, switch to column layout
+// xs: hide rail, show the top tab bar, switch to column layout
 @container armory (max-width: 479px) {
     .armory-view {
         flex-direction: column;
