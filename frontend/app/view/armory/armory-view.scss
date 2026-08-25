@@ -68,6 +68,15 @@
             opacity: 1;
         }
     }
+
+    // ABF gets a standing accent highlight regardless of selection state —
+    // see SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md §5.
+    &.is-abf-highlight:not(.is-active) {
+        i {
+            color: var(--accent-color);
+            opacity: 1;
+        }
+    }
 }
 
 .bundle-manager-section {
@@ -86,13 +95,15 @@
     }
 }
 
-// ── Bottom tab bar (xs only) ─────────────────────────────────────────────────
+// ── Tab bar, top of pane (xs only) ────────────────────────────────────────────
 
 .bundle-manager-tab-bar {
     display: none;
     flex-direction: row;
     align-items: stretch;
-    border-top: 1px solid var(--border-color);
+    // Rendered at the TOP of the pane (see SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md)
+    // — the hairline separates it from the content rendered below, not above.
+    border-bottom: 1px solid var(--border-color);
     background: var(--panel-bg-color, var(--main-bg-color));
     flex-shrink: 0;
     overflow-x: auto;
@@ -120,12 +131,22 @@
         &.is-active {
             opacity: 1;
             color: var(--accent-color);
-            border-top: 2px solid var(--accent-color);
+            // Bottom edge, not top — the bar sits at the TOP of the pane now
+            // (SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md), so the
+            // active-tab indicator should touch the content it's showing,
+            // rendered below, not the far edge away from it.
+            border-bottom: 2px solid var(--accent-color);
         }
 
         &:hover:not(.is-active) {
             opacity: 0.85;
             background: var(--hover-bg-color, rgba(255, 255, 255, 0.04));
+        }
+
+        // ABF gets a standing accent highlight regardless of selection state —
+        // see SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md §5.
+        &.is-abf-highlight:not(.is-active) {
+            i { color: var(--accent-color); }
         }
     }
 }
@@ -149,7 +170,7 @@
     }
 }
 
-// xs: hide rail, show bottom tab bar, switch to column layout
+// xs: hide rail, show the top tab bar, switch to column layout
 @container armory (max-width: 479px) {
     .armory-view {
         flex-direction: column;
