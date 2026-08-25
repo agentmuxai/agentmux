@@ -147,15 +147,22 @@ async function applyNode(
     }
 
     // Non-leaf: insert each child in order. The first child takes the
-    // splitTargetId of the parent; subsequent children split off the
-    // first child (so they end up as siblings under this split node).
+    // splitTargetId of the parent; each subsequent child splits off the
+    // PREVIOUS child (not the first) so a split with 3+ children still
+    // lands in declared order — splitting every sibling off the first
+    // child instead means the 2nd+ insertions all target the same node,
+    // and later ones land ahead of earlier ones (Codex finding on
+    // SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md's 3-child swarm/armory/
+    // sysinfo split, PR #2796).
     let firstId: string | null = null;
+    let previousId: string | null = null;
     for (let i = 0; i < node.children.length; i++) {
         const child = node.children[i];
-        const target = i === 0 ? splitTargetId : firstId;
+        const target = i === 0 ? splitTargetId : previousId;
         const dir = i === 0 ? parentSplit : node.split;
         const id = await applyNode(expectedTabId, layoutModel, child, target, dir);
         if (firstId === null) firstId = id;
+        previousId = id;
     }
     return firstId!;
 }
