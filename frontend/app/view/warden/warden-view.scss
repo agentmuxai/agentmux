@@ -75,7 +75,7 @@
     }
 }
 
-// xs: hide rail, show bottom tab bar, switch to column layout
+// xs: hide rail, show the top tab bar, switch to column layout
 @container warden (max-width: 479px) {
     .warden-view {
         flex-direction: column;

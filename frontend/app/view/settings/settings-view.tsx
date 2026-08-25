@@ -69,6 +69,25 @@ export function SettingsView(props: ViewComponentProps<SettingsViewModel>): JSX.
     return (
         <div class="settings-view-container">
         <div class="settings-view">
+            {/* Narrow-width fallback for .settings-rail below — rendered FIRST
+                (not last) so it sits at the top of the pane, not the bottom, at
+                the same breakpoint the rail hides. See
+                docs/specs/SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md. */}
+            <nav class="settings-tab-bar" aria-label="Settings section">
+                <For each={RAIL}>
+                    {(item) => (
+                        <button
+                            type="button"
+                            aria-label={item.label}
+                            classList={{ "is-active": section() === item.id }}
+                            aria-pressed={section() === item.id}
+                            onClick={() => setSection(item.id)}
+                        >
+                            <i class={`fa-solid fa-${item.icon}`} aria-hidden="true" />
+                        </button>
+                    )}
+                </For>
+            </nav>
             <nav class="settings-rail" aria-label="Settings section">
                 <For each={RAIL}>
                     {(item) => (
@@ -113,21 +132,6 @@ export function SettingsView(props: ViewComponentProps<SettingsViewModel>): JSX.
                     </button>
                 </footer>
             </div>
-            <nav class="settings-tab-bar" aria-label="Settings section">
-                <For each={RAIL}>
-                    {(item) => (
-                        <button
-                            type="button"
-                            aria-label={item.label}
-                            classList={{ "is-active": section() === item.id }}
-                            aria-pressed={section() === item.id}
-                            onClick={() => setSection(item.id)}
-                        >
-                            <i class={`fa-solid fa-${item.icon}`} aria-hidden="true" />
-                        </button>
-                    )}
-                </For>
-            </nav>
         </div>
         </div>
     );

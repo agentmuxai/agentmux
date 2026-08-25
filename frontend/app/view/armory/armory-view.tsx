@@ -73,6 +73,28 @@ export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Elem
         // A container element cannot respond to its own container query.
         <div class="armory-container">
             <div class="armory-view" ref={viewRef} style={{ zoom: model.zoomAtom() }}>
+                {/* Narrow-width fallback for .bundle-manager-rail below — rendered
+                    FIRST (not last) so it sits at the top of the pane, not the
+                    bottom, at the same breakpoint the rail hides. See
+                    docs/specs/SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md. */}
+                <nav class="bundle-manager-tab-bar" aria-label="Armory section">
+                    <For each={RAIL}>
+                        {(item) => (
+                            <button
+                                type="button"
+                                classList={{
+                                    "is-active": section() === item.id,
+                                    "is-abf-highlight": item.id === "bundles",
+                                }}
+                                aria-pressed={section() === item.id}
+                                onClick={() => setSection(item.id)}
+                            >
+                                <i class={`fa-sharp fa-solid fa-${item.icon}`} aria-hidden="true" />
+                                <span>{item.label}</span>
+                            </button>
+                        )}
+                    </For>
+                </nav>
                 <nav class="bundle-manager-rail" aria-label="Armory section">
                     <For each={RAIL}>
                         {(item) => (
@@ -80,7 +102,10 @@ export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Elem
                                 <button
                                     type="button"
                                     class="bundle-manager-rail-item"
-                                    classList={{ "is-active": section() === item.id }}
+                                    classList={{
+                                        "is-active": section() === item.id,
+                                        "is-abf-highlight": item.id === "bundles",
+                                    }}
                                     aria-pressed={section() === item.id}
                                     onClick={() => setSection(item.id)}
                                 >
@@ -115,21 +140,6 @@ export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Elem
                         <NativeMemoryManager />
                     </div>
                 </div>
-                <nav class="bundle-manager-tab-bar" aria-label="Armory section">
-                    <For each={RAIL}>
-                        {(item) => (
-                            <button
-                                type="button"
-                                classList={{ "is-active": section() === item.id }}
-                                aria-pressed={section() === item.id}
-                                onClick={() => setSection(item.id)}
-                            >
-                                <i class={`fa-sharp fa-solid fa-${item.icon}`} aria-hidden="true" />
-                                <span>{item.label}</span>
-                            </button>
-                        )}
-                    </For>
-                </nav>
             </div>
         </div>
     );

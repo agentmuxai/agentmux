@@ -62,6 +62,25 @@ export function WardenView(props: ViewComponentProps<WardenViewModel>): JSX.Elem
         // container element cannot respond to its own container query.
         <div class="warden-container">
             <div class="warden-view" ref={viewRef} style={{ zoom: model.zoomAtom() }}>
+                {/* Narrow-width fallback for .bundle-manager-rail below — rendered
+                    FIRST (not last) so it sits at the top of the pane, not the
+                    bottom, at the same breakpoint the rail hides. See
+                    docs/specs/SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md. */}
+                <nav class="bundle-manager-tab-bar" aria-label="Warden section">
+                    <For each={RAIL}>
+                        {(item) => (
+                            <button
+                                type="button"
+                                classList={{ "is-active": section() === item.id }}
+                                aria-pressed={section() === item.id}
+                                onClick={() => setSection(item.id)}
+                            >
+                                <i class={`fa-sharp fa-solid fa-${item.icon}`} aria-hidden="true" />
+                                <span>{item.label}</span>
+                            </button>
+                        )}
+                    </For>
+                </nav>
                 <nav class="bundle-manager-rail" aria-label="Warden section">
                     <For each={RAIL}>
                         {(item) => (
@@ -102,21 +121,6 @@ export function WardenView(props: ViewComponentProps<WardenViewModel>): JSX.Elem
                         <WardenSupervisorManager />
                     </div>
                 </div>
-                <nav class="bundle-manager-tab-bar" aria-label="Warden section">
-                    <For each={RAIL}>
-                        {(item) => (
-                            <button
-                                type="button"
-                                classList={{ "is-active": section() === item.id }}
-                                aria-pressed={section() === item.id}
-                                onClick={() => setSection(item.id)}
-                            >
-                                <i class={`fa-sharp fa-solid fa-${item.icon}`} aria-hidden="true" />
-                                <span>{item.label}</span>
-                            </button>
-                        )}
-                    </For>
-                </nav>
             </div>
         </div>
     );
