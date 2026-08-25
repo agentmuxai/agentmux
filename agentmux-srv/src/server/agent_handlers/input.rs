@@ -147,6 +147,13 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
     // block file, not just live-broadcast (reagent P1, PR #2164 round 2).
     let filestore_ai = state.filestore.clone();
     let local_web_url_ai = state.local_web_url.clone();
+    // codex P1, PR #2802: the spawn-gate refusal below never called
+    // classify()/persist_last_failure — it only appended a raw
+    // error_during_execution frame to the block's output log, so the
+    // frontend's structured recovery card (agent:last_failure meta +
+    // EVENT_AGENT_FAILURE) never populated for a pre-spawn gate refusal,
+    // same host_spawn.rs pattern the POST-spawn exit path already uses.
+    let event_bus_ai = state.event_bus.clone();
     engine.register_handler(
         COMMAND_AGENT_INPUT,
         Box::new(move |data, _ctx| {
@@ -158,6 +165,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
             let container_manager = container_manager_ai.clone();
             let filestore_gate = filestore_ai.clone();
             let local_web_url = local_web_url_ai.clone();
+            let event_bus_gate = event_bus_ai.clone();
             Box::pin(async move {
                 let cmd: CommandAgentInputData = serde_json::from_value(data)
                     .map_err(|e| format!("agentinput: {e}"))?;
@@ -244,6 +252,36 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                             Some(&filestore_gate),
                             None,
                         );
+                        // codex P1, PR #2802: the frame above only lands in
+                        // the block's raw output log, which the recovery
+                        // banner does NOT read from — it reads the
+                        // structured `agent:last_failure` block-meta key
+                        // (persist_last_failure) + the ephemeral
+                        // EVENT_AGENT_FAILURE push, same as every POST-spawn
+                        // exit classification (host_spawn.rs). No process
+                        // ever ran here, so classify() gets no exit
+                        // code/stderr/result-frame — just the gate's own
+                        // Display text, exactly like health.rs's in-band-error
+                        // reclassification call.
+                        let gate_failure = crate::agents::failure::classify(
+                            None,
+                            None,
+                            &gate.to_string(),
+                            None,
+                        );
+                        crate::backend::blockcontroller::core::persist_last_failure(
+                            &cmd.blockid,
+                            Some(&gate_failure),
+                            &Some(wstore.clone()),
+                            &Some(event_bus_gate.clone()),
+                        );
+                        broker.publish(crate::backend::wps::WaveEvent {
+                            event: crate::backend::wps::EVENT_AGENT_FAILURE.to_string(),
+                            scopes: vec![format!("block:{}", cmd.blockid)],
+                            sender: String::new(),
+                            persist: 1,
+                            data: serde_json::to_value(&gate_failure).ok(),
+                        });
                         return Err(format!("identity spawn gate: {gate}"));
                     }
                 };

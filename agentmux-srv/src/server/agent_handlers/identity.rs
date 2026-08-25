@@ -29,6 +29,36 @@ use crate::backend::storage::store::{
 
 use super::super::AppState;
 
+/// Refuses to persist an OAuth account bound directly to its provider's
+/// ambient home dir (e.g. `~/.claude`) — nothing downstream validates
+/// `secret_ref.dir`, and a real, currently-live account configured exactly
+/// this way was found in this repo's own data
+/// (`docs/status/STATUS_IDENTITY_ISOLATION_GATE_NOT_ENFORCING_2026_08_20.md`
+/// §8). Split out of the `upsertidentityaccount` handler closure so it's
+/// directly unit-testable without spinning up the RPC engine. See
+/// `docs/specs/SPEC_BLOCK_AMBIENT_HOME_DIR_IDENTITY_BINDING_2026_08_25.md`.
+fn reject_ambient_home_dir_binding(account: &IdentityAccount) -> Result<(), String> {
+    let SecretRef::OAuthConfigDir { dir } = &account.secret_ref else {
+        return Ok(());
+    };
+    let Some(provider_cfg) = crate::backend::providers::get_provider(
+        &crate::backend::providers::resolve_provider_alias(&account.provider),
+    ) else {
+        return Ok(());
+    };
+    if crate::backend::providers::is_provider_ambient_home_dir(provider_cfg, dir) {
+        return Err(format!(
+            "upsertidentityaccount: refusing to bind {} identity to its \
+             ambient home directory ({dir}) — this would let a spawned \
+             agent silently share your personal CLI login/session state \
+             instead of using an isolated AgentMux account. Use an \
+             isolated config dir for this account instead.",
+            account.provider,
+        ));
+    }
+    Ok(())
+}
+
 /// Request for `account.key.verify` (Armory key flow). The `api_key`
 /// field is a secret — never log this struct.
 #[derive(serde::Deserialize)]
@@ -164,6 +194,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // so callers don't have to know the current time.
                 let mut account: IdentityAccount = serde_json::from_value(data)
                     .map_err(|e| format!("upsertidentityaccount: {e}"))?;
+                reject_ambient_home_dir_binding(&account)?;
                 if account.id.is_empty() {
                     account.id = uuid::Uuid::new_v4().to_string();
                 }
@@ -955,4 +986,76 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+}
+
+#[cfg(test)]
+mod ambient_home_dir_binding_tests {
+    use super::*;
+
+    fn make_account(provider: &str, secret_ref: SecretRef) -> IdentityAccount {
+        IdentityAccount {
+            id: "acct-1".to_string(),
+            name: "test".to_string(),
+            provider: provider.to_string(),
+            kind: "pat".to_string(),
+            display_name: String::new(),
+            secret_ref,
+            context: serde_json::json!({}),
+            status: "unknown".to_string(),
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    // docs/specs/SPEC_BLOCK_AMBIENT_HOME_DIR_IDENTITY_BINDING_2026_08_25.md.
+    // Uses the REAL get_home_dir() (not a mock) — same reasoning as the
+    // inject.rs spawn-time test, deterministic regardless of whether
+    // ~/.claude exists on the test machine.
+    #[test]
+    fn refuses_oauth_config_dir_pointed_at_the_ambient_home() {
+        let ambient = crate::backend::base::get_home_dir()
+            .join(".claude")
+            .to_string_lossy()
+            .into_owned();
+        let account = make_account("claude", SecretRef::OAuthConfigDir { dir: ambient.clone() });
+
+        let err = reject_ambient_home_dir_binding(&account)
+            .expect_err("must refuse an account bound to the ambient home dir");
+        assert!(err.contains(&ambient), "error should name the offending dir: {err}");
+        assert!(err.contains("claude"), "error should name the provider: {err}");
+    }
+
+    #[test]
+    fn allows_oauth_config_dir_pointed_at_an_isolated_dir() {
+        let isolated = crate::backend::base::get_home_dir()
+            .join(".agentmux")
+            .join("shared")
+            .join("identities")
+            .join("some-id")
+            .join("claude")
+            .to_string_lossy()
+            .into_owned();
+        let account = make_account("claude", SecretRef::OAuthConfigDir { dir: isolated });
+
+        assert!(reject_ambient_home_dir_binding(&account).is_ok());
+    }
+
+    #[test]
+    fn allows_non_oauth_secret_refs_unconditionally() {
+        let account = make_account("github", SecretRef::Env { env_var: "GITHUB_TOKEN".to_string() });
+        assert!(reject_ambient_home_dir_binding(&account).is_ok());
+    }
+
+    #[test]
+    fn allows_an_unknown_provider_id_unconditionally() {
+        // get_provider() returns None for an unrecognized id — the guard
+        // has nothing to check against, so it must not block (matches the
+        // existing "unknown provider" skip behavior elsewhere in this
+        // codebase, not a new failure mode).
+        let account = make_account(
+            "not-a-real-provider",
+            SecretRef::OAuthConfigDir { dir: "/tmp/whatever".to_string() },
+        );
+        assert!(reject_ambient_home_dir_binding(&account).is_ok());
+    }
 }

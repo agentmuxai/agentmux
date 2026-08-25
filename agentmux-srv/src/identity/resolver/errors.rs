@@ -36,6 +36,15 @@ pub enum SpawnGateError {
     /// blocked spawn is retryable and visible; a silent ambient launch
     /// is neither.
     InjectionUnavailable { detail: String },
+    /// The bound account's `SecretRef::OAuthConfigDir` resolves to the
+    /// provider's own literal ambient home directory (e.g. `~/.claude`)
+    /// instead of an AgentMux-isolated dir. Blocked unconditionally,
+    /// regardless of `use_ambient_login` — a real, currently-live account
+    /// configured exactly this way was found in this repo's own data
+    /// (`docs/status/STATUS_IDENTITY_ISOLATION_GATE_NOT_ENFORCING_2026_08_20.md`
+    /// §8); this variant is the enforcement that closes that gap. See
+    /// `docs/specs/SPEC_BLOCK_AMBIENT_HOME_DIR_IDENTITY_BINDING_2026_08_25.md`.
+    AmbientHomeDirNotAllowed { provider: String, dir: String },
 }
 
 impl std::fmt::Display for SpawnGateError {
@@ -58,6 +67,15 @@ impl std::fmt::Display for SpawnGateError {
                 "credential injection could not run ({detail}); the spawn was \
                  refused rather than falling back to the global CLI login. \
                  Retry, and check `muxlog auth` if it persists.",
+            ),
+            SpawnGateError::AmbientHomeDirNotAllowed { provider, dir } => write!(
+                f,
+                "this agent's {provider} identity points directly at your personal \
+                 {provider} config directory ({dir}) instead of an isolated AgentMux \
+                 account — AgentMux no longer allows spawning an agent against your \
+                 own global CLI login. Re-bind this identity to an isolated account \
+                 in Armory → Accounts (delete the current {provider} account and log \
+                 in again to create a fresh, isolated one), then retry.",
             ),
         }
     }
