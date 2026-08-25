@@ -426,7 +426,9 @@
     display: none;
     flex-direction: row;
     align-items: stretch;
-    border-top: 1px solid var(--border-color);
+    // Rendered at the TOP of the pane (see SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md)
+    // — the hairline separates it from the content rendered below, not above.
+    border-bottom: 1px solid var(--border-color);
     background: var(--panel-bg-color, var(--main-bg-color));
     flex-shrink: 0;
     overflow-x: auto;

@@ -159,7 +159,7 @@ describe("WardenView pane title", () => {
         expect(auditPane?.classList.contains("is-hidden")).toBe(false);
     });
 
-    it("clicking a bottom tab-bar item writes warden:section via SetMetaCommand and updates viewName()", () => {
+    it("clicking a tab-bar item writes warden:section via SetMetaCommand and updates viewName()", () => {
         const { model } = renderWarden();
         const tabBar = screen.getByLabelText("Warden section", { selector: "nav.bundle-manager-tab-bar" });
         const supervisorButton = Array.from(tabBar.querySelectorAll("button")).find(
@@ -171,6 +171,14 @@ describe("WardenView pane title", () => {
             { oref: "block:test-block", meta: { "warden:section": "supervisor" } },
         );
         expect(model.viewName()).toBe("Supervisor");
+    });
+
+    // SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md
+    it("renders the tab-bar before the content section, so it sits at the top of the pane", () => {
+        renderWarden();
+        const tabBar = screen.getByLabelText("Warden section", { selector: "nav.bundle-manager-tab-bar" });
+        const section = document.querySelector(".bundle-manager-section");
+        expect(tabBar.compareDocumentPosition(section as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
     it("viewName() reflects a pre-seeded warden:section meta value", () => {

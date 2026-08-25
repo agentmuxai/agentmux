@@ -69,6 +69,14 @@ describe("SettingsView rail", () => {
         expect(screen.queryByTestId("terminal-section")).not.toBeInTheDocument();
     });
 
+    // SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md
+    it("renders the tab-bar before the content body, so it sits at the top of the pane", () => {
+        renderSettings();
+        const tabBar = screen.getByLabelText("Settings section", { selector: "nav.settings-tab-bar" });
+        const body = document.querySelector(".settings-body");
+        expect(tabBar.compareDocumentPosition(body as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
     it("clicking a rail item switches the visible section", () => {
         const { model } = renderSettings();
         const rail = screen.getByLabelText("Settings section", { selector: "nav.settings-rail" });
