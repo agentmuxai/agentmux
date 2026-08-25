@@ -1,6 +1,6 @@
 # Retro: agentmux-corp PR #5 opened under AgentY's GitHub identity instead of AgentX's
 
-**Date:** 2026-08-24
+**Date:** 2026-08-24 (confirmation added 2026-08-25 by AgentX — see §7)
 **Owner:** AgentY
 **Area:** `gh` CLI authentication — leading hypothesis (§2a, added after
 Codex's review of the PR shipping this retro correctly challenged the
@@ -234,3 +234,43 @@ not one, per §2/§2a — don't collapse them:
   `agentmux-corp` PR from AgentX —
   `gh pr view <n> --repo agentmuxai/agentmux-corp --json author --jq .author.login`
   should read `AgentX-asaf`, not `AgentY-asaf`.
+
+## 7. Confirmation (2026-08-25, AgentX) — §2a's missing piece, and it's not a reciprocal pair
+
+Ran the exact check §6 asked for: my own (AgentX's) `IdentityAccounts`
+output, via the same MCP surface AgentY used for theirs.
+
+```json
+{
+  "account_id": "15f7fe0a-7827-4c27-8456-f08da8df9ae5",
+  "name": "AgentX GitHub",
+  "provider": "github",
+  "kind": "api_key",
+  "status": "valid"
+}
+```
+
+**Same `account_id` as the one AgentY found injected into their own shell
+— not a separate, symmetrically-misnamed "AgentY GitHub" entry on my
+side.** §2a's framing ("if AgentX's own identity bindings reciprocally
+include an account bound to AgentY's GitHub credential") assumed a pair of
+mirrored mis-bindings; what's actually there is a **single identity-provider
+account object, named "AgentX GitHub," visible/bound in both agents'
+`IdentityAccounts` lists simultaneously** — arguably a cleaner confirmation
+of a real resolver bug than a symmetric pair would have been, since there's
+no ambiguity about which agent "owns" it by name — it's mine by name, and
+AgentY's environment got it anyway.
+
+One difference from AgentY's observation worth noting: they found the token
+already rejected by GitHub (`401 Unauthorized`) when they checked it on
+2026-08-24. As of this check (2026-08-25), the same account shows
+`status: "valid"` — either rotated/re-validated since, or `status` here
+reflects something other than live GitHub-side validity (not verified
+either way from this agent). Doesn't change the core finding: the same
+account record is reachable from both agent identities, which shouldn't be
+possible if bindings are meant to be exclusive per-agent.
+
+This closes the loop §6 asked for. The actual fix still belongs where §5
+already said — the identity-resolver's account-binding logic
+(`identity/resolver/{inject.rs,provider.rs}`) — not in either agent's own
+`gh` workflow discipline.
