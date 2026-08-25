@@ -14,17 +14,21 @@
  * docs/specs/SPEC_AGENT_PANE_VIRTUALIZATION_REDESIGN.md.
  */
 
-import { onMount, Show, type Accessor, type JSX } from "solid-js";
+import { onMount, Show, createMemo, type Accessor, type JSX } from "solid-js";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import { AgentMessageBlock } from "../components/AgentMessageBlock";
 import { JektBubble } from "../components/JektBubble";
 import { MarkdownBlock } from "../components/MarkdownBlock";
+import { PeekOverlay } from "../components/PeekOverlay";
 import { PersistentShellBlock } from "../components/PersistentShellBlock";
 import { ToolBlock } from "../components/ToolBlock";
 import { UserMessageBlock } from "../components/UserMessageBlock";
+import { useNodePeek } from "../hooks/useNodePeek";
 import type { DocumentNode, DocumentState, ShellNode, UserMessageNode } from "../types";
 import { markRowMount } from "./perf-probe";
-import { formatCompactNumber } from "@/util/format-count";
+import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
+import { formatExactTime, formatTimeAgo } from "@/util/format-time";
+import { useTick } from "@/app/hook/useTick";
 
 export interface DocumentRowProps {
     /**
@@ -180,6 +184,18 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
     // the matching branch's children update when the underlying node
     // changes. This was committed on the Phase 2 PR but landed after
     // the squash-merge cutoff — adding back as a follow-up.
+
+    // Peek tooltip for the node kinds still rendered INLINE below
+    // (section/agent_error/context_compacted/compaction_started/
+    // day_divider/session_outcome) — SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25.
+    // markdown/tool/agent_message/jekt_message/user_message/shell own their
+    // own peek state inside their dedicated components; these six don't
+    // have one, so a SINGLE shared instance here covers all of them — only
+    // one `<Show>` branch (and hence only one of these six anchors) is ever
+    // actually mounted for a given node, so sharing is safe.
+    const peekTick = useTick(1000);
+    const { isPeeking, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } = useNodePeek();
+
     return (
         <>
             <Show when={props.node() && props.node().type === "markdown"}>
@@ -228,8 +244,11 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     expand affordance the removed hover strip used to provide);
                     keyboard "e" on the focused row still toggles too. */}
                 <div
+                    ref={setPeekRowEl}
                     class={`agent-section agent-section--toggle level-${(props.node() as Extract<DocumentNode, { type: "section" }>).level}`}
                     onClick={() => props.onToggleCollapse(props.node().id)}
+                    onMouseEnter={handlePeekEnter}
+                    onMouseLeave={handlePeekLeave}
                 >
                     <Show when={(props.node() as Extract<DocumentNode, { type: "section" }>).level === 1}>
                         <h1>{(props.node() as Extract<DocumentNode, { type: "section" }>).title}</h1>
@@ -240,10 +259,32 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     <Show when={(props.node() as Extract<DocumentNode, { type: "section" }>).level === 3}>
                         <h3>{(props.node() as Extract<DocumentNode, { type: "section" }>).title}</h3>
                     </Show>
+                    {(() => {
+                        const n = props.node() as Extract<DocumentNode, { type: "section" }>;
+                        const timeText = createMemo(() => {
+                            if (!isPeeking() || n.timestamp == null) return null;
+                            peekTick();
+                            return `${formatExactTime(n.timestamp)} · ${formatTimeAgo(n.timestamp)}`;
+                        });
+                        const estimateText = createMemo(() => {
+                            const count = estimateTokenCount(n.title);
+                            return count > 0 ? `~${formatCompactNumber(count)} tok (est.)` : null;
+                        });
+                        return (
+                            <PeekOverlay show={isPeeking() && (timeText() != null || estimateText() != null)} rowEl={peekRowEl}>
+                                <Show when={timeText()}>
+                                    <div class="agent-node-peek-tooltip-meta">{timeText()}</div>
+                                </Show>
+                                <Show when={estimateText()}>
+                                    <div class="agent-node-peek-tooltip-meta">{estimateText()}</div>
+                                </Show>
+                            </PeekOverlay>
+                        );
+                    })()}
                 </div>
             </Show>
             <Show when={props.node() && props.node().type === "agent_error"}>
-                <div class="agent-error-block">
+                <div class="agent-error-block" ref={setPeekRowEl} onMouseEnter={handlePeekEnter} onMouseLeave={handlePeekLeave}>
                     <span class="agent-error-code">
                         {(() => {
                             const n = props.node() as Extract<DocumentNode, { type: "agent_error" }>;
@@ -270,6 +311,23 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                             Login Again →
                         </button>
                     </Show>
+                    {(() => {
+                        // No timestamp field exists on AgentErrorNode — estimate only,
+                        // same "no time line" shape ToolBlock/MarkdownBlock use for an
+                        // untimed node.
+                        const n = props.node() as Extract<DocumentNode, { type: "agent_error" }>;
+                        const estimateText = createMemo(() => {
+                            const count = estimateTokenCount(n.message);
+                            return count > 0 ? `~${formatCompactNumber(count)} tok (est.)` : null;
+                        });
+                        return (
+                            <PeekOverlay show={isPeeking() && estimateText() != null} rowEl={peekRowEl}>
+                                <Show when={estimateText()}>
+                                    <div class="agent-node-peek-tooltip-meta">{estimateText()}</div>
+                                </Show>
+                            </PeekOverlay>
+                        );
+                    })()}
                 </div>
             </Show>
             <Show when={props.node() && props.node().type === "context_compacted"}>
@@ -288,8 +346,21 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     const durationLabel = n.durationMs != null
                         ? ` · took ${(n.durationMs / 1000).toFixed(1)}s`
                         : "";
+                    // Only a time line — tokensBefore/After/duration are already
+                    // visible in the row itself, and there's no free-text body to
+                    // estimate a token count from.
+                    const timeText = createMemo(() => {
+                        if (!isPeeking()) return null;
+                        peekTick();
+                        return `${formatExactTime(n.timestamp)} · ${formatTimeAgo(n.timestamp)}`;
+                    });
                     return (
-                        <div class="agent-context-compacted">
+                        <div
+                            ref={setPeekRowEl}
+                            class="agent-context-compacted"
+                            onMouseEnter={handlePeekEnter}
+                            onMouseLeave={handlePeekLeave}
+                        >
                             <div class="agent-context-compacted-rule">
                                 <span class="agent-context-compacted-label">
                                     context compacted{triggerLabel ? ` — ${triggerLabel}` : ""}
@@ -298,6 +369,9 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                             <div class="agent-context-compacted-detail">
                                 Earlier history summarized · {fmt(n.tokensBefore)} → {fmt(n.tokensAfter)} tokens{durationLabel}
                             </div>
+                            <PeekOverlay show={isPeeking() && timeText() != null} rowEl={peekRowEl}>
+                                <div class="agent-node-peek-tooltip-meta">{timeText()}</div>
+                            </PeekOverlay>
                         </div>
                     );
                 })()}
@@ -306,14 +380,29 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                 {(() => {
                     const n = props.node() as Extract<DocumentNode, { type: "compaction_started" }>;
                     const triggerLabel = n.trigger === "manual" ? "you ran /compact" : "context filled up";
+                    // Node uses `startedAt`, not `timestamp` — same time-only peek
+                    // shape as context_compacted above.
+                    const timeText = createMemo(() => {
+                        if (!isPeeking()) return null;
+                        peekTick();
+                        return `${formatExactTime(n.startedAt)} · ${formatTimeAgo(n.startedAt)}`;
+                    });
                     return (
-                        <div class="agent-compaction-started">
+                        <div
+                            ref={setPeekRowEl}
+                            class="agent-compaction-started"
+                            onMouseEnter={handlePeekEnter}
+                            onMouseLeave={handlePeekLeave}
+                        >
                             <div class="agent-compaction-started-label">
                                 Compacting conversation…
                             </div>
                             <div class="agent-compaction-started-detail">
                                 {triggerLabel}
                             </div>
+                            <PeekOverlay show={isPeeking() && timeText() != null} rowEl={peekRowEl}>
+                                <div class="agent-node-peek-tooltip-meta">{timeText()}</div>
+                            </PeekOverlay>
                         </div>
                     );
                 })()}
@@ -321,13 +410,35 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
             <Show when={props.node() && props.node().type === "day_divider"}>
                 {(() => {
                     const n = props.node() as Extract<DocumentNode, { type: "day_divider" }>;
+                    // Exact local-midnight instant — the visible label is already a
+                    // human day name, so this just adds precision, no estimate line
+                    // (a day label has no free-text body worth estimating).
+                    const timeText = createMemo(() => {
+                        if (!isPeeking()) return null;
+                        peekTick();
+                        return `${formatExactTime(n.timestamp)} · ${formatTimeAgo(n.timestamp)}`;
+                    });
                     return (
-                        <div class="agent-day-divider">
+                        <div
+                            ref={setPeekRowEl}
+                            class="agent-day-divider"
+                            onMouseEnter={handlePeekEnter}
+                            onMouseLeave={handlePeekLeave}
+                        >
                             <div class="agent-day-divider-label">{n.dayLabel}</div>
+                            <PeekOverlay show={isPeeking() && timeText() != null} rowEl={peekRowEl}>
+                                <div class="agent-node-peek-tooltip-meta">{timeText()}</div>
+                            </PeekOverlay>
                         </div>
                     );
                 })()}
             </Show>
+            {/* history_link intentionally has no peek — a render-time synthetic
+                CTA row (fixed id "history-link") with no timestamp/content field
+                at all, and its full text is already fully visible without
+                hovering. SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25
+                treats this as the one deliberate exception to "always fires":
+                there is no data here a peek could add. */}
             <Show when={props.node() && props.node().type === "history_link"}>
                 <div
                     class="agent-history-link-row"
@@ -355,8 +466,22 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     // sees `fresh` today. The resumed rendering is kept for
                     // the P2 Agent History view, which materializes both.
                     const resumed = n.outcome === "resumed";
+                    // Body shows the attempted vs. actual session id — real
+                    // debug info this node's own visible label doesn't surface
+                    // anywhere else.
+                    const timeText = createMemo(() => {
+                        if (!isPeeking()) return null;
+                        peekTick();
+                        return `${formatExactTime(n.timestamp)} · ${formatTimeAgo(n.timestamp)}`;
+                    });
+                    const bodyText = `attempted: ${n.attemptedSid} · actual: ${n.actualSid ?? "—"}`;
                     return (
-                        <div class={resumed ? "agent-session-outcome" : "agent-session-outcome agent-session-outcome-fresh"}>
+                        <div
+                            ref={setPeekRowEl}
+                            class={resumed ? "agent-session-outcome" : "agent-session-outcome agent-session-outcome-fresh"}
+                            onMouseEnter={handlePeekEnter}
+                            onMouseLeave={handlePeekLeave}
+                        >
                             <div class="agent-session-outcome-rule">
                                 <span class="agent-session-outcome-label">
                                     {resumed ? "Session continued" : "New session started"}
@@ -367,6 +492,12 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                                     Prior conversation isn't available to this agent — it's preserved in the agent's history
                                 </div>
                             </Show>
+                            <PeekOverlay show={isPeeking()} rowEl={peekRowEl}>
+                                <Show when={timeText()}>
+                                    <div class="agent-node-peek-tooltip-meta">{timeText()}</div>
+                                </Show>
+                                <div class="agent-node-peek-tooltip-body">{bodyText}</div>
+                            </PeekOverlay>
                         </div>
                     );
                 })()}

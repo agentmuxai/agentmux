@@ -188,13 +188,16 @@ describe("ToolBlock — panel mode", () => {
         // The peek overlay is Portal-rendered at document.body (PeekOverlay.tsx
         // — escapes each virtualized row's own CSS stacking context, see that
         // file's doc comment), so it lives in `document.body`, not `container`.
-        // A real 150ms enter-delay gates its DOM presence (mirrors
+        // A real 50ms enter-delay gates its DOM presence (mirrors
         // UserMessageBlock.tsx's "Session context" hover-to-peek), so these
-        // tests use fake timers and advance past it.
+        // tests use fake timers and advance past it. Fires on `.agent-tool-block`
+        // (the whole row), not the narrower name span — the peek anchor was
+        // widened to the whole row per SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25
+        // ("always fires when hovering anywhere over the row").
         const hoverToolName = (container: HTMLElement) => {
-            const anchor = container.querySelector(".agent-tool-name-peek-anchor") as HTMLElement;
-            fireEvent.mouseEnter(anchor);
-            vi.advanceTimersByTime(200);
+            const row = container.querySelector(".agent-tool-block") as HTMLElement;
+            fireEvent.mouseEnter(row);
+            vi.advanceTimersByTime(100);
         };
 
         it("collapsed: hovering the name shows the bare command, not the decorated summary", () => {
@@ -303,28 +306,51 @@ describe("ToolBlock — panel mode", () => {
         });
 
         // ToolBlock instances are reused across status transitions via
-        // index-based virtualization (no remount) -- these two assert the
+        // index-based virtualization (no remount) -- this asserts the
         // suppression is reactive to a live status/pin change on an
         // ALREADY-MOUNTED instance, not just correct on first render.
-        it("shows the overlay once a running tool completes, with the cursor already stationary over it (no second mouseenter)", () => {
-            // The scenario a naive implementation misses: the user's cursor
-            // never moves, only the tool's own status (and hence
-            // `expanded()`) changes out from under it. If the anchor's hover
-            // handling only acted inside the mouseenter/mouseleave handlers
-            // themselves, this would require a SECOND mouseenter that never
-            // comes in real usage — a stationary cursor doesn't generate one
-            // just because an unrelated prop changed.
+        //
+        // Behavior change from SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25:
+        // the peek anchor used to be a narrow inner span, separate from the
+        // outer row's own mouseenter/mouseleave (which drives `userHolding` —
+        // "keep an already-expanded panel open while the mouse is still over
+        // it"). Since `mouseenter` doesn't bubble, hovering only the inner
+        // span never touched `userHolding`, so a running->success transition
+        // with a stationary cursor collapsed the panel and the peek could
+        // show. Now that peek fires from anywhere in the row (the whole
+        // point of "always fires"), the SAME hover also engages
+        // `userHolding` while the panel is auto-expanded — so it now stays
+        // held open (correctly: the user is visibly still reading it) and
+        // the peek correctly stays suppressed the whole time, per the
+        // existing "peek is redundant once the detail is already visible in
+        // the expanded panel" rule. Leaving and re-hovering afterward (a
+        // genuinely fresh hover over the now-collapsed row) still shows the
+        // peek — the "always fires" contract holds for real hover, not for
+        // a use hovering session that never actually revisits the row.
+        it("keeps a running tool's panel held open through completion when the cursor never moves, so the peek stays suppressed until a fresh hover", () => {
             const [node, setNode] = createSignal<ToolNode>({ ...baseTool, status: "running" });
             vi.useFakeTimers();
             try {
                 const { container } = render(() => (
                     <ToolBlock node={node()} pinned={false} onTogglePin={() => {}} />
                 ));
-                const anchor = container.querySelector(".agent-tool-name-peek-anchor") as HTMLElement;
-                fireEvent.mouseEnter(anchor); // cursor arrives while still running (panel auto-expanded)
-                vi.advanceTimersByTime(200);
+                const row = container.querySelector(".agent-tool-block") as HTMLElement;
+                fireEvent.mouseEnter(row); // cursor arrives while still running (panel auto-expanded)
+                vi.advanceTimersByTime(100);
                 expect(document.body.querySelector(".agent-node-peek-overlay")).toBeNull();
                 setNode({ ...baseTool, status: "success" }); // completes; cursor never moves
+                // Held open by userHolding (engaged at the mouseenter above,
+                // since the panel WAS auto-expanded at that moment) — no
+                // peek while the detail is already visible in-flow.
+                const panel = container.querySelector(".agent-tool-panel") as HTMLElement;
+                expect(panel.classList.contains("agent-tool-panel--flow")).toBe(true);
+                expect(document.body.querySelector(".agent-node-peek-overlay")).toBeNull();
+
+                // A genuine fresh hover (leave, then re-enter) after the row
+                // has actually collapsed still shows the peek.
+                fireEvent.mouseLeave(row);
+                fireEvent.mouseEnter(row);
+                vi.advanceTimersByTime(100);
                 const tip = document.body.querySelector(".agent-node-peek-tooltip-body");
                 expect(tip).not.toBeNull();
                 expect(tip!.textContent).toBe("ls");
