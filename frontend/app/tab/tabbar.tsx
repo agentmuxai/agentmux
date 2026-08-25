@@ -12,12 +12,10 @@ import { isMacOS } from "@/util/platformutil";
 import { fireAndForget } from "@/util/util";
 import type { JSX } from "solid-js";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
-import { Portal } from "solid-js/web";
 import { WorkspaceService } from "../store/services";
 import { DroppableTab } from "./droppable-tab";
 import { TabCloseConfirmModal } from "./tab-close-confirm-modal";
 import { registerTabCloseRequestHandler } from "./tab-close-request";
-import { useActiveTabColorLine } from "./tab-color-line";
 import { useTabDragAndDrop } from "./tab-reorder";
 import { useTabTearOffEvents } from "./tab-tearoff-events";
 import { createTearOffTabAtRelease } from "./tab-tearoff-rpc";
@@ -126,15 +124,6 @@ function TabBar(props: TabBarProps): JSX.Element {
 
     const activeIndex = () => tabIds().indexOf(activeTabId());
 
-    const { lineLeft, lineWidth, lineBottom, lineReady, activeTabColor } = useActiveTabColorLine(
-        {
-            tabBarRef: () => tabBarRef,
-            tabBarScrollRef: () => tabBarScrollRef,
-            tabBarFillRef: () => tabBarFillRef,
-        },
-        tabIds
-    );
-
     return (
         <div ref={tabBarRef!} class="tab-bar" {...dragProps}>
             {/* Windows/Linux: hamburger sits at the LEFT of the tab strip.
@@ -191,29 +180,6 @@ function TabBar(props: TabBarProps): JSX.Element {
                     of the scroll container looked draggable but wasn't. */}
                 <div ref={tabBarFillRef!} class="tab-bar-fill" data-drag-region="true" />
             </div>
-            <Show when={activeTabColor() && lineReady()}>
-                {/* Portal to escape .tab-bar's `overflow: hidden` and
-                    .tab-bar-scroll's `overflow-x: auto` clipping/scroll —
-                    needed even though the line now stops at the tab strip's
-                    own right edge (.tab-bar-fill), since a scrolled-near-the-
-                    end tab strip can still position that edge past what's
-                    currently visible. */}
-                <Portal mount={document.body}>
-                    <div
-                        class="active-tab-color-line"
-                        aria-hidden="true"
-                        style={{
-                            position: "fixed",
-                            left: `${lineLeft()}px`,
-                            width: `${lineWidth()}px`,
-                            bottom: `${lineBottom()}px`,
-                            height: "3px",
-                            background: activeTabColor()!,
-                            "pointer-events": "none",
-                        }}
-                    />
-                </Portal>
-            </Show>
             <Show when={pendingCloseTabId() !== null}>
                 <TabCloseConfirmModal
                     tabId={pendingCloseTabId()!}
