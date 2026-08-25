@@ -5,7 +5,11 @@
 out to be the wrong one — see §5 for the corrected design (the CLAUDE.md
 at AgentMux's shared Claude provider config dir, not the ambient
 `~/.claude/CLAUDE.md`). Filename kept as-is since it's already referenced
-by the PR/commits; read §5 for what actually shipped.
+by the PR/commits; read §5 for what actually shipped. **§6 (2026-08-25)
+re-adds the ambient file after all — as a SECOND, separately-labeled
+block alongside §5's, not a replacement.** Current shipped/target state:
+Global Memory shows TWO independent read-only blocks — the shared
+provider config (§5) and the ambient host CLI config (§6).
 
 ---
 
@@ -247,3 +251,70 @@ treatment §3's out-of-scope items already use elsewhere in this spec chain.
 Badge copy changed from "Machine-wide (Claude Code)" (implying universal
 truth) to "Claude Code — shared provider config" (accurately scoped, with
 the identity-bound caveat moved into the tooltip) to match.
+
+---
+
+## 6. Second revision (2026-08-25) — restore the ambient file as a SECOND, separately-labeled block
+
+**The ask, verbatim:**
+
+> so what do you use claude.md wise? what files have u used this session,
+> keep it short, just a list [...] right .. so those are the ones we
+> should be able to see inside global memory in armory [...] you need to
+> update the Global Memory spec. I am telling you the purpose of Global
+> Memory is to be able to peruse those files
+
+Of the files listed in that conversation, two are genuinely part of
+AgentMux's spawned-agent memory pipeline; two are not (this coding-agent
+harness's own working-directory `CLAUDE.md`/`AGENTMUX_MEMORY.md` — not
+under `CLAUDE_CONFIG_DIR` isolation, not something any in-app Agent pane
+would ever load). Presented as an explicit choice; the operator selected
+**only** the ambient `~/.claude/CLAUDE.md` to add, declining the
+per-identity `CLAUDE_CONFIG_DIR` dirs and the harness-specific files.
+
+**Design:** add a second, independently-fetched read-only block —
+`getclaudeambientconfig` — reusing §5's exact `ClaudeGlobalConfig` shape
+and `read_claude_global_config` helper (already generic: takes a dir,
+appends `CLAUDE.md`, reports `{path, content, exists}`) against
+`get_home_dir().join(".claude")` instead of
+`DataPaths::provider_auth_dir("claude")`. Rendered directly below the
+existing shared-provider-config block, same markup/CSS class
+(`global-brain-machine-config`), with **its own distinct badge** —
+"Claude Code — host CLI config (ambient)" — and a tooltip that states the
+audience distinction plainly, so this pass doesn't repeat §5's mistake of
+one block implying it covers more than it does:
+
+> Claude Code's own global config on this machine — read by a host-level
+> Claude Code CLI running outside AgentMux's isolation (e.g. an external
+> coding-agent harness). A spawned in-app Claude agent does NOT read this
+> file — see the shared provider config block above for what it actually
+> reads.
+
+Two independent blocks, two independent fetches (mirrors §2.2's
+"read-once-at-mount, no live-watch" reasoning — same tradeoffs apply
+identically to the ambient path), two independent atoms
+(`claudeAmbientConfigAtom` alongside the existing
+`claudeGlobalConfigAtom`) — no shared state, no coupling; either can fail
+or be missing independently without affecting the other's rendering.
+
+**Out of scope (same reasoning as §3, re-affirmed after the explicit
+choice above):** per-identity `CLAUDE_CONFIG_DIR` dirs (still a known,
+flagged gap — would require enumerating every identity, a materially
+larger feature); this harness's own working-directory files (not part of
+AgentMux's spawned-agent system at all, would misrepresent what the
+feature does the same way the original §1-§4 design did before §5's
+correction); any equivalent file for other providers (still no evidence
+one exists the way `~/.claude/CLAUDE.md` does for Claude Code).
+
+**Test plan (additive, mirrors §4 exactly for the new path):**
+- [ ] Rust: `getclaudeambientconfig` against a `HOME` pointed at a tempdir
+      — exists/missing/empty-file cases, reusing the existing
+      `read_claude_global_config` test helper against a different dir.
+- [ ] Frontend: `claudeAmbientConfigAtom` populates independently of
+      `claudeGlobalConfigAtom`; a rejected ambient fetch doesn't clear or
+      block the shared-provider-config atom and vice versa.
+- [ ] Frontend: `GlobalBrainManager` renders both blocks with visibly
+      distinct badge text; each is independently read-only (no
+      textarea/button in either).
+- [ ] Manual (`task dev`): confirm both blocks render, each with its own
+      correct path/content/empty-state, positioned adjacently.

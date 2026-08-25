@@ -15,10 +15,16 @@ const getClaudeGlobalConfigMock = vi.fn().mockResolvedValue({
     content: null,
     exists: false,
 });
+const getClaudeAmbientConfigMock = vi.fn().mockResolvedValue({
+    path: "/home/user/.claude/CLAUDE.md",
+    content: null,
+    exists: false,
+});
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         ListMemoriesCommand: (...args: unknown[]) => listMemoriesMock(...args),
         GetClaudeGlobalConfigCommand: (...args: unknown[]) => getClaudeGlobalConfigMock(...args),
+        GetClaudeAmbientConfigCommand: (...args: unknown[]) => getClaudeAmbientConfigMock(...args),
     },
 }));
 
@@ -33,6 +39,12 @@ describe("GlobalBrainManager shared-provider-config block", () => {
         listMemoriesMock.mockClear();
         listMemoriesMock.mockResolvedValue([]);
         getClaudeGlobalConfigMock.mockClear();
+        getClaudeAmbientConfigMock.mockClear();
+        getClaudeAmbientConfigMock.mockResolvedValue({
+            path: "/home/user/.claude/CLAUDE.md",
+            content: null,
+            exists: false,
+        });
     });
 
     test("renders nothing before the fetch resolves", () => {
@@ -52,7 +64,11 @@ describe("GlobalBrainManager shared-provider-config block", () => {
         expect(await screen.findByText("Claude Code — shared provider config")).toBeInTheDocument();
         expect(screen.getByText("/home/user/.agentmux/shared/providers/claude/CLAUDE.md")).toBeInTheDocument();
         expect(screen.getByText("# Global rules")).toBeInTheDocument();
-        expect(screen.queryByText("No file at this path yet.")).not.toBeInTheDocument();
+        // Scoped to this block — the sibling ambient block legitimately
+        // renders its own "No file..." empty state under the beforeEach
+        // default, which is not this block's concern.
+        const block = screen.getByText("Claude Code — shared provider config").closest(".global-brain-machine-config");
+        expect(block?.querySelector(".global-brain-machine-config-empty")).toBeNull();
     });
 
     test("renders the empty-state fallback when no file exists at that path", async () => {
@@ -61,10 +77,18 @@ describe("GlobalBrainManager shared-provider-config block", () => {
             content: null,
             exists: false,
         });
+        // Sibling ambient block set to exists:true so only this block's
+        // empty state renders — avoids a duplicate-text ambiguity when
+        // both blocks are empty simultaneously.
+        getClaudeAmbientConfigMock.mockResolvedValue({
+            path: "/home/user/.claude/CLAUDE.md",
+            content: "# Ambient rules\n",
+            exists: true,
+        });
         render(() => <GlobalBrainManager />);
 
-        expect(await screen.findByText("Claude Code — shared provider config")).toBeInTheDocument();
-        expect(screen.getByText("No file at this path yet.")).toBeInTheDocument();
+        const block = (await screen.findByText("Claude Code — shared provider config")).closest(".global-brain-machine-config");
+        expect(block?.querySelector(".global-brain-machine-config-empty")?.textContent).toBe("No file at this path yet.");
     });
 
     test("is read-only — no textarea or save affordance inside the block", async () => {
@@ -79,5 +103,87 @@ describe("GlobalBrainManager shared-provider-config block", () => {
         const block = screen.getByText("Claude Code — shared provider config").closest(".global-brain-machine-config");
         expect(block?.querySelector("textarea")).toBeNull();
         expect(block?.querySelector("button")).toBeNull();
+    });
+});
+
+// docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6 — a
+// SEPARATE block, independently fetched, rendered alongside the
+// shared-provider-config block above.
+describe("GlobalBrainManager ambient-config block", () => {
+    beforeEach(() => {
+        listMemoriesMock.mockClear();
+        listMemoriesMock.mockResolvedValue([]);
+        getClaudeGlobalConfigMock.mockClear();
+        getClaudeAmbientConfigMock.mockClear();
+    });
+
+    test("renders nothing before the fetch resolves", () => {
+        getClaudeAmbientConfigMock.mockReturnValue(new Promise(() => {})); // never resolves within this test
+        render(() => <GlobalBrainManager />);
+        expect(screen.queryByText("Claude Code — host CLI config (ambient)")).not.toBeInTheDocument();
+    });
+
+    test("renders the path and content when the file exists", async () => {
+        getClaudeAmbientConfigMock.mockResolvedValue({
+            path: "/home/user/.claude/CLAUDE.md",
+            content: "# Ambient rules\n",
+            exists: true,
+        });
+        render(() => <GlobalBrainManager />);
+
+        expect(await screen.findByText("Claude Code — host CLI config (ambient)")).toBeInTheDocument();
+        expect(screen.getByText("/home/user/.claude/CLAUDE.md")).toBeInTheDocument();
+        expect(screen.getByText("# Ambient rules")).toBeInTheDocument();
+    });
+
+    test("renders the empty-state fallback when no file exists at that path", async () => {
+        getClaudeAmbientConfigMock.mockResolvedValue({
+            path: "/home/user/.claude/CLAUDE.md",
+            content: null,
+            exists: false,
+        });
+        // Sibling shared-provider-config block set to exists:true so only
+        // this block's empty state renders — avoids a duplicate-text
+        // ambiguity when both blocks are empty simultaneously.
+        getClaudeGlobalConfigMock.mockResolvedValue({
+            path: "/home/user/.agentmux/shared/providers/claude/CLAUDE.md",
+            content: "# Shared rules\n",
+            exists: true,
+        });
+        render(() => <GlobalBrainManager />);
+
+        const block = (await screen.findByText("Claude Code — host CLI config (ambient)")).closest(".global-brain-machine-config");
+        expect(block?.querySelector(".global-brain-machine-config-empty")?.textContent).toBe("No file at this path yet.");
+    });
+
+    test("is read-only — no textarea or save affordance inside the block", async () => {
+        getClaudeAmbientConfigMock.mockResolvedValue({
+            path: "/home/user/.claude/CLAUDE.md",
+            content: "# Ambient rules\n",
+            exists: true,
+        });
+        render(() => <GlobalBrainManager />);
+        await screen.findByText("Claude Code — host CLI config (ambient)");
+
+        const block = screen.getByText("Claude Code — host CLI config (ambient)").closest(".global-brain-machine-config");
+        expect(block?.querySelector("textarea")).toBeNull();
+        expect(block?.querySelector("button")).toBeNull();
+    });
+
+    test("renders alongside the shared-provider-config block, both visible with distinct badges", async () => {
+        getClaudeGlobalConfigMock.mockResolvedValue({
+            path: "/home/user/.agentmux/shared/providers/claude/CLAUDE.md",
+            content: "# Shared rules\n",
+            exists: true,
+        });
+        getClaudeAmbientConfigMock.mockResolvedValue({
+            path: "/home/user/.claude/CLAUDE.md",
+            content: "# Ambient rules\n",
+            exists: true,
+        });
+        render(() => <GlobalBrainManager />);
+
+        expect(await screen.findByText("Claude Code — shared provider config")).toBeInTheDocument();
+        expect(await screen.findByText("Claude Code — host CLI config (ambient)")).toBeInTheDocument();
     });
 });

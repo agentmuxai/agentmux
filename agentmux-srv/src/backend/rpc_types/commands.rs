@@ -239,6 +239,15 @@ pub const COMMAND_DELETE_SYSTEM_MEMORY: &str = "deletesystemmemory";
 /// no path-traversal surface) and no write counterpart. See
 /// docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §5.
 pub const COMMAND_GET_CLAUDE_GLOBAL_CONFIG: &str = "getclaudeglobalconfig";
+/// Read-only. Returns the ambient `~/.claude/CLAUDE.md` — Claude Code's
+/// own global config, read by a host-level Claude Code CLI running
+/// outside AgentMux's `CLAUDE_CONFIG_DIR` isolation (e.g. an external
+/// coding-agent harness). Deliberately a SEPARATE command/block from
+/// `getclaudeglobalconfig` (§5's shared-provider-config path) rather than
+/// a replacement — the two paths have different audiences and neither
+/// implies coverage of the other. No parameters, no write counterpart.
+/// See docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6.
+pub const COMMAND_GET_CLAUDE_AMBIENT_CONFIG: &str = "getclaudeambientconfig";
 
 // Agent instances
 pub const COMMAND_LIST_AGENT_INSTANCES: &str = "listagentinstances";

@@ -169,6 +169,19 @@ export class GlobalBrainViewModel {
         this._claudeGlobalConfig[0];
     private setClaudeGlobalConfig = this._claudeGlobalConfig[1];
 
+    private _claudeAmbientConfig = createSignal<{ path: string; content: string | null; exists: boolean } | null>(null);
+    /** The ambient ~/.claude/CLAUDE.md — Claude Code's own global config,
+     *  read by a host-level Claude Code CLI running outside AgentMux's
+     *  CLAUDE_CONFIG_DIR isolation (e.g. an external coding-agent
+     *  harness). A spawned in-app Claude agent does NOT read this file —
+     *  see claudeGlobalConfigAtom above for what it actually reads.
+     *  Independent atom, independent fetch: neither block's success or
+     *  failure affects the other. See
+     *  docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6. */
+    claudeAmbientConfigAtom: Accessor<{ path: string; content: string | null; exists: boolean } | null> =
+        this._claudeAmbientConfig[0];
+    private setClaudeAmbientConfig = this._claudeAmbientConfig[1];
+
     constructor() {
         this.sectionsAtom = createMemo(() =>
             this.allAtom()
@@ -199,6 +212,7 @@ export class GlobalBrainViewModel {
         );
         void this.refresh();
         void this.fetchClaudeGlobalConfig();
+        void this.fetchClaudeAmbientConfig();
     }
 
     /** Fetches the shared Claude provider config's CLAUDE.md once. Failure
@@ -212,6 +226,19 @@ export class GlobalBrainViewModel {
         try {
             const cfg = await RpcApi.GetClaudeGlobalConfigCommand(TabRpcClient, {});
             this.setClaudeGlobalConfig(cfg);
+        } catch {
+            // Silent — see doc comment above.
+        }
+    }
+
+    /** Fetches the ambient ~/.claude/CLAUDE.md once. Same silent-failure
+     *  and read-once-at-mount reasoning as fetchClaudeGlobalConfig above —
+     *  independent of it, so a failure here doesn't touch
+     *  claudeGlobalConfigAtom or the ordinary Global Memory sections. */
+    private async fetchClaudeAmbientConfig(): Promise<void> {
+        try {
+            const cfg = await RpcApi.GetClaudeAmbientConfigCommand(TabRpcClient, {});
+            this.setClaudeAmbientConfig(cfg);
         } catch {
             // Silent — see doc comment above.
         }
