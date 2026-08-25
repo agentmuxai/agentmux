@@ -650,7 +650,7 @@ mod tests {
     /// the frontend produces today MUST yield the typed LayoutNode, and
     /// reserializing MUST produce equivalent JSON. The shapes here cover:
     ///   1. Single-leaf root (dnd / tear-off shape)
-    ///   2. The first-launch three-pane shape (deep nesting + mixed
+    ///   2. The first-launch four-pane shape (deep nesting + mixed
     ///      group/leaf nodes)
     ///   3. Edge: missing `children` array for leaves
     #[test]
@@ -673,8 +673,9 @@ mod tests {
         let reparsed: LayoutNode = serde_json::from_value(reserialized).unwrap();
         assert_eq!(leaf, reparsed);
 
-        // Shape 2 — first-launch three-pane (matches wcore::mod.rs).
-        let three_pane_json = serde_json::json!({
+        // Shape 2 — first-launch four-pane (matches wcore::mod.rs —
+        // SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md).
+        let four_pane_json = serde_json::json!({
             "id": "root-id",
             "flexDirection": "row",
             "size": 10,
@@ -691,31 +692,39 @@ mod tests {
                     "size": 5,
                     "children": [
                         {
+                            "id": "swarm-id",
+                            "flexDirection": "row",
+                            "size": 4,
+                            "data": { "blockId": "swarm-block" }
+                        },
+                        {
+                            "id": "armory-id",
+                            "flexDirection": "row",
+                            "size": 4,
+                            "data": { "blockId": "armory-block" }
+                        },
+                        {
                             "id": "sysinfo-id",
                             "flexDirection": "row",
                             "size": 2,
                             "data": { "blockId": "sysinfo-block" }
-                        },
-                        {
-                            "id": "swarm-id",
-                            "flexDirection": "row",
-                            "size": 8,
-                            "data": { "blockId": "swarm-block" }
                         }
                     ]
                 }
             ]
         });
-        let root: LayoutNode = serde_json::from_value(three_pane_json).unwrap();
+        let root: LayoutNode = serde_json::from_value(four_pane_json).unwrap();
         assert_eq!(root.id, "root-id");
         assert_eq!(root.children.len(), 2);
         assert_eq!(root.children[0].id, "agent-id");
         assert_eq!(root.children[0].flex_direction, FlexDirection::Column);
         assert_eq!(root.children[0].data.as_ref().unwrap().block_id, "agent-block");
         let right_col = &root.children[1];
-        assert_eq!(right_col.children.len(), 2);
+        assert_eq!(right_col.children.len(), 3);
         assert_eq!(right_col.data, None); // group node, no leaf data
-        assert_eq!(right_col.children[1].data.as_ref().unwrap().block_id, "swarm-block");
+        assert_eq!(right_col.children[0].data.as_ref().unwrap().block_id, "swarm-block");
+        assert_eq!(right_col.children[1].data.as_ref().unwrap().block_id, "armory-block");
+        assert_eq!(right_col.children[2].data.as_ref().unwrap().block_id, "sysinfo-block");
         let reserialized = serde_json::to_value(&root).unwrap();
         let reparsed: LayoutNode = serde_json::from_value(reserialized).unwrap();
         assert_eq!(root, reparsed);
