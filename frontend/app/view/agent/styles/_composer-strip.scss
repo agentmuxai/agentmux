@@ -2,9 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // AgentComposerStrip — status row above the textarea. In flow order:
-//   1. AgentRuntimeDropup (single Mode · Model · Effort trigger)
-//   2. token/elapsed stats
-//   3. process badge · context text · auth tag · HOST/SANDBOX tag + Shell
+//   1. Controls zone (left): AgentRuntimeDropup (Mode · Model · Effort
+//      trigger) · process badge · auth tag. Badge + auth moved here from
+//      the right zone 2026-08-24 (see
+//      docs/specs/SPEC_COMPOSER_STRIP_LEFT_RIGHT_BALANCE_2026_08_24.md) so
+//      misc elements split roughly evenly across the two edge-anchored
+//      zones instead of all six piling onto the right of a single-item
+//      left zone.
+//   2. Stats zone (centered): token/elapsed stats
+//   3. Right zone: context text · Compact button · HOST/SANDBOX tag + Shell
 //      toggle (paired as a single unit — see .agent-composer-strip-host-shell)
 //
 // Deliberate (not organic) tiered split points, always edge-split — same
@@ -98,6 +104,14 @@
 // First in flow, always on line 1. Never gets its own forced flex-basis:
 // 100% break — it's the anchor the other two zones' split points are
 // defined relative to (see the 280px/482px container queries below).
+// Holds the runtime trigger, the process badge, and the auth tag (the
+// latter two moved here from the right zone 2026-08-24 — see
+// docs/specs/SPEC_COMPOSER_STRIP_LEFT_RIGHT_BALANCE_2026_08_24.md — so this
+// zone isn't just a single item facing six on the right). `.agent-composer-
+// strip-process-badge`/`-auth`'s own rules stay defined further down this
+// file next to `-ctx`/`-compact-btn` (grouped by what they visually are,
+// not which zone currently renders them) — only their position in the JSX
+// flow order changed, not their styling.
 
 .agent-composer-strip-controls {
     display: flex;
@@ -309,19 +323,22 @@
 }
 
 // ── Right zone ───────────────────────────────────────────────────────────
-// Process badge · context text · auth tag · HOST/SANDBOX tag + Shell toggle
-// (paired, see .agent-composer-strip-host-shell below), in that order — the
-// HOST/SANDBOX + Shell pair last. Right-anchored (`justify-content:
-// flex-end`) at every tier — this zone's identity, matching the widest
-// tier's pin — not just centered filler. Forced onto its own line
-// (flex-basis: 100%, default) at every tier below 482px — both the 3-line
-// and 2-line tiers give it a dedicated line, since it's consistently the
-// largest zone and holds the strip's one real action (Shell). At the
-// widest tier (≥482px): the same `flex-end` pin now applies to this
-// zone's own flex-basis-0 half of the row instead of its full-width line
-// (see the container query near the bottom of this file, which overrides
-// the flex-basis: 100% default below) — same visual position as the
-// pre-08-03 grid's `justify-self: end`.
+// Context text · countdown · Compact button · HOST/SANDBOX tag + Shell
+// toggle (paired, see .agent-composer-strip-host-shell below), in that
+// order — the HOST/SANDBOX + Shell pair last. Process badge and auth tag
+// moved to the controls zone 2026-08-24 (see
+// docs/specs/SPEC_COMPOSER_STRIP_LEFT_RIGHT_BALANCE_2026_08_24.md) to
+// balance the strip's two edge zones — this one keeps the context/
+// compaction counters plus the strip's one real action (Shell), which
+// stays outermost. Right-anchored (`justify-content: flex-end`) at every
+// tier — this zone's identity, matching the widest tier's pin — not just
+// centered filler. Forced onto its own line (flex-basis: 100%, default) at
+// every tier below 482px — both the 3-line and 2-line tiers give it a
+// dedicated line. At the widest tier (≥482px): the same `flex-end` pin now
+// applies to this zone's own flex-basis-0 half of the row instead of its
+// full-width line (see the container query near the bottom of this file,
+// which overrides the flex-basis: 100% default below) — same visual
+// position as the pre-08-03 grid's `justify-self: end`.
 
 .agent-composer-strip-right {
     display: flex;

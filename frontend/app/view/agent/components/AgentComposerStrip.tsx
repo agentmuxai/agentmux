@@ -20,16 +20,71 @@
  * true-centered / right right — see _composer-strip.scss for the actual
  * container queries.
  *
- * In flow order:
- *   1. AgentRuntimeDropup (single Mode · Model · Effort trigger)
- *   2. tokens (↑in ↓out) · elapsed
- *   3. ⚙N process badge · context text (12.1k / 64k) · countdown text
- *      (mid band+, "~4.2k to auto-compact" — Tier 3 of
- *      SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md §7) · auth tag ·
- *      HOST/SANDBOX
- *      tag + Shell toggle (paired as one unit, same day, per direct user
- *      request — HOST/SANDBOX moved out of the controls zone to sit
- *      immediately left of Shell)
+ * Misc elements (everything except the centered stats zone) are pooled into
+ * an ordered list of "slots" and split DYNAMICALLY between the left
+ * (controls) and right zones — see `slots`/`splitIndex`/`leftSlots`/
+ * `rightSlots` below. Two things had to be fixed to get here, both same-day
+ * (2026-08-24) corrections per direct user feedback:
+ *
+ *   (1) A static per-item zone assignment (badge+auth always left,
+ *       everything else always right — see
+ *       docs/specs/SPEC_COMPOSER_STRIP_LEFT_RIGHT_BALANCE_2026_08_24.md)
+ *       looks balanced only when every item happens to be visible at once.
+ *       `AgentRuntimeDropup` alone is gated to Claude (`showControls()`),
+ *       and the badge/auth tag are each independently conditional — a
+ *       non-Claude agent with no tracked processes and unknown auth status
+ *       left the ENTIRE controls zone empty while the right zone still
+ *       held Shell (which always renders). Fix: pool whichever elements
+ *       are ACTUALLY visible right now and split that pool, instead of
+ *       hardcoding which zone each element belongs to.
+ *
+ *   (2) A count-based split (`floor(pool.length/2)`) still isn't enough:
+ *       it treats the 3-wide context group (ctx text + countdown +
+ *       Compact) as the same "weight" as the 1-wide auth tag, so a
+ *       2-left/3-right split by COUNT could still be lopsided by actual
+ *       rendered width. Fix: each slot carries a `weight` (how many
+ *       visually distinct sub-elements it's currently rendering).
+ *
+ *   (3) A weight-balanced PREFIX cut (`floor(N/2)`-style, just on
+ *       cumulative weight instead of count) still isn't enough either: a
+ *       contiguous "first k slots left" cut can't separate two heavy
+ *       slots that happen to sit adjacent in pool order (the context
+ *       group and HOST/SANDBOX+Shell both sit at the END of the pool and
+ *       are usually the two heaviest) — every cut point either lumps them
+ *       together or can't reach past them, capping the best achievable
+ *       split at something like 2-vs-5 even though a better balance
+ *       exists. This is the literal "we get 2 lines on the right, 1 on
+ *       the left — that should be impossible" bug direct user feedback
+ *       caught. Fix: `leftMask` (below) brute-forces every possible
+ *       left/right SUBSET assignment (not just contiguous cuts — the pool
+ *       is capped at 5 slots, so at most 32 combinations) and picks
+ *       whichever minimizes the weight difference.
+ *
+ * Slot pool, in order (see `slots` below for the exact visibility gate and
+ * weight of each):
+ *   1. AgentRuntimeDropup (Mode · Model · Effort trigger) — Claude only.
+ *      Weight 1.
+ *   2. ⚙N process badge — when any process is tracked. Weight 1.
+ *   3. Auth tag — once auth status is known. Weight 1.
+ *   4. Context group — context text + countdown + Compact button, bundled
+ *      as ONE slot (never split across zones) because Compact must sit
+ *      immediately right of the context text (pre-existing constraint).
+ *      Weight 1-3 depending on how many of the three are currently
+ *      showing.
+ *   5. HOST/SANDBOX tag + Shell toggle — ALWAYS present (Shell has no
+ *      visibility gate) and ALWAYS the last slot, bundled as one atomic
+ *      unit (never split across zones) per direct user request predating
+ *      this change ("the HOST/SANDBOX indicator should be just to the left
+ *      of the Shell button"). Weight 1 or 2 depending on whether
+ *      HOST/SANDBOX is showing. Being last and `splitIndex`'s tie-break
+ *      (prefers the smaller left-side cut when two cuts balance equally
+ *      well) means this pair lands in the right zone whenever any other
+ *      slot is also visible, and only crosses into the left zone in the
+ *      degenerate case where it's the pool's ONLY slot (one item can't
+ *      populate both zones — an unavoidable floor, not a bug).
+ *
+ * Stats zone (centered, unaffected by the above): tokens (↑in ↓out) ·
+ * elapsed, or the live "Compacting…"/"Reconnecting…" readout.
  *
  * The strip bar itself is not clickable. "Shell" is the sole toggle for
  * the details drawer (the AgentShellSubblock terminal — activity-log lines
@@ -46,7 +101,7 @@ import { compactionThreshold } from "@/app/store/agent-pane-state/context-window
 import type { CompactionState, ResumeRetryState } from "@/app/store/agent-pane-state/types";
 import { formatCompactNumber, formatExactNumber } from "@/util/format-count";
 import { formatElapsedCompact } from "@/util/format-time";
-import { Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
 import type { SessionStats, TurnTokens } from "../types";
 import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
 import { RuntimeBadge } from "./RuntimeBadge";
@@ -305,20 +360,229 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         && !props.loading
         && !props.compacting;
 
-    return (
-        <div class="agent-composer-strip" classList={{ "agent-composer-strip--expanded": props.logOpen }}>
-            {/* Controls zone — the consolidated Mode/Model/Effort trigger +
-                panel, plus the Log button. Reads/writes block meta directly
-                (blockId/blockAtom/providerId), so the displayed state matches
-                the flags the agent actually runs with from first paint. */}
-            <span class="agent-composer-strip-controls">
-                <Show when={showControls()}>
+    // Dynamic left/right pooling — see the file-header comment for why a
+    // static per-item zone assignment left the controls zone empty for
+    // non-Claude/no-process/unknown-auth panes. Each slot's `render`
+    // reproduces exactly what that element rendered under its old fixed
+    // zone (same classes/handlers/titles) — only WHICH zone renders it,
+    // computed fresh here every time, changed. `weight` is the number of
+    // visually distinct sub-elements the slot renders — a plain count-based
+    // split (`floor(slots.length/2)`) treats the 3-wide context group the
+    // same as the 1-wide auth tag, which can leave one zone needing an
+    // internal wrap to a 2nd line while the other sits on 1 (Codex/direct
+    // user feedback, same day: "we get 2 lines on the right, 1 on the
+    // left — that should be impossible"). The split point below balances
+    // cumulative weight instead, so neither zone carries more visual mass
+    // than the other by more than one slot's worth.
+    const slots = createMemo((): { key: string; weight: number; render: () => JSX.Element }[] => {
+        const out: { key: string; weight: number; render: () => JSX.Element }[] = [];
+
+        if (showControls()) {
+            out.push({
+                key: "runtime",
+                weight: 1,
+                render: () => (
                     <AgentRuntimeDropup
                         blockId={props.blockId ?? ""}
                         blockAtom={props.blockAtom ?? (() => undefined)}
                         providerId={props.providerId ?? ""}
                     />
-                </Show>
+                ),
+            });
+        }
+
+        if ((props.processCount ?? 0) > 0) {
+            out.push({
+                key: "badge",
+                weight: 1,
+                render: () => (
+                    <button
+                        type="button"
+                        class="agent-composer-strip-process-badge"
+                        data-strip-button
+                        title={`${props.processCount} tracked ${props.processCount === 1 ? "process" : "processes"} — click to open swarm`}
+                        onClick={() => props.onProcessBadgeClick?.()}
+                    >
+                        <span aria-hidden="true">⚙</span>
+                        <span>{props.processCount}</span>
+                    </button>
+                ),
+            });
+        }
+
+        if (props.authStatus === "authenticated" || props.authStatus === "unauthenticated") {
+            out.push({
+                key: "auth",
+                weight: 1,
+                render: () => (
+                    <span
+                        class="agent-composer-strip-auth"
+                        classList={{
+                            "agent-composer-strip-auth--ok": props.authStatus === "authenticated",
+                            "agent-composer-strip-auth--bad": props.authStatus === "unauthenticated",
+                        }}
+                        title={
+                            props.authStatus === "authenticated"
+                                ? "Signed in to this agent's provider"
+                                : "Not signed in — click Log in to continue"
+                        }
+                    >
+                        <span class="agent-composer-strip-auth-dot" aria-hidden="true" />
+                        {props.authStatus === "authenticated" ? "Logged in" : "Not logged in"}
+                    </span>
+                ),
+            });
+        }
+
+        if (ctxText() != null) {
+            const compactVisible = props.providerId === "claude" && props.onCompact != null;
+            out.push({
+                key: "ctx",
+                // ctx text (always) + countdown (conditional) + Compact
+                // button (conditional) — this slot can't be split across
+                // zones (Compact must stay immediately right of ctx text),
+                // but its WEIGHT still reflects how many sub-elements it's
+                // actually rendering right now, so the split point accounts
+                // for its real width instead of counting it as "1 item"
+                // regardless of whether it's showing 1 or 3 things.
+                weight: 1 + (ctxCountdownText() != null ? 1 : 0) + (compactVisible ? 1 : 0),
+                render: () => (
+                    <>
+                        <span
+                            class={`agent-composer-strip-ctx ${ctxClass()}`}
+                            title={
+                                props.contextTokens != null
+                                    ? contextTitle(props.contextTokens, props.contextWindow)
+                                    : undefined
+                            }
+                        >
+                            {ctxText()}
+                        </span>
+                        <Show when={ctxCountdownText()}>
+                            <span
+                                class={`agent-composer-strip-ctx-countdown ${ctxClass()}`}
+                                classList={{ "agent-composer-strip-ctx-countdown--critical": ctxClass().endsWith("critical") }}
+                                title="Applies to auto-compaction only — a manual /compact can happen at any fill level."
+                            >
+                                {ctxCountdownText()}
+                            </span>
+                        </Show>
+                        <Show when={props.providerId === "claude" && props.onCompact != null}>
+                            <button
+                                type="button"
+                                class="agent-composer-strip-compact-btn"
+                                data-strip-button
+                                disabled={!canCompact()}
+                                title={
+                                    canCompact()
+                                        ? "Summarize and trim this session's history now, instead of waiting for the CLI's own auto-compact threshold."
+                                        : props.compacting
+                                            ? "Already compacting…"
+                                            : "Wait for the current turn to finish before compacting."
+                                }
+                                onClick={() => props.onCompact?.()}
+                            >
+                                Compact
+                            </button>
+                        </Show>
+                    </>
+                ),
+            });
+        }
+
+        // Always present, always last — see file-header comment on why
+        // this pair lands right unless it's the pool's only slot. Weight
+        // 1 (Shell alone) or 2 (HOST/SANDBOX tag + Shell) depending on
+        // whether agentMode is known.
+        out.push({
+            key: "hostShell",
+            weight: props.agentMode === "host" || props.agentMode === "container" ? 2 : 1,
+            render: () => (
+                <span class="agent-composer-strip-host-shell">
+                    <Show when={props.agentMode === "host" || props.agentMode === "container"}>
+                        <RuntimeBadge runtime={props.agentMode!} size="tag" />
+                    </Show>
+                    <button
+                        type="button"
+                        class="agent-composer-strip-log-btn"
+                        classList={{ "agent-composer-strip-log-btn--active": props.logOpen }}
+                        title={props.logOpen ? "Hide the shell" : "Show the shell"}
+                        onClick={() => props.onToggleLog()}
+                    >
+                        Shell
+                    </button>
+                </span>
+            ),
+        });
+
+        return out;
+    });
+
+    // Weight-balanced SUBSET partition — NOT a prefix cut. A contiguous
+    // "first k slots left, rest right" cut can't balance weight when the
+    // heaviest slots happen to sit adjacent to each other in pool order:
+    // e.g. runtime(1)+auth(1)+ctx(3)+hostShell(2) — the two heaviest
+    // (ctx, hostShell) are adjacent at the end, so every possible cut
+    // point either splits them apart (not allowed, they're atomic) or
+    // lumps them together, capping the best achievable split at 2-vs-5.
+    // That's the literal "1 line left, 2 lines right" bug direct user
+    // feedback caught. Fix: brute-force every possible left/right subset
+    // assignment (pool is capped at 5 slots, so at most 32 combinations —
+    // trivial) and pick whichever assignment minimizes the weight
+    // difference, with two tie-breaks: (a) prefer keeping the hostShell
+    // slot (Shell — the strip's one real action) on the right, matching
+    // its established outermost-right convention; (b) among remaining
+    // ties, prefer fewer items on the left. Slots keep their original
+    // pool order WITHIN whichever side they land on (leftSlots/rightSlots
+    // below filter, not reorder), so relative order is still predictable
+    // even though which SIDE a given slot lands on now depends on the
+    // whole pool's weight distribution, not just its own fixed position.
+    const leftMask = createMemo(() => {
+        const list = slots();
+        const n = list.length;
+        const hostIdx = list.findIndex((s) => s.key === "hostShell");
+        const total = list.reduce((sum, s) => sum + s.weight, 0);
+        let bestMask = 0;
+        let bestDiff = Infinity;
+        let bestHostRight = false;
+        let bestLeftCount = Infinity;
+        for (let mask = 0; mask < (1 << n); mask++) {
+            let leftWeight = 0;
+            let leftCount = 0;
+            for (let i = 0; i < n; i++) {
+                if (mask & (1 << i)) {
+                    leftWeight += list[i].weight;
+                    leftCount++;
+                }
+            }
+            const diff = Math.abs(leftWeight - (total - leftWeight));
+            const hostRight = hostIdx === -1 || (mask & (1 << hostIdx)) === 0;
+            const better =
+                diff < bestDiff
+                || (diff === bestDiff && hostRight && !bestHostRight)
+                || (diff === bestDiff && hostRight === bestHostRight && leftCount < bestLeftCount);
+            if (better) {
+                bestMask = mask;
+                bestDiff = diff;
+                bestHostRight = hostRight;
+                bestLeftCount = leftCount;
+            }
+        }
+        return bestMask;
+    });
+
+    const leftSlots = createMemo(() => slots().filter((_, i) => (leftMask() & (1 << i)) !== 0));
+    const rightSlots = createMemo(() => slots().filter((_, i) => (leftMask() & (1 << i)) === 0));
+
+    return (
+        <div class="agent-composer-strip" classList={{ "agent-composer-strip--expanded": props.logOpen }}>
+            {/* Controls zone — renders whichever slots the dynamic pooling
+                above (`leftSlots`) assigned to the left half. See the
+                file-header comment and docs/specs/
+                SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md for why
+                this is computed rather than a fixed set of children. */}
+            <span class="agent-composer-strip-controls">
+                <For each={leftSlots()}>{(slot) => slot.render()}</For>
             </span>
 
             {/* Stats zone — token/elapsed stats. Always centered (this
@@ -345,109 +609,18 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 </Show>
             </span>
 
-            {/* Right zone — process badge + context text + auth tag + the
-                HOST/SANDBOX tag paired with the Shell toggle (see
-                .agent-composer-strip-host-shell below), in that order.
-                Always right-anchored (this zone's identity at every tier,
-                matching its widest-tier `justify-content: flex-end` pin) —
-                forced alone onto its own full-width line below 482px, its
-                own flex-basis-0 half of the row at the widest tier (see
-                _composer-strip.scss). */}
+            {/* Right zone — renders whichever slots the dynamic pooling
+                above (`rightSlots`) assigned to the right half. The
+                hostShell slot (HOST/SANDBOX tag fused to the Shell toggle,
+                see its `render` above) is always last in the pool and
+                lands here except in the degenerate one-slot-total case —
+                see the file-header comment. Always right-anchored (this
+                zone's identity at every tier, matching its widest-tier
+                `justify-content: flex-end` pin) — forced alone onto its
+                own full-width line below 482px, its own flex-basis-0 half
+                of the row at the widest tier (see _composer-strip.scss). */}
             <span class="agent-composer-strip-right">
-                <Show when={(props.processCount ?? 0) > 0}>
-                    <button
-                        type="button"
-                        class="agent-composer-strip-process-badge"
-                        data-strip-button
-                        title={`${props.processCount} tracked ${props.processCount === 1 ? "process" : "processes"} — click to open swarm`}
-                        onClick={() => props.onProcessBadgeClick?.()}
-                    >
-                        <span aria-hidden="true">⚙</span>
-                        <span>{props.processCount}</span>
-                    </button>
-                </Show>
-                <Show when={ctxText()}>
-                    <span
-                        class={`agent-composer-strip-ctx ${ctxClass()}`}
-                        title={
-                            props.contextTokens != null
-                                ? contextTitle(props.contextTokens, props.contextWindow)
-                                : undefined
-                        }
-                    >
-                        {ctxText()}
-                    </span>
-                </Show>
-                <Show when={ctxCountdownText()}>
-                    <span
-                        class={`agent-composer-strip-ctx-countdown ${ctxClass()}`}
-                        classList={{ "agent-composer-strip-ctx-countdown--critical": ctxClass().endsWith("critical") }}
-                        title="Applies to auto-compaction only — a manual /compact can happen at any fill level."
-                    >
-                        {ctxCountdownText()}
-                    </span>
-                </Show>
-                <Show when={props.providerId === "claude" && props.onCompact != null && ctxText() != null}>
-                    <button
-                        type="button"
-                        class="agent-composer-strip-compact-btn"
-                        data-strip-button
-                        disabled={!canCompact()}
-                        title={
-                            canCompact()
-                                ? "Summarize and trim this session's history now, instead of waiting for the CLI's own auto-compact threshold."
-                                : props.compacting
-                                    ? "Already compacting…"
-                                    : "Wait for the current turn to finish before compacting."
-                        }
-                        onClick={() => props.onCompact?.()}
-                    >
-                        Compact
-                    </button>
-                </Show>
-                <Show when={props.authStatus === "authenticated" || props.authStatus === "unauthenticated"}>
-                    <span
-                        class="agent-composer-strip-auth"
-                        classList={{
-                            "agent-composer-strip-auth--ok": props.authStatus === "authenticated",
-                            "agent-composer-strip-auth--bad": props.authStatus === "unauthenticated",
-                        }}
-                        title={
-                            props.authStatus === "authenticated"
-                                ? "Signed in to this agent's provider"
-                                : "Not signed in — click Log in to continue"
-                        }
-                    >
-                        <span class="agent-composer-strip-auth-dot" aria-hidden="true" />
-                        {props.authStatus === "authenticated" ? "Logged in" : "Not logged in"}
-                    </span>
-                </Show>
-                {/* HOST/SANDBOX tag + Shell toggle — grouped as a single unit
-                    immediately to the left of Shell (moved out of the
-                    controls zone, same day, per direct user request), so the
-                    two never separate across an internal wrap the way two
-                    independent zone children could. Not gated by
-                    showControls(): agent mode applies to every provider, not
-                    just Claude. Replaces the old "Host — full system access"
-                    / "Container — isolated Docker sandbox" pane row
-                    (confirmed inert — no click handler) with a compact label
-                    reusing the same RuntimeBadge component MyAgentsList/
-                    HostPopover already use elsewhere for this distinction
-                    (size="tag" — see RuntimeBadge.tsx). */}
-                <span class="agent-composer-strip-host-shell">
-                    <Show when={props.agentMode === "host" || props.agentMode === "container"}>
-                        <RuntimeBadge runtime={props.agentMode!} size="tag" />
-                    </Show>
-                    <button
-                        type="button"
-                        class="agent-composer-strip-log-btn"
-                        classList={{ "agent-composer-strip-log-btn--active": props.logOpen }}
-                        title={props.logOpen ? "Hide the shell" : "Show the shell"}
-                        onClick={() => props.onToggleLog()}
-                    >
-                        Shell
-                    </button>
-                </span>
+                <For each={rightSlots()}>{(slot) => slot.render()}</For>
             </span>
         </div>
     );
