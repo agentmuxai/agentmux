@@ -146,62 +146,72 @@ export const GlobalBrainManager = (): JSX.Element => {
                 <div class="global-brain-error">{model.errorAtom()}</div>
             </Show>
 
-            {/* The CLAUDE.md a spawned Claude agent's CLAUDE_CONFIG_DIR
-                actually points at by default — hand-maintained, read-only,
-                not the same thing as this Global Memory tab. Shown first so
-                an operator sees the full picture before the "here's where
-                you'd add AgentMux's own policy" section below. codex P1, PR
-                #2794: NOT the ambient ~/.claude/CLAUDE.md — that file isn't
-                what a CLAUDE_CONFIG_DIR-isolated agent loads. See
-                docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §5. */}
-            <Show when={model.claudeGlobalConfigAtom()}>
-                {(cfg) => (
-                    <div class="global-brain-machine-config">
-                        <div class="global-brain-machine-config-header">
-                            <span
-                                class="global-brain-machine-config-badge"
-                                title="Hand-maintained on disk, not managed by AgentMux. Read by default-provider Claude agents (identity-bound agents use a separate, per-identity config dir not shown here)."
-                            >
-                                Claude Code — shared provider config
-                            </span>
-                            <code class="global-brain-machine-config-path">{cfg().path}</code>
-                        </div>
-                        <Show
-                            when={cfg().exists}
-                            fallback={<p class="global-brain-machine-config-empty">No file at this path yet.</p>}
-                        >
-                            <pre class="global-brain-machine-config-content">{cfg().content}</pre>
-                        </Show>
-                    </div>
-                )}
-            </Show>
+            {/* "External Claude Code files" — read-only reference displays
+                of files Claude Code itself manages, NOT part of AgentMux's
+                own Global Memory composition (that's
+                <agent working_directory>/CLAUDE.md, a per-agent path
+                already previewed accurately above via the "Combined
+                preview"). This section is the main feature this spec chain
+                converged on — an operator explicitly asked to be able to
+                peruse these files here. See
+                docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §7. */}
+            <Show when={model.claudeGlobalConfigAtom() || model.claudeHostConfigAtom()}>
+                <div class="global-brain-external-files">
+                    <p class="global-brain-external-files-heading">
+                        External Claude Code files — managed by Claude Code itself, not AgentMux. Shown for
+                        visibility only; not part of the Global Memory composed above.
+                    </p>
 
-            {/* The ambient ~/.claude/CLAUDE.md — Claude Code's own global
-                config, read by a host-level CLI outside AgentMux's
-                CLAUDE_CONFIG_DIR isolation (e.g. an external coding-agent
-                harness). A SEPARATE block from the one above, not a
-                replacement — a spawned in-app agent does NOT read this
-                file. See docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6. */}
-            <Show when={model.claudeAmbientConfigAtom()}>
-                {(cfg) => (
-                    <div class="global-brain-machine-config">
-                        <div class="global-brain-machine-config-header">
-                            <span
-                                class="global-brain-machine-config-badge"
-                                title="Claude Code's own global config on this machine — read by a host-level Claude Code CLI running outside AgentMux's isolation. A spawned in-app agent does NOT read this file; see the shared provider config block above for what it actually reads."
-                            >
-                                Claude Code — host CLI config (ambient)
-                            </span>
-                            <code class="global-brain-machine-config-path">{cfg().path}</code>
-                        </div>
-                        <Show
-                            when={cfg().exists}
-                            fallback={<p class="global-brain-machine-config-empty">No file at this path yet.</p>}
-                        >
-                            <pre class="global-brain-machine-config-content">{cfg().content}</pre>
-                        </Show>
-                    </div>
-                )}
+                    <Show when={model.claudeGlobalConfigAtom()}>
+                        {(cfg) => (
+                            <div class="global-brain-machine-config">
+                                <div class="global-brain-machine-config-header">
+                                    <span
+                                        class="global-brain-machine-config-badge"
+                                        title="Hand-maintained on disk, not managed by AgentMux. Read by default-provider Claude agents (identity-bound agents use a separate, per-identity config dir not shown here)."
+                                    >
+                                        Claude Code — shared provider config
+                                    </span>
+                                    <code class="global-brain-machine-config-path">{cfg().path}</code>
+                                </div>
+                                <p class="global-brain-machine-config-caption">
+                                    What a default spawned agent's Claude Code auth/home uses.
+                                </p>
+                                <Show
+                                    when={cfg().exists}
+                                    fallback={<p class="global-brain-machine-config-empty">No file at this path yet.</p>}
+                                >
+                                    <pre class="global-brain-machine-config-content">{cfg().content}</pre>
+                                </Show>
+                            </div>
+                        )}
+                    </Show>
+
+                    <Show when={model.claudeHostConfigAtom()}>
+                        {(cfg) => (
+                            <div class="global-brain-machine-config">
+                                <div class="global-brain-machine-config-header">
+                                    <span
+                                        class="global-brain-machine-config-badge"
+                                        title="Claude Code's own global config on this machine — read by a host-level Claude Code CLI running outside AgentMux's isolation. A spawned in-app agent does NOT read this file; see the shared provider config block above for what it actually reads."
+                                    >
+                                        Claude Code — host CLI config
+                                    </span>
+                                    <code class="global-brain-machine-config-path">{cfg().path}</code>
+                                </div>
+                                <p class="global-brain-machine-config-caption">
+                                    What Claude Code uses outside AgentMux entirely.
+                                </p>
+                                <Show
+                                    when={cfg().exists}
+                                    fallback={<p class="global-brain-machine-config-empty">No file at this path yet.</p>}
+                                >
+                                    <pre class="global-brain-machine-config-content">{cfg().content}</pre>
+                                </Show>
+                            </div>
+                        )}
+                    </Show>
+                </div>
             </Show>
 
             {/* System tier — pinned above ordinary sections, always injected

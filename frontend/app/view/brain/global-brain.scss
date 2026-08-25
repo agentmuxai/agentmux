@@ -45,7 +45,22 @@
     font-size: var(--text-sm);
 }
 
-// ── Machine-wide config (read-only — SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md) ──
+// ── External Claude Code files (read-only — SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §7) ──
+// Files Claude Code itself manages, NOT part of AgentMux's own Global
+// Memory composition (that's <agent working_directory>/CLAUDE.md,
+// previewed above via the "Combined preview" — a per-agent path this
+// section does not represent).
+
+.global-brain-external-files {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.global-brain-external-files-heading {
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+}
 
 .global-brain-machine-config {
     display: flex;
@@ -79,6 +94,12 @@
     font-size: var(--text-xs);
     color: var(--secondary-text-color);
     word-break: break-all;
+}
+
+.global-brain-machine-config-caption {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
 }
 
 .global-brain-machine-config-empty {
