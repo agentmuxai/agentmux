@@ -616,6 +616,88 @@ pub fn get_provider(id: &str) -> Option<&'static ProviderConfig> {
     REGISTRY.get(canonical).copied()
 }
 
+/// True when `dir` resolves to `provider`'s literal ambient home directory
+/// (e.g. `~/.claude` for Claude Code) rather than an AgentMux-isolated dir.
+/// Used to block identity bindings/spawns from ever pointing a spawned
+/// agent at the operator's own global CLI login — a real, currently-live
+/// instance of exactly this was found in this repo's own data (an account's
+/// `secret_ref.dir` set to the literal ambient path — see
+/// `docs/status/STATUS_IDENTITY_ISOLATION_GATE_NOT_ENFORCING_2026_08_20.md`
+/// §8), which nothing in the codebase previously validated against. See
+/// `docs/specs/SPEC_BLOCK_AMBIENT_HOME_DIR_IDENTITY_BINDING_2026_08_25.md`.
+///
+/// Canonicalizes both sides when possible (defeats `..`, symlink, and
+/// Windows `\\?\`-prefix tricks — same approach `identity::cleanup`'s
+/// containment check already uses); falls back to a normalized lexical
+/// comparison when either path doesn't exist yet on disk (e.g. validating a
+/// not-yet-materialized dir at account-creation time), so a not-yet-created
+/// ambient path can't slip past the guard just by not existing at check
+/// time.
+pub fn is_provider_ambient_home_dir(provider: &ProviderConfig, dir: &str) -> bool {
+    let ambient = crate::backend::base::get_home_dir().join(format!(".{}", provider.auth_dir_name));
+    paths_resolve_to_same_dir(&ambient, dir)
+}
+
+/// The actual comparison, split out with the reference side pre-resolved
+/// (not calling `get_home_dir()` internally) so it's directly testable
+/// against a tempdir instead of the real `$HOME`/`%USERPROFILE%` — same
+/// "inject the path, don't resolve it internally" pattern
+/// `read_claude_global_config` already uses (`agent_handlers/memory.rs`).
+fn paths_resolve_to_same_dir(reference: &std::path::Path, candidate: &str) -> bool {
+    let candidate_path = std::path::Path::new(candidate);
+
+    if let (Ok(canon_reference), Ok(canon_candidate)) =
+        (std::fs::canonicalize(reference), std::fs::canonicalize(candidate_path))
+    {
+        return canon_reference == canon_candidate;
+    }
+
+    normalize_path_lexically(reference) == normalize_path_lexically(candidate_path)
+}
+
+/// Lexically normalizes a path with NO filesystem access (unlike
+/// `canonicalize`, safe to call on a path that doesn't exist). Collapses
+/// `.` and `..` components (codex P1, PR #2802: without this, a not-yet-
+/// created dir like `$HOME/.claude/.` compared unequal to `$HOME/.claude`
+/// under plain string comparison, bypassing the guard entirely on a fresh
+/// machine — a `..` segment is normalized the same way for the same
+/// reason). Never pops past a root/prefix/leading `..` — a leading `..`
+/// with nothing to cancel stays literal, standard lexical-normalization
+/// semantics.
+fn normalize_path_lexically(p: &std::path::Path) -> String {
+    use std::path::Component;
+
+    let mut normalized: Vec<Component> = Vec::new();
+    for component in p.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if matches!(normalized.last(), Some(Component::Normal(_))) {
+                    normalized.pop();
+                } else {
+                    normalized.push(component);
+                }
+            }
+            other => normalized.push(other),
+        }
+    }
+    let joined: std::path::PathBuf = normalized.into_iter().collect();
+    let as_str = joined.to_string_lossy().replace('\\', "/");
+    let trimmed = as_str.trim_end_matches('/');
+
+    // codex P2, PR #2802: case-fold only on platforms whose default
+    // filesystem is case-insensitive (Windows, macOS). Unconditionally
+    // lowercasing made a not-yet-created `$HOME/.CLAUDE` compare equal to
+    // `$HOME/.claude` on Linux (case-sensitive ext4) — once both existed,
+    // canonicalize would correctly tell them apart, so the guard's
+    // verdict depended on creation order instead of being deterministic.
+    if cfg!(target_os = "windows") || cfg!(target_os = "macos") {
+        trimmed.to_lowercase()
+    } else {
+        trimmed.to_string()
+    }
+}
+
 /// Whether `path` matches ANY registered provider's
 /// `startup_instructions_filename` — used by the "click Launch" RPC write
 /// path (`editor_handlers.rs`'s `WriteAgentConfig` handler), which receives
@@ -823,5 +905,95 @@ mod tests {
             p.startup_instructions_filename.is_none(),
             "kimi has no confirmed native startup-instructions file — see SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2"
         );
+    }
+
+    // docs/specs/SPEC_BLOCK_AMBIENT_HOME_DIR_IDENTITY_BINDING_2026_08_25.md.
+    // `paths_resolve_to_same_dir` takes the reference side pre-resolved
+    // (not `get_home_dir()` itself) specifically so these tests don't
+    // depend on the real $HOME/%USERPROFILE% — see its own doc comment.
+    mod ambient_home_dir_tests {
+        use super::*;
+
+        #[test]
+        fn identical_existing_dirs_match_via_canonicalize() {
+            let dir = tempfile::tempdir().unwrap();
+            assert!(paths_resolve_to_same_dir(dir.path(), &dir.path().to_string_lossy()));
+        }
+
+        #[test]
+        fn different_existing_dirs_do_not_match() {
+            let a = tempfile::tempdir().unwrap();
+            let b = tempfile::tempdir().unwrap();
+            assert!(!paths_resolve_to_same_dir(a.path(), &b.path().to_string_lossy()));
+        }
+
+        #[test]
+        fn nonexistent_paths_fall_back_to_lexical_comparison() {
+            // Neither side exists on disk — canonicalize fails for both,
+            // so this exercises the lexical fallback, not the
+            // canonicalize branch. Confirms a not-yet-created ambient
+            // path still gets caught (the whole point of the guard —
+            // §7's "can't slip past by not existing at check time").
+            let reference = std::path::Path::new("/tmp/agentmux-test-does-not-exist-ambient/.claude");
+            assert!(paths_resolve_to_same_dir(reference, "/tmp/agentmux-test-does-not-exist-ambient/.claude"));
+            assert!(!paths_resolve_to_same_dir(reference, "/tmp/agentmux-test-does-not-exist-ambient/.codex"));
+        }
+
+        #[test]
+        fn lexical_fallback_ignores_trailing_slash() {
+            let reference = std::path::Path::new("/tmp/agentmux-test-nonexistent/.claude");
+            assert!(paths_resolve_to_same_dir(reference, "/tmp/agentmux-test-nonexistent/.claude/"));
+        }
+
+        // codex P2, PR #2802: case-folding must match the current platform's
+        // default filesystem case-sensitivity, not be unconditional —
+        // asserts whichever behavior is CORRECT for whatever OS actually
+        // runs this test, so it's meaningful on both windows-latest and
+        // ubuntu-latest CI legs.
+        #[test]
+        fn lexical_fallback_case_folding_matches_platform_default() {
+            let reference = std::path::Path::new("/tmp/agentmux-test-nonexistent/.claude");
+            let matches = paths_resolve_to_same_dir(reference, "/TMP/agentmux-test-nonexistent/.CLAUDE");
+            if cfg!(target_os = "windows") || cfg!(target_os = "macos") {
+                assert!(matches, "case-insensitive platforms must fold case in the lexical fallback");
+            } else {
+                assert!(!matches, "case-sensitive platforms must NOT fold case — a not-yet-created dir must not be conflated with a differently-cased one");
+            }
+        }
+
+        // codex P1, PR #2802: without dot-segment collapsing, a binding
+        // like `$HOME/.claude/.` compared unequal to `$HOME/.claude` under
+        // plain string comparison whenever neither existed yet (the fresh-
+        // machine case), bypassing the guard — Claude Code would then
+        // create and use the literal ambient dir once launched.
+        #[test]
+        fn lexical_fallback_collapses_dot_and_dotdot_segments() {
+            let reference = std::path::Path::new("/tmp/agentmux-test-nonexistent/.claude");
+            assert!(paths_resolve_to_same_dir(reference, "/tmp/agentmux-test-nonexistent/.claude/."));
+            assert!(paths_resolve_to_same_dir(
+                reference,
+                "/tmp/agentmux-test-nonexistent/sibling/../.claude",
+            ));
+            // A genuinely different directory reached via `..` must still
+            // correctly NOT match — this isn't "ignore everything after a
+            // dot-segment," it's real lexical normalization.
+            assert!(!paths_resolve_to_same_dir(
+                reference,
+                "/tmp/agentmux-test-nonexistent/.claude/../.codex",
+            ));
+        }
+
+        #[test]
+        fn is_provider_ambient_home_dir_matches_the_real_configured_provider_home_suffix() {
+            // Not asserting against the real $HOME (see module doc comment) —
+            // just confirming the public wrapper joins get_home_dir() with
+            // ".{auth_dir_name}" as documented, by checking the suffix
+            // shape rather than an exact path.
+            let claude = get_provider("claude").unwrap();
+            assert_eq!(claude.auth_dir_name, "claude");
+            // A dir that can't possibly be the real ambient home (this
+            // process's actual $HOME/.claude) must never match.
+            assert!(!is_provider_ambient_home_dir(claude, "/tmp/agentmux-test-definitely-not-ambient"));
+        }
     }
 }

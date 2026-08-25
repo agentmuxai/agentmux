@@ -124,6 +124,10 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let broker = state.broker.clone();
     let container_manager = state.container_manager.clone();
     let filestore = state.filestore.clone();
+    // codex P1, PR #2802: needed to persist_last_failure/publish
+    // EVENT_AGENT_FAILURE for a pre-spawn identity gate refusal — see the
+    // same fix in agent_handlers/input.rs's agentinput handler.
+    let event_bus = state.event_bus.clone();
 
     engine.register_handler(
         COMMAND_AGENT_SEND,
@@ -134,6 +138,7 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
             let broker = broker.clone();
             let container_manager = container_manager.clone();
             let filestore = filestore.clone();
+            let event_bus = event_bus.clone();
             Box::pin(async move {
                 let cmd: CommandAgentSendData = serde_json::from_value(data)
                     .map_err(|e| format!("agent.send: {e}"))?;
@@ -207,6 +212,32 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             Some(&filestore),
                             None,
                         );
+                        // codex P1, PR #2802: same fix as agent_handlers/
+                        // input.rs's agentinput handler — the frame above
+                        // only lands in the block's raw output log, which
+                        // the recovery banner does NOT read from. Classify
+                        // + persist + publish so the structured card
+                        // (agent:last_failure meta + EVENT_AGENT_FAILURE)
+                        // populates for this pre-spawn refusal too.
+                        let gate_failure = crate::agents::failure::classify(
+                            None,
+                            None,
+                            &gate.to_string(),
+                            None,
+                        );
+                        crate::backend::blockcontroller::core::persist_last_failure(
+                            &cmd.block_id,
+                            Some(&gate_failure),
+                            &Some(wstore.clone()),
+                            &Some(event_bus.clone()),
+                        );
+                        broker.publish(crate::backend::wps::WaveEvent {
+                            event: crate::backend::wps::EVENT_AGENT_FAILURE.to_string(),
+                            scopes: vec![format!("block:{}", cmd.block_id)],
+                            sender: String::new(),
+                            persist: 1,
+                            data: serde_json::to_value(&gate_failure).ok(),
+                        });
                         return Err(format!("identity spawn gate: {gate}"));
                     }
                 };

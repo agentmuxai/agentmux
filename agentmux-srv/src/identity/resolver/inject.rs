@@ -564,6 +564,33 @@ pub fn inject_identity_env_with_broker(
                         continue;
                     }
                 };
+                // Block unconditionally if this account's config dir IS the
+                // provider's literal ambient home (e.g. `~/.claude`) rather
+                // than an AgentMux-isolated dir — nothing upstream of this
+                // point validates that, and a real, currently-live account
+                // configured exactly this way was found in this repo's own
+                // data (docs/status/STATUS_IDENTITY_ISOLATION_GATE_NOT_ENFORCING_2026_08_20.md
+                // §8). See docs/specs/SPEC_BLOCK_AMBIENT_HOME_DIR_IDENTITY_BINDING_2026_08_25.md.
+                if let Some(provider_cfg) =
+                    crate::backend::providers::get_provider(&resolve_provider_alias(&binding.provider))
+                {
+                    if crate::backend::providers::is_provider_ambient_home_dir(provider_cfg, &dir) {
+                        tracing::warn!(
+                            target: "identity",
+                            "identity.spawn.blocked: account {} for provider {} \
+                             resolves to the ambient home dir ({}) — refusing to \
+                             spawn (identity {})",
+                            binding.account_id,
+                            binding.provider,
+                            dir,
+                            instance.identity_id,
+                        );
+                        return Err(SpawnGateError::AmbientHomeDirNotAllowed {
+                            provider: binding.provider.clone(),
+                            dir: dir.clone(),
+                        });
+                    }
+                }
                 env_vars.insert(config_dir_env_var.to_string(), dir.clone());
                 // Canonicalized (codex P1 on PR #2377) — see def_provider's
                 // doc comment above; def_provider is now canonical too, so
@@ -866,6 +893,89 @@ mod tests {
         // And does NOT set the anthropic api-key env var — dispatch
         // is by provider class, not by token shape.
         assert!(env.get("ANTHROPIC_API_KEY").is_none());
+    }
+
+    /// docs/specs/SPEC_BLOCK_AMBIENT_HOME_DIR_IDENTITY_BINDING_2026_08_25.md —
+    /// the enforcement that closes the real, currently-live gap found in
+    /// docs/status/STATUS_IDENTITY_ISOLATION_GATE_NOT_ENFORCING_2026_08_20.md
+    /// §8 (an account whose `secret_ref.dir` was the literal ambient home).
+    /// Uses the REAL `get_home_dir()` (not a mock) so this exercises the
+    /// exact same resolution production code does — deterministic
+    /// regardless of whether `~/.claude` actually exists on the test
+    /// machine, since `paths_resolve_to_same_dir`'s lexical fallback
+    /// handles "doesn't exist" and its canonicalize branch handles
+    /// "exists" identically correctly (see providers.rs's own tests).
+    #[cfg(debug_assertions)]
+    #[test]
+    fn inject_oauth_class_blocks_spawn_when_config_dir_is_the_ambient_home() {
+        let store = make_store();
+
+        let mut def = crate::backend::storage::store::AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
+            id: "def-1".to_string(),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            memory_id: String::new(),
+        };
+        store.agent_def_insert(&mut def).unwrap();
+
+        let ambient_claude_dir = crate::backend::base::get_home_dir()
+            .join(".claude")
+            .to_string_lossy()
+            .into_owned();
+        let claude = make_account(
+            "acct-ambient",
+            "claude",
+            SecretRef::OAuthConfigDir { dir: ambient_claude_dir.clone() },
+        );
+        store.identity_upsert(&claude).unwrap();
+        store
+            .agent_identity_link("def-1", "acct-ambient", "claude")
+            .unwrap();
+
+        insert_block_for_agent(&store, "block-ambient", "def-1");
+        let inst = make_instance("block-ambient", "id-ambient");
+        store.instance_create(&inst).unwrap();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        let err = inject_identity_env(store.clone(), store.clone(), store, "block-ambient", &mut env)
+            .expect_err("spawn must be refused when the bound account's config dir is the ambient home");
+
+        match err {
+            SpawnGateError::AmbientHomeDirNotAllowed { provider, dir } => {
+                assert_eq!(provider, "claude");
+                assert_eq!(dir, ambient_claude_dir);
+            }
+            other => panic!("expected AmbientHomeDirNotAllowed, got {other:?}"),
+        }
+        // The gate must block BEFORE anything is injected — no partial
+        // env-var leak from the refused binding.
+        assert!(env.get("CLAUDE_CONFIG_DIR").is_none());
     }
 
     /// The exact end-to-end scenario reagentx's P0 review on PR #2632
