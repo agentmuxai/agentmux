@@ -153,6 +153,22 @@ export class GlobalBrainViewModel {
      *  to" callout rather than silently omitted. */
     noFileProvidersAtom: Accessor<string[]>;
 
+    private _claudeGlobalConfig = createSignal<{ path: string; content: string | null; exists: boolean } | null>(null);
+    /** The CLAUDE.md at AgentMux's shared Claude provider config dir — the
+     *  path a spawned Claude agent's CLAUDE_CONFIG_DIR points at by
+     *  DEFAULT (identity-bound agents use a separate, per-identity dir not
+     *  covered here). Hand-maintained, independent of AgentMux's own
+     *  Global Memory. `null` until the fetch resolves; fetched once at
+     *  construction, not re-fetched on `memories:changed` (nothing in this
+     *  app can write to this file, so there's no event to react to).
+     *  NOT the ambient ~/.claude/CLAUDE.md — codex P1, PR #2794: that file
+     *  isn't what a CLAUDE_CONFIG_DIR-isolated spawned agent actually
+     *  loads. See
+     *  docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §5. */
+    claudeGlobalConfigAtom: Accessor<{ path: string; content: string | null; exists: boolean } | null> =
+        this._claudeGlobalConfig[0];
+    private setClaudeGlobalConfig = this._claudeGlobalConfig[1];
+
     constructor() {
         this.sectionsAtom = createMemo(() =>
             this.allAtom()
@@ -182,6 +198,23 @@ export class GlobalBrainViewModel {
                 .map((p) => p.displayName),
         );
         void this.refresh();
+        void this.fetchClaudeGlobalConfig();
+    }
+
+    /** Fetches the shared Claude provider config's CLAUDE.md once. Failure
+     *  is silent (leaves the atom `null`, so the block just doesn't render)
+     *  rather than surfacing
+     *  through `errorAtom` — this is a supplementary, read-only display, not
+     *  something that should block or alarm-color the rest of the Global
+     *  Memory tab if it can't be read (e.g. a permissions issue on this one
+     *  file shouldn't look like Global Memory itself is broken). */
+    private async fetchClaudeGlobalConfig(): Promise<void> {
+        try {
+            const cfg = await RpcApi.GetClaudeGlobalConfigCommand(TabRpcClient, {});
+            this.setClaudeGlobalConfig(cfg);
+        } catch {
+            // Silent — see doc comment above.
+        }
     }
 
     async refresh(): Promise<void> {

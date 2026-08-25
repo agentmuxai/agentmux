@@ -45,6 +45,62 @@
     font-size: var(--text-sm);
 }
 
+// ── Machine-wide config (read-only — SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md) ──
+
+.global-brain-machine-config {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    padding: var(--space-2);
+    background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+    border: 1px solid var(--border-color);
+}
+
+.global-brain-machine-config-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    flex-wrap: wrap;
+}
+
+.global-brain-machine-config-badge {
+    flex-shrink: 0;
+    padding: 1px var(--space-1-5);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--secondary-text-color);
+    border: 1px solid var(--border-color);
+}
+
+.global-brain-machine-config-path {
+    font-family: var(--fixed-font, monospace);
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+    word-break: break-all;
+}
+
+.global-brain-machine-config-empty {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--secondary-text-color);
+}
+
+.global-brain-machine-config-content {
+    margin: 0;
+    padding: var(--space-2);
+    max-height: 240px;
+    overflow: auto;
+    background: var(--main-bg-color);
+    border: 1px solid var(--border-color);
+    font-family: var(--fixed-font, monospace);
+    font-size: var(--text-xs);
+    color: var(--main-text-color);
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+}
+
 // ── Section list ─────────────────────────────────────────────────────────────
 
 .global-brain-sections {

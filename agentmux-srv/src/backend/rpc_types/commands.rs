@@ -230,6 +230,15 @@ pub const COMMAND_REORDER_GLOBAL_BRAIN: &str = "reorderglobalbrain";
 /// moment they see an existing `is_system=1` row.
 pub const COMMAND_UPSERT_SYSTEM_MEMORY: &str = "upsertsystemmemory";
 pub const COMMAND_DELETE_SYSTEM_MEMORY: &str = "deletesystemmemory";
+/// Read-only. Returns the CLAUDE.md at AgentMux's shared Claude provider
+/// config dir (`DataPaths::provider_auth_dir("claude")` — the
+/// `CLAUDE_CONFIG_DIR` a non-identity-bound spawned Claude agent actually
+/// gets, NOT the ambient `~/.claude/CLAUDE.md`) so the Armory Memory tab
+/// can show the operator where their real "highest priority" instructions
+/// actually live. No parameters (the path is fixed, not caller-supplied —
+/// no path-traversal surface) and no write counterpart. See
+/// docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §5.
+pub const COMMAND_GET_CLAUDE_GLOBAL_CONFIG: &str = "getclaudeglobalconfig";
 
 // Agent instances
 pub const COMMAND_LIST_AGENT_INSTANCES: &str = "listagentinstances";

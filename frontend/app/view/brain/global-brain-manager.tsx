@@ -146,6 +146,36 @@ export const GlobalBrainManager = (): JSX.Element => {
                 <div class="global-brain-error">{model.errorAtom()}</div>
             </Show>
 
+            {/* The CLAUDE.md a spawned Claude agent's CLAUDE_CONFIG_DIR
+                actually points at by default — hand-maintained, read-only,
+                not the same thing as this Global Memory tab. Shown first so
+                an operator sees the full picture before the "here's where
+                you'd add AgentMux's own policy" section below. codex P1, PR
+                #2794: NOT the ambient ~/.claude/CLAUDE.md — that file isn't
+                what a CLAUDE_CONFIG_DIR-isolated agent loads. See
+                docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §5. */}
+            <Show when={model.claudeGlobalConfigAtom()}>
+                {(cfg) => (
+                    <div class="global-brain-machine-config">
+                        <div class="global-brain-machine-config-header">
+                            <span
+                                class="global-brain-machine-config-badge"
+                                title="Hand-maintained on disk, not managed by AgentMux. Read by default-provider Claude agents (identity-bound agents use a separate, per-identity config dir not shown here)."
+                            >
+                                Claude Code — shared provider config
+                            </span>
+                            <code class="global-brain-machine-config-path">{cfg().path}</code>
+                        </div>
+                        <Show
+                            when={cfg().exists}
+                            fallback={<p class="global-brain-machine-config-empty">No file at this path yet.</p>}
+                        >
+                            <pre class="global-brain-machine-config-content">{cfg().content}</pre>
+                        </Show>
+                    </div>
+                )}
+            </Show>
+
             {/* System tier — pinned above ordinary sections, always injected
                 first with override wording. No move up/down: position is
                 fixed server-side regardless of what a reorder call sends.

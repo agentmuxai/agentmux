@@ -68,6 +68,21 @@ export const MemoryApi = {
         return client.rpcCall("deletesystemmemory", data, opts);
     },
 
+    // Read-only. Returns the CLAUDE.md at AgentMux's shared Claude
+    // provider config dir (~/.agentmux/shared/providers/claude/CLAUDE.md
+    // via DataPaths::provider_auth_dir — the CLAUDE_CONFIG_DIR a
+    // non-identity-bound spawned Claude agent actually gets), NOT the
+    // ambient ~/.claude/CLAUDE.md — see
+    // docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §5. No
+    // parameters, no write counterpart.
+    GetClaudeGlobalConfigCommand(
+        client: RpcClient,
+        data: Record<string, never> = {},
+        opts?: RpcOpts,
+    ): Promise<{ path: string; content: string | null; exists: boolean }> {
+        return client.rpcCall("getclaudeglobalconfig", data, opts);
+    },
+
     NativeMemoryListCommand(client: RpcClient, data: { agent_id: string }, opts?: RpcOpts): Promise<NativeMemoryListResult> {
         return client.rpcCall("agent:memory:list", data, opts);
     },
