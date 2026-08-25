@@ -1887,7 +1887,7 @@ async fn layout_seeders_route_through_reducer_coherently() {
         })
         .unwrap();
 
-    // ── three-pane seed (the CreateWindow post-bootstrap path) ──
+    // ── four-pane seed (the CreateWindow post-bootstrap path) ──
     let tab_evs = dispatch_apply(
         &state,
         Command::CreateTab {

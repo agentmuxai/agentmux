@@ -650,7 +650,7 @@ mod tests {
     /// the frontend produces today MUST yield the typed LayoutNode, and
     /// reserializing MUST produce equivalent JSON. The shapes here cover:
     ///   1. Single-leaf root (dnd / tear-off shape)
-    ///   2. The first-launch three-pane shape (deep nesting + mixed
+    ///   2. The first-launch four-pane shape (deep nesting + mixed
     ///      group/leaf nodes)
     ///   3. Edge: missing `children` array for leaves
     #[test]
