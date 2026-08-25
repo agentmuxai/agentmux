@@ -6,9 +6,14 @@
  */
 
 import clsx from "clsx";
-import { Show, type JSX } from "solid-js";
+import { Show, createMemo, type JSX } from "solid-js";
 import type { AgentMessageNode } from "../types";
 import { LinkifiedText } from "@/app/element/linkified-text";
+import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
+import { formatExactTime, formatTimeAgo } from "@/util/format-time";
+import { useTick } from "@/app/hook/useTick";
+import { useNodePeek } from "../hooks/useNodePeek";
+import { PeekOverlay } from "./PeekOverlay";
 
 interface AgentMessageBlockProps {
     node: AgentMessageNode;
@@ -22,8 +27,27 @@ export const AgentMessageBlock = (props: AgentMessageBlockProps): JSX.Element =>
     // each chunk. Destructured `node` would freeze at first ref.
     // Access props.X reactively at each site. (codex P1 on PR #786 +
     // family of issues on virt redesign — also fixed in MarkdownBlock.)
+
+    // Peek tooltip (SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25) —
+    // this node type never surfaces its own timestamp anywhere, collapsed
+    // or expanded, so the peek isn't gated on `props.collapsed` (unlike
+    // ToolBlock's panel, expanding this block wouldn't make the peek
+    // redundant — the expanded view has no time at all).
+    const peekTick = useTick(1000);
+    const { isPeeking, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } = useNodePeek();
+    const peekTimeText = createMemo(() => {
+        if (!isPeeking()) return null;
+        peekTick();
+        return `${formatExactTime(props.node.timestamp)} · ${formatTimeAgo(props.node.timestamp)}`;
+    });
+    const peekEstimateText = createMemo(() => {
+        const count = estimateTokenCount(props.node.message);
+        return count > 0 ? `~${formatCompactNumber(count)} tok (est.)` : null;
+    });
+
     return (
         <div
+            ref={setPeekRowEl}
             class={clsx("agent-message-block", {
                 incoming: props.node.direction === "incoming",
                 outgoing: props.node.direction !== "incoming",
@@ -32,6 +56,8 @@ export const AgentMessageBlock = (props: AgentMessageBlockProps): JSX.Element =>
                 ject: props.node.method === "ject",
             })}
             onClick={props.onToggle}
+            onMouseEnter={handlePeekEnter}
+            onMouseLeave={handlePeekLeave}
         >
             <div class="agent-message-summary">
                 <span class="agent-message-chevron">{props.collapsed ? "▸" : "▾"}</span>
@@ -49,6 +75,14 @@ export const AgentMessageBlock = (props: AgentMessageBlockProps): JSX.Element =>
                     </pre>
                 </div>
             </Show>
+            <PeekOverlay show={isPeeking()} rowEl={peekRowEl}>
+                <Show when={peekTimeText()}>
+                    <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
+                </Show>
+                <Show when={peekEstimateText()}>
+                    <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
+                </Show>
+            </PeekOverlay>
         </div>
     );
 };

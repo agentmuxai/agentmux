@@ -48,6 +48,8 @@ import { LinkifiedText } from "@/app/element/linkified-text";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
 import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import { useTick } from "@/app/hook/useTick";
+import { PEEK_ENTER_DELAY_MS } from "./hover-anchor";
+import { useNodePeek } from "../hooks/useNodePeek";
 import { PeekOverlay } from "./PeekOverlay";
 
 interface UserMessageBlockProps {
@@ -60,10 +62,6 @@ interface UserMessageBlockProps {
     onTogglePin: () => void;
 }
 
-// 150ms enter-delay matches ToolBlock — prevents accidental
-// expansions during fast scroll-throughs.
-const HOVER_ENTER_DELAY_MS = 150;
-
 export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
     const [hovering, setHovering] = createSignal(false);
     let enterTimer: ReturnType<typeof setTimeout> | undefined;
@@ -71,7 +69,7 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
 
     const handleMouseEnter = () => {
         clearTimeout(enterTimer);
-        enterTimer = setTimeout(() => setHovering(true), HOVER_ENTER_DELAY_MS);
+        enterTimer = setTimeout(() => setHovering(true), PEEK_ENTER_DELAY_MS);
     };
     const handleMouseLeave = () => {
         clearTimeout(enterTimer);
@@ -104,7 +102,7 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
     // bodyMode() === "overlay" above) rather than a metadata summary, so
     // this is gated to the non-collapsible case only.
     const peekTick = useTick(1000);
-    const [isPeeking, setIsPeeking] = createSignal(false);
+    const { isPeeking, handlePeekEnter, handlePeekLeave } = useNodePeek();
     const peekTimeText = createMemo(() => {
         if (collapsible() || !isPeeking()) return null;
         peekTick(); // re-run every second so "ago" stays live while hovered
@@ -117,16 +115,6 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
         const count = estimateTokenCount(props.node.message);
         return count > 0 ? `~${formatCompactNumber(count)} tok (est.)` : null;
     });
-    let peekEnterTimer: ReturnType<typeof setTimeout> | undefined;
-    const handlePeekEnter = () => {
-        clearTimeout(peekEnterTimer);
-        peekEnterTimer = setTimeout(() => setIsPeeking(true), HOVER_ENTER_DELAY_MS);
-    };
-    const handlePeekLeave = () => {
-        clearTimeout(peekEnterTimer);
-        setIsPeeking(false);
-    };
-    onCleanup(() => clearTimeout(peekEnterTimer));
 
     // Shared between the flow-mode in-DOM render and the Portal-rendered
     // PeekOverlay — same pin/unpin button + message body in both.
