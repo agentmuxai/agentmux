@@ -176,6 +176,34 @@ export const GlobalBrainManager = (): JSX.Element => {
                 )}
             </Show>
 
+            {/* The ambient ~/.claude/CLAUDE.md — Claude Code's own global
+                config, read by a host-level CLI outside AgentMux's
+                CLAUDE_CONFIG_DIR isolation (e.g. an external coding-agent
+                harness). A SEPARATE block from the one above, not a
+                replacement — a spawned in-app agent does NOT read this
+                file. See docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6. */}
+            <Show when={model.claudeAmbientConfigAtom()}>
+                {(cfg) => (
+                    <div class="global-brain-machine-config">
+                        <div class="global-brain-machine-config-header">
+                            <span
+                                class="global-brain-machine-config-badge"
+                                title="Claude Code's own global config on this machine — read by a host-level Claude Code CLI running outside AgentMux's isolation. A spawned in-app agent does NOT read this file; see the shared provider config block above for what it actually reads."
+                            >
+                                Claude Code — host CLI config (ambient)
+                            </span>
+                            <code class="global-brain-machine-config-path">{cfg().path}</code>
+                        </div>
+                        <Show
+                            when={cfg().exists}
+                            fallback={<p class="global-brain-machine-config-empty">No file at this path yet.</p>}
+                        >
+                            <pre class="global-brain-machine-config-content">{cfg().content}</pre>
+                        </Show>
+                    </div>
+                )}
+            </Show>
+
             {/* System tier — pinned above ordinary sections, always injected
                 first with override wording. No move up/down: position is
                 fixed server-side regardless of what a reorder call sends.

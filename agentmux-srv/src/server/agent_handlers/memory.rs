@@ -12,7 +12,7 @@ use crate::backend::rpc_types::{
     COMMAND_LIST_MEMORIES, COMMAND_GET_MEMORY,
     COMMAND_UPSERT_MEMORY, COMMAND_DELETE_MEMORY, COMMAND_REORDER_GLOBAL_BRAIN,
     COMMAND_UPSERT_SYSTEM_MEMORY, COMMAND_DELETE_SYSTEM_MEMORY,
-    COMMAND_GET_CLAUDE_GLOBAL_CONFIG,
+    COMMAND_GET_CLAUDE_GLOBAL_CONFIG, COMMAND_GET_CLAUDE_AMBIENT_CONFIG,
     CommandGetMemoryData, CommandDeleteMemoryData, CommandReorderGlobalBrainData,
 };
 use crate::backend::storage::store::Memory;
@@ -248,6 +248,22 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+
+    // ---- Read-only: the ambient ~/.claude/CLAUDE.md — Claude Code's own
+    // global config, read by a host-level CLI outside AgentMux's
+    // CLAUDE_CONFIG_DIR isolation. A SEPARATE block from the one above, not
+    // a replacement — see docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6.
+    engine.register_handler(
+        COMMAND_GET_CLAUDE_AMBIENT_CONFIG,
+        Box::new(move |_data, _ctx| {
+            Box::pin(async move {
+                let claude_dir = crate::backend::base::get_home_dir().join(".claude");
+                let result = read_claude_global_config(&claude_dir)
+                    .map_err(|e| format!("getclaudeambientconfig: {e}"))?;
+                Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
+            })
+        }),
+    );
 }
 
 /// The directory a spawned Claude agent's `CLAUDE_CONFIG_DIR` env var
@@ -299,6 +315,11 @@ fn read_claude_global_config(claude_dir: &std::path::Path) -> std::io::Result<Cl
     Ok(ClaudeGlobalConfig { path: path.to_string_lossy().into_owned(), content, exists })
 }
 
+// Covers both getclaudeglobalconfig (resolve_shared_claude_provider_dir)
+// and getclaudeambientconfig (~/.claude) — both handlers call this same
+// generic function against different directories, so exists/missing/
+// empty-file coverage here applies to both call sites. See
+// docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6.
 #[cfg(test)]
 mod claude_global_config_tests {
     use super::*;
