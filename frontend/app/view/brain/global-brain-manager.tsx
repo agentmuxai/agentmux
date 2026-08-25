@@ -131,8 +131,8 @@ export const GlobalBrainManager = (): JSX.Element => {
     return (
         <div class="global-brain">
             <p class="global-brain-intro">
-                Inherited by every agent at launch — composed into <code>CLAUDE.md</code>/
-                <code>GEMINI.md</code> in order.
+                Inherited by every agent at launch — composed into its startup file (e.g.{" "}
+                <code>CLAUDE.md</code>) in order.
             </p>
 
             <div class="global-brain-restart-note">Takes effect on next agent restart.</div>
