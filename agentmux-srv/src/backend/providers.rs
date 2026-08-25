@@ -655,11 +655,47 @@ fn paths_resolve_to_same_dir(reference: &std::path::Path, candidate: &str) -> bo
     normalize_path_lexically(reference) == normalize_path_lexically(candidate_path)
 }
 
+/// Lexically normalizes a path with NO filesystem access (unlike
+/// `canonicalize`, safe to call on a path that doesn't exist). Collapses
+/// `.` and `..` components (codex P1, PR #2802: without this, a not-yet-
+/// created dir like `$HOME/.claude/.` compared unequal to `$HOME/.claude`
+/// under plain string comparison, bypassing the guard entirely on a fresh
+/// machine — a `..` segment is normalized the same way for the same
+/// reason). Never pops past a root/prefix/leading `..` — a leading `..`
+/// with nothing to cancel stays literal, standard lexical-normalization
+/// semantics.
 fn normalize_path_lexically(p: &std::path::Path) -> String {
-    p.to_string_lossy()
-        .replace('\\', "/")
-        .trim_end_matches('/')
-        .to_lowercase()
+    use std::path::Component;
+
+    let mut normalized: Vec<Component> = Vec::new();
+    for component in p.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if matches!(normalized.last(), Some(Component::Normal(_))) {
+                    normalized.pop();
+                } else {
+                    normalized.push(component);
+                }
+            }
+            other => normalized.push(other),
+        }
+    }
+    let joined: std::path::PathBuf = normalized.into_iter().collect();
+    let as_str = joined.to_string_lossy().replace('\\', "/");
+    let trimmed = as_str.trim_end_matches('/');
+
+    // codex P2, PR #2802: case-fold only on platforms whose default
+    // filesystem is case-insensitive (Windows, macOS). Unconditionally
+    // lowercasing made a not-yet-created `$HOME/.CLAUDE` compare equal to
+    // `$HOME/.claude` on Linux (case-sensitive ext4) — once both existed,
+    // canonicalize would correctly tell them apart, so the guard's
+    // verdict depended on creation order instead of being deterministic.
+    if cfg!(target_os = "windows") || cfg!(target_os = "macos") {
+        trimmed.to_lowercase()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 /// Whether `path` matches ANY registered provider's
@@ -904,10 +940,47 @@ mod tests {
         }
 
         #[test]
-        fn lexical_fallback_is_case_insensitive_and_ignores_trailing_slash_and_separator_style() {
+        fn lexical_fallback_ignores_trailing_slash() {
             let reference = std::path::Path::new("/tmp/agentmux-test-nonexistent/.claude");
-            assert!(paths_resolve_to_same_dir(reference, "/TMP/agentmux-test-nonexistent/.CLAUDE/"));
-            assert!(paths_resolve_to_same_dir(reference, r"\tmp\agentmux-test-nonexistent\.claude"));
+            assert!(paths_resolve_to_same_dir(reference, "/tmp/agentmux-test-nonexistent/.claude/"));
+        }
+
+        // codex P2, PR #2802: case-folding must match the current platform's
+        // default filesystem case-sensitivity, not be unconditional —
+        // asserts whichever behavior is CORRECT for whatever OS actually
+        // runs this test, so it's meaningful on both windows-latest and
+        // ubuntu-latest CI legs.
+        #[test]
+        fn lexical_fallback_case_folding_matches_platform_default() {
+            let reference = std::path::Path::new("/tmp/agentmux-test-nonexistent/.claude");
+            let matches = paths_resolve_to_same_dir(reference, "/TMP/agentmux-test-nonexistent/.CLAUDE");
+            if cfg!(target_os = "windows") || cfg!(target_os = "macos") {
+                assert!(matches, "case-insensitive platforms must fold case in the lexical fallback");
+            } else {
+                assert!(!matches, "case-sensitive platforms must NOT fold case — a not-yet-created dir must not be conflated with a differently-cased one");
+            }
+        }
+
+        // codex P1, PR #2802: without dot-segment collapsing, a binding
+        // like `$HOME/.claude/.` compared unequal to `$HOME/.claude` under
+        // plain string comparison whenever neither existed yet (the fresh-
+        // machine case), bypassing the guard — Claude Code would then
+        // create and use the literal ambient dir once launched.
+        #[test]
+        fn lexical_fallback_collapses_dot_and_dotdot_segments() {
+            let reference = std::path::Path::new("/tmp/agentmux-test-nonexistent/.claude");
+            assert!(paths_resolve_to_same_dir(reference, "/tmp/agentmux-test-nonexistent/.claude/."));
+            assert!(paths_resolve_to_same_dir(
+                reference,
+                "/tmp/agentmux-test-nonexistent/sibling/../.claude",
+            ));
+            // A genuinely different directory reached via `..` must still
+            // correctly NOT match — this isn't "ignore everything after a
+            // dot-segment," it's real lexical normalization.
+            assert!(!paths_resolve_to_same_dir(
+                reference,
+                "/tmp/agentmux-test-nonexistent/.claude/../.codex",
+            ));
         }
 
         #[test]

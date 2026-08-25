@@ -243,4 +243,73 @@ investigation, not a repeatable automated test):**
       unit tests above regardless.
 
 **Full suite:** `cargo test --bin agentmux-srv` run after all changes —
-see PR for pass count.
+2813 passed, 0 failed.
+
+---
+
+## 5. Codex review round (PR #2802) — three real, confirmed findings, all fixed
+
+**P1 — the "graceful recovery" classifier was dead code for the actual
+production path.** Verified directly: `agent_handlers/input.rs` and
+`app_api/agent_io.rs` (the two real pre-spawn `SpawnGateError` call sites)
+build a raw `error_during_execution` frame and return early on the gate's
+`Err` — neither ever calls `classify()`. Every production `classify()`
+call site (`agents/runner.rs`, `blockcontroller/health.rs`,
+`blockcontroller/persistent.rs`, `subprocess/host_spawn.rs`) is POST-spawn
+(a real process exited or a `HealthMonitor` reclassified an in-band
+error) — none apply when the spawn was refused before any process
+existed. The frontend's actual recovery-card mechanism is the structured
+`agent:last_failure` block-meta key (written by
+`blockcontroller::core::persist_last_failure`) plus the ephemeral
+`EVENT_AGENT_FAILURE` WPS push — not anything derived from the raw
+persisted frame. So §2.5's classifier addition, while itself correct, was
+never actually invoked for this feature's own headline UX requirement
+("graceful recovery" — §0). **Fix:** both call sites now classify the
+gate's `Display` text (`classify(None, None, &gate.to_string(), None)`,
+same shape `health.rs`'s in-band-error reclassification uses), then
+`persist_last_failure` + publish `EVENT_AGENT_FAILURE`, mirroring
+`host_spawn.rs`'s exact post-exit publish sequence.
+
+**P1 — dot-segment bypass in the lexical fallback.** `paths_resolve_to_same_dir`'s
+fallback (used whenever either side doesn't exist on disk yet — the
+common case for validating a *new* binding before anything is created)
+did plain string comparison after case-folding, with no `.`/`..`
+collapsing. A binding of `$HOME/.claude/.` (or any `..`-containing
+equivalent) compared unequal to `$HOME/.claude` under that fallback,
+passing both guards on a fresh machine — then, once actually used,
+resolves to the literal ambient dir anyway. **Fix:**
+`normalize_path_lexically` now walks `Path::components()`, collapsing
+`CurDir` and popping `ParentDir` against the preceding `Normal` segment
+(never past a root/prefix), before the (still fallback-only) case-fold
+step.
+
+**P2 — case-folding must be platform-conditional.** The fallback
+unconditionally lowercased both sides. On a case-sensitive filesystem
+(Linux ext4), a not-yet-created `$HOME/.CLAUDE` would incorrectly compare
+equal to `$HOME/.claude` while neither existed, then — once both existed —
+`canonicalize` would correctly tell them apart, making the guard's
+verdict depend on creation order instead of being deterministic. **Fix:**
+case-fold only when `cfg!(target_os = "windows") || cfg!(target_os =
+"macos")`.
+
+**P2 — `muxspect`'s diagnostic classifier didn't recognize the new
+wording.** `classify_last_error_source` (`muxspect_handlers.rs`) only
+matched messages starting with `"no credentials for"` or `"credential
+injection could not run"` — every `AmbientHomeDirNotAllowed` refusal
+(starts with `"this agent's"`) reported source `unknown` instead of
+`identity`, regressing this diagnostic specifically for pre-spawn
+refusals. **Fix:** added the third prefix to the classifier's condition.
+
+**Test plan (additive, all passing):**
+- [x] `providers.rs`: `lexical_fallback_collapses_dot_and_dotdot_segments`
+      (the P1 dot-segment fix, including a genuinely-different-directory
+      negative case reached via `..`), `lexical_fallback_case_folding_matches_platform_default`
+      (asserts whichever behavior is correct for whatever OS actually runs
+      the test, so it's meaningful on both CI legs).
+- [x] `muxspect_handlers.rs`: `classify_last_error_source_matches_every_known_construction_site`
+      extended with the `AmbientHomeDirNotAllowed` wording.
+- [x] Manual trace (not a new automated test — verified by reading the
+      call graph): confirmed `classify()` has no other production call
+      site that would have already covered the pre-spawn path, ruling out
+      "already fixed elsewhere" before writing the `input.rs`/`agent_io.rs`
+      fix.
