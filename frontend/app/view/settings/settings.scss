@@ -442,7 +442,11 @@
         justify-content: center;
         padding: 8px 2px;
         border: none;
-        border-top: 2px solid transparent;
+        // Bottom edge, not top — the bar sits at the TOP of the pane now
+        // (SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md), so the
+        // active-tab indicator should touch the content it's showing,
+        // rendered below, not the far edge away from it. codex P2, PR #2793.
+        border-bottom: 2px solid transparent;
         background: transparent;
         color: var(--main-text-color);
         cursor: default;
@@ -453,7 +457,7 @@
         &.is-active {
             opacity: 1;
             color: var(--accent-color);
-            border-top-color: var(--accent-color);
+            border-bottom-color: var(--accent-color);
         }
 
         &:hover:not(.is-active) {
