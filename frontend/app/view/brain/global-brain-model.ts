@@ -201,8 +201,9 @@ export class GlobalBrainViewModel {
         void this.fetchClaudeGlobalConfig();
     }
 
-    /** Fetches ~/.claude/CLAUDE.md once. Failure is silent (leaves the atom
-     *  `null`, so the block just doesn't render) rather than surfacing
+    /** Fetches the shared Claude provider config's CLAUDE.md once. Failure
+     *  is silent (leaves the atom `null`, so the block just doesn't render)
+     *  rather than surfacing
      *  through `errorAtom` — this is a supplementary, read-only display, not
      *  something that should block or alarm-color the rest of the Global
      *  Memory tab if it can't be read (e.g. a permissions issue on this one
