@@ -65,12 +65,15 @@ describe("formatGlobalBrainBlock", () => {
 });
 
 // GlobalBrainViewModel's section split — mocks RpcApi entirely since the
-// constructor fires an unawaited ListMemoriesCommand refresh(), same
-// pattern as frontend/app/view/memory/memory-model.test.ts.
+// constructor fires an unawaited ListMemoriesCommand refresh() AND an
+// unawaited GetClaudeGlobalConfigCommand fetch, same pattern as
+// frontend/app/view/memory/memory-model.test.ts.
 const listMemoriesMock = vi.fn().mockResolvedValue([]);
+const getClaudeGlobalConfigMock = vi.fn().mockResolvedValue({ path: "/home/user/.agentmux/shared/providers/claude/CLAUDE.md", content: null, exists: false });
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         ListMemoriesCommand: (...args: unknown[]) => listMemoriesMock(...args),
+        GetClaudeGlobalConfigCommand: (...args: unknown[]) => getClaudeGlobalConfigMock(...args),
     },
 }));
 
@@ -78,6 +81,8 @@ describe("GlobalBrainViewModel system/ordinary split", () => {
     beforeEach(() => {
         listMemoriesMock.mockClear();
         listMemoriesMock.mockResolvedValue([]);
+        getClaudeGlobalConfigMock.mockClear();
+        getClaudeGlobalConfigMock.mockResolvedValue({ path: "/home/user/.agentmux/shared/providers/claude/CLAUDE.md", content: null, exists: false });
     });
 
     test("systemSectionsAtom and ordinarySectionsAtom partition allAtom without overlap", async () => {
@@ -133,6 +138,41 @@ describe("GlobalBrainViewModel system/ordinary split", () => {
         await model.refresh();
 
         expect(model.noFileProvidersAtom()).toEqual(["Kimi Code CLI"]);
+    });
+
+    // docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §4.
+    test("claudeGlobalConfigAtom starts null and populates from GetClaudeGlobalConfigCommand", async () => {
+        getClaudeGlobalConfigMock.mockResolvedValue({
+            path: "/home/user/.agentmux/shared/providers/claude/CLAUDE.md",
+            content: "# Global rules\n",
+            exists: true,
+        });
+        const { GlobalBrainViewModel } = await import("./global-brain-model");
+        const model = new GlobalBrainViewModel();
+
+        expect(model.claudeGlobalConfigAtom()).toBeNull();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(model.claudeGlobalConfigAtom()).toEqual({
+            path: "/home/user/.agentmux/shared/providers/claude/CLAUDE.md",
+            content: "# Global rules\n",
+            exists: true,
+        });
+    });
+
+    test("claudeGlobalConfigAtom stays null (not an error) when the fetch rejects", async () => {
+        getClaudeGlobalConfigMock.mockRejectedValue(new Error("boom"));
+        const { GlobalBrainViewModel } = await import("./global-brain-model");
+        const model = new GlobalBrainViewModel();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(model.claudeGlobalConfigAtom()).toBeNull();
+        // Doesn't surface through the unrelated Global Memory error banner —
+        // this is a supplementary display, not something that should make
+        // the rest of the tab look broken if it fails.
+        expect(model.errorAtom()).toBeNull();
     });
 });
 

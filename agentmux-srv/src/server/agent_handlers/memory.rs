@@ -12,6 +12,7 @@ use crate::backend::rpc_types::{
     COMMAND_LIST_MEMORIES, COMMAND_GET_MEMORY,
     COMMAND_UPSERT_MEMORY, COMMAND_DELETE_MEMORY, COMMAND_REORDER_GLOBAL_BRAIN,
     COMMAND_UPSERT_SYSTEM_MEMORY, COMMAND_DELETE_SYSTEM_MEMORY,
+    COMMAND_GET_CLAUDE_GLOBAL_CONFIG,
     CommandGetMemoryData, CommandDeleteMemoryData, CommandReorderGlobalBrainData,
 };
 use crate::backend::storage::store::Memory;
@@ -231,4 +232,109 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+
+    // ---- Read-only: the CLAUDE.md at AgentMux's shared Claude provider
+    // config dir — see docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md
+    // §5 (post-review revision). No parameters (fixed path, not
+    // caller-supplied), no write counterpart.
+    engine.register_handler(
+        COMMAND_GET_CLAUDE_GLOBAL_CONFIG,
+        Box::new(move |_data, _ctx| {
+            Box::pin(async move {
+                let claude_dir = resolve_shared_claude_provider_dir();
+                let result = read_claude_global_config(&claude_dir)
+                    .map_err(|e| format!("getclaudeglobalconfig: {e}"))?;
+                Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
+            })
+        }),
+    );
+}
+
+/// The directory a spawned Claude agent's `CLAUDE_CONFIG_DIR` env var
+/// points at by DEFAULT (non-identity-bound agents — the common case;
+/// explicit multi-account identity bundles use a separate, per-identity
+/// dir this does not cover). Mirrors `agent_open.rs`'s own `auth_dir`
+/// resolution exactly — `DataPaths::provider_auth_dir("claude")`, with the
+/// identical `~/.agentmux/shared/providers/claude` fallback when
+/// `DataPaths::from_env()` fails — so the path shown here is genuinely the
+/// one AgentMux itself uses when launching a Claude agent, not a guess.
+/// codex P1, PR #2794: the original version read the ambient
+/// `~/.claude/CLAUDE.md`, which `SPEC_PROVIDER_ISOLATION_2026_06_20.md`
+/// §5b confirms is NOT what a `CLAUDE_CONFIG_DIR`-redirected spawned agent
+/// actually loads as its "user CLAUDE.md" — `CLAUDE_CONFIG_DIR` relocates
+/// Claude Code's entire home, `<CLAUDE_CONFIG_DIR>/CLAUDE.md` included.
+fn resolve_shared_claude_provider_dir() -> std::path::PathBuf {
+    agentmux_common::DataPaths::from_env()
+        .map(|p| p.provider_auth_dir("claude"))
+        .unwrap_or_else(|| {
+            crate::backend::base::get_home_dir()
+                .join(".agentmux")
+                .join("shared")
+                .join("providers")
+                .join("claude")
+        })
+}
+
+/// The resolved shared-provider-dir's `CLAUDE.md` path + content,
+/// read-only. `claude_dir` is injected (not resolved internally) so this
+/// is testable against a tempdir. `content: None, exists: false` for a
+/// genuinely missing file (the common case — no AgentMux-spawned Claude
+/// agent on this host has one today, confirmed 2026-08-24) — real I/O
+/// errors (permission denied, etc.) still propagate as `Err`, not
+/// silently folded into "missing."
+#[derive(serde::Serialize)]
+struct ClaudeGlobalConfig {
+    path: String,
+    content: Option<String>,
+    exists: bool,
+}
+
+fn read_claude_global_config(claude_dir: &std::path::Path) -> std::io::Result<ClaudeGlobalConfig> {
+    let path = claude_dir.join("CLAUDE.md");
+    let (content, exists) = match std::fs::read_to_string(&path) {
+        Ok(c) => (Some(c), true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (None, false),
+        Err(e) => return Err(e),
+    };
+    Ok(ClaudeGlobalConfig { path: path.to_string_lossy().into_owned(), content, exists })
+}
+
+#[cfg(test)]
+mod claude_global_config_tests {
+    use super::*;
+
+    #[test]
+    fn returns_content_and_exists_true_when_the_file_is_present() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), "# My global rules\n").unwrap();
+
+        let result = read_claude_global_config(dir.path()).unwrap();
+        assert!(result.exists);
+        assert_eq!(result.content.as_deref(), Some("# My global rules\n"));
+        assert_eq!(result.path, dir.path().join("CLAUDE.md").to_string_lossy());
+    }
+
+    #[test]
+    fn returns_none_content_and_exists_false_when_the_file_is_missing_not_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        // Deliberately no CLAUDE.md written — the common case on a host
+        // where the user never created one.
+
+        let result = read_claude_global_config(dir.path()).unwrap();
+        assert!(!result.exists);
+        assert!(result.content.is_none());
+        // The path is still reported even when nothing exists there yet —
+        // useful information on its own (SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §2.3).
+        assert_eq!(result.path, dir.path().join("CLAUDE.md").to_string_lossy());
+    }
+
+    #[test]
+    fn returns_content_for_an_empty_file_not_treated_as_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), "").unwrap();
+
+        let result = read_claude_global_config(dir.path()).unwrap();
+        assert!(result.exists);
+        assert_eq!(result.content.as_deref(), Some(""));
+    }
 }
