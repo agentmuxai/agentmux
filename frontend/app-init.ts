@@ -343,7 +343,7 @@ async function initHostWave(): Promise<void> {
         // graceful quit (the destroy-on-close cascade always empties it) or
         // on a truly first-ever launch. Pass `restoreIfAvailable: true` so
         // srv replays the last-session snapshot if one was saved on close,
-        // instead of always seeding the hardcoded default 3-pane layout.
+        // instead of always seeding the hardcoded default 4-pane layout.
         if (!windowId) {
             t = performance.now();
             const newWindow = await withTimeout(WindowService.CreateWindow(null, "", currentWindowLabel(), true), RPC_TIMEOUT, "CreateWindow");

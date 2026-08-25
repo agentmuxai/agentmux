@@ -114,7 +114,7 @@ class WindowServiceType {
     // 2026_08_13 Feature 1): only the true cold-start call site in
     // app-init.ts sets this — it tells srv to replay the last-session
     // snapshot (if one exists) instead of seeding the hardcoded default
-    // 3-pane layout. Every other caller (tear-off, "Open New Window") omits
+    // 4-pane layout. Every other caller (tear-off, "Open New Window") omits
     // it and keeps today's always-blank-workspace behavior.
     CreateWindow(winSize: WinSize, workspaceId: string, hostLabel?: string, restoreIfAvailable?: boolean): Promise<WaveWindow> {
         return WOS.callBackendService("window", "CreateWindow", Array.from(arguments))

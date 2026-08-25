@@ -163,20 +163,23 @@ upholds I1–I6.
 
 Widgets are defined in `agentmux-srv/src/config/widgets.json`. These are the **only** widget types — do not invent or reference widgets that don't exist here.
 
-The widget bar's visibility logic is in `frontend/app/window/action-widgets.tsx`: pinned widgets (`"display:pinned": true`) appear directly in the bar; everything else lives in the **More** dropdown. Both tiers are user-facing. By default every surfaced widget is pinned. Their text labels collapse to icon-only automatically when the title bar is too narrow (and the manual `widget:icononly` setting can force icon-only at any width).
+The widget bar's visibility logic is in `frontend/app/window/action-widgets.tsx`: pinned widgets (`"display:pinned": true`) appear directly in the bar; everything else lives in the **More** dropdown. Both tiers are user-facing. On a fresh install exactly four widgets are pinned by default — `agent`, `swarm`, `armory`, `sysinfo`, in that order (`SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md`) — everything else starts in **More** until the user pins it. Their text labels collapse to icon-only automatically when the title bar is too narrow (and the manual `widget:icononly` setting can force icon-only at any width).
 
-| Widget Key | View | Label | Tier |
+| Widget Key | View | Label | Tier (fresh install) |
 |------------|------|-------|------|
 | `defwidget@agent` | `agent` | Agent | Pinned |
-| `defwidget@browser` | `browser` | Browser | Pinned |
-| `defwidget@terminal` | `term` | Terminal | Pinned |
-| `defwidget@sysinfo` | `sysinfo` | Sysinfo | Pinned |
-| `defwidget@editor` | `editor` | Editor | Pinned |
-| `defwidget@media` | `media` | Media | Pinned |
-| `defwidget@drone` | `drone` | Drone | Pinned |
-| `defwidget@help` | `help` | Help | Pinned |
 | `defwidget@swarm` | `swarm` | Swarm | Pinned |
-| `defwidget@warden` | `warden` | Warden | Pinned |
+| `defwidget@armory` | `armory` | Armory | Pinned |
+| `defwidget@sysinfo` | `sysinfo` | Sysinfo | Pinned |
+| `defwidget@browser` | `browser` | Browser | More |
+| `defwidget@terminal` | `term` | Terminal | More |
+| `defwidget@editor` | `editor` | Editor | More |
+| `defwidget@media` | `media` | Media | More |
+| `defwidget@drone` | `drone` | Drone | More |
+| `defwidget@help` | `help` | Help | More |
+| `defwidget@warden` | `warden` | Warden | More |
+
+`display:pinned`/`display:order` in `agentmux-srv/src/config/widgets.json` are the live source of truth — this table mirrors it as of the reorder above; check the file directly if it drifts again.
 
 ### Not widgets
 

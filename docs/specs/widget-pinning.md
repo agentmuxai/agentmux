@@ -14,7 +14,14 @@ losing access to the rest.
 
 - Show only **pinned** widgets directly in the action bar
 - Collect remaining (unpinned, non-hidden) widgets in a **More** dropdown
-- Ship sensible defaults for new installs: `agent`, `terminal`, `sysinfo` pinned
+- Ship sensible defaults for new installs — pinned set has changed since
+  this doc was originally written; current authoritative default is
+  `agent`, `swarm`, `armory`, `sysinfo` (in that order). See
+  `docs/specs/SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md` and
+  `agentmux-srv/src/config/widgets.json`'s `display:pinned`/`display:order`
+  fields for the live, current values — the `terminal`-era example below
+  (and elsewhere in this doc) is original-design illustration only, not
+  kept in sync with every later change to the actual pinned set.
 - Let users pin / unpin / reorder at will — persisted to settings
 - Existing installs should not lose anything (clean migration)
 

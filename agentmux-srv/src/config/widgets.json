@@ -70,8 +70,8 @@
         }
     },
     "defwidget@sysinfo": {
-        "display:order": 8,
-        "display:pinned": false,
+        "display:order": 4,
+        "display:pinned": true,
         "icon": "chart-line",
         "label": "Sysinfo",
         "blockdef": {
@@ -82,7 +82,7 @@
     },
     "defwidget@drone": {
         "display:order": 3,
-        "display:pinned": true,
+        "display:pinned": false,
         "icon": "diagram-project",
         "color": "#06b6d4",
         "label": "Drone",
@@ -107,7 +107,7 @@
     },
     "defwidget@warden": {
         "display:order": 4,
-        "display:pinned": true,
+        "display:pinned": false,
         "icon": "shield-halved",
         "color": "#8b5cf6",
         "label": "Warden",
@@ -208,7 +208,7 @@
     },
     "defwidget@media": {
         "display:order": 15,
-        "display:pinned": true,
+        "display:pinned": false,
         "icon": "photo-film",
         "color": "#10b981",
         "label": "Media",
@@ -232,8 +232,8 @@
         }
     },
     "defwidget@armory": {
-        "display:order": 21,
-        "display:pinned": false,
+        "display:order": 3,
+        "display:pinned": true,
         "icon": "vault",
         "label": "Armory",
         "description": "Manage accounts, memories, skills, MCP servers, and bundles",

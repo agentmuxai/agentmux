@@ -91,8 +91,8 @@ in its very first implementation phase. Only "Open" (pinned tab in the
 1. **Open to the Side**: opens the file in a new editor pane, split right of
    the current editor pane, without disturbing the current pane's tabs.
 2. **Open in New Tab**: opens the file in a new editor pane inside a brand
-   new, otherwise-empty app tab (not the standard agent/sysinfo/swarm preset
-   tab).
+   new, otherwise-empty app tab (not the standard agent/swarm/armory/sysinfo
+   preset tab).
 3. Both actions reuse existing backend/frontend primitives — no new RPCs.
 
 ## Non-Goals
@@ -157,7 +157,8 @@ There is no single RPC that creates a tab *and* opens a specific pane into it
 with no preset — `WorkspaceService.CreateTab` (used by `createTab()` in
 `frontend/app/store/global.ts:745-776`) is the primitive for creating a tab,
 but `createTab()` itself always layers on `applyTabPreset(tabId,
-DEFAULT_TAB_PRESET)` (agent + sysinfo + swarm), which is wrong for this
+DEFAULT_TAB_PRESET)` (agent + swarm + armory + sysinfo, as of
+`SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md`), which is wrong for this
 action — the user asked for *this file*, not a fresh default workspace.
 
 **Revised during implementation** (the design below superseded the original
