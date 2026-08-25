@@ -6,10 +6,19 @@ out to be the wrong one — see §5 for the corrected design (the CLAUDE.md
 at AgentMux's shared Claude provider config dir, not the ambient
 `~/.claude/CLAUDE.md`). Filename kept as-is since it's already referenced
 by the PR/commits; read §5 for what actually shipped. **§6 (2026-08-25)
-re-adds the ambient file after all — as a SECOND, separately-labeled
-block alongside §5's, not a replacement.** Current shipped/target state:
-Global Memory shows TWO independent read-only blocks — the shared
-provider config (§5) and the ambient host CLI config (§6).
+re-adds that file after all — as a SECOND, separately-labeled block
+alongside §5's, not a replacement. §7 (2026-08-25, same day) renames
+"ambient"→"host CLI config" (real term collision with
+`term:ambient_summary`), corrects an architecture claim §6 got wrong
+(working-directory `CLAUDE.md` files ARE part of AgentMux's spawned-agent
+system — see §7.2), and reframes both blocks as "External Claude Code
+files" — confirmed to be the actual point of this whole spec chain, not
+an incidental addition.** Current shipped/target state: Global Memory's
+"External Claude Code files" section shows TWO independent read-only
+blocks — the shared provider config (§5) and the host CLI config (§6,
+§7.1) — neither of which is, or claims to be, AgentMux's own Global
+Memory composition target (that's `<agent working_directory>/CLAUDE.md`,
+§7.2, already previewed via "Combined preview" elsewhere in the tab).
 
 ---
 
@@ -300,11 +309,12 @@ or be missing independently without affecting the other's rendering.
 **Out of scope (same reasoning as §3, re-affirmed after the explicit
 choice above):** per-identity `CLAUDE_CONFIG_DIR` dirs (still a known,
 flagged gap — would require enumerating every identity, a materially
-larger feature); this harness's own working-directory files (not part of
-AgentMux's spawned-agent system at all, would misrepresent what the
-feature does the same way the original §1-§4 design did before §5's
-correction); any equivalent file for other providers (still no evidence
-one exists the way `~/.claude/CLAUDE.md` does for Claude Code).
+larger feature); this harness's own working-directory files (**INCORRECT
+CLAIM — see §7**: these files are NOT "unrelated to AgentMux's
+spawned-agent system"; `<agent working_directory>/CLAUDE.md` is exactly
+where AgentMux's own Global Memory composition writes to); any
+equivalent file for other providers (still no evidence one exists the
+way `~/.claude/CLAUDE.md` does for Claude Code).
 
 **Test plan (additive, mirrors §4 exactly for the new path):**
 - [ ] Rust: `getclaudeambientconfig` against a `HOME` pointed at a tempdir
@@ -318,3 +328,117 @@ one exists the way `~/.claude/CLAUDE.md` does for Claude Code).
       textarea/button in either).
 - [ ] Manual (`task dev`): confirm both blocks render, each with its own
       correct path/content/empty-state, positioned adjacently.
+
+---
+
+## 7. Third revision (2026-08-25) — terminology cleanup, architecture correction, and the actual point of this whole spec chain
+
+**The ask, verbatim, across a conversation that stepped back and re-derived
+the model from the code instead of prose:**
+
+> ambient already means the tokens used for descriptive information in
+> the application .. can we clean up the terminology? [...] Global Memory
+> are the files all agents read. Personal memory are the files the agent
+> reads. is that clear? [...] right .. but that isnt really accurate when
+> you say "composed into every spawned..." because there are additional
+> global ~/.claude/CLAUDE.md files .. do you see that disconnect? [...]
+> so the external claude code files need to appear in Global Memory, in
+> fact, that's the main feature
+
+Three separate corrections came out of this, in order:
+
+### 7.1 "Ambient" was a real terminology collision — renamed
+
+`term:ambient_summary` (`frontend/app/store/activitySummary.ts`) already
+means "the Haiku-derived per-turn activity paraphrase shown as a pane's
+status text" — an established, unrelated concept. (There is also a
+`crate::ambient` "Ambient Model Call gateway" backend module — a *third*
+distinct meaning.) Naming a CLAUDE.md display block "ambient" reused an
+already-loaded word for something unrelated. Renamed throughout:
+
+| Old | New |
+|---|---|
+| `getclaudeambientconfig` (RPC command) | `getclaudehostconfig` |
+| `COMMAND_GET_CLAUDE_AMBIENT_CONFIG` | `COMMAND_GET_CLAUDE_HOST_CONFIG` |
+| `GetClaudeAmbientConfigCommand` | `GetClaudeHostConfigCommand` |
+| `claudeAmbientConfigAtom` / `fetchClaudeAmbientConfig` | `claudeHostConfigAtom` / `fetchClaudeHostConfig` |
+| Badge: "Claude Code — host CLI config (ambient)" | "Claude Code — host CLI config" |
+
+No behavior change — same RPC shape, same resolved path
+(`~/.claude/CLAUDE.md`), same read-once-at-mount/independent-atom
+semantics as §6. Pure rename.
+
+### 7.2 Architecture correction — §6's "out of scope" claim about working-directory files was WRONG
+
+§6 claimed this coding-agent harness's own working-directory
+`CLAUDE.md`/`AGENTMUX_MEMORY.md` files were "not part of AgentMux's
+spawned-agent system at all." **Traced the actual code — false:**
+
+- `agent_open.rs:288-292`: a spawned agent's working directory defaults
+  to `~/.agentmux/agents/<agent-slug>/` when no explicit project
+  directory is configured (the common case).
+- `agent_open.rs:851` calls
+  `agent_config::write_claude_md_respecting_ownership(base_path, ...)`
+  where `base_path` is exactly that working directory.
+- That function (`agent_config.rs:1106`) writes AgentMux's own composed
+  Global Memory content (system tier + `is_global` bundles + the
+  launching agent's own bundle instructions + skills index) directly
+  into `<working_dir>/CLAUDE.md` — UNLESS a `CLAUDE.md` already exists
+  there without the `<!-- agentmux:managed-claude-md -->` marker
+  (`CLAUDE_MD_MANAGED_MARKER`, `agent_config.rs:904`), in which case it
+  backs off to a single `@import` line and puts the actual content in a
+  companion `<working_dir>/.claude/AGENTMUX_MEMORY.md` instead
+  (`SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md`).
+
+**So `<agent working_directory>/CLAUDE.md` (or its `AGENTMUX_MEMORY.md`
+companion) is the actual, primary answer to "what does Global Memory
+compose into" — a THIRD file location, distinct from both blocks §5/§6
+show (which only cover Claude Code's own `CLAUDE_CONFIG_DIR`-relocated
+*home*/auth paths, never AgentMux's composition target).** This also
+resolves the loose thread §5 explicitly left open ("whatever separate
+mechanism surfaced that file's content into this agent's own context...
+is not resolved here") — that mechanism is exactly this one.
+
+**Consequence:** neither §5's nor §6's block is, or was ever meant to be,
+a preview of "what Global Memory composes into." Both are — and have
+always actually been — reference displays of files *Claude Code itself*
+manages, unrelated to the composition pipeline. The existing
+`previewAtom` (`formatGlobalBrainBlock(sectionsAtom())`, rendered as
+"Combined preview" in the same tab) already shows the real composed
+content accurately, computed client-side from the same bundle data — and
+is representative for every agent equally, since composition is
+per-launch, not per-file-path. **No third block was added for the
+working-directory file** — it's per-agent (path varies with each agent's
+own working directory), so a single fixed-path block in this *global*
+tab would misrepresent it exactly the way §1-§4 and §6 almost did twice
+already. If per-agent visibility is ever wanted, that's a different,
+agent-scoped UI — not a fix to this tab.
+
+### 7.3 Reframe — these two blocks are "External Claude Code files," and that section IS the main feature
+
+Confirmed directly: showing files Claude Code itself manages (as opposed
+to anything AgentMux composes) is not incidental to this spec chain —
+it's the actual point of it. Reflecting that:
+
+- New wrapper section, `global-brain-external-files` /
+  `global-brain-external-files-heading`, rendered only when at least one
+  of the two blocks has data: **"External Claude Code files — managed by
+  Claude Code itself, not AgentMux. Shown for visibility only; not part
+  of the Global Memory composed above."**
+- Each block gains a visible one-line caption (`global-brain-machine-config-caption`,
+  not just a hover tooltip): shared provider config → *"What a default
+  spawned agent's Claude Code auth/home uses."*; host CLI config →
+  *"What Claude Code uses outside AgentMux entirely."*
+- Rust/frontend doc comments on both RPC commands updated to state
+  plainly that neither is the Global Memory composition target, pointing
+  at `<working_dir>/CLAUDE.md` instead (§7.2).
+
+**Test plan (additive):**
+- [ ] Frontend: both blocks render under the shared
+      `global-brain-external-files` heading; the heading only appears
+      once at least one atom has data.
+- [ ] Frontend: all prior §4/§6 test names/mocks renamed
+      ambient→host-config, behavior unchanged.
+- [ ] Rust: no new coverage needed — `getclaudehostconfig` is a rename of
+      an already-tested handler (`read_claude_global_config` is
+      untouched); confirmed via `cargo check` + full suite re-run.

@@ -12,7 +12,7 @@ use crate::backend::rpc_types::{
     COMMAND_LIST_MEMORIES, COMMAND_GET_MEMORY,
     COMMAND_UPSERT_MEMORY, COMMAND_DELETE_MEMORY, COMMAND_REORDER_GLOBAL_BRAIN,
     COMMAND_UPSERT_SYSTEM_MEMORY, COMMAND_DELETE_SYSTEM_MEMORY,
-    COMMAND_GET_CLAUDE_GLOBAL_CONFIG, COMMAND_GET_CLAUDE_AMBIENT_CONFIG,
+    COMMAND_GET_CLAUDE_GLOBAL_CONFIG, COMMAND_GET_CLAUDE_HOST_CONFIG,
     CommandGetMemoryData, CommandDeleteMemoryData, CommandReorderGlobalBrainData,
 };
 use crate::backend::storage::store::Memory;
@@ -249,17 +249,17 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    // ---- Read-only: the ambient ~/.claude/CLAUDE.md — Claude Code's own
-    // global config, read by a host-level CLI outside AgentMux's
-    // CLAUDE_CONFIG_DIR isolation. A SEPARATE block from the one above, not
-    // a replacement — see docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6.
+    // ---- Read-only: ~/.claude/CLAUDE.md — Claude Code's own global
+    // config, read by a host-level CLI outside AgentMux's CLAUDE_CONFIG_DIR
+    // isolation. A SEPARATE block from the one above, not a replacement —
+    // see docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6, §7.
     engine.register_handler(
-        COMMAND_GET_CLAUDE_AMBIENT_CONFIG,
+        COMMAND_GET_CLAUDE_HOST_CONFIG,
         Box::new(move |_data, _ctx| {
             Box::pin(async move {
                 let claude_dir = crate::backend::base::get_home_dir().join(".claude");
                 let result = read_claude_global_config(&claude_dir)
-                    .map_err(|e| format!("getclaudeambientconfig: {e}"))?;
+                    .map_err(|e| format!("getclaudehostconfig: {e}"))?;
                 Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
             })
         }),
@@ -274,8 +274,8 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// identical `~/.agentmux/shared/providers/claude` fallback when
 /// `DataPaths::from_env()` fails — so the path shown here is genuinely the
 /// one AgentMux itself uses when launching a Claude agent, not a guess.
-/// codex P1, PR #2794: the original version read the ambient
-/// `~/.claude/CLAUDE.md`, which `SPEC_PROVIDER_ISOLATION_2026_06_20.md`
+/// codex P1, PR #2794: the original version read `~/.claude/CLAUDE.md`
+/// directly, which `SPEC_PROVIDER_ISOLATION_2026_06_20.md`
 /// §5b confirms is NOT what a `CLAUDE_CONFIG_DIR`-redirected spawned agent
 /// actually loads as its "user CLAUDE.md" — `CLAUDE_CONFIG_DIR` relocates
 /// Claude Code's entire home, `<CLAUDE_CONFIG_DIR>/CLAUDE.md` included.
@@ -316,10 +316,10 @@ fn read_claude_global_config(claude_dir: &std::path::Path) -> std::io::Result<Cl
 }
 
 // Covers both getclaudeglobalconfig (resolve_shared_claude_provider_dir)
-// and getclaudeambientconfig (~/.claude) — both handlers call this same
+// and getclaudehostconfig (~/.claude) — both handlers call this same
 // generic function against different directories, so exists/missing/
 // empty-file coverage here applies to both call sites. See
-// docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6.
+// docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6, §7.
 #[cfg(test)]
 mod claude_global_config_tests {
     use super::*;

@@ -71,10 +71,13 @@ export const MemoryApi = {
     // Read-only. Returns the CLAUDE.md at AgentMux's shared Claude
     // provider config dir (~/.agentmux/shared/providers/claude/CLAUDE.md
     // via DataPaths::provider_auth_dir — the CLAUDE_CONFIG_DIR a
-    // non-identity-bound spawned Claude agent actually gets), NOT the
-    // ambient ~/.claude/CLAUDE.md — see
-    // docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §5. No
-    // parameters, no write counterpart.
+    // non-identity-bound spawned Claude agent actually gets). NOTE: this
+    // is Claude Code's own home-relocation path, NOT the file AgentMux's
+    // Global Memory actually composes into (that's
+    // <agent working_directory>/CLAUDE.md, a per-agent path this doesn't
+    // cover) — this is an "External Claude Code files" reference display
+    // only. See docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md
+    // §5, §7. No parameters, no write counterpart.
     GetClaudeGlobalConfigCommand(
         client: RpcClient,
         data: Record<string, never> = {},
@@ -83,18 +86,22 @@ export const MemoryApi = {
         return client.rpcCall("getclaudeglobalconfig", data, opts);
     },
 
-    // Read-only. Returns the ambient ~/.claude/CLAUDE.md — Claude Code's
-    // own global config, read by a host-level CLI outside AgentMux's
+    // Read-only. Returns ~/.claude/CLAUDE.md — Claude Code's own global
+    // config, read by a host-level CLI outside AgentMux's
     // CLAUDE_CONFIG_DIR isolation. A SEPARATE block from
-    // GetClaudeGlobalConfigCommand above, not a replacement — see
-    // docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6. No
-    // parameters, no write counterpart.
-    GetClaudeAmbientConfigCommand(
+    // GetClaudeGlobalConfigCommand above, not a replacement — both are
+    // "External Claude Code files" reference displays, not part of
+    // AgentMux's own Global Memory composition. Renamed from
+    // GetClaudeAmbientConfigCommand — "ambient" already means something
+    // else in this codebase (term:ambient_summary, activitySummary.ts).
+    // See docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6, §7.
+    // No parameters, no write counterpart.
+    GetClaudeHostConfigCommand(
         client: RpcClient,
         data: Record<string, never> = {},
         opts?: RpcOpts,
     ): Promise<{ path: string; content: string | null; exists: boolean }> {
-        return client.rpcCall("getclaudeambientconfig", data, opts);
+        return client.rpcCall("getclaudehostconfig", data, opts);
     },
 
     NativeMemoryListCommand(client: RpcClient, data: { agent_id: string }, opts?: RpcOpts): Promise<NativeMemoryListResult> {

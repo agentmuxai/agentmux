@@ -153,6 +153,14 @@ export class GlobalBrainViewModel {
      *  to" callout rather than silently omitted. */
     noFileProvidersAtom: Accessor<string[]>;
 
+    // Both signals below back the "External Claude Code files" section —
+    // read-only reference displays of files Claude Code itself manages,
+    // NOT the file AgentMux's own Global Memory actually composes into
+    // (that's <agent working_directory>/CLAUDE.md, a per-agent path
+    // neither of these covers — already previewed accurately via
+    // previewAtom above). See
+    // docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §7.
+
     private _claudeGlobalConfig = createSignal<{ path: string; content: string | null; exists: boolean } | null>(null);
     /** The CLAUDE.md at AgentMux's shared Claude provider config dir — the
      *  path a spawned Claude agent's CLAUDE_CONFIG_DIR points at by
@@ -160,27 +168,26 @@ export class GlobalBrainViewModel {
      *  covered here). Hand-maintained, independent of AgentMux's own
      *  Global Memory. `null` until the fetch resolves; fetched once at
      *  construction, not re-fetched on `memories:changed` (nothing in this
-     *  app can write to this file, so there's no event to react to).
-     *  NOT the ambient ~/.claude/CLAUDE.md — codex P1, PR #2794: that file
-     *  isn't what a CLAUDE_CONFIG_DIR-isolated spawned agent actually
-     *  loads. See
+     *  app can write to this file, so there's no event to react to). See
      *  docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §5. */
     claudeGlobalConfigAtom: Accessor<{ path: string; content: string | null; exists: boolean } | null> =
         this._claudeGlobalConfig[0];
     private setClaudeGlobalConfig = this._claudeGlobalConfig[1];
 
-    private _claudeAmbientConfig = createSignal<{ path: string; content: string | null; exists: boolean } | null>(null);
-    /** The ambient ~/.claude/CLAUDE.md — Claude Code's own global config,
-     *  read by a host-level Claude Code CLI running outside AgentMux's
+    private _claudeHostConfig = createSignal<{ path: string; content: string | null; exists: boolean } | null>(null);
+    /** ~/.claude/CLAUDE.md — Claude Code's own global config, read by a
+     *  host-level Claude Code CLI running outside AgentMux's
      *  CLAUDE_CONFIG_DIR isolation (e.g. an external coding-agent
      *  harness). A spawned in-app Claude agent does NOT read this file —
      *  see claudeGlobalConfigAtom above for what it actually reads.
      *  Independent atom, independent fetch: neither block's success or
-     *  failure affects the other. See
-     *  docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6. */
-    claudeAmbientConfigAtom: Accessor<{ path: string; content: string | null; exists: boolean } | null> =
-        this._claudeAmbientConfig[0];
-    private setClaudeAmbientConfig = this._claudeAmbientConfig[1];
+     *  failure affects the other. Named claudeHostConfigAtom, not
+     *  "ambient" — that word already means something else in this
+     *  codebase (term:ambient_summary, activitySummary.ts). See
+     *  docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6, §7. */
+    claudeHostConfigAtom: Accessor<{ path: string; content: string | null; exists: boolean } | null> =
+        this._claudeHostConfig[0];
+    private setClaudeHostConfig = this._claudeHostConfig[1];
 
     constructor() {
         this.sectionsAtom = createMemo(() =>
@@ -212,7 +219,7 @@ export class GlobalBrainViewModel {
         );
         void this.refresh();
         void this.fetchClaudeGlobalConfig();
-        void this.fetchClaudeAmbientConfig();
+        void this.fetchClaudeHostConfig();
     }
 
     /** Fetches the shared Claude provider config's CLAUDE.md once. Failure
@@ -231,14 +238,14 @@ export class GlobalBrainViewModel {
         }
     }
 
-    /** Fetches the ambient ~/.claude/CLAUDE.md once. Same silent-failure
-     *  and read-once-at-mount reasoning as fetchClaudeGlobalConfig above —
+    /** Fetches ~/.claude/CLAUDE.md once. Same silent-failure and
+     *  read-once-at-mount reasoning as fetchClaudeGlobalConfig above —
      *  independent of it, so a failure here doesn't touch
      *  claudeGlobalConfigAtom or the ordinary Global Memory sections. */
-    private async fetchClaudeAmbientConfig(): Promise<void> {
+    private async fetchClaudeHostConfig(): Promise<void> {
         try {
-            const cfg = await RpcApi.GetClaudeAmbientConfigCommand(TabRpcClient, {});
-            this.setClaudeAmbientConfig(cfg);
+            const cfg = await RpcApi.GetClaudeHostConfigCommand(TabRpcClient, {});
+            this.setClaudeHostConfig(cfg);
         } catch {
             // Silent — see doc comment above.
         }

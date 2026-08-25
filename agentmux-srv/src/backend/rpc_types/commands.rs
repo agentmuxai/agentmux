@@ -233,21 +233,34 @@ pub const COMMAND_DELETE_SYSTEM_MEMORY: &str = "deletesystemmemory";
 /// Read-only. Returns the CLAUDE.md at AgentMux's shared Claude provider
 /// config dir (`DataPaths::provider_auth_dir("claude")` — the
 /// `CLAUDE_CONFIG_DIR` a non-identity-bound spawned Claude agent actually
-/// gets, NOT the ambient `~/.claude/CLAUDE.md`) so the Armory Memory tab
-/// can show the operator where their real "highest priority" instructions
-/// actually live. No parameters (the path is fixed, not caller-supplied —
-/// no path-traversal surface) and no write counterpart. See
-/// docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §5.
+/// gets). NOTE: this is Claude Code's own home-relocation path, NOT the
+/// file AgentMux's Global Memory actually composes into — that's
+/// `<agent working_directory>/CLAUDE.md` (or its `AGENTMUX_MEMORY.md`
+/// companion when foreign), written by `agent_config.rs`'s
+/// `write_claude_md_respecting_ownership`, a per-agent path this command
+/// does not cover. This command exists purely to surface a
+/// Claude-Code-managed reference file for operator visibility ("External
+/// Claude Code files" section — SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md
+/// §7 is the main feature this whole spec chain converged on). No
+/// parameters (the path is fixed, not caller-supplied — no
+/// path-traversal surface) and no write counterpart. See
+/// docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §5, §7.
 pub const COMMAND_GET_CLAUDE_GLOBAL_CONFIG: &str = "getclaudeglobalconfig";
-/// Read-only. Returns the ambient `~/.claude/CLAUDE.md` — Claude Code's
-/// own global config, read by a host-level Claude Code CLI running
-/// outside AgentMux's `CLAUDE_CONFIG_DIR` isolation (e.g. an external
+/// Read-only. Returns `~/.claude/CLAUDE.md` — Claude Code's own global
+/// config, read by a host-level Claude Code CLI running outside
+/// AgentMux's `CLAUDE_CONFIG_DIR` isolation entirely (e.g. an external
 /// coding-agent harness). Deliberately a SEPARATE command/block from
-/// `getclaudeglobalconfig` (§5's shared-provider-config path) rather than
-/// a replacement — the two paths have different audiences and neither
-/// implies coverage of the other. No parameters, no write counterpart.
-/// See docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6.
-pub const COMMAND_GET_CLAUDE_AMBIENT_CONFIG: &str = "getclaudeambientconfig";
+/// `getclaudeglobalconfig` above rather than a replacement — the two
+/// paths have different audiences and neither implies coverage of the
+/// other; both are "External Claude Code files" reference displays, not
+/// part of AgentMux's own Global Memory composition (see that command's
+/// doc comment). Renamed from `getclaudeambientconfig` (§7) — "ambient"
+/// already means something else in this codebase (`term:ambient_summary`,
+/// a per-turn activity paraphrase — see `activitySummary.ts`), so this
+/// command/its UI badge dropped the word entirely rather than picking a
+/// second meaning for it. No parameters, no write counterpart. See
+/// docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6, §7.
+pub const COMMAND_GET_CLAUDE_HOST_CONFIG: &str = "getclaudehostconfig";
 
 // Agent instances
 pub const COMMAND_LIST_AGENT_INSTANCES: &str = "listagentinstances";
