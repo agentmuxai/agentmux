@@ -12,6 +12,7 @@ use crate::backend::rpc_types::{
     COMMAND_LIST_MEMORIES, COMMAND_GET_MEMORY,
     COMMAND_UPSERT_MEMORY, COMMAND_DELETE_MEMORY, COMMAND_REORDER_GLOBAL_BRAIN,
     COMMAND_UPSERT_SYSTEM_MEMORY, COMMAND_DELETE_SYSTEM_MEMORY,
+    COMMAND_GET_CLAUDE_GLOBAL_CONFIG,
     CommandGetMemoryData, CommandDeleteMemoryData, CommandReorderGlobalBrainData,
 };
 use crate::backend::storage::store::Memory;
@@ -231,4 +232,83 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
             })
         }),
     );
+
+    // ---- Read-only: the machine-global ~/.claude/CLAUDE.md — see
+    // docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md. No
+    // parameters (fixed path, not caller-supplied), no write counterpart.
+    engine.register_handler(
+        COMMAND_GET_CLAUDE_GLOBAL_CONFIG,
+        Box::new(move |_data, _ctx| {
+            Box::pin(async move {
+                let claude_dir = crate::backend::base::get_home_dir().join(".claude");
+                let result = read_claude_global_config(&claude_dir)
+                    .map_err(|e| format!("getclaudeglobalconfig: {e}"))?;
+                Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
+            })
+        }),
+    );
+}
+
+/// `~/.claude/CLAUDE.md`'s path + content, read-only. `claude_dir` is
+/// injected (not resolved internally via `get_home_dir()`) so this is
+/// testable against a tempdir without mutating `$HOME`/`%USERPROFILE%`
+/// for the whole test process. `content: None, exists: false` for a
+/// genuinely missing file (the common case on a host where the user never
+/// created one) — real I/O errors (permission denied, etc.) still
+/// propagate as `Err`, not silently folded into "missing."
+#[derive(serde::Serialize)]
+struct ClaudeGlobalConfig {
+    path: String,
+    content: Option<String>,
+    exists: bool,
+}
+
+fn read_claude_global_config(claude_dir: &std::path::Path) -> std::io::Result<ClaudeGlobalConfig> {
+    let path = claude_dir.join("CLAUDE.md");
+    let (content, exists) = match std::fs::read_to_string(&path) {
+        Ok(c) => (Some(c), true),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (None, false),
+        Err(e) => return Err(e),
+    };
+    Ok(ClaudeGlobalConfig { path: path.to_string_lossy().into_owned(), content, exists })
+}
+
+#[cfg(test)]
+mod claude_global_config_tests {
+    use super::*;
+
+    #[test]
+    fn returns_content_and_exists_true_when_the_file_is_present() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), "# My global rules\n").unwrap();
+
+        let result = read_claude_global_config(dir.path()).unwrap();
+        assert!(result.exists);
+        assert_eq!(result.content.as_deref(), Some("# My global rules\n"));
+        assert_eq!(result.path, dir.path().join("CLAUDE.md").to_string_lossy());
+    }
+
+    #[test]
+    fn returns_none_content_and_exists_false_when_the_file_is_missing_not_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        // Deliberately no CLAUDE.md written — the common case on a host
+        // where the user never created one.
+
+        let result = read_claude_global_config(dir.path()).unwrap();
+        assert!(!result.exists);
+        assert!(result.content.is_none());
+        // The path is still reported even when nothing exists there yet —
+        // useful information on its own (SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §2.3).
+        assert_eq!(result.path, dir.path().join("CLAUDE.md").to_string_lossy());
+    }
+
+    #[test]
+    fn returns_content_for_an_empty_file_not_treated_as_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("CLAUDE.md"), "").unwrap();
+
+        let result = read_claude_global_config(dir.path()).unwrap();
+        assert!(result.exists);
+        assert_eq!(result.content.as_deref(), Some(""));
+    }
 }

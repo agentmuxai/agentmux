@@ -146,6 +146,33 @@ export const GlobalBrainManager = (): JSX.Element => {
                 <div class="global-brain-error">{model.errorAtom()}</div>
             </Show>
 
+            {/* Machine-wide, hand-maintained, read-only — the file the system
+                tier below was conceptually meant to replace/complement.
+                Shown first so an operator sees the full picture before the
+                "here's where you'd add AgentMux's own policy" section. See
+                docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md. */}
+            <Show when={model.claudeGlobalConfigAtom()}>
+                {(cfg) => (
+                    <div class="global-brain-machine-config">
+                        <div class="global-brain-machine-config-header">
+                            <span
+                                class="global-brain-machine-config-badge"
+                                title="Hand-maintained on disk, not managed by AgentMux, shared by every agent on this machine"
+                            >
+                                Machine-wide (Claude Code)
+                            </span>
+                            <code class="global-brain-machine-config-path">{cfg().path}</code>
+                        </div>
+                        <Show
+                            when={cfg().exists}
+                            fallback={<p class="global-brain-machine-config-empty">No file at this path yet.</p>}
+                        >
+                            <pre class="global-brain-machine-config-content">{cfg().content}</pre>
+                        </Show>
+                    </div>
+                )}
+            </Show>
+
             {/* System tier — pinned above ordinary sections, always injected
                 first with override wording. No move up/down: position is
                 fixed server-side regardless of what a reorder call sends.
