@@ -131,16 +131,11 @@ export const GlobalBrainManager = (): JSX.Element => {
     return (
         <div class="global-brain">
             <p class="global-brain-intro">
-                Every agent inherits these sections at launch. They compose into the
-                agent's startup instructions file (e.g. <code>CLAUDE.md</code>,{" "}
-                <code>GEMINI.md</code>) in order, each under a{" "}
-                <code># [Workspace]</code> heading.
+                Inherited by every agent at launch — composed into <code>CLAUDE.md</code>/
+                <code>GEMINI.md</code> in order.
             </p>
 
-            <div class="global-brain-restart-note">
-                Changes take effect when agents restart. Running agents keep the version
-                from their last launch.
-            </div>
+            <div class="global-brain-restart-note">Takes effect on next agent restart.</div>
 
             <Show when={model.errorAtom()}>
                 <div class="global-brain-error">{model.errorAtom()}</div>
@@ -158,8 +153,7 @@ export const GlobalBrainManager = (): JSX.Element => {
             <Show when={model.claudeGlobalConfigAtom() || model.claudeHostConfigAtom()}>
                 <div class="global-brain-external-files">
                     <p class="global-brain-external-files-heading">
-                        External Claude Code files — managed by Claude Code itself, not AgentMux. Shown for
-                        visibility only; not part of the Global Memory composed above.
+                        External Claude Code files — reference only, not part of Global Memory.
                     </p>
 
                     <Show when={model.claudeGlobalConfigAtom()}>
@@ -168,15 +162,13 @@ export const GlobalBrainManager = (): JSX.Element => {
                                 <div class="global-brain-machine-config-header">
                                     <span
                                         class="global-brain-machine-config-badge"
-                                        title="Hand-maintained on disk, not managed by AgentMux. Read by default-provider Claude agents (identity-bound agents use a separate, per-identity config dir not shown here)."
+                                        title="Hand-maintained on disk. Identity-bound agents use a separate dir, not shown here."
                                     >
                                         Claude Code — shared provider config
                                     </span>
                                     <code class="global-brain-machine-config-path">{cfg().path}</code>
                                 </div>
-                                <p class="global-brain-machine-config-caption">
-                                    What a default spawned agent's Claude Code auth/home uses.
-                                </p>
+                                <p class="global-brain-machine-config-caption">Used by default spawned agents.</p>
                                 <Show
                                     when={cfg().exists}
                                     fallback={<p class="global-brain-machine-config-empty">No file at this path yet.</p>}
@@ -193,15 +185,13 @@ export const GlobalBrainManager = (): JSX.Element => {
                                 <div class="global-brain-machine-config-header">
                                     <span
                                         class="global-brain-machine-config-badge"
-                                        title="Claude Code's own global config on this machine — read by a host-level Claude Code CLI running outside AgentMux's isolation. A spawned in-app agent does NOT read this file; see the shared provider config block above for what it actually reads."
+                                        title="Claude Code's own config on this machine. Not read by spawned in-app agents — see the block above for what they use."
                                     >
                                         Claude Code — host CLI config
                                     </span>
                                     <code class="global-brain-machine-config-path">{cfg().path}</code>
                                 </div>
-                                <p class="global-brain-machine-config-caption">
-                                    What Claude Code uses outside AgentMux entirely.
-                                </p>
+                                <p class="global-brain-machine-config-caption">Used outside AgentMux.</p>
                                 <Show
                                     when={cfg().exists}
                                     fallback={<p class="global-brain-machine-config-empty">No file at this path yet.</p>}
@@ -347,9 +337,7 @@ export const GlobalBrainManager = (): JSX.Element => {
                 </Show>
 
                 <Show when={model.ordinarySectionsAtom().length === 0 && model.editingIdAtom() === null}>
-                    <div class="global-brain-empty">
-                        No global sections yet. Add one to give every agent shared context.
-                    </div>
+                    <div class="global-brain-empty">No global sections yet.</div>
                 </Show>
             </div>
 
@@ -406,11 +394,11 @@ export const GlobalBrainManager = (): JSX.Element => {
                     class="global-brain-preview-toggle"
                     onClick={() => model.setShowPreview(!model.showPreviewAtom())}
                 >
-                    {model.showPreviewAtom() ? "▾" : "▸"} Combined preview (same content, every applicable file)
+                    {model.showPreviewAtom() ? "▾" : "▸"} Combined preview
                 </button>
                 <Show when={model.showPreviewAtom()}>
                     <pre class="global-brain-preview-content">
-                        {model.previewAtom() || "(no content — sections have no instructions yet)"}
+                        {model.previewAtom() || "(empty)"}
                     </pre>
                 </Show>
             </div>
