@@ -69,7 +69,7 @@ describe("formatGlobalBrainBlock", () => {
 // unawaited GetClaudeGlobalConfigCommand fetch, same pattern as
 // frontend/app/view/memory/memory-model.test.ts.
 const listMemoriesMock = vi.fn().mockResolvedValue([]);
-const getClaudeGlobalConfigMock = vi.fn().mockResolvedValue({ path: "/home/user/.claude/CLAUDE.md", content: null, exists: false });
+const getClaudeGlobalConfigMock = vi.fn().mockResolvedValue({ path: "/home/user/.agentmux/shared/providers/claude/CLAUDE.md", content: null, exists: false });
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         ListMemoriesCommand: (...args: unknown[]) => listMemoriesMock(...args),
@@ -82,7 +82,7 @@ describe("GlobalBrainViewModel system/ordinary split", () => {
         listMemoriesMock.mockClear();
         listMemoriesMock.mockResolvedValue([]);
         getClaudeGlobalConfigMock.mockClear();
-        getClaudeGlobalConfigMock.mockResolvedValue({ path: "/home/user/.claude/CLAUDE.md", content: null, exists: false });
+        getClaudeGlobalConfigMock.mockResolvedValue({ path: "/home/user/.agentmux/shared/providers/claude/CLAUDE.md", content: null, exists: false });
     });
 
     test("systemSectionsAtom and ordinarySectionsAtom partition allAtom without overlap", async () => {
@@ -143,7 +143,7 @@ describe("GlobalBrainViewModel system/ordinary split", () => {
     // docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §4.
     test("claudeGlobalConfigAtom starts null and populates from GetClaudeGlobalConfigCommand", async () => {
         getClaudeGlobalConfigMock.mockResolvedValue({
-            path: "/home/user/.claude/CLAUDE.md",
+            path: "/home/user/.agentmux/shared/providers/claude/CLAUDE.md",
             content: "# Global rules\n",
             exists: true,
         });
@@ -155,7 +155,7 @@ describe("GlobalBrainViewModel system/ordinary split", () => {
         await Promise.resolve();
 
         expect(model.claudeGlobalConfigAtom()).toEqual({
-            path: "/home/user/.claude/CLAUDE.md",
+            path: "/home/user/.agentmux/shared/providers/claude/CLAUDE.md",
             content: "# Global rules\n",
             exists: true,
         });

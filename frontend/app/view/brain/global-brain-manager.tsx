@@ -146,20 +146,23 @@ export const GlobalBrainManager = (): JSX.Element => {
                 <div class="global-brain-error">{model.errorAtom()}</div>
             </Show>
 
-            {/* Machine-wide, hand-maintained, read-only — the file the system
-                tier below was conceptually meant to replace/complement.
-                Shown first so an operator sees the full picture before the
-                "here's where you'd add AgentMux's own policy" section. See
-                docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md. */}
+            {/* The CLAUDE.md a spawned Claude agent's CLAUDE_CONFIG_DIR
+                actually points at by default — hand-maintained, read-only,
+                not the same thing as this Global Memory tab. Shown first so
+                an operator sees the full picture before the "here's where
+                you'd add AgentMux's own policy" section below. codex P1, PR
+                #2794: NOT the ambient ~/.claude/CLAUDE.md — that file isn't
+                what a CLAUDE_CONFIG_DIR-isolated agent loads. See
+                docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §5. */}
             <Show when={model.claudeGlobalConfigAtom()}>
                 {(cfg) => (
                     <div class="global-brain-machine-config">
                         <div class="global-brain-machine-config-header">
                             <span
                                 class="global-brain-machine-config-badge"
-                                title="Hand-maintained on disk, not managed by AgentMux, shared by every agent on this machine"
+                                title="Hand-maintained on disk, not managed by AgentMux. Read by default-provider Claude agents (identity-bound agents use a separate, per-identity config dir not shown here)."
                             >
-                                Machine-wide (Claude Code)
+                                Claude Code — shared provider config
                             </span>
                             <code class="global-brain-machine-config-path">{cfg().path}</code>
                         </div>

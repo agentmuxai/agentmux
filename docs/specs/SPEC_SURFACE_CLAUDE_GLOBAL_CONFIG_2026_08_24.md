@@ -1,7 +1,11 @@
 # SPEC: Surface `~/.claude/CLAUDE.md` (read-only) in Global Memory
 
 **Date:** 2026-08-24
-**Status:** proposed
+**Status:** proposed. **Note:** the file this spec targets in §1-§4 turned
+out to be the wrong one — see §5 for the corrected design (the CLAUDE.md
+at AgentMux's shared Claude provider config dir, not the ambient
+`~/.claude/CLAUDE.md`). Filename kept as-is since it's already referenced
+by the PR/commits; read §5 for what actually shipped.
 
 ---
 
@@ -189,5 +193,57 @@ if one existed, is useful information even when empty.
       (pre-fetch).
 
 **Manual (`task dev`):**
-- [ ] Confirm the block shows this machine's real `~/.claude/CLAUDE.md`
-      path and content, positioned above the system tier.
+- [ ] Confirm the block shows this machine's real shared-provider-config
+      `CLAUDE.md` path and content (see §5 — not the ambient
+      `~/.claude/CLAUDE.md`), positioned above the system tier.
+
+---
+
+## 5. Post-review revision (2026-08-24, PR #2794 — codex P1)
+
+**The original design (§1-§4 above) was wrong about which file a spawned
+Claude agent actually loads as its "global" config.** Codex caught it,
+citing `agent_open.rs:303-312` and
+`SPEC_PROVIDER_ISOLATION_2026_06_20.md` §5b directly:
+
+- Every AgentMux-spawned Claude agent gets `CLAUDE_CONFIG_DIR` set to an
+  AgentMux-owned directory (`agent_open.rs`'s `auth_dir` — by default
+  `DataPaths::provider_auth_dir("claude")`, i.e.
+  `~/.agentmux/shared/providers/claude`; identity-bound agents use a
+  separate per-identity dir instead).
+- `SPEC_PROVIDER_ISOLATION_2026_06_20.md` §5b, already "confirmed on disk"
+  before this spec existed: *"`CLAUDE_CONFIG_DIR` relocates the **entire**
+  Claude home... User `CLAUDE.md` → `<CLAUDE_CONFIG_DIR>/CLAUDE.md`."*
+- So the ambient `~/.claude/CLAUDE.md` this spec originally targeted is
+  simply **not** what a `CLAUDE_CONFIG_DIR`-isolated spawned agent reads —
+  displaying it under "shared by every agent on this machine" was false
+  for the common case, not just imprecise.
+
+**Re-verified empirically (2026-08-24), which also resolved an apparent
+contradiction:** this agent's own `CLAUDE_CONFIG_DIR` is a per-identity
+directory (`~/.agentmux/channels/.../identities/<uuid>/claude`) with no
+`CLAUDE.md` in it at all — and neither does the default shared dir
+(`~/.agentmux/shared/providers/claude/`). So on this host, as of this
+date, **no AgentMux-spawned Claude agent has a populated global
+`CLAUDE.md` anywhere** — the only real, populated file matching that
+description is the ambient `~/.claude/CLAUDE.md` this spec originally
+found, which (per the isolation architecture) isn't actually in the read
+path for a normal spawned agent. Whatever separate mechanism surfaced that
+file's content into *this* agent's own context earlier in the conversation
+that prompted this spec is not resolved here — out of scope, a distinct
+question from what this UI block should display.
+
+**Fix:** resolve the path via the exact same logic `agent_open.rs` uses
+for the DEFAULT (non-identity-bound) case —
+`DataPaths::provider_auth_dir("claude")`, falling back to
+`~/.agentmux/shared/providers/claude` when `DataPaths::from_env()` fails,
+mirroring `agent_open.rs`'s own fallback verbatim. This is the file that
+actually IS shared across every default-provider Claude agent on this
+machine, closing the gap between the block's claim and its behavior for
+the common case. Identity-bound agents (a separate per-identity dir) are
+still not covered — flagged, not fixed, same "known gap, not blocking"
+treatment §3's out-of-scope items already use elsewhere in this spec chain.
+
+Badge copy changed from "Machine-wide (Claude Code)" (implying universal
+truth) to "Claude Code — shared provider config" (accurately scoped, with
+the identity-bound caveat moved into the tooltip) to match.

@@ -154,13 +154,17 @@ export class GlobalBrainViewModel {
     noFileProvidersAtom: Accessor<string[]>;
 
     private _claudeGlobalConfig = createSignal<{ path: string; content: string | null; exists: boolean } | null>(null);
-    /** `~/.claude/CLAUDE.md` — Claude Code's own global user-level config
-     *  file, hand-maintained, independent of AgentMux and of any per-project
-     *  CLAUDE.md, shared by every agent on this machine. `null` until the
-     *  fetch resolves; fetched once at construction, not re-fetched on
-     *  `memories:changed` (nothing in this app can write to this file, so
-     *  there's no event to react to). See
-     *  docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md. */
+    /** The CLAUDE.md at AgentMux's shared Claude provider config dir — the
+     *  path a spawned Claude agent's CLAUDE_CONFIG_DIR points at by
+     *  DEFAULT (identity-bound agents use a separate, per-identity dir not
+     *  covered here). Hand-maintained, independent of AgentMux's own
+     *  Global Memory. `null` until the fetch resolves; fetched once at
+     *  construction, not re-fetched on `memories:changed` (nothing in this
+     *  app can write to this file, so there's no event to react to).
+     *  NOT the ambient ~/.claude/CLAUDE.md — codex P1, PR #2794: that file
+     *  isn't what a CLAUDE_CONFIG_DIR-isolated spawned agent actually
+     *  loads. See
+     *  docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §5. */
     claudeGlobalConfigAtom: Accessor<{ path: string; content: string | null; exists: boolean } | null> =
         this._claudeGlobalConfig[0];
     private setClaudeGlobalConfig = this._claudeGlobalConfig[1];

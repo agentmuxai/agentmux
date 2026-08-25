@@ -233,14 +233,15 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    // ---- Read-only: the machine-global ~/.claude/CLAUDE.md — see
-    // docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md. No
-    // parameters (fixed path, not caller-supplied), no write counterpart.
+    // ---- Read-only: the CLAUDE.md at AgentMux's shared Claude provider
+    // config dir — see docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md
+    // §5 (post-review revision). No parameters (fixed path, not
+    // caller-supplied), no write counterpart.
     engine.register_handler(
         COMMAND_GET_CLAUDE_GLOBAL_CONFIG,
         Box::new(move |_data, _ctx| {
             Box::pin(async move {
-                let claude_dir = crate::backend::base::get_home_dir().join(".claude");
+                let claude_dir = resolve_shared_claude_provider_dir();
                 let result = read_claude_global_config(&claude_dir)
                     .map_err(|e| format!("getclaudeglobalconfig: {e}"))?;
                 Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
@@ -249,13 +250,38 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 }
 
-/// `~/.claude/CLAUDE.md`'s path + content, read-only. `claude_dir` is
-/// injected (not resolved internally via `get_home_dir()`) so this is
-/// testable against a tempdir without mutating `$HOME`/`%USERPROFILE%`
-/// for the whole test process. `content: None, exists: false` for a
-/// genuinely missing file (the common case on a host where the user never
-/// created one) — real I/O errors (permission denied, etc.) still
-/// propagate as `Err`, not silently folded into "missing."
+/// The directory a spawned Claude agent's `CLAUDE_CONFIG_DIR` env var
+/// points at by DEFAULT (non-identity-bound agents — the common case;
+/// explicit multi-account identity bundles use a separate, per-identity
+/// dir this does not cover). Mirrors `agent_open.rs`'s own `auth_dir`
+/// resolution exactly — `DataPaths::provider_auth_dir("claude")`, with the
+/// identical `~/.agentmux/shared/providers/claude` fallback when
+/// `DataPaths::from_env()` fails — so the path shown here is genuinely the
+/// one AgentMux itself uses when launching a Claude agent, not a guess.
+/// codex P1, PR #2794: the original version read the ambient
+/// `~/.claude/CLAUDE.md`, which `SPEC_PROVIDER_ISOLATION_2026_06_20.md`
+/// §5b confirms is NOT what a `CLAUDE_CONFIG_DIR`-redirected spawned agent
+/// actually loads as its "user CLAUDE.md" — `CLAUDE_CONFIG_DIR` relocates
+/// Claude Code's entire home, `<CLAUDE_CONFIG_DIR>/CLAUDE.md` included.
+fn resolve_shared_claude_provider_dir() -> std::path::PathBuf {
+    agentmux_common::DataPaths::from_env()
+        .map(|p| p.provider_auth_dir("claude"))
+        .unwrap_or_else(|| {
+            crate::backend::base::get_home_dir()
+                .join(".agentmux")
+                .join("shared")
+                .join("providers")
+                .join("claude")
+        })
+}
+
+/// The resolved shared-provider-dir's `CLAUDE.md` path + content,
+/// read-only. `claude_dir` is injected (not resolved internally) so this
+/// is testable against a tempdir. `content: None, exists: false` for a
+/// genuinely missing file (the common case — no AgentMux-spawned Claude
+/// agent on this host has one today, confirmed 2026-08-24) — real I/O
+/// errors (permission denied, etc.) still propagate as `Err`, not
+/// silently folded into "missing."
 #[derive(serde::Serialize)]
 struct ClaudeGlobalConfig {
     path: String,
