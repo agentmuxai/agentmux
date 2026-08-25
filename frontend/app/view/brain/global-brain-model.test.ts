@@ -70,12 +70,12 @@ describe("formatGlobalBrainBlock", () => {
 // frontend/app/view/memory/memory-model.test.ts.
 const listMemoriesMock = vi.fn().mockResolvedValue([]);
 const getClaudeGlobalConfigMock = vi.fn().mockResolvedValue({ path: "/home/user/.agentmux/shared/providers/claude/CLAUDE.md", content: null, exists: false });
-const getClaudeAmbientConfigMock = vi.fn().mockResolvedValue({ path: "/home/user/.claude/CLAUDE.md", content: null, exists: false });
+const getClaudeHostConfigMock = vi.fn().mockResolvedValue({ path: "/home/user/.claude/CLAUDE.md", content: null, exists: false });
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         ListMemoriesCommand: (...args: unknown[]) => listMemoriesMock(...args),
         GetClaudeGlobalConfigCommand: (...args: unknown[]) => getClaudeGlobalConfigMock(...args),
-        GetClaudeAmbientConfigCommand: (...args: unknown[]) => getClaudeAmbientConfigMock(...args),
+        GetClaudeHostConfigCommand: (...args: unknown[]) => getClaudeHostConfigMock(...args),
     },
 }));
 
@@ -85,8 +85,8 @@ describe("GlobalBrainViewModel system/ordinary split", () => {
         listMemoriesMock.mockResolvedValue([]);
         getClaudeGlobalConfigMock.mockClear();
         getClaudeGlobalConfigMock.mockResolvedValue({ path: "/home/user/.agentmux/shared/providers/claude/CLAUDE.md", content: null, exists: false });
-        getClaudeAmbientConfigMock.mockClear();
-        getClaudeAmbientConfigMock.mockResolvedValue({ path: "/home/user/.claude/CLAUDE.md", content: null, exists: false });
+        getClaudeHostConfigMock.mockClear();
+        getClaudeHostConfigMock.mockResolvedValue({ path: "/home/user/.claude/CLAUDE.md", content: null, exists: false });
     });
 
     test("systemSectionsAtom and ordinarySectionsAtom partition allAtom without overlap", async () => {
@@ -179,46 +179,48 @@ describe("GlobalBrainViewModel system/ordinary split", () => {
         expect(model.errorAtom()).toBeNull();
     });
 
-    // docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6 — the
-    // ambient block is a SEPARATE atom/fetch from claudeGlobalConfigAtom.
-    test("claudeAmbientConfigAtom starts null and populates from GetClaudeAmbientConfigCommand", async () => {
-        getClaudeAmbientConfigMock.mockResolvedValue({
+    // docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6/§7 —
+    // the host CLI config block is a SEPARATE atom/fetch from
+    // claudeGlobalConfigAtom (renamed from "ambient" — that word already
+    // means something else in this codebase, term:ambient_summary).
+    test("claudeHostConfigAtom starts null and populates from GetClaudeHostConfigCommand", async () => {
+        getClaudeHostConfigMock.mockResolvedValue({
             path: "/home/user/.claude/CLAUDE.md",
-            content: "# Ambient rules\n",
+            content: "# Host CLI rules\n",
             exists: true,
         });
         const { GlobalBrainViewModel } = await import("./global-brain-model");
         const model = new GlobalBrainViewModel();
 
-        expect(model.claudeAmbientConfigAtom()).toBeNull();
+        expect(model.claudeHostConfigAtom()).toBeNull();
         await Promise.resolve();
         await Promise.resolve();
 
-        expect(model.claudeAmbientConfigAtom()).toEqual({
+        expect(model.claudeHostConfigAtom()).toEqual({
             path: "/home/user/.claude/CLAUDE.md",
-            content: "# Ambient rules\n",
+            content: "# Host CLI rules\n",
             exists: true,
         });
     });
 
-    test("claudeAmbientConfigAtom stays null (not an error) when the fetch rejects", async () => {
-        getClaudeAmbientConfigMock.mockRejectedValue(new Error("boom"));
+    test("claudeHostConfigAtom stays null (not an error) when the fetch rejects", async () => {
+        getClaudeHostConfigMock.mockRejectedValue(new Error("boom"));
         const { GlobalBrainViewModel } = await import("./global-brain-model");
         const model = new GlobalBrainViewModel();
         await Promise.resolve();
         await Promise.resolve();
 
-        expect(model.claudeAmbientConfigAtom()).toBeNull();
+        expect(model.claudeHostConfigAtom()).toBeNull();
         expect(model.errorAtom()).toBeNull();
     });
 
-    test("a rejected ambient fetch does not clear or block the shared-provider-config atom, and vice versa", async () => {
+    test("a rejected host-config fetch does not clear or block the shared-provider-config atom, and vice versa", async () => {
         getClaudeGlobalConfigMock.mockResolvedValue({
             path: "/home/user/.agentmux/shared/providers/claude/CLAUDE.md",
             content: "# Shared rules\n",
             exists: true,
         });
-        getClaudeAmbientConfigMock.mockRejectedValue(new Error("boom"));
+        getClaudeHostConfigMock.mockRejectedValue(new Error("boom"));
         const { GlobalBrainViewModel } = await import("./global-brain-model");
         const model = new GlobalBrainViewModel();
         await Promise.resolve();
@@ -229,7 +231,7 @@ describe("GlobalBrainViewModel system/ordinary split", () => {
             content: "# Shared rules\n",
             exists: true,
         });
-        expect(model.claudeAmbientConfigAtom()).toBeNull();
+        expect(model.claudeHostConfigAtom()).toBeNull();
     });
 });
 
