@@ -590,21 +590,35 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
 
     // Re-measures every current slot whenever the pool changes shape OR
     // any slot's own content changes width (both flow through `slots()`
-    // recomputing — e.g. ctx text ticking with token counts). Widths are
-    // measured from whichever zone a slot CURRENTLY sits in, but are
-    // zone-independent in practice (neither -controls nor -right applies
-    // any width-affecting rule to children beyond flex-wrap), so this
-    // converges to a stable split after one settle pass instead of
-    // oscillating between two different "correct" widths.
+    // recomputing — e.g. ctx text ticking with token counts). Each
+    // child's OWN width is zone-independent (neither -controls nor
+    // -right applies any width-affecting rule to children beyond
+    // flex-wrap), but the GAP BETWEEN a multi-child slot's own children
+    // (e.g. ctx's 3 sub-elements, hostShell's 2) is not — reagent P2 on
+    // PR #2808: summing only `getBoundingClientRect().width` ignored the
+    // real `gap` the current zone applies between them, systematically
+    // under-measuring multi-child slots by ~1-2 gaps' worth of pixels,
+    // comparable in size to the 8px rounding bucket below. Reading the
+    // wrapper's own PARENT's computed `column-gap` (not a hardcoded
+    // `--space-1`/`--space-1-5` constant, which would silently drift if
+    // the SCSS values ever change) gets the real value for whichever
+    // zone this slot currently sits in. This converges to a stable split
+    // after one settle pass instead of oscillating between two different
+    // "correct" widths.
     createEffect(() => {
         const keys = slots().map((s) => s.key);
         const widths: Record<string, number> = {};
         for (const key of keys) {
             const el = measureRefs[key];
             if (!el) continue;
+            const children = Array.from(el.children);
             let total = 0;
-            for (const child of Array.from(el.children)) {
+            for (const child of children) {
                 total += child.getBoundingClientRect().width;
+            }
+            if (children.length > 1 && el.parentElement) {
+                const gapPx = parseFloat(getComputedStyle(el.parentElement).columnGap) || 0;
+                total += gapPx * (children.length - 1);
             }
             // Rounded to the nearest 8px — the live turn ticker (elapsed
             // time, token counts) can shift a slot's text width by a
