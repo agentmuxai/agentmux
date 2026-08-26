@@ -844,15 +844,29 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // one is ever actually attached to a live parent at a time — the
     // OTHER stays detached and reports a 0 rect. Reading whichever one is
     // `isConnected` at effect time gets the real on-screen footprint
-    // regardless of which position is currently active. Depends on
-    // `rightText()` explicitly (not `slots()`) since the stats zone isn't
-    // part of the slot pool at all (spec §3.4) — nothing else in this
-    // effect's own dependency chain would otherwise notice its content
-    // changing width.
+    // regardless of which position is currently active.
+    //
+    // Depends on `rightText()` (the stats zone's own content changing
+    // width) AND `stripWidth()`/`slotWidths()` (ReAgent P1, PR #2812,
+    // re-review) — NOT on `rows()` or `statsWidth()` itself, which would
+    // be circular (`rows()` reads `statsWidth()` via `reservedWidth`
+    // below). `stripWidth()`/`slotWidths()` are the actual root inputs
+    // that decide `rows().length`'s single-vs-multi branch: without
+    // depending on them, resizing across that threshold swaps which of
+    // `statsRefs.single`/`.multi` is connected (the `<Show>` blocks
+    // toggling) without ever re-running this effect, leaving `statsWidth`
+    // stuck at whatever the now-DISCONNECTED variant last reported. A
+    // stale, too-small `statsWidth` could then make the single-row fit
+    // check in `computeComposerRows` wrongly accept a line that doesn't
+    // actually have room for the real stats footprint — the same
+    // "stale measurement crosses a structural transition" failure mode
+    // already fixed for zoom/padding in this same PR, one layer up.
     let statsRefs: { single?: HTMLElement; multi?: HTMLElement } = {};
     const [statsWidth, setStatsWidth] = createSignal(0);
     createEffect(() => {
         rightText();
+        stripWidth();
+        slotWidths();
         const el = statsRefs.single?.isConnected ? statsRefs.single : statsRefs.multi?.isConnected ? statsRefs.multi : undefined;
         setStatsWidth(el ? Math.round(el.getBoundingClientRect().width / 8) * 8 : 0);
     });
