@@ -1,5 +1,17 @@
 # AgentMux Version History
 
+## 0.55.25 — 2026-08-25
+
+- feat(widgets): reorder default pinned widgets to Agent, Swarm, Armory, Sysinfo
+- feat(armory): show ambient ~/.claude/CLAUDE.md as a second Global Memory read-only block
+- fix(armory): rename ambient CLAUDE.md block, group External Claude Code files clearly
+- fix(identity): block agent spawns/bindings from resolving to the ambient home dir
+- fix(armory): tone down Global Memory explanations, shrink text
+- fix(splash,agent-pane): darkened splash border + agent-pane tab-strip gap/centering
+- fix(agent): scroll support for AskUserQuestion panel, keep buttons reachable
+- fix(armory): hide Claude Code CLI branding in Accounts sign-in surfaces, keep Anthropic
+
+
 ## 0.55.24 — 2026-08-24
 
 - fix(agent-pane): strip common indentation from mid-file tool previews
