@@ -118,16 +118,16 @@ Same principle as Rev 6: when measurement isn't available (first paint, or JSDOM
 |---|---|---|
 | 1. Retro: why 6 revisions missed this | ✅ Done | `docs/retro/retro-composer-strip-one-sided-lines-misdiagnosis-2026-08-26.md` |
 | 2. This spec | ✅ Done | Written before any code change, per explicit user direction |
-| 3. Implement `ResizeObserver` + `stripWidth` signal | ⬜ Not started | |
-| 4. Implement row-builder pure function + single-row delegation | ⬜ Not started | |
-| 5. Implement `hostShell` last-row-right reordering | ⬜ Not started | |
-| 6. Rewire component render output to `<For each={rows()}>` | ⬜ Not started | |
-| 7. Update SCSS (`.agent-composer-strip-row{,-left,-right}`; remove old zone tier rules) | ⬜ Not started | |
-| 8. Pure-function tests (§7.1-7.2) | ⬜ Not started | |
-| 9. Component regression tests still pass (§7.3) | ⬜ Not started | |
-| 10. `npx tsc --noEmit` + `npx vitest run` + `npx stylelint` clean | ⬜ Not started | |
-| 11. Real screenshot, wide tier (≥482px) | ⬜ Not started | |
-| 12. Real screenshot, narrow tier (<482px) — the tier Rev 6 never re-checked | ⬜ Not started | |
+| 3. Implement `ResizeObserver` + `stripWidth` signal | ✅ Done | |
+| 4. Implement row-builder pure function + single-row delegation | ✅ Done | `computeComposerRows` |
+| 5. Implement `hostShell` last-row-right reordering | ✅ Done | |
+| 6. Rewire component render output to `<For each={rows()}>` | ✅ Done | Iterates `rowIndices()` (primitives), not `rows()` directly — same identity-stability fix as PR #2808's reagent P1, one level up |
+| 7. Update SCSS (`.agent-composer-strip-row{,-left,-right}`; remove old zone tier rules) | ✅ Done | |
+| 8. Pure-function tests (§7.1-7.2) | ✅ Done | 26 tests incl. the parameterized invariant test |
+| 9. Component regression tests still pass (§7.3) | ✅ Done | |
+| 10. `npx tsc --noEmit` + `npx vitest run` + `npx stylelint` clean | ✅ Done | |
+| 11. Real screenshot, wide tier (≥482px) | ✅ Done | Single row, matches Rev 6 |
+| 12. Real screenshot, narrow tier (<482px) — the tier Rev 6 never re-checked | ✅ Done | Found and fixed a real integration bug here: `ResizeObserver`'s `entry.contentRect.width` is reported in local (pre-zoom) CSS pixels, while per-slot widths use `getBoundingClientRect()` (post-zoom, viewport-relative) — under the agent view's `zoom: 0.8`, this made the "does everything fit on one line" check systematically over-generous, silently deciding single-row and letting the row's own `flex-wrap` safety net reproduce the one-sided-lines pattern via a different mechanism. Fixed by reading `entry.target.getBoundingClientRect().width` instead, so both sides of the comparison share the same coordinate space regardless of ancestor zoom. Confirmed via CDP DOM inspection and a live screenshot at 500px width: 2 correctly-paired rows. |
 | 13. Changeset + PR opened | ⬜ Not started | |
 | 14. Review (ReAgent + Codex) addressed | ⬜ Not started | |
 | 15. Merged | ⬜ Not started | |

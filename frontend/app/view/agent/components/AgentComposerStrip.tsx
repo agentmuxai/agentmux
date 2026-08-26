@@ -3,23 +3,27 @@
 
 /**
  * AgentComposerStrip — status row that sits directly above the textarea in
- * the agent pane composer region. Three zones, left/center/right: controls
- * (left), stats (center, always true-centered), everything else (right).
- * Organic flex-wrap reflow — NOT deliberate pixel-breakpoint tiers (that
- * design, and why it was abandoned, is below) — so the strip grows from 1
- * line up to however many it actually needs as the pane narrows, based on
- * each zone's real rendered width, not a guessed magic number.
+ * the agent pane composer region. As of Rev 7 (2026-08-26): a stats zone
+ * (center, always true-centered) plus a list of ROWS, each with its own
+ * left-anchored and right-anchored half — see `computeComposerRows` and
+ * docs/specs/SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md. The strip
+ * grows from 1 row up to however many it actually needs as the pane
+ * narrows, based on real rendered slot widths, not a guessed magic number
+ * — but (unlike Rev 1-6) deciding HOW MANY rows are needed now also needs
+ * the strip's own real available width (a `ResizeObserver`, see `stripWidth`
+ * below), not purely CSS `@container` queries — see Rev 7's own paragraph
+ * further down for why.
  *
  * Misc elements (everything except the centered stats zone) are pooled
- * into an ordered list of "slots" and split between the left (controls)
- * and right zones by a fixed semantic `side` on each slot (see `slots`
- * below): left is "what agent, what mode, how much context is left" (the
- * runtime trigger + the context group); right is "status indicators + the
- * one real action" (process badge, auth tag, then HOST/SANDBOX+Shell,
- * Shell always outermost). The only override: `zones` (below) borrows one
- * right-side slot over to the left if that's the only way to avoid a
- * completely empty left zone (e.g. a non-Claude agent with no context
- * tracked yet, where the left zone's only occupants are both hidden).
+ * into an ordered list of "slots" (see `slots` below), each carrying a
+ * fixed semantic `side` — left is "what agent, what mode, how much context
+ * is left" (the runtime trigger + the context group); right is "status
+ * indicators + the one real action" (process badge, auth tag, then
+ * HOST/SANDBOX+Shell, Shell always outermost) — used ONLY as the fallback
+ * ordering when real measurement isn't available yet (see Rev 6/7's own
+ * paragraphs). Once real widths ARE available, `rows()` computes the
+ * actual left/right split and row grouping fresh, which can and does
+ * override this fixed `side` pairing when real widths call for it.
  *
  * This is the 5th revision of this file's zone-balancing logic in two days
  * (2026-08-24/25) — see
@@ -82,9 +86,32 @@
  *     until the first real measurement lands (avoids an arbitrary/empty
  *     split on first paint) and in any environment with no real layout
  *     engine (e.g. this file's own unit tests run under JSDOM, which
- *     always reports 0-width elements) — see `zones()` further down.
+ *     always reports 0-width elements).
  *
-
+ *   - Rev 7 (2026-08-26): Rev 6's real-width measurement fixed the
+ *     ≥482px single-line case, but the FIXED two-zone architecture below
+ *     that width — `.agent-composer-strip-controls`/`-right`, each
+ *     independently deciding when IT needed its own dedicated line —
+ *     could produce a line that was 100% one zone's content, left- or
+ *     right-justified, with the OTHER half of that exact line completely
+ *     empty. Aggregate left/right totals looked balanced (Rev 6's own
+ *     acceptance criteria); the actual per-LINE layout did not, because
+ *     nothing in that architecture could ever make two independently-
+ *     wrapping zones share a rendered line with each other. See
+ *     docs/retro/retro-composer-strip-one-sided-lines-misdiagnosis-2026-08-26.md
+ *     for why this took six revisions (including this file's own real-
+ *     screenshot verification) to actually notice, and
+ *     docs/specs/SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md for
+ *     the full design. Replaced the two zones with an explicit list of
+ *     ROWS (`computeComposerRows`, `rows()` below) — every row has both a
+ *     left and right occupant except one named, mathematically
+ *     unavoidable exception (an odd total slot count leaves exactly one
+ *     row unpaired) and the pre-existing fully-degenerate single-slot-
+ *     total case. Needs the strip's own real available width to decide
+ *     single-row vs. multi-row (`stripWidth`, a `ResizeObserver`) — a
+ *     genuinely new capability; every prior revision relied purely on CSS
+ *     `@container` queries for this decision.
+ *
  * Stats zone (center, unaffected by the above): tokens (↑in ↓out) ·
  * elapsed, or the live "Compacting…"/"Reconnecting…" readout.
  *
@@ -103,7 +130,7 @@ import { compactionThreshold } from "@/app/store/agent-pane-state/context-window
 import type { CompactionState, ResumeRetryState } from "@/app/store/agent-pane-state/types";
 import { formatCompactNumber, formatExactNumber } from "@/util/format-count";
 import { formatElapsedCompact } from "@/util/format-time";
-import { For, Show, createEffect, createMemo, createSignal, untrack, type JSX } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type JSX } from "solid-js";
 import type { SessionStats, TurnTokens } from "../types";
 import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
 import { RuntimeBadge } from "./RuntimeBadge";
@@ -158,6 +185,100 @@ export function computeBalancedLeftKeys(
         }
     }
     return best;
+}
+
+/** One rendered line of the composer strip's slot pool — see `computeComposerRows`. */
+export interface ComposerRow {
+    left: string[];
+    right: string[];
+}
+
+/**
+ * Rev 7 — see docs/specs/SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md
+ * and docs/retro/retro-composer-strip-one-sided-lines-misdiagnosis-2026-08-26.md
+ * for why this exists. Rev 6's `computeBalancedLeftKeys` picked a GLOBAL
+ * left/right split, then let `.agent-composer-strip-controls`/`-right`
+ * each independently wrap onto their OWN dedicated lines when they didn't
+ * fit — which meant a line could be 100% one zone's content, left- or
+ * right-justified, with the other half of that exact line completely
+ * empty. Aggregate totals looked balanced; every individual LINE did not.
+ *
+ * This builds an explicit list of ROWS instead, each with its own left
+ * and right occupant, so every line that exists has content on both
+ * sides — the actual invariant (spec §1), not a proxy for it. Two paths:
+ *
+ *   - Everything fits within `availableWidth` on one line: delegate to
+ *     `computeBalancedLeftKeys` for a single row — the already-verified
+ *     ≥482px single-line behavior, untouched.
+ *   - Otherwise: sort ALL slots (movable + hostShell) descending by
+ *     width, then pair widest-with-narrowest by walking from both ends
+ *     toward the middle — one row per pair. An odd total count leaves
+ *     exactly one row unpaired (the one named, mathematically unavoidable
+ *     exception — spec §1's "singleton exception"); nothing else is
+ *     allowed to be one-sided. `hostShellKey` is reoriented to the RIGHT
+ *     side of whichever pair it lands in and that pair is moved to the
+ *     END of the row list — "Shell always outermost" (Rev 4/5/6),
+ *     expressed here as "always the last row's right occupant."
+ *
+ * Deliberately a sort + two-pointer walk, not a search — the smallest
+ * mechanism that can satisfy the invariant, matching this file's own
+ * repeated lesson (SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md's
+ * Rev 2/3 postmortem: cleverer search algorithms are where this file's
+ * bugs have historically come from). Exported for direct unit testing
+ * without needing a real layout engine to produce widths.
+ */
+export function computeComposerRows(
+    slots: { key: string; width: number }[],
+    hostShellKey: string,
+    availableWidth: number,
+    gapPx: number,
+): ComposerRow[] {
+    if (slots.length === 0) return [];
+
+    const totalWidth = slots.reduce((sum, s) => sum + s.width, 0) + Math.max(0, slots.length - 1) * gapPx;
+    if (totalWidth <= availableWidth) {
+        const movable = slots.filter((s) => s.key !== hostShellKey);
+        const hostShellWidth = slots.find((s) => s.key === hostShellKey)?.width ?? 0;
+        const leftKeys = computeBalancedLeftKeys(movable, hostShellWidth);
+        return [
+            {
+                left: slots.filter((s) => leftKeys.has(s.key)).map((s) => s.key),
+                right: slots.filter((s) => !leftKeys.has(s.key)).map((s) => s.key),
+            },
+        ];
+    }
+
+    const sorted = [...slots].sort((a, b) => b.width - a.width);
+    const pairs: [string, string | undefined][] = [];
+    let i = 0;
+    let j = sorted.length - 1;
+    while (i < j) {
+        pairs.push([sorted[i].key, sorted[j].key]);
+        i++;
+        j--;
+    }
+    if (i === j) {
+        pairs.push([sorted[i].key, undefined]);
+    }
+
+    // hostShellKey is always present in `slots` by construction (the
+    // component always includes it in the pool passed here) — reorient
+    // whichever pair it landed in so it's the RIGHT occupant, then move
+    // that pair to the end.
+    const hostPairIdx = pairs.findIndex(([a, b]) => a === hostShellKey || b === hostShellKey);
+    if (hostPairIdx !== -1) {
+        let [a, b] = pairs[hostPairIdx];
+        if (a === hostShellKey) {
+            [a, b] = [b, a];
+        }
+        pairs.splice(hostPairIdx, 1);
+        pairs.push([a, b]);
+    }
+
+    return pairs.map(([left, right]) => ({
+        left: left ? [left] : [],
+        right: right ? [right] : [],
+    }));
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -579,6 +700,41 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         return out;
     });
 
+    // Rev 7 — the strip's own real available width, needed to decide
+    // single-row vs. multi-row (see `rows` below and
+    // docs/specs/SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md §3.3).
+    // A genuinely new capability this file didn't need before Rev 7 —
+    // every prior revision relied purely on CSS `@container` queries.
+    // Guarded (`typeof ResizeObserver === "undefined"`) the same way
+    // every other ResizeObserver use in this codebase is (JSDOM, this
+    // file's own unit-test environment, has no ResizeObserver at all) —
+    // `rows()` below already falls back to a single fixed-side row
+    // whenever `stripWidth()` is still 0, so skipping the observer
+    // entirely in that environment is correct, not just tolerated.
+    // `entry.contentRect` is reported in the element's own LOCAL CSS pixels
+    // (unaffected by any CSS `zoom` on an ancestor — e.g. the agent view's
+    // own `zoom: 0.8`), while the per-slot widths measured below use
+    // `getBoundingClientRect()`, which IS zoom-scaled (viewport-relative).
+    // Comparing those two units directly made `rows()`'s "does everything
+    // fit on one line" check systematically over-generous under any
+    // non-1 ancestor zoom, deciding single-row when the real content did
+    // not fit — reproducing the one-sided-lines bug via the row's own
+    // `flex-wrap` safety net. Reading `getBoundingClientRect()` off the
+    // observed element itself instead keeps both sides of that comparison
+    // in the same coordinate space regardless of ancestor zoom.
+    let stripRef: HTMLDivElement | undefined;
+    const [stripWidth, setStripWidth] = createSignal(0);
+    onMount(() => {
+        if (!stripRef || typeof ResizeObserver === "undefined") return;
+        const ro = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                setStripWidth(entry.target.getBoundingClientRect().width);
+            }
+        });
+        ro.observe(stripRef);
+        onCleanup(() => ro.disconnect());
+    });
+
     // Rev 6 — real measured widths per slot, keyed by slot.key. Populated
     // by the effect below from each slot's `display: contents` ref
     // wrapper (see the render output further down); a plain mutable
@@ -630,178 +786,175 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         setSlotWidths(widths);
     });
 
-    // Split left/right, with exactly one override applied uniformly to
-    // whichever split resulted: if that leaves the left zone with
-    // literally zero slots while the right zone has any, borrow the
-    // first right-side slot over to the left instead of showing a dead
-    // zone. Single source of truth (this one memo, not two independently
-    // derived ones) so the override can't be applied inconsistently
-    // between leftKeys/rightKeys.
-    //
-    // Two paths, chosen per render:
-    //   - Real measurement available (every current slot has a
-    //     just-measured, non-zero-summing width): use
-    //     `computeBalancedLeftKeys` — see that function's own doc
-    //     comment for why this is a real-width search, not a repeat of
-    //     Rev 2/3's guessed-weight attempts.
-    //   - Otherwise (first paint, before the effect above has run once;
-    //     or a real layout engine simply isn't present — e.g. this
-    //     file's own unit tests run under JSDOM, which always reports
-    //     0-width elements): fall back to the fixed semantic `side`
-    //     field each slot already carries (Rev 5's pairing) rather than
-    //     an arbitrary or empty split.
-    const zones = createMemo(() => {
-        const list = slots();
-        const widths = slotWidths();
-        const allMeasured = list.every((s) => widths[s.key] !== undefined);
-        const totalMeasured = Object.values(widths).reduce((sum, w) => sum + w, 0);
-
-        let left: typeof list;
-        let right: typeof list;
-        if (allMeasured && totalMeasured > 0) {
-            const hostShellWidth = widths["hostShell"] ?? 0;
-            const movable = list
-                .filter((s) => s.key !== "hostShell")
-                .map((s) => ({ key: s.key, width: widths[s.key] ?? 0 }));
-            const leftKeys = computeBalancedLeftKeys(movable, hostShellWidth);
-            left = list.filter((s) => leftKeys.has(s.key));
-            right = list.filter((s) => !leftKeys.has(s.key));
-        } else {
-            left = list.filter((s) => s.side === "left");
-            right = list.filter((s) => s.side === "right");
-        }
-        if (left.length === 0 && right.length > 0) {
-            return { left: [right[0]], right: right.slice(1) };
-        }
-        return { left, right };
-    });
-
     // reagent P1 on PR #2808: `<For>` (below) reconciles by referential
-    // identity of each item in its `each` array — passing `zones().left`/
-    // `.right` directly, as this used to, handed it a brand-new
-    // `{key, side, render}` object for every slot on EVERY recompute of
-    // `slots()` (any processCount/authStatus/ctxText change, which ticks
-    // every second during an active turn). With no stable identity to
-    // compare against, `<For>` treated that as "every slot removed and
-    // re-added," remounting `AgentRuntimeDropup` — which owns its own
-    // `open`/`selectedOptIndex` signals — and silently collapsing an open
-    // Mode/Model/Effort dropdown on a completely unrelated slot's change.
-    // Plain string keys compare by VALUE, not reference, so `<For>` over
-    // `leftKeys()`/`rightKeys()` correctly preserves DOM/component
-    // identity for any slot whose zone didn't change. `slotByKey` is read
-    // once inside each `<For>` item's own template callback — Solid only
-    // re-invokes that callback when the KEY ITSELF changes, not on every
-    // parent recompute — so the returned JSX stays reactive to that
-    // slot's own signal reads regardless (the standard `<For>` idiom).
-    // A slot that genuinely changes zone (a real rebalance decision, not
+    // identity of each item in its `each` array — passing `slots()`
+    // entries directly gives every one a brand-new `{key, side, render}`
+    // object on EVERY recompute (any processCount/authStatus/ctxText
+    // change, which ticks every second during an active turn). With no
+    // stable identity to compare against, `<For>` would treat that as
+    // "every slot removed and re-added," remounting `AgentRuntimeDropup`
+    // — which owns its own `open`/`selectedOptIndex` signals — and
+    // silently collapsing an open Mode/Model/Effort dropdown on a
+    // completely unrelated slot's change. Plain string keys compare by
+    // VALUE, not reference, so `<For>` over row-derived key arrays (see
+    // `rows` below) correctly preserves DOM/component identity for any
+    // slot whose row/side didn't change. `slotByKey` is read once inside
+    // each `<For>` item's own template callback via `untrack` — Solid
+    // only re-invokes that callback when the KEY ITSELF changes, not on
+    // every parent recompute, and `untrack` stops the LOOKUP itself from
+    // being a tracked dependency of that position (a bare
+    // `{slotByKey().get(key)?.render()}` would still re-invoke `render()`
+    // on every `slots()` change even with a stable key, defeating the
+    // whole point) — so the returned JSX stays reactive to that slot's
+    // OWN signal reads regardless (the standard `<For>` idiom). A slot
+    // that genuinely changes row or side (a real rebalance decision, not
     // an unrelated prop change) still gets destroyed in one `<For>` and
-    // recreated in the other — an inherent limit of two separate `<For>`
-    // blocks, not something a key can paper over, but a real zone change
-    // is a far rarer event than "any slot's content changed."
+    // recreated in the other — an inherent limit of separate `<For>`
+    // blocks, not something a key can paper over, but a real row/side
+    // change is a far rarer event than "any slot's content changed."
     const slotByKey = createMemo(() => {
         const map = new Map<string, { key: string; side: "left" | "right"; render: () => JSX.Element }>();
         for (const s of slots()) map.set(s.key, s);
         return map;
     });
-    const leftKeys = createMemo(() => zones().left.map((s) => s.key));
-    const rightKeys = createMemo(() => zones().right.map((s) => s.key));
+
+    // Rev 7 — replaces `zones()`/`leftKeys()`/`rightKeys()`. Builds an
+    // explicit list of ROWS (see `computeComposerRows`'s own doc comment
+    // and docs/specs/SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md)
+    // instead of two independently-wrapping zones, so every rendered line
+    // has content on both sides — the actual requirement six prior
+    // revisions all missed (docs/retro/retro-composer-strip-one-sided-lines-misdiagnosis-2026-08-26.md).
+    //
+    // Falls back to a SINGLE row via the fixed `side` field (Rev 5/6's
+    // own fallback, unchanged) whenever real measurement isn't available:
+    // first paint (before the effect above has run once), any layout
+    // engine that reports 0-width elements (this file's own JSDOM-based
+    // unit tests), or the ResizeObserver above hasn't delivered its first
+    // callback yet (`stripWidth() === 0`) — never an arbitrary/empty
+    // split, and never a spurious multi-row flash before the real width
+    // is known.
+    const rows = createMemo((): ComposerRow[] => {
+        const list = slots();
+        const widths = slotWidths();
+        const allMeasured = list.every((s) => widths[s.key] !== undefined);
+        const totalMeasured = Object.values(widths).reduce((sum, w) => sum + w, 0);
+        const width = stripWidth();
+
+        if (!allMeasured || totalMeasured === 0 || width === 0) {
+            const left = list.filter((s) => s.side === "left").map((s) => s.key);
+            const right = list.filter((s) => s.side === "right").map((s) => s.key);
+            if (left.length === 0 && right.length > 0) {
+                return [{ left: [right[0]], right: right.slice(1) }];
+            }
+            return [{ left, right }];
+        }
+
+        // Estimated, not measured, same caveat as every other breakpoint
+        // in this file's own SCSS (see _composer-strip.scss's shed-content
+        // queries) — this only decides the single-row/multi-row boundary,
+        // a few px of slop just shifts that boundary slightly, it doesn't
+        // change which slots end up on which side once a path is chosen.
+        const gapPx = stripRef ? parseFloat(getComputedStyle(stripRef).getPropertyValue("--space-1-5")) || 6 : 6;
+        return computeComposerRows(
+            list.map((s) => ({ key: s.key, width: widths[s.key] ?? 0 })),
+            "hostShell",
+            width,
+            gapPx,
+        );
+    });
+
+    // Row COUNT rarely changes across recomputes — plain number primitives
+    // compare by value, so `<For>` over indices preserves each row's own
+    // subtree (and everything under it) across recomputes that don't
+    // change how many rows exist. Iterating `rows()` objects directly
+    // would repeat the exact reagent-P1 identity bug the slot-level fix
+    // above already fixed, one level up.
+    const rowIndices = createMemo(() => rows().map((_, i) => i));
+
+    const renderSlot = (key: string) => {
+        // untrack: see `slotByKey`'s own doc comment above — without
+        // this, a bare `{slotByKey().get(key)?.render()}` would read the
+        // reactive `slotByKey()` memo and re-invoke `.render()` (so
+        // reconstructing e.g. AgentRuntimeDropup, resetting its own
+        // open/selectedOptIndex signals) on every `slots()` recompute,
+        // defeating the point of keying by string at all.
+        const rendered = untrack(() => slotByKey().get(key)?.render());
+        return (
+            // `display: contents` (agent-composer-strip-slot-measure,
+            // _composer-strip.scss) — invisible to layout, so this
+            // wrapper changes nothing about how the slot's own children
+            // flex/wrap; it exists only to give the measurement effect
+            // above a stable per-slot anchor.
+            <span class="agent-composer-strip-slot-measure" ref={(el) => (measureRefs[key] = el)}>
+                {rendered}
+            </span>
+        );
+    };
+
+    // Stats zone — token/elapsed stats. Always centered (this zone's
+    // identity at every tier). Rendered in ONE of two places, mutually
+    // exclusive (`rows().length === 1` vs. not — `rows()` is never empty,
+    // `hostShell` is always present, so this is a true binary): as the
+    // single row's own third child when everything fits one line
+    // (matching the true-centered widest-tier position every revision
+    // through Rev 6 already had — see _composer-strip.scss's
+    // `.agent-composer-strip-row > .agent-composer-strip-stats-zone`), or
+    // as its own dedicated line below the rows block otherwise (matching
+    // every narrower tier's pre-Rev-7 behavior — see
+    // `.agent-composer-strip > .agent-composer-strip-stats-zone`). The
+    // wrapper span always renders (even with no stats yet) so this zone's
+    // presence in the flow order stays stable whether or not stats are
+    // populated yet. Deliberately NOT folded into the row-pairing
+    // algorithm itself (spec §3.4) — a third, always-centered concern,
+    // not a left/right slot.
+    const statsZone = () => (
+        <span class="agent-composer-strip-stats-zone">
+            <Show when={rightText()}>
+                <span
+                    class="agent-composer-strip-stats"
+                    classList={{
+                        "agent-composer-strip-stats--compacting": !!props.compacting,
+                        "agent-composer-strip-stats--reconnecting": !!props.reconnecting,
+                    }}
+                >
+                    {rightText()}
+                </span>
+            </Show>
+        </span>
+    );
 
     return (
-        <div class="agent-composer-strip" classList={{ "agent-composer-strip--expanded": props.logOpen }}>
-            {/* Controls zone — renders whichever slots the dynamic pooling
-                above (`leftKeys`) assigned to the left half. See the
-                file-header comment and docs/specs/
-                SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md for why
-                this is computed rather than a fixed set of children, and
-                `slotByKey`'s own doc comment for why `<For>` iterates
-                plain string keys here rather than the slot objects
-                directly. */}
-            <span class="agent-composer-strip-controls">
-                <For each={leftKeys()}>
-                    {(key) => {
-                        // untrack: `<For>` calls this template callback
-                        // ONCE per stable key, but a bare
-                        // `{slotByKey().get(key)?.render()}` inside JSX
-                        // would still read the `slotByKey()` MEMO reactively
-                        // — re-invoking `.render()` (and so reconstructing
-                        // AgentRuntimeDropup, resetting its own open/
-                        // selectedOptIndex signals) every time `slots()`
-                        // recomputes for ANY reason, defeating the whole
-                        // point of keying by string above. Capturing the
-                        // rendered JSX once, outside tracking, is what
-                        // actually makes this a one-time call — the
-                        // returned JSX stays reactive to its OWN internal
-                        // signal reads regardless (the standard `<For>`
-                        // idiom this file's history already discusses).
-                        const rendered = untrack(() => slotByKey().get(key)?.render());
-                        return (
-                            // `display: contents` (agent-composer-strip-slot-measure,
-                            // _composer-strip.scss) — invisible to layout, so this
-                            // wrapper changes nothing about how the slot's own
-                            // children flex/wrap; it exists only to give the
-                            // measurement effect above a stable per-slot anchor.
-                            <span
-                                class="agent-composer-strip-slot-measure"
-                                ref={(el) => (measureRefs[key] = el)}
-                            >
-                                {rendered}
+        <div
+            class="agent-composer-strip"
+            classList={{ "agent-composer-strip--expanded": props.logOpen }}
+            ref={stripRef}
+        >
+            {/* Rev 7 — one <div class="agent-composer-strip-row"> per entry
+                in `rows()`, each with its own left- and right-anchored
+                span, so every rendered line has content on both sides
+                (see `computeComposerRows`'s own doc comment and
+                docs/specs/SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md).
+                Replaces the old fixed `-controls`/`-right` zone spans,
+                which independently decided when to wrap onto their own
+                dedicated one-sided lines — the actual bug this revision
+                answers (docs/retro/retro-composer-strip-one-sided-lines-misdiagnosis-2026-08-26.md). */}
+            <div class="agent-composer-strip-rows">
+                <For each={rowIndices()}>
+                    {(rowIndex) => (
+                        <div class="agent-composer-strip-row">
+                            <span class="agent-composer-strip-row-left">
+                                <For each={rows()[rowIndex]?.left ?? []}>{renderSlot}</For>
                             </span>
-                        );
-                    }}
-                </For>
-            </span>
-
-            {/* Stats zone — token/elapsed stats. Always centered (this
-                zone's identity at every tier, matching its widest-tier
-                true-centered position) — forced alone onto its own line
-                below 280px, rejoins the controls line (pinned to its right
-                edge) at 280-481px, true-centered between the controls and
-                right zones at the widest tier (see _composer-strip.scss).
-                The wrapper span always renders (even with no stats yet) so
-                this zone's presence in the flow order — and therefore
-                where the right zone wraps to — stays stable whether or not
-                stats are populated yet. */}
-            <span class="agent-composer-strip-stats-zone">
-                <Show when={rightText()}>
-                    <span
-                        class="agent-composer-strip-stats"
-                        classList={{
-                            "agent-composer-strip-stats--compacting": !!props.compacting,
-                            "agent-composer-strip-stats--reconnecting": !!props.reconnecting,
-                        }}
-                    >
-                        {rightText()}
-                    </span>
-                </Show>
-            </span>
-
-            {/* Right zone — renders whichever slots the dynamic pooling
-                above (`rightKeys`) assigned to the right half. The
-                hostShell slot (HOST/SANDBOX tag fused to the Shell toggle,
-                see its `render` above) is always last in the pool and
-                lands here except in the degenerate one-slot-total case —
-                see the file-header comment. Always right-anchored (this
-                zone's identity at every tier, matching its widest-tier
-                `justify-content: flex-end` pin) — forced alone onto its
-                own full-width line below 482px, its own flex-basis-0 half
-                of the row at the widest tier (see _composer-strip.scss). */}
-            <span class="agent-composer-strip-right">
-                <For each={rightKeys()}>
-                    {(key) => {
-                        // See the left zone's identical pattern above for
-                        // why `untrack` is required here, not optional.
-                        const rendered = untrack(() => slotByKey().get(key)?.render());
-                        return (
-                            <span
-                                class="agent-composer-strip-slot-measure"
-                                ref={(el) => (measureRefs[key] = el)}
-                            >
-                                {rendered}
+                            <Show when={rows().length === 1}>{statsZone()}</Show>
+                            <span class="agent-composer-strip-row-right">
+                                <For each={rows()[rowIndex]?.right ?? []}>{renderSlot}</For>
                             </span>
-                        );
-                    }}
+                        </div>
+                    )}
                 </For>
-            </span>
+            </div>
+
+            <Show when={rows().length !== 1}>{statsZone()}</Show>
         </div>
     );
 };

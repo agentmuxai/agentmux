@@ -16,7 +16,7 @@ import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { AgentComposerStrip, computeBalancedLeftKeys } from "./AgentComposerStrip";
+import { AgentComposerStrip, computeBalancedLeftKeys, computeComposerRows } from "./AgentComposerStrip";
 
 // AgentRuntimeDropup (rendered via showControls()) imports this — same mock
 // AgentRuntimeDropup.test.tsx uses; only exercised by the reagent P1
@@ -234,5 +234,120 @@ describe("computeBalancedLeftKeys", () => {
             90,
         );
         expect(result).toEqual(new Set(["ctx", "auth"]));
+    });
+});
+
+/**
+ * Coverage for Rev 7's row-building (see this file's own Rev 7 header
+ * comment, `computeComposerRows`'s own doc comment, and
+ * docs/specs/SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md) — pure,
+ * same rigor as `computeBalancedLeftKeys`'s own tests above. §7.2's
+ * explicit invariant test (last in this block) is the one thing missing
+ * from every prior revision's test suite — see
+ * docs/retro/retro-composer-strip-one-sided-lines-misdiagnosis-2026-08-26.md
+ * for why that gap let the one-sided-lines bug through six revisions.
+ */
+describe("computeComposerRows", () => {
+    it("delegates to computeBalancedLeftKeys for a single row when everything fits", () => {
+        const slots = [
+            { key: "a", width: 50 },
+            { key: "hostShell", width: 30 },
+        ];
+        const rows = computeComposerRows(slots, "hostShell", 200, 5);
+        expect(rows).toEqual([{ left: ["a"], right: ["hostShell"] }]);
+    });
+
+    it("builds width-paired rows (widest-with-narrowest) when the pool needs more than one line, even slot count", () => {
+        const slots = [
+            { key: "w1", width: 100 },
+            { key: "w2", width: 80 },
+            { key: "w3", width: 60 },
+            { key: "hostShell", width: 50 },
+        ];
+        // totalWidth = 290 + 3*5 = 305, far past this tiny availableWidth
+        // — forces the multi-row path.
+        const rows = computeComposerRows(slots, "hostShell", 10, 5);
+        // Sorted descending [w1,w2,w3,hostShell]; two-pointer pairs
+        // (w1,hostShell) and (w2,w3); hostShell's pair reoriented to the
+        // END. Every row has both sides filled — the core invariant,
+        // asserted directly (spec §1), not inferred from a total-width
+        // comparison the way every prior revision's own acceptance
+        // criteria did.
+        expect(rows).toEqual([
+            { left: ["w2"], right: ["w3"] },
+            { left: ["w1"], right: ["hostShell"] },
+        ]);
+        for (const row of rows) {
+            expect(row.left.length).toBeGreaterThan(0);
+            expect(row.right.length).toBeGreaterThan(0);
+        }
+    });
+
+    it("leaves exactly ONE row as the allowed singleton exception when the total slot count is odd", () => {
+        const slots = [
+            { key: "w1", width: 100 },
+            { key: "w2", width: 60 },
+            { key: "hostShell", width: 50 },
+        ];
+        const rows = computeComposerRows(slots, "hostShell", 10, 5);
+        // w1 pairs with hostShell (widest+narrowest among the 3), leaving
+        // w2 as the odd one out — reoriented so hostShell's row is last.
+        expect(rows).toEqual([
+            { left: ["w2"], right: [] },
+            { left: ["w1"], right: ["hostShell"] },
+        ]);
+        const oneSided = rows.filter((r) => r.left.length === 0 || r.right.length === 0);
+        expect(oneSided).toHaveLength(1);
+    });
+
+    it("reorients hostShell to the right side even when it sorts as the WIDER element of its pair", () => {
+        // hostShell(200) is the single widest slot here, so the two-pointer
+        // walk initially pairs it as the "a" (left) position with w2 (the
+        // narrowest) — this test exercises the swap branch specifically,
+        // not just the already-oriented case the previous two tests cover.
+        const slots = [
+            { key: "hostShell", width: 200 },
+            { key: "w1", width: 100 },
+            { key: "w2", width: 50 },
+        ];
+        const rows = computeComposerRows(slots, "hostShell", 10, 5);
+        expect(rows).toEqual([
+            { left: ["w1"], right: [] },
+            { left: ["w2"], right: ["hostShell"] },
+        ]);
+    });
+
+    it("degenerate case: only hostShell exists — one row, left empty, right = [hostShell]", () => {
+        const rows = computeComposerRows([{ key: "hostShell", width: 50 }], "hostShell", 1000, 5);
+        expect(rows).toEqual([{ left: [], right: ["hostShell"] }]);
+    });
+
+    it("returns an empty row list for an empty slot pool", () => {
+        expect(computeComposerRows([], "hostShell", 1000, 5)).toEqual([]);
+    });
+
+    // The explicit invariant test missing from every prior revision (see
+    // this describe block's own doc comment): for ANY combination of
+    // slot widths, across both the single-row and multi-row paths, the
+    // number of one-sided rows must never exceed the mathematically-
+    // justified maximum — 1 if the total slot count is odd (the one
+    // named singleton exception, which also covers the n=1 degenerate
+    // case, itself odd), 0 if even. This is the direct, mechanical
+    // version of the requirement the user had to spell out by hand
+    // ("2 lines should have 4 filled sections") — a test that checks
+    // this exact property would have caught the bug this revision fixes.
+    it.each([
+        { widths: [100, 80, 60, 50], availableWidth: 10 },
+        { widths: [100, 80, 60, 50], availableWidth: 1000 },
+        { widths: [100, 60, 50], availableWidth: 10 },
+        { widths: [10, 10, 10, 10, 10], availableWidth: 10 },
+        { widths: [500, 10, 10, 10], availableWidth: 10 },
+        { widths: [50], availableWidth: 10 },
+    ])("no more than the mathematically-allowed one-sided rows for widths=$widths, availableWidth=$availableWidth", ({ widths, availableWidth }) => {
+        const slots = widths.map((width, i) => ({ key: i === widths.length - 1 ? "hostShell" : `slot${i}`, width }));
+        const rows = computeComposerRows(slots, "hostShell", availableWidth, 5);
+        const oneSidedCount = rows.filter((r) => r.left.length === 0 || r.right.length === 0).length;
+        const maxAllowed = slots.length % 2 === 1 ? 1 : 0;
+        expect(oneSidedCount).toBeLessThanOrEqual(maxAllowed);
     });
 });
