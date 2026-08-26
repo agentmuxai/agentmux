@@ -52,7 +52,21 @@
     // per-INSTANCE value set inline by PaneTabStrip.tsx from the
     // `zoomFactor` prop (each pane type's own content zoom) — not the
     // global chrome-zoom `--zoomfactor` used by window-header/status-bar.
-    height: calc(var(--pane-tab-strip-height, 28px) * var(--pane-tab-strip-zoom, 1));
+    // "+ 1px": this repo's global `box-sizing: border-box` (reset.scss)
+    // means the `border-bottom` below is carved OUT of this declared
+    // height, not added on top — leaving only 27px of content-box for
+    // `.pane-tab-strip-inner` (which needs the full un-eaten
+    // `--pane-tab-strip-height` to match its own un-zoomed 28px height,
+    // see that rule's comment). Without this +1px, `.pane-tab-strip-inner`
+    // overflows this box's content area by 1px and gets clipped at the
+    // bottom by `overflow-y: hidden` above — shifting the "+" button's
+    // flex-centered position (computed against its own full 28px) visibly
+    // upward relative to the now-27px-visible row. Reported live
+    // 2026-08-25 as "the + looks off-center" — only became noticeable once
+    // SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md's bigger 3px
+    // row-gap (a separate, now-fixed issue) stopped drawing attention away
+    // from this smaller, always-present 1px mismatch.
+    height: calc(var(--pane-tab-strip-height, 28px) * var(--pane-tab-strip-zoom, 1) + 1px);
     border-bottom: 1px solid var(--border-color);
     // No fill on the container itself — only .pane-tab (active/hover) and
     // .pane-tab-strip-add (hover) paint a background. Any stray width the
@@ -252,4 +266,16 @@
         background: rgba(255, 255, 255, 0.06);
         color: var(--main-text-color);
     }
+}
+
+// The "+" glyph's own line box (centered by the button's flex align-items/
+// justify-content above) isn't the same as its visual ink — measured live
+// (screenshot pixel-sampling, 2026-08-25) at ~1-2px low relative to the
+// button's true box center, a font-metrics artifact of centering literal
+// text rather than an SVG icon. Nudged on its own wrapping span (not the
+// button itself) so the button's box/border/hover-background stay exactly
+// where they were; only the glyph's rendered position moves.
+.pane-tab-strip-add-glyph {
+    display: block;
+    transform: translateY(-1px);
 }

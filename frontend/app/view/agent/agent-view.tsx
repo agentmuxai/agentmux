@@ -518,11 +518,12 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
                 the pane and clipping the composer off the bottom (found
                 live 2026-08-09: "agent pane has no text input"). */}
             <div class="agent-pane-stack">
-                {/* Progress bar's own row — always reserved, above the tab
-                    strip, below wherever the block-frame's own pane header
-                    ends. Empty div; its only content is whatever
-                    AgentPresentationView portals into it below. Sized in
-                    agent-view.scss (.agent-pane-progress-bar-slot). */}
+                {/* Progress bar's own overlay strip — floats above the tab
+                    strip, never reserving layout space (SPEC_AGENT_PANE_
+                    PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md). Empty div;
+                    its only content is whatever AgentPresentationView
+                    portals into it below. Positioned in agent-view.scss
+                    (.agent-pane-progress-bar-slot). */}
                 <div class="agent-pane-progress-bar-slot" ref={(el) => setProgressBarSlot(el)} />
                 <div class="agent-pane-stack-content">
                     {/* Tab strip floats over the content instead of

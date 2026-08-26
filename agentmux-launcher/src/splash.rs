@@ -99,6 +99,14 @@ const BG_B: u8 = 0x1F;
 const BG_G: u8 = 0x1A;
 const BG_R: u8 = 0x1A;
 
+// Darkened window-edge border — SPEC_SPLASH_SCREEN_BORDER_2026_08_25.md.
+// Roughly half BG's RGB values, a straightforward "darker than the
+// backdrop" reading; not yet confirmed against a real display.
+const BORDER_B: u8 = 0x10;
+const BORDER_G: u8 = 0x0D;
+const BORDER_R: u8 = 0x0D;
+const BORDER_WIDTH: i32 = 2;
+
 static BRAIN_BGRA: &[u8] =
     include_bytes!(concat!(env!("OUT_DIR"), "/brain_bgra.bin"));
 
@@ -431,6 +439,46 @@ fn composite(
     for (i, line) in footer.iter().enumerate() {
         let y = footer_top + i as i32 * (crate::splash_font::GLYPH_H as i32 + FOOTER_LINE_GAP);
         crate::splash_text::draw_text_centered(dib, SPLASH_W, SPLASH_H, y, line, FOOTER_COLOR, 1.0, true);
+    }
+
+    // Darkened window-edge border — drawn last so nothing else (brain,
+    // stage list, separator, footer) ever overdraws it. All of that content
+    // already keeps its own margin well clear of the outer BORDER_WIDTH
+    // pixels (BRAIN_X/Y = SPLASH_PADDING = 12, STAGE_MARGIN_L/R = 14/8), so
+    // ordering here is a defensive "last wins" guarantee, not a fix for an
+    // otherwise-real overlap. SPEC_SPLASH_SCREEN_BORDER_2026_08_25.md.
+    draw_border(dib);
+}
+
+fn set_px(dib: &mut [u8], x: i32, y: i32, rgb: (u8, u8, u8)) {
+    if x < 0 || x >= SPLASH_W || y < 0 || y >= SPLASH_H {
+        return;
+    }
+    let di = ((y * SPLASH_W + x) * 4) as usize;
+    dib[di] = rgb.2; // B
+    dib[di + 1] = rgb.1; // G
+    dib[di + 2] = rgb.0; // R
+    dib[di + 3] = 0xFF;
+}
+
+/// Draws a BORDER_WIDTH-thick ring around the window edge. Iterates only
+/// the border bands (top/bottom full-width, left/right for the remaining
+/// height) rather than the whole SPLASH_W×SPLASH_H frame — this runs every
+/// composited frame (~60 fps), so it's worth not scanning interior pixels
+/// that never change here.
+fn draw_border(dib: &mut [u8]) {
+    let rgb = (BORDER_R, BORDER_G, BORDER_B);
+    for y in 0..BORDER_WIDTH {
+        for x in 0..SPLASH_W {
+            set_px(dib, x, y, rgb);
+            set_px(dib, x, SPLASH_H - 1 - y, rgb);
+        }
+    }
+    for x in 0..BORDER_WIDTH {
+        for y in BORDER_WIDTH..(SPLASH_H - BORDER_WIDTH) {
+            set_px(dib, x, y, rgb);
+            set_px(dib, SPLASH_W - 1 - x, y, rgb);
+        }
     }
 }
 
