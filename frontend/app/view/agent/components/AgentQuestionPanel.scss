@@ -28,12 +28,40 @@
     box-shadow: var(--shadow-lg, 0 12px 24px rgba(0, 0, 0, 0.35));
     color: var(--main-text-color);
     outline: none;
+    // Fixed px, not vh/% — .agent-view only supports width-based container
+    // queries (container-type: inline-size), and vh is relative to the OS
+    // window, not this specific split pane, which can be much shorter.
+    // See SPEC_ASK_USER_QUESTION_PANEL_SCROLL_2026_08_25.md §3.2. Matches
+    // the existing .agent-decision-panel-preview precedent (max-height:
+    // 160px), just larger since this panel holds more than one preview block.
+    max-height: 420px;
 }
 
 .agent-question-panel-header {
     display: flex;
     align-items: center;
     gap: var(--space-2);
+    // Pinned so the countdown stays visible while question content scrolls
+    // beneath it — same pattern as .agent-search-header (_search.scss).
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--modal-bg-color, #232323);
+}
+
+// Scrollable middle region between the sticky header and sticky actions bar.
+// SPEC_ASK_USER_QUESTION_PANEL_SCROLL_2026_08_25.md §3.1.
+.agent-question-panel-scroll {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3); // was .agent-question-panel's own gap, now spaces
+                          // multiple stacked .agent-question-panel-q blocks
+    overflow-y: auto;
+    // REQUIRED: flex items default to min-height: auto, which silently
+    // defeats overflow-y: auto by growing the box to fit its content
+    // instead of scrolling. See spec §3.3 — the classic flexbox scroll
+    // gotcha, easy to lose in a later refactor if this comment goes away.
+    min-height: 0;
 }
 
 .agent-question-panel-icon {
@@ -197,6 +225,15 @@
     display: flex;
     justify-content: flex-end;
     gap: var(--space-2);
+    // Pinned so Submit answer / Answer later are always reachable, even
+    // when the question content above is scrolled — see spec §2 for why
+    // this matters beyond cosmetics (the 30s auto-timeout still fires
+    // regardless of whether the user can reach these buttons).
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
+    background: var(--modal-bg-color, #232323);
+    padding-top: var(--space-2);
 }
 
 .agent-question-panel-btn {
