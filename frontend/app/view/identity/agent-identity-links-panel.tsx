@@ -64,7 +64,7 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
     // instead of leaving an orphaned row that silently blocks every future
     // spawn under the new canonical link.
     const [claudeStaleAliasProvider, setClaudeStaleAliasProvider] = createSignal<string | undefined>(undefined);
-    // reagent P2 on PR #2414 (round 3): the empty-state "Connect Claude
+    // reagent P2 on PR #2414 (round 3): the empty-state "Connect Anthropic
     // account" button below must not appear before the initial load
     // resolves (was previously indistinguishable from "genuinely zero
     // links") or after it fails (the top error banner already covers that
@@ -124,7 +124,7 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
     // Resolve through the agent's bound bundle rather than the possibly-
     // drifted `agent.provider` column directly — #2594, same "gate vs.
     // actual launch can disagree" risk class #2592/#2596/#2607/#2609/
-    // #2610 fixed. Gates the "Connect Claude account" CTA below; falls
+    // #2610 fixed. Gates the "Connect Anthropic account" CTA below; falls
     // back to `agent()?.provider` while loading/unbound/on failure, same
     // fallback contract `resolveEffectiveLaunchProvider` itself documents
     // — a brief stale flash here is cosmetic (button visibility only),

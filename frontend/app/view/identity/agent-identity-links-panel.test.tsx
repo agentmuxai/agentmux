@@ -69,9 +69,27 @@ vi.mock("./identity-model", () => ({
             display_name: "Claude Work",
             status: "valid",
         },
+        // No display_name — mirrors what identity_auth_persist.rs actually
+        // writes for a fresh Anthropic OAuth login (name is the internal
+        // "claude-oauth", display_name is empty). reagent P2 on PR #2806:
+        // the row must fall back to the "Anthropic" brand label here, not
+        // leak this internal name.
+        {
+            id: "acc-claude-nodisplay",
+            name: "claude-oauth",
+            provider: "claude",
+            kind: "oauth",
+            display_name: "",
+            status: "valid",
+        },
     ],
     subscribeAccountChanges: () => () => {},
-    PROVIDER_LABELS: { github: "GitHub", claude: "Claude" },
+    // Matches the real PROVIDER_LABELS shape (identity-model.ts) — keyed by
+    // brand, not raw CLI provider id. No "claude" key on purpose: a
+    // regression that dropped the brandForProvider() mapping and read
+    // row.provider directly would fall through to the raw "claude" string
+    // instead of a label here, the same way it would in production.
+    PROVIDER_LABELS: { github: "GitHub", anthropic: "Anthropic" },
 }));
 
 const claudeLoginPanel = vi.fn();
@@ -169,6 +187,20 @@ describe("AgentIdentityLinksPanel", () => {
                     linkTarget: { agentDefinitionId: "agent-1" },
                 }),
             );
+        });
+
+        it("codex P2 / reagent P2 on PR #2806: renders the Anthropic brand, not the raw 'claude' provider id or the internal 'claude-oauth' account name, for a claude row whose account has no display_name", async () => {
+            listAllAgentIdentities.mockResolvedValue([
+                mkLink({ agent_id: "agent-1", account_id: "acc-claude-nodisplay", provider: "claude" }),
+            ]);
+
+            render(() => <AgentIdentityLinksPanel agentId="agent-1" />);
+
+            // Provider column + Account column both fall back to the brand.
+            const cells = await screen.findAllByText("Anthropic");
+            expect(cells).toHaveLength(2);
+            expect(screen.queryByText("claude-oauth")).not.toBeInTheDocument();
+            expect(screen.queryByText("claude", { selector: "td" })).not.toBeInTheDocument();
         });
 
         it("reagent P2 on PR #2414 (round 5): passes the link row's own account id, not the (possibly cache-lagging) joined Account's, so a click while the local accounts cache hasn't caught up still refreshes the RIGHT account instead of minting a new one", async () => {
