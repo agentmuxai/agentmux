@@ -18,7 +18,7 @@
 
 .global-brain-intro {
     margin: 0;
-    font-size: var(--text-sm);
+    font-size: 10px;
     color: var(--secondary-text-color);
     line-height: 1.5;
 
@@ -31,7 +31,7 @@
 
 .global-brain-restart-note {
     padding: var(--space-1-5) var(--space-2);
-    font-size: var(--text-xs);
+    font-size: 9px;
     color: var(--secondary-text-color);
     background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
     border-left: 2px solid var(--accent-color);
@@ -58,7 +58,7 @@
 }
 
 .global-brain-external-files-heading {
-    font-size: var(--text-xs);
+    font-size: 9px;
     color: var(--secondary-text-color);
 }
 
@@ -91,20 +91,20 @@
 
 .global-brain-machine-config-path {
     font-family: var(--fixed-font, monospace);
-    font-size: var(--text-xs);
+    font-size: 9px;
     color: var(--secondary-text-color);
     word-break: break-all;
 }
 
 .global-brain-machine-config-caption {
     margin: 0;
-    font-size: var(--text-xs);
+    font-size: 9px;
     color: var(--secondary-text-color);
 }
 
 .global-brain-machine-config-empty {
     margin: 0;
-    font-size: var(--text-sm);
+    font-size: 10px;
     color: var(--secondary-text-color);
 }
 
@@ -116,7 +116,7 @@
     background: var(--main-bg-color);
     border: 1px solid var(--border-color);
     font-family: var(--fixed-font, monospace);
-    font-size: var(--text-xs);
+    font-size: 9px;
     color: var(--main-text-color);
     white-space: pre-wrap;
     overflow-wrap: break-word;
@@ -155,7 +155,7 @@
 }
 
 .global-brain-section-name {
-    font-size: var(--text-sm);
+    font-size: 10px;
     font-weight: 600;
     color: var(--main-text-color);
     white-space: nowrap;
@@ -164,7 +164,7 @@
 }
 
 .global-brain-section-desc {
-    font-size: var(--text-xs);
+    font-size: 9px;
     color: var(--secondary-text-color);
     white-space: nowrap;
     overflow: hidden;
@@ -181,7 +181,7 @@
 .global-brain-empty {
     padding: var(--space-3);
     text-align: center;
-    font-size: var(--text-sm);
+    font-size: 10px;
     color: var(--secondary-text-color);
     font-style: italic;
     border: 1px dashed var(--border-color);
@@ -253,7 +253,7 @@
 .global-brain-textarea {
     width: 100%;
     padding: var(--space-1-5) var(--space-2);
-    font-size: var(--text-sm);
+    font-size: 10px;
     color: var(--main-text-color);
     background: var(--main-bg-color);
     border: 1px solid var(--border-color);
@@ -359,7 +359,7 @@
     background: var(--main-bg-color);
     border: 1px solid var(--border-color);
     font-family: var(--fixed-font, monospace);
-    font-size: var(--text-xs);
+    font-size: 9px;
     color: var(--main-text-color);
     white-space: pre-wrap;
     overflow-wrap: break-word;
