@@ -784,6 +784,28 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         onCleanup(() => ro.disconnect());
     });
 
+    // A `getComputedStyle(...)`-read length (e.g. a `column-gap` or CSS
+    // custom property) is reported in the element's own LOCAL CSS pixels,
+    // unaffected by an ancestor's CSS `zoom` — the same property that made
+    // `entry.contentRect` wrong above, for the same reason. Every width in
+    // this file that feeds a fit/pairing decision is measured via
+    // `getBoundingClientRect()` instead, which IS zoom-scaled. A raw
+    // `getComputedStyle` gap value mixed directly into one of those totals
+    // re-introduces the exact zoom-unit mismatch this file's own Rev 7
+    // fix eliminated for width — just via the gap term instead (found via
+    // a real regression report after PR #2812 shipped: the widest tier
+    // started splitting into 2 lines, and the narrow tier grew MORE
+    // one-sided rows than necessary, both explained by systematically
+    // overestimating how much space gaps need). `zoom` applies uniformly
+    // to a whole subtree, so the ratio measured off ANY element inside it
+    // (here, the always-mounted `stripRef`) is the correct multiplier for
+    // a `getComputedStyle` length read anywhere else in that same
+    // subtree — multiply by this wherever the two measurement styles mix.
+    const zoomRatio = (): number => {
+        if (!stripRef || !stripRef.clientWidth) return 1;
+        return stripRef.getBoundingClientRect().width / stripRef.clientWidth;
+    };
+
     // Rev 6 — real measured widths per slot, keyed by slot.key. Populated
     // by the effect below from each slot's `display: contents` ref
     // wrapper (see the render output further down); a plain mutable
@@ -810,7 +832,24 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // zone this slot currently sits in. This converges to a stable split
     // after one settle pass instead of oscillating between two different
     // "correct" widths.
+    //
+    // Also depends on `stripWidth()` — regression found post-merge: a
+    // slot's OWN rendered width isn't purely a function of its content;
+    // this file's own SCSS shed-content queries (`.agent-composer-strip-
+    // auth`, `.agent-composer-strip-process-badge` collapsing to
+    // `display:none` below a container-width threshold) make it a
+    // function of the CONTAINER width too. Without this dependency, a
+    // pure resize crossing a shed threshold never re-ran this effect —
+    // `slots()` (prop-driven) hadn't changed — so `slotWidths` kept
+    // whatever a slot's width was BEFORE it got shed, indefinitely, until
+    // some unrelated prop happened to retrigger a remeasurement. The
+    // Codex P1 shed-slot fix (which excludes zero-width slots from
+    // pairing) never even ran for a slot that measurement never told it
+    // was zero — the exact same "stale measurement crosses a structural
+    // transition" failure mode already fixed for `statsWidth` above, one
+    // more measurement path where it had gone unnoticed.
     createEffect(() => {
+        stripWidth();
         const keys = slots().map((s) => s.key);
         const widths: Record<string, number> = {};
         for (const key of keys) {
@@ -822,7 +861,11 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 total += child.getBoundingClientRect().width;
             }
             if (children.length > 1 && el.parentElement) {
-                const gapPx = parseFloat(getComputedStyle(el.parentElement).columnGap) || 0;
+                // `* zoomRatio()` — see that function's own doc comment;
+                // `columnGap` is a `getComputedStyle` (local/unzoomed)
+                // read, but `total` above is built from
+                // `getBoundingClientRect()` (zoomed) sums.
+                const gapPx = (parseFloat(getComputedStyle(el.parentElement).columnGap) || 0) * zoomRatio();
                 total += gapPx * (children.length - 1);
             }
             // Rounded to the nearest 8px — the live turn ticker (elapsed
@@ -942,7 +985,18 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         // P2, PR #2812: this used to read `--space-1-5`, the row's OWN
         // internal `-row-right` gap, not `--space-2`, the actual
         // `column-gap` between the row's left/right/stats children.)
-        const gapPx = rowsRef ? parseFloat(getComputedStyle(rowsRef).getPropertyValue("--space-2")) || 8 : 8;
+        //
+        // `* zoomRatio()` — regression found post-merge: `getComputedStyle`
+        // returns this in LOCAL/unzoomed pixels, but `width`/`widths`
+        // below are all `getBoundingClientRect()` (zoomed) values. Without
+        // the correction, `gapPx` was too LARGE relative to everything
+        // else under any non-1 ancestor zoom, overestimating how much
+        // space is needed — the widest tier wrongly split into 2 lines,
+        // and the per-pair capacity check (§3.2 step 6) rejected more
+        // pairs than necessary as the pane narrowed, reproducing the very
+        // one-sided-lines pattern this file exists to prevent. See
+        // `zoomRatio`'s own doc comment above.
+        const gapPx = rowsRef ? (parseFloat(getComputedStyle(rowsRef).getPropertyValue("--space-2")) || 8) * zoomRatio() : 8;
 
         // Codex P1, PR #2812: a slot hidden via this file's own SCSS
         // shed-content queries (e.g. `.agent-composer-strip-auth`,
