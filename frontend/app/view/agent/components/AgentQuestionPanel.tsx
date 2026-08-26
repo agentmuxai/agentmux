@@ -568,9 +568,14 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
                         </div>
 
                         {/* Scrollable middle region — header (above) and actions
-                            (below) stay pinned via position: sticky so the
-                            countdown and Submit/Answer-later buttons are never
-                            scrolled out of reach on a long question set.
+                            (below) are flex-shrink: 0 so they never give up space
+                            to this region, keeping the countdown and Submit/
+                            Answer-later buttons visible regardless of how long
+                            the question set is (NOT position: sticky — see
+                            AgentQuestionPanel.scss's comments on
+                            .agent-question-panel-header for why sticky is inert
+                            here; header/actions are siblings of this scroll
+                            region, not nested inside it).
                             Spec: docs/specs/SPEC_ASK_USER_QUESTION_PANEL_SCROLL_2026_08_25.md. */}
                         <div class="agent-question-panel-scroll">
                             <For each={r.questions}>
