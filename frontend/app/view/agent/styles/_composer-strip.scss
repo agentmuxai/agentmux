@@ -418,7 +418,10 @@
 
 // Manual "Compact now" trigger — same subtle chrome treatment as the
 // process badge (neutral, not a loud CTA; Shell stays the strip's one
-// real call-to-action). Sits immediately right of the context text.
+// real call-to-action). Sits immediately adjacent to the context text,
+// on its OUTER side (edge priority — left of the text when the ctx slot
+// is on a row's left half, right of it otherwise; see the ctx slot's
+// render(rowSide) in AgentComposerStrip.tsx).
 .agent-composer-strip-compact-btn {
     display: inline-flex;
     align-items: center;

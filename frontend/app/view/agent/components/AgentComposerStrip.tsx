@@ -689,7 +689,8 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 // ctx text + countdown (conditional) + Compact button
                 // (conditional) render together as one unit — this slot
                 // can't be split across zones, since Compact must stay
-                // immediately right of the context text. Grouped with the
+                // immediately adjacent to the context text (on the OUTER
+                // side of it — see render(rowSide) below). Grouped with the
                 // runtime trigger on the LEFT (2026-08-25, Rev 5) — this
                 // slot alone can render 3 sub-elements, more than
                 // everything else in the pool combined in the common
