@@ -1,6 +1,8 @@
 # Tab close (X) button — spurious select flash
 
-**Status:** Root cause identified, fix proposed (not yet implemented)
+**Status:** §§2-3 (click-bubble race) fixed and shipped (PR #2811). §5 below
+is a follow-up: a second, independent flash reported after §2-3 landed —
+fixed in the same branch.
 **Owner:** unassigned
 **Date:** 2026-08-25
 **Scope:** `frontend/app/tab/tab.tsx`, `frontend/app/tab/tabbar.tsx`,
@@ -195,3 +197,86 @@ downstream.
 - Regression check: closing the *active* tab (via ✕ or Ctrl+W) still moves
   selection to its neighbor exactly once, with no double `ActiveTabChanged`
   round trip.
+
+## 5. Follow-up — flash when closing the *active* tab via the confirm modal
+
+After §2-3 shipped (PR #2811), a second, independent flash was reported:
+closing the **currently active** tab through the close-confirm modal
+(`tab:skipcloseconfirm` unset/false, the default) still shows a brief flash
+right after clicking "Close tab" in the modal — even though the click-bubble
+race from §2 is gone.
+
+### 5.1 Root cause — redundant client-side pre-select turns one atomic update into two
+
+`handleClose` (`tabbar.tsx`, pre-fix) did this when closing the active tab:
+
+```ts
+if (tabId === activeTabId()) {
+    const idx = allTabs.indexOf(tabId);
+    const nextTab = allTabs[idx + 1] ?? allTabs[idx - 1];
+    if (nextTab) await setActiveTab(nextTab);   // RPC #1 — round trip, paints
+}
+await WorkspaceService.CloseTab(props.workspace.oid, tabId);  // RPC #2 — round trip, paints
+```
+
+This is a *sequential* two-RPC dance: first move the highlight to the
+neighbor (a full `SetActiveTab` round trip that lands and paints on its
+own), **then** remove the now-still-visible-but-deselected closing tab (a
+second round trip). The user-visible sequence is: `[X active]` → `[X
+deselected, neighbor active, X still sitting in the strip]` → `[X gone]` —
+the middle frame is the reported flash: the tab you just confirmed closing
+visibly un-highlights before it disappears, instead of just vanishing.
+
+But per §2.4/the backend code already cited in this spec,
+`agentmux-srv/src/reducer/tab.rs::handle_delete_tab` (`tab.rs:127-137`)
+**already** reassigns `active_tab_id` to the correct neighbor *atomically*,
+in the same reducer dispatch as the removal, whenever the deleted tab was
+active — confirmed by the saga (`agentmux-srv/src/sagas/delete_tab.rs`)
+dispatching exactly one `Command::DeleteTab` and by the reducer's own test
+`delete_active_tab_promotes_neighbor` (`tab.rs:616-654`). `TabDeleted` and
+`ActiveTabChanged` are emitted together from that one call, so the frontend
+receives ONE update reflecting the final state (tab gone, correct neighbor
+active) from a single `CloseTab` response. The client-side pre-select was
+always redundant for correctness — it just happened to also be the thing
+splitting one atomic transition into two paintable steps.
+
+The pre-select wasn't pure dead weight, though: `setActiveTab`
+(`tab-actions.ts`) also holds the tab-content **reveal gate**
+(`holdRevealGate()`/`scheduleRevealLift()`, `SPEC_TAB_CONTENT_REVEAL_GATE.md`)
+so the destination tab's panes don't mount piecemeal. Simply deleting the
+pre-select without replacing that would reintroduce pane-content flicker on
+every active-tab close.
+
+### 5.2 Fix
+
+Drop the separate `setActiveTab` RPC; let `CloseTab`'s own atomic backend
+transition handle both the removal and the reassignment in one round trip.
+Keep holding the reveal gate — just around the single `CloseTab` call
+instead of around a now-removed extra RPC:
+
+```ts
+const closingActiveTab = tabId === activeTabId();
+fireAndForget(async () => {
+    if (closingActiveTab) holdRevealGate();
+    try {
+        await WorkspaceService.CloseTab(props.workspace.oid, tabId);
+        deleteLayoutModelForTab(tabId);
+    } finally {
+        if (closingActiveTab) scheduleRevealLift();
+    }
+});
+```
+
+No backend change needed — this only removes a redundant frontend round
+trip and relies on behavior the reducer already had and already tests.
+
+### 5.3 Test plan (follow-up)
+
+- Manual: with the default close-confirm modal enabled, close the active
+  tab via ✕ → confirm — the tab should disappear directly with the neighbor
+  already active, no intermediate deselected-but-still-visible frame.
+- Regression: pane content on the newly-active tab still mounts atomically
+  (no piecemeal reveal) — the reveal gate is still exercised, just around
+  the single `CloseTab` call.
+- Full `vitest` suite + `tsc --noEmit` — no regressions expected; this is a
+  subtractive change (removes a call), not new branching logic.
