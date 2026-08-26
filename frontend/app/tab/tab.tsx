@@ -229,6 +229,17 @@ function Tab(props: TabProps): JSX.Element {
         event.stopPropagation();
     };
 
+    // Without this, a click on the close button bubbles past the button's
+    // own onClick to the parent .tab div's onClick={props.onSelect} (only
+    // mousedown propagation is stopped above), spuriously selecting the tab
+    // that's simultaneously being closed. That races SetActiveTab against
+    // CloseTab on the backend and produces a visible select/deselect flash —
+    // see docs/specs/SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md.
+    const handleCloseClick = (event: MouseEvent) => {
+        event.stopPropagation();
+        props.onClose(event);
+    };
+
     const handleColorSelect = (hex: string | null) => {
         const oref = makeORef("tab", props.id);
         fireAndForget(async () => {
@@ -286,7 +297,7 @@ function Tab(props: TabProps): JSX.Element {
                     </div>
                     <Button
                         className="ghost grey close"
-                        onClick={props.onClose}
+                        onClick={handleCloseClick}
                         onMouseDown={handleMouseDownOnClose}
                         title="Close Tab"
                         draggable={false}

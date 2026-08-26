@@ -630,18 +630,10 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             });
                         }
                     }
-                    for update in &updates {
-                        let oref = format!("{}:{}", update.otype, update.oid);
-                        if let Ok(data) = serde_json::to_value(update) {
-                            event_bus.broadcast_event(
-                                &crate::backend::eventbus::WSEventType {
-                                    eventtype: "waveobj:update".to_string(),
-                                    oref,
-                                    data: Some(data),
-                                },
-                            );
-                        }
-                    }
+                    // One batched frame so the renderer applies all of them in
+                    // a single reactive flush — see
+                    // EventBus::broadcast_wave_obj_updates.
+                    event_bus.broadcast_wave_obj_updates(&updates);
                 }
 
                 Ok(Some(serde_json::to_value(&AgentOpenResult {

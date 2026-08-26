@@ -16,6 +16,12 @@ use super::wps::{WaveEvent, WpsClient, EVENT_SYS_INFO, EVENT_BLOCK_STATS, EVENT_
 
 pub const WS_EVENT_RPC: &str = "rpc";
 
+/// One WS frame carrying an ARRAY of `WaveObjUpdate`s from a single atomic
+/// backend transition. Mirrored in `frontend/app/store/wps-events.ts`
+/// (`WpsEvent.WaveObjBatchedUpdates`) — the frontend applies the whole array
+/// in one Solid `batch()` flush. See `broadcast_wave_obj_updates` below.
+pub const WS_EVENT_WAVE_OBJ_BATCHED_UPDATES: &str = "waveobj:batchedupdates";
+
 /// Egress priority lane for a server→client event.
 ///
 /// `Background` is reserved for droppable perf telemetry (sysinfo + per-block
@@ -164,6 +170,39 @@ impl EventBus {
     /// Broadcast an event to all connected WebSocket clients, on the priority lane.
     pub fn broadcast_event(&self, event: &WSEventType) {
         self.broadcast_event_lane(event, Lane::Priority);
+    }
+
+    /// Broadcast a set of related `WaveObjUpdate`s from ONE atomic backend
+    /// transition as ONE `waveobj:batchedupdates` WS frame, so the frontend
+    /// applies them in a single reactive flush (`updateWaveObjects`'s
+    /// `batch()`), preserving the array's order.
+    ///
+    /// Why one frame instead of N `waveobj:update` frames: each frame is
+    /// dispatched (and painted) independently by the renderer, so a
+    /// `[delete tab, update workspace]` pair sent as two frames blanks the
+    /// still-mounted tab a full paint before the workspace update unmounts
+    /// it — the same flash class
+    /// `SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md` §6 fixed at the
+    /// RPC-response layer, riding in unbatched through the WS push path
+    /// instead (§7). Single-update callers (blockcontroller, setmeta, the
+    /// wave-obj bridge) keep emitting plain `waveobj:update` — there is
+    /// nothing to batch there.
+    pub fn broadcast_wave_obj_updates(&self, updates: &[super::obj::WaveObjUpdate]) {
+        if updates.is_empty() {
+            return;
+        }
+        let data = match serde_json::to_value(updates) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!("cannot marshal waveobj batched updates: {}", e);
+                return;
+            }
+        };
+        self.broadcast_event(&WSEventType {
+            eventtype: WS_EVENT_WAVE_OBJ_BATCHED_UPDATES.to_string(),
+            oref: String::new(),
+            data: Some(data),
+        });
     }
 
     /// Broadcast an event to all connected WebSocket clients on a specific lane.
@@ -332,6 +371,50 @@ mod tests {
 
         assert!(rx1.priority.try_recv().is_ok());
         assert!(rx2.priority.try_recv().is_err()); // tab-2 should not receive
+    }
+
+    /// A multi-object atomic transition must go out as ONE
+    /// `waveobj:batchedupdates` frame (array payload, order preserved), not
+    /// N frames — N frames repaint the renderer in N unbatched steps (the
+    /// SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md §7 flash).
+    #[test]
+    fn test_broadcast_wave_obj_updates_single_batched_frame() {
+        use crate::backend::obj::WaveObjUpdate;
+
+        let bus = EventBus::new();
+        let mut rx = bus.register_ws("conn-1", "tab-1");
+
+        let updates = vec![
+            WaveObjUpdate {
+                updatetype: "update".into(),
+                otype: "workspace".into(),
+                oid: "ws-1".into(),
+                obj: Some(serde_json::json!({"oid": "ws-1"})),
+            },
+            WaveObjUpdate {
+                updatetype: "delete".into(),
+                otype: "tab".into(),
+                oid: "tab-9".into(),
+                obj: None,
+            },
+        ];
+        bus.broadcast_wave_obj_updates(&updates);
+
+        let msg = rx.priority.try_recv().expect("one frame expected");
+        assert_eq!(
+            msg.get("eventtype").and_then(|v| v.as_str()),
+            Some(WS_EVENT_WAVE_OBJ_BATCHED_UPDATES),
+        );
+        let arr = msg.get("data").and_then(|d| d.as_array()).expect("array payload");
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0].get("otype").and_then(|v| v.as_str()), Some("workspace"));
+        assert_eq!(arr[1].get("updatetype").and_then(|v| v.as_str()), Some("delete"));
+        // Exactly one frame — nothing else queued.
+        assert!(rx.priority.try_recv().is_err());
+
+        // Empty slice → no frame at all.
+        bus.broadcast_wave_obj_updates(&[]);
+        assert!(rx.priority.try_recv().is_err());
     }
 
     #[test]

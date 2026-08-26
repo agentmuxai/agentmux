@@ -8,6 +8,7 @@ import { settingsAtom } from "@/store/config-signals";
 import { atoms, setActiveTab } from "@/store/global";
 import { RpcApi } from "@/store/rpc-api";
 import { TabRpcClient } from "@/store/rpc-util";
+import { holdRevealGate, scheduleRevealLift } from "@/store/tab-reveal";
 import { isMacOS } from "@/util/platformutil";
 import { fireAndForget } from "@/util/util";
 import type { JSX } from "solid-js";
@@ -48,14 +49,28 @@ function TabBar(props: TabBarProps): JSX.Element {
     const handleClose = (tabId: string) => {
         const allTabs = tabIds();
         if (allTabs.length <= 1) return;
+        // Don't pre-select the neighbor via a separate SetActiveTab RPC
+        // before closing: CloseTab's own DeleteTab reducer command already
+        // reassigns the workspace's active tab to the correct neighbor
+        // atomically (agentmux-srv/src/reducer/tab.rs::handle_delete_tab)
+        // when the closed tab was active, in the SAME state transition as
+        // the removal. Doing it ourselves first turned one atomic update
+        // into two sequential round trips — neighbor selected (paint),
+        // THEN the closing tab visibly deselects while still sitting there
+        // un-removed, THEN it finally disappears — a visible flash. Just
+        // hold the content reveal gate (same primitive setActiveTab uses)
+        // around the single CloseTab call so the destination pane still
+        // can't paint piecemeal. See
+        // docs/specs/SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md §5.
+        const closingActiveTab = tabId === activeTabId();
         fireAndForget(async () => {
-            if (tabId === activeTabId()) {
-                const idx = allTabs.indexOf(tabId);
-                const nextTab = allTabs[idx + 1] ?? allTabs[idx - 1];
-                if (nextTab) await setActiveTab(nextTab);
+            if (closingActiveTab) holdRevealGate();
+            try {
+                await WorkspaceService.CloseTab(props.workspace.oid, tabId);
+                deleteLayoutModelForTab(tabId);
+            } finally {
+                if (closingActiveTab) scheduleRevealLift();
             }
-            await WorkspaceService.CloseTab(props.workspace.oid, tabId);
-            deleteLayoutModelForTab(tabId);
         });
     };
 

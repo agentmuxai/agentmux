@@ -290,18 +290,9 @@ pub(crate) async fn handle_redock_floating_pane(state: &AppState, call: &WebCall
     // the event bus. Mirrors the pattern in `app_api.rs:399-410`.
     // Without this the target tab.blockids includes the new
     // block but its layout.leaforder doesn't → block invisible.
-    for update in &updates {
-        let oref = format!("{}:{}", update.otype, update.oid);
-        if let Ok(data) = serde_json::to_value(update) {
-            state.event_bus.broadcast_event(
-                &crate::backend::eventbus::WSEventType {
-                    eventtype: "waveobj:update".to_string(),
-                    oref,
-                    data: Some(data),
-                },
-            );
-        }
-    }
+    // One batched frame so the renderer applies all of them in a single
+    // reactive flush — see EventBus::broadcast_wave_obj_updates.
+    state.event_bus.broadcast_wave_obj_updates(&updates);
 
     WebReturnType::success_data_updates(
         serde_json::json!({
