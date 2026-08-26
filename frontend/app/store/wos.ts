@@ -340,6 +340,7 @@ export {
     reloadWaveObject,
     setObjectValue,
     updateWaveObject,
+    updateWaveObjects,
     useWaveObjectValue,
     wpsSubscribeToObject,
 };

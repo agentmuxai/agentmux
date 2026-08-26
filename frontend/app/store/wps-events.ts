@@ -12,6 +12,14 @@ export const WpsEvent = {
     SysInfo: "sysinfo",
     ControllerStatus: "controllerstatus",
     WaveObjUpdate: "waveobj:update",
+    // One WS frame carrying an ARRAY of WaveObjUpdates from a single atomic
+    // backend transition (e.g. CloseTab's [update workspace, delete tab]
+    // pair) — applied in one Solid batch() flush so the UI can't paint a
+    // half-applied intermediate state. Mirrors
+    // WS_EVENT_WAVE_OBJ_BATCHED_UPDATES in
+    // agentmux-srv/src/backend/eventbus.rs. See
+    // docs/specs/SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md §7.
+    WaveObjBatchedUpdates: "waveobj:batchedupdates",
     InstallProgress: "install_progress",
     Config: "config",
     UserInput: "userinput",

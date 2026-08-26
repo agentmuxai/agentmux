@@ -1,8 +1,10 @@
 # Tab close (X) button — spurious select flash
 
-**Status:** §§2-3 (click-bubble race) fixed and shipped (PR #2811). §5 below
-is a follow-up: a second, independent flash reported after §2-3 landed —
-fixed in the same branch.
+**Status:** §§2-3 (click-bubble race), §5 (double round trip), §6
+(unbatched RPC-response application), and §7 (unbatched WS-push
+application — the reason the flash survived §§5-6) are all implemented on
+branch `fix/tab-close-select-flash` (PR #2811, open — not yet merged to
+`main`, so no release build contains any of this yet).
 **Owner:** unassigned
 **Date:** 2026-08-25
 **Scope:** `frontend/app/tab/tab.tsx`, `frontend/app/tab/tabbar.tsx`,
@@ -378,3 +380,84 @@ future return, more than one `WaveObjUpdate` per call.
 - Full `vitest` suite + `tsc --noEmit` — no regressions expected (a `for`
   loop wrapped in `batch()` preserves the same update order and end state,
   only changes when Solid flushes the resulting DOM writes).
+
+## 7. Follow-up #3 — the flash survives §6 because the WS push path applies the same pair unbatched, and it always paints first
+
+After §6, the repo owner reported the flash was STILL there, right after
+the close-confirm modal dismisses. §6's `batch()` was correct but fixed
+only one of the delivery paths — and, as it turns out, the one that never
+actually paints.
+
+### 7.1 Root cause — three delivery paths, two of them unbatched, both faster than the one §6 fixed
+
+A `CloseTab`'s `[delete tab, update workspace]` pair reaches the calling
+renderer THREE separate ways:
+
+1. **The wave-obj bridge** (`agentmux-srv/src/server/wave_obj_bridge.rs`,
+   `Event::TabDeleted` arm): broadcast as **two separate WS frames** —
+   tab delete first, then (after an async `spawn_blocking` SQLite fetch)
+   the workspace update. Fired the moment the reducer publishes the event,
+   i.e. *while the HTTP handler is still running*.
+2. **The response-broadcast loop** (`run_service_call`,
+   `agentmux-srv/src/server/service/mod.rs`): pre-fix, one WS frame **per
+   update**, in the handler's array order — tab delete first. Fired after
+   the handler returns but before the HTTP response body is serialized to
+   the caller; the comment said "for everybody else on the event bus," but
+   `broadcast_event` sends to every connection, including the caller.
+3. **The HTTP response body** (`respData.updates` in `wos.ts`
+   `callBackendService`) — the only path §6 batched. Arrives last.
+
+Server-side, `forward_event` (`server/websocket.rs`) wraps each raw
+`waveobj:update` frame as an `eventrecv` RPC message, so each frame lands
+in `handleWaveEvent` → the scope-less `WaveObjUpdate` subscription in
+`initGlobalEventSubs` (`global.ts`) → a **bare, per-frame
+`WOS.updateWaveObject()` call** — no `batch()` anywhere on this path.
+
+So the actual paint sequence was: WS frame "delete tab:X" → the
+still-mounted `<Tab>` blanks in place (the §6 flash, verbatim) → WS frame
+"update workspace" → tab unmounts → HTTP body's batched pair arrives and
+is a no-op (`updateWaveObject`'s version guard skips the same-version
+workspace update; the tab delete is already applied). §6's `batch()` never
+had a chance to win the paint — the flash was deterministic, not even a
+race.
+
+### 7.2 Fix — batch the response broadcast; order the bridge parent-first
+
+Two changes, mirroring §6's "fix it at the shared layer" principle:
+
+- **`EventBus::broadcast_wave_obj_updates`** (`backend/eventbus.rs`): a
+  response's whole `updates` array now goes out as ONE
+  `waveobj:batchedupdates` WS frame (order preserved). The frontend
+  subscribes to it in `initGlobalEventSubs` and applies via the
+  already-batched `updateWaveObjects`. All five multi-update broadcast
+  sites switched to it: `run_service_call`, `app_api/pane.rs`,
+  `app_api/mod.rs`, `app_api/agent_open.rs`, `service/tear_off.rs`.
+  Single-update emitters (blockcontroller, setmeta, the bridge) keep the
+  plain `waveobj:update` frame — nothing to batch.
+- **Bridge delete ordering** (`wave_obj_bridge.rs`): the `TabDeleted`,
+  `BlockDeleted`, and `SrvWindowClosed` arms now emit the **parent update
+  BEFORE the child delete** (the mirror of the create arms' child-first
+  order). The bridge's two emissions are genuinely separate frames (one
+  requires an async fetch), so they can't be batched into one — but
+  parent-first, the child unmounts with its data still intact and the late
+  delete lands on an unsubscribed signal: nothing paints. General rule
+  worth keeping: **create child-first, delete parent-first.**
+
+With both in place, every arrival order is flash-free: bridge frames are
+parent-first, the response broadcast is atomic, the response body is
+atomic (§6).
+
+### 7.3 Test plan (follow-up #3)
+
+- `wave_obj_bridge.rs::tests` — `TabDeleted` broadcasts the workspace
+  update before the tab delete; `BlockDeleted` broadcasts the tab update
+  before the block delete (asserted on a real `EventBus` connection's
+  receive order).
+- `eventbus.rs::tests` — `broadcast_wave_obj_updates` emits exactly one
+  `waveobj:batchedupdates` frame with the array order preserved, and no
+  frame for an empty slice.
+- `frontend/app/tab/tab.test.tsx` — §4's long-owed component test: a click
+  on a background tab's close button fires `onClose` only (never
+  `onSelect`); a click on the tab body still selects.
+- Manual: close the active tab via the confirm modal — the tab vanishes
+  with the neighbor already active; no blank frame, no highlight blink.
