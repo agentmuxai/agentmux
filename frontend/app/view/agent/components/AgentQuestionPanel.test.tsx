@@ -679,3 +679,41 @@ describe("AgentQuestionPanel keyboard-pause (SPEC_ASK_USER_QUESTION_TIMEOUT_KEYB
         expect(screen.queryByText(/Auto-selects recommended in/)).toBeNull();
     });
 });
+
+describe("AgentQuestionPanel scroll structure (SPEC_ASK_USER_QUESTION_PANEL_SCROLL_2026_08_25.md)", () => {
+    it("wraps question content in a scroll region that is a sibling of the fixed-size header and actions bar", () => {
+        const [pending] = createSignal<ToolNode[]>([twoQuestionSet()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={vi.fn()} />);
+
+        const panel = document.querySelector(".agent-question-panel") as HTMLElement;
+        const scroll = panel.querySelector(":scope > .agent-question-panel-scroll");
+        const header = panel.querySelector(":scope > .agent-question-panel-header");
+        const actions = panel.querySelector(":scope > .agent-question-panel-actions");
+
+        // Header and actions must be direct children of the panel (not nested
+        // inside the scroll region) — they stay visible via flex-shrink: 0,
+        // not position: sticky (which would need them nested inside the
+        // scroll container to have any effect; see the SCSS comments on
+        // .agent-question-panel-header for why sticky doesn't apply here).
+        expect(scroll).toBeTruthy();
+        expect(header).toBeTruthy();
+        expect(actions).toBeTruthy();
+
+        // Both questions render inside the scroll region, not outside it.
+        expect(scroll?.querySelectorAll(".agent-question-panel-q").length).toBe(2);
+        expect(scroll?.contains(screen.getByText("Pick a color"))).toBe(true);
+        expect(scroll?.contains(screen.getByText("Pick a size"))).toBe(true);
+    });
+
+    it("does not put the Submit/Answer-later buttons inside the scroll region", () => {
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={vi.fn()} />);
+
+        const scroll = document.querySelector(".agent-question-panel-scroll");
+        const submitBtn = screen.getByRole("button", { name: /Submit answer/ });
+        const deferBtn = screen.getByRole("button", { name: /Answer later/ });
+
+        expect(scroll?.contains(submitBtn)).toBe(false);
+        expect(scroll?.contains(deferBtn)).toBe(false);
+    });
+});

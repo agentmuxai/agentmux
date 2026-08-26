@@ -567,63 +567,75 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
                             </Show>
                         </div>
 
-                        <For each={r.questions}>
-                            {(q, qi) => (
-                                <fieldset class="agent-question-panel-q">
-                                    <legend class="agent-question-panel-q-prompt">
-                                        <span class="agent-question-panel-q-chip">{q.header}</span>
-                                        {q.question}
-                                    </legend>
-                                    <div class="agent-question-panel-options">
-                                        <For each={q.options}>
-                                            {(opt) => {
-                                                const checked = () =>
-                                                    state()[qi()]?.selected.includes(opt.label) ?? false;
-                                                // Highlight which option(s) the 30s auto-timeout would pick,
-                                                // so a watching user can predict the outcome before it
-                                                // happens. Display-neutral: the label text itself (including
-                                                // any "(Recommended)" suffix) is unchanged.
-                                                const recommended = () =>
-                                                    recommendedOptions(q.options).some((o) => o.label === opt.label);
-                                                return (
-                                                    <label
-                                                        class="agent-question-panel-option"
-                                                        classList={{
-                                                            "agent-question-panel-option--checked": checked(),
-                                                            "agent-question-panel-option--recommended": recommended(),
-                                                        }}
-                                                    >
-                                                        <input
-                                                            type={q.multiSelect ? "checkbox" : "radio"}
-                                                            name={`amux-q-${r.tool_use_id}-${qi()}`}
-                                                            checked={checked()}
-                                                            onChange={() => toggleOption(qi(), opt.label, q.multiSelect)}
-                                                        />
-                                                        <span class="agent-question-panel-option-body">
-                                                            <span class="agent-question-panel-option-label">{opt.label}</span>
-                                                            <Show when={opt.description}>
-                                                                <span class="agent-question-panel-option-desc">{opt.description}</span>
-                                                            </Show>
-                                                        </span>
-                                                    </label>
-                                                );
-                                            }}
-                                        </For>
-                                        <label class="agent-question-panel-other">
-                                            <span class="agent-question-panel-other-label">Other</span>
-                                            <input
-                                                type="text"
-                                                class="agent-question-panel-other-input"
-                                                placeholder="Type a custom answer…"
-                                                value={state()[qi()]?.other ?? ""}
-                                                onInput={(e) => setOther(qi(), e.currentTarget.value, q.multiSelect)}
-                                                onContextMenu={showTextInputContextMenu}
-                                            />
-                                        </label>
-                                    </div>
-                                </fieldset>
-                            )}
-                        </For>
+                        {/* Scrollable middle region — header (above) and actions
+                            (below) are flex-shrink: 0 so they never give up space
+                            to this region, keeping the countdown and Submit/
+                            Answer-later buttons visible regardless of how long
+                            the question set is (NOT position: sticky — see
+                            AgentQuestionPanel.scss's comments on
+                            .agent-question-panel-header for why sticky is inert
+                            here; header/actions are siblings of this scroll
+                            region, not nested inside it).
+                            Spec: docs/specs/SPEC_ASK_USER_QUESTION_PANEL_SCROLL_2026_08_25.md. */}
+                        <div class="agent-question-panel-scroll">
+                            <For each={r.questions}>
+                                {(q, qi) => (
+                                    <fieldset class="agent-question-panel-q">
+                                        <legend class="agent-question-panel-q-prompt">
+                                            <span class="agent-question-panel-q-chip">{q.header}</span>
+                                            {q.question}
+                                        </legend>
+                                        <div class="agent-question-panel-options">
+                                            <For each={q.options}>
+                                                {(opt) => {
+                                                    const checked = () =>
+                                                        state()[qi()]?.selected.includes(opt.label) ?? false;
+                                                    // Highlight which option(s) the 30s auto-timeout would pick,
+                                                    // so a watching user can predict the outcome before it
+                                                    // happens. Display-neutral: the label text itself (including
+                                                    // any "(Recommended)" suffix) is unchanged.
+                                                    const recommended = () =>
+                                                        recommendedOptions(q.options).some((o) => o.label === opt.label);
+                                                    return (
+                                                        <label
+                                                            class="agent-question-panel-option"
+                                                            classList={{
+                                                                "agent-question-panel-option--checked": checked(),
+                                                                "agent-question-panel-option--recommended": recommended(),
+                                                            }}
+                                                        >
+                                                            <input
+                                                                type={q.multiSelect ? "checkbox" : "radio"}
+                                                                name={`amux-q-${r.tool_use_id}-${qi()}`}
+                                                                checked={checked()}
+                                                                onChange={() => toggleOption(qi(), opt.label, q.multiSelect)}
+                                                            />
+                                                            <span class="agent-question-panel-option-body">
+                                                                <span class="agent-question-panel-option-label">{opt.label}</span>
+                                                                <Show when={opt.description}>
+                                                                    <span class="agent-question-panel-option-desc">{opt.description}</span>
+                                                                </Show>
+                                                            </span>
+                                                        </label>
+                                                    );
+                                                }}
+                                            </For>
+                                            <label class="agent-question-panel-other">
+                                                <span class="agent-question-panel-other-label">Other</span>
+                                                <input
+                                                    type="text"
+                                                    class="agent-question-panel-other-input"
+                                                    placeholder="Type a custom answer…"
+                                                    value={state()[qi()]?.other ?? ""}
+                                                    onInput={(e) => setOther(qi(), e.currentTarget.value, q.multiSelect)}
+                                                    onContextMenu={showTextInputContextMenu}
+                                                />
+                                            </label>
+                                        </div>
+                                    </fieldset>
+                                )}
+                            </For>
+                        </div>
 
                         <div class="agent-question-panel-actions">
                             <button
