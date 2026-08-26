@@ -313,6 +313,34 @@ export function computeComposerRows(
     }));
 }
 
+/**
+ * Edge priority for interactive elements (2026-08-26, user-directed
+ * follow-up to Rev 7): on every rendered line, interactive slots
+ * (buttons/dropdowns — things you CLICK) sit flush against the strip's
+ * outer edges; passive/informational slots (auth status, ctx text) sit
+ * inward. A stable partition, not a sort — relative order within the
+ * interactive and passive groups is preserved, so this can never fight
+ * the pool's own ordering rules (e.g. "Shell always outermost" survives
+ * because hostShell is both interactive AND last in pool order).
+ *
+ * Ordering only — row membership and widths are decided upstream by
+ * `computeComposerRows`, so this cannot affect the §1 no-one-sided-rows
+ * invariant or any fit/pairing decision. The matching second half of
+ * the constraint (a composite slot's own internal order — ctx's Compact
+ * button, hostShell's Shell button — mirroring to the outer end of
+ * whichever side it renders on) lives in those slots' `render(rowSide)`
+ * callbacks, not here.
+ */
+export function orderKeysForEdgePriority(
+    keys: string[],
+    side: "left" | "right",
+    isInteractive: (key: string) => boolean,
+): string[] {
+    const interactive = keys.filter((k) => isInteractive(k));
+    const passive = keys.filter((k) => !isInteractive(k));
+    return side === "left" ? [...interactive, ...passive] : [...passive, ...interactive];
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function fmtTokens(t: TurnTokens): string {
@@ -582,13 +610,24 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // partition) — both were solving the wrong layer: the actual dead-
     // space bug was the CSS forcing both zones to equal width regardless
     // of content (see _composer-strip.scss), not which slot goes where.
-    const slots = createMemo((): { key: string; side: "left" | "right"; render: () => JSX.Element }[] => {
-        const out: { key: string; side: "left" | "right"; render: () => JSX.Element }[] = [];
+    // `interactive` — feeds the edge-priority ordering (see
+    // `orderKeysForEdgePriority`): true for slots whose primary content
+    // is something you CLICK (buttons/dropdowns), false for passive
+    // status/info. `render` receives the side of the row it is being
+    // mounted into, so composite slots (ctx, hostShell) can mirror their
+    // own internal order to keep their interactive element on the outer
+    // end — the side is fixed for the lifetime of one render() call
+    // (a slot changing sides leaves one <For> and enters the other,
+    // re-invoking render with the new side), so it is deliberately a
+    // plain parameter, not a reactive read.
+    const slots = createMemo((): { key: string; side: "left" | "right"; interactive: boolean; render: (rowSide: "left" | "right") => JSX.Element }[] => {
+        const out: { key: string; side: "left" | "right"; interactive: boolean; render: (rowSide: "left" | "right") => JSX.Element }[] = [];
 
         if (showControls()) {
             out.push({
                 key: "runtime",
                 side: "left",
+                interactive: true,
                 render: () => (
                     <AgentRuntimeDropup
                         blockId={props.blockId ?? ""}
@@ -603,6 +642,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
             out.push({
                 key: "badge",
                 side: "right",
+                interactive: true,
                 render: () => (
                     <button
                         type="button"
@@ -622,6 +662,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
             out.push({
                 key: "auth",
                 side: "right",
+                interactive: false,
                 render: () => (
                     <span
                         class="agent-composer-strip-auth"
@@ -648,7 +689,8 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 // ctx text + countdown (conditional) + Compact button
                 // (conditional) render together as one unit — this slot
                 // can't be split across zones, since Compact must stay
-                // immediately right of the context text. Grouped with the
+                // immediately adjacent to the context text (on the OUTER
+                // side of it — see render(rowSide) below). Grouped with the
                 // runtime trigger on the LEFT (2026-08-25, Rev 5) — this
                 // slot alone can render 3 sub-elements, more than
                 // everything else in the pool combined in the common
@@ -661,27 +703,17 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 // docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md
                 // Rev 5.
                 side: "left",
-                render: () => (
-                    <>
-                        <span
-                            class={`agent-composer-strip-ctx ${ctxClass()}`}
-                            title={
-                                props.contextTokens != null
-                                    ? contextTitle(props.contextTokens, props.contextWindow)
-                                    : undefined
-                            }
-                        >
-                            {ctxText()}
-                        </span>
-                        <Show when={ctxCountdownText()}>
-                            <span
-                                class={`agent-composer-strip-ctx-countdown ${ctxClass()}`}
-                                classList={{ "agent-composer-strip-ctx-countdown--critical": ctxClass().endsWith("critical") }}
-                                title="Applies to auto-compaction only — a manual /compact can happen at any fill level."
-                            >
-                                {ctxCountdownText()}
-                            </span>
-                        </Show>
+                // Interactive exactly when the Compact button actually
+                // renders (same gate as its <Show> below) — a pure
+                // ctx-text slot has nothing clickable and should sit
+                // inward like any other passive content.
+                interactive: props.providerId === "claude" && props.onCompact != null,
+                // Compact sits on the OUTER end of whichever side this
+                // slot renders on (edge priority): first on the left,
+                // last on the right. The text + countdown stay adjacent
+                // in reading order either way.
+                render: (rowSide) => {
+                    const compactBtn = () => (
                         <Show when={props.providerId === "claude" && props.onCompact != null}>
                             <button
                                 type="button"
@@ -700,8 +732,33 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                                 Compact
                             </button>
                         </Show>
-                    </>
-                ),
+                    );
+                    return (
+                        <>
+                            {rowSide === "left" && compactBtn()}
+                            <span
+                                class={`agent-composer-strip-ctx ${ctxClass()}`}
+                                title={
+                                    props.contextTokens != null
+                                        ? contextTitle(props.contextTokens, props.contextWindow)
+                                        : undefined
+                                }
+                            >
+                                {ctxText()}
+                            </span>
+                            <Show when={ctxCountdownText()}>
+                                <span
+                                    class={`agent-composer-strip-ctx-countdown ${ctxClass()}`}
+                                    classList={{ "agent-composer-strip-ctx-countdown--critical": ctxClass().endsWith("critical") }}
+                                    title="Applies to auto-compaction only — a manual /compact can happen at any fill level."
+                                >
+                                    {ctxCountdownText()}
+                                </span>
+                            </Show>
+                            {rowSide === "right" && compactBtn()}
+                        </>
+                    );
+                },
             });
         }
 
@@ -711,11 +768,19 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         out.push({
             key: "hostShell",
             side: "right",
-            render: () => (
-                <span class="agent-composer-strip-host-shell">
+            interactive: true,
+            // Shell (the button) on the OUTER end, HOST badge (passive)
+            // inward — mirrored by side the same way ctx's Compact is.
+            // On the right this is the existing "Shell always outermost"
+            // order, unchanged; the flip only shows in the degenerate
+            // case where this slot is the line's sole (left) occupant.
+            render: (rowSide) => {
+                const hostBadge = () => (
                     <Show when={props.agentMode === "host" || props.agentMode === "container"}>
                         <RuntimeBadge runtime={props.agentMode!} size="tag" />
                     </Show>
+                );
+                const shellBtn = () => (
                     <button
                         type="button"
                         class="agent-composer-strip-log-btn"
@@ -725,8 +790,15 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                     >
                         Shell
                     </button>
-                </span>
-            ),
+                );
+                return (
+                    <span class="agent-composer-strip-host-shell">
+                        {rowSide === "left" && shellBtn()}
+                        {hostBadge()}
+                        {rowSide === "right" && shellBtn()}
+                    </span>
+                );
+            },
         });
 
         return out;
@@ -958,7 +1030,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // blocks, not something a key can paper over, but a real row/side
     // change is a far rarer event than "any slot's content changed."
     const slotByKey = createMemo(() => {
-        const map = new Map<string, { key: string; side: "left" | "right"; render: () => JSX.Element }>();
+        const map = new Map<string, { key: string; side: "left" | "right"; interactive: boolean; render: (rowSide: "left" | "right") => JSX.Element }>();
         for (const s of slots()) map.set(s.key, s);
         return map;
     });
@@ -985,13 +1057,23 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         const totalMeasured = Object.values(widths).reduce((sum, w) => sum + w, 0);
         const width = stripWidth();
 
+        // Edge priority (see `orderKeysForEdgePriority`) — applied to
+        // EVERY return path below, fallback included, as the final step:
+        // pure reordering within a side, after all row-membership and
+        // shed decisions are made, so it can't interact with any of them.
+        const interactiveByKey = new Map(list.map((s) => [s.key, s.interactive]));
+        const edgeOrdered = (r: ComposerRow): ComposerRow => ({
+            left: orderKeysForEdgePriority(r.left, "left", (k) => interactiveByKey.get(k) ?? false),
+            right: orderKeysForEdgePriority(r.right, "right", (k) => interactiveByKey.get(k) ?? false),
+        });
+
         if (!allMeasured || totalMeasured === 0 || width === 0) {
             const left = list.filter((s) => s.side === "left").map((s) => s.key);
             const right = list.filter((s) => s.side === "right").map((s) => s.key);
             if (left.length === 0 && right.length > 0) {
-                return [{ left: [right[0]], right: right.slice(1) }];
+                return [edgeOrdered({ left: [right[0]], right: right.slice(1) })];
             }
-            return [{ left, right }];
+            return [edgeOrdered({ left, right })];
         }
 
         // The real column-gap `.agent-composer-strip-row` applies between
@@ -1042,13 +1124,13 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
             statsWidth(),
         );
 
-        if (shed.length === 0) return built;
+        if (shed.length === 0) return built.map(edgeOrdered);
         const target = built[built.length - 1] ?? { left: [], right: [] };
         for (const s of shed) {
             if (s.side === "left") target.left = [...target.left, s.key];
             else target.right = [...target.right, s.key];
         }
-        return built.length === 0 ? [target] : [...built.slice(0, -1), target];
+        return (built.length === 0 ? [target] : [...built.slice(0, -1), target]).map(edgeOrdered);
     });
 
     // Row COUNT rarely changes across recomputes — plain number primitives
@@ -1059,14 +1141,14 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // above already fixed, one level up.
     const rowIndices = createMemo(() => rows().map((_, i) => i));
 
-    const renderSlot = (key: string) => {
+    const renderSlot = (key: string, rowSide: "left" | "right") => {
         // untrack: see `slotByKey`'s own doc comment above — without
-        // this, a bare `{slotByKey().get(key)?.render()}` would read the
-        // reactive `slotByKey()` memo and re-invoke `.render()` (so
+        // this, a bare `{slotByKey().get(key)?.render(...)}` would read
+        // the reactive `slotByKey()` memo and re-invoke `.render()` (so
         // reconstructing e.g. AgentRuntimeDropup, resetting its own
         // open/selectedOptIndex signals) on every `slots()` recompute,
         // defeating the point of keying by string at all.
-        const rendered = untrack(() => slotByKey().get(key)?.render());
+        const rendered = untrack(() => slotByKey().get(key)?.render(rowSide));
         return (
             // `display: contents` (agent-composer-strip-slot-measure,
             // _composer-strip.scss) — invisible to layout, so this
@@ -1136,11 +1218,11 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                     {(rowIndex) => (
                         <div class="agent-composer-strip-row">
                             <span class="agent-composer-strip-row-left">
-                                <For each={rows()[rowIndex]?.left ?? []}>{renderSlot}</For>
+                                <For each={rows()[rowIndex]?.left ?? []}>{(key) => renderSlot(key, "left")}</For>
                             </span>
                             <Show when={rows().length === 1}>{statsZone("single")}</Show>
                             <span class="agent-composer-strip-row-right">
-                                <For each={rows()[rowIndex]?.right ?? []}>{renderSlot}</For>
+                                <For each={rows()[rowIndex]?.right ?? []}>{(key) => renderSlot(key, "right")}</For>
                             </span>
                         </div>
                     )}
