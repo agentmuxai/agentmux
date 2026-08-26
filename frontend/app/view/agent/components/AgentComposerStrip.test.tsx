@@ -264,9 +264,12 @@ describe("computeComposerRows", () => {
             { key: "w3", width: 60 },
             { key: "hostShell", width: 50 },
         ];
-        // totalWidth = 290 + 3*5 = 305, far past this tiny availableWidth
-        // — forces the multi-row path.
-        const rows = computeComposerRows(slots, "hostShell", 10, 5);
+        // totalWidth = 290 + 3*5 = 305, past availableWidth=200 — forces
+        // the multi-row path. Both generated pairs still fit within 200
+        // (w1+hostShell+gap=155, w2+w3+gap=145), so parity holds cleanly
+        // — a per-pair-capacity failure is exercised by its own dedicated
+        // test below instead (Codex P1, PR #2812).
+        const rows = computeComposerRows(slots, "hostShell", 200, 5);
         // Sorted descending [w1,w2,w3,hostShell]; two-pointer pairs
         // (w1,hostShell) and (w2,w3); hostShell's pair reoriented to the
         // END. Every row has both sides filled — the core invariant,
@@ -289,7 +292,9 @@ describe("computeComposerRows", () => {
             { key: "w2", width: 60 },
             { key: "hostShell", width: 50 },
         ];
-        const rows = computeComposerRows(slots, "hostShell", 10, 5);
+        // availableWidth=180: past the single-row total (210+10=220), but
+        // still enough for the w1+hostShell pair (100+50+5=155) to fit.
+        const rows = computeComposerRows(slots, "hostShell", 180, 5);
         // w1 pairs with hostShell (widest+narrowest among the 3), leaving
         // w2 as the odd one out — reoriented so hostShell's row is last.
         expect(rows).toEqual([
@@ -310,7 +315,9 @@ describe("computeComposerRows", () => {
             { key: "w1", width: 100 },
             { key: "w2", width: 50 },
         ];
-        const rows = computeComposerRows(slots, "hostShell", 10, 5);
+        // availableWidth=300: past the single-row total (350+10=360), but
+        // still enough for the hostShell+w2 pair (200+50+5=255) to fit.
+        const rows = computeComposerRows(slots, "hostShell", 300, 5);
         expect(rows).toEqual([
             { left: ["w1"], right: [] },
             { left: ["w2"], right: ["hostShell"] },
@@ -326,6 +333,59 @@ describe("computeComposerRows", () => {
         expect(computeComposerRows([], "hostShell", 1000, 5)).toEqual([]);
     });
 
+    // Codex P1, PR #2812: the two-pointer walk used to pair widest-with-
+    // narrowest unconditionally, even when the pair's combined width
+    // didn't fit `availableWidth` — the returned row object had both
+    // sides "filled," but the real rendered line still overflowed onto
+    // two physical lines via the row's own `flex-wrap`, reproducing the
+    // one-sided-lines bug through a different mechanism than the one this
+    // revision set out to fix. `availableWidth=10` here is genuinely too
+    // small for ANY two of these slots to share a line — no pairing can
+    // satisfy both "fits" and "paired," so every slot must fall back to
+    // its own one-sided row (a third, physical-capacity exception to
+    // spec §1, alongside the odd-count and degenerate cases).
+    it("falls back to one-sided rows when no candidate pair fits within availableWidth (Codex P1, PR #2812)", () => {
+        const slots = [
+            { key: "slot0", width: 500 },
+            { key: "slot1", width: 10 },
+            { key: "slot2", width: 10 },
+            { key: "hostShell", width: 10 },
+        ];
+        const rows = computeComposerRows(slots, "hostShell", 10, 5);
+        expect(rows).toEqual([
+            { left: ["slot0"], right: [] },
+            { left: ["slot1"], right: [] },
+            { left: ["slot2"], right: [] },
+            { left: [], right: ["hostShell"] },
+        ]);
+    });
+
+    // Codex P1, PR #2812: the single-row fit check only summed slot
+    // widths, never the stats zone that shares the same physical line as
+    // a third flex child whenever `rows().length === 1` (spec §3.4).
+    // Slots alone fitting `availableWidth` doesn't mean slots-plus-stats
+    // do — `reservedWidth` closes that gap.
+    it("accounts for reservedWidth (the stats zone) in the single-row fit decision (Codex P1, PR #2812)", () => {
+        // 3 slots (odd count) so the multi-row path — once triggered —
+        // produces a pair plus a singleton (2 rows), not a single
+        // still-one-row pairing (a 2-slot pool would collapse right back
+        // to length 1 regardless of which path built it, masking whether
+        // `reservedWidth` actually changed anything).
+        const slots = [
+            { key: "a", width: 30 },
+            { key: "b", width: 20 },
+            { key: "hostShell", width: 10 },
+        ];
+        // Slots alone: 30+20+10 + 2*5(gap) = 70, fits within 80 — single
+        // row with no reserved width.
+        expect(computeComposerRows(slots, "hostShell", 80, 5, 0)).toHaveLength(1);
+        // A 20px stats zone (+ its own gap to the nearest slot) pushes the
+        // real total to 70+20+5=95, past availableWidth=80 — must fall
+        // back to multi-row rather than overflow the shared line.
+        const withStats = computeComposerRows(slots, "hostShell", 80, 5, 20);
+        expect(withStats.length).toBeGreaterThan(1);
+    });
+
     // The explicit invariant test missing from every prior revision (see
     // this describe block's own doc comment): for ANY combination of
     // slot widths, across both the single-row and multi-row paths, the
@@ -336,12 +396,19 @@ describe("computeComposerRows", () => {
     // version of the requirement the user had to spell out by hand
     // ("2 lines should have 4 filled sections") — a test that checks
     // this exact property would have caught the bug this revision fixes.
+    //
+    // Every `availableWidth` below is chosen large enough that every
+    // generated pair also satisfies per-pair capacity — the regime this
+    // UI actually runs in (pane widths are hundreds of pixels; individual
+    // slot widths are tens of pixels). The case where capacity genuinely
+    // can't be satisfied (and this parity invariant necessarily doesn't
+    // hold) has its own dedicated test above, not a generalized property.
     it.each([
-        { widths: [100, 80, 60, 50], availableWidth: 10 },
+        { widths: [100, 80, 60, 50], availableWidth: 200 },
         { widths: [100, 80, 60, 50], availableWidth: 1000 },
-        { widths: [100, 60, 50], availableWidth: 10 },
-        { widths: [10, 10, 10, 10, 10], availableWidth: 10 },
-        { widths: [500, 10, 10, 10], availableWidth: 10 },
+        { widths: [100, 60, 50], availableWidth: 180 },
+        { widths: [10, 10, 10, 10, 10], availableWidth: 60 },
+        { widths: [500, 10, 10, 10], availableWidth: 530 },
         { widths: [50], availableWidth: 10 },
     ])("no more than the mathematically-allowed one-sided rows for widths=$widths, availableWidth=$availableWidth", ({ widths, availableWidth }) => {
         const slots = widths.map((width, i) => ({ key: i === widths.length - 1 ? "hostShell" : `slot${i}`, width }));
