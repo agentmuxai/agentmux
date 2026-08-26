@@ -205,11 +205,16 @@ function AccountDetail({ model, account }: { model: IdentityViewModel; account: 
                     <span class="identity-detail-status-text" data-status={account.status}>{account.status}</span>
                 </div>
 
-                {/* Resolve the label via the brand so CLI-OAuth accounts surface "via <CLI>". */}
+                {/* Resolve the label via the brand so CLI-OAuth accounts surface "via <CLI>" —
+                    except Claude, whose underlying CLI tool ("Claude Code") is an
+                    implementation detail this surface deliberately doesn't expose;
+                    "Anthropic" (the actual account/brand) is shown alone instead. */}
                 <DetailField
                     label="Provider"
                     value={`${PROVIDER_LABELS[brandForProvider(account.provider)] ?? account.provider}${
-                        isCliOAuthProvider(account.provider) ? ` (via ${account.provider} CLI)` : ""
+                        isCliOAuthProvider(account.provider) && brandForProvider(account.provider) !== "anthropic"
+                            ? ` (via ${account.provider} CLI)`
+                            : ""
                     }`}
                 />
                 <DetailField label="Kind" value={KIND_LABELS[account.kind]} />

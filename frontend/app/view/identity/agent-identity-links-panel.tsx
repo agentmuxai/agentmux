@@ -36,6 +36,7 @@ import { statusBadge } from "./identity-manager";
 import { joinAgentIdentityRows } from "./agent-identities-model";
 import { ClaudeLoginPanel } from "@/app/view/accounts/ClaudeLoginPanel";
 import { canonicalProviderId } from "@/app/view/agent/providers/provider-id-aliases";
+import { brandForProvider } from "@/app/view/accounts/provider-brand";
 
 import "./identity-pane-view.scss";
 
@@ -63,7 +64,7 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
     // instead of leaving an orphaned row that silently blocks every future
     // spawn under the new canonical link.
     const [claudeStaleAliasProvider, setClaudeStaleAliasProvider] = createSignal<string | undefined>(undefined);
-    // reagent P2 on PR #2414 (round 3): the empty-state "Connect Claude
+    // reagent P2 on PR #2414 (round 3): the empty-state "Connect Anthropic
     // account" button below must not appear before the initial load
     // resolves (was previously indistinguishable from "genuinely zero
     // links") or after it fails (the top error banner already covers that
@@ -123,7 +124,7 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
     // Resolve through the agent's bound bundle rather than the possibly-
     // drifted `agent.provider` column directly — #2594, same "gate vs.
     // actual launch can disagree" risk class #2592/#2596/#2607/#2609/
-    // #2610 fixed. Gates the "Connect Claude account" CTA below; falls
+    // #2610 fixed. Gates the "Connect Anthropic account" CTA below; falls
     // back to `agent()?.provider` while loading/unbound/on failure, same
     // fallback contract `resolveEffectiveLaunchProvider` itself documents
     // — a brief stale flash here is cosmetic (button visibility only),
@@ -207,13 +208,21 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
                                                 <tr>
                                                     <td>
                                                         {(PROVIDER_LABELS as Record<string, string>)[
-                                                            row.provider
+                                                            brandForProvider(row.provider)
                                                         ] ?? row.provider}
                                                     </td>
                                                     <td>
                                                         {row.account
                                                             ? row.account.display_name?.trim() ||
-                                                              row.account.name
+                                                              // Anthropic accounts persist an
+                                                              // internal `${provider}-oauth` name
+                                                              // (identity_auth_persist.rs) with no
+                                                              // display_name set — fall back to the
+                                                              // brand label instead of leaking that
+                                                              // internal name (codex P2 on PR #2806).
+                                                              (brandForProvider(row.provider) === "anthropic"
+                                                                  ? "Anthropic"
+                                                                  : row.account.name)
                                                             : "—"}
                                                     </td>
                                                     <td>
@@ -291,7 +300,7 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
                                     class="identity-btn identity-btn-primary"
                                     onClick={() => openClaudeLogin(undefined)}
                                 >
-                                    Connect Claude account
+                                    Connect Anthropic account
                                 </button>
                             </div>
                         </Show>

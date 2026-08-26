@@ -47,7 +47,7 @@ export const SERVICE_CATALOG: ServiceTile[] = [
     // decision), so the gallery intercepts this tile's "oauth" pick the
     // same way it intercepts the AgentMux tile above, opening
     // ClaudeLoginPanel instead of the generic OAuthConnectPanel form path.
-    { id: "anthropic", displayName: "Anthropic", authModes: ["oauth", "key"], keyKind: "api_key", blurb: "Claude Code sign-in, or API key" },
+    { id: "anthropic", displayName: "Anthropic", authModes: ["oauth", "key"], keyKind: "api_key", blurb: "Browser sign-in, or API key" },
     { id: "slack", displayName: "Slack", authModes: ["oauth"], keyKind: "api_key", blurb: "Messaging" },
     { id: "custom", displayName: "Custom", authModes: ["key"], keyKind: "api_key", blurb: "Any bearer token" },
 ];

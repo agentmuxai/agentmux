@@ -321,7 +321,7 @@ export function ClaudeLoginPanel(props: {
                 when={!done()}
                 fallback={
                     <div class="accounts-chooser-modes">
-                        <div class="oauth-byo-note">✓ Signed in to Claude.</div>
+                        <div class="oauth-byo-note">✓ Signed in to Anthropic.</div>
                         <div class="identity-key-actions">
                             <button class="identity-btn identity-btn-primary" onClick={() => props.onClose()}>
                                 Done
@@ -348,7 +348,16 @@ export function ClaudeLoginPanel(props: {
                 >
                     <InAppLoginPanel
                         providerId={CLAUDE_PROVIDER.id}
-                        providerLabel={CLAUDE_PROVIDER.displayName}
+                        // "Anthropic" (the account/brand), not
+                        // CLAUDE_PROVIDER.displayName ("Claude Code", the
+                        // internal CLI tool AgentMux runs under the hood) —
+                        // this panel is Armory/Stash-facing, where the CLI
+                        // implementation detail shouldn't surface. Contrast
+                        // PreLaunchAuthPanel, a different call site of this
+                        // same shared component, which correctly keeps
+                        // showing the real provider.displayName since that
+                        // surface is provider-generic across many CLIs.
+                        providerLabel="Anthropic"
                         authUrl={authUrl()}
                         phase={phase()}
                         onCancel={onCancel}
