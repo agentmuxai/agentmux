@@ -59,6 +59,32 @@
  * changing either one — this file's history is what happens when that
  * diagnosis is skipped.
  *
+ *   - Rev 6 (2026-08-26): even with both of the above fixed, the FIXED
+ *     Rev 5 grouping still needed 2 lines in the single common case that
+ *     matters most (Claude + context tracked + HOST + logged in) — the
+ *     runtime trigger + full context group (3 sub-elements) together are
+ *     wider than one line holds, while badge+auth+hostShell fit
+ *     comfortably. No fixed pairing can be right for every combination
+ *     of which slots happen to be present, because that depends on real
+ *     content width, not a semantic label decided at design time — see
+ *     docs/status/STATUS_COMPOSER_STRIP_ZONE_BALANCE_HANDOFF_2026_08_25.md
+ *     for the full diagnosis this revision is the direct answer to.
+ *     Replaced the fixed `side` grouping with `computeBalancedLeftKeys`
+ *     (below) — a real DOM-measurement pass, not a guessed integer
+ *     weight (that's what made Rev 2/3's earlier computed-balance
+ *     attempts buggy): each slot's actual rendered width is measured via
+ *     a `display: contents` ref wrapper (invisible to layout — see
+ *     `.agent-composer-strip-slot-measure` in the SCSS) after every
+ *     commit, and the split that minimizes left/right width difference
+ *     wins the NEXT render. `hostShell` stays pinned right regardless
+ *     (the strip's one action keeps a stable, predictable position); the
+ *     `side` field on each slot below still exists as the fallback used
+ *     until the first real measurement lands (avoids an arbitrary/empty
+ *     split on first paint) and in any environment with no real layout
+ *     engine (e.g. this file's own unit tests run under JSDOM, which
+ *     always reports 0-width elements) — see `zones()` further down.
+ *
+
  * Stats zone (center, unaffected by the above): tokens (↑in ↓out) ·
  * elapsed, or the live "Compacting…"/"Reconnecting…" readout.
  *
@@ -81,6 +107,58 @@ import { For, Show, createEffect, createMemo, createSignal, type JSX } from "sol
 import type { SessionStats, TurnTokens } from "../types";
 import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
 import { RuntimeBadge } from "./RuntimeBadge";
+
+/**
+ * Rev 6 of the zone-balancing logic — see the file-header comment's Rev
+ * 4/5 history above this. Picks which of the MOVABLE slots (everything
+ * except `hostShell`) render in the left zone vs. the right zone by
+ * their REAL measured widths, minimizing the width difference between
+ * the two — see docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md
+ * Rev 6. `hostShell` is excluded from the search and always counted
+ * toward the right side's width instead: "Shell always outermost," a
+ * stable, predictable position for the strip's one real action, not
+ * something that should jump sides just because a token count nudged
+ * some OTHER slot's width by a few pixels. Brute-forces every subset of
+ * the remaining slots (at most 4 in practice — runtime/badge/auth/ctx,
+ * `2**4 = 16` combinations) — small enough that full enumeration is
+ * simpler and more obviously correct than a cleverer search, which is
+ * exactly where two earlier attempts at computed balance (a count-based
+ * split, then a weight-guessed subset-partition search — see that
+ * spec's Rev 2/Rev 3) introduced their own bugs. Exported for direct
+ * unit testing without needing a real layout engine to produce widths.
+ */
+export function computeBalancedLeftKeys(
+    movable: { key: string; width: number }[],
+    fixedRightWidth: number,
+): Set<string> {
+    const n = movable.length;
+    const totalMovable = movable.reduce((sum, m) => sum + m.width, 0);
+    let best = new Set<string>();
+    let bestDiff = Infinity;
+    for (let mask = 0; mask < 1 << n; mask++) {
+        let leftWidth = 0;
+        const leftKeys = new Set<string>();
+        for (let i = 0; i < n; i++) {
+            if (mask & (1 << i)) {
+                leftWidth += movable[i].width;
+                leftKeys.add(movable[i].key);
+            }
+        }
+        // A completely empty left with movable slots available is never
+        // "balanced" — that's the pre-existing "never a dead zone" rule,
+        // applied by the caller (zones() below) as a uniform override
+        // regardless of which path (measured or fallback) produced the
+        // split, so it's deliberately not special-cased again here.
+        if (leftKeys.size === 0) continue;
+        const rightWidth = fixedRightWidth + (totalMovable - leftWidth);
+        const diff = Math.abs(leftWidth - rightWidth);
+        if (diff < bestDiff) {
+            bestDiff = diff;
+            best = leftKeys;
+        }
+    }
+    return best;
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -501,31 +579,83 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         return out;
     });
 
-    // Split by fixed semantic side (see each slot's `side` above), with
-    // exactly one override: if that leaves the left zone with literally
-    // zero slots while the right zone has any, borrow the first right-
-    // side slot over to the left instead of showing a dead zone. Single
-    // source of truth (this one memo, not two independently-derived
-    // ones) so the override can't be applied inconsistently between
-    // leftSlots/rightSlots.
+    // Rev 6 — real measured widths per slot, keyed by slot.key. Populated
+    // by the effect below from each slot's `display: contents` ref
+    // wrapper (see the render output further down); a plain mutable
+    // object, not a signal, since it's only ever read inside that same
+    // effect right after the DOM it describes has committed — no other
+    // reactive consumer needs it directly.
+    let measureRefs: Record<string, HTMLElement | undefined> = {};
+    const [slotWidths, setSlotWidths] = createSignal<Record<string, number>>({});
+
+    // Re-measures every current slot whenever the pool changes shape OR
+    // any slot's own content changes width (both flow through `slots()`
+    // recomputing — e.g. ctx text ticking with token counts). Widths are
+    // measured from whichever zone a slot CURRENTLY sits in, but are
+    // zone-independent in practice (neither -controls nor -right applies
+    // any width-affecting rule to children beyond flex-wrap), so this
+    // converges to a stable split after one settle pass instead of
+    // oscillating between two different "correct" widths.
+    createEffect(() => {
+        const keys = slots().map((s) => s.key);
+        const widths: Record<string, number> = {};
+        for (const key of keys) {
+            const el = measureRefs[key];
+            if (!el) continue;
+            let total = 0;
+            for (const child of Array.from(el.children)) {
+                total += child.getBoundingClientRect().width;
+            }
+            // Rounded to the nearest 8px — the live turn ticker (elapsed
+            // time, token counts) can shift a slot's text width by a
+            // pixel or two every second; without this, the balance below
+            // could flip-flop every tick even though nothing meaningful
+            // about the content actually changed.
+            widths[key] = Math.round(total / 8) * 8;
+        }
+        setSlotWidths(widths);
+    });
+
+    // Split left/right, with exactly one override applied uniformly to
+    // whichever split resulted: if that leaves the left zone with
+    // literally zero slots while the right zone has any, borrow the
+    // first right-side slot over to the left instead of showing a dead
+    // zone. Single source of truth (this one memo, not two independently
+    // derived ones) so the override can't be applied inconsistently
+    // between leftSlots/rightSlots.
     //
-    // This is deliberately simple — no computed "weight," no search over
-    // possible splits. Two earlier attempts (a count-based split, then a
-    // weight-balanced subset-partition search over a hand-guessed integer
-    // "weight" per slot) both tried to solve visual balance at this
-    // layer, in JS, and both produced their own new bugs (see
-    // docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md Rev 3
-    // for the subset-partition version's own failure). The actual dead-
-    // space bug those attempts were chasing lives in the CSS (both zones
-    // forced to equal width regardless of content — see
-    // _composer-strip.scss's removal of the `flex: 1 1 0` widest-tier
-    // rule), not in which slot renders on which side. This rule only
-    // needs to guarantee the ORIGINAL, simpler requirement: never a
-    // completely empty zone when there's more than one slot to show.
+    // Two paths, chosen per render:
+    //   - Real measurement available (every current slot has a
+    //     just-measured, non-zero-summing width): use
+    //     `computeBalancedLeftKeys` — see that function's own doc
+    //     comment for why this is a real-width search, not a repeat of
+    //     Rev 2/3's guessed-weight attempts.
+    //   - Otherwise (first paint, before the effect above has run once;
+    //     or a real layout engine simply isn't present — e.g. this
+    //     file's own unit tests run under JSDOM, which always reports
+    //     0-width elements): fall back to the fixed semantic `side`
+    //     field each slot already carries (Rev 5's pairing) rather than
+    //     an arbitrary or empty split.
     const zones = createMemo(() => {
         const list = slots();
-        const left = list.filter((s) => s.side === "left");
-        const right = list.filter((s) => s.side === "right");
+        const widths = slotWidths();
+        const allMeasured = list.every((s) => widths[s.key] !== undefined);
+        const totalMeasured = Object.values(widths).reduce((sum, w) => sum + w, 0);
+
+        let left: typeof list;
+        let right: typeof list;
+        if (allMeasured && totalMeasured > 0) {
+            const hostShellWidth = widths["hostShell"] ?? 0;
+            const movable = list
+                .filter((s) => s.key !== "hostShell")
+                .map((s) => ({ key: s.key, width: widths[s.key] ?? 0 }));
+            const leftKeys = computeBalancedLeftKeys(movable, hostShellWidth);
+            left = list.filter((s) => leftKeys.has(s.key));
+            right = list.filter((s) => !leftKeys.has(s.key));
+        } else {
+            left = list.filter((s) => s.side === "left");
+            right = list.filter((s) => s.side === "right");
+        }
         if (left.length === 0 && right.length > 0) {
             return { left: [right[0]], right: right.slice(1) };
         }
@@ -542,7 +672,21 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md for why
                 this is computed rather than a fixed set of children. */}
             <span class="agent-composer-strip-controls">
-                <For each={leftSlots()}>{(slot) => slot.render()}</For>
+                <For each={leftSlots()}>
+                    {(slot) => (
+                        // `display: contents` (agent-composer-strip-slot-measure,
+                        // _composer-strip.scss) — invisible to layout, so this
+                        // wrapper changes nothing about how the slot's own
+                        // children flex/wrap; it exists only to give the
+                        // measurement effect above a stable per-slot anchor.
+                        <span
+                            class="agent-composer-strip-slot-measure"
+                            ref={(el) => (measureRefs[slot.key] = el)}
+                        >
+                            {slot.render()}
+                        </span>
+                    )}
+                </For>
             </span>
 
             {/* Stats zone — token/elapsed stats. Always centered (this
@@ -580,7 +724,16 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 own full-width line below 482px, its own flex-basis-0 half
                 of the row at the widest tier (see _composer-strip.scss). */}
             <span class="agent-composer-strip-right">
-                <For each={rightSlots()}>{(slot) => slot.render()}</For>
+                <For each={rightSlots()}>
+                    {(slot) => (
+                        <span
+                            class="agent-composer-strip-slot-measure"
+                            ref={(el) => (measureRefs[slot.key] = el)}
+                        >
+                            {slot.render()}
+                        </span>
+                    )}
+                </For>
             </span>
         </div>
     );

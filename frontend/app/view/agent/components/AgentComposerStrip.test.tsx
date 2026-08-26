@@ -14,7 +14,7 @@
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { AgentComposerStrip } from "./AgentComposerStrip";
+import { AgentComposerStrip, computeBalancedLeftKeys } from "./AgentComposerStrip";
 
 afterEach(() => {
     cleanup();
@@ -99,5 +99,72 @@ describe("AgentComposerStrip — Tier 3 predictive countdown", () => {
             />
         ));
         expect(screen.queryByText(/to auto-compact/)).toBeNull();
+    });
+});
+
+/**
+ * Coverage for Rev 6's real-width zone-balancing search (see this file's
+ * own Rev 6 header comment and
+ * docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md) — pure,
+ * so these run without needing a real layout engine to produce widths
+ * (unlike the component itself, which falls back to the fixed `side`
+ * pairing under JSDOM's always-zero widths — see AgentComposerStrip.tsx's
+ * `zones` memo).
+ */
+describe("computeBalancedLeftKeys", () => {
+    it("returns an empty set when there are no movable slots", () => {
+        expect(computeBalancedLeftKeys([], 90)).toEqual(new Set());
+    });
+
+    it("puts the sole movable slot on the left rather than leaving it empty", () => {
+        // Every other subset is either empty (skipped — the caller's own
+        // "never a dead zone" override handles the resulting all-right
+        // case) or this one; nothing else to compare against.
+        const result = computeBalancedLeftKeys([{ key: "a", width: 10 }], 100);
+        expect(result).toEqual(new Set(["a"]));
+    });
+
+    it("picks the smaller-diff single-item split over grouping both together, first-found wins a tie", () => {
+        // a=100, b=10, fixedRight=0. {a} alone: diff=|100-10|=90. {b}
+        // alone: diff=|10-100|=90 (a tie with {a} alone). {a,b} together:
+        // diff=|110-0|=110 (worse). Ties resolve to whichever subset the
+        // brute force reaches first (ascending bitmask order) — pinning
+        // that here makes the tie-break behavior explicit and regression-
+        // tested, not incidental.
+        const result = computeBalancedLeftKeys(
+            [
+                { key: "a", width: 100 },
+                { key: "b", width: 10 },
+            ],
+            0,
+        );
+        expect(result).toEqual(new Set(["a"]));
+    });
+
+    it("finds the true minimum-diff split across more than 2 movable slots, even when it splits an otherwise-plausible pairing", () => {
+        // Modeling the real reported shape (runtime trigger + ctx group +
+        // auth tag, hostShell fixed right) with representative widths.
+        // runtime=130, ctx=170, auth=55, hostShell(fixed right)=90.
+        // Every 2-way split of {runtime, ctx, auth}:
+        //   {runtime}       -> left=130, right=90+225=315, diff=185
+        //   {ctx}           -> left=170, right=90+185=275, diff=105
+        //   {runtime,ctx}   -> left=300, right=90+55 =145, diff=155
+        //   {auth}          -> left=55,  right=90+300=390, diff=335
+        //   {runtime,auth}  -> left=185, right=90+170=260, diff=75
+        //   {ctx,auth}      -> left=225, right=90+130=220, diff=5   <- best
+        //   {runtime,ctx,auth} -> left=355, right=90,       diff=265
+        // The true optimum (ctx+auth) is NOT the "runtime+ctx together"
+        // pairing Rev 5's fixed semantic grouping used — real widths, not
+        // a semantic label, decide the split, which is the entire point
+        // of this revision.
+        const result = computeBalancedLeftKeys(
+            [
+                { key: "runtime", width: 130 },
+                { key: "ctx", width: 170 },
+                { key: "auth", width: 55 },
+            ],
+            90,
+        );
+        expect(result).toEqual(new Set(["ctx", "auth"]));
     });
 });

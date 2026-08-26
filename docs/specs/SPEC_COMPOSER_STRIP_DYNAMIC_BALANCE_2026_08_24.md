@@ -117,3 +117,38 @@ Two more rounds after Rev 4 shipped, both against real screenshots:
 ### Takeaway
 
 Two genuinely different bugs, at two different layers (CSS width-forcing; JS content-grouping), got reported as "the same issue" back-to-back because both manifest as "one side looks heavier than the other." Fixing layer 1 (CSS) was necessary but not sufficient — it just made layer 2's pre-existing lopsidedness visible for the first time instead of masking it inside forced-equal boxes. If this needs touching again: get a real screenshot AND check which layer is actually responsible (is a zone stretched wider than its content, or is the zone's actual content list just unbalanced by design) before changing either one.
+
+## Rev 6 — real DOM measurement replaces the fixed `side` pairing (2026-08-26)
+
+Even with both Rev 4/5 bugs fixed, the FIXED semantic pairing (runtime+ctx-group left; badge+auth+hostShell right) still needed 2 lines in the single most common case (Claude agent, context tracked, HOST mode) — the runtime trigger plus the full 3-element context group together are wider than one line holds, while badge+auth+hostShell fit comfortably. No fixed pairing can be right for every combination of which slots happen to be present and how wide each one's content currently is, because that depends on REAL content width, not a semantic label decided at design time (see `docs/status/STATUS_COMPOSER_STRIP_ZONE_BALANCE_HANDOFF_2026_08_25.md` for the full diagnostic this revision answers).
+
+This is Option 1 from that status doc's "next attempt" list: real DOM measurement, not a guessed integer weight — which is exactly what made Rev 2/3's earlier computed-balance attempts buggy (a hand-guessed weight is a proxy for width, and proxies can be wrong in ways real widths can't).
+
+**Implementation** (`AgentComposerStrip.tsx`):
+
+1. Each slot's rendered output is wrapped in a `<span class="agent-composer-strip-slot-measure">` (SCSS: `display: contents`) — invisible to layout (its children act as direct flex items of `-controls`/`-right`, exactly as if the wrapper didn't exist), but gives a stable per-slot ref.
+2. A `createEffect` re-measures every current slot's total width (sum of its wrapper's `.children[].getBoundingClientRect().width`) whenever the slot pool changes shape or content (ticks with token counts during an active turn). Rounded to the nearest 8px to damp per-tick jitter from the live elapsed/token counters.
+3. `computeBalancedLeftKeys(movable, fixedRightWidth)` brute-forces every subset of the movable slots (all slots except `hostShell` — at most 4 in practice, `2**4=16` combinations) and picks whichever left/right split minimizes the width difference. `hostShell` is excluded from the search and always counted toward the right side: "Shell always outermost," a stable, predictable position for the strip's one real action, not something that should jump sides just because some OTHER slot's width shifted by a few pixels.
+4. Fallback: until the first real measurement lands (first paint), or in any environment with no real layout engine (this file's own unit tests run under JSDOM, which always reports 0-width elements), `zones()` falls back to the ORIGINAL fixed `side` field each slot still carries — so the component never shows an arbitrary/empty split, and the existing test suite needed no changes to keep passing.
+
+**Why brute force, not a cleverer search:** the pool is small (≤5 slots total, ≤4 movable) — full enumeration is simpler and more obviously correct than the kind of clever search that introduced Rev 2/3's own bugs. `computeBalancedLeftKeys` is exported and unit-tested directly (`AgentComposerStrip.test.tsx`) with hand-verified arithmetic, independent of any real layout engine.
+
+**Visually verified** in a real `task dev` build (not assumed from HMR logs) — see `docs/status/STATUS_COMPOSER_STRIP_ZONE_BALANCE_HANDOFF_2026_08_25.md`'s "How the fix was verified" section for the exact method (direct Win32 screenshot capture, sidestepping `CaptureWindow`'s own-instance/ambiguous-title hazards). At ≥482px the strip now renders on one line with the balanced split (in the verified case: runtime+auth left, ctx-group+HOST+Shell right — a genuinely different, better-balanced grouping than Rev 5's fixed pairing, chosen purely because it's what the real measured widths supported); narrower tiers still degrade to 2-3 readable lines with nothing clipped. Debug outlines (`outline1s0824x`) removed after this confirmation.
+
+### Files touched (Rev 6)
+
+```
+frontend/app/view/agent/components/AgentComposerStrip.tsx   MODIFY — export computeBalancedLeftKeys,
+                                                               add the measurement effect + slotWidths
+                                                               signal, rewrite zones() with the
+                                                               measured/fallback branch, wrap slot
+                                                               render output in ref'd measure spans.
+frontend/app/view/agent/components/AgentComposerStrip.test.tsx   MODIFY — add a describe block unit-
+                                                               testing computeBalancedLeftKeys directly
+                                                               (pure function, no layout engine needed).
+frontend/app/view/agent/styles/_composer-strip.scss          MODIFY — add .agent-composer-strip-slot-measure
+                                                               (display: contents); remove the 3
+                                                               TEMPORARY DEBUG outline rules.
+docs/status/STATUS_COMPOSER_STRIP_ZONE_BALANCE_HANDOFF_2026_08_25.md   MODIFY — mark resolved, document
+                                                               how the fix was verified.
+```

@@ -1,8 +1,32 @@
-# STATUS: Composer strip zone balance — handoff, unresolved
+# STATUS: Composer strip zone balance — RESOLVED (Rev 6)
 
-**Date:** 2026-08-25
-**Status:** In progress, handed off. Two real bugs found and fixed this session; a third issue remains open.
-**Read first:** `docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md` (Rev 1-5, full history) and `docs/reports/REPORT_AGENT_SCREENSHOT_WINDOW_CONTROL_BLOCKERS_2026_08_24.md` (unrelated tooling report from the same session).
+**Date:** 2026-08-25 (handoff), resolved 2026-08-26.
+**Status:** Fixed. Rev 6 replaced the fixed left/right slot pairing with a real DOM-measurement-based split — see
+`docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md` for the Rev 6 write-up and
+`AgentComposerStrip.tsx`'s own header comment (`computeBalancedLeftKeys`) for the implementation. Verified visually
+via a real `task dev` build + direct Win32 screenshot capture (not HMR-log-assumed — see "How the fix was verified"
+below): the common case (Claude agent, context tracked, HOST mode) now renders on ONE line at the ≥482px tier, and
+narrower tiers still degrade to 2-3 readable lines with nothing clipped. Temporary debug outlines removed. Original
+diagnosis (below) is preserved for history — read it first if this needs touching again.
+**Read first:** `docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md` (Rev 1-6, full history) and `docs/reports/REPORT_AGENT_SCREENSHOT_WINDOW_CONTROL_BLOCKERS_2026_08_24.md` (unrelated tooling report from the same session — its exact "Shell-tool exit 201" mystery (#6 in that report) turned out, per this fix's own teardown, to just be the ordinary signal from a `taskkill /T /F` on that tree — not a distinct bug).
+
+## How the fix was verified (2026-08-26)
+
+`mcp__agentmux__CaptureWindow`/`DiscoverWindows` (this session's own PR #2810) weren't used for this — screenshotting
+one's OWN dev-build window that way is exactly the hazard-prone path `REPORT_AGENT_SCREENSHOT_WINDOW_CONTROL_BLOCKERS_2026_08_24.md`
+documents (ambiguous title matches, foreign-instance targeting). Instead: launched `task dev` via
+`scripts/dev-agent.cmd` with the Bash tool's own `run_in_background` (confirmed reliable — plain `&`/`disown`
+silently doesn't survive, matching that report's blocker #6b), found the correct window by PID via
+`Get-CimInstance Win32_Process` filtered on its `cef-dev-<build-id>` command-line path (disambiguating from an old
+leftover window sharing the same title), then captured it directly with a small PowerShell/.NET
+`GetWindowRect` + `Graphics.CopyFromScreen` script — bypassing `CaptureWindow` entirely for a same-machine,
+own-tooling capture. Opening an existing agent's pane in the fresh instance showed a REAL, live composer strip
+(agent data is global across channels/instances per `AGENTS.md`/`CLAUDE.md`'s own note) without needing a fresh
+OAuth login in the isolated dev-channel Armory account list. Verified across 3 widths by dragging the pane's own
+resize divider (not the OS window itself, which was screen-height/width constrained) — ≥482px: single line,
+correctly rebalanced; ~256px: 2 lines, nothing clipped. Removed the debug outlines, confirmed via one more
+screenshot that Vite's HMR had actually applied the change (not assumed from the HMR log alone, honoring this same
+doc's own earlier caution below), then tore down the whole debug process tree via `taskkill /PID <launcher> /T /F`.
 
 ## What's fixed (Rev 4 + Rev 5)
 
@@ -33,13 +57,13 @@ Every fix so far has targeted **which slot goes in which zone** or **how wide ea
 
 ## Options for the next attempt
 
-1. **Real DOM measurement.** After render, measure each slot's actual rendered width (refs + `getBoundingClientRect`), then decide the split from real widths instead of a fixed pairing or a guessed weight. Most likely to actually work; adds complexity (a measure-then-layout pass, possible flash on state changes).
-2. **Split the context group itself.** Right now ctx text + countdown + Compact must stay adjacent (hard constraint, because Compact needs to sit immediately right of the ctx text) — but nothing requires the *whole group* to be assigned to one side as a unit. If the constraint were relaxed to "ctx text and Compact must be adjacent, countdown is flexible," there might be more freedom to balance. Needs a decision on whether that constraint is actually required or just how it happened to be built.
-3. **Accept 2 lines as normal, stop chasing 1-line balance.** Re-confirm with the user whether "up to 3 lines, never empty" was the real bar, and whether a stable 2-line layout (even if visually left-heavy) is actually acceptable as long as it's *consistent* — a lot of this session's difficulty came from each fix changing the specific shape of the imbalance, which reads as "still broken" even when each individual bug was real and got fixed.
+1. **Real DOM measurement.** After render, measure each slot's actual rendered width (refs + `getBoundingClientRect`), then decide the split from real widths instead of a fixed pairing or a guessed weight. Most likely to actually work; adds complexity (a measure-then-layout pass, possible flash on state changes). **← This is the option Rev 6 implemented.** See `computeBalancedLeftKeys` in `AgentComposerStrip.tsx` and the "How the fix was verified" section above.
+2. **Split the context group itself.** Right now ctx text + countdown + Compact must stay adjacent (hard constraint, because Compact needs to sit immediately right of the ctx text) — but nothing requires the *whole group* to be assigned to one side as a unit. If the constraint were relaxed to "ctx text and Compact must be adjacent, countdown is flexible," there might be more freedom to balance. Needs a decision on whether that constraint is actually required or just how it happened to be built. **Not needed** — Rev 6's real-width search made this moot; the atomic ctx-group constraint stayed intact and the fix still converges to a single line in the common case.
+3. **Accept 2 lines as normal, stop chasing 1-line balance.** Re-confirm with the user whether "up to 3 lines, never empty" was the real bar, and whether a stable 2-line layout (even if visually left-heavy) is actually acceptable as long as it's *consistent* — a lot of this session's difficulty came from each fix changing the specific shape of the imbalance, which reads as "still broken" even when each individual bug was real and got fixed. **Not needed** — option 1 worked.
 
-## Diagnostic tooling left in place
+## Diagnostic tooling — removed
 
-`_composer-strip.scss` currently has temporary debug outlines on all 3 zones (`outline: 2px dashed red/blue/limegreen` on `.agent-composer-strip-controls`/`-stats-zone`/`-right`), marked `TEMPORARY DEBUG — outline1s0824x, remove before shipping`. Left in intentionally for whoever picks this up — `grep -n outline1s0824x` finds all 3 spots. Remove once the layout is actually fixed and confirmed via a real screenshot (not assumed from HMR logs — see the report doc for why that assumption failed twice this session).
+`_composer-strip.scss` had temporary debug outlines on all 3 zones (`outline: 2px dashed red/blue/limegreen` on `.agent-composer-strip-controls`/`-stats-zone`/`-right`), marked `TEMPORARY DEBUG — outline1s0824x`. Removed in Rev 6 after visual confirmation via a real screenshot (see above) that the layout is fixed — `grep -n outline1s0824x` now returns nothing.
 
 ## How to test
 

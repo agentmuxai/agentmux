@@ -102,6 +102,19 @@
     }
 }
 
+// Measurement anchor only (Rev 6, AgentComposerStrip.tsx) — `display:
+// contents` removes this wrapper from the box tree entirely, so its
+// children act as direct flex items of `-controls`/`-right` exactly as if
+// the wrapper didn't exist (zero layout impact, same wrap behavior as
+// before this wrapper was introduced). Exists only so the component can
+// hold a stable per-slot ref: `wrapper.children` are that slot's actual
+// rendered elements, measured to decide the next render's left/right
+// split by real width instead of a fixed pairing — see that file's Rev 6
+// header comment.
+.agent-composer-strip-slot-measure {
+    display: contents;
+}
+
 // ── Controls zone ────────────────────────────────────────────────────────
 // First in flow, always on line 1. Never gets its own forced flex-basis:
 // 100% break — it's the anchor the other two zones' split points are
@@ -138,10 +151,6 @@
     // (the ≤150px query below) can't actually shrink this zone below its
     // content width.
     min-width: 0;
-    // TEMPORARY DEBUG — outline1s0824x, remove before shipping. Visually
-    // confirming zone boundaries against a real screenshot instead of
-    // guessing flex-wrap math from pixel estimates.
-    outline: 2px dashed red;
 }
 
 // ── Stats zone ───────────────────────────────────────────────────────────
@@ -162,8 +171,6 @@
     // the widest tier), independent of -strip's own `justify-content`.
     flex-basis: 100%;
     text-align: center;
-    // TEMPORARY DEBUG — outline1s0824x, remove before shipping.
-    outline: 2px dashed blue;
 }
 
 // The consolidated Mode/Model/Effort trigger — a single <button> laying out
@@ -364,8 +371,6 @@
     gap: var(--space-1-5);
     min-width: 0;
     flex-basis: 100%;
-    // TEMPORARY DEBUG — outline1s0824x, remove before shipping.
-    outline: 2px dashed limegreen;
 }
 
 // HOST/SANDBOX tag + Shell toggle, paired as a single unit — moved out of
