@@ -904,14 +904,31 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // actually have room for the real stats footprint — the same
     // "stale measurement crosses a structural transition" failure mode
     // already fixed for zoom/padding in this same PR, one layer up.
+    //
+    // Measures the zone's CONTENT (`firstElementChild`, the
+    // `.agent-composer-strip-stats` span inside the `<Show>`), NOT the
+    // zone wrapper itself — regression found live post-#2813: in the
+    // multi-row position the zone is a direct child of the column-flex
+    // strip, so default `align-items: stretch` blockifies it to the FULL
+    // strip width even when `rightText()` is empty and it renders
+    // nothing. Measuring the wrapper there fed `reservedWidth` ≈ the
+    // whole strip width into `computeComposerRows`, making the
+    // single-row fit check unsatisfiable at ANY pane width — a one-way
+    // trap: the first legitimate visit to multi-row state locked the
+    // strip multi-row forever (the widest tier stuck at 2 lines). The
+    // content span's own rect is the real footprint in BOTH positions
+    // (inline-block in the multi position; `flex: 0 0 auto` child in the
+    // single position), and is 0/absent exactly when there is nothing to
+    // reserve space for.
     let statsRefs: { single?: HTMLElement; multi?: HTMLElement } = {};
     const [statsWidth, setStatsWidth] = createSignal(0);
     createEffect(() => {
         rightText();
         stripWidth();
         slotWidths();
-        const el = statsRefs.single?.isConnected ? statsRefs.single : statsRefs.multi?.isConnected ? statsRefs.multi : undefined;
-        setStatsWidth(el ? Math.round(el.getBoundingClientRect().width / 8) * 8 : 0);
+        const zone = statsRefs.single?.isConnected ? statsRefs.single : statsRefs.multi?.isConnected ? statsRefs.multi : undefined;
+        const content = zone?.firstElementChild;
+        setStatsWidth(content ? Math.round(content.getBoundingClientRect().width / 8) * 8 : 0);
     });
 
     // reagent P1 on PR #2808: `<For>` (below) reconciles by referential
