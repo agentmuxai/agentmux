@@ -16,7 +16,7 @@ import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { AgentComposerStrip, computeBalancedLeftKeys, computeComposerRows } from "./AgentComposerStrip";
+import { AgentComposerStrip, computeBalancedLeftKeys, computeComposerRows, orderKeysForEdgePriority } from "./AgentComposerStrip";
 
 // AgentRuntimeDropup (rendered via showControls()) imports this — same mock
 // AgentRuntimeDropup.test.tsx uses; only exercised by the reagent P1
@@ -416,5 +416,95 @@ describe("computeComposerRows", () => {
         const oneSidedCount = rows.filter((r) => r.left.length === 0 || r.right.length === 0).length;
         const maxAllowed = slots.length % 2 === 1 ? 1 : 0;
         expect(oneSidedCount).toBeLessThanOrEqual(maxAllowed);
+    });
+});
+
+/**
+ * Edge priority for interactive elements (2026-08-26, user-directed
+ * follow-up to Rev 7): on every rendered line, interactive elements
+ * (buttons/dropdowns) sit flush against the strip's outer edges, with
+ * passive/informational content (auth status, ctx text) placed inward.
+ * Two mechanisms, both covered here: side-level ordering of whole slots
+ * (`orderKeysForEdgePriority`), and side-dependent internal ordering of
+ * the composite ctx/hostShell slots (Compact/Shell on the outer end).
+ */
+describe("orderKeysForEdgePriority", () => {
+    const isInteractive = (interactive: string[]) => (key: string) => interactive.includes(key);
+
+    it("moves interactive slots to the FRONT on the left side (outermost = first)", () => {
+        expect(orderKeysForEdgePriority(["auth", "ctx"], "left", isInteractive(["ctx"]))).toEqual(["ctx", "auth"]);
+    });
+
+    it("moves interactive slots to the BACK on the right side (outermost = last)", () => {
+        expect(orderKeysForEdgePriority(["badge", "auth", "hostShell"], "right", isInteractive(["badge", "hostShell"]))).toEqual([
+            "auth",
+            "badge",
+            "hostShell",
+        ]);
+    });
+
+    it("is a stable partition — relative order within each group is preserved", () => {
+        expect(orderKeysForEdgePriority(["a", "b", "c", "d"], "left", isInteractive(["b", "d"]))).toEqual(["b", "d", "a", "c"]);
+        expect(orderKeysForEdgePriority(["a", "b", "c", "d"], "right", isInteractive(["a", "c"]))).toEqual(["b", "d", "a", "c"]);
+    });
+
+    it("leaves uniform groups untouched on either side", () => {
+        expect(orderKeysForEdgePriority(["a", "b"], "left", () => false)).toEqual(["a", "b"]);
+        expect(orderKeysForEdgePriority(["a", "b"], "right", () => true)).toEqual(["a", "b"]);
+        expect(orderKeysForEdgePriority([], "left", () => true)).toEqual([]);
+    });
+});
+
+describe("AgentComposerStrip — interactive elements flush against the row edge", () => {
+    // b must FOLLOW a in document order.
+    const precedes = (a: Element, b: Element) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+
+    it("renders the Compact button BEFORE the ctx text when the ctx slot sits on the left side", () => {
+        const { container } = render(() => (
+            <AgentComposerStrip {...baseProps} onCompact={() => {}} contextTokens={40_000} contextWindow={200_000} />
+        ));
+        const compact = screen.getByRole("button", { name: "Compact" });
+        const ctxText = container.querySelector(".agent-composer-strip-ctx")!;
+        expect(compact.closest(".agent-composer-strip-row-left")).not.toBeNull();
+        expect(precedes(compact, ctxText)).toBe(true);
+    });
+
+    it("orders a passive slot INSIDE an interactive one on the right side (auth inward of the process badge)", () => {
+        // contextTokens populates the ctx slot on the LEFT — without any
+        // left-side slot, the "left must never be completely empty"
+        // fallback would promote the badge (first right slot in pool
+        // order) to the left side, and this test would be asserting
+        // against the wrong row entirely.
+        const { container } = render(() => (
+            <AgentComposerStrip {...baseProps} authStatus="authenticated" processCount={2} contextTokens={40_000} contextWindow={200_000} />
+        ));
+        const auth = container.querySelector(".agent-composer-strip-auth")!;
+        const badge = container.querySelector(".agent-composer-strip-process-badge")!;
+        expect(auth.closest(".agent-composer-strip-row-right")).not.toBeNull();
+        expect(precedes(auth, badge)).toBe(true);
+    });
+
+    it("keeps Shell the outermost element of the right edge", () => {
+        const { container } = render(() => (
+            <AgentComposerStrip {...baseProps} authStatus="authenticated" processCount={2} agentMode="host" />
+        ));
+        const shell = screen.getByRole("button", { name: /Shell/i });
+        const badge = container.querySelector(".agent-composer-strip-process-badge")!;
+        expect(precedes(badge, shell)).toBe(true);
+    });
+
+    it("mirrors the hostShell slot's internal order when it lands on the LEFT (degenerate one-slot case): Shell outermost-left, HOST badge inward", () => {
+        // Minimal pool: no controls (no blockAtom), no auth, no badge, no
+        // ctx — hostShell alone falls back to the left side (the "left
+        // must never be completely empty" fallback), putting it on the
+        // line's LEFT edge, where Shell must flip to the outer (first)
+        // position.
+        const { container } = render(() => (
+            <AgentComposerStrip logOpen={false} onToggleLog={() => {}} agentMode="host" />
+        ));
+        const shell = screen.getByRole("button", { name: /Shell/i });
+        const hostBadge = container.querySelector(".agent-composer-strip-host-shell .runtime-badge")!;
+        expect(shell.closest(".agent-composer-strip-row-left")).not.toBeNull();
+        expect(precedes(shell, hostBadge)).toBe(true);
     });
 });
