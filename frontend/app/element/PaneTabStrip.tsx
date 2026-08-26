@@ -211,7 +211,10 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                         aria-label={props.addTitle ?? "New tab"}
                         onClick={() => props.onAdd!()}
                     >
-                        +
+                        {/* Wrapped so the glyph itself can be nudged (PaneTabStrip.scss's
+                            .pane-tab-strip-add-glyph) without moving the button's own
+                            box/hover-background/border — see that rule's comment. */}
+                        <span class="pane-tab-strip-add-glyph">+</span>
                     </button>
                 </Show>
             </div>
