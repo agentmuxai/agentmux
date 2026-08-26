@@ -36,6 +36,7 @@ import { statusBadge } from "./identity-manager";
 import { joinAgentIdentityRows } from "./agent-identities-model";
 import { ClaudeLoginPanel } from "@/app/view/accounts/ClaudeLoginPanel";
 import { canonicalProviderId } from "@/app/view/agent/providers/provider-id-aliases";
+import { brandForProvider } from "@/app/view/accounts/provider-brand";
 
 import "./identity-pane-view.scss";
 
@@ -207,13 +208,21 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
                                                 <tr>
                                                     <td>
                                                         {(PROVIDER_LABELS as Record<string, string>)[
-                                                            row.provider
+                                                            brandForProvider(row.provider)
                                                         ] ?? row.provider}
                                                     </td>
                                                     <td>
                                                         {row.account
                                                             ? row.account.display_name?.trim() ||
-                                                              row.account.name
+                                                              // Anthropic accounts persist an
+                                                              // internal `${provider}-oauth` name
+                                                              // (identity_auth_persist.rs) with no
+                                                              // display_name set — fall back to the
+                                                              // brand label instead of leaking that
+                                                              // internal name (codex P2 on PR #2806).
+                                                              (brandForProvider(row.provider) === "anthropic"
+                                                                  ? "Anthropic"
+                                                                  : row.account.name)
                                                             : "—"}
                                                     </td>
                                                     <td>
