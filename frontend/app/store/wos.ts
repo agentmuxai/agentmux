@@ -8,7 +8,7 @@ import { WpsEvent } from "@/app/store/wps-events";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { fetch } from "@/util/fetchutil";
 import { type SignalAtom, fireAndForget } from "@/util/util";
-import { createSignal, onCleanup } from "solid-js";
+import { batch, createSignal, onCleanup } from "solid-js";
 import { ObjectService } from "./services";
 import { getApi } from "./app-api";
 
@@ -287,9 +287,19 @@ function updateWaveObject(update: WaveObjUpdate) {
 }
 
 function updateWaveObjects(vals: WaveObjUpdate[]) {
-    for (const val of vals) {
-        updateWaveObject(val);
-    }
+    // batch() so a single RPC response carrying multiple related updates
+    // (e.g. CloseTab's [delete Tab, update Workspace] pair) applies as one
+    // atomic reactive flush. Without it, each setData() below propagates
+    // synchronously and independently: the deleted tab's own signal went
+    // null (blanking its still-mounted <Tab>'s name) a full reactive
+    // update BEFORE the workspace update removed it from the tab strip's
+    // <For> list, so the tab visibly flashed blank in place before
+    // disappearing. See docs/specs/SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md §6.
+    batch(() => {
+        for (const val of vals) {
+            updateWaveObject(val);
+        }
+    });
 }
 
 function cleanWaveObjectCache() {

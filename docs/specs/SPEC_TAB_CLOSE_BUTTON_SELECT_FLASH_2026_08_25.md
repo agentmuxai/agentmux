@@ -280,3 +280,101 @@ trip and relies on behavior the reducer already had and already tests.
   the single `CloseTab` call.
 - Full `vitest` suite + `tsc --noEmit` — no regressions expected; this is a
   subtractive change (removes a call), not new branching logic.
+
+## 6. Follow-up #2 — the closed tab itself flashes blank in place before disappearing
+
+After §5 shipped, the repo owner reported the flash was still there and
+pinned down the precise symptom: **after clicking "Close tab" in the
+confirm modal, the closing tab itself visibly flashes (goes blank) in its
+own position in the strip for a frame, then disappears** — not a
+neighboring tab's highlight; the tab being closed, in place.
+
+### 6.1 Root cause — two unbatched signal writes from one atomic server response
+
+`CloseTab`'s HTTP handler (`agentmux-srv/src/server/service/tab_lifecycle.rs::handle_close_tab`,
+`tab_lifecycle.rs:258-279`) already does the right thing server-side: it
+runs the `delete_tab` saga (one atomic reducer transition — see §5.1) and
+then returns **both** resulting object changes in a single response:
+
+```rust
+let mut updates = vec![WaveObjUpdate {
+    updatetype: "delete", otype: OTYPE_TAB, oid: tab_id.clone(), obj: None,
+}];
+if let Ok(ws) = store.must_get::<Workspace>(&ws_id) {
+    updates.push(WaveObjUpdate {
+        updatetype: "update", otype: OTYPE_WORKSPACE, oid: ws_id.clone(),
+        obj: Some(wave_obj_to_value(&ws)),
+    });
+}
+```
+
+Note the order: the **tab delete comes first**, the **workspace update
+second**. The frontend applies this array via `updateWaveObjects`
+(`frontend/app/store/wos.ts`, pre-fix):
+
+```ts
+function updateWaveObjects(vals: WaveObjUpdate[]) {
+    for (const val of vals) {
+        updateWaveObject(val);   // wov.setData(...) — a raw Solid signal write
+    }
+}
+```
+
+Each `updateWaveObject` call is a bare `setData(...)` on that object's own
+Solid signal, with **no `batch()` wrapper**. Solid propagates every signal
+write's dependent effects synchronously and independently unless the
+writes are batched together. So processing this specific two-item array
+does, in order:
+
+1. **Delete the Tab object** — the closing tab's own `useWaveObjectValue<Tab>`
+   signal (subscribed by its still-mounted `<Tab>` component, `tab.tsx:118`)
+   goes to `{ value: null }`. `tabData()` becomes `null`, so
+   `tabData()?.name` (`tab.tsx:285`) renders empty. The tab's DOM node is
+   **still mounted** at this point — nothing has told the parent `<For
+   each={tabIds()}>` (`tabbar.tsx`) to remove it yet, because `tabIds()` is
+   derived from the **workspace** object, not the tab object. Net visible
+   effect: the tab's own slot in the strip goes blank, in place, while
+   still fully sized and present.
+2. **Update the Workspace object** — *now* `workspace()`/`tabIds()`
+   recompute, and `<For>` finally unmounts the DroppableTab/Tab for the
+   removed id.
+
+Step 1 and step 2 are two separate, independently-propagated Solid
+updates from ONE atomic server response — exactly the blank-flash-then-
+vanish sequence reported. (This is the same root cause class as §5 —
+one atomic backend transition being fragmented into multiple visible
+frontend steps — just one layer further down, at the generic WaveObject
+update-application layer rather than at the RPC-call layer.)
+
+### 6.2 Fix
+
+`updateWaveObjects` is a shared primitive used by every backend RPC
+response that returns multiple related `updates` — not just `CloseTab`.
+Wrap its loop in Solid's `batch()` so all updates from one response apply
+as a single atomic reactive flush, regardless of how many objects changed
+or what order the backend lists them in:
+
+```ts
+import { batch, createSignal, onCleanup } from "solid-js";
+
+function updateWaveObjects(vals: WaveObjUpdate[]) {
+    batch(() => {
+        for (const val of vals) {
+            updateWaveObject(val);
+        }
+    });
+}
+```
+
+This is the general fix (root-caused at the shared update-application
+layer, not special-cased per RPC), and incidentally also closes off the
+same class of bug for any other handler that already returns, or might in
+future return, more than one `WaveObjUpdate` per call.
+
+### 6.3 Test plan (follow-up #2)
+
+- Manual: close the active tab via the confirm modal — the tab should
+  vanish directly, with no intermediate blank/empty frame in its old slot.
+- Full `vitest` suite + `tsc --noEmit` — no regressions expected (a `for`
+  loop wrapped in `batch()` preserves the same update order and end state,
+  only changes when Solid flushes the resulting DOM writes).
