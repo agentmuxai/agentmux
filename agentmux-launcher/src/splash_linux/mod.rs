@@ -263,10 +263,26 @@ pub(crate) fn fade_alpha(fade_start: Option<Instant>, now: Instant) -> f32 {
 /// Rounded-rect coverage (0..=1) at pixel (x, y) for a `w`×`h` rect with corner
 /// `radius` (0 = square), anti-aliased over a 1-px band on the corner arcs.
 fn corner_coverage(x: i32, y: i32, w: i32, h: i32, radius: f32) -> f32 {
-    if radius <= 0.0 {
-        return 1.0;
-    }
     let (fx, fy) = (x as f32 + 0.5, y as f32 + 0.5);
+    if radius <= 0.0 {
+        // No rounding to compute -- but still bounds-check (x, y) against
+        // the w×h rect rather than unconditionally returning 1.0. The old
+        // unconditional shortcut was only ever safe because render_frame's
+        // one call site always passed in-bounds coordinates by
+        // construction (x in 0..w, y in 0..h); the border-band check below
+        // calls this a second time with coordinates shifted relative to a
+        // SHRUNK inner rect, which are legitimately out-of-bounds for
+        // border-band pixels. Under the square X11-fallback path
+        // (radius=0, no compositor), inner_radius also clamps to 0
+        // (BORDER_WIDTH_PX - BORDER_WIDTH_PX), so without this bounds
+        // check interior_t was always 1.0 and the border never rendered
+        // at all in that fallback (Codex P2, PR #2804 review).
+        return if fx >= 0.0 && fx <= w as f32 && fy >= 0.0 && fy <= h as f32 {
+            1.0
+        } else {
+            0.0
+        };
+    }
     // Clamp to the corner-arc center; in the straight edges/interior this yields
     // dist 0 → full coverage. Only the four corner boxes produce a nonzero dist.
     let cx = fx.clamp(radius, w as f32 - radius);
