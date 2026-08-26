@@ -226,16 +226,43 @@ export interface ComposerRow {
  * Rev 2/3 postmortem: cleverer search algorithms are where this file's
  * bugs have historically come from). Exported for direct unit testing
  * without needing a real layout engine to produce widths.
+ *
+ * `reservedWidth` (Codex P1, PR #2812) accounts for content that shares
+ * the single row's own physical line without being a pairable slot
+ * itself — the stats zone, which sits between the left and right halves
+ * as a third flex child whenever everything fits on one line (spec §3.4).
+ * Slots alone fitting `availableWidth` doesn't mean slots-plus-stats do;
+ * ignoring it let the single-row decision fire anyway, and the row's own
+ * `flex-wrap` safety net silently pushed a side onto its own line —
+ * recreating a one-sided line the same way an unfit pair does below.
+ *
+ * Per-pair capacity (Codex P1, PR #2812): the two-pointer walk used to
+ * pair `sorted[i]`/`sorted[j]` unconditionally, even when their combined
+ * width didn't actually fit `availableWidth` — the resulting row object
+ * had both sides "filled" by the data, but the real rendered line still
+ * overflowed onto two physical lines via the row's own `flex-wrap`,
+ * reproducing the one-sided-lines bug through a different mechanism.
+ * `sorted[j]` is always the smallest still-unplaced width at that point
+ * (descending sort, closing in from the end) — if it doesn't fit next to
+ * the widest remaining slot, no other remaining slot (all ≥ its width)
+ * fits any better, so the widest slot is emitted as its own one-sided row
+ * instead of forcing an overflowing pair onto one line. This is a THIRD,
+ * physical-capacity exception to spec §1's invariant, alongside the
+ * already-named odd-count and degenerate cases — genuinely unavoidable
+ * when content simply cannot fit two-up in the available width, not a
+ * gap in this function's own logic.
  */
 export function computeComposerRows(
     slots: { key: string; width: number }[],
     hostShellKey: string,
     availableWidth: number,
     gapPx: number,
+    reservedWidth = 0,
 ): ComposerRow[] {
     if (slots.length === 0) return [];
 
-    const totalWidth = slots.reduce((sum, s) => sum + s.width, 0) + Math.max(0, slots.length - 1) * gapPx;
+    const reservedForFit = reservedWidth > 0 ? reservedWidth + gapPx : 0;
+    const totalWidth = slots.reduce((sum, s) => sum + s.width, 0) + Math.max(0, slots.length - 1) * gapPx + reservedForFit;
     if (totalWidth <= availableWidth) {
         const movable = slots.filter((s) => s.key !== hostShellKey);
         const hostShellWidth = slots.find((s) => s.key === hostShellKey)?.width ?? 0;
@@ -253,9 +280,14 @@ export function computeComposerRows(
     let i = 0;
     let j = sorted.length - 1;
     while (i < j) {
-        pairs.push([sorted[i].key, sorted[j].key]);
-        i++;
-        j--;
+        if (sorted[i].width + sorted[j].width + gapPx <= availableWidth) {
+            pairs.push([sorted[i].key, sorted[j].key]);
+            i++;
+            j--;
+        } else {
+            pairs.push([sorted[i].key, undefined]);
+            i++;
+        }
     }
     if (i === j) {
         pairs.push([sorted[i].key, undefined]);
@@ -711,27 +743,44 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // `rows()` below already falls back to a single fixed-side row
     // whenever `stripWidth()` is still 0, so skipping the observer
     // entirely in that environment is correct, not just tolerated.
-    // `entry.contentRect` is reported in the element's own LOCAL CSS pixels
-    // (unaffected by any CSS `zoom` on an ancestor — e.g. the agent view's
-    // own `zoom: 0.8`), while the per-slot widths measured below use
-    // `getBoundingClientRect()`, which IS zoom-scaled (viewport-relative).
-    // Comparing those two units directly made `rows()`'s "does everything
-    // fit on one line" check systematically over-generous under any
-    // non-1 ancestor zoom, deciding single-row when the real content did
-    // not fit — reproducing the one-sided-lines bug via the row's own
-    // `flex-wrap` safety net. Reading `getBoundingClientRect()` off the
-    // observed element itself instead keeps both sides of that comparison
-    // in the same coordinate space regardless of ancestor zoom.
+    //
+    // Observes `.agent-composer-strip-rows` — NOT the outer
+    // `.agent-composer-strip` (see `stripRef` below) — for two reasons,
+    // both found via real dev-build screenshot verification at the narrow
+    // tier (task #48), not by inspection alone:
+    //
+    //   - `entry.contentRect` is reported in the element's own LOCAL CSS
+    //     pixels (unaffected by any CSS `zoom` on an ancestor — e.g. the
+    //     agent view's own `zoom: 0.8`), while the per-slot widths
+    //     measured below use `getBoundingClientRect()`, which IS
+    //     zoom-scaled (viewport-relative). Comparing those two units
+    //     directly made the "does everything fit on one line" check
+    //     systematically over-generous under any non-1 ancestor zoom.
+    //     Reading `getBoundingClientRect()` off the observed element
+    //     itself instead keeps both sides of that comparison in the same
+    //     coordinate space regardless of ancestor zoom.
+    //   - `.agent-composer-strip`'s own `getBoundingClientRect().width` is
+    //     its BORDER-BOX width, which includes its own horizontal padding
+    //     (`padding: var(--space-1) var(--space-2)`, 16px total) — slot
+    //     widths have no padding component, so comparing them against
+    //     that inflated width overstated how much fits on one line the
+    //     same way the zoom mismatch above did (reagent P1, PR #2812).
+    //     `.agent-composer-strip-rows` has no padding/border of its own,
+    //     so its border-box and content-box widths are identical — its
+    //     rect gives the real available content width directly, still
+    //     via `getBoundingClientRect()` for the zoom-consistency reason
+    //     above.
     let stripRef: HTMLDivElement | undefined;
+    let rowsRef: HTMLDivElement | undefined;
     const [stripWidth, setStripWidth] = createSignal(0);
     onMount(() => {
-        if (!stripRef || typeof ResizeObserver === "undefined") return;
+        if (!rowsRef || typeof ResizeObserver === "undefined") return;
         const ro = new ResizeObserver((entries) => {
             for (const entry of entries) {
                 setStripWidth(entry.target.getBoundingClientRect().width);
             }
         });
-        ro.observe(stripRef);
+        ro.observe(rowsRef);
         onCleanup(() => ro.disconnect());
     });
 
@@ -784,6 +833,28 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
             widths[key] = Math.round(total / 8) * 8;
         }
         setSlotWidths(widths);
+    });
+
+    // Real measured footprint of the stats zone (`statsZone` below), fed
+    // into `computeComposerRows`'s `reservedWidth` param below (Codex P1,
+    // PR #2812) — see that function's own doc comment for why the
+    // single-row fit decision needs to know about this. `statsZone()` is
+    // rendered in one of two mutually exclusive places (its own doc
+    // comment), so it mounts two separate DOM instances even though only
+    // one is ever actually attached to a live parent at a time — the
+    // OTHER stays detached and reports a 0 rect. Reading whichever one is
+    // `isConnected` at effect time gets the real on-screen footprint
+    // regardless of which position is currently active. Depends on
+    // `rightText()` explicitly (not `slots()`) since the stats zone isn't
+    // part of the slot pool at all (spec §3.4) — nothing else in this
+    // effect's own dependency chain would otherwise notice its content
+    // changing width.
+    let statsRefs: { single?: HTMLElement; multi?: HTMLElement } = {};
+    const [statsWidth, setStatsWidth] = createSignal(0);
+    createEffect(() => {
+        rightText();
+        const el = statsRefs.single?.isConnected ? statsRefs.single : statsRefs.multi?.isConnected ? statsRefs.multi : undefined;
+        setStatsWidth(el ? Math.round(el.getBoundingClientRect().width / 8) * 8 : 0);
     });
 
     // reagent P1 on PR #2808: `<For>` (below) reconciles by referential
@@ -849,18 +920,50 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
             return [{ left, right }];
         }
 
-        // Estimated, not measured, same caveat as every other breakpoint
-        // in this file's own SCSS (see _composer-strip.scss's shed-content
-        // queries) — this only decides the single-row/multi-row boundary,
-        // a few px of slop just shifts that boundary slightly, it doesn't
-        // change which slots end up on which side once a path is chosen.
-        const gapPx = stripRef ? parseFloat(getComputedStyle(stripRef).getPropertyValue("--space-1-5")) || 6 : 6;
-        return computeComposerRows(
-            list.map((s) => ({ key: s.key, width: widths[s.key] ?? 0 })),
+        // The real column-gap `.agent-composer-strip-row` applies between
+        // its own left/right (and, single-row, stats) children — reading
+        // it (not a hardcoded constant, which would silently drift if the
+        // SCSS value ever changes) matches reagent P2 on PR #2808's same
+        // rationale for the per-slot measurement effect above. (Reagent
+        // P2, PR #2812: this used to read `--space-1-5`, the row's OWN
+        // internal `-row-right` gap, not `--space-2`, the actual
+        // `column-gap` between the row's left/right/stats children.)
+        const gapPx = rowsRef ? parseFloat(getComputedStyle(rowsRef).getPropertyValue("--space-2")) || 8 : 8;
+
+        // Codex P1, PR #2812: a slot hidden via this file's own SCSS
+        // shed-content queries (e.g. `.agent-composer-strip-auth`,
+        // `.agent-composer-strip-process-badge` collapsing to
+        // `display:none` below a container-width threshold) measures a
+        // real 0px — correct, not a measurement bug. Feeding it into
+        // `computeComposerRows` anyway let it consume a pairing partner
+        // as if it were real content: a row could come back with both
+        // `left`/`right` non-empty while one side renders nothing at all,
+        // the exact visual bug this revision exists to prevent, just
+        // relabeled as a "shed slot" instead of a wrapping zone. Excluded
+        // from the pairing math below — never from rendering, since it
+        // still needs a stable DOM home to stay measurable and pick back
+        // up automatically once the container widens past its own
+        // threshold again — then folded back into the last row afterward
+        // via its own fallback `side`, where its zero width can never
+        // visually unbalance anything.
+        const visible = list.filter((s) => s.key === "hostShell" || (widths[s.key] ?? 0) > 0);
+        const shed = list.filter((s) => s.key !== "hostShell" && (widths[s.key] ?? 0) === 0);
+
+        const built = computeComposerRows(
+            visible.map((s) => ({ key: s.key, width: widths[s.key] ?? 0 })),
             "hostShell",
             width,
             gapPx,
+            statsWidth(),
         );
+
+        if (shed.length === 0) return built;
+        const target = built[built.length - 1] ?? { left: [], right: [] };
+        for (const s of shed) {
+            if (s.side === "left") target.left = [...target.left, s.key];
+            else target.right = [...target.right, s.key];
+        }
+        return built.length === 0 ? [target] : [...built.slice(0, -1), target];
     });
 
     // Row COUNT rarely changes across recomputes — plain number primitives
@@ -906,9 +1009,14 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // presence in the flow order stays stable whether or not stats are
     // populated yet. Deliberately NOT folded into the row-pairing
     // algorithm itself (spec §3.4) — a third, always-centered concern,
-    // not a left/right slot.
-    const statsZone = () => (
-        <span class="agent-composer-strip-stats-zone">
+    // not a left/right slot; its real measured footprint still feeds
+    // `computeComposerRows`'s `reservedWidth` param above (Codex P1, PR
+    // #2812) so the single-row fit decision accounts for it. `variant`
+    // tags which of the two mutually-exclusive call sites below is
+    // mounting this instance, so the measurement effect above can tell
+    // them apart (see that effect's own doc comment).
+    const statsZone = (variant: "single" | "multi") => (
+        <span class="agent-composer-strip-stats-zone" ref={(el) => (statsRefs[variant] = el)}>
             <Show when={rightText()}>
                 <span
                     class="agent-composer-strip-stats"
@@ -938,14 +1046,14 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 which independently decided when to wrap onto their own
                 dedicated one-sided lines — the actual bug this revision
                 answers (docs/retro/retro-composer-strip-one-sided-lines-misdiagnosis-2026-08-26.md). */}
-            <div class="agent-composer-strip-rows">
+            <div class="agent-composer-strip-rows" ref={rowsRef}>
                 <For each={rowIndices()}>
                     {(rowIndex) => (
                         <div class="agent-composer-strip-row">
                             <span class="agent-composer-strip-row-left">
                                 <For each={rows()[rowIndex]?.left ?? []}>{renderSlot}</For>
                             </span>
-                            <Show when={rows().length === 1}>{statsZone()}</Show>
+                            <Show when={rows().length === 1}>{statsZone("single")}</Show>
                             <span class="agent-composer-strip-row-right">
                                 <For each={rows()[rowIndex]?.right ?? []}>{renderSlot}</For>
                             </span>
@@ -954,7 +1062,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 </For>
             </div>
 
-            <Show when={rows().length !== 1}>{statsZone()}</Show>
+            <Show when={rows().length !== 1}>{statsZone("multi")}</Show>
         </div>
     );
 };
