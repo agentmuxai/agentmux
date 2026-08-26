@@ -291,7 +291,7 @@ export const AgentIdentityLinksPanel = (props: AgentIdentityLinksPanelProps): JS
                                     class="identity-btn identity-btn-primary"
                                     onClick={() => openClaudeLogin(undefined)}
                                 >
-                                    Connect Claude account
+                                    Connect Anthropic account
                                 </button>
                             </div>
                         </Show>

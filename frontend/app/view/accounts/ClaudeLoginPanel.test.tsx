@@ -188,7 +188,7 @@ describe("ClaudeLoginPanel — Stash link verification (codex P1 on PR #2414)", 
         ]);
         retryButton.click();
 
-        await screen.findByText(/signed in to claude/i);
+        await screen.findByText(/signed in to anthropic/i);
         // The whole point: Retry must refresh the SAME account
         // ("acct-new") the first attempt already minted and persisted, not
         // mint a brand-new one under the still-undefined original prop —
@@ -209,7 +209,7 @@ describe("ClaudeLoginPanel — Stash link verification (codex P1 on PR #2414)", 
             <ClaudeLoginPanel onClose={() => {}} linkTarget={{ agentDefinitionId: "agent-1" }} />
         ));
 
-        await screen.findByText(/signed in to claude/i);
+        await screen.findByText(/signed in to anthropic/i);
         expect(hub.refreshAccountCache).toHaveBeenCalled();
     });
 
@@ -252,7 +252,7 @@ describe("ClaudeLoginPanel — Stash link verification (codex P1 on PR #2414)", 
 
         render(() => <ClaudeLoginPanel onClose={() => {}} />);
 
-        await screen.findByText(/signed in to claude/i);
+        await screen.findByText(/signed in to anthropic/i);
         expect(hub.listAgentIdentities).not.toHaveBeenCalled();
     });
 });
@@ -267,7 +267,7 @@ describe("ClaudeLoginPanel — unmount cleanup (codex P2 on PR #2414)", () => {
         const { unmount } = render(() => (
             <ClaudeLoginPanel onClose={() => {}} linkTarget={{ agentDefinitionId: "agent-1" }} />
         ));
-        await screen.findByText(/signed in to claude/i);
+        await screen.findByText(/signed in to anthropic/i);
         hub.cancelCliLogin.mockClear(); // clear whatever the login flow itself called
 
         unmount();
