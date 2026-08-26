@@ -103,7 +103,7 @@ import { compactionThreshold } from "@/app/store/agent-pane-state/context-window
 import type { CompactionState, ResumeRetryState } from "@/app/store/agent-pane-state/types";
 import { formatCompactNumber, formatExactNumber } from "@/util/format-count";
 import { formatElapsedCompact } from "@/util/format-time";
-import { For, Show, createEffect, createMemo, createSignal, type JSX } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, untrack, type JSX } from "solid-js";
 import type { SessionStats, TurnTokens } from "../types";
 import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
 import { RuntimeBadge } from "./RuntimeBadge";
@@ -622,7 +622,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // first right-side slot over to the left instead of showing a dead
     // zone. Single source of truth (this one memo, not two independently
     // derived ones) so the override can't be applied inconsistently
-    // between leftSlots/rightSlots.
+    // between leftKeys/rightKeys.
     //
     // Two paths, chosen per render:
     //   - Real measurement available (every current slot has a
@@ -661,31 +661,79 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         }
         return { left, right };
     });
-    const leftSlots = createMemo(() => zones().left);
-    const rightSlots = createMemo(() => zones().right);
+
+    // reagent P1 on PR #2808: `<For>` (below) reconciles by referential
+    // identity of each item in its `each` array — passing `zones().left`/
+    // `.right` directly, as this used to, handed it a brand-new
+    // `{key, side, render}` object for every slot on EVERY recompute of
+    // `slots()` (any processCount/authStatus/ctxText change, which ticks
+    // every second during an active turn). With no stable identity to
+    // compare against, `<For>` treated that as "every slot removed and
+    // re-added," remounting `AgentRuntimeDropup` — which owns its own
+    // `open`/`selectedOptIndex` signals — and silently collapsing an open
+    // Mode/Model/Effort dropdown on a completely unrelated slot's change.
+    // Plain string keys compare by VALUE, not reference, so `<For>` over
+    // `leftKeys()`/`rightKeys()` correctly preserves DOM/component
+    // identity for any slot whose zone didn't change. `slotByKey` is read
+    // once inside each `<For>` item's own template callback — Solid only
+    // re-invokes that callback when the KEY ITSELF changes, not on every
+    // parent recompute — so the returned JSX stays reactive to that
+    // slot's own signal reads regardless (the standard `<For>` idiom).
+    // A slot that genuinely changes zone (a real rebalance decision, not
+    // an unrelated prop change) still gets destroyed in one `<For>` and
+    // recreated in the other — an inherent limit of two separate `<For>`
+    // blocks, not something a key can paper over, but a real zone change
+    // is a far rarer event than "any slot's content changed."
+    const slotByKey = createMemo(() => {
+        const map = new Map<string, { key: string; side: "left" | "right"; render: () => JSX.Element }>();
+        for (const s of slots()) map.set(s.key, s);
+        return map;
+    });
+    const leftKeys = createMemo(() => zones().left.map((s) => s.key));
+    const rightKeys = createMemo(() => zones().right.map((s) => s.key));
 
     return (
         <div class="agent-composer-strip" classList={{ "agent-composer-strip--expanded": props.logOpen }}>
             {/* Controls zone — renders whichever slots the dynamic pooling
-                above (`leftSlots`) assigned to the left half. See the
+                above (`leftKeys`) assigned to the left half. See the
                 file-header comment and docs/specs/
                 SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md for why
-                this is computed rather than a fixed set of children. */}
+                this is computed rather than a fixed set of children, and
+                `slotByKey`'s own doc comment for why `<For>` iterates
+                plain string keys here rather than the slot objects
+                directly. */}
             <span class="agent-composer-strip-controls">
-                <For each={leftSlots()}>
-                    {(slot) => (
-                        // `display: contents` (agent-composer-strip-slot-measure,
-                        // _composer-strip.scss) — invisible to layout, so this
-                        // wrapper changes nothing about how the slot's own
-                        // children flex/wrap; it exists only to give the
-                        // measurement effect above a stable per-slot anchor.
-                        <span
-                            class="agent-composer-strip-slot-measure"
-                            ref={(el) => (measureRefs[slot.key] = el)}
-                        >
-                            {slot.render()}
-                        </span>
-                    )}
+                <For each={leftKeys()}>
+                    {(key) => {
+                        // untrack: `<For>` calls this template callback
+                        // ONCE per stable key, but a bare
+                        // `{slotByKey().get(key)?.render()}` inside JSX
+                        // would still read the `slotByKey()` MEMO reactively
+                        // — re-invoking `.render()` (and so reconstructing
+                        // AgentRuntimeDropup, resetting its own open/
+                        // selectedOptIndex signals) every time `slots()`
+                        // recomputes for ANY reason, defeating the whole
+                        // point of keying by string above. Capturing the
+                        // rendered JSX once, outside tracking, is what
+                        // actually makes this a one-time call — the
+                        // returned JSX stays reactive to its OWN internal
+                        // signal reads regardless (the standard `<For>`
+                        // idiom this file's history already discusses).
+                        const rendered = untrack(() => slotByKey().get(key)?.render());
+                        return (
+                            // `display: contents` (agent-composer-strip-slot-measure,
+                            // _composer-strip.scss) — invisible to layout, so this
+                            // wrapper changes nothing about how the slot's own
+                            // children flex/wrap; it exists only to give the
+                            // measurement effect above a stable per-slot anchor.
+                            <span
+                                class="agent-composer-strip-slot-measure"
+                                ref={(el) => (measureRefs[key] = el)}
+                            >
+                                {rendered}
+                            </span>
+                        );
+                    }}
                 </For>
             </span>
 
@@ -714,7 +762,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
             </span>
 
             {/* Right zone — renders whichever slots the dynamic pooling
-                above (`rightSlots`) assigned to the right half. The
+                above (`rightKeys`) assigned to the right half. The
                 hostShell slot (HOST/SANDBOX tag fused to the Shell toggle,
                 see its `render` above) is always last in the pool and
                 lands here except in the degenerate one-slot-total case —
@@ -724,15 +772,20 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 own full-width line below 482px, its own flex-basis-0 half
                 of the row at the widest tier (see _composer-strip.scss). */}
             <span class="agent-composer-strip-right">
-                <For each={rightSlots()}>
-                    {(slot) => (
-                        <span
-                            class="agent-composer-strip-slot-measure"
-                            ref={(el) => (measureRefs[slot.key] = el)}
-                        >
-                            {slot.render()}
-                        </span>
-                    )}
+                <For each={rightKeys()}>
+                    {(key) => {
+                        // See the left zone's identical pattern above for
+                        // why `untrack` is required here, not optional.
+                        const rendered = untrack(() => slotByKey().get(key)?.render());
+                        return (
+                            <span
+                                class="agent-composer-strip-slot-measure"
+                                ref={(el) => (measureRefs[key] = el)}
+                            >
+                                {rendered}
+                            </span>
+                        );
+                    }}
                 </For>
             </span>
         </div>

@@ -12,9 +12,18 @@
  */
 
 import { cleanup, render, screen } from "@solidjs/testing-library";
-import { afterEach, describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { createSignal } from "solid-js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AgentComposerStrip, computeBalancedLeftKeys } from "./AgentComposerStrip";
+
+// AgentRuntimeDropup (rendered via showControls()) imports this — same mock
+// AgentRuntimeDropup.test.tsx uses; only exercised by the reagent P1
+// regression test below, which opens that dropdown.
+vi.mock("../runtime-apply", () => ({
+    applyRuntimeChange: vi.fn().mockResolvedValue(undefined),
+}));
 
 afterEach(() => {
     cleanup();
@@ -99,6 +108,65 @@ describe("AgentComposerStrip — Tier 3 predictive countdown", () => {
             />
         ));
         expect(screen.queryByText(/to auto-compact/)).toBeNull();
+    });
+});
+
+describe("AgentComposerStrip — zone-assignment identity stability (reagent P1 on PR #2808)", () => {
+    it("keeps the Mode/Model/Effort dropdown open when an unrelated slot's own state changes (e.g. a tracked process count ticking)", async () => {
+        // Before this fix, <For> iterated the FRESH {key,side,render}
+        // objects `slots()` allocates on every recompute — any unrelated
+        // prop change (processCount here) gave every slot a brand-new
+        // object identity, so <For> destroyed and recreated ALL of them,
+        // including AgentRuntimeDropup (which owns its own `open` signal).
+        // That silently closed this exact dropdown. `<For>` now iterates
+        // stable string keys (see `slotByKey`'s doc comment in
+        // AgentComposerStrip.tsx) — this test would fail against the old
+        // behavior (aria-expanded resets to "false" after setProcessCount).
+        const [processCount, setProcessCount] = createSignal(0);
+        render(() => (
+            <AgentComposerStrip
+                {...baseProps}
+                blockId="block-1"
+                blockAtom={() => undefined}
+                processCount={processCount()}
+            />
+        ));
+
+        await userEvent.click(screen.getByRole("button", { name: /Runtime settings/i }));
+        expect(screen.getByRole("button", { name: /Runtime settings/i }).getAttribute("aria-expanded")).toBe("true");
+
+        setProcessCount(1);
+        // Proves the update actually reached the DOM (the process badge is
+        // gated on processCount > 0) before trusting the assertion below —
+        // otherwise a no-op re-render would make this test pass for the
+        // wrong reason regardless of whether the underlying bug is fixed.
+        await screen.findByText("1");
+
+        // Deliberately RE-QUERIES rather than reusing the button reference
+        // from before setProcessCount: if the fix regresses and the trigger
+        // gets destroyed/recreated, the OLD (now-detached) node would still
+        // report its last "aria-expanded=true" forever, making a reused
+        // reference pass for the wrong reason regardless of the real bug.
+        expect(screen.getByRole("button", { name: /Runtime settings/i }).getAttribute("aria-expanded")).toBe("true");
+    });
+
+    it("still updates ctx text live in place when contextTokens changes, despite the untrack() around the one-time render() call", async () => {
+        // The untrack() fix above deliberately stops the OUTER slot lookup
+        // from re-invoking render() on unrelated changes — this test guards
+        // the other direction: it must NOT also break live reactivity
+        // WITHIN a slot's own already-rendered JSX (ctx text needs to keep
+        // updating every turn without the whole slot remounting).
+        const [contextTokens, setContextTokens] = createSignal(90_000);
+        render(() => (
+            <AgentComposerStrip {...baseProps} contextTokens={contextTokens()} contextWindow={200_000} />
+        ));
+
+        expect(screen.getByText(/90k/i)).toBeInTheDocument();
+
+        setContextTokens(120_000);
+        await screen.findByText(/120k/i);
+
+        expect(screen.queryByText(/90k/i)).not.toBeInTheDocument();
     });
 });
 
