@@ -1,7 +1,8 @@
 # SPEC: Scrolling for the AskUserQuestion panel
 
 **Date:** 2026-08-25
-**Status:** design only, not yet implemented
+**Status:** implemented, PR #2805 — see §3.1's two corrections (Codex P1/P2)
+made during that PR's review, before merge.
 **Builds on:** `docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md` (original
 design), `SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md` /
 `SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md` /
@@ -84,23 +85,20 @@ controls that let the user act on it.
 
 ## 3. Design
 
-### 3.1 New scroll boundary: header and footer pinned, question content scrolls
+### 3.1 New scroll boundary: header and footer fixed-size, question content scrolls
 
 Wrap the `<For each={r.questions}>` block in a new element,
-`.agent-question-panel-scroll`, and make the header and actions bar
-`position: sticky` within `.agent-question-panel` (a pattern already used
-elsewhere in this pane family — `frontend/app/view/agent/styles/_search.scss`
-pins its header the same way, `position: sticky; top: 0`):
+`.agent-question-panel-scroll`:
 
 ```
-<div class="agent-question-panel">      <!-- max-height cap, flex column -->
-  <div class="agent-question-panel-header">   <!-- position: sticky; top: 0 -->
+<div class="agent-question-panel">      <!-- max-height cap + min-height: 0, flex column -->
+  <div class="agent-question-panel-header">   <!-- flex-shrink: 0 -->
   <div class="agent-question-panel-scroll">   <!-- NEW: overflow-y: auto, min-height: 0 -->
     <For each={r.questions}>
       <fieldset class="agent-question-panel-q">
     </For>
   </div>
-  <div class="agent-question-panel-actions">  <!-- position: sticky; bottom: 0 -->
+  <div class="agent-question-panel-actions">  <!-- flex-shrink: 0 -->
 </div>
 ```
 
@@ -109,20 +107,54 @@ always visible regardless of how much question content there is — the thing
 that actually matters per §2 — while only the middle (the questions
 themselves) scrolls.
 
-CSS additions to `AgentQuestionPanel.scss`:
+**Correction (Codex P2 on the implementation PR #2805 — `position: sticky` on
+the header/actions was inert, not just unnecessary):** the first draft of
+this design put `position: sticky; top: 0` on the header and `position:
+sticky; bottom: 0` on the actions bar, claiming it mirrored
+`frontend/app/view/agent/styles/_search.scss`'s header-pinning pattern.
+That claim was wrong, and the CSS did nothing as a result: `position: sticky`
+only sticks an element within its nearest *scrolling* ancestor. The header
+and actions are siblings of `.agent-question-panel-scroll` (the actual
+scroll container), not nested inside it, and `.agent-question-panel` itself
+has no `overflow` set — there is no scrolling ancestor for sticky to attach
+to here. `_search.scss`'s header, by contrast, genuinely is nested inside
+its own scrolling container, which is why sticky works there and doesn't
+here — the two cases only look alike, they aren't the same shape.
+
+The actual mechanism that keeps the header/actions visible is plain flex
+sizing, not positioning: give the header and actions `flex-shrink: 0` so
+they never give up space, and leave `.agent-question-panel-scroll` as the
+one flexible, shrinkable child (default `flex-shrink: 1`) that absorbs all
+of the panel's own size changes. No `position: sticky` needed or used.
+
+**Correction (Codex P1 on #2805 — `max-height` on `.agent-question-panel`
+was also ineffective on its own):** the first draft set `max-height: 420px`
+on `.agent-question-panel` without also setting `min-height: 0` on it. As a
+flex item of `.agent-view`, `.agent-question-panel`'s *automatic* minimum
+height defaults to its content's min-content size (since the panel itself
+has no `overflow` set) — and per the flex sizing algorithm, `used-size =
+max(min-size, min(max-size, tentative-size))`, so that automatic minimum
+wins over `max-height` whenever content is taller than 420px. Concretely:
+the panel still grew to fit *all* its content regardless of the cap, and
+`.agent-view`'s `overflow: hidden` clipped it exactly as before this spec —
+the fix did nothing in the exact scenario it was built for. `min-height: 0`
+on `.agent-question-panel` itself (not just on `.agent-question-panel-scroll`
+— see §3.3, a *different* instance of the same underlying gotcha, one level
+up) closes this: with it, the panel can actually shrink to whatever
+`.agent-view` can spare, capped at 420px, instead of always claiming its
+full content height.
+
+CSS additions to `AgentQuestionPanel.scss`, corrected:
 
 ```scss
 .agent-question-panel {
     // existing rules unchanged, plus:
     max-height: 420px; // see §3.2 for why a fixed px value, not vh/%
+    min-height: 0;      // REQUIRED — see the Codex P1 correction above
 }
 
 .agent-question-panel-header {
-    position: sticky;
-    top: 0;
-    z-index: 1;
-    background: var(--modal-bg-color, #232323); // match panel bg so scrolled
-                                                  // content doesn't show through
+    flex-shrink: 0; // never gives up space to the scroll region below
 }
 
 .agent-question-panel-scroll {
@@ -132,15 +164,13 @@ CSS additions to `AgentQuestionPanel.scss`:
                           // stacked <fieldset> blocks when multiple questions
     overflow-y: auto;
     min-height: 0; // REQUIRED — see §3.3, the classic flexbox scroll gotcha
+                    // (a distinct instance of it from the panel-level one above)
 }
 
 .agent-question-panel-actions {
-    position: sticky;
-    bottom: 0;
-    z-index: 1;
-    background: var(--modal-bg-color, #232323);
-    padding-top: var(--space-2); // breathing room above the sticky footer
-                                   // once content is scrolled behind it
+    padding-top: var(--space-2); // breathing room above this bar once the
+                                   // scroll region above it is scrolled
+    flex-shrink: 0; // never gives up space to the scroll region above
 }
 ```
 
@@ -212,8 +242,9 @@ needs no changes here.
 - **No change to the 30s auto-timeout's own logic** (arming, hover-pause,
   keyboard-pause, recommended-option detection) — this spec only changes
   layout/overflow, not timing behavior. The countdown chip simply needs to
-  stay visible in the sticky header, which it already is (it's part of
-  `.agent-question-panel-header`, unchanged).
+  stay visible in the header, which it already is (it's part of
+  `.agent-question-panel-header`, unchanged, and the header is now
+  `flex-shrink: 0` per §3.1's correction).
 - **No virtualization.** Question/option counts in practice are small
   (single digits); a plain `overflow-y: auto` is sufficient and matches the
   weight of the existing `_decision-panel.scss` precedent. Virtualizing a

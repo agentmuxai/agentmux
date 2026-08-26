@@ -681,7 +681,7 @@ describe("AgentQuestionPanel keyboard-pause (SPEC_ASK_USER_QUESTION_TIMEOUT_KEYB
 });
 
 describe("AgentQuestionPanel scroll structure (SPEC_ASK_USER_QUESTION_PANEL_SCROLL_2026_08_25.md)", () => {
-    it("wraps question content in a scroll region that is a sibling of the sticky header and actions bar", () => {
+    it("wraps question content in a scroll region that is a sibling of the fixed-size header and actions bar", () => {
         const [pending] = createSignal<ToolNode[]>([twoQuestionSet()]);
         render(() => <AgentQuestionPanel pending={pending} onAnswer={vi.fn()} />);
 
@@ -691,8 +691,10 @@ describe("AgentQuestionPanel scroll structure (SPEC_ASK_USER_QUESTION_PANEL_SCRO
         const actions = panel.querySelector(":scope > .agent-question-panel-actions");
 
         // Header and actions must be direct children of the panel (not nested
-        // inside the scroll region), or `position: sticky` has nothing to
-        // stick to within — the whole point of the wrapper.
+        // inside the scroll region) — they stay visible via flex-shrink: 0,
+        // not position: sticky (which would need them nested inside the
+        // scroll container to have any effect; see the SCSS comments on
+        // .agent-question-panel-header for why sticky doesn't apply here).
         expect(scroll).toBeTruthy();
         expect(header).toBeTruthy();
         expect(actions).toBeTruthy();
