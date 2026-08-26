@@ -2,15 +2,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // AgentComposerStrip — status row above the textarea. In flow order:
-//   1. AgentRuntimeDropup (single Mode · Model · Effort trigger)
-//   2. token/elapsed stats
-//   3. process badge · context text · auth tag · HOST/SANDBOX tag + Shell
-//      toggle (paired as a single unit — see .agent-composer-strip-host-shell)
+//   1. Controls zone (left): whichever slots AgentComposerStrip.tsx's
+//      `zones` memo assigned to the left side — semantically, the runtime
+//      trigger + context group (ctx text · countdown · Compact) as of
+//      2026-08-25's Rev 5 regrouping (see that file's own header comment
+//      for why context group moved here from the right zone), but see
+//      `zones`'s own doc comment for the "never completely empty" override.
+//   2. Stats zone (centered): token/elapsed stats
+//   3. Right zone: whichever slots landed on the right — semantically,
+//      process badge, auth tag, and the HOST/SANDBOX tag + Shell toggle
+//      (paired as a single unit — see .agent-composer-strip-host-shell),
+//      Shell always outermost.
 //
-// Deliberate (not organic) tiered split points, always edge-split — same
-// visual language as the widest tier's left/center/right split, extended
-// down to fewer zones per line as the pane narrows, never a centered
-// blob. The "always left-justified below the widest tier" design from
+// Tiered split points choose which zones share a line, same left/center/
+// right visual language at every tier, extended down to fewer zones per
+// line as the pane narrows, never a centered blob. The "always left-
+// justified below the widest tier" design from
 // SPEC_COMPOSER_STRIP_LEFT_JUSTIFIED_TIERED_WRAP_2026_08_03.md was
 // reverted per direct user feedback ("the justify left was a mistake"),
 // and an intermediate "center everything" revision was itself corrected
@@ -23,8 +30,9 @@
 //     right — exactly as it would sit at the widest tier, just stacked.
 //   - 280-481px (2 lines): [controls left | stats right] on line 1, right
 //     alone (right-anchored) on line 2.
-//   - >=482px (1 line): controls / stats / right, edge-pinned (unchanged
-//     from the 08-03 addendum below).
+//   - >=482px (1 line): controls / stats / right, edge-pinned, but — as of
+//     2026-08-25 — NOT forced to equal width (see the widest-tier block
+//     below for why that forcing was removed).
 // `justify-content: space-between` on the outer strip pins a 2-zone
 // line's first item to the left edge and last item to the right edge —
 // not centered as a group. A zone forced alone onto a full-width line
@@ -94,10 +102,31 @@
     }
 }
 
+// Measurement anchor only (Rev 6, AgentComposerStrip.tsx) — `display:
+// contents` removes this wrapper from the box tree entirely, so its
+// children act as direct flex items of `-controls`/`-right` exactly as if
+// the wrapper didn't exist (zero layout impact, same wrap behavior as
+// before this wrapper was introduced). Exists only so the component can
+// hold a stable per-slot ref: `wrapper.children` are that slot's actual
+// rendered elements, measured to decide the next render's left/right
+// split by real width instead of a fixed pairing — see that file's Rev 6
+// header comment.
+.agent-composer-strip-slot-measure {
+    display: contents;
+}
+
 // ── Controls zone ────────────────────────────────────────────────────────
 // First in flow, always on line 1. Never gets its own forced flex-basis:
 // 100% break — it's the anchor the other two zones' split points are
 // defined relative to (see the 280px/482px container queries below).
+// Renders whichever slots AgentComposerStrip.tsx's `zones` memo assigned
+// left (semantically the runtime trigger, process badge, and auth tag,
+// with a "never completely empty" override — see that memo's own doc
+// comment). `.agent-composer-strip-process-badge`/`-auth`'s own rules stay
+// defined further down this file next to `-ctx`/`-compact-btn` (grouped by
+// what they visually are, not which zone currently renders them). Content-
+// sized at every tier, including the widest (no forced equal-width with
+// `-right` — see that block further down for why).
 
 .agent-composer-strip-controls {
     display: flex;
@@ -113,11 +142,9 @@
     // No `justify-content` override here (default flex-start) — unlike
     // -stats-zone/-right, this zone never gets a forced `flex-basis: 100%`
     // (see the file-header comment: controls is the anchor the other two
-    // zones' splits are relative to), so its box always matches its own
-    // content width exactly except at the ≥482px tier's `flex: 1 1 0`
-    // — where it must stay left-anchored, not centered, to match -right's
-    // opposite `flex-end` pin. Centering here would be a no-op everywhere
-    // else and actively wrong at that one tier.
+    // zones' splits are relative to), and — as of 2026-08-25 — never gets
+    // stretched to a forced equal width with `-right` either, so its box
+    // always matches its own content width exactly at every tier.
     gap: var(--space-1);
     // A flex item's default min-width is `auto` (its content's intrinsic
     // size), not 0 — without this the runtime trigger's own max-width cap
@@ -309,19 +336,19 @@
 }
 
 // ── Right zone ───────────────────────────────────────────────────────────
-// Process badge · context text · auth tag · HOST/SANDBOX tag + Shell toggle
-// (paired, see .agent-composer-strip-host-shell below), in that order — the
-// HOST/SANDBOX + Shell pair last. Right-anchored (`justify-content:
-// flex-end`) at every tier — this zone's identity, matching the widest
-// tier's pin — not just centered filler. Forced onto its own line
-// (flex-basis: 100%, default) at every tier below 482px — both the 3-line
-// and 2-line tiers give it a dedicated line, since it's consistently the
-// largest zone and holds the strip's one real action (Shell). At the
-// widest tier (≥482px): the same `flex-end` pin now applies to this
-// zone's own flex-basis-0 half of the row instead of its full-width line
-// (see the container query near the bottom of this file, which overrides
-// the flex-basis: 100% default below) — same visual position as the
-// pre-08-03 grid's `justify-self: end`.
+// Renders whichever slots AgentComposerStrip.tsx's `zones` memo assigned
+// right — semantically the context group (ctx text · countdown · Compact)
+// and the HOST/SANDBOX tag + Shell toggle (paired, see
+// .agent-composer-strip-host-shell below), Shell always last/outermost.
+// Right-anchored (`justify-content: flex-end`) at every tier — this zone's
+// identity, matching the widest tier's pin — not just centered filler.
+// Forced onto its own line (flex-basis: 100%, default) at every tier below
+// 482px — both the 3-line and 2-line tiers give it a dedicated line. At
+// the widest tier (≥482px, ≡ 1-line): content-sized, not stretched to a
+// forced equal width with `-controls` (see that tier's own container
+// query further down for why) — `justify-content: flex-end` here still
+// keeps it right-anchored within its own (now content-sized) box, same as
+// every other tier.
 
 .agent-composer-strip-right {
     display: flex;
@@ -632,36 +659,40 @@
     }
 }
 
-// ── Widest tier — edge-pinned controls/right, true-centered stats ──────────
-// The 1-line tier (originally landed 2026-08-03, later same day; unchanged
-// by the 2026-08-14 centered-smart-split revision above other than the
-// surrounding tiers' comments). Gives `-controls` and `-right` matching
-// `flex: 1 1 0` (equal flex-basis, so they grow to occupy equal width) and
-// center-aligns the stats zone between them — the standard "true-center a
-// middle flex item regardless of left/right content width" pattern.
-// Overrides both lower tiers' `flex-basis: 100%`/`auto` toggles on
-// `-stats-zone`/`-right` (this block is last in file order, so it wins the
-// cascade at any width where multiple `min-width` container queries match
-// at once) — nothing here switches `display` or touches `flex-wrap` (still
-// `wrap`, inherited, unchanged — if this breakpoint's estimate is a little
-// off for some real content combination, it still safely reflows instead of
-// clipping, same safety net as every other tier in this file).
-// Breakpoint is estimated (controls ~150-250px + stats ~120-180px + right
-// ~220px + gaps ≈ 600-650px on one line), not measured — needs live
-// task dev verification, same caveat as every breakpoint in this file.
+// ── Widest tier — content-sized controls/right, approximately-centered
+//    stats ───────────────────────────────────────────────────────────────
+// The 1-line tier. Used to give `-controls` and `-right` matching
+// `flex: 1 1 0` (equal flex-basis, forcing them to occupy exactly equal
+// width regardless of actual content) to true-center the stats zone
+// between them. Removed 2026-08-25 — see
+// docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md Rev 4:
+// forcing equal boxes meant a zone with genuinely less content (e.g. just
+// the runtime trigger, vs. the other zone holding ctx text + Compact +
+// HOST/SANDBOX + Shell) showed real, visible dead space in its own half
+// — direct user feedback, with screenshots, after the THIRD attempt at
+// fixing this by computing a cleverer JS split instead of touching this
+// CSS rule.
+//
+// `.agent-composer-strip-controls` falls back cleanly to its own base
+// rule's initial `flex: 0 1 auto` (content-sized) once this override is
+// gone — but `.agent-composer-strip-right`'s BASE rule sets
+// `flex-basis: 100%` unconditionally (needed at the narrower tiers to
+// force it onto its own dedicated full line). Simply deleting this tier's
+// override on `-right`, as Rev 4 first shipped, left that 100% basis in
+// effect even at the widest tier — forcing right onto its own full-width
+// line at every width, not just the narrow ones, which is what actually
+// produced the "still looks the same" report right after Rev 4 landed:
+// controls alone on line 1 (nothing else could fit next to a 100%-wide
+// item), stats sharing line 2 with right instead of true zone separation.
+// `-right` needs an EXPLICIT reset here, not just an absent override.
 @container agent-pane (min-width: 482px) {
-    .agent-composer-strip-controls {
-        flex: 1 1 0;
-    }
-
     .agent-composer-strip-stats-zone {
         flex: 0 0 auto;
         text-align: center;
     }
 
     .agent-composer-strip-right {
-        flex: 1 1 0;
-        justify-content: flex-end;
+        flex: 0 1 auto;
     }
 }
 

@@ -12,9 +12,18 @@
  */
 
 import { cleanup, render, screen } from "@solidjs/testing-library";
-import { afterEach, describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { createSignal } from "solid-js";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { AgentComposerStrip } from "./AgentComposerStrip";
+import { AgentComposerStrip, computeBalancedLeftKeys } from "./AgentComposerStrip";
+
+// AgentRuntimeDropup (rendered via showControls()) imports this — same mock
+// AgentRuntimeDropup.test.tsx uses; only exercised by the reagent P1
+// regression test below, which opens that dropdown.
+vi.mock("../runtime-apply", () => ({
+    applyRuntimeChange: vi.fn().mockResolvedValue(undefined),
+}));
 
 afterEach(() => {
     cleanup();
@@ -99,5 +108,131 @@ describe("AgentComposerStrip — Tier 3 predictive countdown", () => {
             />
         ));
         expect(screen.queryByText(/to auto-compact/)).toBeNull();
+    });
+});
+
+describe("AgentComposerStrip — zone-assignment identity stability (reagent P1 on PR #2808)", () => {
+    it("keeps the Mode/Model/Effort dropdown open when an unrelated slot's own state changes (e.g. a tracked process count ticking)", async () => {
+        // Before this fix, <For> iterated the FRESH {key,side,render}
+        // objects `slots()` allocates on every recompute — any unrelated
+        // prop change (processCount here) gave every slot a brand-new
+        // object identity, so <For> destroyed and recreated ALL of them,
+        // including AgentRuntimeDropup (which owns its own `open` signal).
+        // That silently closed this exact dropdown. `<For>` now iterates
+        // stable string keys (see `slotByKey`'s doc comment in
+        // AgentComposerStrip.tsx) — this test would fail against the old
+        // behavior (aria-expanded resets to "false" after setProcessCount).
+        const [processCount, setProcessCount] = createSignal(0);
+        render(() => (
+            <AgentComposerStrip
+                {...baseProps}
+                blockId="block-1"
+                blockAtom={() => undefined}
+                processCount={processCount()}
+            />
+        ));
+
+        await userEvent.click(screen.getByRole("button", { name: /Runtime settings/i }));
+        expect(screen.getByRole("button", { name: /Runtime settings/i }).getAttribute("aria-expanded")).toBe("true");
+
+        setProcessCount(1);
+        // Proves the update actually reached the DOM (the process badge is
+        // gated on processCount > 0) before trusting the assertion below —
+        // otherwise a no-op re-render would make this test pass for the
+        // wrong reason regardless of whether the underlying bug is fixed.
+        await screen.findByText("1");
+
+        // Deliberately RE-QUERIES rather than reusing the button reference
+        // from before setProcessCount: if the fix regresses and the trigger
+        // gets destroyed/recreated, the OLD (now-detached) node would still
+        // report its last "aria-expanded=true" forever, making a reused
+        // reference pass for the wrong reason regardless of the real bug.
+        expect(screen.getByRole("button", { name: /Runtime settings/i }).getAttribute("aria-expanded")).toBe("true");
+    });
+
+    it("still updates ctx text live in place when contextTokens changes, despite the untrack() around the one-time render() call", async () => {
+        // The untrack() fix above deliberately stops the OUTER slot lookup
+        // from re-invoking render() on unrelated changes — this test guards
+        // the other direction: it must NOT also break live reactivity
+        // WITHIN a slot's own already-rendered JSX (ctx text needs to keep
+        // updating every turn without the whole slot remounting).
+        const [contextTokens, setContextTokens] = createSignal(90_000);
+        render(() => (
+            <AgentComposerStrip {...baseProps} contextTokens={contextTokens()} contextWindow={200_000} />
+        ));
+
+        expect(screen.getByText(/90k/i)).toBeInTheDocument();
+
+        setContextTokens(120_000);
+        await screen.findByText(/120k/i);
+
+        expect(screen.queryByText(/90k/i)).not.toBeInTheDocument();
+    });
+});
+
+/**
+ * Coverage for Rev 6's real-width zone-balancing search (see this file's
+ * own Rev 6 header comment and
+ * docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md) — pure,
+ * so these run without needing a real layout engine to produce widths
+ * (unlike the component itself, which falls back to the fixed `side`
+ * pairing under JSDOM's always-zero widths — see AgentComposerStrip.tsx's
+ * `zones` memo).
+ */
+describe("computeBalancedLeftKeys", () => {
+    it("returns an empty set when there are no movable slots", () => {
+        expect(computeBalancedLeftKeys([], 90)).toEqual(new Set());
+    });
+
+    it("puts the sole movable slot on the left rather than leaving it empty", () => {
+        // Every other subset is either empty (skipped — the caller's own
+        // "never a dead zone" override handles the resulting all-right
+        // case) or this one; nothing else to compare against.
+        const result = computeBalancedLeftKeys([{ key: "a", width: 10 }], 100);
+        expect(result).toEqual(new Set(["a"]));
+    });
+
+    it("picks the smaller-diff single-item split over grouping both together, first-found wins a tie", () => {
+        // a=100, b=10, fixedRight=0. {a} alone: diff=|100-10|=90. {b}
+        // alone: diff=|10-100|=90 (a tie with {a} alone). {a,b} together:
+        // diff=|110-0|=110 (worse). Ties resolve to whichever subset the
+        // brute force reaches first (ascending bitmask order) — pinning
+        // that here makes the tie-break behavior explicit and regression-
+        // tested, not incidental.
+        const result = computeBalancedLeftKeys(
+            [
+                { key: "a", width: 100 },
+                { key: "b", width: 10 },
+            ],
+            0,
+        );
+        expect(result).toEqual(new Set(["a"]));
+    });
+
+    it("finds the true minimum-diff split across more than 2 movable slots, even when it splits an otherwise-plausible pairing", () => {
+        // Modeling the real reported shape (runtime trigger + ctx group +
+        // auth tag, hostShell fixed right) with representative widths.
+        // runtime=130, ctx=170, auth=55, hostShell(fixed right)=90.
+        // Every 2-way split of {runtime, ctx, auth}:
+        //   {runtime}       -> left=130, right=90+225=315, diff=185
+        //   {ctx}           -> left=170, right=90+185=275, diff=105
+        //   {runtime,ctx}   -> left=300, right=90+55 =145, diff=155
+        //   {auth}          -> left=55,  right=90+300=390, diff=335
+        //   {runtime,auth}  -> left=185, right=90+170=260, diff=75
+        //   {ctx,auth}      -> left=225, right=90+130=220, diff=5   <- best
+        //   {runtime,ctx,auth} -> left=355, right=90,       diff=265
+        // The true optimum (ctx+auth) is NOT the "runtime+ctx together"
+        // pairing Rev 5's fixed semantic grouping used — real widths, not
+        // a semantic label, decide the split, which is the entire point
+        // of this revision.
+        const result = computeBalancedLeftKeys(
+            [
+                { key: "runtime", width: 130 },
+                { key: "ctx", width: 170 },
+                { key: "auth", width: 55 },
+            ],
+            90,
+        );
+        expect(result).toEqual(new Set(["ctx", "auth"]));
     });
 });
