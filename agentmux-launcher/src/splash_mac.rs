@@ -67,6 +67,14 @@ const BG_R: f64 = 26.0 / 255.0;
 const BG_G: f64 = 26.0 / 255.0;
 const BG_B: f64 = 31.0 / 255.0;
 
+// Darkened window-edge border — SPEC_SPLASH_SCREEN_BORDER_2026_08_25.md.
+// Roughly half BG's RGB values, a straightforward "darker than the
+// backdrop" reading; not yet confirmed against a real display.
+const BORDER_R: f64 = 13.0 / 255.0;
+const BORDER_G: f64 = 13.0 / 255.0;
+const BORDER_B: f64 = 16.0 / 255.0;
+const BORDER_WIDTH: f64 = 2.0;
+
 /// Safety net: if the host never signals (crash before first paint), tear the
 /// splash down anyway so it can't get stuck on screen.
 const DISMISS_TIMEOUT: Duration = Duration::from_secs(10);
@@ -1038,6 +1046,25 @@ unsafe fn build_window() -> (id, id, Vec<(id, id)>) {
     send_void_id(layer, sel(b"setBackgroundColor:\0"), bg_cgcolor);
     send_void_f64(layer, sel(b"setCornerRadius:\0"), CORNER_RADIUS);
     send_void_bool(layer, sel(b"setMasksToBounds:\0"), 1);
+
+    // Darkened 2px border, inset from the same rounded-rect path as the
+    // corner radius above — SPEC_SPLASH_SCREEN_BORDER_2026_08_25.md. Native
+    // CALayer support, no extra corner math needed.
+    let border_color = {
+        let f: extern "C" fn(id, SEL, f64, f64, f64, f64) -> id =
+            std::mem::transmute(objc_msgSend as *const ());
+        f(
+            class(b"NSColor\0"),
+            sel(b"colorWithSRGBRed:green:blue:alpha:\0"),
+            BORDER_R,
+            BORDER_G,
+            BORDER_B,
+            1.0,
+        )
+    };
+    let border_cgcolor = send(border_color, sel(b"CGColor\0"));
+    send_void_id(layer, sel(b"setBorderColor:\0"), border_cgcolor);
+    send_void_f64(layer, sel(b"setBorderWidth:\0"), BORDER_WIDTH);
 
     // Brain image view in the upper (brain) region, above the stage panel
     // and footer band. macOS Y is bottom-up, so a larger y sits higher.

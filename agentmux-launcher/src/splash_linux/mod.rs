@@ -52,6 +52,15 @@ pub(crate) const CORNER_RADIUS_PX: f32 = 16.0;
 /// Opacity fade-out duration on dismiss. Matches splash_mac.rs.
 pub(crate) const FADE_OUT: Duration = Duration::from_millis(160);
 
+// Darkened window-edge border — SPEC_SPLASH_SCREEN_BORDER_2026_08_25.md.
+// Roughly half BG's RGB values, a straightforward "darker than the
+// backdrop" reading; not yet confirmed against a real display. Matches
+// splash.rs / splash_mac.rs.
+pub(crate) const BORDER_R: u8 = 0x0D;
+pub(crate) const BORDER_G: u8 = 0x0D;
+pub(crate) const BORDER_B: u8 = 0x10;
+pub(crate) const BORDER_WIDTH_PX: i32 = 2;
+
 /// Brain logo as straight (non-pre-multiplied) RGBA8, emitted by build.rs.
 pub(crate) static BRAIN_RGBA: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/brain_rgba.bin"));
 include!(concat!(env!("OUT_DIR"), "/brain_dims.rs")); // pub const BRAIN_W / BRAIN_H (i32)
@@ -312,8 +321,30 @@ pub(crate) fn render_frame(
                 gg = gg * (1.0 - ba) + BRAIN_RGBA[si + 1] as f32 * ba;
                 bb = bb * (1.0 - ba) + BRAIN_RGBA[si + 2] as f32 * ba;
             }
+            // Darkened border band: blend toward BORDER_* the further a pixel
+            // falls outside the shrunk "interior" rect (inset by
+            // BORDER_WIDTH_PX on all sides, radius reduced to match) versus
+            // the outer rect — same anti-aliased coverage math as the corner
+            // rounding itself, just against two nested rects instead of one.
+            // The brain only ever occupies well-interior pixels (PADDING=28
+            // >> BORDER_WIDTH_PX), so blending the already-brain-composited
+            // color here is safe. SPEC_SPLASH_SCREEN_BORDER_2026_08_25.md.
+            let outer_cov = corner_coverage(x, y, w, h, radius);
+            let inner_radius = (radius - BORDER_WIDTH_PX as f32).max(0.0);
+            let inner_cov = corner_coverage(
+                x - BORDER_WIDTH_PX,
+                y - BORDER_WIDTH_PX,
+                w - 2 * BORDER_WIDTH_PX,
+                h - 2 * BORDER_WIDTH_PX,
+                inner_radius,
+            );
+            let interior_t = if outer_cov > 0.0 { (inner_cov / outer_cov).clamp(0.0, 1.0) } else { 0.0 };
+            rr = BORDER_R as f32 * (1.0 - interior_t) + rr * interior_t;
+            gg = BORDER_G as f32 * (1.0 - interior_t) + gg * interior_t;
+            bb = BORDER_B as f32 * (1.0 - interior_t) + bb * interior_t;
+
             // Coverage (rounded corners) × global fade → pre-multiplied alpha.
-            let a = corner_coverage(x, y, w, h, radius) * window_alpha;
+            let a = outer_cov * window_alpha;
             let di = ((y * w + x) * 4) as usize;
             let (o0, o2) = if bgr { (bb, rr) } else { (rr, bb) };
             buf[di] = (o0 * a) as u8;
