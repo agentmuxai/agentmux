@@ -3,87 +3,63 @@
 
 /**
  * AgentComposerStrip — status row that sits directly above the textarea in
- * the agent pane composer region. Deliberate tiered split points (not
- * organic flex-wrap reflow), always edge-split — same left/center/right
- * visual language as the widest tier, extended to fewer zones per line as
- * the pane narrows, never a centered blob — see
- * docs/specs/SPEC_COMPOSER_STRIP_CENTERED_SMART_SPLIT_2026_08_14.md
- * (supersedes SPEC_COMPOSER_STRIP_LEFT_JUSTIFIED_TIERED_WRAP_2026_08_03.md's
- * "always left-justify below the widest tier" design, reverted per direct
- * user feedback; an intermediate "center everything as one group" revision
- * was itself corrected same day per further feedback). <280px: controls /
- * stats / right, each its own line, each keeping its identity (left /
- * center / right) exactly as it would sit at the widest tier, just
- * stacked. 280-481px: [controls left | stats right] on line 1, right
- * alone (right-anchored) on line 2. >=482px (live-measured — the real
- * 1-line/2-line wrap point, not an estimate): controls left / stats zone
- * true-centered / right right — see _composer-strip.scss for the actual
- * container queries.
+ * the agent pane composer region. Three zones, left/center/right: controls
+ * (left), stats (center, always true-centered), everything else (right).
+ * Organic flex-wrap reflow — NOT deliberate pixel-breakpoint tiers (that
+ * design, and why it was abandoned, is below) — so the strip grows from 1
+ * line up to however many it actually needs as the pane narrows, based on
+ * each zone's real rendered width, not a guessed magic number.
  *
- * Misc elements (everything except the centered stats zone) are pooled into
- * an ordered list of "slots" and split DYNAMICALLY between the left
- * (controls) and right zones — see `slots`/`splitIndex`/`leftSlots`/
- * `rightSlots` below. Two things had to be fixed to get here, both same-day
- * (2026-08-24) corrections per direct user feedback:
+ * Misc elements (everything except the centered stats zone) are pooled
+ * into an ordered list of "slots" and split between the left (controls)
+ * and right zones by a fixed semantic `side` on each slot (see `slots`
+ * below): left is "what agent, what mode, how much context is left" (the
+ * runtime trigger + the context group); right is "status indicators + the
+ * one real action" (process badge, auth tag, then HOST/SANDBOX+Shell,
+ * Shell always outermost). The only override: `zones` (below) borrows one
+ * right-side slot over to the left if that's the only way to avoid a
+ * completely empty left zone (e.g. a non-Claude agent with no context
+ * tracked yet, where the left zone's only occupants are both hidden).
  *
- *   (1) A static per-item zone assignment (badge+auth always left,
- *       everything else always right — see
- *       docs/specs/SPEC_COMPOSER_STRIP_LEFT_RIGHT_BALANCE_2026_08_24.md)
- *       looks balanced only when every item happens to be visible at once.
- *       `AgentRuntimeDropup` alone is gated to Claude (`showControls()`),
- *       and the badge/auth tag are each independently conditional — a
- *       non-Claude agent with no tracked processes and unknown auth status
- *       left the ENTIRE controls zone empty while the right zone still
- *       held Shell (which always renders). Fix: pool whichever elements
- *       are ACTUALLY visible right now and split that pool, instead of
- *       hardcoding which zone each element belongs to.
+ * This is the 5th revision of this file's zone-balancing logic in two days
+ * (2026-08-24/25) — see
+ * docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md for the
+ * full history, worth reading before changing this again. Two separate
+ * bugs had to be found and fixed, at two different layers, and getting
+ * one right didn't fix the other:
  *
- *   (2) A count-based split (`floor(pool.length/2)`) still isn't enough:
- *       it treats the 3-wide context group (ctx text + countdown +
- *       Compact) as the same "weight" as the 1-wide auth tag, so a
- *       2-left/3-right split by COUNT could still be lopsided by actual
- *       rendered width. Fix: each slot carries a `weight` (how many
- *       visually distinct sub-elements it's currently rendering).
+ *   - Layer 1 (CSS, Rev 4): `_composer-strip.scss`'s widest tier forced
+ *     BOTH zones to exactly equal width (`flex: 1 1 0`) regardless of how
+ *     much content each one actually had, so a zone with less content
+ *     showed real dead space in its half no matter how "balanced" the JS
+ *     split was. Three earlier JS-side attempts (static assignment,
+ *     count-based split, weight-balanced subset partition) all failed to
+ *     fix this because none of them touched the actual constraint. Fixed
+ *     by letting both zones size to their own content instead.
  *
- *   (3) A weight-balanced PREFIX cut (`floor(N/2)`-style, just on
- *       cumulative weight instead of count) still isn't enough either: a
- *       contiguous "first k slots left" cut can't separate two heavy
- *       slots that happen to sit adjacent in pool order (the context
- *       group and HOST/SANDBOX+Shell both sit at the END of the pool and
- *       are usually the two heaviest) — every cut point either lumps them
- *       together or can't reach past them, capping the best achievable
- *       split at something like 2-vs-5 even though a better balance
- *       exists. This is the literal "we get 2 lines on the right, 1 on
- *       the left — that should be impossible" bug direct user feedback
- *       caught. Fix: `leftMask` (below) brute-forces every possible
- *       left/right SUBSET assignment (not just contiguous cuts — the pool
- *       is capped at 5 slots, so at most 32 combinations) and picks
- *       whichever minimizes the weight difference.
+ *   - Layer 2 (JS, Rev 5): fixing Layer 1 revealed a SECOND, independent
+ *     issue: even with no forced dead space, the ORIGINAL side grouping
+ *     (Rev 4: badge/auth/context-group on the right, only the runtime
+ *     trigger on the left) put most of the strip's actual visual weight
+ *     on one side in the common case — the context group alone can render
+ *     3 sub-elements (text + countdown + Compact), more than the entire
+ *     left zone. No amount of "don't force equal width" fixes a grouping
+ *     that's just inherently lopsided by content. Fixed by moving the
+ *     context group to the left (paired with the runtime trigger — both
+ *     are "primary awareness" of the running agent), leaving badge/auth
+ *     paired with HOST/SANDBOX+Shell on the right ("secondary status +
+ *     the action button"). This is a FIXED regrouping chosen by counting
+ *     realistic sub-element totals for the common case, not a per-render
+ *     computed weight — simpler, and the earlier per-render weight
+ *     computations (Rev 2/3) were themselves a source of bugs.
  *
- * Slot pool, in order (see `slots` below for the exact visibility gate and
- * weight of each):
- *   1. AgentRuntimeDropup (Mode · Model · Effort trigger) — Claude only.
- *      Weight 1.
- *   2. ⚙N process badge — when any process is tracked. Weight 1.
- *   3. Auth tag — once auth status is known. Weight 1.
- *   4. Context group — context text + countdown + Compact button, bundled
- *      as ONE slot (never split across zones) because Compact must sit
- *      immediately right of the context text (pre-existing constraint).
- *      Weight 1-3 depending on how many of the three are currently
- *      showing.
- *   5. HOST/SANDBOX tag + Shell toggle — ALWAYS present (Shell has no
- *      visibility gate) and ALWAYS the last slot, bundled as one atomic
- *      unit (never split across zones) per direct user request predating
- *      this change ("the HOST/SANDBOX indicator should be just to the left
- *      of the Shell button"). Weight 1 or 2 depending on whether
- *      HOST/SANDBOX is showing. Being last and `splitIndex`'s tie-break
- *      (prefers the smaller left-side cut when two cuts balance equally
- *      well) means this pair lands in the right zone whenever any other
- *      slot is also visible, and only crosses into the left zone in the
- *      degenerate case where it's the pool's ONLY slot (one item can't
- *      populate both zones — an unavoidable floor, not a bug).
+ * The lesson, if this needs touching again: a visual-balance report needs
+ * BOTH the actual rendered screenshot AND a check of which layer (CSS
+ * width-forcing vs. JS content-grouping) is actually responsible before
+ * changing either one — this file's history is what happens when that
+ * diagnosis is skipped.
  *
- * Stats zone (centered, unaffected by the above): tokens (↑in ↓out) ·
+ * Stats zone (center, unaffected by the above): tokens (↑in ↓out) ·
  * elapsed, or the live "Compacting…"/"Reconnecting…" readout.
  *
  * The strip bar itself is not clickable. "Shell" is the sole toggle for
@@ -365,22 +341,23 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // non-Claude/no-process/unknown-auth panes. Each slot's `render`
     // reproduces exactly what that element rendered under its old fixed
     // zone (same classes/handlers/titles) — only WHICH zone renders it,
-    // computed fresh here every time, changed. `weight` is the number of
-    // visually distinct sub-elements the slot renders — a plain count-based
-    // split (`floor(slots.length/2)`) treats the 3-wide context group the
-    // same as the 1-wide auth tag, which can leave one zone needing an
-    // internal wrap to a 2nd line while the other sits on 1 (Codex/direct
-    // user feedback, same day: "we get 2 lines on the right, 1 on the
-    // left — that should be impossible"). The split point below balances
-    // cumulative weight instead, so neither zone carries more visual mass
-    // than the other by more than one slot's worth.
-    const slots = createMemo((): { key: string; weight: number; render: () => JSX.Element }[] => {
-        const out: { key: string; weight: number; render: () => JSX.Element }[] = [];
+    // computed fresh here every time, changed. `side` is a fixed semantic
+    // preference (left = state/config, right = counters + the one real
+    // action) — see `zones` below for how the "left must never be
+    // completely empty" override works, and
+    // docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md Rev 4
+    // for why this replaced two earlier attempts at balancing by a
+    // computed integer "weight" (count-based, then weight-based subset
+    // partition) — both were solving the wrong layer: the actual dead-
+    // space bug was the CSS forcing both zones to equal width regardless
+    // of content (see _composer-strip.scss), not which slot goes where.
+    const slots = createMemo((): { key: string; side: "left" | "right"; render: () => JSX.Element }[] => {
+        const out: { key: string; side: "left" | "right"; render: () => JSX.Element }[] = [];
 
         if (showControls()) {
             out.push({
                 key: "runtime",
-                weight: 1,
+                side: "left",
                 render: () => (
                     <AgentRuntimeDropup
                         blockId={props.blockId ?? ""}
@@ -394,7 +371,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         if ((props.processCount ?? 0) > 0) {
             out.push({
                 key: "badge",
-                weight: 1,
+                side: "right",
                 render: () => (
                     <button
                         type="button"
@@ -413,7 +390,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         if (props.authStatus === "authenticated" || props.authStatus === "unauthenticated") {
             out.push({
                 key: "auth",
-                weight: 1,
+                side: "right",
                 render: () => (
                     <span
                         class="agent-composer-strip-auth"
@@ -435,17 +412,24 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         }
 
         if (ctxText() != null) {
-            const compactVisible = props.providerId === "claude" && props.onCompact != null;
             out.push({
                 key: "ctx",
-                // ctx text (always) + countdown (conditional) + Compact
-                // button (conditional) — this slot can't be split across
-                // zones (Compact must stay immediately right of ctx text),
-                // but its WEIGHT still reflects how many sub-elements it's
-                // actually rendering right now, so the split point accounts
-                // for its real width instead of counting it as "1 item"
-                // regardless of whether it's showing 1 or 3 things.
-                weight: 1 + (ctxCountdownText() != null ? 1 : 0) + (compactVisible ? 1 : 0),
+                // ctx text + countdown (conditional) + Compact button
+                // (conditional) render together as one unit — this slot
+                // can't be split across zones, since Compact must stay
+                // immediately right of the context text. Grouped with the
+                // runtime trigger on the LEFT (2026-08-25, Rev 5) — this
+                // slot alone can render 3 sub-elements, more than
+                // everything else in the pool combined in the common
+                // case, so pairing it with badge/auth/hostShell on the
+                // right (as Rev 4 first shipped) put most of the strip's
+                // visual weight on one side every time a Claude agent had
+                // context tracking active. "Mode + context awareness"
+                // (left) / "status indicators + the action button"
+                // (right) is the resulting split — see
+                // docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md
+                // Rev 5.
+                side: "left",
                 render: () => (
                     <>
                         <span
@@ -490,13 +474,12 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
             });
         }
 
-        // Always present, always last — see file-header comment on why
-        // this pair lands right unless it's the pool's only slot. Weight
-        // 1 (Shell alone) or 2 (HOST/SANDBOX tag + Shell) depending on
-        // whether agentMode is known.
+        // Always present (Shell has no visibility gate) and always last
+        // in pool order — see `zones` below for why that keeps it on the
+        // right except in the fully degenerate one-slot-total case.
         out.push({
             key: "hostShell",
-            weight: props.agentMode === "host" || props.agentMode === "container" ? 2 : 1,
+            side: "right",
             render: () => (
                 <span class="agent-composer-strip-host-shell">
                     <Show when={props.agentMode === "host" || props.agentMode === "container"}>
@@ -518,61 +501,38 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         return out;
     });
 
-    // Weight-balanced SUBSET partition — NOT a prefix cut. A contiguous
-    // "first k slots left, rest right" cut can't balance weight when the
-    // heaviest slots happen to sit adjacent to each other in pool order:
-    // e.g. runtime(1)+auth(1)+ctx(3)+hostShell(2) — the two heaviest
-    // (ctx, hostShell) are adjacent at the end, so every possible cut
-    // point either splits them apart (not allowed, they're atomic) or
-    // lumps them together, capping the best achievable split at 2-vs-5.
-    // That's the literal "1 line left, 2 lines right" bug direct user
-    // feedback caught. Fix: brute-force every possible left/right subset
-    // assignment (pool is capped at 5 slots, so at most 32 combinations —
-    // trivial) and pick whichever assignment minimizes the weight
-    // difference, with two tie-breaks: (a) prefer keeping the hostShell
-    // slot (Shell — the strip's one real action) on the right, matching
-    // its established outermost-right convention; (b) among remaining
-    // ties, prefer fewer items on the left. Slots keep their original
-    // pool order WITHIN whichever side they land on (leftSlots/rightSlots
-    // below filter, not reorder), so relative order is still predictable
-    // even though which SIDE a given slot lands on now depends on the
-    // whole pool's weight distribution, not just its own fixed position.
-    const leftMask = createMemo(() => {
+    // Split by fixed semantic side (see each slot's `side` above), with
+    // exactly one override: if that leaves the left zone with literally
+    // zero slots while the right zone has any, borrow the first right-
+    // side slot over to the left instead of showing a dead zone. Single
+    // source of truth (this one memo, not two independently-derived
+    // ones) so the override can't be applied inconsistently between
+    // leftSlots/rightSlots.
+    //
+    // This is deliberately simple — no computed "weight," no search over
+    // possible splits. Two earlier attempts (a count-based split, then a
+    // weight-balanced subset-partition search over a hand-guessed integer
+    // "weight" per slot) both tried to solve visual balance at this
+    // layer, in JS, and both produced their own new bugs (see
+    // docs/specs/SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md Rev 3
+    // for the subset-partition version's own failure). The actual dead-
+    // space bug those attempts were chasing lives in the CSS (both zones
+    // forced to equal width regardless of content — see
+    // _composer-strip.scss's removal of the `flex: 1 1 0` widest-tier
+    // rule), not in which slot renders on which side. This rule only
+    // needs to guarantee the ORIGINAL, simpler requirement: never a
+    // completely empty zone when there's more than one slot to show.
+    const zones = createMemo(() => {
         const list = slots();
-        const n = list.length;
-        const hostIdx = list.findIndex((s) => s.key === "hostShell");
-        const total = list.reduce((sum, s) => sum + s.weight, 0);
-        let bestMask = 0;
-        let bestDiff = Infinity;
-        let bestHostRight = false;
-        let bestLeftCount = Infinity;
-        for (let mask = 0; mask < (1 << n); mask++) {
-            let leftWeight = 0;
-            let leftCount = 0;
-            for (let i = 0; i < n; i++) {
-                if (mask & (1 << i)) {
-                    leftWeight += list[i].weight;
-                    leftCount++;
-                }
-            }
-            const diff = Math.abs(leftWeight - (total - leftWeight));
-            const hostRight = hostIdx === -1 || (mask & (1 << hostIdx)) === 0;
-            const better =
-                diff < bestDiff
-                || (diff === bestDiff && hostRight && !bestHostRight)
-                || (diff === bestDiff && hostRight === bestHostRight && leftCount < bestLeftCount);
-            if (better) {
-                bestMask = mask;
-                bestDiff = diff;
-                bestHostRight = hostRight;
-                bestLeftCount = leftCount;
-            }
+        const left = list.filter((s) => s.side === "left");
+        const right = list.filter((s) => s.side === "right");
+        if (left.length === 0 && right.length > 0) {
+            return { left: [right[0]], right: right.slice(1) };
         }
-        return bestMask;
+        return { left, right };
     });
-
-    const leftSlots = createMemo(() => slots().filter((_, i) => (leftMask() & (1 << i)) !== 0));
-    const rightSlots = createMemo(() => slots().filter((_, i) => (leftMask() & (1 << i)) === 0));
+    const leftSlots = createMemo(() => zones().left);
+    const rightSlots = createMemo(() => zones().right);
 
     return (
         <div class="agent-composer-strip" classList={{ "agent-composer-strip--expanded": props.logOpen }}>
