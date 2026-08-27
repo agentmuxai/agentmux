@@ -774,6 +774,16 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
             // On the right this is the existing "Shell always outermost"
             // order, unchanged; the flip only shows in the degenerate
             // case where this slot is the line's sole (left) occupant.
+            //
+            // No wrapper span (element-level edge priority, 2026-08-26):
+            // badge and button render as direct siblings in the slot's
+            // measure wrapper — same shape as the ctx slot's elements —
+            // so the SCSS edge-priority `order` rules can place the
+            // passive badge inward past a NEIGHBORING slot's interactive
+            // element (Compact), which a single wrapping flex item never
+            // allowed. The user explicitly chose this over the older
+            // "HOST just left of Shell" pairing when the two directives
+            // collided (see _composer-strip.scss's removal note).
             render: (rowSide) => {
                 const hostBadge = () => (
                     <Show when={props.agentMode === "host" || props.agentMode === "container"}>
@@ -792,11 +802,11 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                     </button>
                 );
                 return (
-                    <span class="agent-composer-strip-host-shell">
+                    <>
                         {rowSide === "left" && shellBtn()}
                         {hostBadge()}
                         {rowSide === "right" && shellBtn()}
-                    </span>
+                    </>
                 );
             },
         });
@@ -940,12 +950,21 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 const gapPx = (parseFloat(getComputedStyle(el.parentElement).columnGap) || 0) * zoomRatio();
                 total += gapPx * (children.length - 1);
             }
-            // Rounded to the nearest 8px — the live turn ticker (elapsed
+            // Rounded UP to an 8px bucket — the live turn ticker (elapsed
             // time, token counts) can shift a slot's text width by a
-            // pixel or two every second; without this, the balance below
-            // could flip-flop every tick even though nothing meaningful
-            // about the content actually changed.
-            widths[key] = Math.round(total / 8) * 8;
+            // pixel or two every second; without bucketing, the balance
+            // below could flip-flop every tick even though nothing
+            // meaningful about the content actually changed. `ceil`, not
+            // `round` (user-reported regression, 2026-08-26): nearest-8
+            // can UNDER-report a slot by up to 4px, making the fit check
+            // in `computeComposerRows` optimistic — the row's own CSS
+            // flex-wrap safety net then overflows a couple of pixels
+            // BEFORE the JS split threshold, so a resize shows two
+            // distinct layout breaks within a few px of each other.
+            // Rounding up keeps the anti-jitter bucketing while
+            // guaranteeing the JS decision always fires at-or-before the
+            // point real layout would overflow.
+            widths[key] = Math.ceil(total / 8) * 8;
         }
         setSlotWidths(widths);
     });
@@ -1000,7 +1019,9 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         slotWidths();
         const zone = statsRefs.single?.isConnected ? statsRefs.single : statsRefs.multi?.isConnected ? statsRefs.multi : undefined;
         const content = zone?.firstElementChild;
-        setStatsWidth(content ? Math.round(content.getBoundingClientRect().width / 8) * 8 : 0);
+        // ceil, not round — same optimistic-fit reasoning as the slot
+        // measurement effect above.
+        setStatsWidth(content ? Math.ceil(content.getBoundingClientRect().width / 8) * 8 : 0);
     });
 
     // reagent P1 on PR #2808: `<For>` (below) reconciles by referential

@@ -313,43 +313,50 @@
     }
 }
 
-// HOST/SANDBOX tag + Shell toggle, paired as a single unit — moved out of
-// the controls zone, same day, per direct user request ("the HOST/SANDBOX
-// indicator should be just to the left of the Shell button"). An
-// inline-flex wrapper, not just adjacent DOM order: as ONE flex item inside
-// `.agent-composer-strip-row-right`'s own `flex-wrap: wrap` (Rev 7; was
-// `.agent-composer-strip-right` pre-Rev-7), the pair can never be torn
-// apart onto two different sub-lines the way two independent items could —
-// they move together or not at all.
-//
-// `flex-wrap: wrap` + `min-width: 0` here too (reagentx/Codex P2, PR #2408):
-// panes can shrink to 40px (`MinNodeSizePx`, layoutResize.ts) and
-// `.agent-view` clips overflow, so an unconditional `flex: 0 0 auto` with no
-// give risked pushing Shell — the strip's one real action, otherwise always
-// reachable at every tier — outside the clipped viewport at extreme narrow
-// widths. Wrapping internally is the same last-resort safety net
-// `-row-left`/`-row-right` already rely on: normally the pair sits on one
-// line, but if it truly doesn't fit, HOST/SANDBOX drops to its own
-// sub-line instead of either item overflowing. The shed query below
-// (hiding HOST/SANDBOX outright before that point) is the primary defense
-// — this wrap is the fallback for whatever width that shed rule doesn't
-// quite cover.
-.agent-composer-strip-host-shell {
-    display: inline-flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-1);
-    // flex-shrink 1 (not 0) — reagentx P1, PR #2408: flex-shrink:0 makes
-    // this item never squeeze below its content's natural width inside
-    // `.agent-composer-strip-row-right`, which makes the flex-wrap
-    // fallback above dead code (an item that never shrinks never reaches
-    // the point where its own internal wrap needs to trigger).
-    // `-row-left`/`-row-right` get this behavior "for free" from the flex
-    // initial default (flex-shrink: 1) since neither sets `flex` in its
-    // own base rule — matching that here, explicitly, since this rule
-    // does set `flex`.
-    flex: 0 1 auto;
-    min-width: 0;
+// [Superseded, element-level edge priority 2026-08-26] HOST/SANDBOX +
+// Shell were previously paired as a single inline-flex unit per a
+// 2026-08-24 user request ("the HOST/SANDBOX indicator should be just
+// to the left of the Shell button") — the user explicitly chose to
+// override that with strict edge priority when the two directives
+// collided (interactive elements always closest to the edge means
+// Compact can sit BETWEEN the passive HOST badge and Shell). Full
+// wrapper history: reagentx P1 PR #2393 (internal-wrap fallback),
+// reagentx/Codex P2 PR #2408 (min-width give so Shell never clips).
+// [Removed, element-level edge priority 2026-08-26] The
+// `.agent-composer-strip-host-shell` wrapper (inline-flex, internal
+// wrap fallback, --space-1 gap — reagentx P1 PR #2393 / P1 PR #2408
+// history) is gone: HOST/SANDBOX and Shell now render as direct
+// siblings in the slot's measure wrapper (same shape as the ctx slot's
+// own 3 elements), so each is independently orderable by the
+// edge-priority rules below — a passive badge trapped inside a wrapper
+// could never be ordered inward past a NEIGHBORING slot's interactive
+// element. The zone's own gap now spaces them; the row-level
+// `flex-wrap: wrap` safety net (still present above) replaces the
+// wrapper's internal-wrap fallback.
+
+// Element-level edge priority (2026-08-26, user-directed): within each
+// row side, interactive elements (buttons/dropdowns) order toward the
+// strip's outer edge ACROSS slot boundaries — a passive element from
+// one slot (the HOST badge) must never sit closer to the edge than a
+// neighboring slot's interactive one (Compact). CSS `order` changes
+// VISUAL placement only: DOM order — and with it slot measurement,
+// pairing math, and keyboard focus order — is untouched. The JS layers
+// (`orderKeysForEdgePriority`, the composite slots' `render(rowSide)`
+// mirroring) keep DOM order aligned with the visual result within and
+// between whole slots; these rules are the cross-slot authority on
+// top. Scoped through `.agent-composer-strip-slot-measure >` so only
+// each slot's TOP-LEVEL elements are ordered — never anything nested
+// inside the dropup panel or another component's own flex internals.
+.agent-composer-strip-row-left
+    .agent-composer-strip-slot-measure
+    > :is(.agent-runtime-dropup-trigger, .agent-composer-strip-compact-btn, .agent-composer-strip-process-badge, .agent-composer-strip-log-btn) {
+    order: -1;
+}
+
+.agent-composer-strip-row-right
+    .agent-composer-strip-slot-measure
+    > :is(.agent-runtime-dropup-trigger, .agent-composer-strip-compact-btn, .agent-composer-strip-process-badge, .agent-composer-strip-log-btn) {
+    order: 1;
 }
 
 .agent-composer-strip-stats {
@@ -545,17 +552,17 @@
 // auth 70px + Shell 40px + 3 gaps ≈ 220px), not measured DOM output —
 // confirm against real rendered widths in `task dev` and adjust.
 
-// HOST/SANDBOX sheds ahead of auth (below), not alongside it: it now shares
-// its wrapper with Shell — the strip's one real action, which never sheds —
-// so that pair needs strictly more guaranteed room than auth alone did on
-// its own. Hiding the badge first keeps Shell comfortably clear of the
-// `.agent-composer-strip-host-shell` internal-wrap fallback above in the
-// common case; that wrap is still there as the last-resort safety net for
-// whatever width this estimate doesn't quite cover. reagentx/Codex P2, PR
-// #2408 — estimated, not measured; confirm against real rendered widths in
-// `task dev` and adjust, same caveat as every breakpoint in this section.
+// HOST/SANDBOX sheds ahead of auth (below), not alongside it: it renders
+// beside Shell — the strip's one real action, which never sheds — so
+// that neighborhood needs strictly more guaranteed room than auth alone
+// did on its own. (The badge is now a direct row-zone item — the
+// `.agent-composer-strip-host-shell` wrapper is gone, see the removal
+// note above — so the selector scopes to the strip, where hostShell is
+// the badge's only source.) reagentx/Codex P2, PR #2408 — estimated,
+// not measured; confirm against real rendered widths in `task dev` and
+// adjust, same caveat as every breakpoint in this section.
 @container agent-pane (max-width: 260px) {
-    .agent-composer-strip-host-shell .runtime-badge {
+    .agent-composer-strip .runtime-badge {
         display: none;
     }
 }
