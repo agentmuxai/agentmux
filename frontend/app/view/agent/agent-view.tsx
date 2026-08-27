@@ -2142,7 +2142,26 @@ const AgentPresentationView = ({
                 <Show when={workingRowVisible()}>
                     <div
                         class="agent-working-row-backdrop"
-                        classList={{ "agent-working-row-backdrop--loading": workingRowLoading() }}
+                        classList={{
+                            // Must mirror AgentWorkingRow's OWN loading gate
+                            // (`props.loading || !!props.compacting ||
+                            // !!props.reconnecting`, AgentFooter.tsx), not
+                            // just `workingRowLoading()` — reagent P1 on
+                            // PR #2826: since `workingRowVisible()` above
+                            // already renders this backdrop for
+                            // compacting/reconnecting too, using only
+                            // `workingRowLoading()` here left the backdrop in
+                            // its `--worked` (non-loading) color while the
+                            // row itself rendered its loading/accent-tinted
+                            // variant during those two states — the exact
+                            // backdrop/row color-mismatch
+                            // SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md
+                            // fixed for the plain loading case.
+                            "agent-working-row-backdrop--loading":
+                                workingRowLoading() ||
+                                agentAtoms().compactingAtom[0]() != null ||
+                                agentAtoms().reconnectingAtom[0]() != null,
+                        }}
                     />
                 </Show>
 
