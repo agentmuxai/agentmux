@@ -1353,12 +1353,10 @@ const AgentPresentationView = ({
             // REGARDLESS of code (reducer.ts's FailureCleared case), so
             // dispatching it unconditionally here would ALSO silently wipe
             // an unrelated concurrent failure (rate_limited, overloaded,
-            // context_exceeded, unresponsive, etc.) that happens to be
-            // showing the moment a turn-active event arrives, even though
-            // that unrelated problem was never actually resolved. Mirrors
-            // the established pattern at useAgentFailure.ts's silent
-            // self-heal handler ("never blow away an unrelated concurrent
-            // failure"). reagentx P1 on PR #2338 (thirty-fifth re-review).
+            // context_exceeded, etc.) that happens to be showing the moment
+            // a turn-active event arrives, even though that unrelated
+            // problem was never actually resolved. reagentx P1 on PR #2338
+            // (thirty-fifth re-review).
             if (paneSnapshot(model.blockId)?.failure?.data.code === "auth") {
                 dispatchPane(model.blockId, { type: "FailureCleared" }, "system");
             }
@@ -1834,15 +1832,6 @@ const AgentPresentationView = ({
         onLoginViaTerminal: () => {
             log("auth", "Login via terminal — opening a console window for browser login");
             void status.loginViaTerminal();
-        },
-        // unresponsive recovery — the process is alive but wedged (backend
-        // health monitor's Dead classification), so there's nothing a plain
-        // retry could reach. Kill + respawn via the same mechanism already
-        // trusted for the post-login stale-process case. See
-        // docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md §4.
-        onRestart: () => {
-            log("agent", "Restart — the agent process was unresponsive, respawning it");
-            void status.forceControllerRefresh("restart");
         },
     });
 

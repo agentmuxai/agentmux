@@ -3,6 +3,11 @@
 **Date:** 2026-07-27
 **Author:** Agent1
 **Status:** §1 audit-only, fix proposed, not implemented. §2 (Agent2's stuck pane) — live-confirmed post-merge (§2.7): the CLI subprocess itself had gone unresponsive (`Dead` per the backend health monitor), not a frontend-only race; recovered by closing/reopening the pane. §2.8 — a second, distinct, code-confirmed bug (answering a question can never succeed after any process respawn) is **fixed and merged**. §4 (surface/auto-recover a `Dead` persistent agent before the user has to notice) — the minimum-viable version (surface a "Restart" recovery row; auto-restart stretch goal deliberately NOT built) is **implemented and merged**, see §4's own status line.
+**2026-08-27 note:** the "Restart" recovery row this report's §4 shipped (and
+the backend `Dead`/unresponsive health-monitor state §2.7 references) was
+removed in `docs/specs/SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md`
+after proving too false-positive-prone in practice. This report otherwise
+stands as the historical incident record.
 **Triggered by:** two live incidents observed in the same session — (1) Agent2's pane (block `210a0e08-1740-4bf0-8f26-93c82a107e4c`), running concurrently in an adjacent pane, visibly stuck on an AskUserQuestion prompt with no way to resolve it; (2) a separate, repeated observation that a pane shows "Worked" and then reverts to "Working…" with no user message sent in between.
 
 This report is a companion to two same-day documents already in the repo — `docs/reports/REPORT_WORKING_STATE_TELEMETRY_AUDIT_2026_07_27.md` (catalogs 9 other false-"Working" paths, mostly about a turn never *ending*) and `docs/specs/REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md` (the fire-once `controllerstatus` event gap). Neither covers the two issues below: this report is about a turn that legitimately *did* end, then un-ends itself, and about a specific stuck-forever panel shape distinct from a stuck turn.

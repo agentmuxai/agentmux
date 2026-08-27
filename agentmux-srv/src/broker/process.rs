@@ -7,8 +7,8 @@
 //! for the full rationale. AgentMux answers "is this agent/process alive and
 //! what's it doing" six different, only-partially-overlapping ways today
 //! (`blockcontroller::CONTROLLER_REGISTRY`, `process_tracker`, the `reactive`
-//! handler's own registration list, `pidregistry`, `HealthMonitor`'s
-//! output-silence heuristic, and `watchdog.rs`'s PTY-idle timers). This
+//! handler's own registration list, `pidregistry`, `TurnActivityTracker`'s
+//! turn-active bookkeeping, and `watchdog.rs`'s PTY-idle timers). This
 //! module is the consolidation point for the two callers that most directly
 //! motivated it (the Agent pane's process badge and the Swarm pane's block
 //! discovery/overview), modeled on `broker::scheduler`'s Credential Broker
