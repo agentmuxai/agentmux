@@ -503,7 +503,7 @@ describe("AgentComposerStrip — interactive elements flush against the row edge
             <AgentComposerStrip logOpen={false} onToggleLog={() => {}} agentMode="host" />
         ));
         const shell = screen.getByRole("button", { name: /Shell/i });
-        const hostBadge = container.querySelector(".agent-composer-strip-host-shell .runtime-badge")!;
+        const hostBadge = container.querySelector(".agent-composer-strip .runtime-badge")!;
         expect(shell.closest(".agent-composer-strip-row-left")).not.toBeNull();
         expect(precedes(shell, hostBadge)).toBe(true);
     });
