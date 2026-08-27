@@ -19,12 +19,15 @@ interface BrowserAuthModalPanelProps {
     realm: string;
     isProxy: boolean;
     onCancel: () => void;
-    onSubmit: (username: string, password: string) => void;
+    onSubmit: (username: string, password: string, save: boolean) => void;
 }
 
 export const BrowserAuthModalPanel = (props: BrowserAuthModalPanelProps): JSX.Element => {
     const [username, setUsername] = createSignal("");
     const [password, setPassword] = createSignal("");
+    // Unchecked by default — saving a credential to the OS keychain is an
+    // opt-in action, not the default outcome of a one-off manual sign-in.
+    const [saveCredential, setSaveCredential] = createSignal(false);
     // True once either footer button fired its handler. onCleanup
     // uses this to detect "modal was unmounted via ESC / backdrop
     // click / pane close / replace" and fire onCancel exactly once
@@ -34,7 +37,7 @@ export const BrowserAuthModalPanel = (props: BrowserAuthModalPanelProps): JSX.El
 
     const submit = () => {
         resolved = true;
-        props.onSubmit(username(), password());
+        props.onSubmit(username(), password(), saveCredential());
     };
     const cancel = () => {
         resolved = true;
@@ -89,6 +92,14 @@ export const BrowserAuthModalPanel = (props: BrowserAuthModalPanelProps): JSX.El
                         onInput={(e) => setPassword(e.currentTarget.value)}
                         onKeyDown={onKeyDown}
                     />
+                </label>
+                <label class="browser-auth-modal-save-field">
+                    <input
+                        type="checkbox"
+                        checked={saveCredential()}
+                        onChange={(e) => setSaveCredential(e.currentTarget.checked)}
+                    />
+                    <span>Save this credential</span>
                 </label>
             </div>
             <footer class="modal-panel-footer">

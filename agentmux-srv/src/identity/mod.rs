@@ -32,6 +32,7 @@
 pub mod auth_diag;
 pub mod auth_patterns;
 pub mod auth_session;
+pub mod browser_credential_store;
 pub mod cleanup;
 pub mod key_validator;
 pub mod oauth_client;

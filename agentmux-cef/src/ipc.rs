@@ -234,7 +234,9 @@ async fn route_command(
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| "open_subwindow: parent_instance_id required".to_string())?
                 .to_string();
-            commands::window::open_subwindow(state, parent)
+            let initial_view = args.get("initial_view").and_then(|v| v.as_str());
+            let initial_meta = args.get("initial_meta").and_then(|v| v.as_str());
+            commands::window::open_subwindow(state, parent, initial_view, initial_meta)
         }
         "open_floating_pane_window" => {
             // Floating-pane tear-off — a chromeless window showing just the
@@ -512,6 +514,19 @@ async fn route_command(
             // pane mid-auth-prompt leaks the CEF AuthCallback refcount
             // until the 5-minute TTL fires.
             crate::browser_pane::auth::cancel_for_block(block_id);
+            // Un-join this pane's request from any pending credential
+            // approval it was riding (possibly shared with a sibling pane
+            // hitting the same protection space — see
+            // `credential_broker::approval`'s coalescing). If this was the
+            // last request on that approval, close its now-pointless
+            // subwindow too.
+            if let Some(window_id) = crate::credential_broker::approval::cancel_for_block(block_id) {
+                if let Err(e) =
+                    commands::window::close_window_by_label(state, &serde_json::json!({ "label": window_id }))
+                {
+                    tracing::warn!("[credential-broker] failed to close orphaned approval window: {e}");
+                }
+            }
             state.browser_panes.close(block_id, state);
             Ok(serde_json::json!(true))
         }
@@ -607,6 +622,114 @@ async fn route_command(
             } else {
                 Ok(serde_json::json!(false))
             }
+        }
+        "browser_pane_auth_save" => {
+            // Opt-in save after a manual credential submit — a wholly new
+            // command rather than a flag on browser_pane_auth_submit, so
+            // that IPC's contract stays byte-for-byte unchanged.
+            // `frontend/app/view/browser/use-browser-auth.ts` fires this
+            // right after `browser_pane_auth_submit` when the user checked
+            // "save this credential." A failure here never affects the
+            // page load — auth already succeeded via the untouched submit
+            // path — so this only ever surfaces as a non-blocking toast on
+            // the renderer side.
+            let block_id = args.get("block_id").and_then(|v| v.as_str()).unwrap_or("");
+            let origin = args.get("origin").and_then(|v| v.as_str()).unwrap_or("");
+            let realm = args.get("realm").and_then(|v| v.as_str()).unwrap_or("");
+            let is_proxy = args.get("is_proxy").and_then(|v| v.as_bool()).unwrap_or(false);
+            let username = args.get("username").and_then(|v| v.as_str()).unwrap_or("");
+            let password = args.get("password").and_then(|v| v.as_str()).unwrap_or("");
+            match crate::credential_broker::save_credential(
+                state, block_id, origin, realm, is_proxy, username, password,
+            )
+            .await
+            {
+                Ok(()) => Ok(serde_json::json!(true)),
+                Err(e) => {
+                    tracing::warn!("[credential-broker] browser_pane_auth_save failed: {e}");
+                    Err(e)
+                }
+            }
+        }
+        "credential_approval_decide" => {
+            // The human resolved the credential-approval subwindow —
+            // approve (Fill + cont() every coalesced parked callback) or
+            // deny (cancel() each). See `credential_broker::approval` for
+            // the coalescing rationale (multiple panes hitting the same
+            // protection space near-simultaneously share one approval).
+            let approval_id = args.get("approval_id").and_then(|v| v.as_str()).unwrap_or("");
+            let approve = args.get("approve").and_then(|v| v.as_bool()).unwrap_or(false);
+            tracing::info!(
+                "[credential-broker] approval_decide approval_id={} approve={}",
+                approval_id,
+                approve,
+            );
+            let Some(resolved) = crate::credential_broker::approval::take(approval_id) else {
+                tracing::warn!(
+                    "[credential-broker] decide for unknown/expired approval_id {} — already \
+                     resolved or timed out",
+                    approval_id,
+                );
+                return Ok(serde_json::json!(false));
+            };
+
+            if approve {
+                match crate::credential_broker::fill_credential(
+                    state,
+                    &resolved.identity_id,
+                    &resolved.origin,
+                    &resolved.realm,
+                    resolved.is_proxy,
+                )
+                .await
+                {
+                    Ok((username, password)) => {
+                        use cef::ImplAuthCallback;
+                        let u = cef::CefString::from(username.as_str());
+                        let p = cef::CefString::from(password.as_str());
+                        for request_id in &resolved.auth_request_ids {
+                            if let Some(cb) = crate::browser_pane::auth::take(request_id) {
+                                cb.cont(Some(&u), Some(&p));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "[credential-broker] Fill failed for approval_id {}: {e} — \
+                             cancelling {} parked auth request(s)",
+                            approval_id,
+                            resolved.auth_request_ids.len(),
+                        );
+                        use cef::ImplAuthCallback;
+                        for request_id in &resolved.auth_request_ids {
+                            if let Some(cb) = crate::browser_pane::auth::take(request_id) {
+                                cb.cancel();
+                            }
+                        }
+                    }
+                }
+            } else {
+                use cef::ImplAuthCallback;
+                for request_id in &resolved.auth_request_ids {
+                    if let Some(cb) = crate::browser_pane::auth::take(request_id) {
+                        cb.cancel();
+                    }
+                }
+            }
+
+            // The approval subwindow's job is done — close it regardless
+            // of approve/deny. Best-effort: a failure here just leaves a
+            // dead window the human closes manually, never blocks the
+            // decision that already took effect above.
+            if let Some(window_id) = resolved.window_id {
+                if let Err(e) =
+                    commands::window::close_window_by_label(state, &serde_json::json!({ "label": window_id }))
+                {
+                    tracing::warn!("[credential-broker] failed to close approval window: {e}");
+                }
+            }
+
+            Ok(serde_json::json!(true))
         }
         "browser_panes_set_overlay_clip" => {
             // Apply a clip region to every pane HWND that excludes the given

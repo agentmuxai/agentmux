@@ -34,6 +34,7 @@ mod srv_ipc;
 mod memory_heartbeat;
 mod memory_pressure;
 mod browser_pane;
+mod credential_broker;
 #[cfg(target_os = "windows")]
 mod floating_pane;
 mod reducer;
@@ -645,6 +646,11 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     // `tokio::spawn` there would panic with "there is no reactor
     // running" because that thread has no `Handle::current()`.
     browser_pane::auth::set_runtime_handle(runtime.handle().clone());
+
+    // Same rationale, for the credential broker's async orchestration
+    // (and the approval registry's TTL timer, which shares this handle) —
+    // see `credential_broker::set_runtime_handle`'s doc comment.
+    credential_broker::set_runtime_handle(runtime.handle().clone());
 
     // Start the IPC HTTP server and get the assigned port.
     let ipc_port = runtime.block_on(ipc::start_ipc_server(app_state.clone()));
