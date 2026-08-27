@@ -16,7 +16,7 @@ import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { AgentComposerStrip, computeBalancedLeftKeys, computeComposerRows, orderKeysForEdgePriority } from "./AgentComposerStrip";
+import { AgentComposerStrip, computeBalancedLeftKeys, computeComposerRows, computeStatsInline, orderKeysForEdgePriority } from "./AgentComposerStrip";
 
 // AgentRuntimeDropup (rendered via showControls()) imports this — same mock
 // AgentRuntimeDropup.test.tsx uses; only exercised by the reagent P1
@@ -504,5 +504,41 @@ describe("AgentComposerStrip — interactive elements flush against the row edge
         const hostBadge = container.querySelector(".agent-composer-strip .runtime-badge")!;
         expect(shell.closest(".agent-composer-strip-row-left")).not.toBeNull();
         expect(precedes(shell, hostBadge)).toBe(true);
+    });
+});
+
+/**
+ * The stats-placement decision (ReAgent P2, PR #2817) — extracted as a
+ * pure function precisely so this guard exists: this exact stats-width
+ * math has regressed twice before (Codex P1 #2812's overflow, the
+ * post-#2813 wrapper trap) with no automated coverage.
+ */
+describe("computeStatsInline", () => {
+    it("keeps stats inline when slots-plus-stats-plus-gap fit the single row", () => {
+        // slots 70 + stats 20 + gap 5 = 95 <= 100
+        expect(computeStatsInline(1, 70, 20, 5, 100)).toBe(true);
+    });
+
+    it("evicts stats to their own line — WITHOUT splitting slots — when they no longer fit beside them (the 2-line middle tier)", () => {
+        // slots 70 + stats 20 + gap 5 = 95 > 80, but the row count stays
+        // 1: the caller's slot rows are untouched, only placement flips.
+        expect(computeStatsInline(1, 70, 20, 5, 80)).toBe(false);
+    });
+
+    it("empty stats are always inline — an empty zone must never claim a line of its own", () => {
+        // Regression shape of the post-#2813 wrapper trap: a zero-width
+        // stats measurement must never flip placement, at ANY width.
+        expect(computeStatsInline(1, 70, 0, 5, 80)).toBe(true);
+        expect(computeStatsInline(1, 9999, 0, 5, 10)).toBe(true);
+    });
+
+    it("never inline once the slots themselves need multiple rows", () => {
+        expect(computeStatsInline(2, 70, 20, 5, 1000)).toBe(false);
+        expect(computeStatsInline(3, 70, 0, 5, 1000)).toBe(false);
+    });
+
+    it("boundary: exactly-fitting stats stay inline", () => {
+        expect(computeStatsInline(1, 70, 25, 5, 100)).toBe(true);
+        expect(computeStatsInline(1, 70, 26, 5, 100)).toBe(false);
     });
 });

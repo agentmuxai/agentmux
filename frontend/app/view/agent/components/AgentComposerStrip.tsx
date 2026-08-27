@@ -341,6 +341,27 @@ export function orderKeysForEdgePriority(
     return side === "left" ? [...interactive, ...passive] : [...passive, ...interactive];
 }
 
+/**
+ * Whether the stats zone shares the single row's line (2026-08-26,
+ * extracted from the `layout` memo per ReAgent P2 on PR #2817 so the
+ * decision has a pure-function test guard — this exact stats-width math
+ * has regressed twice before: Codex P1 #2812, the post-#2813 wrapper
+ * trap). True only when there is one slot row AND either no stats exist
+ * or slots-plus-stats-plus-gap genuinely fit the available width. False
+ * evicts the stats to their own line below WITHOUT splitting the slot
+ * row — the middle tier (1 line → 2 → 3) that stops the strip jumping
+ * from 1 visual line straight to 3.
+ */
+export function computeStatsInline(
+    rowCount: number,
+    slotsTotalWidth: number,
+    statsWidth: number,
+    gapPx: number,
+    availableWidth: number,
+): boolean {
+    return rowCount === 1 && (statsWidth === 0 || slotsTotalWidth + statsWidth + gapPx <= availableWidth);
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function fmtTokens(t: TurnTokens): string {
@@ -1162,10 +1183,10 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         // answer to a different question: not "how do slots split" but
         // "where do the stats go." On failure the stats move to their
         // own line below (the multi mount position) while the slots stay
-        // exactly where the slot-only decision put them.
-        const stats = statsWidth();
+        // exactly where the slot-only decision put them. See
+        // `computeStatsInline`'s own doc comment.
         const slotsTotal = visible.reduce((sum, s) => sum + (widths[s.key] ?? 0), 0) + Math.max(0, visible.length - 1) * gapPx;
-        const statsInline = built.length === 1 && (stats === 0 || slotsTotal + stats + gapPx <= width);
+        const statsInline = computeStatsInline(built.length, slotsTotal, statsWidth(), gapPx, width);
 
         if (shed.length === 0) return { rows: built.map(edgeOrdered), statsInline };
         const target = built[built.length - 1] ?? { left: [], right: [] };
