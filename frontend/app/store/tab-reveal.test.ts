@@ -10,6 +10,7 @@ import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { createRoot } from "solid-js";
 import {
     clearLeafRevealGate,
+    gateTargetTabId,
     gatingNodeIds,
     holdLeafRevealGate,
     holdRevealGate,
@@ -60,6 +61,35 @@ describe("tab-reveal gate", () => {
         expect(read(tabSwitching)).toBe(false);
         holdRevealGate();
         expect(read(tabSwitching)).toBe(true);
+    });
+
+    // Destination-targeted gate (SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH §9):
+    // a targeted hold records which tab should hide; an untargeted hold
+    // records null (legacy hide-current-active); every lift path clears
+    // the target so a stale target can't leak into the next transition.
+    test("holdRevealGate records the destination target and lifting clears it", () => {
+        holdRevealGate("tab-dest");
+        expect(read(gateTargetTabId)).toBe("tab-dest");
+        expect(read(tabSwitching)).toBe(true);
+        scheduleRevealLift();
+        vi.advanceTimersByTime(1000); // drain to the fallback lift
+        expect(read(tabSwitching)).toBe(false);
+        expect(read(gateTargetTabId)).toBe(null);
+    });
+
+    test("untargeted holdRevealGate resets a stale target from a prior hold", () => {
+        holdRevealGate("tab-a");
+        expect(read(gateTargetTabId)).toBe("tab-a");
+        holdRevealGate();
+        expect(read(gateTargetTabId)).toBe(null);
+        expect(read(tabSwitching)).toBe(true);
+    });
+
+    test("safety-net lift after MAX_GATE_MS also clears the target", () => {
+        holdRevealGate("tab-b");
+        vi.advanceTimersByTime(900); // past MAX_GATE_MS with no schedule call
+        expect(read(tabSwitching)).toBe(false);
+        expect(read(gateTargetTabId)).toBe(null);
     });
 
     test("holdRevealGate keeps the gate up across long awaits", () => {

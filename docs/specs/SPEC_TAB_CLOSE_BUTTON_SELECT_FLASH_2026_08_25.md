@@ -541,3 +541,70 @@ no optimistic layer in front of it.
 - 2-tab workspace: modal open on one tab → Confirm still closes (raw-list
   guard); the surviving tab cannot be closed (✕ hidden / guard).
 - `tsc --noEmit` + full `vitest` — no regressions.
+
+## 9. Follow-up #5 — the promoted neighbor's PANE flashes after §8
+
+With §8 in a verified build, the repo owner confirmed the strip flash is
+gone but reported: "after the modal, when the tab is gone, the next tab's
+entire pane flashes."
+
+### 9.1 Root cause — the reveal gate blanks the SOURCE for the whole round trip
+
+`workspace.tsx` keeps every tab's content mounted (`display:none` when
+inactive) and applies the reveal gate as `visibility:hidden`/`opacity:0`
+to whichever tab is **currently active** while `tabSwitching` is up
+(`tid === tabId() && tabSwitching()`). On close-promotion:
+
+1. Confirm → `handleClose` → `holdRevealGate()`. `tabId()` is still the
+   CLOSING tab X → **X's fully-rendered pane blanks instantly.**
+2. CloseTab RPC round-trips (~tens of ms). Content region shows blank.
+3. Update lands: X unmounts, neighbor Y flips `display:none → flex` and —
+   `tid === tabId()` now matching Y — stays hidden under the gate.
+4. `scheduleRevealLift()`'s settle detector waits for 80ms of
+   long-task-free frames. Tab teardown (block/terminal disposal, layout
+   model deletion) emits long tasks that keep resetting that clock, so
+   the blank stretches toward the 800ms hard cap before Y fades in over
+   120ms.
+
+Net effect: blank-from-confirm → (long settle) → fade-in = "the next
+tab's entire pane flashes." The same source-blanking happens on ordinary
+tab switches (the gate has always keyed on the current active tab), but
+the switch case is shorter (no teardown long-tasks) and so was never
+reported.
+
+### 9.2 Fix — destination-targeted gate
+
+The holder usually KNOWS the destination tab. Let it say so:
+
+- `tab-reveal.ts`: `holdRevealGate(targetTabId?: string|null)` records a
+  `gateTargetTabId` signal; every lift path (settle, hard cap, safety
+  net) clears it. Untargeted holds keep the legacy behavior.
+- `workspace.tsx`: hide only when
+  `tid === tabId() && tabSwitching() && (target == null || target === tid)`.
+- `tabbar.tsx handleClose`: passes `displayActiveTabId()` (computed after
+  the optimistic hide, so it resolves to the neighbor the backend is
+  about to promote — §8's same promotion mirror).
+- `tab-actions.ts setActiveTab`: passes its destination `tabId` — regular
+  tab switches get the same improvement (source keeps painting through
+  the RPC; only the destination is FOUC-gated, from the flip until
+  settle).
+- `createTab` stays untargeted: its destination id doesn't exist until
+  the RPC returns, and hiding the current tab during creation is the
+  established behavior.
+
+What the user now sees on close-promotion: X's content stays on screen
+through the RPC; at the flip, Y is hidden only for its own settle window
+(teardown tasks overlap it), then fades in. The blank no longer starts at
+confirm-click and no longer covers the round trip.
+
+### 9.3 Test plan
+
+- `tab-reveal.test.ts`: targeted hold records the target; untargeted hold
+  resets a stale target; every lift path (schedule fallback, MAX_GATE
+  safety net) clears it.
+- Manual: close the active tab via the modal — the closing pane stays
+  visible until the moment of the switch; the neighbor appears with at
+  most its own brief settle, no full-region blank from the confirm click.
+- Manual regression: ordinary tab switch — source no longer blanks during
+  the RPC; destination still reveals atomically (no piecemeal paint).
+  Startup reveal (app-init's untargeted `scheduleRevealLift`) unchanged.
