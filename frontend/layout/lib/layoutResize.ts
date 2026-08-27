@@ -87,7 +87,9 @@ export const DefaultGapSizePx = 3;
 // 128px minimum in both directions — this same constant floors both Row (width)
 // and Column (height) drags, since minNodeSize is derived generically from
 // whichever parent's pixelToSizeRatio is active (see onResizeMove below).
-const MinNodeSizePx = 128;
+// Exported for the Shift+window-edge resize path (windowEdgeResize.ts), which
+// applies the same floor directly in CSS px.
+export const MinNodeSizePx = 128;
 
 /**
  * Shrinks `block` by `amount` in total, distributed proportionally to each

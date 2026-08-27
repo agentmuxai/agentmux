@@ -12,7 +12,7 @@ import { modalsModel } from "@/app/store/modalmodel";
 import { ClientService, ObjectService, WindowService, WorkspaceService } from "@/app/store/services";
 import { RpcApi } from "@/app/store/rpc-api";
 import { initWshrpc, TabRpcClient } from "@/app/store/rpc-util";
-import { getLayoutModelForStaticTab } from "@/layout/index";
+import { getLayoutModelForStaticTab, installWindowEdgeResizeListener } from "@/layout/index";
 import {
     atoms,
     countersClear,
@@ -1032,6 +1032,10 @@ async function initWave(initOpts: AgentMuxInitOpts) {
     initGlobalEventSubs(initOpts);
     subscribeToConnEvents();
     installFloatingRedockHoverListener();
+    // Shift + OS-window-edge resize (Windows host emits windowresize:*
+    // during the native size loop; inert elsewhere). See
+    // SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26.md §3.
+    installWindowEdgeResizeListener();
     tlog("initEventSubs", t);
 
     // Prime the identity-account cache from the DB so synchronous callers
