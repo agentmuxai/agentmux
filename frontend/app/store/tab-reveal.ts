@@ -157,6 +157,17 @@ function startDetector(handle: DetectorHandle, onSettle: () => void): void {
 const [tabSwitching, setTabSwitching] = createSignal(false);
 export { tabSwitching };
 
+// When non-null, the gate hides ONLY this tab id (once it becomes the
+// active tab) instead of whichever tab is currently active. Set by
+// destination-aware holders (tab close promotion, tab switches): the
+// SOURCE tab then stays visible right up to the activetabid flip instead
+// of blanking the content region the moment the gate goes up — the
+// "neighbor pane flash" of SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH §9. Null
+// (legacy) hides the current active tab, which createTab still wants
+// (its destination id doesn't exist until the RPC returns).
+const [gateTargetTabId, setGateTargetTabId] = createSignal<string | null>(null);
+export { gateTargetTabId };
+
 const tabHandle = newHandle();
 
 /** Lift the whole-tab gate AND cross-fade the startup splash. The gate's
@@ -168,6 +179,7 @@ const tabHandle = newHandle();
  *  safe. */
 function liftTabGate(): void {
     setTabSwitching(false);
+    setGateTargetTabId(null);
     fadeOutStartupSplash();
 }
 
@@ -186,8 +198,16 @@ function liftTabGate(): void {
  * MAX_GATE_MS fallback so the gate eventually lifts and the window can't
  * be left blank indefinitely. The normal-path `scheduleRevealLift()`
  * cancels this timer before installing its own detector.
+ *
+ * @param targetTabId when the destination tab of the transition is known
+ *   up front (tab switch, close-promotion), pass it: the gate then hides
+ *   only that tab once it becomes active, and the source keeps painting
+ *   until the actual activetabid flip — no premature blank. Omit (null)
+ *   for the legacy hide-current-active behavior (createTab, where the
+ *   destination id doesn't exist yet).
  */
-export function holdRevealGate(): void {
+export function holdRevealGate(targetTabId: string | null = null): void {
+    setGateTargetTabId(targetTabId);
     setTabSwitching(true);
     cancelDetector(tabHandle);
     armFallback(tabHandle, liftTabGate, MAX_GATE_MS);

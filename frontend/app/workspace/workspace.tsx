@@ -8,7 +8,7 @@ import { StatusBar } from "@/app/statusbar/StatusBar";
 import { WindowHeader } from "@/app/window/window-header";
 import { TabContent } from "@/app/tab/tabcontent";
 import { atoms } from "@/store/global";
-import { tabSwitching } from "@/store/tab-reveal";
+import { gateTargetTabId, tabSwitching } from "@/store/tab-reveal";
 import { For, Show, createMemo } from "solid-js";
 import type { JSX } from "solid-js";
 
@@ -16,6 +16,19 @@ function WorkspaceElem(): JSX.Element {
     const tabId = atoms.activeTabId;
     const ws = atoms.workspace;
     const prefersReducedMotion = atoms.prefersReducedMotionAtom;
+
+    // Reveal gate, destination-aware (SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH §9):
+    // when the holder announced WHICH tab is being revealed
+    // (gateTargetTabId), only that tab hides while gated — the SOURCE tab
+    // keeps painting right up to the activetabid flip instead of blanking
+    // the whole content region for the RPC round trip. An untargeted hold
+    // (gateTargetTabId null — createTab) falls back to hiding whichever
+    // tab is active, the original behavior.
+    const gateHides = (tid: string) => {
+        if (tid !== tabId() || !tabSwitching()) return false;
+        const target = gateTargetTabId();
+        return target == null || target === tid;
+    };
 
     // All tab IDs (pinned + regular). Keep every tab mounted so terminals
     // preserve their xterm.js instance and scrollback across tab switches.
@@ -62,11 +75,10 @@ function WorkspaceElem(): JSX.Element {
                                         // on PR #1108.
                                         // Spec:
                                         // SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md.
-                                        visibility:
-                                            tid === tabId() && tabSwitching() ? "hidden" : null,
+                                        visibility: gateHides(tid) ? "hidden" : null,
                                         opacity: prefersReducedMotion()
                                             ? "1"
-                                            : tid === tabId() && tabSwitching() ? "0" : "1",
+                                            : gateHides(tid) ? "0" : "1",
                                         transition: prefersReducedMotion()
                                             ? "none"
                                             : "opacity 120ms ease-out",

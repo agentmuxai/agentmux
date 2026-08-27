@@ -35,10 +35,60 @@ function TabBar(props: TabBarProps): JSX.Element {
     // Pin feature removed — merge any legacy pinnedtabids into the regular list
     // so existing workspaces don't lose tabs. A one-time UpdateTabIds (below)
     // drains pinnedtabids server-side so this concat becomes a no-op.
-    const tabIds = () => {
+    const allTabIds = () => {
         const ws = props.workspace;
         if (!ws) return [];
         return [...(ws.pinnedtabids ?? []), ...(ws.tabids ?? [])];
+    };
+
+    // Optimistic close (SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH §8): ids hidden
+    // from the strip while a close is pending — from the moment the confirm
+    // modal opens (or the close fires, on the skip-confirm path) until the
+    // backend workspace update lands or the close is cancelled / fails.
+    // A hidden tab is UNMOUNTED, so no ordering of the backend's HTTP
+    // response vs WS push frames can ever paint it again — this is what
+    // makes the close flash structurally impossible rather than a race we
+    // keep winning (§§2-7 each closed one ordering hole; this closes the
+    // class). A Set (not a single id) so overlapping skip-confirm closes
+    // of different tabs each stay hidden.
+    const [pendingHiddenTabIds, setPendingHiddenTabIds] = createSignal<ReadonlySet<string>>(new Set());
+    const hideTab = (tabId: string) =>
+        setPendingHiddenTabIds((prev) => {
+            if (prev.has(tabId)) return prev;
+            const next = new Set(prev);
+            next.add(tabId);
+            return next;
+        });
+    const unhideTab = (tabId: string) =>
+        setPendingHiddenTabIds((prev) => {
+            if (!prev.has(tabId)) return prev;
+            const next = new Set(prev);
+            next.delete(tabId);
+            return next;
+        });
+
+    // What the strip renders: the workspace's tabs minus any mid-close ones.
+    const tabIds = () => {
+        const hidden = pendingHiddenTabIds();
+        if (hidden.size === 0) return allTabIds();
+        return allTabIds().filter((id) => !hidden.has(id));
+    };
+
+    // While the REAL active tab is optimistically hidden (mid-close), the
+    // strip highlights the neighbor the backend is about to promote —
+    // next tab in the list, else previous, mirroring handle_delete_tab's
+    // `tab_ids.get(pos) ?? pos-1` (agentmux-srv/src/reducer/tab.rs). The
+    // strip therefore shows the FINAL post-close state from the first
+    // frame; the backend's update then changes nothing visibly.
+    const displayActiveTabId = () => {
+        const real = activeTabId();
+        const hidden = pendingHiddenTabIds();
+        if (!hidden.has(real)) return real;
+        const all = allTabIds();
+        const idx = all.indexOf(real);
+        for (let i = idx + 1; i < all.length; i++) if (!hidden.has(all[i])) return all[i];
+        for (let i = idx - 1; i >= 0; i--) if (!hidden.has(all[i])) return all[i];
+        return real;
     };
 
     const handleSelect = (tabId: string) => {
@@ -47,29 +97,41 @@ function TabBar(props: TabBarProps): JSX.Element {
     };
 
     const handleClose = (tabId: string) => {
-        const allTabs = tabIds();
-        if (allTabs.length <= 1) return;
+        // Guard on the RAW list — the filtered tabIds() already excludes a
+        // tab the modal path hid, so filtering here would make a 2-tab
+        // workspace read as 1 and refuse every confirmed close.
+        if (allTabIds().length <= 1) {
+            unhideTab(tabId);
+            return;
+        }
         // Don't pre-select the neighbor via a separate SetActiveTab RPC
         // before closing: CloseTab's own DeleteTab reducer command already
         // reassigns the workspace's active tab to the correct neighbor
         // atomically (agentmux-srv/src/reducer/tab.rs::handle_delete_tab)
-        // when the closed tab was active, in the SAME state transition as
-        // the removal. Doing it ourselves first turned one atomic update
-        // into two sequential round trips — neighbor selected (paint),
-        // THEN the closing tab visibly deselects while still sitting there
-        // un-removed, THEN it finally disappears — a visible flash. Just
-        // hold the content reveal gate (same primitive setActiveTab uses)
-        // around the single CloseTab call so the destination pane still
-        // can't paint piecemeal. See
-        // docs/specs/SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md §5.
+        // in the SAME state transition as the removal (§5).
         const closingActiveTab = tabId === activeTabId();
+        hideTab(tabId); // no-op when the modal path already hid it
+        // Destination-targeted gate (§9): hideTab already ran, so
+        // displayActiveTabId() resolves to the neighbor the backend is
+        // about to promote. Passing it keeps the CLOSING tab's content on
+        // screen through the RPC round trip (only the neighbor hides,
+        // once it becomes active, until it settles) — an untargeted hold
+        // here blanked the whole content region at confirm-click, which
+        // read as the neighbor pane "flashing".
+        const promotedTabId = closingActiveTab ? displayActiveTabId() : null;
         fireAndForget(async () => {
-            if (closingActiveTab) holdRevealGate();
+            if (closingActiveTab) holdRevealGate(promotedTabId);
             try {
                 await WorkspaceService.CloseTab(props.workspace.oid, tabId);
                 deleteLayoutModelForTab(tabId);
             } finally {
                 if (closingActiveTab) scheduleRevealLift();
+                // Success: the RPC response applied the workspace update
+                // synchronously before the await resolved, so the id is no
+                // longer in allTabIds() and unhiding cannot resurrect it.
+                // Failure: restores the tab — a close that didn't happen
+                // must not leave the tab invisibly alive.
+                unhideTab(tabId);
             }
         });
     };
@@ -77,10 +139,20 @@ function TabBar(props: TabBarProps): JSX.Element {
     const [pendingCloseTabId, setPendingCloseTabId] = createSignal<string | null>(null);
 
     const requestClose = (tabId: string) => {
+        // Guard on the VISIBLE count here (unlike handleClose's raw-list
+        // guard): with N closes already pending, the raw list still counts
+        // the hidden tabs until their RPCs land, so rapid skip-confirm
+        // clicks could pass a raw guard and hide every last tab, leaving an
+        // empty strip until an RPC failed (reagent P2 on PR #2818). A new
+        // close may only START while more than one tab is actually visible.
         if (tabIds().length <= 1) return;
+        if (pendingHiddenTabIds().has(tabId)) return; // close already pending
         if ((settingsAtom() as any)["tab:skipcloseconfirm"]) {
             handleClose(tabId);
         } else {
+            // Repo-owner-directed UX (§8): the tab leaves the strip the
+            // moment the modal opens; cancel puts it back.
+            hideTab(tabId);
             setPendingCloseTabId(tabId);
         }
     };
@@ -125,19 +197,28 @@ function TabBar(props: TabBarProps): JSX.Element {
 
     // In-strip reorder DnD + pane-drag-over-strip cleanup + Windows
     // tear-off-cursor workaround + wheel-scroll.
-    useTabDragAndDrop({ tabBarScrollRef: () => tabBarScrollRef }, () => props.workspace, tabIds, tearOffTabAtRelease);
+    //
+    // RAW list, not the filtered one: these hooks compute BACKEND indices
+    // (executeReorder's insertion math, tear-off merge/restore positions)
+    // against the workspace's real tab_ids, which still contains any
+    // optimistically-hidden mid-close tab until its RPC lands. Feeding
+    // them the filtered list shifts every computed index by the number of
+    // hidden tabs and silently misplaces a concurrently dragged tab
+    // (reagent P1 on PR #2818). The filtered tabIds() is for RENDERING
+    // only.
+    useTabDragAndDrop({ tabBarScrollRef: () => tabBarScrollRef }, () => props.workspace, allTabIds, tearOffTabAtRelease);
 
     // Phase 4/5 — cross-window tear-off event listeners (hover/merge/
-    // standalone/cancel-back).
+    // standalone/cancel-back). Raw list for the same reason as above.
     useTabTearOffEvents(
         () => props.workspace,
         () => tabBarScrollRef,
-        tabIds
+        allTabIds
     );
 
     if (!props.workspace) return null;
 
-    const activeIndex = () => tabIds().indexOf(activeTabId());
+    const activeIndex = () => tabIds().indexOf(displayActiveTabId());
 
     return (
         <div ref={tabBarRef!} class="tab-bar" {...dragProps}>
@@ -173,13 +254,29 @@ function TabBar(props: TabBarProps): JSX.Element {
                             <DroppableTab
                                 tabId={tabId}
                                 workspaceId={props.workspace.oid}
-                                activeTabId={activeTabId()}
-                                isActive={tabId === activeTabId()}
+                                activeTabId={displayActiveTabId()}
+                                isActive={tabId === displayActiveTabId()}
                                 isFirst={i() === 0}
                                 isBeforeActive={i() === activeIndex() - 1}
-                                allTabCount={tabIds().length}
-                                tabIndex={i()}
-                                tabIds={tabIds()}
+                                // RAW count, not the filtered one: while a
+                                // close is pending the workspace still HAS
+                                // the hidden tab, and undercounting here
+                                // would flip droppable-tab's isLoneTabDrag/
+                                // canDrag on the survivor of a 2-tab
+                                // workspace, spuriously disabling its drag
+                                // until the RPC resolves (reagent P2 on
+                                // PR #2818).
+                                allTabCount={allTabIds().length}
+                                // Backend-facing index/list (drag payload's
+                                // tabIndex feeds ReorderTab math): use the
+                                // RAW list so indices line up with the
+                                // workspace's real tab_ids even while a
+                                // mid-close tab is hidden from rendering
+                                // (reagent P1 on PR #2818). i() stays for
+                                // the visual props above (isFirst /
+                                // isBeforeActive / separators).
+                                tabIndex={allTabIds().indexOf(tabId)}
+                                tabIds={allTabIds()}
                                 onSelect={() => handleSelect(tabId)}
                                 onClose={() => requestClose(tabId)}
                             />
@@ -208,7 +305,11 @@ function TabBar(props: TabBarProps): JSX.Element {
                         }
                         handleClose(tabId);
                     }}
-                    onCancel={() => setPendingCloseTabId(null)}
+                    onCancel={() => {
+                        // Cancel restores the optimistically-hidden tab (§8).
+                        unhideTab(pendingCloseTabId()!);
+                        setPendingCloseTabId(null);
+                    }}
                 />
             </Show>
         </div>
