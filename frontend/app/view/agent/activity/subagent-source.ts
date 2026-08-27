@@ -19,6 +19,7 @@ import { callBackendService } from "@/app/store/wos";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { createSignal, type Accessor } from "solid-js";
 import { mergeSubagentsPreservingIdentity, type ActiveSubagent } from "../../swarm/swarm-model";
+import { createBackfillAwareTrigger } from "./backfill-tracker";
 import { createDebouncedRefresh } from "./debounced-refresh";
 
 const [allSubagents, setAllSubagents] = createSignal<ActiveSubagent[]>([]);
@@ -40,6 +41,12 @@ async function refresh(): Promise<void> {
 // (docs/reports/REPORT_AGENT_PANE_REOPEN_SUBAGENT_STORM_2026_08_23.md).
 const scheduleRefresh = createDebouncedRefresh(() => void refresh(), 100, 1000);
 
+// Suppresses even the debounced refresh entirely while a backfill is in
+// flight anywhere, firing exactly one refresh once it settles — see
+// backfill-tracker.ts's doc comment for why the debounce alone isn't
+// sufficient (docs/retro/retro-activity-dock-flicker-survives-debounce-fix-2026-08-24.md).
+const trigger = createBackfillAwareTrigger(scheduleRefresh, () => void refresh());
+
 // Started once at module load (ES modules are singletons — every importer
 // shares this one subscription set), never torn down: the dock's subagent
 // rows should reflect swarm-wide activity for the lifetime of the app, same
@@ -48,8 +55,8 @@ const scheduleRefresh = createDebouncedRefresh(() => void refresh(), 100, 1000);
 // should reflect real data as soon as possible, not wait out a debounce
 // window with nothing yet to coalesce against.
 void refresh();
-waveEventSubscribe({ eventType: "subagent:spawned", handler: () => scheduleRefresh() });
-waveEventSubscribe({ eventType: "subagent:completed", handler: () => scheduleRefresh() });
+waveEventSubscribe({ eventType: "subagent:spawned", handler: () => trigger() });
+waveEventSubscribe({ eventType: "subagent:completed", handler: () => trigger() });
 // Without this, a subagent the backend reconciles from active to abandoned
 // (parent turn already ended — see `reconcile_stale_subagents`, which runs
 // on every pane reopen with a persisted session id, i.e. exactly the app-
@@ -59,7 +66,7 @@ waveEventSubscribe({ eventType: "subagent:completed", handler: () => scheduleRef
 // refresh — which, for an otherwise-idle pane, may never happen. Mirrors
 // `dispatch-source.ts`'s identical fix (reagent/codex, PR #2676) for the
 // sibling dispatch-card singleton, which this module predates.
-waveEventSubscribe({ eventType: "subagent:abandoned", handler: () => scheduleRefresh() });
+waveEventSubscribe({ eventType: "subagent:abandoned", handler: () => trigger() });
 waveEventSubscribe({
     eventType: "subagent:named",
     handler: (event: WaveEvent) => {
