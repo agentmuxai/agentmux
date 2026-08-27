@@ -21,6 +21,7 @@ import { callBackendService } from "@/app/store/wos";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { createSignal, type Accessor } from "solid-js";
 import type { AgentDispatch } from "../../swarm/swarm-model";
+import { createBackfillAwareTrigger } from "./backfill-tracker";
 import { createDebouncedRefresh } from "./debounced-refresh";
 
 /** The backend's own quiet window (`refresh_dispatch_status`,
@@ -90,17 +91,23 @@ async function refresh(): Promise<void> {
 // (docs/reports/REPORT_AGENT_PANE_REOPEN_SUBAGENT_STORM_2026_08_23.md).
 const scheduleRefresh = createDebouncedRefresh(() => void refresh(), 100, 1000);
 
+// Suppresses even the debounced refresh entirely while a backfill is in
+// flight anywhere, firing exactly one refresh once it settles — see
+// backfill-tracker.ts's doc comment for why the debounce alone isn't
+// sufficient (docs/retro/retro-activity-dock-flicker-survives-debounce-fix-2026-08-24.md).
+const trigger = createBackfillAwareTrigger(scheduleRefresh, () => void refresh());
+
 // Started once at module load (ES modules are singletons — every importer
 // shares this one subscription set), never torn down — mirrors
 // `subagent-source.ts`'s own lifecycle rationale. The module-load-time
 // refresh itself stays immediate (undebounced) — see that module's
 // identical comment for why.
 void refresh();
-waveEventSubscribe({ eventType: "subagent:spawned", handler: () => scheduleRefresh() });
-waveEventSubscribe({ eventType: "subagent:completed", handler: () => scheduleRefresh() });
-waveEventSubscribe({ eventType: "subagent:named", handler: () => scheduleRefresh() });
-waveEventSubscribe({ eventType: "subagent:abandoned", handler: () => scheduleRefresh() });
-waveEventSubscribe({ eventType: "dispatch:updated", handler: () => scheduleRefresh() });
+waveEventSubscribe({ eventType: "subagent:spawned", handler: () => trigger() });
+waveEventSubscribe({ eventType: "subagent:completed", handler: () => trigger() });
+waveEventSubscribe({ eventType: "subagent:named", handler: () => trigger() });
+waveEventSubscribe({ eventType: "subagent:abandoned", handler: () => trigger() });
+waveEventSubscribe({ eventType: "dispatch:updated", handler: () => trigger() });
 
 /** Every tracked dispatch (Solo or Workflow) currently known, across the
  *  whole app. Callers filter by `parent_block_id` for their own pane. */

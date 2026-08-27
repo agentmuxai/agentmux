@@ -24,6 +24,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import { callBackendService } from "@/app/store/wos";
 import { recordTurn } from "@/app/store/token-usage";
 import { ActivityRow } from "./ActivityRow";
+import { backgroundTaskActivities } from "../activity/background-adapter";
 import { shellActivities } from "../activity/shell-adapter";
 import { subagentActivities } from "../activity/subagent-adapter";
 import { allSubagentsAtom } from "../activity/subagent-source";
@@ -53,6 +54,11 @@ interface ActivityDockProps {
      *  spawned by THIS agent (D5: the dock is block-scoped), same as shells
      *  are already scoped by living in this pane's own document. */
     blockId: string;
+    /** Raw `db_background_tasks` rows for this block, from
+     *  `useBackgroundTaskRegistry`'s returned accessor — see
+     *  `activity/background-adapter.ts` for why these need reconciling
+     *  against the transcript-derived rows below rather than just appended. */
+    backgroundTasksAtom: () => BackgroundTaskView[];
 }
 
 export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
@@ -88,11 +94,18 @@ export const ActivityDock = (props: ActivityDockProps): JSX.Element => {
 
     const allActivities = createMemo(() => {
         toolPromotionNonce();
-        return [
+        const transcriptDerived = [
             ...shellActivities(nodes()),
             ...subagentActivities(allSubagentsAtom(), props.blockId),
             ...toolActivities(nodes(), Date.now()),
         ];
+        // Registry rows fill the gap left by a session restart (no
+        // transcript history exists for a task that survived one) —
+        // filtered against ids the transcript already produced so a task
+        // still visible in THIS session's transcript isn't rendered twice.
+        // See activity/background-adapter.ts's doc comment.
+        const knownIds = new Set(transcriptDerived.map((a) => a.id));
+        return [...transcriptDerived, ...backgroundTaskActivities(props.backgroundTasksAtom(), knownIds)];
     });
 
     const activityById = createMemo(() => {
