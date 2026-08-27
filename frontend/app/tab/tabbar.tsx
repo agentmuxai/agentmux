@@ -111,8 +111,16 @@ function TabBar(props: TabBarProps): JSX.Element {
         // in the SAME state transition as the removal (§5).
         const closingActiveTab = tabId === activeTabId();
         hideTab(tabId); // no-op when the modal path already hid it
+        // Destination-targeted gate (§9): hideTab already ran, so
+        // displayActiveTabId() resolves to the neighbor the backend is
+        // about to promote. Passing it keeps the CLOSING tab's content on
+        // screen through the RPC round trip (only the neighbor hides,
+        // once it becomes active, until it settles) — an untargeted hold
+        // here blanked the whole content region at confirm-click, which
+        // read as the neighbor pane "flashing".
+        const promotedTabId = closingActiveTab ? displayActiveTabId() : null;
         fireAndForget(async () => {
-            if (closingActiveTab) holdRevealGate();
+            if (closingActiveTab) holdRevealGate(promotedTabId);
             try {
                 await WorkspaceService.CloseTab(props.workspace.oid, tabId);
                 deleteLayoutModelForTab(tabId);

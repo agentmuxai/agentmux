@@ -92,7 +92,12 @@ export async function setActiveTab(tabId: string): Promise<void> {
     // destination mount window, not the longtask-free RPC duration.
     // Honours rapid Ctrl-Tab spam — each call resets the detector.
     // See issue #774 / SPEC_TAB_CONTENT_REVEAL_GATE.md.
-    holdRevealGate();
+    //
+    // Targeted at the DESTINATION tab (SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH
+    // §9): the source tab keeps painting during the RPC instead of
+    // blanking the content region the moment the switch starts; only the
+    // destination is FOUC-gated, from the activetabid flip until settle.
+    holdRevealGate(tabId);
     try {
         await WorkspaceService.SetActiveTab(ws.oid, tabId);
     } finally {
