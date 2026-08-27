@@ -135,6 +135,32 @@ gates that check the artifact (a test assertion, in this case) catch drift
 that a human re-reading prose does not reliably catch, including when that
 human is specifically primed to look for it.
 
+**It happened a second and third time in the same review cycle.** Codex's
+independent review of the same PR found the *same fix* still hadn't gone far
+enough: the corrected paragraph now said `pin-consistency.test.ts` "enforces
+agreement across all six locations," but the test only checks the **five**
+locations that are actual matching version strings — the sixth row in the
+doc's own table is the model catalog `label`, explicitly marked in that same
+table as "not itself version-locked to the CLI pin." Self-reviewing to fix
+Codex's finding, the exact same miscount ("all six") turned up in `SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md`
+itself — this document's own §3.2 proposed a bump script that would "edit
+all six pin locations via the same regex," which is not even mechanically
+possible, since the label isn't a version string a regex can match. Three
+edits to functionally the same claim, by the same author, across one review
+cycle, each one individually plausible and each one wrong in a slightly
+different way. Fixed all three; see both docs' current "five matching-string
+locations plus one curated label" framing.
+
+This is the strongest evidence this exercise produced for its own thesis.
+It's not that checklists are hard to get right once — it's that "get the
+count right in prose" is not a task that stays solved once you've solved it
+one time; every subsequent edit to the same claim is a fresh chance to
+re-introduce a slightly different version of the same imprecision, and nothing
+about having just fixed it once makes the next edit safer. The fix that
+actually holds is the one from §"What Went Well" and Tier 1 of the spec: a
+test that parses the real files and asserts a real count, which cannot drift
+no matter how many more times this paragraph gets edited by hand.
+
 ## What Would Help Next Time
 
 - See `docs/specs/SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md` for the full

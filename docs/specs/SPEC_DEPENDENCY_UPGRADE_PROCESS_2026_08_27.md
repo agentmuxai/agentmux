@@ -4,7 +4,7 @@
 **Type:** Process spec (not primarily a code-change spec — most action items are checks/automation, small in scope individually)
 **Status:** Proposed — item 1 (Dockerfile pin-consistency check) already implemented as part of the exercise that prompted this doc; the rest is unimplemented and intentionally incremental.
 **Owner:** unassigned
-**Scope:** `frontend/app/view/agent/providers/catalog.ts` (model catalog), the six Claude CLI version pin locations documented in `docs/spec-claude-code-versioning.md`, and — by extension, since the mechanism generalizes — any other provider's pinned CLI (`codex`, `gemini`, etc.).
+**Scope:** `frontend/app/view/agent/providers/catalog.ts` (model catalog), the five Claude CLI version pin locations documented in `docs/spec-claude-code-versioning.md` (a matching semver string, mechanically checkable), plus that same file's curated model-alias `label` (a semantic claim about upstream state, not a version string — see §1's distinction), and — by extension, since the mechanism generalizes — any other provider's pinned CLI (`codex`, `gemini`, etc.).
 **Related:** `docs/retro/retro-claude-cli-and-opus-5-upgrade-2026-08-27.md` (the concrete exercise this generalizes from), `docs/spec-claude-code-versioning.md` (the existing, narrower CLI-pin checklist this spec builds on top of, not replaces), `docs/specs/SPEC_MODEL_CATALOG_REFRESH_2026_07_02.md` (the live API-catalog-overlay design), `docs/specs/SPEC_AGENT_MODEL_DROPDOWN_CLI_PIN_LOG_2026_07_02.md` (original pin-consistency-test proposal), `frontend/app/view/agent/providers/pin-consistency.test.ts`.
 
 > This is explicitly framed as the **first** of a recurring exercise (model
@@ -19,14 +19,18 @@
 AgentMux pins two independent things per provider, and both need periodic
 bumping as upstream ships:
 
-1. **The CLI version** (`@anthropic-ai/claude-code@X.Y.Z`) — six source
-   locations that must literally match (see `docs/spec-claude-code-versioning.md`).
+1. **The CLI version** (`@anthropic-ai/claude-code@X.Y.Z`) — five source
+   locations that must literally match, one matching semver string each
+   (see `docs/spec-claude-code-versioning.md`), mechanically enforced by
+   `pin-consistency.test.ts`.
 2. **The model catalog** — a curated fallback list (`catalog.ts`) whose
    `label`/`description` fields describe what a stable alias (`opus`,
    `sonnet`, `haiku`) currently resolves to, live-overlaid at runtime by an
    API fetch (`SPEC_MODEL_CATALOG_REFRESH_2026_07_02.md`) that can silently
    fail closed (missing keychain entry, 401, offline) back to that curated
-   fallback.
+   fallback. Unlike #1, a label is **not** a version string to be
+   string-matched — it's a semantic claim about what Anthropic's API
+   currently resolves an alias to, which no regex can verify (§3.3).
 
 Today's exercise (`retro-claude-cli-and-opus-5-upgrade-2026-08-27.md`) found
 that the existing process — a well-written, human-maintained checklist doc —
@@ -149,16 +153,19 @@ was ever actually hit.
 ### 3.2 Tier 2 — A single bump script (proposed, not built)
 
 Replace `docs/spec-claude-code-versioning.md`'s "How to bump" numbered list
-(6 manual file edits + 2 manual verification steps) with one script,
+(5 version-pin file edits, a separate model-label recheck, and 2 manual
+verification steps) with one script,
 `scripts/bump-provider-cli.sh <provider> <version>`, that:
 
 1. Looks up the real latest version via `npm view @anthropic-ai/<pkg> version`
    when no version is given (matches §2.1's "verify against the real
    registry" practice this exercise followed by hand).
-2. Edits all six pin locations via the same regex `pin-consistency.test.ts`
-   already parses (so the script and its own test share one definition of
-   "where the pins live" — the test would then be validating the script's
-   output shape, not a second, independently-hand-maintained pattern).
+2. Edits the five matching-semver-string pin locations via the same regex
+   `pin-consistency.test.ts` already parses (so the script and its own test
+   share one definition of "where the pins live" — the test would then be
+   validating the script's output shape, not a second, independently-hand-
+   maintained pattern). Does **not** touch the model-alias `label` here —
+   that's a distinct, non-mechanical edit, step 4 below.
 3. Runs `pin-consistency.test.ts` immediately and fails loudly on mismatch,
    the same way `scripts/release.sh` already re-reads all five version
    locations after a release bump and fails loudly on disagreement
