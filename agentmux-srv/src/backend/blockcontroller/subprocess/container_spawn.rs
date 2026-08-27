@@ -21,6 +21,7 @@ use tokio::io::AsyncWriteExt;
 use crate::backend::blockcontroller::{
     core, publish_controller_status, session_stats, shell, STATUS_DONE, STATUS_RUNNING,
 };
+use crate::backend::wps;
 
 use super::{argv::build_turn_argv, SubprocessController, SubprocessControllerInner, SubprocessSpawnConfig, SUBPROCESS_OUTPUT_SUBJECT};
 
@@ -248,6 +249,21 @@ impl SubprocessController {
             // this forces a non-zero exit even if inspect_exec can't be reached.
             let mut stream_errored = false;
 
+            // Capture a bounded tail of stderr so a non-zero exit can be classified
+            // into a real cause, mirroring host_spawn.rs's `stderr_tail`. No
+            // Arc<Mutex<>> needed here (unlike host_spawn.rs) — this whole turn
+            // runs in a single task, so a plain owned Vec captured by this async
+            // block is sufficient.
+            let mut stderr_tail: Vec<String> = Vec::new();
+            // Retain the terminal `result` frame and any in-band API error
+            // (e.g. a synthetic assistant message carrying a 401/auth failure
+            // with exit 0 / is_error:false) so a completion-time classifier has
+            // the same inputs host_spawn.rs's process_waiter does — this
+            // controller has no HealthMonitor-driven route to AgentFailure now
+            // that the silence watchdog is gone, so this is its only path.
+            let mut last_result_frame: Option<serde_json::Value> = None;
+            let mut last_inband_error: Option<serde_json::Value> = None;
+
             // Resolve the agent's GLOBAL transcript zone once (see persistent.rs)
             // so every container-exec `output` line is also mirrored to the
             // cross-channel store. `None` for non-agent blocks.
@@ -282,7 +298,7 @@ impl SubprocessController {
                             None => {
                                 // Stream ended — flush any remaining partial line.
                                 if !line_buf.trim().is_empty() {
-                                    Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &wstore, &event_bus, &broker, &filestore, &mut stats, global_output_zone.as_deref());
+                                    Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &wstore, &event_bus, &broker, &filestore, &mut stats, global_output_zone.as_deref(), &mut last_result_frame, &mut last_inband_error);
                                 }
                                 tracing::info!(block_id = %block_id, "container exec output EOF");
                                 break;
@@ -301,6 +317,13 @@ impl SubprocessController {
                                         for line in s.lines() {
                                             if !line.trim().is_empty() {
                                                 tracing::info!(block_id = %block_id, stderr = %line, "container exec stderr");
+                                                // Retain the last ~40 non-empty lines for classification
+                                                // (mirrors host_spawn.rs's stderr_tail cap).
+                                                stderr_tail.push(line.to_string());
+                                                let overflow = stderr_tail.len().saturating_sub(40);
+                                                if overflow > 0 {
+                                                    stderr_tail.drain(0..overflow);
+                                                }
                                             }
                                         }
                                         continue;
@@ -311,7 +334,7 @@ impl SubprocessController {
                                 for ch in chunk.chars() {
                                     if ch == '\n' {
                                         if !line_buf.trim().is_empty() {
-                                            Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &wstore, &event_bus, &broker, &filestore, &mut stats, global_output_zone.as_deref());
+                                            Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &wstore, &event_bus, &broker, &filestore, &mut stats, global_output_zone.as_deref(), &mut last_result_frame, &mut last_inband_error);
                                         }
                                         line_buf.clear();
                                     } else {
@@ -352,6 +375,47 @@ impl SubprocessController {
                 }
             };
 
+            // Classify a genuine non-zero exit OR a failure reported in-band as
+            // an error `result` frame / synthetic assistant error (auth /
+            // rate-limit / usage — the container CLI may even exit 0), mirroring
+            // host_spawn.rs's own independent completion-time classifier. This
+            // controller has no HealthMonitor-driven route to AgentFailure now
+            // that the silence watchdog is gone — this is its only path to a
+            // persisted/published failure for container-backed agents.
+            let mut run_failure: Option<crate::agents::failure::AgentFailure> = None;
+            {
+                let frame_is_error = last_result_frame
+                    .as_ref()
+                    .and_then(|f| f.get("is_error"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let inband_is_api_error = last_inband_error.is_some();
+                if exit_code != 0 || frame_is_error || inband_is_api_error {
+                    let tail = stderr_tail.join("\n");
+                    // Merge the in-band error text so classify() sees the
+                    // "authentication_failed" / "401" string even though it
+                    // arrived on stdout, not stderr.
+                    let inband_text = last_inband_error.as_ref().map(|f| {
+                        let err_str = f.get("error").and_then(|v| v.as_str()).unwrap_or("");
+                        let content_text = f.pointer("/message/content/0/text")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        format!("{err_str} {content_text}")
+                    }).unwrap_or_default();
+                    let combined_tail = if inband_text.trim().is_empty() {
+                        tail
+                    } else {
+                        format!("{tail}\n{inband_text}")
+                    };
+                    run_failure = Some(crate::agents::failure::classify(
+                        Some(exit_code),
+                        None, // container exec has no OS process signal
+                        &combined_tail,
+                        last_result_frame.as_ref(),
+                    ));
+                }
+            }
+
             // Mark done
             {
                 let mut inner = inner_arc.lock().unwrap();
@@ -372,6 +436,26 @@ impl SubprocessController {
                     SubprocessController::build_status_snapshot(&inner, &block_id, false)
                 };
                 publish_controller_status(b, &status);
+            }
+
+            // Persist or clear agent:last_failure in block meta so the recovery
+            // banner survives tab switches and page reloads, and a previously
+            // persisted failure is cleared after a later successful turn — this
+            // call handles both cases regardless of whether run_failure is
+            // Some or None. Mirrors host_spawn.rs's process_waiter.
+            core::persist_last_failure(&block_id, run_failure.as_ref(), &wstore, &event_bus);
+
+            // Surface the classified failure cause to the pane. persist:1 so
+            // reconnecting subscribers also receive the last failure without a
+            // separate meta read (belt-and-suspenders with the meta write above).
+            if let (Some(failure), Some(ref b)) = (run_failure.as_ref(), broker.as_ref()) {
+                b.publish(wps::WaveEvent {
+                    event: wps::EVENT_AGENT_FAILURE.to_string(),
+                    scopes: vec![format!("block:{}", block_id)],
+                    sender: String::new(),
+                    persist: 1,
+                    data: serde_json::to_value(failure).ok(),
+                });
             }
 
             run_lock.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -451,6 +535,8 @@ impl SubprocessController {
         filestore: &Option<Arc<crate::backend::storage::filestore::FileStore>>,
         stats: &mut session_stats::SessionStatsAccumulator,
         global_output_zone: Option<&str>,
+        last_result_frame: &mut Option<serde_json::Value>,
+        last_inband_error: &mut Option<serde_json::Value>,
     ) {
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -466,6 +552,21 @@ impl SubprocessController {
                     tracing::info!(block_id = %block_id, session_id = %sid, "container exec: captured session id");
                     core::persist_session_id(block_id, sid, &wstore, &event_bus);
                 }
+            }
+
+            // Retain the terminal `result` frame for completion-time failure
+            // classification (mirrors host_spawn.rs's stdout_reader).
+            if parsed.get("type").and_then(|v| v.as_str()) == Some("result") {
+                *last_result_frame = Some(parsed);
+            } else if parsed.get("type").and_then(|v| v.as_str()) == Some("assistant")
+                && (parsed.get("isApiErrorMessage").and_then(|v| v.as_bool()).unwrap_or(false)
+                    || parsed.get("error").is_some())
+            {
+                // In-band API error: 401 / auth failures arrive as a synthetic
+                // assistant message (exit 0, is_error:false on result frame) —
+                // capture it so the completion-time classifier below can trip
+                // the failure gate.
+                *last_inband_error = Some(parsed);
             }
         }
 
