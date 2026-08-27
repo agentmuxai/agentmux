@@ -72,7 +72,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // agentmux-cef/src/commands/providers.rs `CLAUDE_VERSION`, and
         // .github/workflows/container-image.yml `claude_version` default — enforced by
         // ./pin-consistency.test.ts.
-        pinnedVersion: "2.1.198",
+        pinnedVersion: "2.1.247",
         docsUrl: "https://docs.anthropic.com/claude-code",
         windowsInstallCommand: "irm https://claude.ai/install.ps1 | iex",
         unixInstallCommand: "curl -fsSL https://claude.ai/install.sh | bash",
@@ -118,7 +118,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // desyncs the strip's Model dropdown from the actual default and is a
         // trap for any `models.find(m => m.default)` reader.
         models: [
-            { value: "opus", label: "Opus 4.8", description: "Claude Opus 4.8 — highest quality", aliases: ["claude-opus"] },
+            { value: "opus", label: "Opus 5", description: "Claude Opus 5 — highest quality", aliases: ["claude-opus"] },
             { value: "sonnet", label: "Sonnet 5", default: true, description: "Claude Sonnet 5 — balanced", aliases: ["claude-sonnet"] },
             { value: "haiku", label: "Haiku 4.5", description: "Claude Haiku 4.5 — fastest", aliases: ["claude-haiku"] },
             // No confirmed generic "fable" alias (unlike opus/sonnet/haiku above), so this
