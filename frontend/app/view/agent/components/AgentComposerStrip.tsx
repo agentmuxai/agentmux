@@ -234,7 +234,7 @@ export interface ComposerRow {
  * made a too-wide stats zone split the SLOTS, jumping from 1 visual
  * line straight to 3 (2 slot rows + the stats' own line) and skipping
  * the strictly-better middle tier of "slots on one line, stats evicted
- * to their own line below" (2 lines). The overflow Codex P1 originally
+ * to their own line above the rows" (2 lines). The overflow Codex P1
  * guarded against cannot recur: when slots-plus-stats don't fit, the
  * stats leave the row entirely instead of overflowing it.
  *
@@ -348,7 +348,7 @@ export function orderKeysForEdgePriority(
  * has regressed twice before: Codex P1 #2812, the post-#2813 wrapper
  * trap). True only when there is one slot row AND either no stats exist
  * or slots-plus-stats-plus-gap genuinely fit the available width. False
- * evicts the stats to their own line below WITHOUT splitting the slot
+ * evicts the stats to their own line (above the rows) WITHOUT splitting the slot
  * row — the middle tier (1 line → 2 → 3) that stops the strip jumping
  * from 1 visual line straight to 3.
  */
@@ -1021,7 +1021,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // Measures the zone's CONTENT (`firstElementChild`, the
     // `.agent-composer-strip-stats` span inside the `<Show>`), NOT the
     // zone wrapper itself — regression found live post-#2813: in the
-    // below-the-rows position the zone is a direct child of the
+    // evicted (own-line) position the zone is a direct child of the
     // column-flex strip, so default `align-items: stretch` blockifies it
     // to the FULL strip width even when `rightText()` is empty and it
     // renders nothing. Measuring the wrapper there reported a footprint
@@ -1182,7 +1182,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         // (PR #2812) originally put inside computeComposerRows, now the
         // answer to a different question: not "how do slots split" but
         // "where do the stats go." On failure the stats move to their
-        // own line below (the multi mount position) while the slots stay
+        // own line above the rows (the multi mount position) while the slots stay
         // exactly where the slot-only decision put them. See
         // `computeStatsInline`'s own doc comment.
         const slotsTotal = visible.reduce((sum, s) => sum + (widths[s.key] ?? 0), 0) + Math.max(0, visible.length - 1) * gapPx;
@@ -1235,15 +1235,17 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // identity at every tier). Rendered in ONE of two places, mutually
     // exclusive (`statsInline()` vs. not — since 2026-08-26 this is its
     // own decision, no longer synonymous with `rows().length === 1`: a
-    // single slot row can have the stats evicted to their own line below
+    // single slot row can have the stats evicted to their own line
     // when slots-plus-stats don't fit together, the middle tier that
     // stops the 1-line → 3-line jump): as the
     // single row's own third child when everything fits one line
     // (matching the true-centered widest-tier position every revision
     // through Rev 6 already had — see _composer-strip.scss's
     // `.agent-composer-strip-row > .agent-composer-strip-stats-zone`), or
-    // as its own dedicated line below the rows block otherwise (matching
-    // every narrower tier's pre-Rev-7 behavior — see
+    // as its own dedicated line ABOVE the rows block otherwise
+    // (user-directed, 2026-08-26 — "the center token count should float
+    // up as the width is made narrow"; pre-Rev-7 tiers and the first
+    // #2817 revision rendered this line BELOW the rows — see
     // `.agent-composer-strip > .agent-composer-strip-stats-zone`). The
     // wrapper span always renders (even with no stats yet) so this zone's
     // presence in the flow order stays stable whether or not stats are
@@ -1288,6 +1290,13 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 which independently decided when to wrap onto their own
                 dedicated one-sided lines — the actual bug this revision
                 answers (docs/retro/retro-composer-strip-one-sided-lines-misdiagnosis-2026-08-26.md). */}
+            {/* Evicted stats render ABOVE the rows (user-directed,
+                2026-08-26): as the pane narrows, the centered token
+                stats float UP off the shared line, keeping the
+                interactive slot rows anchored at the bottom next to the
+                composer instead of being pushed down by a stats line. */}
+            <Show when={!statsInline()}>{statsZone("multi")}</Show>
+
             <div class="agent-composer-strip-rows" ref={rowsRef}>
                 <For each={rowIndices()}>
                     {(rowIndex) => (
@@ -1303,8 +1312,6 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                     )}
                 </For>
             </div>
-
-            <Show when={!statsInline()}>{statsZone("multi")}</Show>
         </div>
     );
 };

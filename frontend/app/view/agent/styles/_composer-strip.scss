@@ -59,13 +59,16 @@
         border-bottom: 1px solid transparent;
     }
 
-    // Multi-row case (AgentComposerStrip.tsx's `rows()` returns more than
-    // one row): the stats zone is a direct child of the strip itself, NOT
-    // nested in any one row — same treatment every tier below 482px had
-    // before Rev 7, now keyed on actual row count instead of a pixel
-    // breakpoint. `.agent-composer-strip-rows` + this sibling naturally
-    // stack (this container is `flex-direction: column`) without needing
-    // an explicit `flex-basis: 100%` the way the old wrapping model did.
+    // Evicted case (AgentComposerStrip.tsx's `statsInline()` is false):
+    // the stats zone is a direct child of the strip itself, NOT nested
+    // in any one row — same treatment every tier below 482px had before
+    // Rev 7, now keyed on the statsInline decision instead of a pixel
+    // breakpoint. Rendered ABOVE `.agent-composer-strip-rows` in DOM
+    // order (user-directed, 2026-08-26: the token stats float UP as the
+    // pane narrows, keeping the interactive rows anchored by the
+    // composer) — the two naturally stack (this container is
+    // `flex-direction: column`) without needing an explicit
+    // `flex-basis: 100%` the way the old wrapping model did.
     > .agent-composer-strip-stats-zone {
         text-align: center;
         min-width: 0;
