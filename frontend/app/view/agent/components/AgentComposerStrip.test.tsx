@@ -365,25 +365,23 @@ describe("computeComposerRows", () => {
     // a third flex child whenever `rows().length === 1` (spec §3.4).
     // Slots alone fitting `availableWidth` doesn't mean slots-plus-stats
     // do — `reservedWidth` closes that gap.
-    it("accounts for reservedWidth (the stats zone) in the single-row fit decision (Codex P1, PR #2812)", () => {
-        // 3 slots (odd count) so the multi-row path — once triggered —
-        // produces a pair plus a singleton (2 rows), not a single
-        // still-one-row pairing (a 2-slot pool would collapse right back
-        // to length 1 regardless of which path built it, masking whether
-        // `reservedWidth` actually changed anything).
+    it("decides row membership from slot widths alone — the stats zone can no longer force a slot split (supersedes Codex P1, PR #2812)", () => {
+        // User-reported regression: with live stats ticking, the strip
+        // jumped straight from 1 visual line to 3 (2 slot rows + the
+        // stats' own dedicated line) — reservedWidth forcing the SLOT
+        // split skipped the strictly-better middle tier of "slots on
+        // one line, stats evicted to their own line below" (2 lines).
+        // computeComposerRows now takes no reservedWidth; whether the
+        // stats zone SHARES the single row is the component's own
+        // separate `statsInline` decision.
         const slots = [
             { key: "a", width: 30 },
             { key: "b", width: 20 },
             { key: "hostShell", width: 10 },
         ];
-        // Slots alone: 30+20+10 + 2*5(gap) = 70, fits within 80 — single
-        // row with no reserved width.
-        expect(computeComposerRows(slots, "hostShell", 80, 5, 0)).toHaveLength(1);
-        // A 20px stats zone (+ its own gap to the nearest slot) pushes the
-        // real total to 70+20+5=95, past availableWidth=80 — must fall
-        // back to multi-row rather than overflow the shared line.
-        const withStats = computeComposerRows(slots, "hostShell", 80, 5, 20);
-        expect(withStats.length).toBeGreaterThan(1);
+        // Slots alone: 30+20+10 + 2*5(gap) = 70, fits within 80 —
+        // single row, regardless of any stats zone.
+        expect(computeComposerRows(slots, "hostShell", 80, 5)).toHaveLength(1);
     });
 
     // The explicit invariant test missing from every prior revision (see

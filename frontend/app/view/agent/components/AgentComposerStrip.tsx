@@ -227,14 +227,16 @@ export interface ComposerRow {
  * bugs have historically come from). Exported for direct unit testing
  * without needing a real layout engine to produce widths.
  *
- * `reservedWidth` (Codex P1, PR #2812) accounts for content that shares
- * the single row's own physical line without being a pairable slot
- * itself — the stats zone, which sits between the left and right halves
- * as a third flex child whenever everything fits on one line (spec §3.4).
- * Slots alone fitting `availableWidth` doesn't mean slots-plus-stats do;
- * ignoring it let the single-row decision fire anyway, and the row's own
- * `flex-wrap` safety net silently pushed a side onto its own line —
- * recreating a one-sided line the same way an unfit pair does below.
+ * No `reservedWidth` param anymore (2026-08-26, supersedes Codex P1, PR
+ * #2812): row membership is decided from slot widths alone. Whether the
+ * stats zone SHARES the single row is the component's own separate
+ * `statsInline` decision — reserving stats space inside THIS fit check
+ * made a too-wide stats zone split the SLOTS, jumping from 1 visual
+ * line straight to 3 (2 slot rows + the stats' own line) and skipping
+ * the strictly-better middle tier of "slots on one line, stats evicted
+ * to their own line below" (2 lines). The overflow Codex P1 originally
+ * guarded against cannot recur: when slots-plus-stats don't fit, the
+ * stats leave the row entirely instead of overflowing it.
  *
  * Per-pair capacity (Codex P1, PR #2812): the two-pointer walk used to
  * pair `sorted[i]`/`sorted[j]` unconditionally, even when their combined
@@ -257,12 +259,10 @@ export function computeComposerRows(
     hostShellKey: string,
     availableWidth: number,
     gapPx: number,
-    reservedWidth = 0,
 ): ComposerRow[] {
     if (slots.length === 0) return [];
 
-    const reservedForFit = reservedWidth > 0 ? reservedWidth + gapPx : 0;
-    const totalWidth = slots.reduce((sum, s) => sum + s.width, 0) + Math.max(0, slots.length - 1) * gapPx + reservedForFit;
+    const totalWidth = slots.reduce((sum, s) => sum + s.width, 0) + Math.max(0, slots.length - 1) * gapPx;
     if (totalWidth <= availableWidth) {
         const movable = slots.filter((s) => s.key !== hostShellKey);
         const hostShellWidth = slots.find((s) => s.key === hostShellKey)?.width ?? 0;
@@ -1071,7 +1071,16 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // callback yet (`stripWidth() === 0`) — never an arbitrary/empty
     // split, and never a spurious multi-row flash before the real width
     // is known.
-    const rows = createMemo((): ComposerRow[] => {
+    // Returns BOTH the row list and `statsInline` — whether the stats
+    // zone shares the single row's line (true only when slots-plus-stats
+    // genuinely fit together). Separated from row membership
+    // (user-reported regression, 2026-08-26): feeding `statsWidth` into
+    // `computeComposerRows`'s fit check made a too-wide stats zone split
+    // the SLOTS — the strip jumped from 1 visual line straight to 3
+    // (2 slot rows + the stats' own dedicated line), skipping the
+    // strictly-better middle tier this decision now creates: slots stay
+    // on one line and only the stats move to their own line (2 lines).
+    const layout = createMemo((): { rows: ComposerRow[]; statsInline: boolean } => {
         const list = slots();
         const widths = slotWidths();
         const allMeasured = list.every((s) => widths[s.key] !== undefined);
@@ -1091,10 +1100,13 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         if (!allMeasured || totalMeasured === 0 || width === 0) {
             const left = list.filter((s) => s.side === "left").map((s) => s.key);
             const right = list.filter((s) => s.side === "right").map((s) => s.key);
+            // statsInline true in the fallback — matches the pre-split
+            // rendering every environment without measurement (JSDOM,
+            // first paint) always had.
             if (left.length === 0 && right.length > 0) {
-                return [edgeOrdered({ left: [right[0]], right: right.slice(1) })];
+                return { rows: [edgeOrdered({ left: [right[0]], right: right.slice(1) })], statsInline: true };
             }
-            return [edgeOrdered({ left, right })];
+            return { rows: [edgeOrdered({ left, right })], statsInline: true };
         }
 
         // The real column-gap `.agent-composer-strip-row` applies between
@@ -1142,17 +1154,33 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
             "hostShell",
             width,
             gapPx,
-            statsWidth(),
         );
 
-        if (shed.length === 0) return built.map(edgeOrdered);
+        // Stats share the single row's line only when slots PLUS stats
+        // (plus the stats' own gap) genuinely fit — the check Codex P1
+        // (PR #2812) originally put inside computeComposerRows, now the
+        // answer to a different question: not "how do slots split" but
+        // "where do the stats go." On failure the stats move to their
+        // own line below (the multi mount position) while the slots stay
+        // exactly where the slot-only decision put them.
+        const stats = statsWidth();
+        const slotsTotal = visible.reduce((sum, s) => sum + (widths[s.key] ?? 0), 0) + Math.max(0, visible.length - 1) * gapPx;
+        const statsInline = built.length === 1 && (stats === 0 || slotsTotal + stats + gapPx <= width);
+
+        if (shed.length === 0) return { rows: built.map(edgeOrdered), statsInline };
         const target = built[built.length - 1] ?? { left: [], right: [] };
         for (const s of shed) {
             if (s.side === "left") target.left = [...target.left, s.key];
             else target.right = [...target.right, s.key];
         }
-        return (built.length === 0 ? [target] : [...built.slice(0, -1), target]).map(edgeOrdered);
+        return {
+            rows: (built.length === 0 ? [target] : [...built.slice(0, -1), target]).map(edgeOrdered),
+            statsInline,
+        };
     });
+
+    const rows = (): ComposerRow[] => layout().rows;
+    const statsInline = (): boolean => layout().statsInline;
 
     // Row COUNT rarely changes across recomputes — plain number primitives
     // compare by value, so `<For>` over indices preserves each row's own
@@ -1184,8 +1212,11 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
 
     // Stats zone — token/elapsed stats. Always centered (this zone's
     // identity at every tier). Rendered in ONE of two places, mutually
-    // exclusive (`rows().length === 1` vs. not — `rows()` is never empty,
-    // `hostShell` is always present, so this is a true binary): as the
+    // exclusive (`statsInline()` vs. not — since 2026-08-26 this is its
+    // own decision, no longer synonymous with `rows().length === 1`: a
+    // single slot row can have the stats evicted to their own line below
+    // when slots-plus-stats don't fit together, the middle tier that
+    // stops the 1-line → 3-line jump): as the
     // single row's own third child when everything fits one line
     // (matching the true-centered widest-tier position every revision
     // through Rev 6 already had — see _composer-strip.scss's
@@ -1241,7 +1272,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                             <span class="agent-composer-strip-row-left">
                                 <For each={rows()[rowIndex]?.left ?? []}>{(key) => renderSlot(key, "left")}</For>
                             </span>
-                            <Show when={rows().length === 1}>{statsZone("single")}</Show>
+                            <Show when={statsInline()}>{statsZone("single")}</Show>
                             <span class="agent-composer-strip-row-right">
                                 <For each={rows()[rowIndex]?.right ?? []}>{(key) => renderSlot(key, "right")}</For>
                             </span>
@@ -1250,7 +1281,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
                 </For>
             </div>
 
-            <Show when={rows().length !== 1}>{statsZone("multi")}</Show>
+            <Show when={!statsInline()}>{statsZone("multi")}</Show>
         </div>
     );
 };
