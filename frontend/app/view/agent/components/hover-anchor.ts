@@ -14,6 +14,16 @@
  * needed. Removed as dead code once the last caller migrated off it.
  */
 
+// Shared hover-to-peek enter delay. Was 150ms (separately declared in
+// ToolBlock.tsx/MarkdownBlock.tsx/UserMessageBlock.tsx — three copies that
+// could silently drift). Lowered to 50ms per SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS
+// (2026-08-25): every node kind now gets a peek, so a snappier response
+// matters more than the old ToolBlock-only guard against "accidental
+// expansion during a fast scroll-through" — 50ms is still well above a
+// single scroll-wheel tick's dwell time, just no longer padded for a
+// feature that only existed on three anchor types.
+export const PEEK_ENTER_DELAY_MS = 50;
+
 export interface VerticalRect {
     /** Distance from viewport top to top edge, in px. */
     readonly top: number;

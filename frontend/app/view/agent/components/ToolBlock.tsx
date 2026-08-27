@@ -44,6 +44,7 @@ import { formatExactTime, formatTimeAgo } from "@/util/format-time";
 import clsx from "clsx";
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 import { extractToolDetail } from "../stream-parser";
+import { useNodePeek } from "../hooks/useNodePeek";
 import type { AgentDispatch } from "../../swarm/swarm-model";
 import type { BashResult, EditResult, GlobResult, GrepResult, ToolNode, WriteResult } from "../types";
 import { AnsweredQuestionMessage } from "./AnsweredQuestionMessage";
@@ -118,10 +119,6 @@ const STATUS_ICON: Record<ToolNode["status"], string> = {
 const PREVIEW_ZOOM_STEP = 0.05;
 const PREVIEW_ZOOM_MIN = 0.7;
 const PREVIEW_ZOOM_MAX = 2.0;
-
-// 150ms enter-delay matches UserMessageBlock's hover-to-peek — prevents
-// accidental expansions during fast scroll-throughs.
-const PEEK_ENTER_DELAY_MS = 150;
 
 export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // Drives the peek tooltip's live "time ago" text (§2.3 of
@@ -328,7 +325,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // ticker forever, not just the one actually being hovered right now.
     // Short-circuiting before peekTick() means only genuinely-hovered rows
     // subscribe.
-    const [isPeeking, setIsPeeking] = createSignal(false);
+    const { isPeeking, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } = useNodePeek();
     const peekTimeText = createMemo(() => {
         if (!isPeeking()) return null;
         peekTick(); // re-run every second so "ago" stays live while hovered
@@ -360,18 +357,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     // UserMessageBlock.tsx's "Session context" hover-to-peek (flush to the
     // row's edges, no gap), reusing the same `hover-anchor.ts` direction
     // logic — just rendered outside the row's subtree instead of inside it.
-    let peekEnterTimer: ReturnType<typeof setTimeout> | undefined;
-    let rowEl: HTMLDivElement | undefined;
-
-    const handlePeekEnter = () => {
-        clearTimeout(peekEnterTimer);
-        peekEnterTimer = setTimeout(() => setIsPeeking(true), PEEK_ENTER_DELAY_MS);
-    };
-    const handlePeekLeave = () => {
-        clearTimeout(peekEnterTimer);
-        setIsPeeking(false);
-    };
-    onCleanup(() => clearTimeout(peekEnterTimer));
+    // Timer/signal state lives in the shared useNodePeek() hook above.
 
     // A resolved AskUserQuestion renders as a user message instead of the
     // generic collapsed tool row below — it substantively IS user input.
@@ -384,7 +370,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     return (
         <Show when={!isAnsweredQuestion()} fallback={<AnsweredQuestionMessage node={props.node} />}>
             <div
-                ref={(el) => (rowEl = el)}
+                ref={setPeekRowEl}
                 class={clsx("agent-tool-block", {
                     collapsed: !expanded(),
                     expanded: expanded(),
@@ -404,18 +390,23 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 // names CSS needs to target one specific open-ended tool without touching the
                 // shared "other" styling every other unrecognized tool also falls back to.
                 data-tool-name={props.node.toolName?.toLowerCase()}
+                // Peek-hover fires from anywhere in the row (not just the tool-name
+                // text) per SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25 —
+                // merged with the pre-existing userHolding handlers below rather
+                // than adding a second listener pair, since SolidJS only keeps the
+                // last onMouseEnter/onMouseLeave assigned to a given element.
                 onMouseEnter={() => {
                     if (props.pinned || autoExpanded()) setUserHolding(true);
+                    handlePeekEnter();
                 }}
-                onMouseLeave={() => setUserHolding(false)}
+                onMouseLeave={() => {
+                    setUserHolding(false);
+                    handlePeekLeave();
+                }}
             >
                 <div class="agent-tool-summary" onClick={props.onTogglePin}>
                     <span class="agent-tool-status-icon">{statusIcon()}</span>
-                    <span
-                        class="agent-tool-name-peek-anchor"
-                        onMouseEnter={handlePeekEnter}
-                        onMouseLeave={handlePeekLeave}
-                    >
+                    <span class="agent-tool-name-peek-anchor">
                         <span class="agent-tool-name">{props.node.summary}</span>
                     </span>
                     <Show when={props.node.duration}>
@@ -470,7 +461,7 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 panel is already expanded, since the command/time are
                 visible in context there — same condition the old
                 Tooltip-based version used. */}
-                <PeekOverlay show={isPeeking() && hasAnyPeekContent() && !expanded()} rowEl={() => rowEl}>
+                <PeekOverlay show={isPeeking() && hasAnyPeekContent() && !expanded()} rowEl={peekRowEl}>
                     <Show when={peekTimeText()}>
                         <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
                     </Show>
