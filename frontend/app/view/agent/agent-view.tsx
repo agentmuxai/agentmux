@@ -1552,7 +1552,13 @@ const AgentPresentationView = ({
     const workingRowLoading = createMemo(
         () => showingLaunchActivity() || workingFromPhase(agentAtoms().turnPhaseAtom[0]())
     );
-    const workingRowVisible = createMemo(() => workingRowLoading() || agentAtoms().sessionStatsAtom[0]() != null);
+    const workingRowVisible = createMemo(
+        () =>
+            workingRowLoading() ||
+            agentAtoms().sessionStatsAtom[0]() != null ||
+            agentAtoms().compactingAtom[0]() != null ||
+            agentAtoms().reconnectingAtom[0]() != null,
+    );
 
     // Ref CALLBACK, not a one-shot onMount(): originally fixed a bug where
     // Agent History's now-removed `bodyMode` in-place swap (PR #2509)
@@ -2136,7 +2142,26 @@ const AgentPresentationView = ({
                 <Show when={workingRowVisible()}>
                     <div
                         class="agent-working-row-backdrop"
-                        classList={{ "agent-working-row-backdrop--loading": workingRowLoading() }}
+                        classList={{
+                            // Must mirror AgentWorkingRow's OWN loading gate
+                            // (`props.loading || !!props.compacting ||
+                            // !!props.reconnecting`, AgentFooter.tsx), not
+                            // just `workingRowLoading()` — reagent P1 on
+                            // PR #2826: since `workingRowVisible()` above
+                            // already renders this backdrop for
+                            // compacting/reconnecting too, using only
+                            // `workingRowLoading()` here left the backdrop in
+                            // its `--worked` (non-loading) color while the
+                            // row itself rendered its loading/accent-tinted
+                            // variant during those two states — the exact
+                            // backdrop/row color-mismatch
+                            // SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md
+                            // fixed for the plain loading case.
+                            "agent-working-row-backdrop--loading":
+                                workingRowLoading() ||
+                                agentAtoms().compactingAtom[0]() != null ||
+                                agentAtoms().reconnectingAtom[0]() != null,
+                        }}
                     />
                 </Show>
 
@@ -2200,6 +2225,8 @@ const AgentPresentationView = ({
                                 const phase = agentAtoms().turnPhaseAtom[0]();
                                 return phase.kind === "Streaming" ? (phase.retryAfterMs ?? null) : null;
                             })()}
+                            compacting={agentAtoms().compactingAtom[0]()}
+                            reconnecting={agentAtoms().reconnectingAtom[0]()}
                         />
                     </Show>
                 </div>
@@ -2365,7 +2392,6 @@ const AgentPresentationView = ({
                 providerId={provider()?.id ?? ""}
                 agentMode={block()?.meta?.["agentMode"] as string | undefined}
                 compacting={agentAtoms().compactingAtom[0]()}
-                reconnecting={agentAtoms().reconnectingAtom[0]()}
                 // Route through handleSendMessage — same pattern as the
                 // SlashHelpPanel's onInvoke above, and for the same reason:
                 // this needs the same pre-TurnStart wasAlreadyWorking

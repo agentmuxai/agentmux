@@ -113,7 +113,7 @@
  *     `@container` queries for this decision.
  *
  * Stats zone (center, unaffected by the above): tokens (↑in ↓out) ·
- * elapsed, or the live "Compacting…"/"Reconnecting…" readout.
+ * elapsed.
  *
  * The strip bar itself is not clickable. "Shell" is the sole toggle for
  * the details drawer (the AgentShellSubblock terminal — activity-log lines
@@ -127,7 +127,7 @@
 
 import { useTick } from "@/app/hook/useTick";
 import { compactionThreshold } from "@/app/store/agent-pane-state/context-window";
-import type { CompactionState, ResumeRetryState } from "@/app/store/agent-pane-state/types";
+import type { CompactionState } from "@/app/store/agent-pane-state/types";
 import { formatCompactNumber, formatExactNumber } from "@/util/format-count";
 import { formatElapsedCompact } from "@/util/format-time";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type JSX } from "solid-js";
@@ -456,21 +456,14 @@ interface AgentComposerStripProps {
     agentMode?: string;
     /**
      * Live "compaction in progress" state (reducer-owned, set by the
-     * `PreCompact` hook's `compaction_started` signal). While set, the
-     * center stats zone shows "Compacting…" plus a live elapsed
-     * counter instead of the normal turn/session stats — Tier 1/2 of
-     * docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md.
+     * `PreCompact` hook's `compaction_started` signal). Gates the manual
+     * Compact button (`canCompact()` below) and its tooltip. The
+     * "Compacting…" + live elapsed readout this used to also drive here
+     * moved to `AgentWorkingRow` (2026-08-27, Part 2 of
+     * SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md) — see
+     * `agent-view.tsx`'s `<AgentWorkingRow compacting=.../>` call site.
      */
     compacting?: CompactionState | null;
-    /**
-     * Live "reconnecting after a stale `--resume` session id" state, or
-     * null. While set, the center stats zone shows "Reconnecting…" plus a
-     * live elapsed counter — same treatment as `compacting`, so a stale-
-     * resume recovery (usually seconds, occasionally tens of seconds) never
-     * reads as a silent hang. See
-     * docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md §6.2.
-     */
-    reconnecting?: ResumeRetryState | null;
     /**
      * Manually trigger compaction now, instead of waiting for the CLI's
      * own auto-compact threshold. Only meaningful for Claude — sends the
@@ -511,42 +504,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         return s != null ? (tick(), Date.now() - s) : 0;
     });
 
-    // Live elapsed time since compaction started — a real stopwatch via
-    // Date.now() deltas (ticks every second through the same `useTick`
-    // this strip already uses for the turn-elapsed display). Once the
-    // authoritative `compact_boundary` event lands, `compacting` clears
-    // and the finalized transcript node shows the backend's real
-    // `durationMs` instead — this live reading is only ever the
-    // in-progress approximation. Tier 2 of
-    // docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md.
-    const compactingElapsedMs = createMemo(() => {
-        const c = props.compacting;
-        return c ? (tick(), Date.now() - c.startedAt) : 0;
-    });
-
-    // Live elapsed time since a stale-`--resume` retry began — same
-    // stopwatch pattern as compactingElapsedMs above. Clears the moment
-    // `reconnecting` clears (the retry's outcome — Fresh or Resumed — is
-    // known); there's no separate finalized-duration node to hand off to,
-    // unlike compaction's transcript node.
-    const reconnectingElapsedMs = createMemo(() => {
-        const r = props.reconnecting;
-        return r ? (tick(), Date.now() - r.startedAt) : 0;
-    });
-
     const rightText = createMemo((): string => {
-        // Mutually exclusive with `compacting` by construction (a stale-
-        // resume retry only fires once the underlying process has already
-        // exited, at which point compaction can't still be in progress),
-        // but checked first regardless — a silent-gap recovery is the more
-        // easily mistaken-for-a-hang state, so it takes priority if both
-        // were ever somehow set.
-        if (props.reconnecting) {
-            return `Reconnecting…  ${formatElapsedCompact(reconnectingElapsedMs())}`;
-        }
-        if (props.compacting) {
-            return `Compacting…  ${formatElapsedCompact(compactingElapsedMs())}`;
-        }
         const parts: string[] = [];
         if (props.loading) {
             if (props.turnTokens) parts.push(fmtTokens(props.turnTokens));
@@ -1262,13 +1220,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     const statsZone = (variant: "single" | "multi") => (
         <span class="agent-composer-strip-stats-zone" ref={(el) => (statsRefs[variant] = el)}>
             <Show when={rightText()}>
-                <span
-                    class="agent-composer-strip-stats"
-                    classList={{
-                        "agent-composer-strip-stats--compacting": !!props.compacting,
-                        "agent-composer-strip-stats--reconnecting": !!props.reconnecting,
-                    }}
-                >
+                <span class="agent-composer-strip-stats">
                     {rightText()}
                 </span>
             </Show>

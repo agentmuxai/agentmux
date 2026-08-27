@@ -15,6 +15,7 @@ import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedCompact } from "@/util/format-time";
 import { abbreviateText } from "@/util/format-text";
 import { MicButton } from "@/app/element/MicButton";
+import type { CompactionState, ResumeRetryState } from "@/app/store/agent-pane-state/types";
 import type { AgentViewModel } from "../agent-model";
 import type { SlashCommand } from "../commands/types";
 import type { SessionStats, TurnTokens } from "../types";
@@ -93,6 +94,19 @@ interface AgentWorkingRowProps {
      *  launchPhase to "waiting-for-login-completion" too, so without this the
      *  row rendered a second, redundant Cancel button alongside AuthUrlBox's. */
     hasAuthUrl?: boolean;
+    /** Live "compaction in progress" state, or null — relocated here from
+     *  AgentComposerStrip (2026-08-27, Part 2 of
+     *  SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md) so a user has
+     *  exactly one place to check "is something happening right now." Takes
+     *  priority over the normal Working/tool display. */
+    compacting?: CompactionState | null;
+    /** Live "recovering from a stale --resume session id" state, or null —
+     *  same relocation as `compacting` above. Fires ONLY after the
+     *  underlying process has already crashed/exited, so this can be set
+     *  while `loading` is false — the row must render for this alone. Takes
+     *  priority over `compacting` (mirrors the old composer-strip priority:
+     *  a silent-gap recovery is more easily mistaken for a hang). */
+    reconnecting?: ResumeRetryState | null;
 }
 
 // reagent P2 on PR #2304: "waiting-for-login-link" (tier 1's own up-to-15s
@@ -111,6 +125,8 @@ const CANCELLABLE_LAUNCH_PHASES = new Set([
  *  of the JSX ternary chain so both the type-out reveal effect and the
  *  render itself read the same computed value. */
 function loadingLeftText(props: AgentWorkingRowProps, phrase: string, nowMs: number): string {
+    if (props.reconnecting) return "Reconnecting…";
+    if (props.compacting) return "Compacting…";
     if (props.stopping) return "Stopping…";
     if (props.waitingReason === "rate_limited") {
         return props.retryAfterMs != null
@@ -206,6 +222,19 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
         return s != null ? (tick(), Date.now() - s) : 0;
     });
 
+    // Live elapsed time since compaction/reconnecting-retry started —
+    // relocated from AgentComposerStrip (2026-08-27, Part 2 of
+    // SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md). Same
+    // stopwatch pattern as elapsedMs above.
+    const compactingElapsedMs = createMemo(() => {
+        const c = props.compacting;
+        return c ? (tick(), Date.now() - c.startedAt) : 0;
+    });
+    const reconnectingElapsedMs = createMemo(() => {
+        const r = props.reconnecting;
+        return r ? (tick(), Date.now() - r.startedAt) : 0;
+    });
+
     createEffect(() => {
         if (!props.loading || (props.currentTool && !props.toolPromoted)) return;
         setPhrase(pickThinkingPhrase());
@@ -255,6 +284,12 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     });
 
     const rightText = createMemo((): string => {
+        // reconnecting/compacting show only the elapsed-time readout, no
+        // token counts — matches the old composer-strip behavior these
+        // states were relocated from. `reconnecting` takes priority (see
+        // its prop doc comment above).
+        if (props.reconnecting) return formatElapsedCompact(reconnectingElapsedMs());
+        if (props.compacting) return formatElapsedCompact(compactingElapsedMs());
         const right: string[] = [];
         if (props.turnTokens) right.push(fmtTokens(props.turnTokens));
         right.push(formatElapsedCompact(elapsedMs()));
@@ -276,7 +311,7 @@ export const AgentWorkingRow = (props: AgentWorkingRowProps): JSX.Element => {
     // reducer axis itself stays, for the watchdog/Swarm consumers).
     return (
         <Show
-            when={props.loading}
+            when={props.loading || !!props.compacting || !!props.reconnecting}
             fallback={
                 <Show when={workedSummary()}>
                     <span class="agent-working-row agent-working-row--worked">
