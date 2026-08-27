@@ -1,5 +1,21 @@
 # AgentMux Version History
 
+## 0.55.26 — 2026-08-26
+
+- fix(agent): suppress Activity Dock refresh during backfill bursts and reconcile registry-known background tasks into dock rows
+- feat(agent-pane): hover-to-peek now fires on every transcript node kind, 50ms delay
+- feat(agentmux-mcp): DiscoverWindows tool + pid-based CaptureWindow targeting
+- fix(agent-pane): real DOM-measurement-based composer strip zone balance
+- fix(agent-pane): row-based composer strip layout so every rendered line has both a left and right occupant
+- fix(agent-pane): composer strip zoom/gap unit mismatch and stale shed-slot measurement on resize
+- fix(agent-pane): composer strip stuck multi-row — stats zone wrapper measured instead of its content
+- fix(tab): eliminate tab-close flash — batch multi-object WS updates into one frame, emit parent-before-child on deletes
+- feat(agent-pane): composer strip edge priority — interactive elements flush against row edges
+- feat(agent-pane): element-level edge priority + conservative fit rounding in composer strip
+- fix(agent-pane): composer strip stats eviction middle tier — no more 1-to-3-line jump
+- fix(agent-pane): evicted composer strip stats float above the rows
+
+
 ## 0.55.25 — 2026-08-25
 
 - feat(widgets): reorder default pinned widgets to Agent, Swarm, Armory, Sysinfo
