@@ -515,28 +515,23 @@ impl AgentMuxHandler {
             cb.clone(),
         );
 
-        // Broadcast to every TOP-LEVEL window — `emit_event_from_state`
-        // only dispatches to the "main" browser, so panes hosted in a
-        // tear-off / secondary window would never see the event and
-        // the CEF callback would wait until TTL/cancel. Filtering to
-        // top-level is critical: the payload carries origin/host/realm
-        // plus block_id correlation, which must not be visible to
-        // remote content loaded inside a sibling pane (whose main
-        // frame is an arbitrary URL). The host renderer filters on
-        // `payload.block_id` so only the window owning this pane
-        // surfaces the prompt.
-        crate::events::emit_event_to_top_level_windows(
-            &self.state,
-            "browser-pane-auth-required",
-            &serde_json::json!({
-                "block_id": block_id,
-                "request_id": request_id,
-                "origin": origin,
-                "host": host_str,
-                "port": port,
-                "realm": realm_str,
-                "is_proxy": is_proxy_bool,
-            }),
+        // Hand off to the credential broker: identity-resolve → stored-
+        // credential lookup → either a human-approval subwindow (never a
+        // `<Modal>` — see `credential_broker`'s own doc comment for why)
+        // or, on any friction at all (no bound identity, no stored
+        // credential, srv unreachable, etc.), the exact same
+        // `browser-pane-auth-required` broadcast this function emitted
+        // unconditionally before this feature existed. See
+        // `docs/status/majestic-painting-minsky` plan.
+        crate::credential_broker::on_auth_challenge(
+            self.state.clone(),
+            request_id,
+            block_id,
+            origin,
+            host_str,
+            port,
+            realm_str,
+            is_proxy_bool,
         );
 
         1
