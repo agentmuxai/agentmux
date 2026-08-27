@@ -118,6 +118,23 @@ central finding this retro exists to hand off to `SPEC_DEPENDENCY_UPGRADE_PROCES
   point in favor of always updating the doc as part of the bump rather than
   treating it as optional paperwork.
 
+## Addendum: the review caught the retro repeating its own mistake
+
+ReAgent's review of the PR this retro describes (P2, non-blocking) found that
+step 6 above was incomplete: the Dockerfile `ARG` gap was closed in the
+*test*, but the prose paragraph in `docs/spec-claude-code-versioning.md` that
+had originally warned about the gap was left unedited — still stating, after
+the fix, that `pin-consistency.test.ts` "does not cover the Dockerfile ARG...
+double check it by hand." A doc describing behavior the code no longer had.
+Fixed in the same PR. This is worth recording rather than quietly amending
+away: it's a small-scale repeat of this retro's own central finding — a
+human (agent, here) editing prose under time pressure missed updating one of
+several places making the same claim, even while writing a document *about*
+that exact failure mode. It's further evidence for §"Root Cause": review
+gates that check the artifact (a test assertion, in this case) catch drift
+that a human re-reading prose does not reliably catch, including when that
+human is specifically primed to look for it.
+
 ## What Would Help Next Time
 
 - See `docs/specs/SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md` for the full

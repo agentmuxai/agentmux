@@ -26,14 +26,15 @@ The CI workflow's "Resolve Claude Code version" step (`id: claude_ver`) has a sp
 - Input non-empty and not `"latest"` → use the input value verbatim (shell injection safe via `env:`)
 - Input empty or `"latest"` → resolve via `npm view @anthropic-ai/claude-code version` at build time
 
-`frontend/app/view/agent/providers/pin-consistency.test.ts` enforces agreement across
-the last three (frontend, srv, cef) plus the workflow default — it does **not**
-cover the Dockerfile `ARG`, so that one location can still drift silently; double
-check it by hand when bumping. All six must be updated together. (This gap —
-plus this doc itself having drifted on the frontend file path — is exactly the
-kind of thing `SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md` generalizes a fix
-for: a durable checklist/script instead of a doc a human has to remember to
-re-read accurately.)
+`frontend/app/view/agent/providers/pin-consistency.test.ts` enforces agreement
+across **all six** locations, including the Dockerfile `ARG` — added
+2026-08-27, closing a gap this doc itself had warned about (in this same
+paragraph) for over a month without it becoming a test. All six must still be
+updated together; the test only catches a *mismatch*, not a location someone
+forgot to touch at all. (That drift-in-a-warning — plus this doc having
+separately drifted on the frontend file path — is exactly the kind of thing
+`SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md` generalizes a fix for: prefer
+a durable check over a doc a human has to remember to re-read accurately.)
 
 ## How to bump
 
@@ -46,8 +47,8 @@ re-read accurately.)
 7. Also in `catalog.ts`: re-check each model alias's curated `label`/`description` still
    matches what the pinned CLI currently resolves that alias to (e.g. `opus` → "Opus 5")
    — a label can go stale even when the alias `value` itself never changes.
-8. Run `pin-consistency.test.ts` to confirm 2-6 agree (it won't catch the Dockerfile —
-   diff it by hand).
+8. Run `pin-consistency.test.ts` to confirm all six agree (includes the Dockerfile
+   `ARG` as of 2026-08-27).
 9. Open a PR and merge it.
 10. To publish the image, either:
     - **Push a `v*` git tag** (e.g. `git tag v0.50.0 && git push origin v0.50.0`) — this triggers the workflow automatically and publishes both the semver tag and `:latest`.
@@ -59,7 +60,7 @@ re-read accurately.)
 |---------|------|-------|
 | `2.1.197` | 2026-06-30 | First explicit pin; replaced floating `latest` default |
 | `2.1.198` | 2026-07-02 | Bump; initially missed the cef host installer and workflow default (see `pin-consistency.test.ts` history note) |
-| `2.1.247` | 2026-08-27 | Bump (verified via `npm view @anthropic-ai/claude-code version` against the real registry); paired with relabeling the `opus` alias from "Opus 4.8" to "Opus 5" in the UI catalog. First bump done against a written checklist (this doc) rather than tribal knowledge — found this doc's own frontend file path had drifted (`index.ts` → `catalog.ts`) and that the Dockerfile `ARG` (a 6th pin location) isn't covered by `pin-consistency.test.ts`; both corrected here. Full retro: `docs/retro/retro-claude-cli-and-opus-5-upgrade-2026-08-27.md`. Forward-looking process: `docs/specs/SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md`. |
+| `2.1.247` | 2026-08-27 | Bump (verified via `npm view @anthropic-ai/claude-code version` against the real registry); paired with relabeling the `opus` alias from "Opus 4.8" to "Opus 5" in the UI catalog. First bump done against a written checklist (this doc) rather than tribal knowledge — found this doc's own frontend file path had drifted (`index.ts` → `catalog.ts`) and that the Dockerfile `ARG` (a 6th pin location) wasn't covered by `pin-consistency.test.ts`; both corrected here, and the test extended to cover the Dockerfile going forward (this doc's own prose warning about that gap was initially left in place after the fix and had to be corrected in review — see the retro). Full retro: `docs/retro/retro-claude-cli-and-opus-5-upgrade-2026-08-27.md`. Forward-looking process: `docs/specs/SPEC_DEPENDENCY_UPGRADE_PROCESS_2026_08_27.md`. |
 
 ## Escape hatch
 
