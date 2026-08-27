@@ -1,11 +1,13 @@
 # SPEC: Agent-pane status cleanup — remove "unresponsive" detection, consolidate Reconnecting/Compacting/Working
 
 **Date:** 2026-08-25
-**Status:** Part 1 (removal) implemented, verified (cargo test + vitest +
-tsc all green), pending PR/merge. Part 2 (status consolidation) scoped with
-an explicit design recommendation, not yet implemented. Two
-separately-implementable pieces in one doc — either can ship as its own PR
-(per repo-owner direction when this spec was extended).
+**Status:** Part 1 (removal) implemented, PR #2825 (includes a fixup commit
+restoring container-exec failure classification that Codex caught in
+review — see that PR for detail). Part 2 (status consolidation) implemented
+per §10's design recommendation, verified (tsc + full vitest green),
+pending PR/merge. Two separately-implementable pieces in one doc — either
+can ship as its own PR (per repo-owner direction when this spec was
+extended).
 **Scope — Part 1:** `agentmux-srv/src/backend/blockcontroller/health.rs`,
 `agentmux-srv/src/backend/blockcontroller/{mod,core,persistent,acp}.rs`,
 `agentmux-srv/src/backend/blockcontroller/subprocess/{mod,host_spawn,container_spawn}.rs`,
