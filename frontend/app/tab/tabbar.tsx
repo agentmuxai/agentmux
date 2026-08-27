@@ -131,7 +131,13 @@ function TabBar(props: TabBarProps): JSX.Element {
     const [pendingCloseTabId, setPendingCloseTabId] = createSignal<string | null>(null);
 
     const requestClose = (tabId: string) => {
-        if (allTabIds().length <= 1) return;
+        // Guard on the VISIBLE count here (unlike handleClose's raw-list
+        // guard): with N closes already pending, the raw list still counts
+        // the hidden tabs until their RPCs land, so rapid skip-confirm
+        // clicks could pass a raw guard and hide every last tab, leaving an
+        // empty strip until an RPC failed (reagent P2 on PR #2818). A new
+        // close may only START while more than one tab is actually visible.
+        if (tabIds().length <= 1) return;
         if (pendingHiddenTabIds().has(tabId)) return; // close already pending
         if ((settingsAtom() as any)["tab:skipcloseconfirm"]) {
             handleClose(tabId);
@@ -235,7 +241,15 @@ function TabBar(props: TabBarProps): JSX.Element {
                                 isActive={tabId === displayActiveTabId()}
                                 isFirst={i() === 0}
                                 isBeforeActive={i() === activeIndex() - 1}
-                                allTabCount={tabIds().length}
+                                // RAW count, not the filtered one: while a
+                                // close is pending the workspace still HAS
+                                // the hidden tab, and undercounting here
+                                // would flip droppable-tab's isLoneTabDrag/
+                                // canDrag on the survivor of a 2-tab
+                                // workspace, spuriously disabling its drag
+                                // until the RPC resolves (reagent P2 on
+                                // PR #2818).
+                                allTabCount={allTabIds().length}
                                 tabIndex={i()}
                                 tabIds={tabIds()}
                                 onSelect={() => handleSelect(tabId)}
