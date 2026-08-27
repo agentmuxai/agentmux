@@ -226,6 +226,230 @@ pub(crate) unsafe fn install_main_window_floater_cascade_hook(
     }
 }
 
+/// Per-HWND entry for the window-edge-resize hook: original WndProc,
+/// install-time window label (fallback for event routing), and whether a
+/// `windowresize:begin` has been emitted for the in-progress size loop.
+#[cfg(target_os = "windows")]
+struct WindowEdgeResizeHookEntry {
+    original: isize,
+    install_label: String,
+    session_began: bool,
+}
+
+/// Map of top-level HWND -> hook entry for the Shift+window-edge-resize
+/// subclass (`install_window_edge_resize_hook`). Self-prunes on
+/// WM_NCDESTROY (HWND-reuse safety, same discipline as
+/// `CLOSE_ROUTING_WNDPROCS`).
+#[cfg(target_os = "windows")]
+static WINDOW_EDGE_RESIZE_WNDPROCS: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<usize, WindowEdgeResizeHookEntry>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Handle to host AppState for the static window-edge-resize wndproc (same
+/// pattern as `close_routing_app_state`). Set on first
+/// `install_window_edge_resize_hook` call.
+#[cfg(target_os = "windows")]
+fn window_edge_resize_app_state() -> &'static std::sync::OnceLock<std::sync::Arc<crate::state::AppState>> {
+    static S: std::sync::OnceLock<std::sync::Arc<crate::state::AppState>> = std::sync::OnceLock::new();
+    &S
+}
+
+/// Emit one `windowresize:*` event to THIS window's top-level renderer.
+/// The label is resolved fresh from the HWND (`AppState::label_for_hwnd`)
+/// so a promoted pool window routes correctly even if its registered label
+/// changed after install; falls back to the install-time label.
+#[cfg(target_os = "windows")]
+fn emit_window_edge_resize_event(
+    hwnd: *mut std::ffi::c_void,
+    install_label: &str,
+    event: &str,
+    payload: &serde_json::Value,
+) {
+    let Some(state) = window_edge_resize_app_state().get() else {
+        return;
+    };
+    let label = state
+        .label_for_hwnd(hwnd)
+        .unwrap_or_else(|| install_label.to_string());
+    crate::events::emit_event_to_window(state, &label, event, payload);
+}
+
+/// Window-edge-resize hook body — observes the native size loop and
+/// forwards it to the renderer so Shift+window-edge resize can feed the
+/// entire delta to the edge pane(s):
+///
+/// - `WM_SIZING` — carries the dragged edge verbatim in `wParam`
+///   (`WMSZ_*`). First tick of a loop emits `windowresize:begin {}` (begin
+///   is lazy here rather than on `WM_ENTERSIZEMOVE`, which also fires for
+///   plain window MOVES — a move must not open a resize session). Every
+///   tick then samples `GetAsyncKeyState(VK_SHIFT)` (precedent:
+///   `commands/drag.rs::get_mouse_button_state`) and emits
+///   `windowresize:tick { edge, shiftHeld }`, so Shift can be
+///   pressed/released mid-resize and the renderer mode follows live.
+/// - `WM_EXITSIZEMOVE` — emits `windowresize:end {}` iff a begin was sent.
+///
+/// The renderer computes the pixel delta itself from its own container
+/// rect (no coordinates are forwarded — that sidesteps every
+/// physical-px/DPR/zoom unit question). Pure observer: every message
+/// ALWAYS passes through to the original WndProc.
+///
+/// Spec: `docs/specs/SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26.md` §3.4.
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn window_edge_resize_wndproc(
+    hwnd: *mut std::ffi::c_void,
+    msg: u32,
+    wparam: usize,
+    lparam: isize,
+) -> isize {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_SHIFT};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        CallWindowProcW, DefWindowProcW, WM_EXITSIZEMOVE, WM_NCDESTROY, WM_SIZING,
+    };
+
+    if msg == WM_SIZING {
+        // WMSZ_* — the dragged edge/corner, verbatim from the OS.
+        let edge = match wparam {
+            1 => "left",        // WMSZ_LEFT
+            2 => "right",       // WMSZ_RIGHT
+            3 => "top",         // WMSZ_TOP
+            4 => "topleft",     // WMSZ_TOPLEFT
+            5 => "topright",    // WMSZ_TOPRIGHT
+            6 => "bottom",      // WMSZ_BOTTOM
+            7 => "bottomleft",  // WMSZ_BOTTOMLEFT
+            8 => "bottomright", // WMSZ_BOTTOMRIGHT
+            _ => "",
+        };
+        if !edge.is_empty() {
+            // Read/update session state under the lock, emit AFTER releasing
+            // it (same discipline as tear_off_hook's handle_mouse_move).
+            let session = WINDOW_EDGE_RESIZE_WNDPROCS.lock().ok().and_then(|mut m| {
+                m.get_mut(&(hwnd as usize)).map(|entry| {
+                    let first_tick = !entry.session_began;
+                    entry.session_began = true;
+                    (entry.install_label.clone(), first_tick)
+                })
+            });
+            if let Some((install_label, first_tick)) = session {
+                if first_tick {
+                    emit_window_edge_resize_event(
+                        hwnd,
+                        &install_label,
+                        "windowresize:begin",
+                        &serde_json::json!({}),
+                    );
+                }
+                let shift_held =
+                    (GetAsyncKeyState(VK_SHIFT as i32) as u16 & 0x8000) != 0;
+                emit_window_edge_resize_event(
+                    hwnd,
+                    &install_label,
+                    "windowresize:tick",
+                    &serde_json::json!({ "edge": edge, "shiftHeld": shift_held }),
+                );
+            }
+        }
+    } else if msg == WM_EXITSIZEMOVE {
+        let ended = WINDOW_EDGE_RESIZE_WNDPROCS.lock().ok().and_then(|mut m| {
+            m.get_mut(&(hwnd as usize)).and_then(|entry| {
+                if entry.session_began {
+                    entry.session_began = false;
+                    Some(entry.install_label.clone())
+                } else {
+                    None // plain move loop — no session, nothing to end
+                }
+            })
+        });
+        if let Some(install_label) = ended {
+            emit_window_edge_resize_event(
+                hwnd,
+                &install_label,
+                "windowresize:end",
+                &serde_json::json!({}),
+            );
+        }
+    }
+
+    // ALWAYS pass through — pure observer, CEF still owns every message.
+    let original = WINDOW_EDGE_RESIZE_WNDPROCS
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&(hwnd as usize)).map(|e| e.original))
+        .unwrap_or(0);
+    let result = if original != 0 {
+        CallWindowProcW(Some(std::mem::transmute(original)), hwnd, msg, wparam, lparam)
+    } else {
+        DefWindowProcW(hwnd, msg, wparam, lparam)
+    };
+
+    // Prune AFTER passthrough so the original proc still receives
+    // WM_NCDESTROY (HWND-reuse safety, same as close_routing_wndproc).
+    if msg == WM_NCDESTROY {
+        if let Ok(mut m) = WINDOW_EDGE_RESIZE_WNDPROCS.lock() {
+            m.remove(&(hwnd as usize));
+        }
+    }
+
+    result
+}
+
+/// Subclass a top-level window's WndProc to observe the native size loop
+/// (`WM_SIZING` / `WM_EXITSIZEMOVE`) and forward `windowresize:*` events to
+/// the renderer — the host half of Shift+window-edge resize (see
+/// `window_edge_resize_wndproc` for the message flow and the spec pointer).
+///
+/// Installed from `on_after_created` (UI thread — the thread that owns the
+/// window, per Win32 subclassing rules) on every top-level non-popup
+/// window, `main` included: unlike close routing this hook never
+/// short-circuits a message, so it is safe on main. Idempotent per HWND.
+/// Coexists with the other subclasses in any order: each hook records and
+/// chains to whatever wndproc it displaced.
+#[cfg(target_os = "windows")]
+pub(crate) unsafe fn install_window_edge_resize_hook(
+    state: &std::sync::Arc<crate::state::AppState>,
+    hwnd: *mut std::ffi::c_void,
+    label: &str,
+) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{SetWindowLongPtrW, GWLP_WNDPROC};
+
+    let _ = window_edge_resize_app_state().set(state.clone());
+
+    let already_hooked = WINDOW_EDGE_RESIZE_WNDPROCS
+        .lock()
+        .ok()
+        .map(|m| m.contains_key(&(hwnd as usize)))
+        .unwrap_or(false);
+    if already_hooked {
+        return;
+    }
+
+    let original = SetWindowLongPtrW(
+        hwnd,
+        GWLP_WNDPROC,
+        window_edge_resize_wndproc as *const () as isize,
+    );
+    if original != 0 {
+        if let Ok(mut m) = WINDOW_EDGE_RESIZE_WNDPROCS.lock() {
+            m.insert(
+                hwnd as usize,
+                WindowEdgeResizeHookEntry {
+                    original,
+                    install_label: label.to_string(),
+                    session_began: false,
+                },
+            );
+        }
+        tracing::info!(
+            "[window-edge-resize] installed WM_SIZING observer on HWND {:p} label={}",
+            hwnd, label,
+        );
+    } else {
+        tracing::warn!(
+            "[window-edge-resize] SetWindowLongPtrW returned 0 for HWND {:p} label={} — hook not installed",
+            hwnd, label,
+        );
+    }
+}
+
 /// Hide the given top-level HWND from the Windows taskbar via
 /// `ITaskbarList::DeleteTab`. The window remains fully usable — Alt-Tab still
 /// finds it, it takes focus, repaints, etc. — but the shell paints no taskbar

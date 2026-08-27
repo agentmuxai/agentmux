@@ -294,6 +294,19 @@ impl AgentMuxHandler {
                 // Install on every top-level — both `main` and Subwindow.
                 if is_top_level_window && !is_popup {
                     unsafe { install_top_level_focus_restore_hook(hwnd); }
+
+                    // Shift+window-edge resize (spec SPEC_RESIZE_DEFAULT_FLIP_
+                    // AND_WINDOW_EDGE_SHIFT_2026_08_26.md §3.4): observe the
+                    // native size loop (WM_SIZING/WM_EXITSIZEMOVE) and forward
+                    // windowresize:* events to this window's renderer. Pure
+                    // observer-passthrough — safe on main and Subwindows alike.
+                    unsafe {
+                        super::wndproc::install_window_edge_resize_hook(
+                            &self.state,
+                            hwnd,
+                            &label,
+                        );
+                    }
                 }
 
                 // OS-close routing (task #30): Alt+F4 / taskbar-close
