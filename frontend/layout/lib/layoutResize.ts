@@ -31,8 +31,56 @@ export interface ResizeContext {
      * toggling Shift mid-drag needs no context rebuild: each move tick just
      * picks which formula to apply to this same baseline + the current
      * drag-start-to-now pixel delta. SPEC_SHIFT_DRAG_GROUP_RESIZE_2026_08_03.md §5.4.
+     *
+     * (Since the mid-drag REBASE below, "drag start" here really means
+     * "since the last modifier toggle" — a toggle rewrites these baselines
+     * to the currently-staged sizes.)
      */
     groupSiblingStartSizes: ResizeNodeOperation[];
+    /**
+     * Which mode staged the previous tick. A tick arriving with the OTHER
+     * mode is a mid-drag modifier toggle and triggers a rebase
+     * (`rebaseResizeContextForModeSwitch`) instead of naively recomputing
+     * the new mode's formula from the original drag-start baseline — which
+     * would snap every border except the dragged one to where the new
+     * formula would have put it had it run from the start (the "funny"
+     * jump reported after the 2026-08-26 default flip).
+     */
+    lastGroupResize: boolean;
+    /**
+     * Every sibling's currently-staged size — seeded from the drag-start
+     * sizes and merged with each successfully-staged tick's ops (a
+     * floor-rejected direct-mode tick stages nothing and leaves this
+     * untouched, matching the pending action). This is the rebase
+     * baseline: what the user actually SEES at the moment of a toggle.
+     */
+    stagedSizes: Map<string, number>;
+}
+
+/**
+ * Mid-drag modifier toggle: make the CURRENT visual state the new baseline
+ * so the incoming mode's math applies only to post-toggle cursor motion.
+ * Rewrites the 2-node start sizes and the group sibling snapshot to the
+ * currently-staged sizes, and — the key move — `resizeHandleStartPx` to
+ * the cursor's current position, so `clientDiff` restarts from zero.
+ * Every border therefore stays exactly where it is on the toggle frame;
+ * only subsequent movement follows the new mode. Toggling repeatedly
+ * mid-drag just chains rebases. Exported for direct unit testing (pure
+ * with respect to the context object — no DOM/model access).
+ */
+export function rebaseResizeContextForModeSwitch(
+    ctx: ResizeContext,
+    clientPoint: number,
+    groupResize: boolean
+): void {
+    ctx.lastGroupResize = groupResize;
+    ctx.resizeHandleStartPx = clientPoint;
+    ctx.beforeNodeStartSize = ctx.stagedSizes.get(ctx.beforeNodeId) ?? ctx.beforeNodeStartSize;
+    ctx.afterNodeStartSize = ctx.stagedSizes.get(ctx.afterNodeId) ?? ctx.afterNodeStartSize;
+    ctx.groupSiblingStartSizes = ctx.groupSiblingStartSizes.map((s) => ({
+        nodeId: s.nodeId,
+        size: ctx.stagedSizes.get(s.nodeId) ?? s.size,
+    }));
 }
 
 export const DefaultGapSizePx = 3;
@@ -279,6 +327,8 @@ export function onResizeMove(
                 afterNodeStartSize: afterNode.size,
                 pixelToSizeRatio,
                 groupSiblingStartSizes,
+                lastGroupResize: groupResize,
+                stagedSizes: new Map(groupSiblingStartSizes.map((s) => [s.nodeId, s.size])),
             };
         } else {
             console.error(
@@ -291,6 +341,11 @@ export function onResizeMove(
     const clientPoint = parentIsRow
         ? x - model.resizeContext.displayContainerRect?.left
         : y - model.resizeContext.displayContainerRect?.top;
+    // Mid-drag modifier toggle → rebase BEFORE computing clientDiff, so
+    // the new mode measures motion from the toggle point, not drag start.
+    if (groupResize !== model.resizeContext.lastGroupResize) {
+        rebaseResizeContextForModeSwitch(model.resizeContext, clientPoint, groupResize);
+    }
     const clientDiff = (model.resizeContext.resizeHandleStartPx - clientPoint) * model.resizeContext.pixelToSizeRatio;
     const minNodeSize = MinNodeSizePx * model.resizeContext.pixelToSizeRatio;
     const afterNodeSize = model.resizeContext.afterNodeStartSize + clientDiff;
@@ -327,6 +382,13 @@ export function onResizeMove(
                 size: afterNodeSize,
             },
         ];
+    }
+
+    // Record what this tick staged — the rebase baseline for a future
+    // mid-drag modifier toggle. Direct-mode floor rejections return above
+    // without reaching here, correctly leaving the last staged state.
+    for (const op of resizeOperations) {
+        model.resizeContext.stagedSizes.set(op.nodeId, op.size);
     }
 
     const resizeAction: LayoutTreeResizeNodeAction = {

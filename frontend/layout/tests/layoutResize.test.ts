@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { assert, test } from "vitest";
-import { computeGroupResizeSizes } from "../lib/layoutResize";
+import { computeGroupResizeSizes, rebaseResizeContextForModeSwitch } from "../lib/layoutResize";
 import type { ResizeNodeOperation } from "../lib/types";
 
 function sizesOf(result: Map<string, number>, ids: string[]): number[] {
@@ -260,4 +260,93 @@ test("computeGroupResizeSizes - driven with no siblings before it (degenerate: c
     const result = computeGroupResizeSizes(siblings, "solo", 5, 10);
     assert.equal(result.get("solo"), 10, "clamped to the floor since desired (5) is below minNodeSize (10)");
     assert.equal(result.get("untouched"), 50, "no beforeBlock exists to redistribute with, so afterBlock's other members are untouched");
+});
+
+// ---- Mid-drag modifier toggle rebase (fluid mode switching) ----
+//
+// A toggle must not jump any border: the currently-staged sizes become the
+// new baseline and the cursor position becomes the new zero, so the
+// incoming mode's formula applied at zero delta reproduces the staged
+// state exactly. SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26.md.
+
+function makeCtx(): import("../lib/layoutResize").ResizeContext {
+    const startSizes: ResizeNodeOperation[] = [
+        { nodeId: "a", size: 100 },
+        { nodeId: "b", size: 100 },
+        { nodeId: "c", size: 100 },
+        { nodeId: "d", size: 100 },
+    ];
+    return {
+        handleId: "h",
+        pixelToSizeRatio: 1,
+        resizeHandleStartPx: 200,
+        beforeNodeId: "b",
+        beforeNodeStartSize: 100,
+        afterNodeId: "c",
+        afterNodeStartSize: 100,
+        groupSiblingStartSizes: startSizes,
+        lastGroupResize: true,
+        stagedSizes: new Map(startSizes.map((s) => [s.nodeId, s.size])),
+    };
+}
+
+test("rebaseResizeContextForModeSwitch - staged sizes become the new baselines and the cursor becomes the new zero", () => {
+    const ctx = makeCtx();
+    // Simulate a group-mode drag having staged: b|c handle dragged left by 40
+    // (driven c grew, beforeBlock [a,b] shrank proportionally).
+    const dragged = computeGroupResizeSizes(ctx.groupSiblingStartSizes, "c", 140, 10);
+    for (const [id, size] of dragged) ctx.stagedSizes.set(id, size);
+
+    rebaseResizeContextForModeSwitch(ctx, 160, false);
+
+    assert.equal(ctx.lastGroupResize, false);
+    assert.equal(ctx.resizeHandleStartPx, 160, "cursor position becomes the new zero");
+    assert.equal(ctx.beforeNodeStartSize, dragged.get("b"), "2-node baseline rewritten to staged");
+    assert.equal(ctx.afterNodeStartSize, dragged.get("c"), "2-node baseline rewritten to staged");
+    for (const s of ctx.groupSiblingStartSizes) {
+        assert.equal(s.size, dragged.get(s.nodeId), `group baseline rewritten to staged for ${s.nodeId}`);
+    }
+});
+
+test("rebaseResizeContextForModeSwitch - continuity: the incoming mode at zero delta reproduces the staged state exactly (no border jumps)", () => {
+    const ctx = makeCtx();
+    const dragged = computeGroupResizeSizes(ctx.groupSiblingStartSizes, "c", 140, 10);
+    for (const [id, size] of dragged) ctx.stagedSizes.set(id, size);
+
+    rebaseResizeContextForModeSwitch(ctx, 160, false);
+
+    // Direct 2-node formula at clientDiff = 0 (cursor hasn't moved since
+    // the toggle): before/after both equal their staged sizes — identical
+    // frame, no jump.
+    const clientDiff = (ctx.resizeHandleStartPx - 160) * ctx.pixelToSizeRatio;
+    assert.equal(clientDiff, 0);
+    assert.equal(ctx.beforeNodeStartSize - clientDiff, dragged.get("b"));
+    assert.equal(ctx.afterNodeStartSize + clientDiff, dragged.get("c"));
+
+    // And toggling BACK to group mode at zero delta likewise reproduces the
+    // staged state (chained rebases stay continuous).
+    rebaseResizeContextForModeSwitch(ctx, 175, true);
+    const groupAtZero = computeGroupResizeSizes(ctx.groupSiblingStartSizes, "c", ctx.afterNodeStartSize, 10);
+    for (const s of ctx.groupSiblingStartSizes) {
+        assert.equal(groupAtZero.get(s.nodeId), ctx.stagedSizes.get(s.nodeId), `no jump for ${s.nodeId}`);
+    }
+});
+
+test("rebaseResizeContextForModeSwitch - post-toggle motion applies only the incremental delta in the new mode", () => {
+    const ctx = makeCtx();
+    // Group-drag staged state first.
+    const dragged = computeGroupResizeSizes(ctx.groupSiblingStartSizes, "c", 140, 10);
+    for (const [id, size] of dragged) ctx.stagedSizes.set(id, size);
+    rebaseResizeContextForModeSwitch(ctx, 160, false);
+
+    // Cursor moves another 10px left after the toggle → direct mode moves
+    // ONLY the flanking pair, by exactly 10, from their staged values.
+    const clientDiff = (ctx.resizeHandleStartPx - 150) * ctx.pixelToSizeRatio; // +10
+    assert.equal(clientDiff, 10);
+    assert.equal(ctx.beforeNodeStartSize - clientDiff, dragged.get("b")! - 10);
+    assert.equal(ctx.afterNodeStartSize + clientDiff, dragged.get("c")! + 10);
+    // a and d: untouched by direct mode — their baselines (= staged) are
+    // what a direct-mode tick leaves in place.
+    assert.equal(ctx.stagedSizes.get("a"), dragged.get("a"));
+    assert.equal(ctx.stagedSizes.get("d"), dragged.get("d"));
 });
