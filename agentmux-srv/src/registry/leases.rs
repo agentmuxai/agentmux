@@ -40,8 +40,8 @@ use thiserror::Error;
 use super::atomic::write_atomic;
 
 /// How often a held lease must be renewed while a turn is in flight.
-/// Piggybacks the existing per-turn health watchdog tick
-/// (`blockcontroller/core.rs::spawn_health_watchdog`) — not a new timer.
+/// Drives its own dedicated renewal task (`subprocess/host_spawn.rs`) on
+/// this interval — not piggybacked on anything else.
 pub const RENEW_INTERVAL_MS: u64 = 5_000;
 
 /// 3x the renew interval — tolerates two missed ticks (disk hiccup, GC

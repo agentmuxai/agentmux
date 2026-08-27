@@ -34,7 +34,7 @@ use super::{
     STATUS_RUNNING,
 };
 use super::core;
-use super::health::HealthMonitor;
+use super::health::TurnActivityTracker;
 use crate::backend::eventbus::EventBus;
 use crate::backend::storage::filestore::FileStore;
 use crate::backend::storage::store::Store;
@@ -94,7 +94,7 @@ pub struct AcpController {
     event_bus: Option<Arc<EventBus>>,
     wstore: Option<Arc<Store>>,
     filestore: Option<Arc<FileStore>>,
-    health_monitor: Arc<HealthMonitor>,
+    health_monitor: Arc<TurnActivityTracker>,
     /// Monotonically increasing JSON-RPC request ID.
     next_rpc_id: Arc<AtomicU64>,
     /// Every `session/prompt` request id that has been SENT but not yet
@@ -119,12 +119,7 @@ impl AcpController {
         wstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
     ) -> Self {
-        let health_monitor = Arc::new(HealthMonitor::new(
-            block_id.clone(),
-            broker.clone(),
-            wstore.clone(),
-            event_bus.clone(),
-        ));
+        let health_monitor = Arc::new(TurnActivityTracker::new(block_id.clone()));
         Self {
             tab_id,
             block_id,
@@ -342,17 +337,6 @@ impl AcpController {
                 if line.is_empty() {
                     continue;
                 }
-                // reagent P1 (PR #2336): without this, `last_meaningful_ts`
-                // never advances for ACP, so a genuinely wedged process
-                // would silently never reach Dead via the silence branch
-                // either (paired with the watchdog-spawn fix above — both
-                // were needed for Restart-on-unresponsive to actually work
-                // for this controller type). Any non-empty line counts as
-                // meaningful — ACP doesn't have persistent.rs's finer-grained
-                // classify_output_line integration; that's a reasonable
-                // follow-up, not required to close this gap.
-                health_clone.record_output(true);
-
                 // Parse as JSON to check for session/update notifications
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&line) {
                     // Extract session ID from initialize result or session/create result
@@ -378,10 +362,7 @@ impl AcpController {
                                     // flushed prompt is genuinely in flight.
                                     // reagentx P2 on PR #2338 (thirty-first
                                     // re-review).
-                                    let was_active = health_clone.mark_turn_active_returning_was_active();
-                                    if !was_active {
-                                        core::spawn_health_watchdog(&health_clone);
-                                    }
+                                    health_clone.mark_turn_active_returning_was_active();
                                     if let Some(ref broker) = broker_clone {
                                         let status = BlockControllerRuntimeStatus {
                                             blockid: block_id_stdout.clone(),
@@ -751,19 +732,11 @@ impl Controller for AcpController {
                     }
                 }
             }).to_string();
-            // reagent P1 (PR #2336): this controller wired wstore/event_bus
-            // into HealthMonitor for the Unresponsive-failure/Restart
-            // feature but never spawned the periodic watchdog — Dead (the
-            // silence-based branch) can only ever be detected while
-            // `spawn_health_watchdog`'s 5s loop is actually ticking, so
-            // without this a genuinely wedged ACP process would hang
-            // forever with no signal at all, same bug this whole feature
-            // exists to close. `mark_turn_active_returning_was_active`
-            // (not the plain `set_active_turn(true)` this used to call) so
-            // a mid-turn steering send doesn't spawn a second, leaked
-            // watchdog on top of an already-running one — see
-            // `core::spawn_health_watchdog`'s own doc comment and
-            // persistent.rs's identical guard.
+            // `mark_turn_active_returning_was_active` (not the plain
+            // `set_active_turn(true)` this used to call) is atomic across
+            // the read-and-write, so a mid-turn steering send racing this
+            // one can't both observe "was idle" — see persistent.rs's
+            // identical guard.
             //
             // Established BEFORE the stdin enqueue below (not after) — a
             // fast-responding ACP agent can have the stdout reader task
@@ -776,15 +749,7 @@ impl Controller for AcpController {
             // prior (twenty-fifth re-review) ordering, which fixed a
             // different bug (see the rollback below) by moving this after
             // the enqueue, reintroducing this race.
-            // The return value (was a turn already active?) is used ONLY to
-            // gate the watchdog spawn below, not to decide whether to roll
-            // back on enqueue failure (see that rollback's own comment) —
-            // outstanding_prompt_ids's emptiness is the authoritative signal
-            // for that now.
-            let was_active = self.health_monitor.mark_turn_active_returning_was_active();
-            if !was_active {
-                core::spawn_health_watchdog(&self.health_monitor);
-            }
+            self.health_monitor.mark_turn_active_returning_was_active();
             // Publish the turn_active flip, mirroring persistent.rs's
             // send_message/send_user_message (which both call
             // self.publish_status() right after this same
@@ -829,13 +794,10 @@ impl Controller for AcpController {
                 // (mid-turn steering) must not be clobbered by this failed
                 // one. This single emptiness check replaces what used to be
                 // two separate, easy-to-desync mechanisms: a `was_active`-
-                // conditioned health-monitor rollback, and a
-                // latest/previous-id compare-and-swap that could still
-                // strand turn_active under out-of-order responses (codex
-                // P2 on PR #2338, twenty-seventh through thirtieth
-                // re-reviews). The freshly-spawned watchdog (if any) exits
-                // on its own next tick once is_active_turn() reads false
-                // again — see spawn_health_watchdog's doc comment.
+                // conditioned rollback, and a latest/previous-id
+                // compare-and-swap that could still strand turn_active
+                // under out-of-order responses (codex P2 on PR #2338,
+                // twenty-seventh through thirtieth re-reviews).
                 let now_empty = {
                     let mut outstanding = self.outstanding_prompt_ids.lock().unwrap();
                     outstanding.remove(&prompt_id);
@@ -938,27 +900,15 @@ mod tests {
         assert!(outstanding.is_empty());
     }
 
-    /// Regression for reagent P1 on PR #2336: `send_input` used to call the
-    /// plain `set_active_turn(true)`, which never spawns the health
-    /// watchdog — combined with the stdout reader never calling
-    /// `record_output` either, `evaluate_and_transition` could never
-    /// observe silence, so the Restart-on-unresponsive feature could never
-    /// trigger for ACP-backed panes at all. Confirms the swap to
-    /// `mark_turn_active_returning_was_active` didn't change the
-    /// observable turn-active behavior (full watchdog-tick coverage isn't
-    /// practical here without spawning a real process — this pins the
-    /// call-site contract; health.rs's own tests cover the watchdog
-    /// mechanics once armed).
-    // #[tokio::test], not #[test]: send_input now spawns the health
-    // watchdog (core::spawn_health_watchdog does tokio::spawn), which
-    // requires a running Tokio runtime — the exact watchdog-arming this
-    // test exists to pin.
+    /// `send_input` marks the turn active via `mark_turn_active_returning_was_active`
+    /// — pins the call-site contract that `turn_active` flips true once a
+    /// message is actually sent to an already-running process.
     #[tokio::test]
     async fn send_input_marks_the_turn_active() {
         let c = controller();
         // Simulate an already-running process — send_input only reaches the
-        // turn-active/watchdog logic when `is_running()` is true (otherwise
-        // it stashes the message as `pending_prompt` for the next start()).
+        // turn-active logic when `is_running()` is true (otherwise it
+        // stashes the message as `pending_prompt` for the next start()).
         let (tx, _rx) = mpsc::channel::<String>(8);
         c.inner.lock().unwrap().stdin_tx = Some(tx);
 
@@ -970,9 +920,9 @@ mod tests {
 
     /// A second send while already active (mid-turn steering) must not
     /// error or panic — `mark_turn_active_returning_was_active`'s
-    /// was-already-active branch is what gates against spawning a second,
-    /// leaked watchdog task; this at least confirms the call site doesn't
-    /// choke on repeated calls the way a naive re-check-then-act would.
+    /// was-already-active branch is what gates re-arming; this at least
+    /// confirms the call site doesn't choke on repeated calls the way a
+    /// naive re-check-then-act would.
     #[tokio::test]
     async fn repeated_send_input_while_active_does_not_error() {
         let c = controller();

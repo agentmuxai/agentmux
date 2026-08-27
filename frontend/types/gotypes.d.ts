@@ -94,8 +94,7 @@ declare global {
             | "killed"
             | "no_output"
             | "spawn_failure"
-            | "unknown_non_zero"
-            | "unresponsive";
+            | "unknown_non_zero";
         title: string;
         detail: string;
         exitCode?: number;

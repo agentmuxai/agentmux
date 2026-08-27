@@ -19,7 +19,7 @@ use futures_util::StreamExt as _;
 use tokio::io::AsyncWriteExt;
 
 use crate::backend::blockcontroller::{
-    core, health, publish_controller_status, session_stats, shell, STATUS_DONE, STATUS_RUNNING,
+    core, publish_controller_status, session_stats, shell, STATUS_DONE, STATUS_RUNNING,
 };
 
 use super::{argv::build_turn_argv, SubprocessController, SubprocessControllerInner, SubprocessSpawnConfig, SUBPROCESS_OUTPUT_SUBJECT};
@@ -218,13 +218,6 @@ impl SubprocessController {
             }
             health_monitor.set_active_turn(true);
 
-            // Health watchdog: drive check() every 5s while the turn is active,
-            // mirroring spawn_turn. set_active_turn(true) alone never calls
-            // check(), so without this a container turn gets no Stalled/Dead
-            // detection. Self-terminates when the turn ends — completion calls
-            // health_monitor.set_exited(), which clears the active-turn flag.
-            core::spawn_health_watchdog(&health_monitor);
-
             let crate::backend::container::ExecSession { exec_id, mut input, output } = exec_session;
 
             // Write the turn message to container stdin INLINE — not via a
@@ -289,7 +282,7 @@ impl SubprocessController {
                             None => {
                                 // Stream ended — flush any remaining partial line.
                                 if !line_buf.trim().is_empty() {
-                                    Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &wstore, &event_bus, &broker, &filestore, &health_monitor, &mut stats, global_output_zone.as_deref());
+                                    Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &wstore, &event_bus, &broker, &filestore, &mut stats, global_output_zone.as_deref());
                                 }
                                 tracing::info!(block_id = %block_id, "container exec output EOF");
                                 break;
@@ -318,7 +311,7 @@ impl SubprocessController {
                                 for ch in chunk.chars() {
                                     if ch == '\n' {
                                         if !line_buf.trim().is_empty() {
-                                            Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &wstore, &event_bus, &broker, &filestore, &health_monitor, &mut stats, global_output_zone.as_deref());
+                                            Self::publish_line(&line_buf, &block_id, &session_id_field, &inner_arc, &wstore, &event_bus, &broker, &filestore, &mut stats, global_output_zone.as_deref());
                                         }
                                         line_buf.clear();
                                     } else {
@@ -444,9 +437,9 @@ impl SubprocessController {
         );
     }
 
-    /// Publish a single NDJSON line from container exec output: session-id capture,
-    /// health classification, WPS blockfile event, and FileStore write-through.
-    /// Used by `spawn_container_turn`'s output reader task.
+    /// Publish a single NDJSON line from container exec output: session-id
+    /// capture, WPS blockfile event, and FileStore write-through. Used by
+    /// `spawn_container_turn`'s output reader task.
     fn publish_line(
         line: &str,
         block_id: &str,
@@ -456,7 +449,6 @@ impl SubprocessController {
         event_bus: &Option<Arc<crate::backend::eventbus::EventBus>>,
         broker: &Option<Arc<crate::backend::wps::Broker>>,
         filestore: &Option<Arc<crate::backend::storage::filestore::FileStore>>,
-        health: &Arc<health::HealthMonitor>,
         stats: &mut session_stats::SessionStatsAccumulator,
         global_output_zone: Option<&str>,
     ) {
@@ -467,19 +459,6 @@ impl SubprocessController {
         stats.record_line(trimmed.len(), wstore);
 
         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
-            let (meaningful, error) = health::classify_output_line(&parsed);
-            // reagent P1 (same finding as persistent.rs, mirrored here):
-            // record_output must run before set_compacting(false) — see
-            // persistent.rs's own comment on this exact ordering for the
-            // full explanation.
-            health.record_output(meaningful);
-            if health::is_compact_boundary_frame(&parsed) {
-                health.set_compacting(false);
-            }
-            if let Some((class, msg)) = error {
-                health.record_error(class, msg);
-            }
-
             // Capture session_id from provider init event.
             if let Some(sid) = parsed.get(session_id_field).and_then(|v| v.as_str()) {
                 let changed = SubprocessController::record_captured_session_id_inner(inner, sid);

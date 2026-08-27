@@ -785,29 +785,15 @@ async fn handle_wps_publish(
     State(state): State<AppState>,
     Json(req): Json<WpsPublishRequest>,
 ) -> impl IntoResponse {
-    // Forward `compaction_started` into the target block's own
-    // `HealthMonitor` before the generic broadcast below, so the
-    // silence-based Unresponsive detector stops counting silence the
-    // instant Claude Code's `PreCompact` hook fires (`agentmux-bashwrap
-    // precompact`) — see
-    // docs/specs/SPEC_UNRESPONSIVE_FALSE_POSITIVE_DURING_COMPACTION_2026_08_22.md.
-    // Best-effort and silent: an unknown/unregistered block id, a
-    // controller type with no health monitor (default `None` — see
-    // `Controller::health_monitor`'s own doc comment), or any other event
-    // name is simply a no-op here. This must never fail or delay the
-    // publish itself — the hook that triggers it is explicitly
-    // "never block/delay the operation for observability" (see
-    // `agentmux-bashwrap/src/precompact.rs`'s module doc comment).
-    if req.event == "compaction_started" {
-        if let Some(block_id) = req.scopes.iter().find_map(|s| s.strip_prefix("block:")) {
-            if let Some(controller) = crate::backend::blockcontroller::get_controller(block_id) {
-                if let Some(health) = controller.health_monitor() {
-                    health.set_compacting(true);
-                }
-            }
-        }
-    }
-
+    // Note: this endpoint used to special-case `compaction_started` to
+    // forward into the target block's `HealthMonitor` (silence-detector
+    // compaction awareness) — removed along with the unresponsive
+    // detector itself, see
+    // docs/specs/SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md.
+    // `agentmux-bashwrap`'s `precompact` POST still lands here and is now
+    // a harmless no-op broadcast like any other WPS event — left as-is
+    // rather than removing the route, since deleting it isn't warranted
+    // just to avoid one no-op publish.
     let event = crate::backend::wps::WaveEvent {
         event: req.event,
         scopes: req.scopes,

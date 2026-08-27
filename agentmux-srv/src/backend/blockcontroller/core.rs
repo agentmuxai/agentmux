@@ -10,7 +10,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use super::health::HealthMonitor;
 use crate::backend::eventbus::EventBus;
 use crate::backend::storage::store::Store;
 
@@ -92,26 +91,6 @@ pub(crate) fn expand_home_dir(dir: &str) -> String {
         }
     }
     dir.to_string()
-}
-
-/// Spawn the health-watchdog background task for a turn.
-///
-/// The watchdog polls `health_monitor.check()` every 5 s while a turn is
-/// active and exits as soon as `is_active_turn()` returns false (i.e. after
-/// the turn ends or the process exits). Duplicated verbatim in
-/// persistent.rs and subprocess.rs (twice) before this extraction.
-pub(crate) fn spawn_health_watchdog(health_monitor: &Arc<HealthMonitor>) {
-    let health = Arc::clone(health_monitor);
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
-        loop {
-            interval.tick().await;
-            if !health.is_active_turn() {
-                break;
-            }
-            health.check();
-        }
-    });
 }
 
 /// Persist a newly captured session ID to block metadata and broadcast the

@@ -4,7 +4,13 @@
 **Repo:** agentmuxai/agentmux
 **Trigger:** operator report — the "Agent unresponsive" banner (with its "Restart" recovery action) appears in the agent pane during context compaction, and "other times it's not supposed to."
 
-**Implementation status:** Not started. This document proposes the design; it does not change code.
+**Implementation status:** Shipped (PR #2754, merged) — see `VERSION_HISTORY.md:58`.
+**Archived 2026-08-27:** the detector this fix patched (`HealthMonitor`'s
+silence watchdog) was removed entirely in
+`docs/specs/SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md`, which
+supersedes this document — the compaction-awareness override this spec
+added no longer exists, having nothing left to patch. Kept for historical
+record only.
 
 ---
 
