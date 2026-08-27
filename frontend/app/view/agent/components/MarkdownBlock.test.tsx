@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * MarkdownBlock — thinking-clump peek tooltip
- * (SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md §2.4). Regular (non-
- * thinking) markdown and the canceled-thinking path are unchanged by this
- * feature; covered here only enough to confirm neither regressed.
+ * MarkdownBlock — peek tooltip (SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md
+ * §2.4, extended to regular assistant text by
+ * SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25 — "regular assistant
+ * text... remain out of scope" no longer holds). Thinking clumps and regular
+ * text now share the same anchor/overlay; the canceled-thinking path is
+ * unchanged, covered here only enough to confirm it didn't regress.
  */
 
 import { cleanup, fireEvent, render } from "@solidjs/testing-library";
@@ -25,35 +27,50 @@ const thinkingNode: MarkdownNode = {
     metadata: { thinking: true },
 };
 
-describe("MarkdownBlock — regular text (unaffected)", () => {
-    it("renders plain content with no tooltip anchor", () => {
+// The peek overlay is Portal-rendered at document.body (PeekOverlay.tsx
+// — escapes each virtualized row's own CSS stacking context, see that
+// file's doc comment), so it lives in `document.body`, not `container`.
+// A real 50ms enter-delay gates its DOM presence, so these tests use fake
+// timers and advance past it.
+const hoverBlock = (container: HTMLElement) => {
+    const anchor = container.querySelector(".agent-markdown-peek-anchor") as HTMLElement;
+    fireEvent.mouseEnter(anchor);
+    vi.advanceTimersByTime(100);
+};
+
+describe("MarkdownBlock — regular (non-thinking) text now gets a peek too", () => {
+    it("renders plain content with no thinking-block styling", () => {
         const node: MarkdownNode = { type: "markdown", id: "md-2", content: "Hello" };
         const { container, unmount } = render(() => <MarkdownBlock node={node} />);
         expect(container.querySelector(".thinking-block")).toBeNull();
         unmount();
     });
+
+    it("shows a peek with time + estimate on hover, same as a thinking clump", () => {
+        const node: MarkdownNode = { type: "markdown", id: "md-2", content: "Hello", timestamp: Date.now() - 65_000 };
+        vi.useFakeTimers();
+        try {
+            const { container } = render(() => <MarkdownBlock node={node} />);
+            expect(container.querySelector(".agent-markdown-peek-anchor")).not.toBeNull();
+            hoverBlock(container);
+            const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
+            expect(metaLines.length).toBe(2);
+            expect(metaLines[0].textContent).toMatch(/\d{2}:\d{2}:\d{2} · 1m ago/);
+            expect(metaLines[1].textContent).toMatch(/~\d+ tok \(est\.\)/);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
 });
 
 describe("MarkdownBlock — thinking-clump peek tooltip", () => {
-    // The peek overlay is Portal-rendered at document.body (PeekOverlay.tsx
-    // — escapes each virtualized row's own CSS stacking context, see that
-    // file's doc comment), so it lives in `document.body`, not `container`.
-    // A real 150ms enter-delay gates its DOM presence (mirrors
-    // UserMessageBlock.tsx's "Session context" hover-to-peek), so these
-    // tests use fake timers and advance past it.
-    const hoverThinkingBlock = (container: HTMLElement) => {
-        const anchor = container.querySelector(".agent-thinking-peek-anchor") as HTMLElement;
-        fireEvent.mouseEnter(anchor);
-        vi.advanceTimersByTime(200);
-    };
-
     it("shows exact time + time-ago + an estimated token count when the node has a timestamp", () => {
         const timed: MarkdownNode = { ...thinkingNode, timestamp: Date.now() - 65_000 };
         vi.useFakeTimers();
         try {
             const { container } = render(() => <MarkdownBlock node={timed} />);
             expect(container.querySelector(".thinking-block")).not.toBeNull();
-            hoverThinkingBlock(container);
+            hoverBlock(container);
             const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
             expect(metaLines.length).toBe(2);
             expect(metaLines[0].textContent).toMatch(/\d{2}:\d{2}:\d{2} · 1m ago/);
@@ -68,7 +85,7 @@ describe("MarkdownBlock — thinking-clump peek tooltip", () => {
         vi.useFakeTimers();
         try {
             const { container } = render(() => <MarkdownBlock node={untimed} />);
-            hoverThinkingBlock(container);
+            hoverBlock(container);
             const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
             expect(metaLines.length).toBe(1);
             expect(metaLines[0].textContent).toMatch(/~\d+ tok \(est\.\)/);
@@ -92,8 +109,9 @@ describe("MarkdownBlock — thinking-clump peek tooltip", () => {
             ...thinkingNode,
             metadata: { thinking: true, canceled: true },
         };
-        const { getByText, unmount } = render(() => <MarkdownBlock node={canceled} />);
+        const { getByText, container, unmount } = render(() => <MarkdownBlock node={canceled} />);
         expect(getByText("Canceled — partial thought")).toBeInTheDocument();
+        expect(container.querySelector(".agent-markdown-peek-anchor")).toBeNull();
         unmount();
     });
 });
