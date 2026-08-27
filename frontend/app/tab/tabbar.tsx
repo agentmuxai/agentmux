@@ -197,14 +197,23 @@ function TabBar(props: TabBarProps): JSX.Element {
 
     // In-strip reorder DnD + pane-drag-over-strip cleanup + Windows
     // tear-off-cursor workaround + wheel-scroll.
-    useTabDragAndDrop({ tabBarScrollRef: () => tabBarScrollRef }, () => props.workspace, tabIds, tearOffTabAtRelease);
+    //
+    // RAW list, not the filtered one: these hooks compute BACKEND indices
+    // (executeReorder's insertion math, tear-off merge/restore positions)
+    // against the workspace's real tab_ids, which still contains any
+    // optimistically-hidden mid-close tab until its RPC lands. Feeding
+    // them the filtered list shifts every computed index by the number of
+    // hidden tabs and silently misplaces a concurrently dragged tab
+    // (reagent P1 on PR #2818). The filtered tabIds() is for RENDERING
+    // only.
+    useTabDragAndDrop({ tabBarScrollRef: () => tabBarScrollRef }, () => props.workspace, allTabIds, tearOffTabAtRelease);
 
     // Phase 4/5 — cross-window tear-off event listeners (hover/merge/
-    // standalone/cancel-back).
+    // standalone/cancel-back). Raw list for the same reason as above.
     useTabTearOffEvents(
         () => props.workspace,
         () => tabBarScrollRef,
-        tabIds
+        allTabIds
     );
 
     if (!props.workspace) return null;
@@ -258,8 +267,16 @@ function TabBar(props: TabBarProps): JSX.Element {
                                 // until the RPC resolves (reagent P2 on
                                 // PR #2818).
                                 allTabCount={allTabIds().length}
-                                tabIndex={i()}
-                                tabIds={tabIds()}
+                                // Backend-facing index/list (drag payload's
+                                // tabIndex feeds ReorderTab math): use the
+                                // RAW list so indices line up with the
+                                // workspace's real tab_ids even while a
+                                // mid-close tab is hidden from rendering
+                                // (reagent P1 on PR #2818). i() stays for
+                                // the visual props above (isFirst /
+                                // isBeforeActive / separators).
+                                tabIndex={allTabIds().indexOf(tabId)}
+                                tabIds={allTabIds()}
                                 onSelect={() => handleSelect(tabId)}
                                 onClose={() => requestClose(tabId)}
                             />
