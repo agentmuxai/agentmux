@@ -32,7 +32,7 @@ use super::{
     STATUS_RUNNING,
 };
 use super::core;
-use super::health::{classify_output_line, is_compact_boundary_frame, HealthMonitor};
+use super::health::TurnActivityTracker;
 use super::persistent_resume;
 use crate::backend::eventbus::EventBus;
 use crate::backend::storage::filestore::FileStore;
@@ -606,14 +606,14 @@ pub struct PersistentSubprocessController {
     wstore: Option<Arc<Store>>,
     /// FileStore for write-through persistence of output lines (Phase 1.3).
     filestore: Option<Arc<FileStore>>,
-    health_monitor: Arc<HealthMonitor>,
+    health_monitor: Arc<TurnActivityTracker>,
     /// Monotonic counter bumped for every stdout line (including control frames).
     /// The AskUserQuestion dead-air fallback snapshots this *before* sending the
     /// answer and re-checks after a short window; any increment means the CLI
     /// produced output (assistant content OR a follow-up control_request), i.e.
-    /// the turn resumed. Counting *all* frames — not just `record_output`, which
-    /// the reader skips for control frames — avoids a spurious fallback when the
-    /// resumed turn's first activity is a tool-permission round-trip.
+    /// the turn resumed. Counting *all* frames — including control frames the
+    /// reader otherwise skips — avoids a spurious fallback when the resumed
+    /// turn's first activity is a tool-permission round-trip.
     stdout_seq: Arc<AtomicU64>,
     /// Weak self-reference for the stale-`--resume`-session retry (see
     /// `retry_after_resume_failure`) — set by `set_self_ref` right after
@@ -680,12 +680,7 @@ impl PersistentSubprocessController {
         wstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
     ) -> Self {
-        let health_monitor = Arc::new(HealthMonitor::new(
-            block_id.clone(),
-            broker.clone(),
-            wstore.clone(),
-            event_bus.clone(),
-        ));
+        let health_monitor = Arc::new(TurnActivityTracker::new(block_id.clone()));
         Self {
             tab_id,
             block_id,
@@ -771,14 +766,12 @@ impl PersistentSubprocessController {
     /// of those fire. See REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md
     /// §4 item 5. Duplicates `get_status_snapshot`'s field construction
     /// rather than calling it, since the spawned task only holds cloned
-    /// `Arc`s, not `&self` — matches the existing precedent noted on
-    /// `core::spawn_health_watchdog` ("duplicated verbatim... before this
-    /// extraction"); worth factoring out if a second controller type needs
-    /// the same heartbeat.
+    /// `Arc`s, not `&self`; worth factoring out if a second controller type
+    /// needs the same heartbeat.
     ///
-    /// Same latent duplicate-loop race as `spawn_health_watchdog`'s existing,
-    /// already-accepted contract (reagent P2 on the PR that introduced this
-    /// function): if a turn ends and a new one starts again within one
+    /// A latent duplicate-loop race is an existing, already-accepted
+    /// contract (reagent P2 on the PR that introduced this function): if a
+    /// turn ends and a new one starts again within one
     /// `HEARTBEAT_SECS` window, the old loop hasn't yet woken up to observe
     /// `is_active_turn() == false` and break, so both the old and new loop
     /// can run concurrently for that window. Harmless — `publish_status`
@@ -836,18 +829,16 @@ impl PersistentSubprocessController {
         });
     }
 
-    /// Marks a turn active (re-arming the health watchdog and heartbeat
-    /// only if it was previously idle) and publishes the resulting status
-    /// flip. Shared by `send_message` and `retry_after_resume_failure` —
-    /// both represent "a user message is about to be delivered," just via
-    /// different spawn paths. See `send_message`'s original inline
-    /// comment (now here) for why the watchdog is re-armed conditionally:
-    /// a mid-turn steering send already has one running, so re-spawning on
-    /// every call would leak duplicate watchdog tasks.
+    /// Marks a turn active (re-arming the status heartbeat only if it was
+    /// previously idle) and publishes the resulting status flip. Shared by
+    /// `send_message` and `retry_after_resume_failure` — both represent "a
+    /// user message is about to be delivered," just via different spawn
+    /// paths. The heartbeat is re-armed conditionally: a mid-turn steering
+    /// send already has one running, so re-spawning on every call would
+    /// leak duplicate heartbeat tasks.
     fn mark_turn_active_and_publish(&self) {
         let was_active = self.health_monitor.mark_turn_active_returning_was_active();
         if !was_active {
-            core::spawn_health_watchdog(&self.health_monitor);
             self.spawn_status_heartbeat();
         }
         self.publish_status();
@@ -1951,12 +1942,11 @@ impl PersistentSubprocessController {
     pub fn send_user_message(&self, message: String) -> Result<(), String> {
         // Whether the process was busy or idle, delivering this message
         // (re)starts an active turn — see the comment in `send_message`,
-        // including the watchdog re-arm-only-if-was-idle rationale and why
+        // including the heartbeat re-arm-only-if-was-idle rationale and why
         // this must be the atomic read-and-set (send_message and
         // send_user_message can race on the same block).
         let was_active = self.health_monitor.mark_turn_active_returning_was_active();
         if !was_active {
-            core::spawn_health_watchdog(&self.health_monitor);
             self.spawn_status_heartbeat();
         }
         self.publish_status();
@@ -2355,9 +2345,7 @@ impl PersistentSubprocessController {
 
         let pid = child.id().unwrap_or(0);
 
-        // Notify health monitor that a turn is starting. This arms the Stalled
-        // (30 s) and Dead (120 s) thresholds so the frontend learns the agent
-        // is not responding rather than silently waiting forever.
+        // Notify the turn-activity tracker that a turn is starting.
         self.health_monitor.set_active_turn(true);
 
         tracing::info!(
@@ -2598,9 +2586,9 @@ impl PersistentSubprocessController {
                     continue;
                 }
                 // Bump the activity counter for EVERY non-empty stdout line —
-                // including control frames (which `continue` below before
-                // `record_output`) — so the AskUserQuestion dead-air fallback can
-                // tell whether the turn resumed. See `answer_question`.
+                // including control frames handled via `continue` below — so
+                // the AskUserQuestion dead-air fallback can tell whether the
+                // turn resumed. See `answer_question`.
                 stdout_seq_read.fetch_add(1, Ordering::Relaxed);
 
                 // Track session metadata (debounced 1 s)
@@ -2614,7 +2602,8 @@ impl PersistentSubprocessController {
                 // every other line, matching today's behavior exactly.
                 let mut hold_back_for_resume_retry = false;
 
-                // Parse JSON for health monitoring and session ID capture
+                // Parse JSON for control-frame handling, turn-active tracking,
+                // and session ID capture
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&line) {
                     // Control-protocol frames (can_use_tool / AskUserQuestion) are
                     // NOT conversation output — handle them and skip the blockfile
@@ -2625,25 +2614,6 @@ impl PersistentSubprocessController {
                             Self::handle_control_frame(kind, &parsed, &block_id_read, &inner_read);
                             continue;
                         }
-                    }
-                    let (meaningful, _error) = classify_output_line(&parsed);
-                    // reagent P1: record_output must run BEFORE set_compacting(false)
-                    // here, not after. set_compacting(false) leaves last_meaningful_ts
-                    // untouched (by design — see its own doc comment) and immediately
-                    // re-evaluates health; evaluating against a last_meaningful_ts still
-                    // stale from before compaction started (routinely >120s for any
-                    // compaction that actually needed this fix) computes Dead and
-                    // publishes "Agent unresponsive" for one tick, self-clearing the
-                    // instant record_output's own re-evaluation runs — a transient
-                    // flicker at exactly the moment this fix exists to prevent.
-                    // Calling record_output first refreshes last_meaningful_ts to now
-                    // (compact_boundary is itself classified "meaningful" by
-                    // classify_output_line's default arm) while still compacting, so
-                    // set_compacting(false)'s own re-evaluation sees fresh output and
-                    // never dips through Dead at all.
-                    health_read.record_output(meaningful);
-                    if is_compact_boundary_frame(&parsed) {
-                        health_read.set_compacting(false);
                     }
                     let is_result_frame =
                         parsed.get("type").and_then(|v| v.as_str()) == Some("result");
@@ -3007,11 +2977,6 @@ impl PersistentSubprocessController {
             tracing::info!(block_id = %block_id_read, "persistent stdout reader finished");
         });
 
-        // Spawn health watchdog — checks every 5 s while turn is active.
-        // Emits `agenthealth` WPS events when the process stalls (30 s) or
-        // dies (120 s) without producing meaningful output, giving the
-        // frontend enough signal to show a "not responding" warning.
-        core::spawn_health_watchdog(&self.health_monitor);
         self.spawn_status_heartbeat();
 
         // Spawn process waiter task
@@ -3187,7 +3152,7 @@ impl PersistentSubprocessController {
                     // actively-running generation's own state as if IT
                     // had exited. reagentx round 8: the round-6 fix only
                     // gated the field writes above, missing
-                    // `health_wait.set_exited` (a shared `HealthMonitor`
+                    // `health_wait.set_exited` (a shared `TurnActivityTracker`
                     // across generations) and the deregistration block
                     // below — both keyed by `block_id`/`agent_id`, not
                     // generation, so a stale exit incorrectly marked a
@@ -3638,8 +3603,8 @@ impl PersistentSubprocessController {
                     }
 
                     if is_current_generation {
-                        // Notify health monitor so Stalled/Dead watchdog
-                        // stops — shared `Arc<HealthMonitor>` across
+                        // Notify the turn-activity tracker of the exit —
+                        // shared `Arc<TurnActivityTracker>` across
                         // generations, gated the same way as the
                         // child.wait() arm above.
                         health_wait.set_exited(-1);
@@ -3811,10 +3776,6 @@ impl Controller for PersistentSubprocessController {
 
     fn set_agent_id(&self, id: Option<String>) {
         *self.agent_id.lock().unwrap() = id;
-    }
-
-    fn health_monitor(&self) -> Option<Arc<HealthMonitor>> {
-        Some(Arc::clone(&self.health_monitor))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
@@ -4097,7 +4058,7 @@ mod send_input_tests {
     // send_message()/the stdout reader, which both require a real spawned
     // process.
     #[test]
-    fn status_snapshot_turn_active_tracks_health_monitor() {
+    fn status_snapshot_turn_active_tracks_turn_activity_tracker() {
         let c = controller();
         assert!(
             !c.get_status_snapshot().turn_active,
@@ -4107,7 +4068,7 @@ mod send_input_tests {
         c.health_monitor.set_active_turn(true);
         assert!(
             c.get_status_snapshot().turn_active,
-            "turn_active must flip true once the health monitor marks a turn active"
+            "turn_active must flip true once the turn-activity tracker marks a turn active"
         );
 
         c.health_monitor.set_active_turn(false);

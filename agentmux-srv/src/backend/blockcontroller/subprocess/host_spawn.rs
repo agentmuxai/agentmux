@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::backend::blockcontroller::{
-    core, health::{classify_output_line, is_compact_boundary_frame}, publish_controller_status,
+    core, publish_controller_status,
     session_stats, shell, DEFAULT_GRACEFUL_KILL_WAIT_MS, STATUS_DONE, STATUS_RUNNING,
 };
 use crate::backend::wps;
@@ -266,7 +266,6 @@ impl SubprocessController {
         let wstore_read = self.wstore.clone();
         let event_bus_read = self.event_bus.clone();
         let filestore_read = self.filestore.clone();
-        let health_read = Arc::clone(&self.health_monitor);
         let session_id_field = config.session_id_field.clone();
         // Resolve the agent's GLOBAL transcript zone once (see persistent.rs).
         let global_output_zone =
@@ -311,25 +310,9 @@ impl SubprocessController {
                         // so token_estimate stays consistent across controller types.
                         stats.record_line(line.len(), &wstore_read);
 
-                        // Classify output for health monitoring + retain the
-                        // terminal `result` frame for failure classification.
+                        // Retain the terminal `result` frame for failure
+                        // classification.
                         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                            let (meaningful, error) = classify_output_line(&parsed);
-                            // reagent P1 (same finding as persistent.rs, mirrored
-                            // here): record_output must run before
-                            // set_compacting(false), or its re-evaluation sees a
-                            // still-stale last_meaningful_ts and transiently
-                            // publishes/clears "Agent unresponsive" right at the
-                            // moment compaction ends — see persistent.rs's own
-                            // comment on this exact ordering for the full
-                            // explanation.
-                            health_read.record_output(meaningful);
-                            if is_compact_boundary_frame(&parsed) {
-                                health_read.set_compacting(false);
-                            }
-                            if let Some((class, msg)) = error {
-                                health_read.record_error(class, msg);
-                            }
                             if parsed.get("type").and_then(|v| v.as_str()) == Some("result") {
                                 *last_result_frame_read.lock().unwrap() = Some(parsed);
                             } else if parsed.get("type").and_then(|v| v.as_str()) == Some("assistant")
@@ -443,16 +426,10 @@ impl SubprocessController {
             }
         });
 
-        core::spawn_health_watchdog(&self.health_monitor);
-
-        // Renew the lease (if any) on the same cadence as the health
-        // watchdog above, for as long as THIS turn is active. A
-        // dedicated task rather than widening `spawn_health_watchdog`'s
-        // signature — that helper has 7 call sites across every
-        // controller type (ACP, persistent, container, host); only
-        // host-mode claims a lease in this PR (see module + struct doc
-        // comments), so touching the other 6 for an always-`None`
-        // param isn't warranted.
+        // Renew the lease (if any) on its own interval, for as long as
+        // THIS turn is active. Only host-mode claims a lease in this PR
+        // (see module + struct doc comments), so this is a dedicated task
+        // scoped to this controller type rather than shared plumbing.
         //
         // Exit condition is a fresh per-turn flag (`turn_done`), NOT
         // `health_monitor.is_active_turn()` — that flag is shared by

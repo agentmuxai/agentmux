@@ -107,7 +107,6 @@ const mkUI = (onRetry: () => void) => {
         onLoginViaTerminal() {},
         onOpenArmory() {},
         onNewSession() {},
-        onRestart() {},
     });
     return { ui, model };
 };
@@ -279,55 +278,6 @@ describe("useAgentFailure auto-retry budget (§6)", () => {
             expect(onRetry).toHaveBeenCalledTimes(1);
             vi.advanceTimersByTime(5000); // completes the real 10s tier
             expect(onRetry).toHaveBeenCalledTimes(2);
-
-            dispose();
-        });
-    });
-});
-
-// docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md
-// §4: health.rs publishes a null-data `agentfailure` event when a process
-// silently self-heals out of `Dead` (late output arriving after the 120s
-// threshold already tripped, no hysteresis on that transition). The hook
-// must clear the row for that case but never clobber an unrelated
-// concurrent failure that happens to be showing.
-describe("useAgentFailure — unresponsive self-heal clear signal", () => {
-    beforeEach(() => {
-        hub.handlers.clear();
-        hub.persistedFailure = null;
-    });
-
-    it("clears the failure row on a null-data agentfailure event when currently unresponsive", async () => {
-        await createRoot(async (dispose) => {
-            const { ui } = mkUI(vi.fn());
-            await Promise.resolve();
-
-            fire("agentfailure", {
-                code: "unresponsive",
-                title: "Agent unresponsive",
-                detail: "Unresponsive for 120s",
-                retryable: false,
-            });
-            expect(ui.row()?.sigil).toBeTruthy();
-
-            fire("agentfailure", undefined);
-            expect(ui.row()).toBeNull();
-
-            dispose();
-        });
-    });
-
-    it("does NOT clear a different, unrelated concurrent failure on a null-data event", async () => {
-        await createRoot(async (dispose) => {
-            const { ui } = mkUI(vi.fn());
-            await Promise.resolve();
-
-            fire("agentfailure", transient()); // rate_limited — unrelated class
-            expect(ui.row()).not.toBeNull();
-
-            fire("agentfailure", undefined);
-            expect(ui.row()).not.toBeNull();
-            expect(ui.row()?.meta).toContain("rate_limited");
 
             dispose();
         });

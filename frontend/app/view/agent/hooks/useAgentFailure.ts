@@ -63,8 +63,6 @@ export interface UseAgentFailureOptions {
     onOpenArmory: () => void;
     /** Start a fresh agent session (context-window overflow recovery). */
     onNewSession: () => void;
-    /** Kill and respawn the agent's controller process (`unresponsive` only). */
-    onRestart: () => void;
     /** True when the provider supports seed-from-global (Claude). Promotes
      *  "Use existing login" to primary in the auth failure banner. */
     canSeed?: () => boolean;
@@ -161,22 +159,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
             scope: WOS.makeORef("block", opts.blockId),
             handler: (event) => {
                 const f = (event as any)?.data as AgentFailure | undefined;
-                if (!f) {
-                    // A published-but-empty agentfailure event is the
-                    // backend's live-clear signal for a silent self-heal
-                    // (health.rs: Dead -> anything else, reachable when late
-                    // output arrives after the 120s threshold already
-                    // tripped — no hysteresis on that transition). Only
-                    // clear if the currently-showing failure is the class
-                    // that self-heals this way — never blow away an
-                    // unrelated concurrent failure (e.g. auth) that happens
-                    // to be showing at the same moment. See
-                    // docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md §4.
-                    if (opts.failure()?.data.code === "unresponsive") {
-                        opts.model.dispatchPane({ type: "FailureCleared" });
-                    }
-                    return;
-                }
+                if (!f) return;
                 cancelCountdown();
                 setExpanded(false);
                 setRetrying(false);
@@ -261,7 +244,6 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 newSession: opts.onNewSession,
                 toggleDetails: () => setExpanded((v) => !v),
                 dismiss: endEpisode,
-                restart: opts.onRestart,
             },
         );
     };

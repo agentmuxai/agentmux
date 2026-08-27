@@ -26,7 +26,6 @@ export const WpsEvent = {
     AgentMessageAccepted: "agent-message-accepted",
     RouteGone: "route:gone",
     BlockStats: "blockstats",
-    AgentHealth: "agenthealth",
     AgentFailure: "agentfailure",
     ShellNodeCreate: "shell_node_create",
     ShellChunk: "shell_chunk",

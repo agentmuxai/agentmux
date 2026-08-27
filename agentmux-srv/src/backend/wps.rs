@@ -39,7 +39,6 @@ pub const EVENT_AGENT_MESSAGE_ACCEPTED: &str = "agent-message-accepted";
 #[allow(dead_code)]
 pub const EVENT_ROUTE_GONE: &str = "route:gone";
 pub const EVENT_BLOCK_STATS: &str = "blockstats";
-pub const EVENT_AGENT_HEALTH: &str = "agenthealth";
 /// Fired when an agent subprocess exits non-zero (or reports an error on its
 /// terminal `result` frame). Carries the classified `AgentFailure` so the pane
 /// shows the real cause instead of a bare exit code.

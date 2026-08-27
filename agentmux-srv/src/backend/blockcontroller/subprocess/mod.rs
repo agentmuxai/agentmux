@@ -42,7 +42,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use super::health::HealthMonitor;
+use super::health::TurnActivityTracker;
 use super::{BlockControllerRuntimeStatus, BlockInputUnion, Controller, STATUS_INIT};
 use crate::backend::eventbus::EventBus;
 use crate::backend::storage::filestore::FileStore;
@@ -158,8 +158,8 @@ pub struct SubprocessController {
     wstore: Option<Arc<Store>>,
     /// FileStore for write-through persistence of output lines (Phase 1.3).
     filestore: Option<Arc<FileStore>>,
-    /// Agent health monitor (output activity + error tracking).
-    health_monitor: Arc<HealthMonitor>,
+    /// Per-block turn-activity tracker.
+    health_monitor: Arc<TurnActivityTracker>,
     /// Weak self-reference for queue drain. Set by `set_self_ref` after
     /// the controller is wrapped in Arc.
     self_ref: Mutex<Option<std::sync::Weak<Self>>>,
@@ -192,12 +192,7 @@ impl SubprocessController {
         registry: Option<Arc<crate::registry::Registry>>,
         boot_id: Arc<str>,
     ) -> Self {
-        let health_monitor = Arc::new(HealthMonitor::new(
-            block_id.clone(),
-            broker.clone(),
-            wstore.clone(),
-            event_bus.clone(),
-        ));
+        let health_monitor = Arc::new(TurnActivityTracker::new(block_id.clone()));
         let lease_store = registry.and_then(|r| {
             crate::registry::LeaseStore::open(r.root())
                 .map(Arc::new)
@@ -415,10 +410,6 @@ impl Controller for SubprocessController {
 
     fn block_id(&self) -> &str {
         &self.block_id
-    }
-
-    fn health_monitor(&self) -> Option<Arc<HealthMonitor>> {
-        Some(Arc::clone(&self.health_monitor))
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

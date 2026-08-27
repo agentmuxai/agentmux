@@ -7,6 +7,11 @@ SPDX-License-Identifier: Apache-2.0
 
 - **Date:** 2026-06-20
 - **Status:** Proposed
+- **2026-08-27 note:** the `FailureClass::Unresponsive` taxonomy entry this
+  framework carried was removed in
+  `docs/specs/SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md` — every
+  other failure class and this framework's general durable-error-state design
+  are unaffected.
 - **Author:** AgentA
 - **Area:** `agentmux-srv` blockcontroller, `frontend/app/view/agent`, `frontend/app/view/accounts`
 - **Related:**
