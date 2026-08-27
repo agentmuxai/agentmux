@@ -12,6 +12,7 @@ import { newLayoutNode } from "./lib/layoutNode";
 import { clearCrossTabDrop, redockDraggedPane } from "./lib/crossTabDrag";
 import { markBlockRecentlyCreated } from "./lib/layoutPersistence";
 import { closeBlockInStack, pushBlockOntoStack, setActiveBlockInStack } from "./lib/layoutStack";
+import { installWindowEdgeResizeListener } from "./lib/windowEdgeResize";
 import type {
     ContentRenderer,
     LayoutTreeDeleteNodeAction,
@@ -29,6 +30,7 @@ export {
     deleteLayoutModelForTab,
     getLayoutModelForStaticTab,
     getLayoutModelForTabById,
+    installWindowEdgeResizeListener,
     LayoutTreeActionType,
     markBlockRecentlyCreated,
     NavigateDirection,
