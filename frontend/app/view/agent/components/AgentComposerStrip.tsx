@@ -970,47 +970,47 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     });
 
     // Real measured footprint of the stats zone (`statsZone` below), fed
-    // into `computeComposerRows`'s `reservedWidth` param below (Codex P1,
-    // PR #2812) — see that function's own doc comment for why the
-    // single-row fit decision needs to know about this. `statsZone()` is
-    // rendered in one of two mutually exclusive places (its own doc
-    // comment), so it mounts two separate DOM instances even though only
-    // one is ever actually attached to a live parent at a time — the
-    // OTHER stays detached and reports a 0 rect. Reading whichever one is
-    // `isConnected` at effect time gets the real on-screen footprint
-    // regardless of which position is currently active.
+    // into the `layout` memo's `statsInline` decision (since 2026-08-26;
+    // previously `computeComposerRows`'s now-removed `reservedWidth`
+    // param, Codex P1, PR #2812) — whether the stats can share the
+    // single row's line. `statsZone()` is rendered in one of two
+    // mutually exclusive places (its own doc comment), so it mounts two
+    // separate DOM instances even though only one is ever actually
+    // attached to a live parent at a time — the OTHER stays detached and
+    // reports a 0 rect. Reading whichever one is `isConnected` at effect
+    // time gets the real on-screen footprint regardless of which
+    // position is currently active.
     //
     // Depends on `rightText()` (the stats zone's own content changing
     // width) AND `stripWidth()`/`slotWidths()` (ReAgent P1, PR #2812,
-    // re-review) — NOT on `rows()` or `statsWidth()` itself, which would
-    // be circular (`rows()` reads `statsWidth()` via `reservedWidth`
-    // below). `stripWidth()`/`slotWidths()` are the actual root inputs
-    // that decide `rows().length`'s single-vs-multi branch: without
-    // depending on them, resizing across that threshold swaps which of
+    // re-review) — NOT on `layout()` or `statsWidth()` itself, which
+    // would be circular (the `layout` memo's `statsInline` reads
+    // `statsWidth()`). `stripWidth()`/`slotWidths()` are the actual root
+    // inputs behind `statsInline`'s placement flip: without depending on
+    // them, resizing across that threshold swaps which of
     // `statsRefs.single`/`.multi` is connected (the `<Show>` blocks
     // toggling) without ever re-running this effect, leaving `statsWidth`
     // stuck at whatever the now-DISCONNECTED variant last reported. A
-    // stale, too-small `statsWidth` could then make the single-row fit
-    // check in `computeComposerRows` wrongly accept a line that doesn't
-    // actually have room for the real stats footprint — the same
-    // "stale measurement crosses a structural transition" failure mode
-    // already fixed for zoom/padding in this same PR, one layer up.
+    // stale, too-small `statsWidth` could then make the `statsInline`
+    // check wrongly keep the stats on a line that doesn't actually have
+    // room for their real footprint — the same "stale measurement
+    // crosses a structural transition" failure mode already fixed for
+    // zoom/padding in this same PR, one layer up.
     //
     // Measures the zone's CONTENT (`firstElementChild`, the
     // `.agent-composer-strip-stats` span inside the `<Show>`), NOT the
     // zone wrapper itself — regression found live post-#2813: in the
-    // multi-row position the zone is a direct child of the column-flex
-    // strip, so default `align-items: stretch` blockifies it to the FULL
-    // strip width even when `rightText()` is empty and it renders
-    // nothing. Measuring the wrapper there fed `reservedWidth` ≈ the
-    // whole strip width into `computeComposerRows`, making the
-    // single-row fit check unsatisfiable at ANY pane width — a one-way
-    // trap: the first legitimate visit to multi-row state locked the
-    // strip multi-row forever (the widest tier stuck at 2 lines). The
-    // content span's own rect is the real footprint in BOTH positions
-    // (inline-block in the multi position; `flex: 0 0 auto` child in the
-    // single position), and is 0/absent exactly when there is nothing to
-    // reserve space for.
+    // below-the-rows position the zone is a direct child of the
+    // column-flex strip, so default `align-items: stretch` blockifies it
+    // to the FULL strip width even when `rightText()` is empty and it
+    // renders nothing. Measuring the wrapper there reported a footprint
+    // ≈ the whole strip width, making the fit decision it feeds
+    // unsatisfiable at ANY pane width — a one-way trap: the first
+    // legitimate visit to the evicted-stats state locked it forever (the
+    // widest tier stuck multi-line). The content span's own rect is the
+    // real footprint in BOTH positions (inline-block in the below
+    // position; `flex: 0 0 auto` child in the single-row position), and
+    // is 0/absent exactly when there is nothing to reserve space for.
     let statsRefs: { single?: HTMLElement; multi?: HTMLElement } = {};
     const [statsWidth, setStatsWidth] = createSignal(0);
     createEffect(() => {
@@ -1228,9 +1228,11 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // presence in the flow order stays stable whether or not stats are
     // populated yet. Deliberately NOT folded into the row-pairing
     // algorithm itself (spec §3.4) — a third, always-centered concern,
-    // not a left/right slot; its real measured footprint still feeds
-    // `computeComposerRows`'s `reservedWidth` param above (Codex P1, PR
-    // #2812) so the single-row fit decision accounts for it. `variant`
+    // not a left/right slot; its real measured footprint feeds the
+    // `layout` memo's `statsInline` decision above (since 2026-08-26;
+    // previously `computeComposerRows`'s now-removed `reservedWidth`
+    // param, Codex P1 PR #2812), which picks between these two mount
+    // positions so the shared line is never overflowed. `variant`
     // tags which of the two mutually-exclusive call sites below is
     // mounting this instance, so the measurement effect above can tell
     // them apart (see that effect's own doc comment).
