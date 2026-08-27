@@ -461,3 +461,150 @@ atomic (§6).
   `onSelect`); a click on the tab body still selects.
 - Manual: close the active tab via the confirm modal — the tab vanishes
   with the neighbor already active; no blank frame, no highlight blink.
+
+## 8. Follow-up #4 — optimistic removal: make the flash structurally impossible
+
+§§2-7 each closed one specific ordering hole, and after all four the flash
+was STILL reproducible on the repo owner's machine ("after I click ok on
+the modal, the closed tab will flash in its place before disappearing").
+Two lessons:
+
+1. **Verification gap:** none of §§5-7 was ever verified against a build
+   actually containing all of them at once (v0.55.25 predates the merge;
+   the dev instance used for testing had only §§3-6). Some sightings may
+   have been of incomplete builds. But regardless —
+2. **Wrong fix class:** every fix so far tries to *win an ordering race*
+   between the HTTP response, individual WS frames, reveal-gate timing,
+   and Solid's flush boundaries. Each new transport, event arm, or
+   scheduler change can reopen the class. The strip's rendering of the
+   closing tab should not *depend* on backend update ordering at all.
+
+### 8.1 The directive (repo owner, verbatim intent)
+
+> "the closed tab should leave right when the modal is open, if the user
+> cancels, put the tab back"
+
+That is optimistic UI, and it is ordering-immune by construction: a tab
+that is not rendered cannot flash, whatever order the backend's updates
+arrive in.
+
+### 8.2 Design (`frontend/app/tab/tabbar.tsx`)
+
+- `pendingHiddenTabIds: Signal<ReadonlySet<string>>` — ids hidden from the
+  strip while a close is pending. A Set so overlapping skip-confirm closes
+  of different tabs each stay hidden.
+- `allTabIds()` — the raw workspace list (logic/guards);
+  `tabIds()` — the rendered list, `allTabIds()` minus hidden ids.
+- **Hide points:** modal path — `requestClose` hides the tab the moment it
+  opens the modal (the directive); skip-confirm path — `handleClose` hides
+  before firing the RPC.
+- **Restore points:** modal `onCancel` unhides; `handleClose`'s `finally`
+  unhides — on success the RPC response has already applied the workspace
+  update synchronously (the id is gone from `allTabIds()`, unhide is a
+  no-op), on failure the tab visibly returns rather than leaking as
+  invisibly-alive.
+- **Guards use the raw list:** `requestClose`/`handleClose` check
+  `allTabIds().length <= 1`. Checking the filtered list would make a
+  2-tab workspace read as 1 tab after the modal hid one, and refuse every
+  confirmed close.
+- **`displayActiveTabId()`** — while the real active tab is hidden
+  mid-close, the strip highlights the neighbor the backend is about to
+  promote (next in list, else previous — mirroring `handle_delete_tab`'s
+  `tab_ids.get(pos) ?? pos-1`). The strip shows the final post-close state
+  from the first frame; the backend's update then changes nothing visibly.
+  `activeIndex`/`isActive`/`isBeforeActive` all key off it.
+- Re-entry guard: `requestClose` no-ops for a tab already pending close.
+
+The reveal gate (§5) is unchanged and still covers the *content* region on
+active-tab close; this section covers the strip.
+
+### 8.3 What §§3-7 still buy us
+
+Optimistic hiding makes the strip immune, but §§3-7 remain correct and
+load-bearing: §3 (click containment) prevents a spurious SetActiveTab RPC
+entirely; §5 keeps the close a single atomic backend transition; §6/§7
+(batched application + parent-first delete ordering) protect every OTHER
+multi-object update path (block close, window close, tab create) that has
+no optimistic layer in front of it.
+
+### 8.4 Test plan
+
+- Modal path: ✕ on active tab → tab disappears from strip immediately,
+  neighbor highlighted, modal open → Cancel → tab reappears in place, its
+  highlight state restored.
+- Modal path: ✕ → Confirm → no visible change in the strip at all (it
+  already showed the final state); content area switches atomically under
+  the reveal gate.
+- Skip-confirm path: rapid ✕ clicks on several background tabs — each
+  vanishes on click, none reappears, no flash.
+- Failure injection: CloseTab RPC rejects → tab returns to the strip.
+- 2-tab workspace: modal open on one tab → Confirm still closes (raw-list
+  guard); the surviving tab cannot be closed (✕ hidden / guard).
+- `tsc --noEmit` + full `vitest` — no regressions.
+
+## 9. Follow-up #5 — the promoted neighbor's PANE flashes after §8
+
+With §8 in a verified build, the repo owner confirmed the strip flash is
+gone but reported: "after the modal, when the tab is gone, the next tab's
+entire pane flashes."
+
+### 9.1 Root cause — the reveal gate blanks the SOURCE for the whole round trip
+
+`workspace.tsx` keeps every tab's content mounted (`display:none` when
+inactive) and applies the reveal gate as `visibility:hidden`/`opacity:0`
+to whichever tab is **currently active** while `tabSwitching` is up
+(`tid === tabId() && tabSwitching()`). On close-promotion:
+
+1. Confirm → `handleClose` → `holdRevealGate()`. `tabId()` is still the
+   CLOSING tab X → **X's fully-rendered pane blanks instantly.**
+2. CloseTab RPC round-trips (~tens of ms). Content region shows blank.
+3. Update lands: X unmounts, neighbor Y flips `display:none → flex` and —
+   `tid === tabId()` now matching Y — stays hidden under the gate.
+4. `scheduleRevealLift()`'s settle detector waits for 80ms of
+   long-task-free frames. Tab teardown (block/terminal disposal, layout
+   model deletion) emits long tasks that keep resetting that clock, so
+   the blank stretches toward the 800ms hard cap before Y fades in over
+   120ms.
+
+Net effect: blank-from-confirm → (long settle) → fade-in = "the next
+tab's entire pane flashes." The same source-blanking happens on ordinary
+tab switches (the gate has always keyed on the current active tab), but
+the switch case is shorter (no teardown long-tasks) and so was never
+reported.
+
+### 9.2 Fix — destination-targeted gate
+
+The holder usually KNOWS the destination tab. Let it say so:
+
+- `tab-reveal.ts`: `holdRevealGate(targetTabId?: string|null)` records a
+  `gateTargetTabId` signal; every lift path (settle, hard cap, safety
+  net) clears it. Untargeted holds keep the legacy behavior.
+- `workspace.tsx`: hide only when
+  `tid === tabId() && tabSwitching() && (target == null || target === tid)`.
+- `tabbar.tsx handleClose`: passes `displayActiveTabId()` (computed after
+  the optimistic hide, so it resolves to the neighbor the backend is
+  about to promote — §8's same promotion mirror).
+- `tab-actions.ts setActiveTab`: passes its destination `tabId` — regular
+  tab switches get the same improvement (source keeps painting through
+  the RPC; only the destination is FOUC-gated, from the flip until
+  settle).
+- `createTab` stays untargeted: its destination id doesn't exist until
+  the RPC returns, and hiding the current tab during creation is the
+  established behavior.
+
+What the user now sees on close-promotion: X's content stays on screen
+through the RPC; at the flip, Y is hidden only for its own settle window
+(teardown tasks overlap it), then fades in. The blank no longer starts at
+confirm-click and no longer covers the round trip.
+
+### 9.3 Test plan
+
+- `tab-reveal.test.ts`: targeted hold records the target; untargeted hold
+  resets a stale target; every lift path (schedule fallback, MAX_GATE
+  safety net) clears it.
+- Manual: close the active tab via the modal — the closing pane stays
+  visible until the moment of the switch; the neighbor appears with at
+  most its own brief settle, no full-region blank from the confirm click.
+- Manual regression: ordinary tab switch — source no longer blanks during
+  the RPC; destination still reveals atomically (no piecemeal paint).
+  Startup reveal (app-init's untargeted `scheduleRevealLift`) unchanged.
