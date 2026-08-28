@@ -1,7 +1,7 @@
 # SPEC: Align pane scrollback with actual model context, and make cross-instance opens honest
 
 **Date:** 2026-08-05
-**Status:** active — Part A (session-outcome transcript event) shipped in PR #2426; Parts B (rehydrate-before-resume) and C (session_id backfill) not started. Verified 2026-08-10. See also SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md, which builds on Part A.
+**Status:** active — Part A (session-outcome transcript event) shipped in PR #2426, and extended 2026-08-27 to cover the no-`--resume`-attempted case (§2.1's superseded callout). Parts B (rehydrate-before-resume) and C (session_id backfill) still not started — `rehydrate_claude_session` exists only in `scripts/import-agents.sh`, not in `agentmux-srv`. Verified against `main` 2026-08-27. See also SPEC_AGENT_PANE_SESSION_SCOPED_SCROLLBACK_AND_AGENT_HISTORY_VIEW_2026_08_09.md, which builds on Part A.
 **Severity:** Medium — no data loss, but a real correctness gap: the pane can
 imply the agent remembers a conversation it does not, with no visible signal
 that anything went wrong.
@@ -158,8 +158,9 @@ fn emit_session_outcome_line(&self, outcome: SessionOutcome, attempted_sid: Stri
 exactly — a frame shape the provider CLI itself would never emit (no collision
 risk) that both consumers already know how to special-case.
 
-**Deliberately not touched:** the `SpawnedFresh` transition (spawn-time
-classification of "no resume attempted this generation"). As documented in
+**Deliberately not touched (in the original PR — superseded 2026-08-27, see
+below):** the `SpawnedFresh` transition (spawn-time classification of "no
+resume attempted this generation"). As documented in
 `persistent.rs:1918-1932`, that classification also fires for a truly-first-ever
 turn (no session existed to lose) and for internal respawns with no immediate
 message — neither is a "the model lost its memory" event, and disambiguating
@@ -167,6 +168,28 @@ them correctly from inside `spawn_process` would touch code with a long history
 of subtle races (issue #2368, PR #2373 rounds 4/5/7/9). Out of scope for this
 PR; not needed for the two outcome points above, which already cover every case
 where AgentMux *positively knows* what happened to a resume attempt.
+
+> **Superseded (2026-08-27).** The "no session existed to lose" reasoning has
+> one real exception, which
+> `docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`
+> then observed live: a long-lived named agent opened in a **fresh channel**
+> whose shared-registry pointer is empty gets no `--resume` at all, so the CLI
+> never errors and no outcome is ever emitted — while the pane renders the
+> entire prior conversation through `blockfile.rs`'s cross-channel read
+> fallback from the global transcript zone. There *is* something to lose in
+> that case, and it was the one case with no signal of any kind.
+>
+> `spawn_process` now emits `Fresh` (with an empty `attempted_sid` — there was
+> no id to attempt) when all three hold: no `--resume` was attached, this is
+> the controller's **first** generation, and a transcript already exists
+> locally or in the agent's global zone. The generation gate is what keeps the
+> races above out of scope — later generations that spawn without `--resume`
+> either emit their own outcome (`retry_after_resume_failure`) or are
+> respawns of an already-classified session. `persistent_resume::update`'s
+> `SpawnedFresh` arm is still effect-free and its regression guards (§8) still
+> hold; the decision lives in `persistent.rs`'s `fresh_start_needs_disclosure`
+> because "does prior history exist" is a FileStore question the pure state
+> machine can't answer.
 
 ### 2.2 Frontend: render it as a distinct divider, not silently
 
@@ -333,9 +356,17 @@ doc §6) and copy it into the isolated home before spawning — reusing the
 `rehydrate_claude_session` shape already prototyped for the import path
 (`import-agents.sh:107-120`, cited in the analysis doc). If no transcript can
 be found anywhere (genuinely nothing to rehydrate), spawn without `--resume` —
-this is the "load empty if the memory is empty" half of the ask, and with Part
-A already landed, that fresh-start is now an honest, visibly-labeled event
-instead of an unexplained blank pane.
+this is the "load empty if the memory is empty" half of the ask.
+
+**Correction (2026-08-27):** this paragraph originally continued "...and with
+Part A already landed, that fresh-start is now an honest, visibly-labeled event
+instead of an unexplained blank pane." That was **not** true of Part A as
+shipped — §2.1 explicitly exempted the no-`--resume`-attempted spawn, and
+`persistent_resume.rs`'s own regression guard
+(`spawned_fresh_and_never_confirmed_paths_never_emit_a_session_outcome`) pinned
+the opposite. It became true on 2026-08-27 via §2.1's superseded callout, which
+labels exactly this case. Part B still has to hold up its own end: the label is
+honest, but it only *describes* a lost conversation — it doesn't recover one.
 
 ### 6.3 Part C — backfill the session_id-less migrated agents
 

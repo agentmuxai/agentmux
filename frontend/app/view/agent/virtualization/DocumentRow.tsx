@@ -474,7 +474,12 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                         peekTick();
                         return `${formatExactTime(n.timestamp)} · ${formatTimeAgo(n.timestamp)}`;
                     });
-                    const bodyText = `attempted: ${n.attemptedSid} · actual: ${n.actualSid ?? "—"}`;
+                    // An empty `attemptedSid` is meaningful, not missing: the
+                    // spawn had no session id to resume at all (srv's
+                    // `fresh_start_needs_disclosure` path), as opposed to
+                    // having attempted one that was rejected. Render it as "—"
+                    // so the peek body doesn't read as a truncated id.
+                    const bodyText = `attempted: ${n.attemptedSid || "—"} · actual: ${n.actualSid ?? "—"}`;
                     return (
                         <div
                             ref={setPeekRowEl}

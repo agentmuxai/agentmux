@@ -31,6 +31,12 @@
 //! different trigger (a resume rejection mid-session, not a stale PID found
 //! at boot) — kept in this file rather than a new module since it's the
 //! established home for "frontend-only session-state signal flags."
+//!
+//! Unlike `was_interrupted`, `resume_failed` is cleared by the backend as well
+//! as by the user: `clear_resume_failed` retracts it when the recovery scan
+//! that follows a rejection succeeds, so the banner can't claim the
+//! conversation was lost while the transcript's own session-outcome divider
+//! says it was resumed.
 
 use std::sync::Arc;
 
@@ -85,6 +91,75 @@ pub fn mark_resume_failed(wstore: &Arc<Store>, event_bus: &Option<Arc<EventBus>>
     let Some(ref bus) = event_bus else {
         return;
     };
+    if let Ok(updated_block) = wstore.must_get::<Block>(block_id) {
+        let update_data = serde_json::to_value(&crate::backend::obj::WaveObjUpdate {
+            updatetype: "update".into(),
+            otype: "block".into(),
+            oid: block_id.to_string(),
+            obj: Some(crate::backend::obj::wave_obj_to_value(&updated_block)),
+        })
+        .ok();
+        bus.broadcast_event(&crate::backend::eventbus::WSEventType {
+            eventtype: "waveobj:update".to_string(),
+            oref: oref_str,
+            data: update_data,
+        });
+    }
+}
+
+/// Clear `session:resume_failed` — the counterpart to [`mark_resume_failed`],
+/// called when a resume attempt ultimately resolves as `Resumed`.
+///
+/// [`mark_resume_failed`] fires from the stderr reader the instant the CLI
+/// says "No conversation found", which is *before*
+/// `persistent.rs`'s `retry_after_resume_failure` runs its recovery scan. In
+/// the common case that scan finds the real, live on-disk session and resumes
+/// it (live-confirmed in
+/// `docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md` §2),
+/// the conversation was NOT lost — but nothing cleared the flag, so the pane
+/// kept showing "Couldn't resume the previous conversation — started a new
+/// one" while the `agentmux_session_outcome` divider in the same transcript
+/// said `resumed`. Two disclosure surfaces contradicting each other is worse
+/// than either alone, so the flag now tracks the *resolved* outcome.
+///
+/// Skips both the write and the broadcast when the flag isn't currently set —
+/// a `Resumed` outcome is the overwhelmingly common case and almost never
+/// follows a failure, so the no-op path must not spam `waveobj:update` on
+/// every ordinary resume.
+pub fn clear_resume_failed(wstore: &Arc<Store>, event_bus: &Option<Arc<EventBus>>, block_id: &str) {
+    match wstore.get::<Block>(block_id) {
+        Ok(Some(block)) => {
+            let set = block
+                .meta
+                .get(META_SESSION_RESUME_FAILED)
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !set {
+                return;
+            }
+        }
+        // Block missing or unreadable — nothing to clear, and the write
+        // below would fail anyway.
+        _ => return,
+    }
+
+    let mut meta = MetaMapType::new();
+    meta.insert(META_SESSION_RESUME_FAILED.to_string(), serde_json::Value::Null);
+    let oref_str = format!("block:{}", block_id);
+    if let Err(e) = crate::server::service::update_object_meta(wstore, &oref_str, &meta) {
+        tracing::warn!(block_id = %block_id, error = %e, "session_recovery: failed to clear resume_failed");
+        return;
+    }
+    tracing::info!(
+        block_id = %block_id,
+        "session_recovery: resume recovered — cleared the resume_failed disclosure"
+    );
+    let Some(ref bus) = event_bus else {
+        return;
+    };
+    // Same live-delivery requirement as `mark_resume_failed`: the user may be
+    // staring at the banner right now, so the clear must reach an already-open
+    // `blockAtom`, not only the pane's next reload.
     if let Ok(updated_block) = wstore.must_get::<Block>(block_id) {
         let update_data = serde_json::to_value(&crate::backend::obj::WaveObjUpdate {
             updatetype: "update".into(),
@@ -400,6 +475,114 @@ mod tests {
                 .and_then(|v| v.as_bool()),
             Some(true),
             "broadcast payload must carry the flag, not just trigger a generic refetch",
+        );
+    }
+
+    fn agent_block(block_id: &str) -> Block {
+        Block {
+            oid: block_id.to_string(),
+            parentoref: String::new(),
+            version: 1,
+            runtimeopts: None,
+            stickers: None,
+            meta: {
+                let mut m = MetaMapType::new();
+                m.insert("view".to_string(), serde_json::json!("agent"));
+                m
+            },
+            subblockids: None,
+        }
+    }
+
+    /// The recovery scan that follows a rejected `--resume` usually succeeds
+    /// (live-confirmed in STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23
+    /// §2). When it does, the banner `mark_resume_failed` already raised must
+    /// come back down — otherwise the pane claims the conversation was lost
+    /// while the transcript's own outcome divider says `resumed`.
+    #[test]
+    fn test_clear_resume_failed_retracts_the_flag() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
+
+        let block_id = "55555555-5555-5555-5555-555555555555";
+        let mut block = agent_block(block_id);
+        wstore.insert(&mut block).unwrap();
+
+        mark_resume_failed(&wstore, &None, block_id);
+        clear_resume_failed(&wstore, &None, block_id);
+
+        let after: Block = wstore.get(block_id).unwrap().unwrap();
+        assert_eq!(
+            after.meta.get(META_SESSION_RESUME_FAILED).and_then(|v| v.as_bool()),
+            None,
+            "a recovered resume must leave no resume_failed flag behind",
+        );
+    }
+
+    /// A `Resumed` outcome is the overwhelmingly common case and almost never
+    /// follows a failure, so the clear must not broadcast `waveobj:update` on
+    /// every ordinary resume just to write a null over an absent key.
+    #[tokio::test]
+    async fn test_clear_resume_failed_is_silent_when_the_flag_was_never_set() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
+        let event_bus = Arc::new(EventBus::new());
+
+        let block_id = "66666666-6666-6666-6666-666666666666";
+        let mut block = agent_block(block_id);
+        wstore.insert(&mut block).unwrap();
+        let version_before = wstore.get::<Block>(block_id).unwrap().unwrap().version;
+
+        let mut receivers = event_bus.register_ws("test-conn", "test-tab");
+
+        clear_resume_failed(&wstore, &Some(event_bus.clone()), block_id);
+
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(200),
+                receivers.priority.recv(),
+            )
+            .await
+            .is_err(),
+            "no broadcast may fire when there was no flag to retract",
+        );
+        assert_eq!(
+            wstore.get::<Block>(block_id).unwrap().unwrap().version,
+            version_before,
+            "the block must not be rewritten when there was nothing to clear",
+        );
+    }
+
+    /// The retraction has the same live-delivery requirement as the flag
+    /// itself: the user may be looking at the banner right now, so an
+    /// already-open `blockAtom` must see it go away without a pane reload.
+    #[tokio::test]
+    async fn test_clear_resume_failed_broadcasts_waveobj_update() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
+        let event_bus = Arc::new(EventBus::new());
+
+        let block_id = "88888888-8888-8888-8888-888888888888";
+        let mut block = agent_block(block_id);
+        wstore.insert(&mut block).unwrap();
+        mark_resume_failed(&wstore, &None, block_id);
+
+        let mut receivers = event_bus.register_ws("test-conn", "test-tab");
+
+        clear_resume_failed(&wstore, &Some(event_bus.clone()), block_id);
+
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(2), receivers.priority.recv())
+            .await
+            .expect("timed out waiting for waveobj:update broadcast")
+            .expect("priority channel closed");
+        assert_eq!(msg.get("eventtype").and_then(|v| v.as_str()), Some("waveobj:update"));
+        let obj = msg.get("data").and_then(|d| d.get("obj")).expect("data.obj present");
+        assert_eq!(
+            obj.get("meta")
+                .and_then(|m| m.get(META_SESSION_RESUME_FAILED))
+                .and_then(|v| v.as_bool()),
+            None,
+            "the broadcast payload must show the flag gone, not still set",
         );
     }
 }
