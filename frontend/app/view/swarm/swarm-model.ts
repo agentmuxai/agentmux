@@ -1037,6 +1037,17 @@ export class SwarmViewModel implements ViewModel {
 
         void this.loadAll();
 
+        // Bounded backfill-naming backlog pass (agentmuxai/agentmux#2829) —
+        // fired once, only here, because this constructor only runs when a
+        // human actually opens the Swarm pane (block-registry.ts's "swarm"
+        // view), never from the headless per-agent-pane backfill scan that
+        // runs on every reopen regardless of whether this pane is even
+        // open. Resolves a capped batch of whatever's currently unnamed in
+        // the backfilled/historical backlog server-side; results stream
+        // back through the existing subagent:named / dispatch:updated
+        // handlers below — no response to await here.
+        void callBackendService("subagent", "ResolveUnnamedBacklog", []);
+
         const unsubSpawned = waveEventSubscribe({
             eventType: "subagent:spawned",
             handler: () => this.scheduleLoadSubagents(),

@@ -158,6 +158,39 @@ pub(super) fn solo_dispatch_id(agent_id: &str) -> String {
     format!("solo:{agent_id}")
 }
 
+/// One item selected by `SubagentWatcher::select_unnamed_backlog` for the
+/// bounded backfill-naming pass (`resolve_unnamed_backlog`) — the two
+/// candidate pools mirror `trigger_eager_naming`'s own Solo/Workflow split.
+/// `Workflow`'s `representative_agent_id` is an arbitrary current member,
+/// the same "first/any member stands in for the whole batch" convention
+/// the live eager path already uses (see `generate_dispatch_name`'s doc
+/// comment).
+pub(super) enum BacklogNamingItem {
+    Solo { agent_id: String },
+    Workflow { dispatch_id: String, representative_agent_id: String },
+}
+
+impl BacklogNamingItem {
+    pub(super) fn dispatch_id(&self) -> String {
+        match self {
+            BacklogNamingItem::Solo { agent_id } => solo_dispatch_id(agent_id),
+            BacklogNamingItem::Workflow { dispatch_id, .. } => dispatch_id.clone(),
+        }
+    }
+}
+
+/// Bounded batch size for `resolve_unnamed_backlog`'s one-shot burst per
+/// Swarm-pane-open (`("subagent", "ResolveUnnamedBacklog")`, fired from
+/// `SwarmViewModel`'s constructor). Deliberately separate from
+/// `BACKFILL_MAX_FILES` above — that one bounds how much JSONL history gets
+/// *replayed into memory*; this one bounds how many Haiku *naming calls*
+/// fire per burst, gated additionally by its own cap-1
+/// `backlog_naming_semaphore()` (`server::app_api::session`). Because
+/// `naming_triggered` claims are permanent, a backlog larger than this
+/// drains progressively across repeated pane-opens rather than all at
+/// once — see `select_unnamed_backlog`'s doc comment.
+pub(super) const BACKLOG_NAMING_BATCH_LIMIT: usize = 20;
+
 // ── Internal state ────────────────────────────────────────────────────────
 
 pub(super) struct SessionWatch {
