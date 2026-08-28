@@ -1,5 +1,15 @@
 # AgentMux Version History
 
+## 0.55.27 — 2026-08-27
+
+- chore(agent-pane): upgrade Claude Code CLI pin to 2.1.247, relabel Opus 5
+- fix(tab): optimistic tab removal on close — close flash structurally impossible
+- feat(layout): plain drag now group-resizes the row/column; Shift+drag moves a single border
+- feat(layout): Shift+window-edge resize feeds only the edge panes (Windows)
+- fix(agent): remove false-positive-prone 'agent unresponsive' detection, keep turn-active tracking
+- fix(agent-pane): consolidate Reconnecting…/Compacting… status into the Working row
+
+
 ## 0.55.26 — 2026-08-26
 
 - fix(agent): suppress Activity Dock refresh during backfill bursts and reconcile registry-known background tasks into dock rows
