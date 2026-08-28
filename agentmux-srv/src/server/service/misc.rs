@@ -160,6 +160,7 @@ pub(super) async fn handle_misc_service(state: &AppState, call: &WebCallType) ->
                 &state.wstore,
                 &state.subagent_watcher,
                 &agent_id,
+                super::super::app_api::session::pull_call_semaphore(),
             )
             .await;
             let (display_name, tokens) = match result {
@@ -167,6 +168,16 @@ pub(super) async fn handle_misc_service(state: &AppState, call: &WebCallType) ->
                 None => (None, None),
             };
             WebReturnType::success(serde_json::json!({ "displayName": display_name, "tokens": tokens }))
+        }
+        // Bounded, rate-limited burst that resolves names for whatever's
+        // currently unnamed in the backfilled/historical backlog — see
+        // `SubagentWatcher::resolve_unnamed_backlog`'s doc comment. Only
+        // ever called from `SwarmViewModel`'s constructor (a human actually
+        // opening the Swarm pane); fire-and-forget, same pattern as eager
+        // naming's own `tokio::spawn`.
+        ("subagent", "ResolveUnnamedBacklog") => {
+            tokio::spawn(state.subagent_watcher.clone().resolve_unnamed_backlog());
+            WebReturnType::success_empty()
         }
         // ---- HistoryService ----
         ("history", "List") => {
