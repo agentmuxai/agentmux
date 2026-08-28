@@ -15,7 +15,7 @@
  * spied on so other real exports this import graph needs stay intact.
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as wos from "@/store/wos";
 
 const hub = vi.hoisted(() => ({
@@ -62,6 +62,10 @@ describe("SwarmViewModel backfill-naming backlog trigger", () => {
         callBackendServiceSpy.mockClear();
     });
 
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
     it("fires subagent.ResolveUnnamedBacklog exactly once on construction", () => {
         new SwarmViewModel("block-1", {} as any);
 
@@ -83,5 +87,30 @@ describe("SwarmViewModel backfill-naming backlog trigger", () => {
         handler!({ data: { agentId: "agent-1", displayName: "Resolved name" } });
 
         expect(vm.subagentsAtom().find((s) => s.agent_id === "agent-1")?.display_name).toBe("Resolved name");
+    });
+
+    it("re-fires ResolveUnnamedBacklog when a later reload discovers newly backfilled rows on an already-open pane (Codex P1 on #2830)", () => {
+        // The constructor's one-shot call only covers whatever's already
+        // backfilled by the time the Swarm pane opens. A backfill landing
+        // on an *already-open* pane (a different agent pane reopening
+        // while this one stays up) reaches scheduleLoadSubagents via
+        // subagent:spawned but must re-fire the backlog resolver too —
+        // otherwise those newly-discovered rows stay raw-slugged until the
+        // whole view model is torn down and rebuilt.
+        new SwarmViewModel("block-1", {} as any);
+
+        const backlogCallCount = () =>
+            callBackendServiceSpy.mock.calls.filter((call) => call[0] === "subagent" && call[1] === "ResolveUnnamedBacklog")
+                .length;
+        expect(backlogCallCount()).toBe(1);
+
+        vi.useFakeTimers();
+        const spawnedHandler = hub.handlers.get("subagent:spawned");
+        expect(spawnedHandler).toBeDefined();
+        spawnedHandler!({});
+
+        vi.advanceTimersByTime(200); // past the 150ms debounce, comfortable margin
+
+        expect(backlogCallCount()).toBe(2);
     });
 });
