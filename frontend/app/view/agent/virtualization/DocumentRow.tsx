@@ -457,6 +457,63 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     <span class="agent-history-link-cta">Open Agent History →</span>
                 </div>
             </Show>
+            {/* resume_preflight — like history_link, a render-time synthetic
+                with a fixed id, no timestamp and no hidden content, so it has
+                no peek either (same deliberate exception). */}
+            <Show when={props.node() && props.node().type === "resume_preflight"}>
+                {(() => {
+                    const n = props.node() as Extract<DocumentNode, { type: "resume_preflight" }>;
+                    return (
+                        <Show
+                            when={!n.pending}
+                            fallback={
+                                // Only ever rendered when the check has already
+                                // run longer than its reveal delay — see
+                                // `useResumePreflight`'s STEPS_VISIBLE_AFTER_MS.
+                                <div class="agent-resume-preflight agent-resume-preflight-pending">
+                                    <span class="agent-resume-preflight-sigil">⟳</span>
+                                    <span class="agent-resume-preflight-label">
+                                        Checking whether this conversation can resume…
+                                    </span>
+                                </div>
+                            }
+                        >
+                            <div
+                                class={
+                                    n.verdict === "recover"
+                                        ? "agent-resume-preflight agent-resume-preflight-recover"
+                                        : "agent-resume-preflight agent-resume-preflight-fresh"
+                                }
+                            >
+                                <span class="agent-resume-preflight-sigil">
+                                    {n.verdict === "recover" ? "⟲" : "⚠"}
+                                </span>
+                                <span class="agent-resume-preflight-label">
+                                    {n.verdict === "recover"
+                                        ? "This agent will reconnect to its conversation — it may pause briefly on your first message."
+                                        : "This agent will start a new conversation — the history below isn't available to it."}
+                                </span>
+                                <Show when={n.verdict === "fresh" && props.onOpenHistory}>
+                                    <span
+                                        class="agent-resume-preflight-cta"
+                                        role="button"
+                                        tabindex="0"
+                                        onClick={() => props.onOpenHistory?.()}
+                                        onKeyDown={(e) => {
+                                            if (e.key === "Enter" || e.key === " ") {
+                                                e.preventDefault();
+                                                props.onOpenHistory?.();
+                                            }
+                                        }}
+                                    >
+                                        Open Agent History →
+                                    </span>
+                                </Show>
+                            </div>
+                        </Show>
+                    );
+                })()}
+            </Show>
             <Show when={props.node() && props.node().type === "session_outcome"}>
                 {(() => {
                     const n = props.node() as Extract<DocumentNode, { type: "session_outcome" }>;

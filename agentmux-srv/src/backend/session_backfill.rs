@@ -106,6 +106,40 @@ pub fn find_largest_session_for_working_dir(config_dir: &str, working_dir: &str)
     largest_session_id(&[projects_dir], &slug)
 }
 
+/// Absolute path of the transcript file `--resume <sid>` would need to find:
+/// `<config_dir>/projects/<slug(working_dir)>/<sid>.jsonl`.
+///
+/// Shares [`find_largest_session_for_working_dir`]'s expansion rules exactly —
+/// `expand_home_dir_safe` for the config dir, `core::expand_home_dir` for the
+/// working dir — because the two answer the same question from opposite ends
+/// ("which session is there?" vs "is THIS session there?"), and a preflight
+/// that expanded paths differently from the recovery scan would contradict it.
+/// `None` when `config_dir` or `sid` is empty (nothing to look for).
+pub fn session_file_path(config_dir: &str, working_dir: &str, sid: &str) -> Option<PathBuf> {
+    if config_dir.is_empty() || sid.is_empty() {
+        return None;
+    }
+    let expanded = crate::backend::base::expand_home_dir_safe(config_dir);
+    let expanded_working_dir = crate::backend::blockcontroller::core::expand_home_dir(working_dir);
+    let slug = encode_project_slug(&expanded_working_dir);
+    Some(
+        expanded
+            .join("projects")
+            .join(slug)
+            .join(format!("{sid}.jsonl")),
+    )
+}
+
+/// Would `--resume <sid>` find its conversation under this exact
+/// `CLAUDE_CONFIG_DIR`? This is the whole of what the CLI checks before
+/// answering "No conversation found with session ID" — so asking it up front
+/// predicts a resume's success without spawning anything.
+pub fn session_is_reachable(config_dir: &str, working_dir: &str, sid: &str) -> bool {
+    session_file_path(config_dir, working_dir, sid)
+        .map(|p| p.is_file())
+        .unwrap_or(false)
+}
+
 /// Populate `session_id` for registry records that lack one, from the agent's
 /// largest provider session. Idempotent (skips records that already carry a
 /// non-empty id). Returns the number populated. Best-effort per record — a

@@ -3,9 +3,91 @@ use super::*;
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_session_activity_summary(engine, state);
     register_session_next_prompt_suggestion(engine, state);
+    register_session_resume_preflight_handler(engine, state);
     register_session_archive_handler(engine, state);
     register_session_restore_handler(engine, state);
     register_session_export_handler(engine, state);
+}
+
+/// `session:resume_preflight` — read-only, mutates nothing, spawns nothing.
+///
+/// The pane calls this on mount so it can say whether the conversation it's
+/// displaying will actually be continued, instead of the user finding out by
+/// typing and watching the transcript clear
+/// (`crate::backend::resume_preflight`'s module doc).
+fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+
+    engine.register_handler(
+        COMMAND_SESSION_RESUME_PREFLIGHT,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            Box::pin(async move {
+                let cmd: CommandSessionResumePreflightData = serde_json::from_value(data)
+                    .map_err(|e| format!("session:resume_preflight: {e}"))?;
+
+                let block = wstore
+                    .must_get::<Block>(&cmd.block_id)
+                    .map_err(|e| format!("session:resume_preflight: {e}"))?;
+
+                // `CLAUDE_CONFIG_DIR` lives inside the block's own `cmd:env`
+                // map — the same map `apply_working_dir` hands to the child, so
+                // the preflight checks the exact config dir the CLI will use.
+                let config_dir = block
+                    .meta
+                    .get(crate::backend::blockcontroller::META_KEY_CMD_ENV)
+                    .and_then(|v| v.as_object())
+                    .and_then(|env| env.get("CLAUDE_CONFIG_DIR"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+
+                let input = crate::backend::resume_preflight::PreflightInput {
+                    resume_flag: obj::meta_get_string(&block.meta, "agent:resume_flag", ""),
+                    session_id: obj::meta_get_string(&block.meta, "agent:sessionid", ""),
+                    working_dir: obj::meta_get_string(&block.meta, "cmd:cwd", ""),
+                    config_dir,
+                };
+
+                // Blocking file I/O (one `is_file`, at most one `read_dir` of a
+                // single directory) off the async runtime's worker threads —
+                // small, but a pane open shouldn't be able to stall the
+                // reactor on a cold or network-backed home directory.
+                let result = tokio::task::spawn_blocking(move || crate::backend::resume_preflight::preflight(&input))
+                    .await
+                    .map_err(|e| format!("session:resume_preflight: {e}"))?;
+
+                tracing::info!(
+                    block_id = %cmd.block_id,
+                    verdict = %result.verdict.as_str(),
+                    duration_ms = result.duration_ms,
+                    "session:resume_preflight"
+                );
+
+                Ok(Some(
+                    serde_json::to_value(&SessionResumePreflightResult {
+                        block_id: cmd.block_id,
+                        verdict: result.verdict.as_str().to_string(),
+                        session_id: result.session_id,
+                        recoverable_session_id: result.recoverable_session_id,
+                        steps: result
+                            .steps
+                            .into_iter()
+                            .map(|s| ResumePreflightStep {
+                                id: s.id.to_string(),
+                                label: s.label,
+                                ok: s.ok,
+                                detail: s.detail,
+                                duration_ms: s.duration_ms,
+                            })
+                            .collect(),
+                        duration_ms: result.duration_ms,
+                    })
+                    .unwrap(),
+                ))
+            })
+        }),
+    );
 }
 
 fn register_session_archive_handler(engine: &Arc<WshRpcEngine>, state: &AppState) {

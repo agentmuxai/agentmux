@@ -157,6 +157,9 @@ export const STREAMING_CAPABLE: Record<NodeKind, boolean> = {
     day_divider: false,
     // Render-time synthetic link row (live view) — static.
     history_link: false,
+    // Render-time synthetic continuity notice (live view) — static. Its
+    // pending/resolved swap replaces the node wholesale, never streams.
+    resume_preflight: false,
 };
 
 /**
@@ -179,6 +182,7 @@ export function estimateNode(node: DocumentNode, state: DocumentState): number {
         case "session_outcome":   return 48;
         case "day_divider":       return 32;
         case "history_link":      return 40;
+        case "resume_preflight":  return 56;
     }
 }
 
@@ -222,6 +226,7 @@ export function estimateNodeForState(
             case "session_outcome":   return 48;
             case "day_divider":       return 32;
         case "history_link":      return 40;
+        case "resume_preflight":  return 56;
         }
     }
     // expanded
@@ -239,5 +244,6 @@ export function estimateNodeForState(
         case "session_outcome":   return 48;
         case "day_divider":       return 32;
         case "history_link":      return 40;
+        case "resume_preflight":  return 56;
     }
 }
