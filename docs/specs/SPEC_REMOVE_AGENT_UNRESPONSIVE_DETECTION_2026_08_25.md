@@ -1,13 +1,33 @@
 # SPEC: Agent-pane status cleanup — remove "unresponsive" detection, consolidate Reconnecting/Compacting/Working
 
 **Date:** 2026-08-25
-**Status:** Part 1 (removal) implemented, PR #2825 (includes a fixup commit
-restoring container-exec failure classification that Codex caught in
-review — see that PR for detail). Part 2 (status consolidation) implemented
-per §10's design recommendation, verified (tsc + full vitest green),
-pending PR/merge. Two separately-implementable pieces in one doc — either
-can ship as its own PR (per repo-owner direction when this spec was
-extended).
+**Status:** Both parts shipped and merged to main (2026-08-27).
+- **Part 1 (removal):** PR #2825 (merged) — includes a fixup commit
+  restoring container-exec failure classification, a real regression Codex
+  caught in review (container-backed agents had silently lost their only
+  route to in-band failure classification; `host_spawn.rs`'s own
+  independent completion-time classifier was never mirrored in
+  `container_spawn.rs`) — see that PR for detail.
+- **Part 2 (status consolidation):** PR #2826 (merged) — implemented per
+  §10's design recommendation. Review caught one real bug (reagent and
+  Codex both independently found it): the working-row backdrop's
+  `--loading` modifier didn't account for the two relocated sub-states,
+  reintroducing the exact backdrop/row color mismatch
+  `SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md` fixed for the plain
+  loading case — fixed in a follow-up commit before merge.
+
+**Outstanding (not blocking, tracked here for whoever picks these up):**
+- Manual verification items in §6/§11's test plans (Swarm pane badge during
+  a long tool call, `muxspect describe` lifecycle accuracy, live
+  compaction/stale-resume-retry rendering) were not run against a live pane
+  this session — code-verified only.
+- Issue #2707 (open, pre-existing, unrelated) — `AgentWorkingRow`'s
+  type-out reveal restarting on tool-call bursts — lives in the same
+  component Part 2 touched but was not addressed here.
+- `container_spawn.rs`'s exec-start-failure path (the `Err(e)` arm when the
+  exec itself never starts) still has no route to a persisted
+  `AgentFailure` — a pre-existing gap, out of scope for what Codex flagged
+  on PR #2825, noted there as a follow-up candidate.
 **Scope — Part 1:** `agentmux-srv/src/backend/blockcontroller/health.rs`,
 `agentmux-srv/src/backend/blockcontroller/{mod,core,persistent,acp}.rs`,
 `agentmux-srv/src/backend/blockcontroller/subprocess/{mod,host_spawn,container_spawn}.rs`,
