@@ -17,11 +17,17 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
 /// (`crate::backend::resume_preflight`'s module doc).
 fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: &AppState) {
     let wstore = state.wstore.clone();
+    // Needed to resolve an identity-bound pane's REAL config dir — see
+    // `preflight_input_from_meta`.
+    let id_store = state.id_store.clone();
+    let identity_store = state.identity_store.clone();
 
     engine.register_handler(
         COMMAND_SESSION_RESUME_PREFLIGHT,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
+            let id_store = id_store.clone();
+            let identity_store = identity_store.clone();
             Box::pin(async move {
                 let cmd: CommandSessionResumePreflightData = serde_json::from_value(data)
                     .map_err(|e| format!("session:resume_preflight: {e}"))?;
@@ -30,7 +36,13 @@ fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: 
                     .must_get::<Block>(&cmd.block_id)
                     .map_err(|e| format!("session:resume_preflight: {e}"))?;
 
-                let input = preflight_input_from_meta(&block.meta);
+                let bound_config_dir = crate::identity::resolver::resolve_bound_oauth_config_dir(
+                    &wstore,
+                    &id_store,
+                    &identity_store,
+                    &cmd.block_id,
+                );
+                let input = preflight_input_from_meta(&block.meta, bound_config_dir);
 
                 // Blocking file I/O (one `is_file`, at most one `read_dir` of a
                 // single directory) off the async runtime's worker threads —
@@ -90,19 +102,41 @@ fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: 
 /// at all: the spawn still attaches `--resume`, but the preflight was
 /// reporting `Unknown` and silently suppressing the notice for exactly the
 /// long-lived panes this feature exists for.
+/// `bound_config_dir` is `identity::resolver::resolve_bound_oauth_config_dir`'s
+/// answer for this block, and **takes precedence over `cmd:env`** whenever
+/// it's `Some` (reagent P1, second pass on PR #2833).
+///
+/// For an agent bound to an Armory OAuth identity, the `cmd:env` snapshot is
+/// simply not where the CLI will look: the real spawn resolves the isolated
+/// dir dynamically through `inject_identity_env_async`
+/// (`agent_handlers/input.rs:224`, `app_api/agent_io.rs:184`), and
+/// `reactive.rs` already documents that "identity-bound agents' real
+/// `CLAUDE_CONFIG_DIR` is never the stale `cmd:env` snapshot"
+/// (`SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22.md`).
+/// Checking reachability against the wrong directory is worse than not
+/// checking: it can warn "fresh" at a pane that will resume perfectly well,
+/// or stay quiet at one that's about to lose its conversation.
+///
+/// `None` — not identity-bound, or a non-OAuth provider — keeps the
+/// `cmd:env` read, which is correct for those. Same helper and same
+/// precedence order `subagent_watcher` already uses for this exact
+/// pre-spawn question.
 fn preflight_input_from_meta(
     meta: &crate::backend::obj::MetaMapType,
+    bound_config_dir: Option<std::path::PathBuf>,
 ) -> crate::backend::resume_preflight::PreflightInput {
-    // `CLAUDE_CONFIG_DIR` lives inside the block's own `cmd:env` map — the
-    // same map `apply_working_dir` hands to the child, so the preflight
-    // checks the exact config dir the CLI will use.
-    let config_dir = meta
-        .get(crate::backend::blockcontroller::META_KEY_CMD_ENV)
-        .and_then(|v| v.as_object())
-        .and_then(|env| env.get("CLAUDE_CONFIG_DIR"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    // `CLAUDE_CONFIG_DIR` from the block's own `cmd:env` map — the fallback
+    // when this pane isn't identity-bound.
+    let config_dir = match bound_config_dir {
+        Some(dir) => dir.to_string_lossy().to_string(),
+        None => meta
+            .get(crate::backend::blockcontroller::META_KEY_CMD_ENV)
+            .and_then(|v| v.as_object())
+            .and_then(|env| env.get("CLAUDE_CONFIG_DIR"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+    };
 
     crate::backend::resume_preflight::PreflightInput {
         resume_flag: obj::meta_get_string(meta, "agent:resume_flag", "--resume"),
@@ -1519,7 +1553,7 @@ mod preflight_input_tests {
     /// silent.
     #[test]
     fn absent_resume_flag_defaults_to_the_same_value_the_spawn_path_uses() {
-        let input = preflight_input_from_meta(&meta_of(&[]));
+        let input = preflight_input_from_meta(&meta_of(&[]), None);
         assert_eq!(
             input.resume_flag, "--resume",
             "must match agent_handlers/input.rs:400's default, or the preflight              reports Unknown for panes whose spawn really will --resume",
@@ -1531,13 +1565,13 @@ mod preflight_input_tests {
     /// the default, or the preflight would claim resume support that isn't there.
     #[test]
     fn an_explicitly_empty_resume_flag_is_preserved_not_defaulted() {
-        let input = preflight_input_from_meta(&meta_of(&[("agent:resume_flag", serde_json::json!(""))]));
+        let input = preflight_input_from_meta(&meta_of(&[("agent:resume_flag", serde_json::json!(""))]), None);
         assert_eq!(input.resume_flag, "");
     }
 
     #[test]
     fn an_explicit_resume_flag_is_read_verbatim() {
-        let input = preflight_input_from_meta(&meta_of(&[("agent:resume_flag", serde_json::json!("-r"))]));
+        let input = preflight_input_from_meta(&meta_of(&[("agent:resume_flag", serde_json::json!("-r"))]), None);
         assert_eq!(input.resume_flag, "-r");
     }
 
@@ -1546,7 +1580,7 @@ mod preflight_input_tests {
         let input = preflight_input_from_meta(&meta_of(&[(
             "cmd:env",
             serde_json::json!({ "CLAUDE_CONFIG_DIR": "/home/dev/.claude", "OTHER": "x" }),
-        )]));
+        )]), None);
         assert_eq!(input.config_dir, "/home/dev/.claude");
     }
 
@@ -1555,29 +1589,67 @@ mod preflight_input_tests {
     /// silent, which is the correct posture when there's nowhere to look.
     #[test]
     fn a_missing_config_dir_is_empty_rather_than_a_guess() {
-        assert_eq!(preflight_input_from_meta(&meta_of(&[])).config_dir, "");
+        assert_eq!(preflight_input_from_meta(&meta_of(&[]), None).config_dir, "");
         assert_eq!(
-            preflight_input_from_meta(&meta_of(&[("cmd:env", serde_json::json!({ "PATH": "/usr/bin" }))]))
+            preflight_input_from_meta(&meta_of(&[("cmd:env", serde_json::json!({ "PATH": "/usr/bin" }))]), None)
                 .config_dir,
             ""
         );
         assert_eq!(
-            preflight_input_from_meta(&meta_of(&[("cmd:env", serde_json::json!("not-an-object"))])).config_dir,
+            preflight_input_from_meta(&meta_of(&[("cmd:env", serde_json::json!("not-an-object"))]), None).config_dir,
             ""
         );
     }
 
     #[test]
     fn session_id_and_working_dir_default_to_empty() {
-        let input = preflight_input_from_meta(&meta_of(&[]));
+        let input = preflight_input_from_meta(&meta_of(&[]), None);
         assert_eq!(input.session_id, "");
         assert_eq!(input.working_dir, "");
 
         let input = preflight_input_from_meta(&meta_of(&[
             ("agent:sessionid", serde_json::json!("sid-1")),
             ("cmd:cwd", serde_json::json!("/work/dir")),
-        ]));
+        ]), None);
         assert_eq!(input.session_id, "sid-1");
         assert_eq!(input.working_dir, "/work/dir");
+    }
+
+    /// reagent P1 (second pass): an identity-bound pane's real config dir
+    /// comes from the identity resolver, never the `cmd:env` snapshot, so a
+    /// resolved dir must win outright — including when `cmd:env` disagrees.
+    #[test]
+    fn a_bound_identity_config_dir_overrides_the_cmd_env_snapshot() {
+        let meta = meta_of(&[(
+            "cmd:env",
+            serde_json::json!({ "CLAUDE_CONFIG_DIR": "/stale/from/spawn/snapshot" }),
+        )]);
+        let input = preflight_input_from_meta(
+            &meta,
+            Some(std::path::PathBuf::from("/identities/acct-7/claude")),
+        );
+        assert_eq!(
+            input.config_dir, "/identities/acct-7/claude",
+            "the identity-resolved dir is where the CLI will actually look",
+        );
+    }
+
+    /// …and a resolved dir must still win when there's no `cmd:env` at all.
+    #[test]
+    fn a_bound_identity_config_dir_is_used_with_no_cmd_env_present() {
+        let input = preflight_input_from_meta(
+            &meta_of(&[]),
+            Some(std::path::PathBuf::from("/identities/acct-9/claude")),
+        );
+        assert_eq!(input.config_dir, "/identities/acct-9/claude");
+    }
+
+    /// `None` means "not identity-bound, or not an OAuth provider" — for
+    /// those the `cmd:env` snapshot IS what the spawn uses, so it must still
+    /// be read rather than dropped.
+    #[test]
+    fn an_unbound_pane_still_falls_back_to_cmd_env() {
+        let meta = meta_of(&[("cmd:env", serde_json::json!({ "CLAUDE_CONFIG_DIR": "/home/dev/.claude" }))]);
+        assert_eq!(preflight_input_from_meta(&meta, None).config_dir, "/home/dev/.claude");
     }
 }
