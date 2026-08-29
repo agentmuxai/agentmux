@@ -39,9 +39,34 @@ struct AuthRequest {
     block_id: String,
 }
 
+/// One parked request handed back to a caller that now has to resolve it
+/// itself — on the abandon path (window creation failed) or the
+/// post-approval `Fill`-failed path. Carries `block_id` as well as
+/// `request_id` because coalesced requests can come from **different
+/// panes**: a fall-through prompt emitted with the wrong `block_id` would
+/// render in a pane that never raised the challenge (reagent P2 / codex P2
+/// on PR #2824).
+pub struct ParkedRequest {
+    pub request_id: String,
+    pub block_id: String,
+}
+
+impl From<AuthRequest> for ParkedRequest {
+    fn from(r: AuthRequest) -> Self {
+        Self { request_id: r.request_id, block_id: r.block_id }
+    }
+}
+
 struct Entry {
     identity_id: String,
     origin: String,
+    /// `host`/`port` are components of the protection space, identical for
+    /// every coalesced request. Stored because a fall-through emitted after
+    /// the entry is taken (post-approval `Fill` failure) still has to
+    /// reproduce the full `browser-pane-auth-required` payload, and by then
+    /// the original challenge's locals are long gone.
+    host: String,
+    port: i32,
     realm: String,
     is_proxy: bool,
     /// `None` until the approval subwindow has actually been created —
@@ -87,6 +112,8 @@ pub enum Reservation {
 pub fn reserve_or_join(
     identity_id: &str,
     origin: &str,
+    host: &str,
+    port: i32,
     realm: &str,
     is_proxy: bool,
     request_id: String,
@@ -107,6 +134,8 @@ pub fn reserve_or_join(
         Entry {
             identity_id: identity_id.to_string(),
             origin: origin.to_string(),
+            host: host.to_string(),
+            port,
             realm: realm.to_string(),
             is_proxy,
             window_id: None,
@@ -155,9 +184,15 @@ pub fn finalize_window(approval_id: &str, window_id: String) -> bool {
 pub struct ResolvedApproval {
     pub identity_id: String,
     pub origin: String,
+    pub host: String,
+    pub port: i32,
     pub realm: String,
     pub is_proxy: bool,
-    pub auth_request_ids: Vec<String>,
+    /// Every parked request riding this approval, each with its own
+    /// `block_id` — see [`ParkedRequest`]. Needed in full (not just the
+    /// ids) because the post-approval `Fill`-failure path has to emit a
+    /// per-pane fall-through prompt rather than cancelling.
+    pub auth_requests: Vec<ParkedRequest>,
     pub window_id: Option<String>,
 }
 
@@ -169,21 +204,30 @@ pub fn take(approval_id: &str) -> Option<ResolvedApproval> {
     pending().lock().remove(approval_id).map(|e| ResolvedApproval {
         identity_id: e.identity_id,
         origin: e.origin,
+        host: e.host,
+        port: e.port,
         realm: e.realm,
         is_proxy: e.is_proxy,
-        auth_request_ids: e.auth_requests.into_iter().map(|r| r.request_id).collect(),
+        auth_requests: e.auth_requests.into_iter().map(Into::into).collect(),
         window_id: e.window_id,
     })
 }
 
 /// Abandon a `New` reservation whose window creation failed — removes the
-/// entry outright (there's no window to ever finalize) and returns the
-/// request ids so the caller can fall each through to the normal prompt.
-pub fn abandon(approval_id: &str) -> Vec<String> {
+/// entry outright (there's no window to ever finalize) and returns **every**
+/// parked request so the caller can fall each through to the normal prompt.
+///
+/// Returns [`ParkedRequest`]s, not bare ids: by the time window creation
+/// fails, other challenges may have coalesced onto this reservation from
+/// *other panes*, and each needs a prompt addressed to its own `block_id`.
+/// Dropping this return value (or using only the caller's own request) is
+/// the bug this shape exists to prevent — the joined requests would sit
+/// parked with no prompt until `browser_pane::auth`'s own TTL fired.
+pub fn abandon(approval_id: &str) -> Vec<ParkedRequest> {
     pending()
         .lock()
         .remove(approval_id)
-        .map(|e| e.auth_requests.into_iter().map(|r| r.request_id).collect())
+        .map(|e| e.auth_requests.into_iter().map(Into::into).collect())
         .unwrap_or_default()
 }
 
@@ -317,7 +361,7 @@ mod tests {
     fn reserve_creates_new_entry_for_first_request() {
         let _guard = TEST_LOCK.lock();
         drain();
-        match reserve_or_join("id-a", "https://a", "realm", false, "req-1".into(), "block-1".into()) {
+        match reserve_or_join("id-a", "https://a", "host-a", 443, "realm", false, "req-1".into(), "block-1".into()) {
             Reservation::New { approval_id } => assert!(!approval_id.is_empty()),
             Reservation::Joined => panic!("expected New for first request"),
         }
@@ -328,17 +372,17 @@ mod tests {
     fn second_request_for_same_protection_space_joins() {
         let _guard = TEST_LOCK.lock();
         drain();
-        let approval_id = match reserve_or_join("id-a", "https://a", "realm", false, "req-1".into(), "block-1".into())
+        let approval_id = match reserve_or_join("id-a", "https://a", "host-a", 443, "realm", false, "req-1".into(), "block-1".into())
         {
             Reservation::New { approval_id } => approval_id,
             Reservation::Joined => panic!("expected New for first request"),
         };
-        match reserve_or_join("id-a", "https://a", "realm", false, "req-2".into(), "block-2".into()) {
+        match reserve_or_join("id-a", "https://a", "host-a", 443, "realm", false, "req-2".into(), "block-2".into()) {
             Reservation::Joined => {}
             Reservation::New { .. } => panic!("expected Joined for coalescing second request"),
         }
         let resolved = take(&approval_id).expect("entry should exist");
-        assert_eq!(resolved.auth_request_ids.len(), 2);
+        assert_eq!(resolved.auth_requests.len(), 2);
         drain();
     }
 
@@ -346,8 +390,8 @@ mod tests {
     fn different_protection_spaces_do_not_coalesce() {
         let _guard = TEST_LOCK.lock();
         drain();
-        reserve_or_join("id-a", "https://a", "realm", false, "req-1".into(), "block-1".into());
-        match reserve_or_join("id-a", "https://b", "realm", false, "req-2".into(), "block-2".into()) {
+        reserve_or_join("id-a", "https://a", "host-a", 443, "realm", false, "req-1".into(), "block-1".into());
+        match reserve_or_join("id-a", "https://b", "host-a", 443, "realm", false, "req-2".into(), "block-2".into()) {
             Reservation::New { .. } => {}
             Reservation::Joined => panic!("different origins must not coalesce"),
         }
@@ -358,8 +402,8 @@ mod tests {
     fn different_identities_do_not_coalesce_even_for_same_origin() {
         let _guard = TEST_LOCK.lock();
         drain();
-        reserve_or_join("id-a", "https://a", "realm", false, "req-1".into(), "block-1".into());
-        match reserve_or_join("id-b", "https://a", "realm", false, "req-2".into(), "block-2".into()) {
+        reserve_or_join("id-a", "https://a", "host-a", 443, "realm", false, "req-1".into(), "block-1".into());
+        match reserve_or_join("id-b", "https://a", "host-a", 443, "realm", false, "req-2".into(), "block-2".into()) {
             Reservation::New { .. } => {}
             Reservation::Joined => panic!("different identities must not coalesce"),
         }
@@ -370,7 +414,7 @@ mod tests {
     fn take_removes_entry_and_returns_window_id() {
         let _guard = TEST_LOCK.lock();
         drain();
-        let approval_id = match reserve_or_join("id-a", "https://a", "realm", false, "req-1".into(), "block-1".into())
+        let approval_id = match reserve_or_join("id-a", "https://a", "host-a", 443, "realm", false, "req-1".into(), "block-1".into())
         {
             Reservation::New { approval_id } => approval_id,
             Reservation::Joined => unreachable!(),
@@ -386,7 +430,7 @@ mod tests {
     fn cancel_for_window_finds_entry_by_window_id_not_approval_id() {
         let _guard = TEST_LOCK.lock();
         drain();
-        let approval_id = match reserve_or_join("id-a", "https://a", "realm", false, "req-1".into(), "block-1".into())
+        let approval_id = match reserve_or_join("id-a", "https://a", "host-a", 443, "realm", false, "req-1".into(), "block-1".into())
         {
             Reservation::New { approval_id } => approval_id,
             Reservation::Joined => unreachable!(),
@@ -402,16 +446,19 @@ mod tests {
     fn cancel_for_block_unjoins_without_disturbing_sibling() {
         let _guard = TEST_LOCK.lock();
         drain();
-        let approval_id = match reserve_or_join("id-a", "https://a", "realm", false, "req-1".into(), "block-1".into())
+        let approval_id = match reserve_or_join("id-a", "https://a", "host-a", 443, "realm", false, "req-1".into(), "block-1".into())
         {
             Reservation::New { approval_id } => approval_id,
             Reservation::Joined => unreachable!(),
         };
-        reserve_or_join("id-a", "https://a", "realm", false, "req-2".into(), "block-2".into());
+        reserve_or_join("id-a", "https://a", "host-a", 443, "realm", false, "req-2".into(), "block-2".into());
         let closed_window = cancel_for_block("block-1");
         assert!(closed_window.is_empty(), "sibling still pending — window must not close");
         let resolved = take(&approval_id).expect("entry should still exist for block-2's request");
-        assert_eq!(resolved.auth_request_ids, vec!["req-2".to_string()]);
+        assert_eq!(
+            resolved.auth_requests.iter().map(|r| r.request_id.as_str()).collect::<Vec<_>>(),
+            vec!["req-2"],
+        );
         drain();
     }
 
@@ -419,7 +466,7 @@ mod tests {
     fn cancel_for_block_closes_window_when_last_request_leaves() {
         let _guard = TEST_LOCK.lock();
         drain();
-        let approval_id = match reserve_or_join("id-a", "https://a", "realm", false, "req-1".into(), "block-1".into())
+        let approval_id = match reserve_or_join("id-a", "https://a", "host-a", 443, "realm", false, "req-1".into(), "block-1".into())
         {
             Reservation::New { approval_id } => approval_id,
             Reservation::Joined => unreachable!(),
@@ -435,14 +482,76 @@ mod tests {
     fn abandon_removes_entry_and_returns_request_ids() {
         let _guard = TEST_LOCK.lock();
         drain();
-        let approval_id = match reserve_or_join("id-a", "https://a", "realm", false, "req-1".into(), "block-1".into())
+        let approval_id = match reserve_or_join("id-a", "https://a", "host-a", 443, "realm", false, "req-1".into(), "block-1".into())
         {
             Reservation::New { approval_id } => approval_id,
             Reservation::Joined => unreachable!(),
         };
-        let ids = abandon(&approval_id);
-        assert_eq!(ids, vec!["req-1".to_string()]);
+        let parked = abandon(&approval_id);
+        assert_eq!(
+            parked.iter().map(|p| p.request_id.as_str()).collect::<Vec<_>>(),
+            vec!["req-1"],
+        );
         assert!(take(&approval_id).is_none());
+        drain();
+    }
+
+    /// codex P2 / reagent P2 on PR #2824: `abandon` must hand back EVERY
+    /// request riding the reservation, each with its own `block_id` — the
+    /// window-creation-failure path falls them all through to the manual
+    /// prompt, and coalesced challenges can come from different panes. The
+    /// old signature returned bare request ids, so the caller had no way to
+    /// address a joined request's prompt to the right pane even if it had
+    /// used the return value (it discarded it, prompting only its own).
+    #[test]
+    fn abandon_returns_every_coalesced_request_with_its_own_block_id() {
+        let _guard = TEST_LOCK.lock();
+        drain();
+        let approval_id =
+            match reserve_or_join("id-a", "https://a", "host-a", 443, "realm", false, "req-1".into(), "block-1".into())
+            {
+                Reservation::New { approval_id } => approval_id,
+                Reservation::Joined => unreachable!(),
+            };
+        // A second pane hits the same protection space while the window is
+        // still being created.
+        match reserve_or_join("id-a", "https://a", "host-a", 443, "realm", false, "req-2".into(), "block-2".into()) {
+            Reservation::Joined => {}
+            Reservation::New { .. } => unreachable!("same protection space must join"),
+        }
+
+        let parked = abandon(&approval_id);
+        let pairs: Vec<(&str, &str)> =
+            parked.iter().map(|p| (p.request_id.as_str(), p.block_id.as_str())).collect();
+        assert_eq!(pairs, vec![("req-1", "block-1"), ("req-2", "block-2")]);
+        assert!(take(&approval_id).is_none());
+        drain();
+    }
+
+    /// The post-approval `Fill`-failure path re-emits the full
+    /// `browser-pane-auth-required` payload, which needs `host`/`port` —
+    /// by then the original challenge's locals are gone, so the entry has
+    /// to have carried them (reagent P1 on PR #2824).
+    #[test]
+    fn take_carries_host_port_and_per_request_block_ids() {
+        let _guard = TEST_LOCK.lock();
+        drain();
+        let approval_id =
+            match reserve_or_join("id-a", "https://a", "host-a", 8443, "realm", false, "req-1".into(), "block-1".into())
+            {
+                Reservation::New { approval_id } => approval_id,
+                Reservation::Joined => unreachable!(),
+            };
+        reserve_or_join("id-a", "https://a", "host-a", 8443, "realm", false, "req-2".into(), "block-2".into());
+
+        let resolved = take(&approval_id).expect("approval still pending");
+        assert_eq!(resolved.host, "host-a");
+        assert_eq!(resolved.port, 8443);
+        assert_eq!(resolved.origin, "https://a");
+        assert_eq!(
+            resolved.auth_requests.iter().map(|r| r.block_id.as_str()).collect::<Vec<_>>(),
+            vec!["block-1", "block-2"],
+        );
         drain();
     }
 
@@ -457,14 +566,14 @@ mod tests {
         let _guard = TEST_LOCK.lock();
         drain();
 
-        let origin_approval = match reserve_or_join("id-a", "https://a", "realm", false, "req-1".into(), "block-1".into()) {
+        let origin_approval = match reserve_or_join("id-a", "https://a", "host-a", 443, "realm", false, "req-1".into(), "block-1".into()) {
             Reservation::New { approval_id } => approval_id,
             Reservation::Joined => unreachable!("first request for this space"),
         };
         assert!(finalize_window(&origin_approval, "win-origin".into()));
 
         // Same block, DIFFERENT protection space (is_proxy) — a separate entry.
-        let proxy_approval = match reserve_or_join("id-a", "https://a", "realm", true, "req-2".into(), "block-1".into()) {
+        let proxy_approval = match reserve_or_join("id-a", "https://a", "host-a", 443, "realm", true, "req-2".into(), "block-1".into()) {
             Reservation::New { approval_id } => approval_id,
             Reservation::Joined => unreachable!("different protection space must not coalesce"),
         };
@@ -492,7 +601,7 @@ mod tests {
         let _guard = TEST_LOCK.lock();
         drain();
 
-        let approval_id = match reserve_or_join("id-a", "https://a", "realm", false, "req-1".into(), "block-1".into()) {
+        let approval_id = match reserve_or_join("id-a", "https://a", "host-a", 443, "realm", false, "req-1".into(), "block-1".into()) {
             Reservation::New { approval_id } => approval_id,
             Reservation::Joined => unreachable!(),
         };
@@ -513,7 +622,7 @@ mod tests {
     fn finalize_window_reports_success_for_a_live_reservation() {
         let _guard = TEST_LOCK.lock();
         drain();
-        let approval_id = match reserve_or_join("id-a", "https://a", "realm", false, "req-1".into(), "block-1".into()) {
+        let approval_id = match reserve_or_join("id-a", "https://a", "host-a", 443, "realm", false, "req-1".into(), "block-1".into()) {
             Reservation::New { approval_id } => approval_id,
             Reservation::Joined => unreachable!(),
         };

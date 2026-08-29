@@ -108,7 +108,7 @@ pub fn on_auth_challenge(
                  credential_broker::set_runtime_handle?",
                 request_id
             );
-            fall_through(&state, &block_id, &request_id, &origin, &host, port, &realm, is_proxy);
+            fall_through_to(&state, &block_id, &request_id, &origin, &host, port, &realm, is_proxy);
         }
     }
 }
@@ -123,7 +123,7 @@ async fn run_challenge(
     realm: String,
     is_proxy: bool,
 ) {
-    let fall_through = || fall_through(&state, &block_id, &request_id, &origin, &host, port, &realm, is_proxy);
+    let fall_through = || fall_through_to(&state, &block_id, &request_id, &origin, &host, port, &realm, is_proxy);
 
     let identity_id = match call_credential_service(
         &state,
@@ -201,7 +201,16 @@ async fn run_challenge(
         .unwrap_or("")
         .to_string();
 
-    match approval::reserve_or_join(&identity_id, &origin, &realm, is_proxy, request_id.clone(), block_id.clone()) {
+    match approval::reserve_or_join(
+        &identity_id,
+        &origin,
+        &host,
+        port,
+        &realm,
+        is_proxy,
+        request_id.clone(),
+        block_id.clone(),
+    ) {
         approval::Reservation::Joined => {
             tracing::info!(
                 "[credential-broker] request_id {} joined an already-pending approval for \
@@ -230,13 +239,34 @@ async fn run_challenge(
                     }
                 }
                 Err(e) => {
+                    // Fall through EVERY request riding this reservation, not
+                    // just our own. Another same-protection-space challenge can
+                    // join on a different Tokio worker while
+                    // `open_approval_window` runs (no lock is held across it),
+                    // and it may belong to a different pane — so each needs a
+                    // prompt addressed to its own `block_id`. Discarding
+                    // `abandon`'s return value left those joined requests
+                    // parked with no prompt until `browser_pane::auth`'s TTL
+                    // fired (codex P2 / reagent P2 on PR #2824).
                     tracing::warn!(
                         "[credential-broker] failed to open approval window for origin={}: {e} \
                          — falling through",
                         origin,
                     );
-                    approval::abandon(&approval_id);
-                    fall_through();
+                    let mut parked = approval::abandon(&approval_id);
+                    // `abandon` returns nothing if the entry was already gone
+                    // (pane closed / TTL) during the window-creation gap. Our
+                    // own request still needs its prompt either way, and must
+                    // not be prompted twice if it is in the list.
+                    if !parked.iter().any(|p| p.request_id == request_id) {
+                        parked.push(approval::ParkedRequest {
+                            request_id: request_id.clone(),
+                            block_id: block_id.clone(),
+                        });
+                    }
+                    for p in &parked {
+                        fall_through_to(&state, &p.block_id, &p.request_id, &origin, &host, port, &realm, is_proxy);
+                    }
                 }
             }
         }
@@ -246,7 +276,7 @@ async fn run_challenge(
 /// Emit the same `browser-pane-auth-required` event `on_auth_credentials`
 /// emitted unconditionally before this feature existed — the unmodified
 /// baseline path, reached from every early-return above.
-fn fall_through(
+pub(crate) fn fall_through_to(
     state: &Arc<AppState>,
     block_id: &str,
     request_id: &str,
