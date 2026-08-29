@@ -692,31 +692,54 @@ async fn route_command(
                         use cef::ImplAuthCallback;
                         let u = cef::CefString::from(username.as_str());
                         let p = cef::CefString::from(password.as_str());
-                        for request_id in &resolved.auth_request_ids {
-                            if let Some(cb) = crate::browser_pane::auth::take(request_id) {
+                        for parked in &resolved.auth_requests {
+                            if let Some(cb) = crate::browser_pane::auth::take(&parked.request_id) {
                                 cb.cont(Some(&u), Some(&p));
                             }
                         }
                     }
                     Err(e) => {
+                        // The human already said yes; the secret just could not
+                        // be read (credential deleted between approval and
+                        // Fill, transient keychain/backend failure, srv
+                        // restart). Cancelling here would render the bare 401
+                        // with no way to type credentials — strictly worse than
+                        // pre-feature behaviour, and a direct violation of this
+                        // feature's "can only make auth more automatic, never
+                        // break the baseline" guarantee (codex P2 → reagent P1
+                        // on PR #2824).
+                        //
+                        // So leave every callback PARKED in
+                        // `browser_pane::auth` and emit the ordinary
+                        // `browser-pane-auth-required` prompt for each, one per
+                        // originating pane — coalesced requests can come from
+                        // different panes. The manual prompt then resolves the
+                        // very same parked callbacks, exactly as it does when
+                        // no stored credential exists at all.
                         tracing::warn!(
                             "[credential-broker] Fill failed for approval_id {}: {e} — \
-                             cancelling {} parked auth request(s)",
+                             falling {} parked auth request(s) through to the manual prompt",
                             approval_id,
-                            resolved.auth_request_ids.len(),
+                            resolved.auth_requests.len(),
                         );
-                        use cef::ImplAuthCallback;
-                        for request_id in &resolved.auth_request_ids {
-                            if let Some(cb) = crate::browser_pane::auth::take(request_id) {
-                                cb.cancel();
-                            }
+                        for parked in &resolved.auth_requests {
+                            crate::credential_broker::fall_through_to(
+                                state,
+                                &parked.block_id,
+                                &parked.request_id,
+                                &resolved.origin,
+                                &resolved.host,
+                                resolved.port,
+                                &resolved.realm,
+                                resolved.is_proxy,
+                            );
                         }
                     }
                 }
             } else {
                 use cef::ImplAuthCallback;
-                for request_id in &resolved.auth_request_ids {
-                    if let Some(cb) = crate::browser_pane::auth::take(request_id) {
+                for parked in &resolved.auth_requests {
+                    if let Some(cb) = crate::browser_pane::auth::take(&parked.request_id) {
                         cb.cancel();
                     }
                 }
