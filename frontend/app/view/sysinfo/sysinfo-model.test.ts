@@ -100,13 +100,46 @@ describe("sampleReducer — APPEND across a backwards clock step", () => {
         expect(out.some((d) => d.ts === base + 8000)).toBe(false);
     });
 
-    it("tolerates sub-threshold jitter without discarding the buffer", () => {
-        // A ~1s backwards nudge is slew, not a step: keep the history.
+    it("tolerates sub-threshold jitter without marking a break", () => {
+        // A sub-tick backwards nudge is slew, not a step: keep the history and
+        // do NOT insert a visible break. The one overtaken point is dropped so
+        // the series still can't go non-monotonic.
         const base = 10_000_000;
         const state = [sample(base), sample(base + 1000)];
         const out = append(state, sample(base + 500));
-        expect(out.map((d) => d.ts)).toEqual([base, base + 1000, base + 500]);
+        expect(out.map((d) => d.ts)).toEqual([base, base + 500]);
         expect(out.some((d) => d.blank === 1)).toBe(false);
+    });
+
+    // reagentx P1 (PR #2832): the first version of this fix used ONE threshold
+    // for two different jobs — deciding a step happened, and deciding which
+    // points may remain. A point sitting between `item.ts` and
+    // `item.ts + gapThreshold` survived the filter but is still AHEAD of the
+    // new sample, so the `clockStepped` branch appended
+    // `[...trimmed, blank(last.ts + 1), item]` with `last.ts + 1 > item.ts` —
+    // reintroducing exactly the non-monotonic series this PR exists to fix.
+    // Only reachable for a PARTIAL step: bigger than the threshold, but not
+    // big enough to clear every buffered point — i.e. an ordinary few-second
+    // NTP correction, which is far more common than a 55-year jump.
+    it("stays monotonic for a partial step that clears only some of the buffer", () => {
+        const out = append([sample(8000), sample(9000), sample(10000)], sample(5000));
+        expect(out.map((d) => d.ts)).toEqual([5000]);
+        for (let i = 1; i < out.length; i++) {
+            expect(out[i].ts).toBeGreaterThan(out[i - 1].ts);
+        }
+    });
+
+    it("stays monotonic across every backwards step magnitude", () => {
+        const base = 10_000_000;
+        const state = [sample(base), sample(base + 1000), sample(base + 2000), sample(base + 3000)];
+        // Sweep well past the gap threshold (3000ms at 1Hz) and back, so both
+        // the partial-step and full-clear regimes are covered.
+        for (const back of [100, 500, 1000, 2500, 3000, 3500, 4000, 5000, 10_000, 60_000]) {
+            const out = append(state, sample(base + 3000 - back));
+            for (let i = 1; i < out.length; i++) {
+                expect(out[i].ts, `regression at back=${back}ms`).toBeGreaterThan(out[i - 1].ts);
+            }
+        }
     });
 });
 
@@ -150,5 +183,44 @@ describe("sampleReducer — RESET", () => {
         for (let i = 1; i < out.length; i++) {
             expect(out[i].ts).toBeGreaterThan(out[i - 1].ts);
         }
+    });
+
+    // codex P2 (PR #2832): a sub-threshold backwards correction in history left
+    // BOTH samples in place, and bracketing the seam with `prev.ts + 1` /
+    // `cur.ts - 1` blanks inherits the same inversion rather than repairing it
+    // — history [10000, 8000] emitted 10000, 10001, 7999, 8000.
+    it("drops the superseded segment on a sub-threshold backwards correction", () => {
+        const out = reset([sample(10000), sample(8000)]);
+        const ts = out.map((d) => d.ts);
+        expect(ts).not.toContain(10000);
+        expect(ts).toContain(8000);
+        for (let i = 1; i < out.length; i++) {
+            expect(out[i].ts).toBeGreaterThan(out[i - 1].ts);
+        }
+    });
+
+    it("repairs arbitrary out-of-order ring content, anchored on the newest sample", () => {
+        // Ring order is insertion order, so any interleaving is possible.
+        const out = reset([sample(5000), sample(9000), sample(6000), sample(7000)]);
+        for (let i = 1; i < out.length; i++) {
+            expect(out[i].ts).toBeGreaterThan(out[i - 1].ts);
+        }
+        // The newest-by-arrival sample is the live one and must survive.
+        expect(out[out.length - 1].ts).toBe(7000);
+    });
+});
+
+describe("sampleReducer — no duplicate x", () => {
+    it("omits the seam sentinel when it would collide with the new sample", () => {
+        // `last.ts + 1 === item.ts`: the sentinel has nowhere to go.
+        const out = append([sample(4999), sample(20000)], sample(5000));
+        expect(out.map((d) => d.ts)).toEqual([4999, 5000]);
+        expect(new Set(out.map((d) => d.ts)).size).toBe(out.length);
+    });
+
+    it("supersedes a buffered sample sharing the new sample's timestamp", () => {
+        const out = append([sample(1000), sample(2000, 11)], sample(2000, 99));
+        expect(out.map((d) => d.ts)).toEqual([1000, 2000]);
+        expect(out[out.length - 1].cpu).toBe(99);
     });
 });
