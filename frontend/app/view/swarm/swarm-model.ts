@@ -1037,6 +1037,17 @@ export class SwarmViewModel implements ViewModel {
 
         void this.loadAll();
 
+        // Bounded backfill-naming backlog pass (agentmuxai/agentmux#2829) —
+        // fired once, only here, because this constructor only runs when a
+        // human actually opens the Swarm pane (block-registry.ts's "swarm"
+        // view), never from the headless per-agent-pane backfill scan that
+        // runs on every reopen regardless of whether this pane is even
+        // open. Resolves a capped batch of whatever's currently unnamed in
+        // the backfilled/historical backlog server-side; results stream
+        // back through the existing subagent:named / dispatch:updated
+        // handlers below — no response to await here.
+        void callBackendService("subagent", "ResolveUnnamedBacklog", []);
+
         const unsubSpawned = waveEventSubscribe({
             eventType: "subagent:spawned",
             handler: () => this.scheduleLoadSubagents(),
@@ -1270,6 +1281,20 @@ export class SwarmViewModel implements ViewModel {
                 }
                 this.reconcileCountdowns();
             });
+
+            // agentmuxai/agentmux#2829 (Codex P1 on #2830): the constructor's
+            // one-shot ResolveUnnamedBacklog call only covers whatever's
+            // already backfilled by the time the Swarm pane opens. A
+            // backfill that lands on an *already-open* pane (e.g. a
+            // different agent pane reopening while this one is up) reaches
+            // this same debounced handler via subagent:spawned/dispatch:
+            // updated but never re-fires the backlog resolver — those rows
+            // stay raw-slugged until the whole view model is torn down and
+            // rebuilt. Re-firing here too closes that gap. Cheap when
+            // there's nothing new: the backend's naming_triggered claim
+            // makes an already-drained backlog a fast no-op scan, not a
+            // real Haiku spend.
+            void callBackendService("subagent", "ResolveUnnamedBacklog", []);
         }, SwarmViewModel.LOAD_SUBAGENTS_DEBOUNCE_MS);
     };
 

@@ -246,14 +246,136 @@ impl SubagentWatcher {
                     &watcher,
                     &dispatch_id,
                     &first_member_agent_id,
+                    crate::server::app_api::session::pull_call_semaphore(),
                 ).await;
             } else {
                 crate::server::app_api::session::generate_subagent_name(
                     &watcher.wstore,
                     &watcher,
                     &first_member_agent_id,
+                    crate::server::app_api::session::pull_call_semaphore(),
                 ).await;
             }
         });
+    }
+
+    /// Select up to `limit` currently-unnamed subagents/dispatches for the
+    /// bounded backfill-naming pass (`resolve_unnamed_backlog`), most
+    /// recently-active first, and atomically claim each selected item in
+    /// `naming_triggered` before returning it — reusing the exact dedup
+    /// structure the live eager-naming path already uses
+    /// (`jsonl::process_jsonl_change`), so this can never double-name
+    /// something, race with a live spawn of the same dispatch, or need a
+    /// second `HashSet`. Because the claim is permanent, calling this again
+    /// (a second Swarm-pane-open before an earlier batch finishes, or after
+    /// it drains) never re-selects anything already claimed — this is what
+    /// makes `resolve_unnamed_backlog` safe to fire on every pane open with
+    /// no extra debounce.
+    ///
+    /// Deliberately never holds `sessions`/`dispatches` and `naming_triggered`
+    /// locked at the same time — mirrors `process_jsonl_change`'s own
+    /// convention (see its "Mutex released here" comment).
+    pub(super) fn select_unnamed_backlog(&self, limit: usize) -> Vec<BacklogNamingItem> {
+        let mut candidates: Vec<(u64, BacklogNamingItem)> = {
+            let sessions = self.sessions.lock().unwrap();
+            sessions
+                .values()
+                .flat_map(|s| s.subagents.values())
+                .filter(|state| {
+                    state.info.display_name.is_none() && state.info.dispatch_id.starts_with("solo:")
+                })
+                .map(|state| {
+                    (
+                        state.info.last_event_at,
+                        BacklogNamingItem::Solo { agent_id: state.info.agent_id.clone() },
+                    )
+                })
+                .collect()
+        };
+
+        let unnamed_workflows: Vec<(String, u64)> = {
+            let dispatches = self.dispatches.lock().unwrap();
+            dispatches
+                .values()
+                .map(|state| &state.info)
+                .filter(|info| info.kind == DispatchKind::Workflow && info.dispatch_name.is_none())
+                .map(|info| (info.dispatch_id.clone(), info.last_event_at))
+                .collect()
+        };
+
+        if !unnamed_workflows.is_empty() {
+            let sessions = self.sessions.lock().unwrap();
+            for (dispatch_id, last_event_at) in unnamed_workflows {
+                let representative = sessions
+                    .values()
+                    .flat_map(|s| s.subagents.values())
+                    .find(|state| state.info.dispatch_id == dispatch_id)
+                    .map(|state| state.info.agent_id.clone());
+                if let Some(representative_agent_id) = representative {
+                    candidates.push((
+                        last_event_at,
+                        BacklogNamingItem::Workflow { dispatch_id, representative_agent_id },
+                    ));
+                }
+            }
+        }
+
+        candidates.sort_by(|a, b| b.0.cmp(&a.0));
+
+        let mut naming_triggered = self.naming_triggered.lock().unwrap();
+        let mut selected = Vec::with_capacity(limit.min(candidates.len()));
+        for (_, item) in candidates {
+            if selected.len() >= limit {
+                break;
+            }
+            if naming_triggered.insert(item.dispatch_id()) {
+                selected.push(item);
+            }
+        }
+        selected
+    }
+
+    /// Bounded, rate-limited burst that resolves names for whatever's
+    /// currently unnamed in the backfilled/historical backlog
+    /// (`select_unnamed_backlog`) — fired only via the
+    /// `("subagent", "ResolveUnnamedBacklog")` RPC, itself only ever called
+    /// from `SwarmViewModel`'s constructor (i.e. a human actually opening
+    /// the Swarm pane), never from the headless per-agent-pane backfill
+    /// scan — that path stays exactly as `live`-gated as before (see
+    /// `process_jsonl_change`'s doc comment and
+    /// docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md).
+    ///
+    /// Deliberately separate from `trigger_eager_naming`'s live path: uses
+    /// its own `backlog_naming_semaphore()` (cap 1), not the shared
+    /// `pull_call_semaphore()` every live user-facing ambient caller
+    /// contends for.
+    pub(crate) async fn resolve_unnamed_backlog(self: std::sync::Arc<Self>) {
+        let items = self.select_unnamed_backlog(BACKLOG_NAMING_BATCH_LIMIT);
+        for item in items {
+            let watcher = std::sync::Arc::clone(&self);
+            tokio::spawn(async move {
+                match item {
+                    BacklogNamingItem::Solo { agent_id } => {
+                        crate::server::app_api::session::generate_subagent_name(
+                            &watcher.wstore,
+                            &watcher,
+                            &agent_id,
+                            crate::server::app_api::session::backlog_naming_semaphore(),
+                        )
+                        .await;
+                    }
+                    BacklogNamingItem::Workflow { dispatch_id, representative_agent_id } => {
+                        crate::server::app_api::session::generate_dispatch_name(
+                            &watcher.wstore,
+                            &watcher,
+                            &dispatch_id,
+                            &representative_agent_id,
+                            crate::server::app_api::session::backlog_naming_semaphore(),
+                        )
+                        .await;
+                    }
+                }
+            });
+        }
     }
 }
