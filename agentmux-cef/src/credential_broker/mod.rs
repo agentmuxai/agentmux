@@ -43,6 +43,36 @@ pub(crate) fn runtime_handle() -> Option<Handle> {
     TOKIO_HANDLE.get().cloned()
 }
 
+/// Closes an approval subwindow by label. Installed once from `lib.rs`
+/// alongside [`set_runtime_handle`], for the same reason a handle is: the
+/// paths that need to close a window (notably [`approval`]'s TTL timer)
+/// run on tasks that hold neither `AppState` nor a window handle.
+///
+/// A hook rather than a direct `commands::window` call from [`approval`] so
+/// that module keeps its stated design property — it holds `window_id`
+/// strings and nothing else, with no dependency on window management.
+type WindowCloser = Box<dyn Fn(&str) + Send + Sync + 'static>;
+static WINDOW_CLOSER: OnceLock<WindowCloser> = OnceLock::new();
+
+pub fn set_window_closer(f: impl Fn(&str) + Send + Sync + 'static) {
+    let _ = WINDOW_CLOSER.set(Box::new(f));
+}
+
+/// Best-effort — a failure (or a closer that was never installed) leaves a
+/// dead window for the human to close, which is strictly better than the
+/// previous behaviour of always leaving it. Never propagates: every caller
+/// is on a cleanup path where there is nothing useful to do with an error.
+pub(crate) fn close_approval_window(window_id: &str) {
+    match WINDOW_CLOSER.get() {
+        Some(f) => f(window_id),
+        None => tracing::error!(
+            "[credential-broker] no window closer installed; approval subwindow {} will \
+             be left open. Did lib.rs call credential_broker::set_window_closer?",
+            window_id
+        ),
+    }
+}
+
 /// srv is on the same machine (`127.0.0.1`) — a slow/unreachable srv must
 /// never add a long stall to auth challenges that have no stored
 /// credential at all (the overwhelming common case, now sitting in this
@@ -183,7 +213,22 @@ async fn run_challenge(
         approval::Reservation::New { approval_id } => {
             match open_approval_window(&state, &block_id, &approval_id, &origin, &realm, is_proxy, &masked_username)
             {
-                Ok(window_id) => approval::finalize_window(&approval_id, window_id),
+                Ok(window_id) => {
+                    // The reservation can be cancelled (pane closed) or time
+                    // out during `open_approval_window`'s synchronous gap —
+                    // no lock is held across it. If that happened, the window
+                    // now belongs to nothing: `cancel_for_window` can't match
+                    // it, the decide-handler's `take` returns `None`, and the
+                    // TTL entry is already gone — so nothing else will ever
+                    // close it (reagent P1 on PR #2824). Close it here, and
+                    // fall this request through to the manual prompt rather
+                    // than leaving it parked for a decision that can no
+                    // longer be made.
+                    if !approval::finalize_window(&approval_id, window_id.clone()) {
+                        close_approval_window(&window_id);
+                        fall_through();
+                    }
+                }
                 Err(e) => {
                     tracing::warn!(
                         "[credential-broker] failed to open approval window for origin={}: {e} \
