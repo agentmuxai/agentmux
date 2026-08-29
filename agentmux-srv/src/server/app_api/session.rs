@@ -349,6 +349,24 @@ fn definition_summary_semaphore() -> &'static tokio::sync::Semaphore {
     SEM.get_or_init(|| tokio::sync::Semaphore::new(MAX_CONCURRENT_DEFINITION_SUMMARIES))
 }
 
+/// Max simultaneous Haiku CLI spawns for `SubagentWatcher::resolve_unnamed_backlog`'s
+/// bounded backfill-naming pass. Deliberately its OWN semaphore, not
+/// `pull_call_semaphore()` — same reasoning as `definition_summary_semaphore()`
+/// above: this is a background burst triggered by a Swarm-pane-open, not a
+/// live user-turn-triggered call (`subagent.GenerateName`'s on-click path
+/// still uses `pull_call_semaphore()` directly), so it must not queue behind
+/// or block that one. Capped at 1: this is best-effort backlog fill-in for
+/// historical rows, not latency-sensitive — see
+/// docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md for why an
+/// unbounded version of this exact call pattern is the incident this is
+/// designed not to repeat.
+const MAX_CONCURRENT_BACKLOG_NAMING: usize = 1;
+
+pub(crate) fn backlog_naming_semaphore() -> &'static tokio::sync::Semaphore {
+    static SEM: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    SEM.get_or_init(|| tokio::sync::Semaphore::new(MAX_CONCURRENT_BACKLOG_NAMING))
+}
+
 /// Read-only CLI path lookup for `provider_id` — checks the versioned
 /// local-install dir, then falls back to system PATH. Deliberately never
 /// installs anything (unlike the `resolvecli` RPC handler / `agent_open.rs`'s
@@ -547,6 +565,7 @@ pub(crate) async fn generate_subagent_name(
     wstore: &Store,
     subagent_watcher: &Arc<crate::backend::subagent_watcher::SubagentWatcher>,
     agent_id: &str,
+    semaphore: &'static tokio::sync::Semaphore,
 ) -> Option<(String, Option<crate::agents::TokenCounts>)> {
     let info = subagent_watcher.get_info(agent_id)?;
     if let Some(existing) = info.display_name {
@@ -560,13 +579,14 @@ pub(crate) async fn generate_subagent_name(
     };
     let cancel = guard.cancellation();
 
-    // Same cross-block concurrency cap as the pull RPCs above — a user
-    // rapidly expanding several subagent rows shouldn't spawn unbounded
-    // concurrent Haiku CLIs either.
+    // Concurrency cap — `pull_call_semaphore()` for the live on-click path
+    // (a user rapidly expanding several subagent rows shouldn't spawn
+    // unbounded concurrent Haiku CLIs either), `backlog_naming_semaphore()`
+    // for the bounded backfill pass — see each call site.
     let permit = tokio::select! {
         biased;
         _ = cancel.cancelled() => None,
-        permit = pull_call_semaphore().acquire() => permit.ok(),
+        permit = semaphore.acquire() => permit.ok(),
     };
     let Some(_permit) = permit else {
         drop(guard);
@@ -641,6 +661,7 @@ pub(crate) async fn generate_dispatch_name(
     subagent_watcher: &Arc<crate::backend::subagent_watcher::SubagentWatcher>,
     dispatch_id: &str,
     first_member_agent_id: &str,
+    semaphore: &'static tokio::sync::Semaphore,
 ) -> Option<(String, Option<crate::agents::TokenCounts>)> {
     let info = subagent_watcher.get_info(first_member_agent_id)?;
 
@@ -651,12 +672,12 @@ pub(crate) async fn generate_dispatch_name(
     };
     let cancel = guard.cancellation();
 
-    // Same cross-block concurrency cap as every other ambient caller — see
-    // AMBIENT_PURPOSE_SUBAGENT_NAME's comment above.
+    // Concurrency cap — see `generate_subagent_name`'s matching comment
+    // above; same two possible callers, same two possible semaphores.
     let permit = tokio::select! {
         biased;
         _ = cancel.cancelled() => None,
-        permit = pull_call_semaphore().acquire() => permit.ok(),
+        permit = semaphore.acquire() => permit.ok(),
     };
     let Some(_permit) = permit else {
         drop(guard);
