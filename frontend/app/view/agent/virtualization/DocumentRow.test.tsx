@@ -285,6 +285,27 @@ describe("DocumentRow — peek tooltip on the inline node kinds", () => {
         );
     });
 
+    it("session_outcome: an empty attemptedSid reads as '—', not a blank", () => {
+        vi.useFakeTimers();
+        // srv emits `attempted_sid: ""` when the spawn had no session id to
+        // resume at all (the cross-channel-open case its
+        // `fresh_start_needs_disclosure` gate covers) — distinct from having
+        // attempted an id that was rejected.
+        const node: SessionOutcomeNode = {
+            type: "session_outcome",
+            id: "so-2",
+            outcome: "fresh",
+            attemptedSid: "",
+            actualSid: null,
+            timestamp: Date.now() - 65_000,
+        };
+        const { container } = renderRow(node);
+        hover(container, ".agent-session-outcome");
+        expect(document.body.querySelector(".agent-node-peek-tooltip-body")?.textContent).toBe(
+            "attempted: — · actual: —"
+        );
+    });
+
     it("history_link: no peek anchor at all — nothing to show", () => {
         vi.useFakeTimers();
         const node: HistoryLinkNode = { type: "history_link", id: "history-link" };

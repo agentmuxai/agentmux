@@ -104,6 +104,8 @@ import { computeTermSizeFromEl, usePtyWidth } from "./hooks/usePtyWidth";
 import { useScrollToNode } from "./hooks/useScrollToNode";
 import { useSnapshotPersistence } from "./hooks/useSnapshotPersistence";
 import { injectHistoryLink } from "./inject-history-link";
+import { buildResumePreflightNode, injectResumePreflight } from "./inject-resume-preflight";
+import { useResumePreflight } from "./hooks/useResumePreflight";
 import { HISTORY_TAB_FOR_META_KEY, openOrFocusHistoryTab } from "./open-history-tab";
 import { getProvider } from "./providers";
 import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
@@ -1005,6 +1007,12 @@ const AgentPresentationView = ({
         log,
     });
 
+    // Will the next spawn continue the conversation this pane is displaying, or
+    // start a new one? Asked once on mount, before the user can type — the
+    // whole point is to beat the first send, since every other continuity
+    // signal is retrospective. See `hooks/useResumePreflight.ts`.
+    const resumePreflight = useResumePreflight(model.blockId);
+
     // True when content older than the working session exists out of view:
     // set by the restore/pagination clamp paths (scopeClamped) OR derived
     // from a live clamp — after the reducer's StreamFlush trim, the fresh
@@ -1024,7 +1032,15 @@ const AgentPresentationView = ({
     // setter, so pairing a derived read with the real write side is safe
     // (nothing writes through this pair, so there's nothing to desync).
     const displayDocumentAtom: SignalPair<DocumentNode[]> = [
-        () => injectHistoryLink(agentAtoms().documentAtom[0](), earlierHistoryAvailable()),
+        () =>
+            injectResumePreflight(
+                injectHistoryLink(agentAtoms().documentAtom[0](), earlierHistoryAvailable()),
+                buildResumePreflightNode(
+                    agentAtoms().documentAtom[0](),
+                    resumePreflight.result(),
+                    resumePreflight.showSteps(),
+                ),
+            ),
         agentAtoms().documentAtom[1],
     ];
 
