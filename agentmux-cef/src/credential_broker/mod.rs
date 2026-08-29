@@ -346,12 +346,23 @@ fn http_client() -> &'static reqwest::Client {
     CLIENT.get_or_init(reqwest::Client::new)
 }
 
-/// POST `{"service": "credential", "method": ..., "args": [args0]}` to
-/// `/agentmux/service`, same endpoint + `X-AuthKey` auth
+/// POST `{"service": "credential", "method": ..., "args": [args0, secret]}`
+/// to `/agentmux/service`, same endpoint + `X-AuthKey` auth
 /// `client::helpers::backend_close_window` already uses for this
 /// direction — async via `reqwest` here rather than that raw-TCP style,
 /// since this call site is already fully async (unlike
 /// `backend_close_window`'s non-async caller).
+///
+/// `args[1]` is `AGENTMUX_HOST_REG_SECRET` — srv rejects every method on
+/// this service without it. `X-AuthKey` alone is NOT sufficient and must
+/// never be treated as such here: it's injected into every agent's own
+/// environment, so gating on it alone let any agent `curl` the plaintext
+/// password straight out of `credential.Fill` (reagent P0 on PR #2824).
+/// See `agentmux-srv/src/server/service/credential.rs`'s module doc.
+///
+/// Sent as a positional arg rather than a header to match
+/// `host_ipc.Register`'s existing shape (`args[2]` there), keeping both
+/// host→srv host-proving calls in one idiom.
 async fn call_credential_service(
     state: &Arc<AppState>,
     method: &str,
@@ -362,11 +373,22 @@ async fn call_credential_service(
         return Err("backend web_endpoint not yet configured".to_string());
     }
     let auth_key = state.auth_key.lock().clone();
+    let host_reg_secret = state.host_reg_secret.lock().clone();
+    if host_reg_secret.is_empty() {
+        // Every caller of this function already falls through to the manual
+        // prompt on Err, so failing here degrades to "no auto-fill" rather
+        // than breaking auth — the same posture as every other failure mode
+        // in this feature.
+        return Err(format!(
+            "credential.{method}: host has no AGENTMUX_HOST_REG_SECRET — cannot prove \
+             host identity to srv, falling through to the manual prompt"
+        ));
+    }
     let url = format!("{}/agentmux/service", web_endpoint.trim_end_matches('/'));
     let body = serde_json::json!({
         "service": "credential",
         "method": method,
-        "args": [args0],
+        "args": [args0, host_reg_secret],
         "uicontext": serde_json::Value::Null,
     });
 
