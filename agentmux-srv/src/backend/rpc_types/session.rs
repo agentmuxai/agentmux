@@ -76,6 +76,48 @@ pub struct NextPromptSuggestionResult {
     pub tokens: Option<TokenCounts>,
 }
 
+// ---- Resume preflight types ----
+
+/// Request for session:resume_preflight — asks, before any spawn, whether this
+/// pane's next turn will continue its conversation or start a new one.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CommandSessionResumePreflightData {
+    pub block_id: String,
+}
+
+/// One row of the pane's progress list while the preflight runs — same shape as
+/// the launcher splash's stage rows.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ResumePreflightStep {
+    pub id: String,
+    pub label: String,
+    /// `false` is normal — it's how the sequence narrows, not an error.
+    pub ok: bool,
+    pub detail: String,
+    pub duration_ms: u64,
+}
+
+/// Response from session:resume_preflight.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct SessionResumePreflightResult {
+    pub block_id: String,
+    /// `"resume" | "recover" | "fresh" | "unknown"`.
+    pub verdict: String,
+    /// The session that would actually load, when one would.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    /// A real session on disk that the next spawn will NOT reach for — set
+    /// only alongside `"fresh"`, as evidence that history exists even though
+    /// nothing will load it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recoverable_session_id: Option<String>,
+    pub steps: Vec<ResumePreflightStep>,
+    pub duration_ms: u64,
+}
+
 // ---- Session archival types ----
 
 /// Request for session:archive — compress and archive a session's FileStore output.

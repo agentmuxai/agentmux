@@ -537,6 +537,10 @@ pub const COMMAND_MCP_CATALOG_LIST_FOR_BUNDLE: &str = "mcp.catalog.list_for_bund
 // See the identical comment on COMMAND_SKILL_CATALOG_UPSERT_FOR_BUNDLE above.
 pub const COMMAND_MCP_CATALOG_UPSERT_FOR_BUNDLE: &str = "mcp.catalog.upsert_for_bundle";
 
+// Pane-open resume preflight — "will this conversation resume, or start new?"
+// answered before anything is spawned. See crate::backend::resume_preflight.
+pub const COMMAND_SESSION_RESUME_PREFLIGHT: &str = "session:resume_preflight";
+
 // App API Tier 1 — session archival commands
 pub const COMMAND_SESSION_ARCHIVE: &str = "session:archive";
 pub const COMMAND_SESSION_RESTORE: &str = "session:restore";

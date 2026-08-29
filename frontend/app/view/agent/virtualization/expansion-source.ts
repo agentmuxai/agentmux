@@ -125,5 +125,9 @@ export function currentExpansion(
         case "history_link":
             // Fixed-height link row — never collapsible.
             return OPEN_DEFAULT;
+
+        case "resume_preflight":
+            // Fixed-height continuity notice — never collapsible.
+            return OPEN_DEFAULT;
     }
 }

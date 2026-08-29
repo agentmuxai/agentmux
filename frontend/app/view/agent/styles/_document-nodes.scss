@@ -2174,3 +2174,67 @@
         }
     }
 }
+
+// ── Pane-open continuity notice ──────────────────────────────────────────────
+// Injected at the very top of the live document by `injectResumePreflight` when
+// the next spawn won't continue the conversation on screen. Shares
+// `.agent-history-link-row`'s dashed-outline vocabulary — both are render-time
+// synthetics about the conversation rather than part of it — but carries a
+// warning tint, since this one is telling you something is about to be lost.
+.agent-resume-preflight {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    padding: 8px var(--space-2);
+    margin: 0 var(--space-1-5);
+    border: 1px dashed var(--border-color, rgba(255, 255, 255, 0.12));
+    border-radius: 4px;
+    user-select: none;
+
+    .agent-resume-preflight-sigil {
+        flex-shrink: 0;
+        opacity: 0.8;
+    }
+
+    .agent-resume-preflight-label {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 11px;
+        color: var(--secondary-text-color, rgba(255, 255, 255, 0.55));
+    }
+
+    .agent-resume-preflight-cta {
+        flex-shrink: 0;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--accent-color);
+        cursor: var(--cursor-interactive, pointer);
+
+        &:hover,
+        &:focus-visible {
+            text-decoration: underline;
+        }
+
+        &:focus-visible {
+            outline: none;
+        }
+    }
+}
+
+.agent-resume-preflight-fresh {
+    border-color: color-mix(in srgb, var(--warning-color, #d89a3a) 45%, transparent);
+
+    .agent-resume-preflight-sigil {
+        color: var(--warning-color, #d89a3a);
+    }
+}
+
+// Continuity survives here — this is a "brace for a pause", not a warning, so
+// it stays in the neutral vocabulary rather than borrowing the warning tint.
+.agent-resume-preflight-recover .agent-resume-preflight-sigil,
+.agent-resume-preflight-pending .agent-resume-preflight-sigil {
+    color: var(--tertiary-text-color, rgba(255, 255, 255, 0.35));
+}

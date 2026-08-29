@@ -83,6 +83,77 @@ fn session_outcome_line(
     )
 }
 
+/// Should a spawn that attached NO `--resume` disclose itself as a fresh
+/// start (subject to the caller also confirming prior history actually
+/// exists — see `has_prior_transcript`)?
+///
+/// SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md §2.1 deliberately left
+/// this case unreported, reasoning that a spawn with no session id has
+/// "nothing to lose". That's true for a brand-new agent and false for the
+/// case `docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`
+/// recorded: a long-lived named agent opened in a fresh channel whose shared
+/// registry pointer is empty gets no `--resume` at all, so the CLI never
+/// errors, `persistent_resume` never tracks anything, and no outcome is ever
+/// emitted — while the pane renders the entire prior conversation through
+/// `blockfile.rs`'s cross-channel read fallback. That is exactly the silent
+/// disagreement between "what the pane shows" and "what the model has" that
+/// `EmitSessionOutcome` exists to prevent.
+///
+/// `generation == 1` restricts this to a controller's FIRST spawn. Later
+/// generations also spawn without `--resume`, but each already has its own
+/// disclosure or deliberately has none: `retry_after_resume_failure`'s
+/// no-recovery-candidate path emits `Fresh` itself, and
+/// `respawn_once_for_leftover_queue` restarts a session whose fresh-vs-resumed
+/// status was decided on an earlier generation. Only a first spawn can be the
+/// "pane just opened onto history this process never had" case.
+///
+/// Kept a pure free function (the FileStore lookup stays at the call site) so
+/// the gate is unit-testable without a controller or a spawned process.
+fn fresh_start_needs_disclosure(attempted_resume_sid: Option<&str>, generation: u64) -> bool {
+    attempted_resume_sid.is_none() && generation == 1
+}
+
+#[cfg(test)]
+mod fresh_start_disclosure_tests {
+    use super::fresh_start_needs_disclosure;
+
+    /// The case STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md
+    /// recorded: a pane's first spawn, no registry pointer to resume, prior
+    /// history on disk. Nothing else in the resume machinery reports this.
+    #[test]
+    fn a_first_spawn_with_no_resume_is_disclosed() {
+        assert!(fresh_start_needs_disclosure(None, 1));
+    }
+
+    /// A resume WAS attempted — `persistent_resume`'s own tracking owns the
+    /// outcome from here (Resumed, or Fresh via the retry/recovery cascade).
+    /// Disclosing here too would double-report and could contradict it.
+    #[test]
+    fn a_spawn_that_attempted_a_resume_is_never_disclosed_here() {
+        assert!(!fresh_start_needs_disclosure(Some("some-sid"), 1));
+        assert!(!fresh_start_needs_disclosure(Some("some-sid"), 4));
+    }
+
+    /// Later generations spawn without `--resume` too, but each already has
+    /// its own disclosure or deliberately has none —
+    /// `retry_after_resume_failure` emits `Fresh` itself when no recovery
+    /// candidate exists, and `respawn_once_for_leftover_queue` restarts a
+    /// session already decided on an earlier generation. Re-disclosing would
+    /// stack a second divider onto an unchanged conversation.
+    #[test]
+    fn a_later_generation_respawn_is_not_re_disclosed() {
+        assert!(!fresh_start_needs_disclosure(None, 2));
+        assert!(!fresh_start_needs_disclosure(None, 17));
+    }
+
+    /// Generation 0 never reaches a spawn (`spawn_process` bumps before use),
+    /// but the gate must not treat the sentinel as a first spawn.
+    #[test]
+    fn generation_zero_is_not_treated_as_a_first_spawn() {
+        assert!(!fresh_start_needs_disclosure(None, 0));
+    }
+}
+
 /// Publish a `wps::EVENT_AGENT_RESUME_RETRY` status ping — a free function
 /// (not a method) for the same reason `session_outcome_line` above is one:
 /// callable from the stdout-reader/process-waiter match arms, which only
@@ -1592,6 +1663,53 @@ impl PersistentSubprocessController {
         );
     }
 
+    /// Does a transcript already exist for this pane — either in this
+    /// channel's own blockfile, or in the agent's GLOBAL transcript zone?
+    ///
+    /// The second half is the one that matters for
+    /// [`fresh_start_needs_disclosure`]: on a cross-channel or cross-version
+    /// open this channel's blockfile is empty, but the pane still renders the
+    /// full prior conversation through `app_api::global_output_source`'s read
+    /// fallback. Mirrors that function's checks (agent-anchored, not archived,
+    /// non-empty `output`) so "the pane will show history" and "we disclose a
+    /// fresh start" can't disagree.
+    ///
+    /// Two `stat` calls at most, on the spawn path only — cheap enough to run
+    /// unconditionally behind the caller's own generation gate.
+    fn has_prior_transcript(&self) -> bool {
+        if let Some(ref fs) = self.filestore {
+            if matches!(fs.stat(&self.block_id, PERSISTENT_OUTPUT_SUBJECT), Ok(Some(ref f)) if f.size > 0)
+            {
+                return true;
+            }
+        }
+        let Some(ref store) = self.wstore else {
+            return false;
+        };
+        let Ok(block) = store.must_get::<crate::backend::obj::Block>(&self.block_id) else {
+            return false;
+        };
+        let archived = block
+            .meta
+            .get(crate::backend::session_archive::META_SESSION_ARCHIVED_AT)
+            .and_then(|v| v.as_i64())
+            .map(|v| v > 0)
+            .unwrap_or(false);
+        if archived {
+            return false;
+        }
+        let Some(zone) = crate::backend::agent_session::agent_zone_for_block_meta(&block.meta) else {
+            return false;
+        };
+        let Some(gfs) = crate::backend::agent_session::global_transcript_store() else {
+            return false;
+        };
+        matches!(
+            gfs.stat(&zone, crate::backend::agent_session::OUTPUT_FILE),
+            Ok(Some(ref f)) if f.size > 0
+        )
+    }
+
     /// After a confirmed-stale `--resume` failure, try to recover a REAL
     /// session instead of giving up and starting blank
     /// (`docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`).
@@ -2343,6 +2461,28 @@ impl PersistentSubprocessController {
             }
         }
 
+        // This process starts with none of the conversation the pane is about
+        // to display — say so, in the transcript, before any of its own output
+        // lands. See `fresh_start_needs_disclosure` for why
+        // `persistent_resume`'s `SpawnedFresh` can't decide this itself.
+        //
+        // `attempted_sid` is empty: there was no id to attempt, which is the
+        // whole point. The frontend renders that as "—" rather than a blank
+        // (`DocumentRow.tsx`'s session-outcome body).
+        if fresh_start_needs_disclosure(attempted_resume_sid.as_deref(), my_generation)
+            && self.has_prior_transcript()
+        {
+            tracing::info!(
+                block_id = %self.block_id,
+                "spawned with no --resume while prior history exists — disclosing a fresh start"
+            );
+            self.emit_session_outcome_now(
+                persistent_resume::SessionOutcome::Fresh,
+                String::new(),
+                None,
+            );
+        }
+
         let pid = child.id().unwrap_or(0);
 
         // Notify the turn-activity tracker that a turn is starting.
@@ -2747,6 +2887,22 @@ impl PersistentSubprocessController {
                                         // publish (still fine) when this outcome came from a
                                         // plain first-time resume that was never retried.
                                         publish_resume_retry_status(&broker_read, &block_id_read, "resolved");
+                                        // A recovery scan can turn an
+                                        // already-disclosed resume failure
+                                        // into a genuine resume — retract the
+                                        // banner so it can't contradict the
+                                        // `resumed` divider appended just
+                                        // below. See
+                                        // `session_recovery::clear_resume_failed`.
+                                        if matches!(outcome, persistent_resume::SessionOutcome::Resumed) {
+                                            if let Some(ref store) = wstore_read {
+                                                super::session_recovery::clear_resume_failed(
+                                                    store,
+                                                    &event_bus_read,
+                                                    &block_id_read,
+                                                );
+                                            }
+                                        }
                                         if let Some(ref broker) = broker_read {
                                             let line = session_outcome_line(outcome, attempted_sid, actual_sid);
                                             super::shell::handle_append_block_file(
@@ -3267,6 +3423,20 @@ impl PersistentSubprocessController {
                                 actual_sid,
                             } => {
                                 publish_resume_retry_status(&broker_wait, &block_id_wait, "resolved");
+                                // Same retraction as the stdout-reader site
+                                // above — this arm reaches `Fresh` today, but
+                                // the clear is keyed on the outcome rather
+                                // than on which arm produced it, so it stays
+                                // correct if that ever changes.
+                                if matches!(outcome, persistent_resume::SessionOutcome::Resumed) {
+                                    if let Some(ref store) = wstore_wait {
+                                        super::session_recovery::clear_resume_failed(
+                                            store,
+                                            &event_bus_wait,
+                                            &block_id_wait,
+                                        );
+                                    }
+                                }
                                 if let Some(ref broker) = broker_wait {
                                     let line = session_outcome_line(outcome, attempted_sid, actual_sid);
                                     super::shell::handle_append_block_file(
@@ -3896,6 +4066,17 @@ mod send_input_tests {
     /// (issue #2365 — retry batches carry identity, not just text).
     fn qentry(seq: u64, json: &str) -> persistent_resume::QueuedRetryEntry {
         persistent_resume::QueuedRetryEntry { seq, json: json.to_string() }
+    }
+
+    /// `has_prior_transcript` gates the fresh-start disclosure, so a false
+    /// positive would stamp "New session started" onto a brand-new agent's
+    /// very first turn — and, worse, clamp its scrollback against a boundary
+    /// that has nothing before it. With no filestore and no store there is
+    /// provably no history, and it must say so rather than defaulting to
+    /// "assume there might be".
+    #[test]
+    fn has_prior_transcript_is_false_without_any_backing_store() {
+        assert!(!controller().has_prior_transcript());
     }
 
     /// codex P1 on PR #2500 (second round): the fresh-start clear must

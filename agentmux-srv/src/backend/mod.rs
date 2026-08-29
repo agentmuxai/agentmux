@@ -36,6 +36,7 @@ pub mod messagebus;
 pub mod oref;
 pub mod process_tracker;
 pub mod reactive;
+pub mod resume_preflight;
 pub mod rpc;
 pub mod rpc_types;
 pub mod schema;

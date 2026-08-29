@@ -38,6 +38,13 @@ export const SessionApi = {
         return client.rpcCall("session:next_prompt_suggestion", data, opts);
     },
 
+    // Will this pane's next turn continue its conversation, or start a new
+    // one? Read-only; spawns nothing. Called on pane mount so the answer is
+    // known before the user types.
+    SessionResumePreflightCommand(client: RpcClient, data: CommandSessionResumePreflightData, opts?: RpcOpts): Promise<SessionResumePreflightResult> {
+        return client.rpcCall("session:resume_preflight", data, opts);
+    },
+
     SessionArchiveCommand(client: RpcClient, data: CommandSessionArchiveData, opts?: RpcOpts): Promise<SessionArchiveResult> {
         return client.rpcCall("session:archive", data, opts);
     },

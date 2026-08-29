@@ -2656,6 +2656,39 @@ declare global {
         tokens?: TokenCounts;
     };
 
+    // wshrpc.CommandSessionResumePreflightData
+    type CommandSessionResumePreflightData = {
+        block_id: string;
+    };
+
+    // wshrpc.ResumePreflightStep — one row of the pane's progress list.
+    // `ok: false` is normal (it's how the sequence narrows), not an error.
+    type ResumePreflightStep = {
+        id: string;
+        label: string;
+        ok: boolean;
+        detail: string;
+        duration_ms: number;
+    };
+
+    // wshrpc.SessionResumePreflightResult — what the next spawn will do to this
+    // pane's conversation, decided before anything is spawned.
+    //   resume  — the exact session is present; it will be continued
+    //   recover — the held id is dead but a real session on disk will be
+    //             picked up by the retry path (continuity survives a pause)
+    //   fresh   — the next turn starts with none of the prior conversation
+    //   unknown — not determinable (no resume flag / no config dir); say nothing
+    type SessionResumePreflightResult = {
+        block_id: string;
+        verdict: "resume" | "recover" | "fresh" | "unknown";
+        session_id?: string;
+        // A real session on disk the next spawn will NOT reach for — set only
+        // alongside "fresh", as evidence history exists though nothing loads it.
+        recoverable_session_id?: string;
+        steps: ResumePreflightStep[];
+        duration_ms: number;
+    };
+
     // wshrpc.CommandSessionArchiveData
     type CommandSessionArchiveData = {
         block_id: string;
