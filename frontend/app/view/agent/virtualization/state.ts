@@ -53,6 +53,19 @@ export interface AgentViewState {
     disengageStickToBottom: () => void;
 
     /**
+     * True once this pane's content has overflowed its viewport at least
+     * once (`scrollHeight > clientHeight`). A pane that has never
+     * overflowed cannot have a legitimate "user scrolled away" state —
+     * there is nowhere to have scrolled away to yet — so the view layer
+     * uses this to force-pin the very first overflow transition instead
+     * of trusting whatever geometry a scroll event reports at that
+     * instant. See docs/specs/SPEC_AGENT_PANE_FIRST_OVERFLOW_SCROLL_PIN_FIX_2026_08_29.md.
+     */
+    hasOverflowedOnce: Accessor<boolean>;
+    /** Idempotent — latches true and stays true for the pane's lifetime. */
+    markOverflowedOnce: () => void;
+
+    /**
      * Captured anchor for restoring scroll position after a prepend
      * (history pagination) or remount (tab switch). null when sticky
      * to bottom or when no anchor has been captured.
@@ -109,6 +122,8 @@ export function createAgentViewState(documentAtom: SignalPair<DocumentNode[]>): 
     });
 
     const [stickToBottom, setStickToBottom] = createSignal(true);
+    const [hasOverflowedOnce, setHasOverflowedOnce] = createSignal(false);
+    const markOverflowedOnce = () => setHasOverflowedOnce(true);
     const [headAnchor, setHeadAnchor] = createSignal<ScrollAnchor | null>(null);
     const [streamingNodeId, setStreamingNodeId] = createSignal<string | null>(null);
     const [historyReady, setHistoryReady] = createSignal(false);
@@ -152,6 +167,8 @@ export function createAgentViewState(documentAtom: SignalPair<DocumentNode[]>): 
         stickToBottom,
         engageStickToBottom,
         disengageStickToBottom,
+        hasOverflowedOnce,
+        markOverflowedOnce,
         headAnchor,
         captureHeadAnchor,
         clearHeadAnchor,

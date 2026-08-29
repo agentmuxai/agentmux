@@ -196,6 +196,11 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             );
         }
         lastKnownScrollHeight = h;
+        // First real scrollbar this pane has ever had — latch it so
+        // handleScrollNow knows any FUTURE "far from bottom" reading is a
+        // legitimate disengage candidate, not a first-transition artifact.
+        // See docs/specs/SPEC_AGENT_PANE_FIRST_OVERFLOW_SCROLL_PIN_FIX_2026_08_29.md §5.1.
+        if (h > scrollRef.clientHeight) props.viewState.markOverflowedOnce();
         pendingProgrammaticScroll = true;
         scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "auto" });
     }
@@ -714,9 +719,31 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             collapseScrolledOffTools();
         }
 
+        // First time this pane's content has ever overflowed its viewport.
+        // There is no legitimate "user scrolled away" state to preserve
+        // here — nowhere existed to scroll away to before this instant —
+        // so force a fresh pin instead of trusting whatever this one
+        // event's geometry happens to read (a native scrollbar-insertion
+        // side effect or a same-frame race can otherwise make a brand-new
+        // overflow look "far from bottom" and disengage it right out of
+        // the gate, with nothing to re-engage it afterward but a manual
+        // scroll or keystroke). Latches once per pane; every subsequent
+        // scroll event uses the normal isNearBottom logic below unchanged.
+        // See docs/specs/SPEC_AGENT_PANE_FIRST_OVERFLOW_SCROLL_PIN_FIX_2026_08_29.md §5.1.
+        const isFirstOverflow = scrollHeight > clientHeight && !props.viewState.hasOverflowedOnce();
+        if (isFirstOverflow) {
+            props.viewState.markOverflowedOnce();
+            console.info(
+                "[wave-scroll-first-overflow]",
+                `pane=${props.blockId?.slice(0, 7) ?? "?"}`,
+                `forced engage — scrollTop=${scrollTop} scrollHeight=${scrollHeight} clientHeight=${clientHeight}`,
+            );
+            scrollToTrueBottom();
+        }
+
         // Engage stick when user scrolls back near bottom; disengage
         // otherwise. Engaging clears any captured headAnchor (atomic).
-        if (isNearBottom(scrollTop, scrollHeight, clientHeight)) {
+        if (isFirstOverflow || isNearBottom(scrollTop, scrollHeight, clientHeight)) {
             if (!props.viewState.stickToBottom()) {
                 props.viewState.engageStickToBottom();
             }
