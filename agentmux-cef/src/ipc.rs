@@ -520,7 +520,12 @@ async fn route_command(
             // `credential_broker::approval`'s coalescing). If this was the
             // last request on that approval, close its now-pointless
             // subwindow too.
-            if let Some(window_id) = crate::credential_broker::approval::cancel_for_block(block_id) {
+            // Plural: one pane can ride several approvals at once (a
+            // proxy-auth and an origin-auth challenge from the same page),
+            // and closing it can empty more than one of them. The earlier
+            // singular form dropped every emptied approval past the first
+            // (reagent P2 on PR #2824).
+            for window_id in crate::credential_broker::approval::cancel_for_block(block_id) {
                 if let Err(e) =
                     commands::window::close_window_by_label(state, &serde_json::json!({ "label": window_id }))
                 {

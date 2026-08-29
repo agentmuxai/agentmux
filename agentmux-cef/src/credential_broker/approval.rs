@@ -121,17 +121,29 @@ pub fn reserve_or_join(
 /// Record the approval subwindow's `window_id` once it has actually been
 /// created, so `cancel_for_window` can later find this entry when the
 /// window (or its parent, cascading down) closes.
-pub fn finalize_window(approval_id: &str, window_id: String) {
+/// Returns `false` when the approval was already gone — the reservation was
+/// cancelled (pane closed) or timed out during the window-creation gap, so
+/// the window the caller just opened belongs to nothing and **the caller
+/// must close it**. `#[must_use]` because ignoring that answer is exactly
+/// the bug this return value exists to prevent (reagent P1 on PR #2824):
+/// the entry is gone, so `cancel_for_window` will never match it, the IPC
+/// decide-handler's `take` returns `None` and closes nothing, and the TTL
+/// timer has no entry left to fire on — leaving a dead, unresponsive
+/// subwindow open until the human closes it by hand.
+#[must_use]
+pub fn finalize_window(approval_id: &str, window_id: String) -> bool {
     let mut g = pending().lock();
     if let Some(e) = g.get_mut(approval_id) {
         e.window_id = Some(window_id);
+        true
     } else {
         tracing::warn!(
             "[credential-broker] finalize_window: approval {} no longer pending \
-             (already resolved or timed out) — the just-opened subwindow is now \
-             orphaned and should be closed by the caller",
+             (already resolved or timed out) — the just-opened subwindow is \
+             orphaned; closing it",
             approval_id
         );
+        false
     }
 }
 
@@ -203,18 +215,30 @@ pub fn cancel_for_window(window_id: &str) -> Vec<String> {
 /// entirely, that whole approval is cancelled too (nothing left to
 /// resolve) and its `window_id` (if the subwindow already exists) is
 /// returned so the caller can close it.
-pub fn cancel_for_block(block_id: &str) -> Option<String> {
+/// Returns **every** emptied approval's `window_id`, not just the first.
+///
+/// The earlier cut `break`'d on the first entry that emptied, which silently
+/// skipped the rest (reagent P2 on PR #2824). One pane can legitimately ride
+/// two simultaneous approvals for *different* protection spaces — a
+/// proxy-auth and an origin-auth challenge from the same page is the obvious
+/// case — and `HashMap` iteration order decides which one the `break` lands
+/// on. The others kept a stale `AuthRequest` for an already-closed pane, and
+/// their subwindows stayed open, until the 60s TTL swept them.
+pub fn cancel_for_block(block_id: &str) -> Vec<String> {
     let mut g = pending().lock();
-    let mut emptied_id: Option<String> = None;
+    let mut emptied_ids: Vec<String> = Vec::new();
     for (id, entry) in g.iter_mut() {
         let before = entry.auth_requests.len();
         entry.auth_requests.retain(|r| r.block_id != block_id);
         if entry.auth_requests.len() != before && entry.auth_requests.is_empty() {
-            emptied_id = Some(id.clone());
-            break;
+            emptied_ids.push(id.clone());
         }
     }
-    emptied_id.and_then(|id| g.remove(&id)).and_then(|e| e.window_id)
+    emptied_ids
+        .into_iter()
+        .filter_map(|id| g.remove(&id))
+        .filter_map(|e| e.window_id)
+        .collect()
 }
 
 /// Same rationale as `browser_pane::auth`'s own TTL timer — this can be
@@ -248,12 +272,19 @@ fn arm_ttl(approval_id: String, epoch: u64) {
                             cb.cancel();
                         }
                     }
-                    // The subwindow (if it exists) is left for the IPC
-                    // decide-handler to close on the next interaction, or
-                    // for its own parent-close cascade — this module has
-                    // no direct window-management handle, only `window_id`
-                    // strings, by design (keeps this registry free of a
-                    // dependency on `commands::window`).
+                    // Close the subwindow too. It used to be left for "the
+                    // IPC decide-handler to close on the next interaction"
+                    // — but that handler's `take` returns `None` for an
+                    // already-expired approval and returns without closing
+                    // anything, so a late Approve/Deny click did nothing
+                    // and the window sat inert until closed by hand
+                    // (reagent P2 on PR #2824). Routed through
+                    // `super::close_approval_window` rather than calling
+                    // `commands::window` here, so this registry keeps its
+                    // design property of holding only `window_id` strings.
+                    if let Some(window_id) = entry.window_id {
+                        super::close_approval_window(&window_id);
+                    }
                 }
             });
         }
@@ -344,7 +375,7 @@ mod tests {
             Reservation::New { approval_id } => approval_id,
             Reservation::Joined => unreachable!(),
         };
-        finalize_window(&approval_id, "win-1".into());
+        assert!(finalize_window(&approval_id, "win-1".into()));
         let resolved = take(&approval_id).expect("entry should exist");
         assert_eq!(resolved.window_id.as_deref(), Some("win-1"));
         assert!(take(&approval_id).is_none(), "take must remove the entry");
@@ -360,7 +391,7 @@ mod tests {
             Reservation::New { approval_id } => approval_id,
             Reservation::Joined => unreachable!(),
         };
-        finalize_window(&approval_id, "win-1".into());
+        assert!(finalize_window(&approval_id, "win-1".into()));
         let ids = cancel_for_window("win-1");
         assert_eq!(ids, vec!["req-1".to_string()]);
         assert!(take(&approval_id).is_none());
@@ -378,7 +409,7 @@ mod tests {
         };
         reserve_or_join("id-a", "https://a", "realm", false, "req-2".into(), "block-2".into());
         let closed_window = cancel_for_block("block-1");
-        assert!(closed_window.is_none(), "sibling still pending — window must not close");
+        assert!(closed_window.is_empty(), "sibling still pending — window must not close");
         let resolved = take(&approval_id).expect("entry should still exist for block-2's request");
         assert_eq!(resolved.auth_request_ids, vec!["req-2".to_string()]);
         drain();
@@ -393,9 +424,9 @@ mod tests {
             Reservation::New { approval_id } => approval_id,
             Reservation::Joined => unreachable!(),
         };
-        finalize_window(&approval_id, "win-1".into());
+        assert!(finalize_window(&approval_id, "win-1".into()));
         let closed_window = cancel_for_block("block-1");
-        assert_eq!(closed_window.as_deref(), Some("win-1"));
+        assert_eq!(closed_window, vec!["win-1".to_string()]);
         assert!(take(&approval_id).is_none());
         drain();
     }
@@ -412,6 +443,82 @@ mod tests {
         let ids = abandon(&approval_id);
         assert_eq!(ids, vec!["req-1".to_string()]);
         assert!(take(&approval_id).is_none());
+        drain();
+    }
+
+    /// reagent P2 on PR #2824: the old `cancel_for_block` `break`'d on the
+    /// first entry that emptied, so a pane riding TWO approvals for different
+    /// protection spaces (proxy-auth + origin-auth from the same page) left
+    /// the second one's stale request registered — and its window open —
+    /// until the 60s TTL swept it. Which one survived depended on HashMap
+    /// iteration order, so this failed intermittently rather than never.
+    #[test]
+    fn cancel_for_block_empties_every_approval_the_block_was_riding() {
+        let _guard = TEST_LOCK.lock();
+        drain();
+
+        let origin_approval = match reserve_or_join("id-a", "https://a", "realm", false, "req-1".into(), "block-1".into()) {
+            Reservation::New { approval_id } => approval_id,
+            Reservation::Joined => unreachable!("first request for this space"),
+        };
+        assert!(finalize_window(&origin_approval, "win-origin".into()));
+
+        // Same block, DIFFERENT protection space (is_proxy) — a separate entry.
+        let proxy_approval = match reserve_or_join("id-a", "https://a", "realm", true, "req-2".into(), "block-1".into()) {
+            Reservation::New { approval_id } => approval_id,
+            Reservation::Joined => unreachable!("different protection space must not coalesce"),
+        };
+        assert!(finalize_window(&proxy_approval, "win-proxy".into()));
+
+        let mut closed = cancel_for_block("block-1");
+        closed.sort();
+        assert_eq!(
+            closed,
+            vec!["win-origin".to_string(), "win-proxy".to_string()],
+            "both approvals emptied, so both windows must be returned for closing",
+        );
+        assert!(take(&origin_approval).is_none(), "origin approval must be gone");
+        assert!(take(&proxy_approval).is_none(), "proxy approval must be gone");
+        drain();
+    }
+
+    /// reagent P1 on PR #2824: no lock is held across `open_approval_window`,
+    /// so the reservation can be cancelled in that gap. `finalize_window`
+    /// must report that, or the caller leaves a window nothing will ever
+    /// close — `cancel_for_window` can't match it, the decide-handler's
+    /// `take` returns `None`, and the TTL entry is already gone.
+    #[test]
+    fn finalize_window_reports_a_reservation_that_vanished_during_the_gap() {
+        let _guard = TEST_LOCK.lock();
+        drain();
+
+        let approval_id = match reserve_or_join("id-a", "https://a", "realm", false, "req-1".into(), "block-1".into()) {
+            Reservation::New { approval_id } => approval_id,
+            Reservation::Joined => unreachable!(),
+        };
+        // The pane closes while the subwindow is still being created.
+        let closed = cancel_for_block("block-1");
+        assert!(closed.is_empty(), "no window_id yet — nothing for the caller to close from here");
+
+        assert!(
+            !finalize_window(&approval_id, "win-orphan".into()),
+            "the approval is gone, so the caller owns closing the window it just opened",
+        );
+        drain();
+    }
+
+    /// The ordinary path still reports success, so the caller doesn't close a
+    /// window that is legitimately in use.
+    #[test]
+    fn finalize_window_reports_success_for_a_live_reservation() {
+        let _guard = TEST_LOCK.lock();
+        drain();
+        let approval_id = match reserve_or_join("id-a", "https://a", "realm", false, "req-1".into(), "block-1".into()) {
+            Reservation::New { approval_id } => approval_id,
+            Reservation::Joined => unreachable!(),
+        };
+        assert!(finalize_window(&approval_id, "win-1".into()));
+        assert_eq!(take(&approval_id).and_then(|r| r.window_id).as_deref(), Some("win-1"));
         drain();
     }
 }
