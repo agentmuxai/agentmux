@@ -32,15 +32,37 @@ type SampleAction =
     | { type: "RESET"; items: DataItem[]; intervalSecs: number; numPoints: number }
     | { type: "APPEND"; item: DataItem; intervalSecs: number; numPoints: number };
 
-function sampleReducer(state: DataItem[], action: SampleAction): DataItem[] {
+/**
+ * How far ahead of the newest sample a retained point may sit before it is
+ * treated as debris from a BACKWARDS clock step rather than ordinary jitter.
+ *
+ * Sample timestamps are wall-clock (`SystemTime::now()` in
+ * `agentmux-srv/src/backend/sysinfo.rs`), so they can jump backwards on an NTP
+ * correction, a manual clock set, or a VM resume. Both of this reducer's
+ * original trim/gap rules assumed time only moves forward, which made a
+ * backwards step permanently corrupt the series — see this module's tests and
+ * `frontend/app/statusbar/backend-uptime.ts` for the live 2081 -> 2026 case.
+ *
+ * Reuses the same threshold as a "true break" so slew (a sub-tick nudge) keeps
+ * the history while a real step clears it.
+ */
+function staleAheadCutoff(newestTs: number, intervalSecs: number): number {
+    return newestTs + getGapThresholdMs(intervalSecs);
+}
+
+export function sampleReducer(state: DataItem[], action: SampleAction): DataItem[] {
     if (action.type === "RESET") {
         const { items, intervalSecs, numPoints } = action;
         if (items.length === 0) return [];
         const targetLen = numPoints + 1;
         const gapThreshold = getGapThresholdMs(intervalSecs);
+        // Ring order is insertion order, so the LAST item is the newest by
+        // arrival even when the clock stepped mid-history; anchor both bounds
+        // on it and drop anything stamped implausibly far ahead of it.
         const latestTs = items[items.length - 1].ts;
         const cutoffTs = latestTs - intervalSecs * 1000 * targetLen;
-        const filtered = items.filter((d) => d.ts >= cutoffTs);
+        const staleAheadTs = staleAheadCutoff(latestTs, intervalSecs);
+        const filtered = items.filter((d) => d.ts >= cutoffTs && d.ts <= staleAheadTs);
         if (filtered.length === 0) return [];
         const template = filtered[filtered.length - 1];
         const result: DataItem[] = [];
@@ -52,7 +74,10 @@ function sampleReducer(state: DataItem[], action: SampleAction): DataItem[] {
         for (let i = 1; i < filtered.length; i++) {
             const prev = filtered[i - 1];
             const cur = filtered[i];
-            if (cur.ts - prev.ts > gapThreshold) {
+            // `cur.ts < prev.ts` catches a residual backwards seam small
+            // enough to survive the staleAhead filter above — a subtraction
+            // test alone can't, since a negative delta is never `> threshold`.
+            if (cur.ts - prev.ts > gapThreshold || cur.ts < prev.ts) {
                 result.push(makeBlankItem(template, prev.ts + 1));
                 result.push(makeBlankItem(template, cur.ts - 1));
             }
@@ -64,9 +89,28 @@ function sampleReducer(state: DataItem[], action: SampleAction): DataItem[] {
     if (action.type === "APPEND") {
         const { item, intervalSecs, numPoints } = action;
         const intervalMs = intervalSecs * 1000;
+
+        // Drop points stamped implausibly far AHEAD of this sample before the
+        // window trim below. They are debris from a backwards clock step, and
+        // the trim alone can never remove them: their ts is larger than any
+        // cutoff derived from the new (earlier) ts, so `d.ts >= cutoffTs`
+        // stays true forever and they'd pin the series non-monotonic for the
+        // life of the pane. See `staleAheadCutoff`.
+        const staleAheadTs = staleAheadCutoff(item.ts, intervalSecs);
+        const fresh = state.filter((d) => d.ts <= staleAheadTs);
+        const clockStepped = fresh.length !== state.length;
+
         const cutoffTs = item.ts - intervalMs * (numPoints + 1);
-        const trimmed = state.filter((d) => d.ts >= cutoffTs);
+        const trimmed = fresh.filter((d) => d.ts >= cutoffTs);
         const last = trimmed.length > 0 ? trimmed[trimmed.length - 1] : null;
+
+        if (clockStepped) {
+            // A real discontinuity: mark it so the line doesn't connect across
+            // the seam. Both gap branches below test `gap > ...`, which a
+            // negative gap can never satisfy — that's why this is handled here
+            // rather than as another case inside them.
+            return last ? [...trimmed, makeBlankItem(last, last.ts + 1), item] : [item];
+        }
 
         if (last) {
             const gap = item.ts - last.ts;
