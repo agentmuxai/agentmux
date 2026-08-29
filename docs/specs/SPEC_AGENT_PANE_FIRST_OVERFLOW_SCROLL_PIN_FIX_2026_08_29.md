@@ -63,6 +63,34 @@ actually needed — is also fixed (log/act only when the fix changes the
 outcome), but doesn't affect §4's reasoning or invalidate anything above
 the addendum; noted for completeness since it's the same review round.
 
+## Addendum 2 2026-08-29 (same day) — point 3 above was itself incomplete
+
+Reagent's re-review (after the first addendum's fixes shipped) found that
+point 3's own fix didn't actually deliver what it claimed. `markNotOverflowing`
+was reachable ONLY through `scrollToTrueBottom()`, and every content-resize
+call site of `scrollToTrueBottom()` (both `ResizeObserver`s, the itemized
+signal effect) is itself gated on `stickToBottom()` already being `true`.
+So a pane that collapses to non-overflowing WHILE scrolled away — the
+`/clear`-while-reading-history case the doc comment explicitly claimed to
+cover, or the whole-pane 0px collapse happening mid-history-read — never
+re-armed `isOverflowing` at all, because nothing that could observe the
+collapse ever ran while disengaged. The re-arm only actually worked for a
+pane that stayed pinned throughout, which is the one case that's *least*
+in need of protection (a still-pinned pane's normal re-pin machinery
+already keeps it correct).
+
+Fixed by extracting a `syncOverflowState()` helper that updates
+`isOverflowing` from live geometry unconditionally, called from every
+geometry-observation point — every `handleScrollNow` invocation, both
+`ResizeObserver` callbacks, and the itemized effect — deliberately BEFORE
+and independent of each site's own `stickToBottom()` gate on the actual
+re-pin action. Point 3's text above ("the latter called from
+scrollToTrueBottom whenever content resizes back down to non-overflowing")
+describes the superseded first pass; the mechanism described in this
+addendum is what actually shipped. Added a fifth test exercising the
+collapse specifically while `stickToBottom()` is already `false` — the one
+scenario neither of point 3's original two tests exercised.
+
 ## 1. Bug report
 
 > If an agent pane loads without any content (no scrollbar yet), the first

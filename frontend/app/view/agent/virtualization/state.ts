@@ -66,12 +66,22 @@ export interface AgentViewState {
      * whole-pane `scrollHeight → 0px` case in
      * FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_LIVE_INSTANCE_DATA_2026_08_22.md
      * §3, or a `/clear` emptying the transcript without remounting this
-     * component) — otherwise a still-following pane that lives through
-     * that collapse-and-regrow only gets this protection once, ever,
-     * for its whole mounted lifetime, rather than every time the
-     * transition genuinely recurs. See
+     * component) — otherwise a pane that lives through that
+     * collapse-and-regrow only gets this protection once, ever, for its
+     * whole mounted lifetime, rather than every time the transition
+     * genuinely recurs.
+     *
+     * The view layer's `syncOverflowState()` is the ONLY thing allowed to
+     * call `markOverflowing`/`markNotOverflowing`, and it runs
+     * unconditionally from every geometry-observation point (every scroll
+     * event, both ResizeObservers, the itemized content-signal effect) —
+     * deliberately NOT gated on `stickToBottom()` already being true, the
+     * way the actual re-pin action (`scrollToTrueBottom()`) is. A pane
+     * scrolled away reading history can still collapse or regrow while
+     * disengaged, and this flag has to track that regardless of whether
+     * anything chooses to act on it. See
      * docs/specs/SPEC_AGENT_PANE_FIRST_OVERFLOW_SCROLL_PIN_FIX_2026_08_29.md
-     * (codex P2 on PR #2834).
+     * (codex P2 and reagent P1 on PR #2834).
      */
     isOverflowing: Accessor<boolean>;
     markOverflowing: () => void;

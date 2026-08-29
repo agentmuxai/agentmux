@@ -460,4 +460,61 @@ describe("AgentDocumentVirtualList — first-ever overflow", () => {
             infoSpy.mockRestore();
         }
     });
+
+    it("re-arms even when the collapse happens while scrolled away reading history (reagent P1, second pass)", () => {
+        // The 're-arms after a collapse' test above only exercises the
+        // collapse while stickToBottom() stays true throughout — every
+        // re-pin call site (scrollToTrueBottom's callers) is gated on that,
+        // so it can't tell a real bidirectional sync from one that merely
+        // happens to run inside an always-following pane. This test forces
+        // the disengaged path: the collapse must be observed by
+        // syncOverflowState() directly, independent of stickToBottom.
+        const { viewState, scrollRef } = setup();
+        setGeometry(scrollRef, { scrollHeight: 200, clientHeight: 200, scrollTop: 0 });
+
+        const virtualContainer = scrollRef.querySelector(".agent-document-virtualizer") as HTMLElement;
+
+        // First overflow — protected, ends stickToBottom=true at true bottom.
+        setGeometry(scrollRef, { scrollHeight: 500 });
+        scrollRef.dispatchEvent(new Event("scroll"));
+        flushRaf();
+        flushRaf();
+        expect(viewState.stickToBottom()).toBe(true);
+
+        // User scrolls away to read history — an unambiguous, real disengage.
+        setGeometry(scrollRef, { scrollTop: 0 });
+        scrollRef.dispatchEvent(new Event("scroll"));
+        flushRaf();
+        expect(viewState.stickToBottom()).toBe(false);
+
+        // Content collapses to non-overflowing WHILE disengaged (e.g. /clear,
+        // or the documented whole-pane collapse) — RO #2 fires regardless of
+        // stickToBottom. Must NOT force a pin (the reading position is
+        // legitimate and must be left alone), but MUST still re-arm
+        // isOverflowing for next time.
+        setGeometry(scrollRef, { scrollHeight: 150, scrollTop: 0 });
+        triggerResize(virtualContainer);
+        expect(viewState.stickToBottom()).toBe(false); // untouched
+        expect(scrollRef.scrollTop).toBe(0); // no forced scroll
+
+        // User scrolls back to (what is now, since it doesn't overflow) the
+        // only possible position — a normal near-bottom re-engage, NOT
+        // through scrollToTrueBottom/jumpToBottom.
+        scrollRef.dispatchEvent(new Event("scroll"));
+        flushRaf();
+        expect(viewState.stickToBottom()).toBe(true);
+
+        // Content overflows a second time, with the same kind of stray
+        // far-from-bottom scroll event as the original bug. Without the
+        // unconditional re-arm, isOverflowing would still read stale `true`
+        // from the very first overflow above, isFirstOverflow would read
+        // false, and this event would incorrectly disengage instead of
+        // being protected.
+        setGeometry(scrollRef, { scrollHeight: 600 });
+        scrollRef.dispatchEvent(new Event("scroll"));
+        flushRaf();
+
+        expect(viewState.stickToBottom()).toBe(true);
+        expect(scrollRef.scrollTop).toBe(400); // scrollHeight(600) - clientHeight(200)
+    });
 });

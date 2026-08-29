@@ -184,6 +184,32 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // change produced a given visible "scroll went backward" report — the
     // real fix has to happen upstream, at whatever DOM swap caused the
     // shrink (e.g. a FLIP-style freeze-then-ease on that element), not here.
+    // Keeps isOverflowing() current in both directions from live geometry.
+    // MUST run unconditionally from every observation point (handleScrollNow,
+    // both ResizeObservers, the itemized effect) — NOT only from paths gated
+    // on stickToBottom() already being true. A pane can collapse to
+    // non-overflowing (or grow past it) while the user is scrolled away
+    // reading history — a `/clear` wiping the transcript, or the documented
+    // whole-pane scrollHeight->0px collapse, mid-history-read — and every
+    // stickToBottom()-gated call site (all of RO #1/#2's re-pin, the
+    // itemized effect's re-pin, and scrollToTrueBottom itself) would
+    // otherwise never observe it, leaving isOverflowing() stale until the
+    // user manually re-engages. This was reagent P1's finding on the first
+    // review-fix pass (PR #2834) — the original version of this file only
+    // updated the flag from inside scrollToTrueBottom, which is exactly one
+    // of those gated call sites.
+    function syncOverflowState(): void {
+        if (!scrollRef) return;
+        const overflowing = scrollRef.scrollHeight > scrollRef.clientHeight;
+        if (overflowing !== props.viewState.isOverflowing()) {
+            if (overflowing) {
+                props.viewState.markOverflowing();
+            } else {
+                props.viewState.markNotOverflowing();
+            }
+        }
+    }
+
     let lastKnownScrollHeight = 0;
     function scrollToTrueBottom(): void {
         if (!scrollRef) return;
@@ -196,19 +222,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             );
         }
         lastKnownScrollHeight = h;
-        // Keep isOverflowing() current in both directions — this runs on
-        // every re-pin, including RO #2 (content-resize) firing on a pure
-        // SHRINK back to non-overflowing while still stickToBottom()'d, so
-        // a later regrowth past clientHeight is re-armed as a genuine
-        // "first overflow" transition again rather than staying permanently
-        // marked from whatever the pane's actual first overflow was.
-        // See docs/specs/SPEC_AGENT_PANE_FIRST_OVERFLOW_SCROLL_PIN_FIX_2026_08_29.md
-        // (codex P2 on PR #2834).
-        if (h > scrollRef.clientHeight) {
-            props.viewState.markOverflowing();
-        } else {
-            props.viewState.markNotOverflowing();
-        }
+        syncOverflowState();
         pendingProgrammaticScroll = true;
         scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "auto" });
     }
@@ -509,6 +523,10 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         const _len = props.viewState.nodes().length;
         const _totalSize = props.layoutView?.()?.totalSize;
         const _workingRowHeight = props.workingRowHeight?.();
+        // Unconditional — a node-count drop (e.g. /clear) can collapse this
+        // pane to non-overflowing while scrolled away reading history; see
+        // syncOverflowState's own doc comment.
+        syncOverflowState();
         if (props.viewState.stickToBottom() && scrollRef) {
             // queueMicrotask so the new content has rendered before we scroll.
             queueMicrotask(() => {
@@ -548,6 +566,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     onMount(() => {
         const ro = new ResizeObserver(() => {
             const h = scrollRef.clientHeight;
+            // Unconditional — see syncOverflowState's own doc comment.
+            syncOverflowState();
             if (h > 0 && props.viewState.stickToBottom()) {
                 scrollToTrueBottom();
             }
@@ -599,7 +619,10 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     onMount(() => {
         if (typeof ResizeObserver === "undefined") return;
         const ro = new ResizeObserver(() => {
-            if (!scrollRef || !props.viewState.stickToBottom()) return;
+            if (!scrollRef) return;
+            // Unconditional — see syncOverflowState's own doc comment.
+            syncOverflowState();
+            if (!props.viewState.stickToBottom()) return;
             scrollToTrueBottom();
         });
         if (virtualContainerRef) ro.observe(virtualContainerRef);
@@ -729,13 +752,13 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
 
         // This pane's content has overflowed its viewport for the first
         // time since it last didn't (see isOverflowing's own doc comment
-        // for why this isn't a one-time latch). Keep it current regardless
-        // of what we do below — later evaluations need an accurate reading
-        // whether or not THIS event ends up needing protection.
-        const isFirstOverflow = scrollHeight > clientHeight && !props.viewState.isOverflowing();
-        if (isFirstOverflow) {
-            props.viewState.markOverflowing();
-        }
+        // for why this isn't a one-time latch). Capture the PRE-sync
+        // reading for the transition check, then sync unconditionally —
+        // every scroll event is an observation point regardless of
+        // stickToBottom, same as syncOverflowState's other call sites.
+        const wasOverflowing = props.viewState.isOverflowing();
+        syncOverflowState();
+        const isFirstOverflow = scrollHeight > clientHeight && !wasOverflowing;
 
         // Engage stick when user scrolls back near bottom; disengage
         // otherwise. Engaging clears any captured headAnchor (atomic).
