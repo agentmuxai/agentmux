@@ -37,6 +37,34 @@ const MAX_INTERVAL_SECS: f64 = 2.0;
 // name-guessing), and "other" (everything else, top-N by commit kept for
 // visibility — Chrome, VS Code, Docker, Windows itself, ...).
 
+/// Monotonic reference point for this backend process's uptime, set once at
+/// startup by `mark_process_start` (`bootstrap.rs`).
+///
+/// `Instant` and NOT `SystemTime`/`chrono::Utc::now()` deliberately: uptime
+/// must survive a system clock step. The previous scheme subtracted two
+/// independent wall-clock reads taken at opposite ends of the backend's life
+/// (the host's `backend_started_at` stamp vs. each sysinfo tick's `ts`), so an
+/// NTP correction, a manual clock set, or a VM resume made the difference
+/// negative for the rest of that backend's life. Observed live on 0.55.26: the
+/// app started while the machine's clock read 2081-02-05, the clock was later
+/// corrected to 2026-08-29 with no restart, and the status bar rendered
+/// `-59:0-14`. An `Instant` cannot move backwards, so no clock event can
+/// reproduce that.
+static PROCESS_START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+
+/// Record this process's start for uptime reporting. Idempotent; the first
+/// call wins, so a stray second call can't restart the clock.
+pub fn mark_process_start() {
+    let _ = PROCESS_START.set(Instant::now());
+}
+
+/// Seconds since `mark_process_start`. Falls back to initializing on first
+/// read, so a caller that never marked startup reports a truthful (if
+/// late-based) 0 rather than a wrong number or a panic.
+pub fn uptime_secs() -> u64 {
+    PROCESS_START.get_or_init(Instant::now).elapsed().as_secs()
+}
+
 /// How often to log a full attribution snapshot in the steady state.
 #[cfg(target_os = "windows")]
 const ATTRIBUTION_INTERVAL: Duration = Duration::from_secs(30);
@@ -1009,7 +1037,7 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigWat
             .unwrap_or_default()
             .as_millis() as i64;
 
-        let ts_data = TimeSeriesData { ts: now, values };
+        let ts_data = TimeSeriesData { ts: now, values, uptime_secs: Some(uptime_secs()) };
 
         let event = WaveEvent {
             event: EVENT_SYS_INFO.to_string(),
@@ -1103,6 +1131,8 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigWat
                 let block_ts = TimeSeriesData {
                     ts: now,
                     values: block_values,
+                    // Per-block process stats, not the backend's own uptime.
+                    uptime_secs: None,
                 };
                 let block_event = WaveEvent {
                     event: EVENT_BLOCK_STATS.to_string(),
@@ -1122,5 +1152,52 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigWat
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod uptime_tests {
+    use super::*;
+
+    /// The real property this fix guarantees — that uptime is immune to a
+    /// system clock step — can't be asserted without a mockable clock, since
+    /// `Instant` is deliberately unsettable. What IS assertable: the marker is
+    /// idempotent (a stray second call can't restart the clock) and the value
+    /// never runs backwards. The type being `u64` is itself part of the fix:
+    /// the old wall-clock subtraction was signed and went to about -1.7e9.
+    #[test]
+    fn uptime_is_monotonic_and_the_start_marker_is_idempotent() {
+        mark_process_start();
+        let first = uptime_secs();
+        mark_process_start();
+        let second = uptime_secs();
+        assert!(second >= first, "uptime went backwards: {second} < {first}");
+    }
+
+    /// The frontend's fallback path keys off this field's ABSENCE, and the
+    /// per-block stats / CPU-stream payloads must keep their exact prior
+    /// shape — so `skip_serializing_if` is a wire contract, not a style choice.
+    #[test]
+    fn uptime_secs_is_emitted_when_present_and_omitted_when_absent() {
+        let with = TimeSeriesData { ts: 5, values: HashMap::new(), uptime_secs: Some(42) };
+        let v = serde_json::to_value(&with).expect("serialize");
+        assert_eq!(v["uptime_secs"], serde_json::json!(42));
+
+        let without = TimeSeriesData { ts: 5, values: HashMap::new(), uptime_secs: None };
+        let v = serde_json::to_value(&without).expect("serialize");
+        assert!(
+            v.get("uptime_secs").is_none(),
+            "block-stats/CPU-stream payload shape must be byte-for-byte unchanged"
+        );
+    }
+
+    /// A payload produced before this field existed (e.g. replayed from the
+    /// sysinfo persist ring across an upgrade) must still deserialize.
+    #[test]
+    fn payload_without_uptime_still_deserializes() {
+        let json = serde_json::json!({ "ts": 7, "values": { "cpu": 1.5 } });
+        let parsed: TimeSeriesData = serde_json::from_value(json).expect("deserialize");
+        assert_eq!(parsed.ts, 7);
+        assert_eq!(parsed.uptime_secs, None);
     }
 }

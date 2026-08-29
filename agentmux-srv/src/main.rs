@@ -47,6 +47,11 @@ async fn main() {
     #[cfg(windows)]
     let _crash_guard = bootstrap::install_crash_guard();
 
+    // 0c. Anchor the monotonic uptime clock before anything else can take time.
+    //     Must NOT be derived from wall-clock stamps — see the doc comment on
+    //     `PROCESS_START` for the clock-step bug that motivated it.
+    backend::sysinfo::mark_process_start();
+
     // 1. Init tracing (stderr + rolling file)
     let _log_guard = bootstrap::init_logging();
 
