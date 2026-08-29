@@ -196,11 +196,19 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             );
         }
         lastKnownScrollHeight = h;
-        // First real scrollbar this pane has ever had — latch it so
-        // handleScrollNow knows any FUTURE "far from bottom" reading is a
-        // legitimate disengage candidate, not a first-transition artifact.
-        // See docs/specs/SPEC_AGENT_PANE_FIRST_OVERFLOW_SCROLL_PIN_FIX_2026_08_29.md §5.1.
-        if (h > scrollRef.clientHeight) props.viewState.markOverflowedOnce();
+        // Keep isOverflowing() current in both directions — this runs on
+        // every re-pin, including RO #2 (content-resize) firing on a pure
+        // SHRINK back to non-overflowing while still stickToBottom()'d, so
+        // a later regrowth past clientHeight is re-armed as a genuine
+        // "first overflow" transition again rather than staying permanently
+        // marked from whatever the pane's actual first overflow was.
+        // See docs/specs/SPEC_AGENT_PANE_FIRST_OVERFLOW_SCROLL_PIN_FIX_2026_08_29.md
+        // (codex P2 on PR #2834).
+        if (h > scrollRef.clientHeight) {
+            props.viewState.markOverflowing();
+        } else {
+            props.viewState.markNotOverflowing();
+        }
         pendingProgrammaticScroll = true;
         scrollRef.scrollTo({ top: Number.MAX_SAFE_INTEGER, behavior: "auto" });
     }
@@ -719,31 +727,56 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
             collapseScrolledOffTools();
         }
 
-        // First time this pane's content has ever overflowed its viewport.
-        // There is no legitimate "user scrolled away" state to preserve
-        // here — nowhere existed to scroll away to before this instant —
-        // so force a fresh pin instead of trusting whatever this one
-        // event's geometry happens to read (a native scrollbar-insertion
-        // side effect or a same-frame race can otherwise make a brand-new
-        // overflow look "far from bottom" and disengage it right out of
-        // the gate, with nothing to re-engage it afterward but a manual
-        // scroll or keystroke). Latches once per pane; every subsequent
-        // scroll event uses the normal isNearBottom logic below unchanged.
-        // See docs/specs/SPEC_AGENT_PANE_FIRST_OVERFLOW_SCROLL_PIN_FIX_2026_08_29.md §5.1.
-        const isFirstOverflow = scrollHeight > clientHeight && !props.viewState.hasOverflowedOnce();
+        // This pane's content has overflowed its viewport for the first
+        // time since it last didn't (see isOverflowing's own doc comment
+        // for why this isn't a one-time latch). Keep it current regardless
+        // of what we do below — later evaluations need an accurate reading
+        // whether or not THIS event ends up needing protection.
+        const isFirstOverflow = scrollHeight > clientHeight && !props.viewState.isOverflowing();
         if (isFirstOverflow) {
-            props.viewState.markOverflowedOnce();
+            props.viewState.markOverflowing();
+        }
+
+        // Engage stick when user scrolls back near bottom; disengage
+        // otherwise. Engaging clears any captured headAnchor (atomic).
+        const nearBottom = isNearBottom(scrollTop, scrollHeight, clientHeight);
+        if (isFirstOverflow && props.viewState.stickToBottom() && !nearBottom) {
+            // A pane that was still following when it hit its first overflow
+            // has no legitimate reason for THIS event's geometry to read as
+            // "far from bottom" — nowhere existed to scroll away to before
+            // this instant, so a native scrollbar-insertion side effect or a
+            // same-frame race is the far likelier explanation. Force a fresh
+            // pin instead of trusting this one reading.
+            //
+            // Gated on stickToBottom() already being true: this must never
+            // force an engage from an ALREADY, legitimately disengaged state
+            // — most notably a headAnchor captured moments earlier by
+            // in-flight older-history pagination (its restore's own
+            // scrollTo() doesn't route through scrollToTrueBottom, so
+            // isOverflowing() can still be transitioning here too). Reading
+            // stickToBottom() false in that case means the capture already
+            // ran before this event, so this branch correctly does nothing,
+            // leaving the just-restored reading position alone (reagent P1
+            // on PR #2834).
+            //
+            // Also gated on !nearBottom: if the raw geometry already reads
+            // near bottom, forcing is a redundant no-op — only log/act when
+            // this is a genuine save (codex P2 on PR #2834).
             console.info(
                 "[wave-scroll-first-overflow]",
                 `pane=${props.blockId?.slice(0, 7) ?? "?"}`,
                 `forced engage — scrollTop=${scrollTop} scrollHeight=${scrollHeight} clientHeight=${clientHeight}`,
             );
             scrollToTrueBottom();
+            // Stop here — the pagination check below reads the scrollTop
+            // captured at the top of this event, now stale (we just forced
+            // true bottom). Letting it run could re-capture a head anchor
+            // from that stale near-top reading and immediately undo the pin
+            // (codex P1 on PR #2834).
+            return;
         }
 
-        // Engage stick when user scrolls back near bottom; disengage
-        // otherwise. Engaging clears any captured headAnchor (atomic).
-        if (isFirstOverflow || isNearBottom(scrollTop, scrollHeight, clientHeight)) {
+        if (nearBottom) {
             if (!props.viewState.stickToBottom()) {
                 props.viewState.engageStickToBottom();
             }

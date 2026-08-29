@@ -1,13 +1,67 @@
 # Spec: force stick-to-bottom on an agent pane's first-ever overflow
 
 **Date:** 2026-08-29
-**Status:** Proposed — no code changed yet.
+**Status:** Implemented in PR #2834 — §5.1's design below reflects the
+*first* implementation pass; see the addendum immediately below for three
+corrections found in code review before merge.
 **Verified against:** `main` @ `4573d0d34`.
 **Related:** `docs/specs/REPORT_AGENT_PANE_SCROLL_PIN_FLICKER_AUDIT_2026_07_30.md`,
 `docs/specs/PLAN_AGENT_PANE_RESIZE_SCROLL_PIN_2026_08_05.md`,
 `docs/analysis/ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md`,
 `docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_21.md`,
 `docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_LIVE_INSTANCE_DATA_2026_08_22.md`.
+
+## Addendum 2026-08-29 (same day) — three corrections from code review, before merge
+
+Codex and reagent's PR #2834 reviews found three real gaps in the first
+implementation pass below. All three are fixed in the shipped commit;
+noted here rather than silently rewritten into §5.1 so the reasoning that
+led to the final design stays visible:
+
+1. **(codex P1) Missing early return let pagination clobber the forced
+   pin.** §5.1 as originally written didn't `return` after forcing the
+   pin, so execution fell through into the older-history pagination
+   block (`handleScrollNow`'s last statement), which reads the *stale*
+   `scrollTop` captured at the top of the event — still near-top at the
+   exact moment this fix's own force-pin fires. With `props.onLoadOlder`
+   always supplied in the real pane (`agent-view.tsx`), that stale
+   near-top reading triggered `captureHeadAnchor()`, flipping
+   `stickToBottom` back to `false` in the same tick the fix had just set
+   it `true`. Fixed with an explicit `return` right after the forced
+   scroll.
+2. **(reagent P1) The force-pin didn't check whether stickToBottom was
+   *already*, legitimately, `false`.** §4's invariant — "a pane that's
+   never overflowed can't have a legitimate scrolled-away state" — is
+   true for a real user scroll gesture, but not for
+   `captureHeadAnchor()` itself: older-history pagination can fire (and
+   disengage stickToBottom) on a pane that hasn't overflowed yet, because
+   a non-overflowing pane's `scrollTop` is always `0`, which always
+   satisfies `isNearTop`. If that pagination's *own* anchor-restore
+   `scrollTo()` (which never routes through `scrollToTrueBottom`) is what
+   pushes the pane past its first overflow, the original code would force
+   stickToBottom back to `true` and snap to the very bottom, destroying
+   the reader's just-restored position. Fixed by gating the force-pin on
+   `stickToBottom()` already being `true` at the moment of transition —
+   it only ever *protects* an already-following pane, never *re-engages*
+   one that's disengaged for any reason, pagination included.
+3. **(codex P2) The latch never re-armed.** §5.1's `hasOverflowedOnce`
+   was written as a one-way, mount-lifetime latch. But the whole reason
+   §2 connects this bug to the still-open whole-pane `scrollHeight →
+   0px` collapse is that a still-following pane living through that
+   collapse-and-regrow re-lives the exact same transition — and a
+   one-way latch only protects it the *first* time that ever happens,
+   not every time it recurs. Renamed to a bidirectional `isOverflowing`
+   signal (`markOverflowing` / `markNotOverflowing`, the latter called
+   from `scrollToTrueBottom` whenever content resizes back down to
+   non-overflowing) so each collapse-and-regrow gets independently
+   re-armed.
+
+A fourth, narrower finding (reagent P2) — the `[wave-scroll-first-overflow]`
+diagnostic logging unconditionally on every detected transition, including
+ones where the raw geometry already read near-bottom and no protection was
+actually needed — is also fixed (log/act only when the fix changes the
+outcome), but doesn't affect §4's reasoning or invalidate anything above
+the addendum; noted for completeness since it's the same review round.
 
 ## 1. Bug report
 
