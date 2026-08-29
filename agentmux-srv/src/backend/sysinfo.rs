@@ -37,32 +37,74 @@ const MAX_INTERVAL_SECS: f64 = 2.0;
 // name-guessing), and "other" (everything else, top-N by commit kept for
 // visibility — Chrome, VS Code, Docker, Windows itself, ...).
 
-/// Monotonic reference point for this backend process's uptime, set once at
-/// startup by `mark_process_start` (`bootstrap.rs`).
+/// Milliseconds from a SUSPEND-AWARE monotonic clock — one that keeps counting
+/// while the machine is asleep, and can never move backwards.
 ///
-/// `Instant` and NOT `SystemTime`/`chrono::Utc::now()` deliberately: uptime
-/// must survive a system clock step. The previous scheme subtracted two
-/// independent wall-clock reads taken at opposite ends of the backend's life
-/// (the host's `backend_started_at` stamp vs. each sysinfo tick's `ts`), so an
-/// NTP correction, a manual clock set, or a VM resume made the difference
-/// negative for the rest of that backend's life. Observed live on 0.55.26: the
-/// app started while the machine's clock read 2081-02-05, the clock was later
-/// corrected to 2026-08-29 with no restart, and the status bar rendered
-/// `-59:0-14`. An `Instant` cannot move backwards, so no clock event can
-/// reproduce that.
-static PROCESS_START: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+/// Uptime needs both properties, and no single obvious clock has them:
+///
+/// - Wall clock (`SystemTime`/`chrono::Utc::now()`) counts suspend but moves
+///   backwards on an NTP correction, a manual set, or a VM resume. That was
+///   the original bug: on 0.55.26 the app started while the machine's clock
+///   read 2081-02-05, the clock was later corrected to 2026-08-29 with no
+///   restart, and the status bar rendered `-59:0-14`.
+/// - `std::time::Instant` can't move backwards, but it STOPS while the machine
+///   is suspended (`CLOCK_MONOTONIC` on Linux, `mach_absolute_time` on macOS,
+///   QPC on Windows). Using it would silently under-report by the whole
+///   suspend interval on every laptop lid-close — a regression against the
+///   wall-clock behaviour it replaced (codex P2 on PR #2831).
+///
+/// So each platform's suspend-aware counter is used directly:
+///
+/// | Platform | Source | Counts suspend |
+/// |---|---|---|
+/// | Linux/Android | `CLOCK_BOOTTIME` | yes (`CLOCK_MONOTONIC` does not) |
+/// | macOS/BSD | `CLOCK_MONOTONIC` | yes — Darwin's continues across sleep, unlike `CLOCK_UPTIME_RAW` and unlike the `mach_absolute_time` behind `Instant` |
+/// | Windows | `GetTickCount64` | yes (`QueryUnbiasedInterruptTime` does not) |
+///
+/// All three count from system boot, not process start, so `mark_process_start`
+/// takes a baseline and `uptime_secs` subtracts it.
+#[cfg(windows)]
+fn suspend_aware_now_ms() -> u64 {
+    // SAFETY: no arguments, no pointers, always succeeds.
+    unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() }
+}
+
+#[cfg(not(windows))]
+fn suspend_aware_now_ms() -> u64 {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    const CLOCK: libc::clockid_t = libc::CLOCK_BOOTTIME;
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    const CLOCK: libc::clockid_t = libc::CLOCK_MONOTONIC;
+
+    let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+    // SAFETY: `ts` is a valid, initialized, exclusively-borrowed timespec.
+    if unsafe { libc::clock_gettime(CLOCK, &mut ts) } != 0 {
+        // Reporting 0 makes uptime read 0 — visibly wrong but harmless and
+        // never negative. Preferable to substituting a clock with different
+        // properties partway through the process's life.
+        return 0;
+    }
+    (ts.tv_sec as u64) * 1_000 + (ts.tv_nsec as u64) / 1_000_000
+}
+
+/// Baseline reading of `suspend_aware_now_ms` captured at process start by
+/// `mark_process_start` (`main.rs`).
+static PROCESS_START_MS: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
 
 /// Record this process's start for uptime reporting. Idempotent; the first
 /// call wins, so a stray second call can't restart the clock.
 pub fn mark_process_start() {
-    let _ = PROCESS_START.set(Instant::now());
+    let _ = PROCESS_START_MS.set(suspend_aware_now_ms());
 }
 
 /// Seconds since `mark_process_start`. Falls back to initializing on first
 /// read, so a caller that never marked startup reports a truthful (if
-/// late-based) 0 rather than a wrong number or a panic.
+/// late-based) 0 rather than a wrong number or a panic. `saturating_sub`
+/// makes a decrease structurally impossible even if a platform counter ever
+/// misbehaved.
 pub fn uptime_secs() -> u64 {
-    PROCESS_START.get_or_init(Instant::now).elapsed().as_secs()
+    let start = *PROCESS_START_MS.get_or_init(suspend_aware_now_ms);
+    suspend_aware_now_ms().saturating_sub(start) / 1_000
 }
 
 /// How often to log a full attribution snapshot in the steady state.
@@ -1159,12 +1201,13 @@ pub async fn run_sysinfo_loop(broker: Arc<Broker>, config_watcher: Arc<ConfigWat
 mod uptime_tests {
     use super::*;
 
-    /// The real property this fix guarantees — that uptime is immune to a
-    /// system clock step — can't be asserted without a mockable clock, since
-    /// `Instant` is deliberately unsettable. What IS assertable: the marker is
-    /// idempotent (a stray second call can't restart the clock) and the value
-    /// never runs backwards. The type being `u64` is itself part of the fix:
-    /// the old wall-clock subtraction was signed and went to about -1.7e9.
+    /// Neither property this fix depends on — immunity to a clock step, and
+    /// counting across suspend — can be asserted in a unit test: the platform
+    /// counters are deliberately unsettable, and suspending the machine isn't
+    /// something a test can do. What IS assertable: the marker is idempotent
+    /// (a stray second call can't restart the clock) and the value never runs
+    /// backwards. The `u64` return type is itself part of the fix — the old
+    /// wall-clock subtraction was signed and reached about -1.7e9.
     #[test]
     fn uptime_is_monotonic_and_the_start_marker_is_idempotent() {
         mark_process_start();
@@ -1172,6 +1215,20 @@ mod uptime_tests {
         mark_process_start();
         let second = uptime_secs();
         assert!(second >= first, "uptime went backwards: {second} < {first}");
+    }
+
+    /// The suspend-aware counter must be a sane, forward-running millisecond
+    /// source on whatever platform this is built for — a `clock_gettime`
+    /// failure returning 0, or a units mix-up, would show up here.
+    #[test]
+    fn suspend_aware_clock_is_nonzero_and_never_decreases() {
+        let a = suspend_aware_now_ms();
+        let b = suspend_aware_now_ms();
+        assert!(a > 0, "suspend-aware clock returned 0 — clock_gettime failed?");
+        assert!(b >= a, "suspend-aware clock went backwards: {b} < {a}");
+        // Sanity on units: a machine that booted more than ~10 years ago is a
+        // units error (ns or µs mistaken for ms), not a real uptime.
+        assert!(a < 10 * 365 * 24 * 60 * 60 * 1_000, "implausible ms reading: {a}");
     }
 
     /// The frontend's fallback path keys off this field's ABSENCE, and the
