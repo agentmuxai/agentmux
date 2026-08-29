@@ -30,24 +30,7 @@ fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: 
                     .must_get::<Block>(&cmd.block_id)
                     .map_err(|e| format!("session:resume_preflight: {e}"))?;
 
-                // `CLAUDE_CONFIG_DIR` lives inside the block's own `cmd:env`
-                // map — the same map `apply_working_dir` hands to the child, so
-                // the preflight checks the exact config dir the CLI will use.
-                let config_dir = block
-                    .meta
-                    .get(crate::backend::blockcontroller::META_KEY_CMD_ENV)
-                    .and_then(|v| v.as_object())
-                    .and_then(|env| env.get("CLAUDE_CONFIG_DIR"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-
-                let input = crate::backend::resume_preflight::PreflightInput {
-                    resume_flag: obj::meta_get_string(&block.meta, "agent:resume_flag", ""),
-                    session_id: obj::meta_get_string(&block.meta, "agent:sessionid", ""),
-                    working_dir: obj::meta_get_string(&block.meta, "cmd:cwd", ""),
-                    config_dir,
-                };
+                let input = preflight_input_from_meta(&block.meta);
 
                 // Blocking file I/O (one `is_file`, at most one `read_dir` of a
                 // single directory) off the async runtime's worker threads —
@@ -88,6 +71,45 @@ fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: 
             })
         }),
     );
+}
+
+/// Lift a block's meta into a [`resume_preflight::PreflightInput`].
+///
+/// **Every default here must match what the real spawn path uses for the
+/// same key**, or the preflight predicts something the spawn won't do —
+/// which is worse than not predicting at all, since the pane then states a
+/// falsehood confidently.
+///
+/// `agent:resume_flag` defaulting to `"--resume"` is that rule doing real
+/// work (reagent P1 on PR #2833): it was `""` here while all four real
+/// spawn-path readers default to `"--resume"`
+/// (`agent_handlers/input.rs:400,422`, `app_api/agent_io.rs:265,287` — the
+/// first of those is the exact line that builds `PersistentSpawnConfig`).
+/// `agent_open.rs` only started writing the key recently, so any Claude pane
+/// created before that and not respawned since has no `agent:resume_flag`
+/// at all: the spawn still attaches `--resume`, but the preflight was
+/// reporting `Unknown` and silently suppressing the notice for exactly the
+/// long-lived panes this feature exists for.
+fn preflight_input_from_meta(
+    meta: &crate::backend::obj::MetaMapType,
+) -> crate::backend::resume_preflight::PreflightInput {
+    // `CLAUDE_CONFIG_DIR` lives inside the block's own `cmd:env` map — the
+    // same map `apply_working_dir` hands to the child, so the preflight
+    // checks the exact config dir the CLI will use.
+    let config_dir = meta
+        .get(crate::backend::blockcontroller::META_KEY_CMD_ENV)
+        .and_then(|v| v.as_object())
+        .and_then(|env| env.get("CLAUDE_CONFIG_DIR"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    crate::backend::resume_preflight::PreflightInput {
+        resume_flag: obj::meta_get_string(meta, "agent:resume_flag", "--resume"),
+        session_id: obj::meta_get_string(meta, "agent:sessionid", ""),
+        working_dir: obj::meta_get_string(meta, "cmd:cwd", ""),
+        config_dir,
+    }
 }
 
 fn register_session_archive_handler(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -1468,5 +1490,94 @@ mod sanitize_ambient_text_tests {
         // string while failing to match.
         let s = "\u{0130} think we should refactor this";
         assert_eq!(sanitize_ambient_text(s), s);
+    }
+}
+
+#[cfg(test)]
+mod preflight_input_tests {
+    use super::preflight_input_from_meta;
+
+    // ── resume-preflight meta extraction (reagent P1 on PR #2833) ────────
+    //
+    // The divergence these guard: the preflight must read every meta key with
+    // the SAME default the real spawn path uses, or it predicts a spawn that
+    // won't happen. Unit-testing `preflight` itself (as the rest of the suite
+    // does) can't catch that — it takes an explicit `PreflightInput`, so the
+    // extraction defaults are exactly the part those tests skip.
+
+    fn meta_of(pairs: &[(&str, serde_json::Value)]) -> crate::backend::obj::MetaMapType {
+        let mut m = crate::backend::obj::MetaMapType::new();
+        for (k, v) in pairs {
+            m.insert(k.to_string(), v.clone());
+        }
+        m
+    }
+
+    /// The regression itself: a Claude pane predating `agent_open.rs` writing
+    /// `agent:resume_flag`. The spawn attaches `--resume` via its own default,
+    /// so the preflight must not read this as "provider can't resume" and go
+    /// silent.
+    #[test]
+    fn absent_resume_flag_defaults_to_the_same_value_the_spawn_path_uses() {
+        let input = preflight_input_from_meta(&meta_of(&[]));
+        assert_eq!(
+            input.resume_flag, "--resume",
+            "must match agent_handlers/input.rs:400's default, or the preflight              reports Unknown for panes whose spawn really will --resume",
+        );
+    }
+
+    /// A provider that genuinely has no resume flag writes an explicit empty
+    /// string; that must survive as empty rather than being back-filled with
+    /// the default, or the preflight would claim resume support that isn't there.
+    #[test]
+    fn an_explicitly_empty_resume_flag_is_preserved_not_defaulted() {
+        let input = preflight_input_from_meta(&meta_of(&[("agent:resume_flag", serde_json::json!(""))]));
+        assert_eq!(input.resume_flag, "");
+    }
+
+    #[test]
+    fn an_explicit_resume_flag_is_read_verbatim() {
+        let input = preflight_input_from_meta(&meta_of(&[("agent:resume_flag", serde_json::json!("-r"))]));
+        assert_eq!(input.resume_flag, "-r");
+    }
+
+    #[test]
+    fn config_dir_is_read_out_of_the_cmd_env_map() {
+        let input = preflight_input_from_meta(&meta_of(&[(
+            "cmd:env",
+            serde_json::json!({ "CLAUDE_CONFIG_DIR": "/home/dev/.claude", "OTHER": "x" }),
+        )]));
+        assert_eq!(input.config_dir, "/home/dev/.claude");
+    }
+
+    /// No `cmd:env` at all, or no `CLAUDE_CONFIG_DIR` within it, must yield an
+    /// empty config dir — `preflight` turns that into `Unknown` and stays
+    /// silent, which is the correct posture when there's nowhere to look.
+    #[test]
+    fn a_missing_config_dir_is_empty_rather_than_a_guess() {
+        assert_eq!(preflight_input_from_meta(&meta_of(&[])).config_dir, "");
+        assert_eq!(
+            preflight_input_from_meta(&meta_of(&[("cmd:env", serde_json::json!({ "PATH": "/usr/bin" }))]))
+                .config_dir,
+            ""
+        );
+        assert_eq!(
+            preflight_input_from_meta(&meta_of(&[("cmd:env", serde_json::json!("not-an-object"))])).config_dir,
+            ""
+        );
+    }
+
+    #[test]
+    fn session_id_and_working_dir_default_to_empty() {
+        let input = preflight_input_from_meta(&meta_of(&[]));
+        assert_eq!(input.session_id, "");
+        assert_eq!(input.working_dir, "");
+
+        let input = preflight_input_from_meta(&meta_of(&[
+            ("agent:sessionid", serde_json::json!("sid-1")),
+            ("cmd:cwd", serde_json::json!("/work/dir")),
+        ]));
+        assert_eq!(input.session_id, "sid-1");
+        assert_eq!(input.working_dir, "/work/dir");
     }
 }
