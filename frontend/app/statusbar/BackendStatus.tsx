@@ -11,20 +11,7 @@ import { Portal } from "solid-js/web";
 import { autoUpdate } from "@floating-ui/dom";
 import { usePaneOverlay } from "@/app/platform/pane-overlay";
 import { computeMenuPosition } from "@/app/util/menu-position";
-
-function pad2(n: number): string {
-    return n < 10 ? `0${n}` : `${n}`;
-}
-
-function formatUptime(secs: number): string {
-    const s = secs % 60;
-    const m = Math.floor(secs / 60) % 60;
-    const h = Math.floor(secs / 3600) % 24;
-    const d = Math.floor(secs / 86400);
-    if (d > 0) return `${d}:${pad2(h)}:${pad2(m)}:${pad2(s)}`;
-    if (h > 0) return `${h}:${pad2(m)}:${pad2(s)}`;
-    return `${m}:${pad2(s)}`;
-}
+import { formatUptime, resolveUptimeSecs } from "./backend-uptime";
 
 function gpuColor(c: ReturnType<typeof getGpuInfo>["classification"]): string {
     switch (c) {
@@ -311,18 +298,27 @@ const BackendStatus = (): JSX.Element => {
         }
     });
 
-    // Drive uptime from sysinfo event timestamp so all windows update in sync.
-    // The backend broadcasts sysinfo with a server-side ts (ms epoch); all windows
-    // receive the same ts and compute the same integer, eliminating phase drift.
+    // Drive uptime from the sysinfo event so all windows update in sync — every
+    // window receives the same tick and shows the same integer, eliminating
+    // phase drift.
+    //
+    // The value itself comes from srv's MONOTONIC `uptime_secs`, not from
+    // subtracting the event's wall-clock `ts` from the host's `started_at`
+    // stamp. Those are two independent wall-clock reads spanning the backend's
+    // whole lifetime, so any backwards clock step (NTP correction, manual set,
+    // VM resume) made the difference negative and left it that way until the
+    // next restart. See `backend-uptime.ts` for the live 2081 -> 2026 case this
+    // fixes. `ts` is still passed as a clamped fallback for a payload that
+    // predates the field.
     onMount(() => {
         const unsub = waveEventSubscribe({
             eventType: WpsEvent.SysInfo,
             scope: "local",
             handler: (event) => {
-                const ts: number | undefined = (event as WaveEvent)?.data?.ts;
-                const start = startedAt();
-                if (ts != null && start != null) {
-                    setUptimeSecs(Math.floor((ts - start) / 1000));
+                const data = (event as WaveEvent)?.data;
+                const next = resolveUptimeSecs(data?.uptime_secs, data?.ts, startedAt());
+                if (next != null) {
+                    setUptimeSecs(next);
                 }
             },
         });

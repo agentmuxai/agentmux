@@ -47,6 +47,12 @@ async fn main() {
     #[cfg(windows)]
     let _crash_guard = bootstrap::install_crash_guard();
 
+    // 0c. Anchor the uptime clock before anything else can take time. Must be
+    //     neither a wall-clock stamp (moves backwards on a clock step) nor an
+    //     `Instant` (stops while suspended) — see `suspend_aware_now_ms` in
+    //     `backend::sysinfo` for both bugs and the per-platform sources.
+    backend::sysinfo::mark_process_start();
+
     // 1. Init tracing (stderr + rolling file)
     let _log_guard = bootstrap::init_logging();
 

@@ -1965,6 +1965,11 @@ declare global {
     type TimeSeriesData = {
         ts: number;
         values: {[key: string]: number};
+        // Backend uptime in seconds, from srv's monotonic clock. Present only
+        // on the top-level sysinfo tick, absent on per-block stats and the
+        // CPU-stream RPCs. Never derive uptime from `ts` — see
+        // frontend/app/statusbar/backend-uptime.ts.
+        uptime_secs?: number;
     };
 
     // uctypes.UIChat

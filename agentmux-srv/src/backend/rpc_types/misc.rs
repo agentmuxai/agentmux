@@ -254,6 +254,18 @@ pub struct CommandVarResponseData {
 pub struct TimeSeriesData {
     pub ts: i64,
     pub values: HashMap<String, f64>,
+    /// Backend uptime in seconds, from a MONOTONIC clock (`sysinfo::uptime_secs`)
+    /// — NOT `ts` minus some earlier wall-clock stamp. Only the top-level
+    /// sysinfo tick carries it; per-block stats and the CPU-stream RPCs leave
+    /// it `None`, hence `skip_serializing_if` so their payload shape is
+    /// byte-for-byte unchanged.
+    ///
+    /// Exists because the frontend previously derived uptime by subtracting
+    /// the host's wall-clock `backend_started_at` from this struct's own
+    /// wall-clock `ts`, which goes permanently negative after any backwards
+    /// clock step. See `frontend/app/statusbar/backend-uptime.ts`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uptime_secs: Option<u64>,
 }
 
 /// Matches Go's `RemoteInfo`
