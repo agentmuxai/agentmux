@@ -1037,19 +1037,31 @@ struct AgentMuxWindowInfo {
     tier: CaptureTier,
 }
 
-/// Enumerate every top-level OS window belonging to an AgentMux process
-/// (matched via `app_name()`, not `title()` — AgentMux's own process names
-/// are version-stamped, e.g. `agentmux-0.55.18`, not a single fixed
-/// string, but they all share the `agentmux` prefix — reagent P1, PR
-/// #2709 round 2, which also found the original unscoped version could
-/// screenshot a KeePass password-manager window with zero gating).
+/// Enumerate every top-level OS window, AgentMux-owned or not, each tagged
+/// with the `CaptureTier` that decides whether it may be captured.
+///
+/// `is_agentmux` is matched via `app_name()`, not `title()` — AgentMux's own
+/// process names are version-stamped, e.g. `agentmux-0.55.18`, not a single
+/// fixed string, but they all share the `agentmux` prefix (reagent P1, PR
+/// #2709 round 2). That flag no longer decides *inclusion* — non-AgentMux
+/// windows are T4 capture targets — but it still gates disclosure: they stay
+/// out of `DiscoverWindows`' default listing and their titles are withheld
+/// from candidate/miss lists (`candidate_label`), which is what keeps round
+/// 2's KeePass-title leak closed now that they're enumerated at all.
+///
 /// `is_self` marks windows belonging to the calling agent's OWN instance
-/// (`own_instance_pids()`) — surfaced as a flag here (for `DiscoverWindows`,
-/// which is read-only and fine showing "yes this is you"), then hard-
-/// excluded downstream by `capture_window_impl` (which must never let an
-/// agent screenshot its own instance — reagent P0, PR #2709 round 3: one
-/// AgentMux instance's top-level window contains every agent's pane in it,
-/// so that exclusion is the actual isolation boundary, not a nicety).
+/// (`own_instance_pids()`).
+///
+/// **Historical note (reagent P2 on PR #2845):** this comment previously said
+/// `is_self` windows were "hard-excluded downstream by `capture_window_impl`
+/// … the actual isolation boundary, not a nicety" (reagent P0, PR #2709
+/// round 3). That is no longer true and the reasoning has been superseded, not
+/// merely relaxed: the boundary it protected —
+/// `SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md` §6's own-pane-only
+/// default — was an unratified recommendation that defaulted closed because no
+/// mechanism existed to be selective. `is_self` now resolves to
+/// `CaptureTier::SameInstance`, which is allowed. See
+/// `SPEC_AGENT_UNRESTRICTED_CAPTURE_WITH_ACCOUNTABILITY_2026_08_30.md`.
 fn enumerate_agentmux_windows() -> Result<Vec<AgentMuxWindowInfo>> {
     let windows =
         xcap::Window::all().map_err(|e| anyhow::anyhow!("failed to enumerate windows: {e}"))?;
@@ -1133,6 +1145,22 @@ fn looks_unrendered(img: &image::RgbaImage) -> bool {
     sampled > 0
 }
 
+/// Label for a window in a disambiguation/candidate list.
+///
+/// Withholds the TITLE of a non-AgentMux window — reagent P1 on PR #2845.
+/// Foreign windows became capturable with the tier model, so any list built
+/// from the capturable set can disclose a user's unrelated app titles (their
+/// browser, their password manager) as a side effect of a miss or an ambiguous
+/// match, bypassing `DiscoverWindows`' own `include_foreign` opt-in. The pid
+/// alone is enough to disambiguate, and is what the caller needs anyway.
+fn candidate_label(w: &AgentMuxWindowInfo) -> String {
+    if w.is_agentmux {
+        format!("pid={} title={:?}", w.pid, w.title)
+    } else {
+        format!("pid={} <non-AgentMux window; pass include_foreign to DiscoverWindows to identify it>", w.pid)
+    }
+}
+
 /// The actual `CaptureWindow` logic — window enumeration, own-instance and
 /// third-party-app exclusion, targeting (by pid or by title), capture, and
 /// save. Extracted to its own function (rather than living inline in the
@@ -1151,6 +1179,12 @@ fn capture_window_impl(
     title_contains: Option<&str>,
     index: Option<usize>,
     pid: Option<u32>,
+    // Filled the moment a target is RESOLVED, so a failure after that point —
+    // a denied T3 pid, a failed capture_image, a failed PNG write — is still
+    // audited with its tier and target instead of nulls (codex P2 on PR #2845).
+    // Without it the log cannot tell "no such window" apart from "blocked
+    // cross-user attempt", which is the entry a reviewer most wants to find.
+    resolved: &mut Option<(CaptureTier, String)>,
 ) -> Result<CaptureOutcome> {
     let all = enumerate_agentmux_windows()?;
     // Tier gate replaces the old `!w.is_self` exclusion — see `CaptureTier`.
@@ -1191,7 +1225,7 @@ fn capture_window_impl(
             None => {
                 let candidates: Vec<String> = matches
                     .iter()
-                    .map(|w| format!("title={:?}", w.title))
+                    .map(|w| candidate_label(w))
                     .collect();
                 anyhow::bail!(
                     "{} windows matched pid {target_pid} — a single process can own \
@@ -1213,16 +1247,23 @@ fn capture_window_impl(
             .collect();
 
         if matches.is_empty() {
-            // Only lists OTHER AgentMux windows' titles, not every
-            // window on the desktop — reagent P2 (PR #2709 round 2):
-            // the original version dumped every visible window's title
-            // on any miss, which let a caller enumerate arbitrary
-            // window titles (confirmed in testing: this leaked a
-            // password manager's document title) with no real match
-            // required at all. Still helpful for the actual in-scope
-            // case (multiple AgentMux instances open) without that leak.
+            // Only lists AGENTMUX windows' titles, never every window on the
+            // desktop — reagent P2 (PR #2709 round 2): the original version
+            // dumped every visible window's title on any miss, which let a
+            // caller enumerate arbitrary window titles (confirmed in testing:
+            // it leaked a password manager's document title) with no real
+            // match required at all.
+            //
+            // The `is_agentmux` filter is load-bearing again as of the tier
+            // model — reagent P1 on PR #2845. `foreign` now includes T4
+            // non-AgentMux windows (they became capturable), so listing it
+            // wholesale would have re-opened exactly that leak, and would have
+            // bypassed `DiscoverWindows`' own `include_foreign` opt-in in the
+            // process: a caller could enumerate the user's desktop by
+            // deliberately missing.
             let titles: Vec<&str> = foreign
                 .iter()
+                .filter(|w| w.is_agentmux)
                 .map(|w| w.title.as_str())
                 .filter(|t| !t.is_empty())
                 .collect();
@@ -1254,7 +1295,7 @@ fn capture_window_impl(
                 // would list candidates instead. It now actually does.
                 let candidates: Vec<String> = matches
                     .iter()
-                    .map(|w| format!("pid={} title={:?}", w.pid, w.title))
+                    .map(|w| candidate_label(w))
                     .collect();
                 anyhow::bail!(
                     "{} windows matched {title_contains:?} — pass an explicit index (0-based), \
@@ -1266,6 +1307,8 @@ fn capture_window_impl(
             }
         }
     };
+
+    *resolved = Some((target.tier, candidate_label(target)));
 
     let title = target.title.clone();
 
@@ -1361,7 +1404,13 @@ fn sha256_file(path: &std::path::Path) -> Option<String> {
 /// itself — `prune_old_captures`'s PNG-only extension filter already
 /// leaves a `.log` file in that same directory untouched, so this doesn't
 /// need (or want) its own separate directory alongside it.
-fn audit_log_capture_window(query_desc: &str, outcome: &Result<CaptureOutcome>) {
+fn audit_log_capture_window(
+    query_desc: &str,
+    outcome: &Result<CaptureOutcome>,
+    // Resolved target/tier for the FAILURE paths — on success the outcome
+    // carries its own. See capture_window_impl's `resolved` param.
+    resolved: &Option<(CaptureTier, String)>,
+) {
     let entry = serde_json::json!({
         "timestamp": std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1377,8 +1426,16 @@ fn audit_log_capture_window(query_desc: &str, outcome: &Result<CaptureOutcome>) 
         // reviewer needs to know what was actually captured, which a
         // `title_contains` substring doesn't say. Absent on failure, since
         // nothing was resolved (spec §6).
-        "tier": outcome.as_ref().ok().map(|c| c.tier.label()),
-        "target": outcome.as_ref().ok().map(|c| c.target.clone()),
+        "tier": outcome
+            .as_ref()
+            .ok()
+            .map(|c| c.tier.label())
+            .or_else(|| resolved.as_ref().map(|(t, _)| t.label())),
+        "target": outcome
+            .as_ref()
+            .ok()
+            .map(|c| c.target.clone())
+            .or_else(|| resolved.as_ref().map(|(_, t)| t.clone())),
         // Traces a leaked screenshot back to the call that produced it.
         "image_sha256": outcome.as_ref().ok().and_then(|c| c.image_sha256.clone()),
         // Phase 1 never redacts — recorded explicitly so an unredacted T2/T4
@@ -2759,8 +2816,9 @@ async fn call_tool(
             // one — logging every call (who, what was requested, what
             // happened) is the honest, shippable Phase-1 answer while the
             // real gate is tracked separately (operator-confirmed).
-            let outcome = capture_window_impl(title_contains.as_deref(), index, pid);
-            audit_log_capture_window(&query_desc, &outcome);
+            let mut resolved: Option<(CaptureTier, String)> = None;
+            let outcome = capture_window_impl(title_contains.as_deref(), index, pid, &mut resolved);
+            audit_log_capture_window(&query_desc, &outcome, &resolved);
             return outcome.map(|c| c.message);
         }
         "DiscoverWindows" => {
@@ -3641,8 +3699,9 @@ mod tests {
                 target: "pid=42 title=\"Other\"".to_string(),
                 image_sha256: Some("deadbeef".to_string()),
             }),
+            &None,
         );
-        audit_log_capture_window("second query", &Err(anyhow::anyhow!("no match")));
+        audit_log_capture_window("second query", &Err(anyhow::anyhow!("no match")), &None);
 
         unsafe { std::env::remove_var("AGENTMUX_DATA_HOME") };
 
@@ -3668,6 +3727,53 @@ mod tests {
         // recording a target that was never captured.
         assert!(second["tier"].is_null());
         assert!(second["image_sha256"].is_null());
+    }
+
+    /// codex P2 on PR #2845: a failure AFTER target resolution — a denied T3
+    /// pid, a failed capture, a failed save — must still record which tier and
+    /// target it addressed. Otherwise the audit cannot tell "no such window"
+    /// apart from "blocked cross-user attempt", which is the entry a reviewer
+    /// most wants to find.
+    #[test]
+    fn a_failed_capture_still_audits_its_resolved_tier_and_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let _guard = DATA_HOME_ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var("AGENTMUX_DATA_HOME", dir.path()) };
+
+        let resolved = Some((
+            CaptureTier::OtherUser,
+            "pid=99 <non-AgentMux window>".to_string(),
+        ));
+        audit_log_capture_window("pid=99", &Err(anyhow::anyhow!("withheld")), &resolved);
+
+        unsafe { std::env::remove_var("AGENTMUX_DATA_HOME") };
+
+        let log_path = dir.path().join("tmp/capture-window/capture-window-audit.log");
+        let content = std::fs::read_to_string(&log_path).unwrap();
+        let entry: Value = serde_json::from_str(content.lines().next().unwrap()).unwrap();
+        assert_eq!(entry["outcome"]["result"], "error");
+        assert_eq!(
+            entry["tier"], "T3-other-user",
+            "a denied cross-user attempt must be identifiable in the trail"
+        );
+        assert_eq!(entry["target"], "pid=99 <non-AgentMux window>");
+    }
+
+    /// A foreign window's TITLE must never appear in a candidate/miss list —
+    /// that would bypass DiscoverWindows' include_foreign opt-in by simply
+    /// missing on purpose (reagent P1 / codex P2 on PR #2845).
+    #[test]
+    fn candidate_label_withholds_foreign_window_titles() {
+        let Ok(windows) = enumerate_agentmux_windows() else { return };
+        for w in windows.iter().filter(|w| !w.is_agentmux && !w.title.is_empty()) {
+            let label = candidate_label(w);
+            assert!(
+                !label.contains(&w.title),
+                "foreign window title leaked into a candidate label: {label}"
+            );
+            assert!(label.contains(&format!("pid={}", w.pid)), "pid must still identify it");
+            return; // one real foreign window is enough
+        }
     }
 
     /// The Phase-1 `allow` defaults (spec §3). The whole point of this change
