@@ -1208,10 +1208,22 @@ fn capture_window_impl(
             .copied()
             .collect();
         if matches.is_empty() {
+            // `foreign` is already tier-filtered, so a withheld T3 window is
+            // absent from it and would otherwise be indistinguishable from a
+            // pid that doesn't exist — reported identically to the caller AND
+            // audited as `tier: null`. Look it up in the UNFILTERED set to
+            // separate "withheld" from "absent" (codex P2 / reagentx P2).
+            if let Some(blocked) = all.iter().find(|w| w.pid == target_pid) {
+                *resolved = Some((blocked.tier, candidate_label(blocked)));
+                anyhow::bail!(
+                    "window pid={target_pid} is {} — capture is withheld for windows owned \
+                     by a different OS user; every other tier is available",
+                    blocked.tier.label()
+                );
+            }
             anyhow::bail!(
-                "no window found for pid {target_pid} (or it belongs to a different \
-                 OS user, the one tier capture is withheld from) — call \
-                 DiscoverWindows to see current candidates"
+                "no window found for pid {target_pid} — call DiscoverWindows to see \
+                 current candidates"
             );
         }
         match index {
@@ -1247,6 +1259,23 @@ fn capture_window_impl(
             .collect();
 
         if matches.is_empty() {
+            // Same withheld-vs-absent distinction as the pid branch above: a
+            // title that matches ONLY a T3 window must audit as T3, not as a
+            // miss. Checked against the unfiltered set, but the error text
+            // deliberately does NOT echo that window's title — naming it would
+            // confirm a cross-user window's title to the caller, which is the
+            // disclosure this tier exists to prevent.
+            if let Some(blocked) = all
+                .iter()
+                .find(|w| !w.tier.allowed() && w.title.to_lowercase().contains(&needle))
+            {
+                *resolved = Some((blocked.tier, candidate_label(blocked)));
+                anyhow::bail!(
+                    "a window matching {title_contains:?} exists but is {} — capture is \
+                     withheld for windows owned by a different OS user",
+                    blocked.tier.label()
+                );
+            }
             // Only lists AGENTMUX windows' titles, never every window on the
             // desktop — reagent P2 (PR #2709 round 2): the original version
             // dumped every visible window's title on any miss, which let a
@@ -2838,6 +2867,16 @@ async fn call_tool(
             let windows = enumerate_agentmux_windows()?;
             let list: Vec<Value> = windows
                 .iter()
+                // T3 windows are omitted entirely, with no opt-in — reagentx P1
+                // on PR #2845. Withholding only the CAPTURE while still
+                // listing the window would disclose its `title` and its
+                // `exe_path` (which embeds the owning OS username), and that
+                // disclosure across a human boundary is the whole reason the
+                // tier is withheld: the other user never consented and cannot
+                // be notified. This is new exposure created by this PR —
+                // before it, foreign windows weren't enumerated at all — so
+                // the filter belongs here, not only at the capture gate.
+                .filter(|w| w.tier.allowed())
                 .filter(|w| include_self || !w.is_self)
                 .filter(|w| include_foreign || w.is_agentmux)
                 .map(|w| {
@@ -3773,6 +3812,32 @@ mod tests {
             );
             assert!(label.contains(&format!("pid={}", w.pid)), "pid must still identify it");
             return; // one real foreign window is enough
+        }
+    }
+
+    /// reagentx P2 on PR #2845 caught that the previous round's claimed fix for
+    /// this had silently not applied — the edit no-opped and I reported it as
+    /// landed. This test pins the behaviour itself rather than trusting a diff:
+    /// a withheld target must be reachable in the UNFILTERED enumeration so it
+    /// can be audited, since `foreign` (tier-filtered) cannot see it.
+    #[test]
+    fn a_withheld_window_is_still_findable_for_auditing() {
+        let Ok(windows) = enumerate_agentmux_windows() else { return };
+        let withheld: Vec<&AgentMuxWindowInfo> =
+            windows.iter().filter(|w| !w.tier.allowed()).collect();
+        let capturable: Vec<&AgentMuxWindowInfo> =
+            windows.iter().filter(|w| w.tier.allowed()).collect();
+        // The enumeration must retain both sets — the capture gate filters
+        // later. If enumeration itself dropped withheld windows, the audit
+        // could never name them and "withheld" would be indistinguishable
+        // from "absent", which is the defect this pins.
+        assert_eq!(
+            withheld.len() + capturable.len(),
+            windows.len(),
+            "every enumerated window must be classified, none silently dropped"
+        );
+        for w in withheld {
+            assert_eq!(w.tier, CaptureTier::OtherUser, "only T3 is withheld");
         }
     }
 
