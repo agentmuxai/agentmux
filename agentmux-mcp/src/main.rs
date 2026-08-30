@@ -1502,7 +1502,7 @@ fn audit_log_capture_window(
 /// shipped with none. Same shape, same file (a single window-related audit
 /// trail is easier to review than two): best-effort, never blocks the
 /// tool's own result.
-fn audit_log_discover_windows(include_self: bool, windows: &[Value]) {
+fn audit_log_discover_windows(include_self: bool, include_foreign: bool, windows: &[Value]) {
     let entry = serde_json::json!({
         "timestamp": std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1510,7 +1510,13 @@ fn audit_log_discover_windows(include_self: bool, windows: &[Value]) {
             .unwrap_or(0),
         "agent_id": agent_slug().unwrap_or_else(|_| "unknown".to_string()),
         "tool": "DiscoverWindows",
-        "query": format!("include_self={include_self}"),
+        // Both flags — reagentx P2 on PR #2845. `include_foreign` is the one
+        // that actually triggers this trail's reason for existing: it
+        // discloses non-AgentMux window titles and exe_paths. Recording only
+        // `include_self` left a reviewer scanning query strings unable to tell
+        // whether foreign disclosure was even requested, inferable only by
+        // picking through each entry's `is_agentmux` tag.
+        "query": format!("include_self={include_self} include_foreign={include_foreign}"),
         "outcome": serde_json::json!({
             "result": "success",
             "window_count": windows.len(),
@@ -2912,7 +2918,7 @@ async fn call_tool(
             // OTHER instances/users on a shared machine is the same
             // disclosure-across-a-human-boundary risk CaptureWindow already
             // logs — this tool must too, not just the tool that follows it.
-            audit_log_discover_windows(include_self, &list);
+            audit_log_discover_windows(include_self, include_foreign, &list);
             return Ok(serde_json::to_string_pretty(&json!({ "windows": list }))
                 .unwrap_or_else(|_| "{\"windows\":[]}".to_string()));
         }
@@ -3946,7 +3952,7 @@ mod tests {
             "exe_path": "C:\\Users\\someone\\agentmux.exe",
             "is_self": false,
         })];
-        audit_log_discover_windows(false, &windows);
+        audit_log_discover_windows(false, false, &windows);
 
         unsafe { std::env::remove_var("AGENTMUX_DATA_HOME") };
 
@@ -3957,7 +3963,11 @@ mod tests {
 
         let entry: Value = serde_json::from_str(lines[0]).unwrap();
         assert_eq!(entry["tool"], "DiscoverWindows");
-        assert_eq!(entry["query"], "include_self=false");
+        // Both disclosure flags must be legible from the query string alone —
+        // `include_foreign` is the one that exposes non-AgentMux titles and
+        // exe_paths, i.e. this trail's whole reason for existing (reagentx P2
+        // on PR #2845).
+        assert_eq!(entry["query"], "include_self=false include_foreign=false");
         assert_eq!(entry["outcome"]["result"], "success");
         assert_eq!(entry["outcome"]["window_count"], 1);
         assert_eq!(
