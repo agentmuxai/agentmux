@@ -39,7 +39,14 @@ pub(super) async fn handle_host_ipc_service(state: &AppState, call: &WebCallType
 /// matched. Not signing anything meaningful — both sides already hold the
 /// same static secret out-of-band (spawn-time env), so this is just a
 /// constant-time equality check dressed as a one-shot MAC.
-fn secret_matches(known: &str, supplied: &str) -> bool {
+/// `pub(super)` so the `credential` service can reuse this exact check
+/// rather than growing a second constant-time comparison — it gates on the
+/// same `AGENTMUX_HOST_REG_SECRET` for the same reason (proving the caller
+/// is the paired host, not an agent riding the shared `X-AuthKey`). The
+/// NONCE below names host_ipc only because that was the first caller; it's
+/// a locally-computed comparison salt on both sides of a single `==`, never
+/// a wire format, so sharing it across callers is safe.
+pub(super) fn secret_matches(known: &str, supplied: &str) -> bool {
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
 

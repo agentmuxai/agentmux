@@ -263,8 +263,11 @@ export interface BrowserAuthRequest {
      *  v1 surfaces both with the same UI; future spec may diverge. */
     isProxy: boolean;
     /** User submitted credentials. The layer routes them to the host
-     *  via `browser_pane_auth_submit`. */
-    onSubmit: (username: string, password: string) => void;
+     *  via `browser_pane_auth_submit`, and — when `save` is true (the
+     *  panel's opt-in "save this credential" checkbox) — also fires
+     *  `browser_pane_auth_save` so the host stores it in the OS keychain
+     *  for future auto-fill. */
+    onSubmit: (username: string, password: string, save: boolean) => void;
     /** User cancelled. The layer routes to `browser_pane_auth_cancel`,
      *  which calls `AuthCallback.cancel()` so CEF aborts the request
      *  and renders the 401 response body. */

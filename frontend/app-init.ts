@@ -677,7 +677,15 @@ async function initAppInner() {
                     await initHostNewWindow();
                     const coldSearchParams = new URL(window.location.href).searchParams;
                     const coldInitialView = coldSearchParams.get("initialView");
-                    if (coldInitialView) {
+                    // "credential-approval" is not a real pane view — it's
+                    // rendered by app.tsx as this window's ENTIRE content,
+                    // bypassing the normal Workspace/pane tree on purpose
+                    // (see CredentialApprovalWindow's own doc comment for
+                    // why: a pane opened via pane.open gets a
+                    // [data-blockid] wrapper, which would make its Approve
+                    // button reachable by any agent's UIQuery/UIClick).
+                    // Opening it as a real pane here would defeat that.
+                    if (coldInitialView && coldInitialView !== "credential-approval") {
                         const coldMetaRaw = coldSearchParams.get("initialMeta");
                         let coldMeta: Record<string, unknown> | undefined;
                         try { coldMeta = coldMetaRaw ? JSON.parse(coldMetaRaw) : undefined; } catch { /* ignore */ }

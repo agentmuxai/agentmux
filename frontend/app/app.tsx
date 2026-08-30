@@ -33,6 +33,7 @@ import { checkSeparatorParity, setupDprTracking } from "./init/dpr";
 import { NotificationBubbles } from "./notification/notificationbubbles";
 import { MemoryPressureBanner } from "./notification/memory-pressure-banner";
 import { BrowserPaneOutsideClickBridge } from "./window/browser-pane-outside-click-bridge";
+import { CredentialApprovalWindow } from "./view/credential-approval/CredentialApprovalWindow";
 
 import "./app.scss";
 
@@ -312,10 +313,24 @@ const AppInner = () => {
     // Cold path (open_floating_pane_window) opens the window with floatingPaneId
     // in the URL from the start, so both paths are correct here.
     const IS_FLOATING_PANE = new URLSearchParams(window.location.search).has("floatingPaneId");
+    // The credential-approval subwindow (`open_subwindow` with
+    // `initial_view=credential-approval` — see `credential_broker` in
+    // agentmux-cef) is a cold-path-only window: unlike floatingPaneId,
+    // there's no pool-promote path that could inject this param after
+    // module load, so reading it once here (rather than at mount time) is
+    // safe. Checked BEFORE the client/windowData gate below — this window
+    // never opens a workspace/backend window object at all (see
+    // app-init.ts's guard against firing `pane.open` for this view), so it
+    // must never wait on atoms that will never populate.
+    const IS_CREDENTIAL_APPROVAL = new URLSearchParams(window.location.search).get("initialView") === "credential-approval";
     const prefersReducedMotion = atoms.prefersReducedMotionAtom;
     const client = atoms.client;
     const windowData = atoms.waveWindow;
     const isFullScreen = atoms.isFullScreen;
+
+    if (IS_CREDENTIAL_APPROVAL) {
+        return <CredentialApprovalWindow />;
+    }
 
     return (
         <Show

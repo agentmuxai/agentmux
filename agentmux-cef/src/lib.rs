@@ -34,6 +34,7 @@ mod srv_ipc;
 mod memory_heartbeat;
 mod memory_pressure;
 mod browser_pane;
+mod credential_broker;
 #[cfg(target_os = "windows")]
 mod floating_pane;
 mod reducer;
@@ -645,6 +646,28 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     // `tokio::spawn` there would panic with "there is no reactor
     // running" because that thread has no `Handle::current()`.
     browser_pane::auth::set_runtime_handle(runtime.handle().clone());
+
+    // Same rationale, for the credential broker's async orchestration
+    // (and the approval registry's TTL timer, which shares this handle) —
+    // see `credential_broker::set_runtime_handle`'s doc comment.
+    credential_broker::set_runtime_handle(runtime.handle().clone());
+
+    // Lets the approval registry's TTL timer close an expired approval's
+    // subwindow. It holds `window_id` strings and nothing else by design, and
+    // its timer task has neither `AppState` nor a window handle — without
+    // this, a timed-out approval left a dead, unresponsive window open until
+    // the human closed it by hand (reagent P2 on PR #2824).
+    {
+        let closer_state = app_state.clone();
+        credential_broker::set_window_closer(move |window_id: &str| {
+            if let Err(e) = commands::window::close_window_by_label(
+                &closer_state,
+                &serde_json::json!({ "label": window_id }),
+            ) {
+                tracing::warn!("[credential-broker] failed to close approval window {window_id}: {e}");
+            }
+        });
+    }
 
     // Start the IPC HTTP server and get the assigned port.
     let ipc_port = runtime.block_on(ipc::start_ipc_server(app_state.clone()));
