@@ -32,10 +32,6 @@ describe("wholeCommandSleepMs — matches", () => {
         expect(wholeCommandSleepMs("timeout 60 sleep 60")).toBe(60_000);
         expect(wholeCommandSleepMs("timeout 90s sleep 60")).toBe(60_000);
     });
-
-    it("is case-insensitive", () => {
-        expect(wholeCommandSleepMs("SLEEP 60")).toBe(60_000);
-    });
 });
 
 describe("wholeCommandSleepMs — refuses anything with a second clause", () => {
@@ -91,5 +87,55 @@ describe("wholeCommandSleepMs — the micro-delay floor", () => {
 
     it("accepts exactly at the floor", () => {
         expect(wholeCommandSleepMs("sleep 5")).toBe(SLEEP_IMMEDIATE_MIN_MS);
+    });
+});
+
+describe("wholeCommandSleepMs — timeout wrapper decides the real wait (codex P2, PR #2851)", () => {
+    /** `timeout N sleep M` ends at whichever comes first. Counting down from
+     *  the sleep's own argument would say "~300s left" about a process that
+     *  dies in 5 — the confidently-wrong reading this module exists to avoid. */
+    it("uses the timeout when it is shorter than the sleep", () => {
+        expect(wholeCommandSleepMs("timeout 5 sleep 300")).toBe(5_000);
+        expect(wholeCommandSleepMs("timeout 30s sleep 600")).toBe(30_000);
+        expect(wholeCommandSleepMs("timeout 1m sleep 3600")).toBe(60_000);
+    });
+
+    it("uses the sleep when the timeout is longer (it never fires)", () => {
+        expect(wholeCommandSleepMs("timeout 600 sleep 30")).toBe(30_000);
+    });
+
+    /** `timeout --help`: "A duration of 0 disables the associated timeout." */
+    it("treats a zero timeout as no timeout at all", () => {
+        expect(wholeCommandSleepMs("timeout 0 sleep 300")).toBe(300_000);
+    });
+
+    it("applies the micro-delay floor to the EFFECTIVE wait, not the sleep argument", () => {
+        // Dies after 2s despite the `sleep 300` — below the floor, so no row.
+        expect(wholeCommandSleepMs("timeout 2 sleep 300")).toBeNull();
+    });
+});
+
+describe("wholeCommandSleepMs — case sensitivity matches the shell (codex P2, PR #2851)", () => {
+    /** Verified against coreutils: `sleep 5M` -> "invalid time interval '5M'".
+     *  Matching it would promote a call that fails instantly — phantom dock
+     *  row, suppressed working row, bogus attached-task exemption. */
+    it("refuses uppercase unit suffixes, which coreutils rejects", () => {
+        expect(wholeCommandSleepMs("sleep 5M")).toBeNull();
+        expect(wholeCommandSleepMs("sleep 30S")).toBeNull();
+        expect(wholeCommandSleepMs("sleep 1H")).toBeNull();
+    });
+
+    it("refuses an uppercase command name, which is not a command on a case-sensitive fs", () => {
+        expect(wholeCommandSleepMs("SLEEP 60")).toBeNull();
+        expect(wholeCommandSleepMs("Sleep 60")).toBeNull();
+    });
+
+    it("refuses an uppercase timeout wrapper", () => {
+        expect(wholeCommandSleepMs("TIMEOUT 60 sleep 60")).toBeNull();
+    });
+
+    it("still accepts the ordinary lowercase forms", () => {
+        expect(wholeCommandSleepMs("sleep 5m")).toBe(300_000);
+        expect(wholeCommandSleepMs("sleep 30s")).toBe(30_000);
     });
 });

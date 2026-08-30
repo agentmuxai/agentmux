@@ -47,10 +47,28 @@ export const SLEEP_IMMEDIATE_MIN_MS = 5_000;
  * fails to match and falls through to duration promotion. So does a bare
  * `sleep` with no argument, and GNU's multi-arg `sleep 1 2` form (rare, and
  * summing it is not worth the surface).
+ *
+ * **Case-sensitive, and lowercase suffixes only** (codex P2 on PR #2851).
+ * `sleep 5M` is not a slow sleep — coreutils rejects it outright (*"invalid
+ * time interval '5M'"*, verified), and `SLEEP 60` is not a command at all on
+ * any case-sensitive filesystem. Matching either would promote a call that is
+ * about to die instantly: a phantom dock row, a suppressed working row, and a
+ * bogus attached-task exemption, all for a command that never waited. A false
+ * negative here is free — it just falls through to duration promotion.
+ *
+ * Groups: 1/2 = the `timeout` wrapper's duration + unit (absent when
+ * unwrapped), 3/4 = the sleep's own.
  */
-const WHOLE_COMMAND_SLEEP = /^\s*(?:timeout\s+\d+(?:\.\d+)?[smhd]?\s+)?sleep\s+(\d+(?:\.\d+)?)([smhd]?)\s*;?\s*$/i;
+const WHOLE_COMMAND_SLEEP =
+    /^\s*(?:timeout\s+(\d+(?:\.\d+)?)([smhd]?)\s+)?sleep\s+(\d+(?:\.\d+)?)([smhd]?)\s*;?\s*$/;
 
 const UNIT_MS: Record<string, number> = { "": 1_000, s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 };
+
+function toMs(value: string, unit: string): number | null {
+    const n = Number.parseFloat(value);
+    if (!Number.isFinite(n)) return null;
+    return n * (UNIT_MS[unit] ?? 1_000);
+}
 
 /**
  * Milliseconds this command will sleep for, or `null` when it isn't a
@@ -66,8 +84,18 @@ export function wholeCommandSleepMs(command: string | undefined): number | null 
     if (!command) return null;
     const m = WHOLE_COMMAND_SLEEP.exec(command);
     if (!m) return null;
-    const value = Number.parseFloat(m[1]);
-    if (!Number.isFinite(value)) return null;
-    const ms = value * (UNIT_MS[m[2].toLowerCase()] ?? 1_000);
-    return ms >= SLEEP_IMMEDIATE_MIN_MS ? ms : null;
+
+    const sleepMs = toMs(m[3], m[4]);
+    if (sleepMs == null) return null;
+
+    // `timeout N sleep M` waits for whichever comes first — the countdown must
+    // follow the process, not the sleep's own argument (codex P2 on PR #2851).
+    // `timeout 5 sleep 300` dies at 5s; counting down from 5 minutes would be
+    // exactly the confidently-wrong reading this module exists to avoid.
+    // Per `timeout --help`: "A duration of 0 disables the associated timeout",
+    // so a zero wrapper means the sleep runs in full.
+    const timeoutMs = m[1] != null ? toMs(m[1], m[2]) : null;
+    const effectiveMs = timeoutMs != null && timeoutMs > 0 ? Math.min(timeoutMs, sleepMs) : sleepMs;
+
+    return effectiveMs >= SLEEP_IMMEDIATE_MIN_MS ? effectiveMs : null;
 }
