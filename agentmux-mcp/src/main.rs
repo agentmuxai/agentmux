@@ -2979,15 +2979,14 @@ async fn call_tool(
             let windows = enumerate_agentmux_windows()?;
             let list: Vec<Value> = windows
                 .iter()
-                // T3 windows are omitted entirely, with no opt-in — reagentx P1
-                // on PR #2845. Withholding only the CAPTURE while still
-                // listing the window would disclose its `title` and its
-                // `exe_path` (which embeds the owning OS username), and that
-                // disclosure across a human boundary is the whole reason the
-                // tier is withheld: the other user never consented and cannot
-                // be notified. This is new exposure created by this PR —
-                // before it, foreign windows weren't enumerated at all — so
-                // the filter belongs here, not only at the capture gate.
+                // These two filters decide WHICH windows are listed. What each
+                // listed entry may say about itself — in particular that a
+                // withheld window is redacted rather than omitted — belongs to
+                // `window_listing_entry` below, which documents that rationale
+                // rather than repeating it here (reagentx P2 on PR #2845: an
+                // earlier version of this comment still described a
+                // `tier.allowed()` filter that has since been replaced, and
+                // contradicted the code under it).
                 .filter(|w| include_self || !w.is_self)
                 .filter(|w| include_foreign || w.is_agentmux)
                 .map(window_listing_entry)
