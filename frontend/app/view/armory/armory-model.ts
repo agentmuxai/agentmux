@@ -9,16 +9,24 @@ import { createMemo, type Accessor } from "solid-js";
 // Section ids are internal and stay stable across renames (they're
 // persisted in block.meta["armory:section"] — changing an id would strand
 // a user's previously-selected tab back to "accounts"). "memory" is the
-// global-brain tab (label "Global Memory" below); "native_memory" is the
-// per-agent tab (label "Personal Memory" below) — both distinct from a
-// bundle's own "bundles" section (label "ABF"; its backing component,
-// MemoryManager, is itself a naming leftover — see
+// combined Memory tab (label "Memory" below), covering both the global
+// brain (GlobalBrainManager, is_global Memory bundles) and the per-agent
+// native memory history (NativeMemoryManager) as sections inside one pane
+// — see docs/specs/SPEC_ARMORY_MEMORY_TAB_MERGE_2026_08_30.md. Distinct
+// from a bundle's own "bundles" section (label "ABF"; its backing
+// component, MemoryManager, is itself a naming leftover — see
 // docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.3).
-// "Global Memory"/"Personal Memory" abstract away, for the user, that these
-// are two structurally different backing systems (is_global Memory bundles
-// vs. the harness's own native memory files) — see
-// docs/specs/SPEC_ARMORY_MEMORY_GLOBAL_PERSONAL_RENAME_2026_08_22.md.
-export type ArmorySection = "accounts" | "memory" | "skills" | "mcp" | "bundles" | "native_memory";
+//
+// "native_memory" is a legacy rail-section id: prior to the 08-30 merge it
+// was its own rail tab ("Personal Memory") — see
+// docs/specs/SPEC_ARMORY_MEMORY_GLOBAL_PERSONAL_RENAME_2026_08_22.md. It is
+// no longer written, but a block saved before the merge may still carry it
+// in block.meta["armory:section"]; sectionAtom below normalizes it to
+// "memory" (and memorySubsectionAtom seeds "personal") so those users land
+// on the equivalent spot in the merged tab instead of falling back to
+// "accounts".
+export type ArmorySection = "accounts" | "memory" | "skills" | "mcp" | "bundles";
+type LegacyArmorySection = ArmorySection | "native_memory";
 
 // Label text only (not icon/tooltip, which stay armory-view.tsx's own
 // presentation detail) — hoisted here so viewName can read it without
@@ -27,15 +35,22 @@ export type ArmorySection = "accounts" | "memory" | "skills" | "mcp" | "bundles"
 // too, so the two can never drift out of sync.
 export const ARMORY_SECTION_LABELS: Record<ArmorySection, string> = {
     accounts: "Accounts",
-    memory: "Global Memory",
+    memory: "Memory",
     skills: "Skills",
     mcp: "MCP Servers",
     bundles: "ABF",
-    native_memory: "Personal Memory",
 };
 
 function isArmorySection(v: unknown): v is ArmorySection {
     return typeof v === "string" && Object.prototype.hasOwnProperty.call(ARMORY_SECTION_LABELS, v);
+}
+
+// Sub-tab inside the merged Memory pane — see armory-view.tsx's memory
+// sub-nav and SPEC_ARMORY_MEMORY_TAB_MERGE_2026_08_30.md.
+export type MemorySubsection = "global" | "personal";
+
+function isMemorySubsection(v: unknown): v is MemorySubsection {
+    return v === "global" || v === "personal";
 }
 
 export class ArmoryViewModel implements ViewModel {
@@ -53,6 +68,10 @@ export class ArmoryViewModel implements ViewModel {
     // (below) can react to it, and as a side effect the selected tab now
     // survives a block remount instead of always resetting to "accounts".
     sectionAtom: Accessor<ArmorySection>;
+    // Sub-tab (Global vs Personal) inside the merged Memory pane — same
+    // meta-backed pattern as sectionAtom. See
+    // SPEC_ARMORY_MEMORY_TAB_MERGE_2026_08_30.md.
+    memorySubsectionAtom: Accessor<MemorySubsection>;
 
     viewIcon = () => "vault";
     // wired in armory.tsx to avoid circular import
@@ -72,8 +91,20 @@ export class ArmoryViewModel implements ViewModel {
         );
         this.sectionAtom = useBlockAtom(blockId, "armory-section", () =>
             createMemo<ArmorySection>(() => {
-                const s = this.blockAtom()?.meta?.["armory:section"];
+                const s = this.blockAtom()?.meta?.["armory:section"] as LegacyArmorySection | undefined;
+                if (s === "native_memory") return "memory";
                 return isArmorySection(s) ? s : "accounts";
+            }),
+        );
+        this.memorySubsectionAtom = useBlockAtom(blockId, "armory-memory-subsection", () =>
+            createMemo<MemorySubsection>(() => {
+                const sub = this.blockAtom()?.meta?.["armory:memory:subsection"];
+                if (isMemorySubsection(sub)) return sub;
+                // Legacy: a pre-merge armory:section of "native_memory" meant
+                // the user had Personal Memory open — seed Personal instead
+                // of defaulting to Global. See sectionAtom above.
+                const legacySection = this.blockAtom()?.meta?.["armory:section"];
+                return legacySection === "native_memory" ? "personal" : "global";
             }),
         );
         this.viewName = useBlockAtom(blockId, "armory-view-name", () =>

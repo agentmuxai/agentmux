@@ -13,13 +13,15 @@
  *
  * docs/specs/SPEC_ARMORY_MEMORY_GLOBAL_PERSONAL_RENAME_2026_08_22.md renamed
  * "Memories" to "Global Memory" and "Native Memory" to "Personal Memory",
- * and moved Personal Memory up to sit right below Global Memory (both now
- * adjacent, just below Accounts) — one user-facing "Memory" concept split
- * by scope, abstracting away the two structurally different backing
- * systems. Current rail order: Accounts, Global Memory, Personal Memory,
- * Skills, MCP Servers, ABF. These tests guard the rail contents directly;
- * `ArmorySection`'s type-level rejection of `"identities"` is checked at
- * compile time below (no runtime assertion needed for that part).
+ * as two adjacent rail tabs.
+ *
+ * docs/specs/SPEC_ARMORY_MEMORY_TAB_MERGE_2026_08_30.md then merged those
+ * two rail tabs into a single "Memory" tab (brain icon), with Global and
+ * Personal as a sub-nav inside that one pane instead of two rail entries.
+ * Current rail order: Accounts, Memory, Skills, MCP Servers, ABF. These
+ * tests guard the rail contents directly; `ArmorySection`'s type-level
+ * rejection of `"identities"` is checked at compile time below (no runtime
+ * assertion needed for that part).
  */
 
 import { createSignal } from "solid-js";
@@ -31,6 +33,9 @@ vi.mock("@/app/view/accounts/accounts-manager", () => ({
 }));
 vi.mock("@/app/view/brain/global-brain-manager", () => ({
     GlobalBrainManager: () => <div data-testid="brain-manager" />,
+}));
+vi.mock("@/app/view/native-memory/native-memory-manager", () => ({
+    NativeMemoryManager: () => <div data-testid="native-memory-manager" />,
 }));
 vi.mock("@/app/view/memory/memory-manager", () => ({
     MemoryManager: () => <div data-testid="memory-manager" />,
@@ -108,24 +113,73 @@ describe("ArmoryView rail", () => {
         expect(container.querySelector(".bundle-manager-pane--identity")).not.toBeInTheDocument();
     });
 
-    it("labels the brain tab 'Global Memory' (renamed from 'Memories')", () => {
+    it("labels the combined tab 'Memory' with a brain icon (merged from 'Global Memory' + 'Personal Memory')", () => {
         renderArmory();
-        expect(screen.getAllByText("Global Memory").length).toBeGreaterThan(0);
+        const rail = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-rail" });
+        expect(screen.getAllByText("Memory").length).toBeGreaterThan(0);
+        expect(screen.queryByText("Global Memory")).not.toBeInTheDocument();
+        expect(screen.queryByText("Personal Memory")).not.toBeInTheDocument();
         expect(screen.queryByText("Memories")).not.toBeInTheDocument();
-        expect(screen.queryByText("Memory")).not.toBeInTheDocument();
+        expect(rail.querySelector(".bundle-manager-rail-item .fa-brain")).toBeInTheDocument();
     });
 
-    it("labels the native-memory tab 'Personal Memory' (renamed from 'Native Memory')", () => {
-        renderArmory();
-        expect(screen.getAllByText("Personal Memory").length).toBeGreaterThan(0);
-        expect(screen.queryByText("Native Memory")).not.toBeInTheDocument();
-    });
-
-    it("orders the rail as Accounts, Global Memory, Personal Memory, Skills, MCP Servers, ABF", () => {
+    it("orders the rail as Accounts, Memory, Skills, MCP Servers, ABF", () => {
         renderArmory();
         const rail = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-rail" });
         const labels = Array.from(rail.querySelectorAll("button span")).map((el) => el.textContent);
-        expect(labels).toEqual(["Accounts", "Global Memory", "Personal Memory", "Skills", "MCP Servers", "ABF"]);
+        expect(labels).toEqual(["Accounts", "Memory", "Skills", "MCP Servers", "ABF"]);
+    });
+});
+
+describe("ArmoryView Memory sub-nav", () => {
+    afterEach(() => {
+        cleanup();
+        setMetaMock.mockClear();
+        setBlockMeta({});
+    });
+
+    function renderArmory() {
+        const model = new ArmoryViewModel("test-block", null as any);
+        return render(() => (
+            <ArmoryView
+                blockId="test-block"
+                model={model}
+                blockRef={{ current: null }}
+                contentRef={{ current: null }}
+            />
+        ));
+    }
+
+    it("defaults to the Global section showing GlobalBrainManager", () => {
+        setBlockMeta({ "armory:section": "memory" });
+        renderArmory();
+        const globalPane = screen.getByTestId("brain-manager").closest(".bundle-manager-pane");
+        const personalPane = screen.getByTestId("native-memory-manager").closest(".bundle-manager-pane");
+        expect(globalPane?.classList.contains("is-hidden")).toBe(false);
+        expect(personalPane?.classList.contains("is-hidden")).toBe(true);
+    });
+
+    it("clicking Personal writes armory:memory:subsection and swaps the visible pane", () => {
+        setBlockMeta({ "armory:section": "memory" });
+        renderArmory();
+        const subnav = screen.getByLabelText("Memory scope");
+        const personalButton = Array.from(subnav.querySelectorAll("button")).find(
+            (b) => b.textContent === "Personal",
+        ) as HTMLButtonElement;
+        personalButton.click();
+        expect(setMetaMock).toHaveBeenCalledWith(
+            undefined,
+            { oref: "block:test-block", meta: { "armory:memory:subsection": "personal" } },
+        );
+        const personalPane = screen.getByTestId("native-memory-manager").closest(".bundle-manager-pane");
+        expect(personalPane?.classList.contains("is-hidden")).toBe(false);
+    });
+
+    it("normalizes a legacy armory:section='native_memory' value to Memory + Personal", () => {
+        setBlockMeta({ "armory:section": "native_memory" });
+        const model = new ArmoryViewModel("test-block", null as any);
+        expect(model.viewName()).toBe("Memory");
+        expect(model.memorySubsectionAtom()).toBe("personal");
     });
 });
 
