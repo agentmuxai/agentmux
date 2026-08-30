@@ -512,10 +512,15 @@ describe("computeComposerRows — anchored model selector + Shell (Rev 8)", () =
         expect(oneSided.length).toBeLessThanOrEqual(1);
     });
 
-    it("anchors that cannot share a line degrade to two ADJACENT one-sided rows, still bottom-most", () => {
+    it("keeps the anchors on ONE row even when they cannot fit side by side (reagent P1, PR #2839)", () => {
         // runtime(120) + hostShell(120) + gap(5) = 245 > availableWidth
-        // 200 — the physical-capacity exception (spec §1). They must not
-        // be forced onto one overflowing row, but must still not travel.
+        // 200. An earlier revision split these into two adjacent one-sided
+        // rows via the generic physical-capacity exception — but only the
+        // LAST row is hoisted out of the render's <For>, so that put
+        // `runtime` back inside it and destroyed AgentRuntimeDropup on any
+        // resize across the split boundary. The row's own flex-wrap
+        // renders the same two visual lines without moving either anchor
+        // between DOM subtrees, so the row must stay singular here.
         const slots = [
             { key: "runtime", width: 120 },
             { key: "w1", width: 100 },
@@ -523,10 +528,31 @@ describe("computeComposerRows — anchored model selector + Shell (Rev 8)", () =
             { key: "hostShell", width: 120 },
         ];
         const rows = computeComposerRows(slots, "hostShell", 200, 5, "runtime");
-        expect(rows.slice(-2)).toEqual([
-            { left: ["runtime"], right: [] },
-            { left: [], right: ["hostShell"] },
-        ]);
+        expect(rows[rows.length - 1]).toEqual({ left: ["runtime"], right: ["hostShell"] });
+    });
+
+    it("the anchors share exactly one row at EVERY width, so neither can change rows on resize", () => {
+        // The property the P1 above is really about: sweep a wide range of
+        // available widths and assert the anchors are always together on
+        // the final row. If that holds everywhere, no resize can ever move
+        // them between the hoisted element and a <For> index.
+        const slots = [
+            { key: "runtime", width: 120 },
+            { key: "w1", width: 100 },
+            { key: "w2", width: 90 },
+            { key: "auth", width: 40 },
+            { key: "hostShell", width: 120 },
+        ];
+        for (const availableWidth of [1000, 700, 500, 400, 300, 240, 200, 150, 100, 50]) {
+            const rows = computeComposerRows(slots, "hostShell", availableWidth, 5, "runtime");
+            const last = rows[rows.length - 1];
+            expect(last.left).toContain("runtime");
+            expect(last.right).toContain("hostShell");
+            for (const r of rows.slice(0, -1)) {
+                expect([...r.left, ...r.right]).not.toContain("runtime");
+                expect([...r.left, ...r.right]).not.toContain("hostShell");
+            }
+        }
     });
 
     it("falls back to the pre-anchor behavior when the model selector is absent (controls hidden)", () => {

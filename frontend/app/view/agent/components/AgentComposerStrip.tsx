@@ -242,10 +242,12 @@ export interface ComposerRow {
  *     degrades to its positional meaning — the anchor is the outermost
  *     LEFT occupant, hostShell the outermost RIGHT one, on the one row
  *     that exists.
- *   - If the two anchors cannot physically share a line, the same
- *     physical-capacity exception that governs any other pair applies:
- *     two adjacent one-sided rows, still bottom-most, rather than an
- *     overflowing row that `flex-wrap` would split anyway.
+ *   - The anchor row is NEVER split, even when the two can't fit side by
+ *     side — the row's own `flex-wrap` breaks them onto two visual lines
+ *     instead, which renders identically without moving either anchor
+ *     between DOM subtrees (reagent P1, PR #2839). See the inline comment
+ *     at the `anchorsReserved` branch for why this pair is exempt from
+ *     the generic physical-capacity exception.
  *
  * This deliberately reverses the earlier "the model selector moving sides
  * is acceptable" call recorded in the retro's step 3 — it was dismissed
@@ -348,21 +350,27 @@ export function computeComposerRows(
     }
 
     if (anchorsReserved) {
-        // The constraint row. If the two anchors genuinely cannot share a
-        // line at this width, the physical-capacity exception (spec §1)
-        // applies exactly as it does to any other pair — emit them as two
-        // adjacent one-sided rows rather than forcing an overflow that the
-        // row's own `flex-wrap` would silently split anyway (which is the
-        // one-sided-lines bug this file exists to prevent, reintroduced by
-        // a different route). They stay bottom-most and adjacent either
-        // way, so neither anchor travels; only their sharing of one line
-        // degrades.
-        if (anchorLeft!.width + hostShell!.width + gapPx <= availableWidth) {
-            pairs.push([anchorLeft!.key, hostShell!.key]);
-        } else {
-            pairs.push([anchorLeft!.key, undefined]);
-            pairs.push([undefined, hostShell!.key]);
-        }
+        // The constraint row — ALWAYS exactly one row, never split, even
+        // when the two anchors can't fit side by side at this width
+        // (reagent P1, PR #2839). An earlier revision emitted them as two
+        // adjacent one-sided rows in that case, borrowing the generic
+        // physical-capacity exception (spec §1). That was wrong here for a
+        // reason specific to the anchors: only the LAST row is hoisted out
+        // of the render's `<For>` (see `precedingRowIndices`), so a split
+        // put `runtime` in the second-to-last row — back inside the `<For>`
+        // — and resizing across the split boundary destroyed and rebuilt
+        // `AgentRuntimeDropup`, reintroducing the very open-state loss the
+        // hoist exists to prevent, just at a different width.
+        //
+        // Keeping them one row is safe precisely because this pair is
+        // degenerate: two items, one per side, nothing else competing. The
+        // row's own `flex-wrap` (SCSS, the long-standing reagent-P1 #2393
+        // safety net) then breaks them onto two VISUAL lines at narrow
+        // widths — the identical rendering the split produced, reached
+        // without ever moving either anchor between DOM subtrees. The
+        // generic exception still applies to every other pair above, where
+        // the wrap outcome genuinely is unpredictable.
+        pairs.push([anchorLeft!.key, hostShell!.key]);
     } else {
         // No anchor pair to reserve (e.g. the runtime slot is absent
         // because controls are hidden) — fall back to the pre-anchor
