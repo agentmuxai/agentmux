@@ -288,7 +288,7 @@ const CAPTURE_WINDOW_TOOL: &str = r#"{
 
 const DISCOVER_WINDOWS_TOOL: &str = r#"{
   "name": "DiscoverWindows",
-  "description": "List top-level windows on this machine — read-only: no screenshot taken, nothing written to disk. Use this BEFORE CaptureWindow so you have real candidates (pid, title, exe_path) instead of guessing a title substring. Each entry reports its capture `tier` and whether it is `capturable`, so you can see why a window is out of reach before trying. By default lists AgentMux windows only; pass include_foreign to also list other applications (kept opt-in so ordinary discovery does not disclose the titles of a user's unrelated apps). exe_path can reveal the OS username of a different instance's owner on a shared machine, so — same as CaptureWindow — every call is logged to this instance's own audit trail.",
+  "description": "List top-level windows on this machine — read-only: no screenshot taken, nothing written to disk. Use this BEFORE CaptureWindow so you have real candidates (pid, title, exe_path) instead of guessing a title substring. Each entry reports its capture `tier` and whether it is `capturable`. A window owned by a different OS user IS listed but withheld: `capturable: false`, with `title` and `exe_path` null and a `withheld_reason` — so you can see that it exists and why it is out of reach, without its content crossing that boundary. By default lists AgentMux windows only; pass include_foreign to also list other applications (kept opt-in so ordinary discovery does not disclose the titles of a user's unrelated apps). exe_path can reveal the OS username of a different instance's owner on a shared machine, so — same as CaptureWindow — every call is logged to this instance's own audit trail.",
   "inputSchema": {
     "type": "object",
     "properties": {
@@ -1095,6 +1095,13 @@ fn enumerate_agentmux_windows() -> Result<Vec<AgentMuxWindowInfo>> {
         // Fails safe: an unresolvable pid is treated as "assume it's mine"
         // rather than silently dropped, so `DiscoverWindows` still surfaces
         // that the window exists instead of hiding it.
+        //
+        // That promise is real again as of reagentx P2 on PR #2845. Briefly it
+        // wasn't: an unresolvable OWNER resolves the window to T3, and
+        // `DiscoverWindows` was dropping non-allowed tiers outright, so such a
+        // window vanished from the listing even with `include_self`. It is now
+        // listed with `title`/`exe_path` redacted, which keeps the disclosure
+        // closed without reintroducing the hiding this comment warns against.
         let is_self = pid == 0 || own_pids.contains(&pid);
         let proc = sys.process(sysinfo::Pid::from(pid as usize));
         let title = window.title().unwrap_or_default();
@@ -1533,6 +1540,49 @@ fn audit_log_capture_window(
         },
     });
     append_window_audit_log_entry(&entry);
+}
+
+/// One `DiscoverWindows` entry.
+///
+/// A withheld (T3) window is LISTED but redacted, not omitted — reagentx P2 on
+/// PR #2845 caught two contradictions the omit-entirely approach created:
+///   - the `is_self` fail-safe promised an unresolvable-pid window would
+///     "still surface ... instead of hiding it", which an unconditional drop
+///     broke (an unresolvable owner resolves to T3)
+///   - this tool advertises `capturable` so a caller can "see why a window is
+///     out of reach before trying", unreachable if every listed entry is
+///     capturable by construction
+///
+/// Redacting satisfies both while keeping the disclosure closed: `title` and
+/// `exe_path` (which embeds the owning OS username) are exactly what must not
+/// cross the human boundary, and they are the only fields dropped. A pid and
+/// "someone else owns this" are already available to anything with shell
+/// access, so surfacing them costs nothing — and it makes a wholesale
+/// user-id-resolution failure diagnosable instead of silently returning an
+/// empty list.
+fn window_listing_entry(w: &AgentMuxWindowInfo) -> Value {
+    if w.tier.allowed() {
+        json!({
+            "pid": w.pid,
+            "title": w.title,
+            "exe_path": w.exe_path,
+            "is_self": w.is_self,
+            "is_agentmux": w.is_agentmux,
+            "tier": w.tier.label(),
+            "capturable": true,
+        })
+    } else {
+        json!({
+            "pid": w.pid,
+            "title": null,
+            "exe_path": null,
+            "is_self": w.is_self,
+            "is_agentmux": w.is_agentmux,
+            "tier": w.tier.label(),
+            "capturable": false,
+            "withheld_reason": "owned by a different OS user; title and exe_path withheld",
+        })
+    }
 }
 
 /// Audit trail for `DiscoverWindows` — reagent P1 on PR #2810: this tool
@@ -2938,22 +2988,9 @@ async fn call_tool(
                 // be notified. This is new exposure created by this PR —
                 // before it, foreign windows weren't enumerated at all — so
                 // the filter belongs here, not only at the capture gate.
-                .filter(|w| w.tier.allowed())
                 .filter(|w| include_self || !w.is_self)
                 .filter(|w| include_foreign || w.is_agentmux)
-                .map(|w| {
-                    json!({
-                        "pid": w.pid,
-                        "title": w.title,
-                        "exe_path": w.exe_path,
-                        "is_self": w.is_self,
-                        "is_agentmux": w.is_agentmux,
-                        // So a caller can see WHY a window isn't capturable
-                        // before trying, rather than learning from an error.
-                        "tier": w.tier.label(),
-                        "capturable": w.tier.allowed(),
-                    })
-                })
+                .map(window_listing_entry)
                 .collect();
             // reagent P1 on PR #2810: exe_path (embeds the OS username) for
             // OTHER instances/users on a shared machine is the same
@@ -3868,8 +3905,11 @@ mod tests {
         let Ok(windows) = enumerate_agentmux_windows() else { return };
         for w in windows.iter().filter(|w| !w.is_agentmux && !w.title.is_empty()) {
             let label = candidate_label(w);
+            // Escaped form, same reason as `audit_target_label`'s test: a raw
+            // `contains(&w.title)` would pass vacuously for any title
+            // containing a backslash, which on Windows is most paths.
             assert!(
-                !label.contains(&w.title),
+                !label.contains(&format!("{:?}", w.title)),
                 "foreign window title leaked into a candidate label: {label}"
             );
             assert!(label.contains(&format!("pid={}", w.pid)), "pid must still identify it");
@@ -3945,10 +3985,17 @@ mod tests {
         for w in &windows {
             let label = audit_target_label(w);
             assert!(label.contains(&format!("pid={}", w.pid)));
+            // Compare against the DEBUG-escaped form the label actually emits.
+            // A naive `contains(&w.title)` passes only while no window title
+            // needs escaping — it went green locally and failed on CI, where a
+            // window is titled `C:\ProgramData\GitHub\...` and `{:?}` doubles
+            // every backslash. It would also have made the withheld-side
+            // assertion below pass vacuously for exactly those titles.
+            let escaped = format!("{:?}", w.title);
             if w.tier.allowed() {
                 if !w.title.is_empty() {
                     assert!(
-                        label.contains(&w.title),
+                        label.contains(&escaped),
                         "an allowed tier should keep full audit detail: {label}"
                     );
                 }
@@ -3958,8 +4005,33 @@ mod tests {
                     "a withheld tier must not record its title in an agent-readable log: {label}"
                 );
                 if !w.title.is_empty() {
-                    assert!(!label.contains(&w.title), "T3 title leaked into the audit: {label}");
+                    assert!(
+                        !label.contains(&escaped),
+                        "T3 title leaked into the audit: {label}"
+                    );
                 }
+            }
+        }
+    }
+
+    /// reagentx P2 on PR #2845: a withheld window must be LISTED (so the
+    /// `is_self` fail-safe still surfaces it and `capturable` means something)
+    /// but must not carry the two fields that cross the human boundary.
+    #[test]
+    fn withheld_windows_are_listed_but_title_and_exe_path_are_redacted() {
+        let Ok(windows) = enumerate_agentmux_windows() else { return };
+        for w in &windows {
+            let entry = window_listing_entry(w);
+            assert_eq!(entry["pid"], w.pid, "pid is always surfaced");
+            assert_eq!(entry["tier"], w.tier.label());
+            assert_eq!(entry["capturable"], w.tier.allowed());
+            if w.tier.allowed() {
+                assert_eq!(entry["title"], w.title);
+                assert_eq!(entry["exe_path"], w.exe_path);
+            } else {
+                assert!(entry["title"].is_null(), "a withheld title must not be listed");
+                assert!(entry["exe_path"].is_null(), "exe_path embeds the OS username");
+                assert!(!entry["withheld_reason"].is_null(), "say why, don't just blank it");
             }
         }
     }
