@@ -30,6 +30,12 @@ import { setTileDragInFlight } from "./dragInFlight";
 import { clearCrossTabDrop } from "./crossTabDrag";
 import { dragState } from "./tilelayout-drag-state";
 import {
+    computeDragPreviewSize,
+    dragPreviewCursorOffset,
+    DRAG_PREVIEW_FALLBACK,
+    type DragPreviewSize,
+} from "./drag-preview-size";
+import {
     DisplayNodesWrapper,
     MagnifiedPaneOverlay,
     NodeBackdrops,
@@ -61,8 +67,6 @@ export interface TileLayoutProps {
     getCursorPoint?: () => { x: number; y: number };
 }
 
-const DragPreviewWidth = 300;
-const DragPreviewHeight = 300;
 
 function TileLayoutComponent(props: TileLayoutProps) {
     const layoutModel = useTileLayout(props.tabAtom, props.contents);
@@ -203,27 +207,65 @@ const DisplayNode = (props: DisplayNodeProps) => {
 
 
     // Drag preview image state
-    const [previewImage, setPreviewImage] = createSignal<HTMLImageElement | null>(null);
+    // The rasterised ghost, stored WITH the size it was rendered at. Keeping
+    // them together is deliberate: the cursor grab-offset must be derived from
+    // the size the image actually has, and a separate nominal constant is
+    // exactly how the two drift and the ghost detaches from the cursor.
+    const [previewImage, setPreviewImage] = createSignal<{ img: HTMLImageElement; size: DragPreviewSize } | null>(
+        null
+    );
+    // Drives the hidden .tile-preview element. Starts at the historical fixed
+    // square and is replaced with the pane-shaped size on first hover.
+    const [previewSize, setPreviewSize] = createSignal<DragPreviewSize>(DRAG_PREVIEW_FALLBACK);
     const [previewElementGeneration, setPreviewElementGeneration] = createSignal(0);
     const [previewImageGeneration, setPreviewImageGeneration] = createSignal(0);
+
+    // Monotonic token for in-flight rasterisations. `toPng` is async and a
+    // pane can be resized between two hovers, so two requests can be pending
+    // at once; without this the OLDER one resolving last overwrites the
+    // correctly-sized image, and the next drag uses that stale aspect ratio
+    // with no further pointerenter to repair it.
+    let previewRequestSeq = 0;
 
     const devicePixelRatio = () => window.devicePixelRatio ?? 1;
 
     const generatePreviewImage = () => {
-        const dpr = typeof devicePixelRatio === "function" ? (devicePixelRatio as () => number)() : devicePixelRatio;
-        const offsetX = (DragPreviewWidth * dpr - DragPreviewWidth) / 2 + 10;
-        const offsetY = (DragPreviewHeight * dpr - DragPreviewHeight) / 2 + 10;
-        const img = previewImage();
+        // Size the ghost from the pane being dragged, so its shape matches what
+        // you are holding — a wide terminal reads wide, a tall pane reads tall.
+        // Capped and ratio-preserving; see drag-preview-size.ts for why NOT the
+        // pane's literal size.
+        const measured = computeDragPreviewSize(tileNodeRef?.getBoundingClientRect());
+        setPreviewSize(measured);
+        // Applied to the element directly as well as through the signal: toPng
+        // reads the LIVE DOM, and Solid has not necessarily flushed the signal
+        // into the style by the time we rasterise below. Writing both keeps the
+        // declarative binding honest without racing it.
+        if (previewRef) {
+            previewRef.style.width = `${measured.width}px`;
+            previewRef.style.height = `${measured.height}px`;
+        }
+        const cached = previewImage();
         const prevElGen = previewElementGeneration();
         const prevImgGen = previewImageGeneration();
-        if (img !== null && prevElGen === prevImgGen) {
+        // A cached image is only reusable if it was rasterised at the size we
+        // would render NOW. Without this, resizing a pane and then dragging it
+        // hands you the pre-resize ghost shape: the generation counters track
+        // CONTENT changes and know nothing about geometry.
+        const sizeMatches =
+            cached !== null && cached.size.width === measured.width && cached.size.height === measured.height;
+        if (cached !== null && prevElGen === prevImgGen && sizeMatches) {
             // already up-to-date preview image; used on next dragstart
         } else if (previewRef) {
             setPreviewImageGeneration(prevElGen);
+            const seq = ++previewRequestSeq;
             toPng(previewRef).then((url) => {
+                // A newer rasterisation was requested while this one was in
+                // flight — it measured the pane more recently, so drop this
+                // result rather than clobbering it.
+                if (seq !== previewRequestSeq) return;
                 const newImg = new Image();
                 newImg.src = url;
-                setPreviewImage(newImg);
+                setPreviewImage({ img: newImg, size: measured });
             });
         }
     };
@@ -264,12 +306,15 @@ const DisplayNode = (props: DisplayNodeProps) => {
                 canDrag: () => !isEphemeral() && !isMagnified(),
                 getInitialData: () => ({ nodeId: props.node.id, type: tileItemType }),
                 onGenerateDragPreview: ({ nativeSetDragImage }) => {
-                    const img = previewImage();
-                    if (img && nativeSetDragImage) {
-                        const dpr = typeof devicePixelRatio === "function" ? (devicePixelRatio as () => number)() : devicePixelRatio;
-                        const offsetX = (DragPreviewWidth * dpr - DragPreviewWidth) / 2 + 10;
-                        const offsetY = (DragPreviewHeight * dpr - DragPreviewHeight) / 2 + 10;
-                        nativeSetDragImage(img, offsetX, offsetY);
+                    const preview = previewImage();
+                    if (preview && nativeSetDragImage) {
+                        const dpr =
+                            typeof devicePixelRatio === "function" ? (devicePixelRatio as () => number)() : devicePixelRatio;
+                        // Offsets from the size THIS image was rasterised at,
+                        // never a nominal constant — see the previewImage
+                        // signal's comment.
+                        const offset = dragPreviewCursorOffset(preview.size, dpr);
+                        nativeSetDragImage(preview.img, offset.x, offset.y);
                     }
                 },
                 onDragStart: () => {
@@ -350,8 +395,8 @@ const DisplayNode = (props: DisplayNodeProps) => {
                     class="tile-preview"
                     ref={previewRef}
                     style={{
-                        width: `${DragPreviewWidth}px`,
-                        height: `${DragPreviewHeight}px`,
+                        width: `${previewSize().width}px`,
+                        height: `${previewSize().height}px`,
                         transform: `scale(${1 / dpr})`,
                     }}
                 >
