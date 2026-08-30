@@ -127,17 +127,21 @@ don't assume those are coming.
 > | WhatsApp | ✅ Live | **#2028** (Cloud API webhook receiver + send) |
 > | Teams | ⬜ Deferred | Not started — see **#2029**, which recorded exactly this split |
 >
-> **The per-platform blockers/limitations in the table below remain
-> accurate and worth reading** — they describe operational risks of the
-> shipped bridges (Discord heartbeat-ghosting, Slack Socket Mode silently
-> stalling, WhatsApp's Meta policy exposure), not reasons the work hasn't
-> started. Only the "Bridge status" column was wrong.
+> **The right-hand column is a mix — read it with care.** Most entries
+> describe genuine operational risks of the *shipped* bridges (Discord
+> heartbeat-ghosting, Slack Socket Mode silently stalling, WhatsApp's Meta
+> policy exposure) and remain worth reading. But some of it is
+> **pre-implementation planning language** that reads as current guidance
+> and is not — Telegram's "lowest-friction of the remaining four... a
+> reasonable next pick" describes a sequencing decision that was made and
+> executed over a year-month ago. Those are flagged inline below rather
+> than deleted, so the original planning record survives.
 
 | App | Bridge status | Notable blocker/limitation from the spec |
 |---|---|---|
 | Discord | ✅ Live | Heartbeat-ghost risk (bot silently stops receiving events); needs proactive reconnect on OS wake-from-sleep. No external health monitor exists yet. |
 | Slack | ✅ Live (#2026 — table originally said "Not started") | Socket Mode connections refresh ~hourly and can silently stop delivering after days — needs proactive reconnect + a 5-min-no-event force-reconnect heuristic. |
-| Telegram | ✅ Live (#2022 — table originally said "Not started") | Lowest-friction of the remaining four (long-polling, no tunnel needed) — a reasonable next pick despite not being first historically. |
+| Telegram | ✅ Live (#2022 — table originally said "Not started") | *(Historical planning note, superseded — Telegram shipped in #2022 and is not a "next pick".)* Lowest-friction of the remaining four (long-polling, no tunnel needed) — a reasonable next pick despite not being first historically. |
 | WhatsApp | ✅ Live (#2028 — table originally said "Not started") | Most complex. Official Cloud API needs Meta Business verification (2-10 days) + a dedicated number + a public HTTPS webhook (tunnel required). **Meta's Oct-2025 policy bans using WhatsApp as a delivery channel for a general-purpose AI assistant distributed to others** — spec says a personal single-user bot is "gray area" and to frame AgentMux's use as a personal productivity bridge, not a chatbot product. Unofficial (Baileys) path carries a 15-30% account-ban risk for bots that message new contacts proactively; spec requires a persistent user-acknowledged warning banner before enabling it. |
 | Teams | ⬜ Not started (accurate — deferred, see #2029) | Explicitly "Implement Last." Requires Azure Bot Service + an Azure subscription + Entra ID tenant + admin-gated app sideloading. **Not usable at all for personal/non-enterprise users.** |
 

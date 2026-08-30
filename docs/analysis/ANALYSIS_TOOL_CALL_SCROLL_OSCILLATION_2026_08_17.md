@@ -8,7 +8,11 @@
 > 2. `docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_LIVE_INSTANCE_DATA_2026_08_22.md`
 >    — two running instances, hours of real usage, ~2 orders of magnitude
 >    more data. Surfaced **two distinct anomalies**: a recurring ~251px
->    shrink and a whole-window collapse to 0px.
+>    shrink, and multiple panes' `scrollHeight` dropping to exactly
+>    `0px` within milliseconds of each other (3 panes in one incident, 2 in
+>    another). That second one's mechanism is explicitly unknown — the
+>    08-22 doc hypothesises an app-wide event but does not establish it,
+>    and it is pane-measurement state, not the window collapsing.
 >
 > The diagnostic this doc recommended shipped in commit `70c6decb`. **The
 > root-cause fix is still open** — tracked in issues **#2648** ("diagnostic

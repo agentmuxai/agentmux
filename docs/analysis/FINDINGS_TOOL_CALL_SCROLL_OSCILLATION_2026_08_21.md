@@ -7,7 +7,10 @@
 > follow-up covers two running instances with hours of real usage —
 > roughly two orders of magnitude more data — and surfaces two distinct
 > anomalies this dataset was too small to separate: a recurring ~251px
-> shrink and a whole-window collapse to 0px.
+> shrink, and multiple panes' `scrollHeight` dropping to exactly `0px`
+> within milliseconds of each other. The 08-22 doc is explicit that this
+> second phenomenon's mechanism is unknown — treat it as measured pane
+> state, not a window-lifecycle event.
 >
 > This doc's conclusions aren't retracted, but **don't size the problem
 > from this dataset**. The root-cause fix remains open — issues **#2648**
