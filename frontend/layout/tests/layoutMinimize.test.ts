@@ -604,3 +604,64 @@ describe("collapsedExtentPx — cross-split (perpendicular nested branch)", () =
         expect(collapsedExtentPx(outer, true, gap)).toBe(2 * chipH);
     });
 });
+
+// ── All-minimized Row: chips fill the width instead of leaving dead space ───
+// Operator report (2026-08-30): after the cross-split height fix, "the space
+// above the 2 collapsed panes is gone, but there is still blank space to the
+// right. The collapsed panes should equally fill up the empty space."
+describe("all-minimized Row: chips share the full width", () => {
+    const gap = 3;
+    const size = (n: LayoutNode) => n.size;
+    const minLeaf = (id: string) => {
+        const n = newLayoutNode(FlexDirection.Row, 10, undefined, { blockId: id });
+        n.minimized = true;
+        return n;
+    };
+
+    it("two minimized leaves split the row evenly, no leftover", () => {
+        const kids = [minLeaf("a"), minLeaf("b")];
+        const { px } = computeMainAxisAllocation(kids, true, 1200, size, gap);
+        expect(px[0]).toBeCloseTo(600);
+        expect(px[1]).toBeCloseTo(600);
+        expect(px[0] + px[1]).toBeCloseTo(1200); // was 2 * (180+3) = 366
+    });
+
+    it("three minimized leaves split evenly", () => {
+        const kids = [minLeaf("a"), minLeaf("b"), minLeaf("c")];
+        const { px } = computeMainAxisAllocation(kids, true, 1200, size, gap);
+        px.forEach((v) => expect(v).toBeCloseTo(400));
+        expect(px.reduce((a, b) => a + b, 0)).toBeCloseTo(1200);
+    });
+
+    it("a nested fully-minimized Row branch keeps its larger share (proportional, not strictly equal)", () => {
+        // [ leaf, Row[leaf, leaf] ] — the branch needs two chip-widths to the
+        // leaf's one, so it takes 2/3 of the row, not 1/2.
+        const solo = minLeaf("solo");
+        const pair = newLayoutNode(FlexDirection.Row, 10, [minLeaf("a"), minLeaf("b")]);
+        const { px } = computeMainAxisAllocation([solo, pair], true, 900, size, gap);
+        expect(px[0]).toBeCloseTo(300);
+        expect(px[1]).toBeCloseTo(600);
+        expect(px[0] + px[1]).toBeCloseTo(900);
+    });
+
+    it("does NOT stretch when an expanded sibling is present — that one still slips", () => {
+        const a = minLeaf("a");
+        const b = newLayoutNode(FlexDirection.Row, 10, undefined, { blockId: "b" });
+        const { px } = computeMainAxisAllocation([a, b], true, 1200, size, gap);
+        expect(px[0]).toBe(MinimizedRowSlotWidthPx + gap); // unchanged fixed chip
+        expect(px[1]).toBeCloseTo(1200 - (MinimizedRowSlotWidthPx + gap));
+    });
+
+    it("does NOT stretch a Column — chips must stay header-height", () => {
+        const kids = [minLeaf("a"), minLeaf("b")];
+        const { px } = computeMainAxisAllocation(kids, false, 1200, size, gap);
+        px.forEach((v) => expect(v).toBe(HeaderHeightPx + gap));
+    });
+
+    it("still shrinks to fit when the row is narrower than the chips need", () => {
+        const kids = [minLeaf("a"), minLeaf("b"), minLeaf("c"), minLeaf("d"), minLeaf("e"), minLeaf("f")];
+        const { px } = computeMainAxisAllocation(kids, true, 300, size, gap);
+        expect(px.reduce((a, b) => a + b, 0)).toBeCloseTo(300);
+        px.forEach((v) => expect(v).toBeLessThan(MinimizedRowSlotWidthPx));
+    });
+});
