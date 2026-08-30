@@ -17,9 +17,23 @@ synthetic repro, and not doc archaeology.
 evidence; §3 and §4 are structural findings from the code; §6 lists what this
 report deliberately does **not** claim.
 
-**Update 2026-08-29** — this status line is the only edit; the analysis below is
-left exactly as written. All three findings were re-verified against `main` at
-`f2aca1f09` and still hold. Follow-up work, in the §7 order:
+**Update 2026-08-29** — all three findings were re-verified against `main` at
+`f2aca1f09` and still hold.
+
+**This report has been substantively corrected since it was written**, unlike
+its predecessors in this family where only a status line changed. Codex's review
+on PR #2836 caught two over-claims, both now fixed inline and marked where they
+occur (§TL;DR, §1, §2, §4, §6, §7):
+
+1. The trace does **not** show the dock rendering the false-`Active` set — every
+   `ListActive` in it post-dates the reconciliation. The transient is real and
+   code-verified; its link to the visible flicker is a hypothesis. This report
+   originally asserted the link, which is the same over-attribution error the
+   two prior reports in this family were corrected for.
+2. §2's fix makes **two** of §3's four mechanisms redundant, not three. The
+   debounce still prevents the §1 request storm and must stay.
+
+Follow-up work, in the §7 order:
 
 - §2 (replay asserts false-`Active` subagents, then retracts them) — being fixed
   now. `jsonl.rs:125` still inserts `SubAgentStatus::Active` for a replayed
@@ -50,10 +64,20 @@ addressed:
 
 **On every reopen, the backend fabricates ~200 subagents into its own
 "currently active" set, broadcasts them as spawns, and then — 314ms later,
-while the same load is still in flight — retracts all 200 as abandoned.** The
-Activity Dock is not glitching. It is faithfully rendering a backend that
-genuinely believes, for about half a second, that 200 long-dead subagents are
-running right now. Every fix so far has attacked *when the frontend samples*
+while the same load is still in flight — retracts all 200 as abandoned.** For
+that window the backend genuinely believes 200 long-dead subagents are running,
+and `subagent.ListActive` would say so if asked.
+
+**Corrected after review (codex P2 on PR #2836):** an earlier version of this
+paragraph went on to assert that the dock rendered that state — i.e. that this
+transient *is* the observed flicker. The trace does not support that; every
+`ListActive` in it post-dates the reconciliation (see §1). The transient is
+real and code-verified; its connection to what the user sees is a hypothesis.
+§2's fix stands on the transient itself — a state model that asserts something
+it must immediately retract, plus 200 spurious broadcasts per reopen — not on
+that unproven link.
+
+Every fix so far has attacked *when the frontend samples*
 that state (debounce → gate → spinner gate). None changed the fact that **the
 state itself is wrong during the sampling window.**
 
@@ -96,11 +120,26 @@ But inside that 1.9 seconds, this happened (srv log, same window):
 | `19:47:34.873` | `[fe]` | `long-task 406 ms name=self` |
 | `19:47:35.351` | `[fe]` | last of five long-tasks (75/406/62/82/139 ms) |
 
-Three distinct refresh rounds reached the dock inside a 280 ms window that
-straddles the end of the backfill burst — and the backend's own answer to
-"what is active right now" changed 400 times inside that same window. Three
-different answers, rendered. That is the flicker, exactly as the owner
-described it, on a build with every fix in place.
+Three distinct refresh rounds reached the dock inside a 280 ms window at the end
+of the backfill burst, and the backend's own answer to "what is active right
+now" changed 400 times during that burst.
+
+**Corrected after review (codex P2 on PR #2836): this trace does NOT show those
+two windows overlapping, and an earlier version of this paragraph claimed they
+did.** Working the arithmetic the other way: reconciliation finished at
+`33.954`, and the earliest `ListActive` — reported at `34.070` with a 51 ms
+round-trip — cannot have been issued before about `34.019`. Every listed RPC
+therefore sampled the state *after* the mutations settled. The `subagent
+spawned` log lines running to `34.052` do not contradict that:
+`scan_subagents_dir` processes files synchronously before calling
+`reconcile_stale_subagents`, so those later lines are not insertion timestamps
+(they can come from the 500 ms workflow-activity flush).
+
+So §2 below describes a real, code-verified transient — but this trace does not
+establish that the frontend ever sampled inside it, nor that it is the cause of
+the flicker the owner reported. Treat that causal step as a hypothesis until an
+actual pre-reconciliation fetch is caught in a trace. §2's fix is still worth
+making on its own terms (see §2), just not on this evidence.
 
 ## 2. Root cause: the backfill asserts 200 false "active" subagents, then retracts them
 
@@ -122,12 +161,16 @@ spawn, and 98 ms before the last one.** For that window, `subagent.ListActive`
 — the exact RPC the dock's rows are built from — returns up to 200 rows that
 are, by the backend's own subsequent admission, not active.
 
-So the sequence the user sees is not a rendering artifact at any layer:
+So the sequence available to be rendered — **not, per §1's correction, one this
+trace caught being rendered** — is not a defect at any single layer:
 
 1. Backend says: 200 subagents are active. (True as far as the replay knows.)
-2. Dock renders 200 rows. (Correct, given the data.)
+2. Any dock refresh landing here shows 200 rows. (Correct, given the data.)
 3. Backend says: actually all 200 are abandoned. (Also true.)
-4. Dock removes 200 rows, playing its departure animation. (Correct again.)
+4. The next refresh removes them, playing the departure animation. (Correct again.)
+
+Step 2 is the unproven one: in the 0.55.26 trace every refresh landed after
+step 3.
 
 **Every component behaved correctly. The composition is what's broken.** This
 is the same root cause the 08-25 analysis named — the backend never
@@ -229,8 +272,19 @@ This is deliberately **not** a rewrite of the backend subagent/shell/dispatch
 subsystems — the 08-25 report's judgement that the domain split is legitimate
 still holds. It is a frontend readiness primitive plus the §2 backend fix. On
 its own the paint gate would only *hide* the transient lie; §2 is what removes
-it. Both are needed, and §2 is the higher-value one — it makes three of the
-four mechanisms in §3 deletable.
+it. Both are needed, and §2 is the higher-value one — it makes **two** of the
+four mechanisms in §3 redundant.
+
+**Corrected after review (codex P2 on PR #2836): an earlier version said three,
+and recommending that would have caused harm.** Being born `Abandoned` does not
+suppress the `is_new` path in `process_jsonl_change`, so the backend still emits
+up to 200 `subagent:spawned` events per reopen. Only the two backfill gates
+(`useSubagentBackfillGate`, `backfill-tracker`) stop having a job. The
+`createDebouncedRefresh` debounce is still what prevents those 200 events from
+becoming an RPC storm — deleting it would restore the measured §1 regression —
+and `shellStatusCorrection` addresses an unrelated shell-status race that §2
+does not touch. Suppressing the replay broadcasts themselves is a separate,
+larger change and is not proposed here.
 
 ## 5. A separate, larger finding: `output.idx` is fully rebuilt every 30 seconds, forever
 
@@ -296,8 +350,17 @@ covered_size`, not from 0); (c) `spawn_blocking` the rebuild regardless.
 ## 6. What this report does not establish
 
 Stated explicitly, because the two prior reports in this family were both
-corrected for over-attribution and the discipline is worth keeping:
+corrected for over-attribution and the discipline is worth keeping — and,
+per the entry immediately below, this one initially failed the same way:
 
+- **That §2's transient is what the user sees.** Added after codex's P2 review
+  on PR #2836. Reconciliation finished at `33.954`; the earliest `ListActive`
+  cannot have been issued before ~`34.019`. Every RPC in this trace sampled
+  post-settlement, so the report cannot claim the dock rendered the
+  false-`Active` set. The transient exists (code-verified: `jsonl.rs` inserts
+  `Active`, `scan.rs` retracts it) and is worth removing on its own terms, but
+  the causal link to the visible symptom is unproven. Catching it would need a
+  trace with a fetch/render demonstrably inside the pre-reconciliation window.
 - **Why three refresh rounds got through rather than one.** The gate logic in
   `createBackfillAwareTrigger` reads correctly, the event delivery path was
   verified to reach it, and the host process had been running for 12 hours so
@@ -316,8 +379,9 @@ corrected for over-attribution and the discipline is worth keeping:
   global-zone (cross-channel) blocks** or applies to local blocks too. The
   trace only exercised one block.
 - **No claim that any prior fix should be reverted.** §1's numbers show they
-  work. The argument in §3 is that three of them become *unnecessary* after
-  §2 — which is a reason to consolidate later, not to undo now.
+  work. The argument in §3 is that TWO of them (the backfill gates) become
+  *unnecessary* after §2 — see §4's correction; the debounce and
+  `shellStatusCorrection` stay. A reason to consolidate later, not to undo now.
 
 ## 7. Recommended sequence
 
@@ -326,7 +390,8 @@ corrected for over-attribution and the discipline is worth keeping:
    `process_jsonl_change` when `live: false`, so a replayed subagent whose
    parent turn has ended is born `Abandoned`. Highest value, backend-only,
    directly testable (assert `ListActive` never transiently exceeds its settled
-   count across a backfill), and it retires most of §3.
+   count across a backfill). It retires the two backfill gates in §3 — not the
+   debounce, which still prevents the §1 request storm.
 2. **§5(a) — stop the snapshot poller forcing a 759 MB rescan every 30 s.**
    One-line-ish frontend change, immediate and large win on exactly the heavy
    panes in question.
