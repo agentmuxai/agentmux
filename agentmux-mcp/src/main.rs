@@ -240,27 +240,39 @@ const UI_QUERY_TOOL: &str = r#"{
 }"#;
 
 // Deliberately NOT part of the ui_handlers.rs signed-identity/pane-ownership
-// scheme UIScreenshot/UIClick/UIQuery use: this captures a DIFFERENT
-// AgentMux instance/process's top-level window (e.g. a separate `task dev`
-// build), which crosses no agent-to-agent trust boundary within one
-// instance — there's no shared srv/auth-key domain to protect there, unlike
-// reaching into another agent's pane within this same instance (that
-// capability is deliberately not offered by any tool today — see
-// docs/specs/SPEC_AGENT_UI_AUTOMATION_CLICK_SCREENSHOT_2026_08_18.md §6 and
-// PR #2662's history of real vulnerabilities found in that exact area).
-// "Crosses no boundary within one instance" is an enforced invariant, not
-// just a design intent — see own_instance_pids()'s doc comment (reagent P0,
-// PR #2709 round 3): the caller's OWN instance is always excluded from the
-// candidate set, since one instance's top-level window contains every
-// agent's pane in it.
+// scheme UIScreenshot/UIClick/UIQuery use. Authorization here is by
+// `CaptureTier` (what is being captured), not by pane ownership.
 //
-// Scoped to AgentMux's own windows only (matched via app_name(), not an
-// unrestricted OS-wide target) — reagent P1 (PR #2709 round 2): an earlier
-// version of this tool could screenshot ANY top-level window, which is the
-// "arbitrary third-party app" capability docs/specs/computer-use-pane.md
-// (draft, unbuilt) already scopes out as needing its own per-app approval
-// gating, mutex, and app-tier warnings before ever being built — not
-// something to back into accidentally via a narrower tool's scope creep.
+// **This block previously asserted three invariants that are no longer true**
+// (reagentx P2 on PR #2845 — the same stale-comment class already fixed on
+// `enumerate_agentmux_windows`, missed here on the first pass):
+//   - "crosses no agent-to-agent trust boundary within one instance" — it
+//     does now. T1 capture reaches this instance's own window, which contains
+//     every agent's pane.
+//   - "the caller's OWN instance is always excluded from the candidate set" —
+//     no longer excluded; that is the point of the change.
+//   - "Scoped to AgentMux's own windows only" — non-AgentMux windows are T4
+//     targets now.
+//
+// What replaced them, per
+// `SPEC_AGENT_UNRESTRICTED_CAPTURE_WITH_ACCOUNTABILITY_2026_08_30.md`: the
+// repo owner directed that agents be able to capture anything, so the control
+// moved from prevention to accountability. Every agent-to-agent tier is open
+// and audited; only T3 (a window owned by a DIFFERENT OS user) is withheld,
+// because that is a human boundary rather than an agent one — that person
+// never consented and cannot be notified.
+//
+// Two things reagent P1 (PR #2709 round 2) established still hold and must
+// not be undone while widening scope: the `is_agentmux` flag still gates
+// DISCLOSURE even though it no longer gates inclusion — foreign windows stay
+// out of `DiscoverWindows`' default listing and their titles are withheld
+// from candidate/miss lists (`candidate_label`). That is what keeps round 2's
+// KeePass-title leak closed now that foreign windows are enumerated at all.
+//
+// The per-app approval gating, mutex and app-tier warnings that
+// docs/specs/computer-use-pane.md (draft, unbuilt) scopes for arbitrary
+// third-party app control remain OUT of scope here: this is read-only pixel
+// capture, not input injection.
 const CAPTURE_WINDOW_TOOL: &str = r#"{
   "name": "CaptureWindow",
   "description": "Screenshot any window on this machine — another AgentMux instance, your OWN instance's other windows (including a torn-off floating pane), or a non-AgentMux application. Target by pid (preferred; get one from DiscoverWindows) or by (partial, case-insensitive) title match. Prefer pid: AgentMux's own frontend actively rewrites window titles (tab switches, workspace renames), so a title match can go stale mid-session in a way a pid never does. The ONE exception is a window owned by a DIFFERENT OS user — withheld by default, because that is a human boundary rather than an agent one and no in-app notification can reach that person. If title_contains matches more than one window and you did not pass an explicit index, this returns every candidate (pid + title) instead of guessing — pass one of those pids back in, or use DiscoverWindows first. A single process can also own multiple top-level windows sharing the same pid — if pid matches more than one, pass an explicit index alongside it the same way. Every call is logged (who, what, which tier, a hash of the image, outcome) to an audit trail in this instance's own data dir. Returns a file path; use the Read tool on that path to view it yourself, or OpenMedia to show it to the user. The result may note likely_unrendered if the captured frame looks solid/near-solid-color even after a couple of internal retries — that CAN mean the window has not painted its first real frame yet, but it is only a heuristic (a legitimately solid-colored window trips it too).",
@@ -1154,6 +1166,33 @@ fn looks_unrendered(img: &image::RgbaImage) -> bool {
 /// browser, their password manager) as a side effect of a miss or an ambiguous
 /// match, bypassing `DiscoverWindows`' own `include_foreign` opt-in. The pid
 /// alone is enough to disambiguate, and is what the caller needs anyway.
+/// Label for a window in the AUDIT TRAIL.
+///
+/// Fuller than `candidate_label` where it can be — reagentx P2 on PR #2845
+/// correctly spotted that reusing the caller-facing label lost a T4 window's
+/// title on a post-resolution failure, giving foreign-app failures less audit
+/// detail than AgentMux ones for no reason.
+///
+/// But NOT unconditionally full, because that finding's premise — "the audit
+/// is server-side only" — does not hold here. The trail is an NDJSON file in
+/// this instance's own data dir, and agents have shell access; it was read
+/// with `tail` during this PR's own verification. It is therefore not a
+/// confidential sink.
+///
+/// So audit detail follows the ALLOW decision, not AgentMux-ness:
+///   - allowed tier → full title. The agent could capture the window and read
+///     the title off the pixels anyway, so recording it discloses nothing new.
+///   - withheld tier → pid and tier only. Recording a T3 title would hand the
+///     agent, via a file it can read, exactly the content the tier denied it —
+///     reopening through the log the same oracle closed in the title-miss path.
+fn audit_target_label(w: &AgentMuxWindowInfo) -> String {
+    if w.tier.allowed() {
+        format!("pid={} title={:?}", w.pid, w.title)
+    } else {
+        format!("pid={} {} <title withheld>", w.pid, w.tier.label())
+    }
+}
+
 fn candidate_label(w: &AgentMuxWindowInfo) -> String {
     if w.is_agentmux {
         format!("pid={} title={:?}", w.pid, w.title)
@@ -1215,7 +1254,7 @@ fn capture_window_impl(
             // audited as `tier: null`. Look it up in the UNFILTERED set to
             // separate "withheld" from "absent" (codex P2 / reagentx P2).
             if let Some(blocked) = all.iter().find(|w| w.pid == target_pid) {
-                *resolved = Some((blocked.tier, candidate_label(blocked)));
+                *resolved = Some((blocked.tier, audit_target_label(blocked)));
                 anyhow::bail!(
                     "window pid={target_pid} is {} — capture is withheld for windows owned \
                      by a different OS user; every other tier is available",
@@ -1289,7 +1328,7 @@ fn capture_window_impl(
                 .iter()
                 .find(|w| !w.tier.allowed() && w.title.to_lowercase().contains(&needle))
             {
-                *resolved = Some((blocked.tier, candidate_label(blocked)));
+                *resolved = Some((blocked.tier, audit_target_label(blocked)));
             }
             // Only lists AGENTMUX windows' titles, never every window on the
             // desktop — reagent P2 (PR #2709 round 2): the original version
@@ -1352,7 +1391,7 @@ fn capture_window_impl(
         }
     };
 
-    *resolved = Some((target.tier, candidate_label(target)));
+    *resolved = Some((target.tier, audit_target_label(target)));
 
     let title = target.title.clone();
 
@@ -3888,6 +3927,38 @@ mod tests {
                 !msg.contains(leak),
                 "title-miss error leaked withheld-window state via {leak:?}: {msg}"
             );
+        }
+    }
+
+    /// reagentx P2 on PR #2845, with a corrected premise. Audit detail follows
+    /// the ALLOW decision, not AgentMux-ness:
+    ///   - an allowed tier records the real title (the agent could capture the
+    ///     window and read it off the pixels anyway)
+    ///   - a withheld tier records pid + tier only, because the trail is an
+    ///     agent-readable file — putting a T3 title there would hand back
+    ///     exactly what the tier denied, reopening the closed oracle via the log
+    #[test]
+    fn audit_target_label_withholds_only_for_withheld_tiers() {
+        let Ok(windows) = enumerate_agentmux_windows() else { return };
+        for w in &windows {
+            let label = audit_target_label(w);
+            assert!(label.contains(&format!("pid={}", w.pid)));
+            if w.tier.allowed() {
+                if !w.title.is_empty() {
+                    assert!(
+                        label.contains(&w.title),
+                        "an allowed tier should keep full audit detail: {label}"
+                    );
+                }
+            } else {
+                assert!(
+                    label.contains("<title withheld>"),
+                    "a withheld tier must not record its title in an agent-readable log: {label}"
+                );
+                if !w.title.is_empty() {
+                    assert!(!label.contains(&w.title), "T3 title leaked into the audit: {label}");
+                }
+            }
         }
     }
 
