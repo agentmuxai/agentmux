@@ -140,9 +140,31 @@ export function computeMainAxisAllocation(
         isSlip(c) ? 0 : isEffectivelyMinimized(c) ? minimizedFixedPx(c, nodeIsRow, gapPx) : 0
     );
     const fixedTotal = fixed.reduce((a, b) => a + b, 0);
-    const scale = fixedTotal > nodePixels && fixedTotal > 0 ? nodePixels / fixedTotal : 1;
-    const remainingPx = Math.max(nodePixels - fixedTotal * scale, 0);
     const flexTotal = children.reduce((s, c, i) => (fixed[i] || isSlip(c) ? s : s + getSize(c)), 0);
+
+    // When every child of a Row is a chip, the chips ARE the row's occupants —
+    // share the full width among them rather than each taking a fixed
+    // `MinimizedRowSlotWidthPx` and leaving dead space to the right. This is
+    // reachable only when no sibling is expanded (an expanded sibling would
+    // have absorbed them via `resolveRowSlipTargets` instead), so there is no
+    // flex child whose space this could steal.
+    //
+    // Distributed proportionally to each child's own collapsed extent, not
+    // strictly equally: an all-leaf row divides evenly (the common case), while
+    // a nested fully-minimized Row branch — which genuinely needs N chip-widths
+    // for its N side-by-side chips — keeps its larger share.
+    //
+    // Row-only, deliberately. The Column equivalent is already correct and must
+    // not stretch: a fully-minimized Column is handed exactly its collapsed
+    // extent by its parent (see `collapsedExtentPx`), so there is nothing left
+    // over, and stretching would render chips TALLER than a header.
+    const chipsOwnTheRow = nodeIsRow && flexTotal === 0 && fixedTotal > 0;
+    const scale = chipsOwnTheRow
+        ? nodePixels / fixedTotal
+        : fixedTotal > nodePixels && fixedTotal > 0
+          ? nodePixels / fixedTotal
+          : 1;
+    const remainingPx = Math.max(nodePixels - fixedTotal * scale, 0);
     const pixelToSizeRatio =
         flexTotal > 0 && remainingPx > 0
             ? flexTotal / remainingPx
