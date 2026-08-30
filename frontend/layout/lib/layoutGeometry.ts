@@ -28,16 +28,58 @@ export interface MainAxisAllocation {
     pixelToSizeRatio: number;
 }
 
-/** Leaf count of a subtree — one header chip per leaf when fully minimized. */
-function countLeafPanes(node: LayoutNode): number {
-    if (!node.children?.length) return 1;
-    return node.children.reduce((s, c) => s + countLeafPanes(c), 0);
+/**
+ * Extent (in px) a FULLY-MINIMIZED subtree needs along one axis, once every
+ * leaf in it has become a header chip.
+ *
+ * This must recurse on each branch's own `flexDirection`, not just count
+ * leaves: chips only accumulate along the axis their container lays out on,
+ * and span (max) across the perpendicular one.
+ *
+ * - leaf → one chip: a header-height along the vertical axis, a fixed
+ *   compact width along the horizontal one.
+ * - branch laid out ALONG the measured axis → **sum** of its children
+ *   (a stack: N chips take N chip-extents).
+ * - branch laid out ACROSS it → **max** of its children
+ *   (a strip: N chips side by side still occupy one chip-extent deep).
+ *
+ * The previous implementation was `countLeafPanes(node) * (Header + gap)` —
+ * i.e. sum-always, which silently assumes every branch on the path stacks
+ * along the axis being measured. That holds for an all-Column subtree and
+ * breaks for any **cross-split** (a branch nested perpendicular to its
+ * parent: a Row inside a Column, or the mirror). A fully-minimized Row of
+ * 3 panes inside a Column parent was asked for 3 header-heights of height
+ * and rendered a single 1-header-high strip of chips, leaving 2
+ * header-heights of dead space below it — visible as an empty band between
+ * the chip strip and the pane underneath, and reproduced end-to-end in
+ * `docs/analysis/ANALYSIS_PANE_MINIMIZE_ROW_BRANCH_DISTORTIONS_2026_08_30.md`
+ * §2. The mirrored case UNDER-allocated for the same reason: a
+ * fully-minimized Row branch inside a Row parent got one chip's width for
+ * N side-by-side chips.
+ *
+ * Pure; exported for unit tests.
+ */
+export function collapsedExtentPx(node: LayoutNode, axisIsVertical: boolean, gapPx: number): number {
+    const kids = node.children;
+    if (!kids?.length) {
+        return axisIsVertical ? HeaderHeightPx + gapPx : MinimizedRowSlotWidthPx + gapPx;
+    }
+    const extents = kids.map((c) => collapsedExtentPx(c, axisIsVertical, gapPx));
+    // A Column lays its children out vertically; a Row, horizontally.
+    const laidOutAlongThisAxis = (node.flexDirection === FlexDirection.Column) === axisIsVertical;
+    return laidOutAlongThisAxis
+        ? extents.reduce((a, b) => a + b, 0)
+        : extents.reduce((a, b) => Math.max(a, b), 0);
 }
 
 /**
  * Fixed main-axis pixels for a minimized child: a header-height strip per
  * stacked chip in a Column parent, a compact fixed-width chip in a Row parent.
  * Derived fresh every pass — minimize never writes sizes (see layoutMinimize).
+ *
+ * Delegates to [`collapsedExtentPx`] so a minimized BRANCH is measured by its
+ * own internal direction rather than by leaf count — see that function for
+ * the cross-split bug this fixes.
  *
  * Gap compensation: each tile's rendered box is inset by `gapSizePx`
  * downstream (`innerRect` computes `calc(size - gapSizePx)` in
@@ -46,24 +88,29 @@ function countLeafPanes(node: LayoutNode): number {
  * box to come out exactly header-sized instead of clipping.
  */
 function minimizedFixedPx(node: LayoutNode, parentIsRow: boolean, gapPx: number): number {
-    if (parentIsRow) return MinimizedRowSlotWidthPx + gapPx;
-    return countLeafPanes(node) * (HeaderHeightPx + gapPx);
+    // A Row parent allocates along the horizontal axis; a Column, vertical.
+    return collapsedExtentPx(node, !parentIsRow, gapPx);
 }
 
 /**
- * Cross-axis (height) a minimized child needs when its parent is a Row: one
- * header height per leaf in its subtree, stacked. A single minimized leaf
- * needs one header height; a fully-minimized BRANCH holding N leaves needs
- * N header-heights, because its own recursive Column layout will stack N
- * chips inside whatever cross-axis space its parent gives it here — giving
- * it less produces overlapping/clipped chips, giving it more produces dead
- * space below them (the bug this function exists to prevent). Same formula
- * as `minimizedFixedPx`'s Column-parent branch — a stack's required extent
- * doesn't depend on which axis it's being measured for. Pure; exported for
- * unit tests.
+ * Cross-axis (height) a minimized child needs when its parent is a Row.
+ *
+ * A single minimized leaf needs one header height. A fully-minimized BRANCH
+ * needs however deep its own chip arrangement actually is: a **Column**
+ * branch holding N leaves stacks N chips and needs N header-heights, while a
+ * **Row** branch holding N leaves lays them side by side and needs only ONE
+ * — giving it less produces overlapping/clipped chips, giving it more
+ * produces dead space below them (the bug this function exists to prevent,
+ * in both directions).
+ *
+ * An earlier version of this comment claimed "a stack's required extent
+ * doesn't depend on which axis it's being measured for." That is true of a
+ * stack and false of a strip, and it is exactly why the Row-inside-Column
+ * case over-allocated — see [`collapsedExtentPx`]. Pure; exported for unit
+ * tests.
  */
 export function minimizedCrossAxisPx(child: LayoutNode, gapPx: number): number {
-    return minimizedFixedPx(child, false, gapPx);
+    return collapsedExtentPx(child, true, gapPx);
 }
 
 /**
