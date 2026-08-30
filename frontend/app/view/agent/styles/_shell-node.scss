@@ -268,6 +268,17 @@
     white-space: nowrap;
 }
 
+// "~Ns left" countdown — only ever rendered for a whole-command sleep, the one
+// activity whose remaining time is known (ActivityRow's `remaining` memo).
+// Dimmer than the elapsed clock beside it: supplementary detail, not the row's
+// primary reading.
+.agent-activity-remaining {
+    flex: 0 0 auto;
+    font-size: 11px;
+    color: var(--secondary-text-color, rgba(255, 255, 255, 0.55));
+    white-space: nowrap;
+}
+
 .agent-activity-tail {
     flex: 1 1 0;
     min-width: 0;

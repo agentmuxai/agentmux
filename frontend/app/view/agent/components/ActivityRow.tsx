@@ -83,6 +83,25 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
         onCleanup(() => clearTimeout(timer));
     });
 
+    /**
+     * "~Ns left" for a whole-command sleep, while it's still running — the one
+     * activity whose remaining time is actually known (`sleepMs`, set only by
+     * `sleep-detect.ts`'s narrow matcher). Everything else shows elapsed only,
+     * because a guess here would be worse than nothing.
+     *
+     * Clamped at 0: the process is reaped slightly after its own deadline, so
+     * the last tick before `ToolEnd` would otherwise render a negative number.
+     * Empty once terminal — a finished row shows its final elapsed, not a
+     * countdown to a moment that has passed.
+     */
+    const remaining = createMemo(() => {
+        const a = props.activity();
+        if (!a || a.sleepMs == null || a.status !== "running") return "";
+        tick();
+        const leftMs = Math.max(0, a.startedAt + a.sleepMs - Date.now());
+        return `~${Math.ceil(leftMs / 1000)}s left`;
+    });
+
     const elapsed = createMemo(() => {
         const a = props.activity();
         if (!a) return "";
@@ -197,6 +216,9 @@ export const ActivityRow = (props: ActivityRowProps): JSX.Element => {
                         <span class="agent-activity-sigil">{sigil()}</span>
                         <span class="agent-activity-title">{a().title}</span>
                         <span class="agent-activity-elapsed">[{elapsed()}]</span>
+                        <Show when={remaining()}>
+                            <span class="agent-activity-remaining">{remaining()}</span>
+                        </Show>
                         <Show when={tail()}>
                             <span class="agent-activity-tail">↳ {tail()}</span>
                         </Show>
