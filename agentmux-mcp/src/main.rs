@@ -280,8 +280,8 @@ const CAPTURE_WINDOW_TOOL: &str = r#"{
     "type": "object",
     "properties": {
       "pid": { "type": "number", "description": "Process id of the target window's owning process — from DiscoverWindows. Preferred over title_contains: stable for the process's whole lifetime, unlike its title. If more than one window shares this pid, also pass index to disambiguate." },
-      "title_contains": { "type": "string", "description": "Substring to match against other AgentMux windows' titles, case-insensitive. Ignored if pid is given." },
-      "index": { "type": "number", "description": "If multiple AgentMux windows match title_contains (or share the given pid), which one to capture (0-based). Omit this when you expect exactly one match — if more than one actually matches, the tool returns the full candidate list instead of silently picking one." }
+      "title_contains": { "type": "string", "description": "Substring to match against capturable windows' titles, case-insensitive — that includes non-AgentMux windows, not just AgentMux ones. Ignored if pid is given. Note the candidate/miss lists returned on an ambiguous or failed match identify a non-AgentMux window by pid only, never by title." },
+      "index": { "type": "number", "description": "If multiple windows match title_contains (or share the given pid), which one to capture (0-based). Omit this when you expect exactly one match — if more than one actually matches, the tool returns the full candidate list instead of silently picking one." }
     }
   }
 }"#;
@@ -1158,14 +1158,6 @@ fn looks_unrendered(img: &image::RgbaImage) -> bool {
     sampled > 0
 }
 
-/// Label for a window in a disambiguation/candidate list.
-///
-/// Withholds the TITLE of a non-AgentMux window — reagent P1 on PR #2845.
-/// Foreign windows became capturable with the tier model, so any list built
-/// from the capturable set can disclose a user's unrelated app titles (their
-/// browser, their password manager) as a side effect of a miss or an ambiguous
-/// match, bypassing `DiscoverWindows`' own `include_foreign` opt-in. The pid
-/// alone is enough to disambiguate, and is what the caller needs anyway.
 /// Label for a window in the AUDIT TRAIL.
 ///
 /// Fuller than `candidate_label` where it can be — reagentx P2 on PR #2845
@@ -1193,6 +1185,16 @@ fn audit_target_label(w: &AgentMuxWindowInfo) -> String {
     }
 }
 
+/// Label for a window in a CALLER-FACING disambiguation/candidate list.
+///
+/// Stricter than `audit_target_label` above, because the audiences differ: this
+/// one is returned to the agent, so it withholds the TITLE of every
+/// non-AgentMux window — reagent P1 on PR #2845. Foreign windows became
+/// capturable with the tier model, so any list built from the capturable set
+/// would otherwise disclose a user's unrelated app titles (their browser,
+/// their password manager) as a side effect of a miss or an ambiguous match,
+/// bypassing `DiscoverWindows`' own `include_foreign` opt-in. The pid alone
+/// disambiguates, and is what the caller needs anyway.
 fn candidate_label(w: &AgentMuxWindowInfo) -> String {
     if w.is_agentmux {
         format!("pid={} title={:?}", w.pid, w.title)
