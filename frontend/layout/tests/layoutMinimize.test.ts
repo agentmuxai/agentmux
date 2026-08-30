@@ -12,7 +12,12 @@ import {
     HeaderHeightPx,
     MinimizedRowSlotWidthPx,
 } from "../lib/layoutMinimize";
-import { computeMainAxisAllocation, minimizedCrossAxisPx, resolveRowSlipTargets } from "../lib/layoutGeometry";
+import {
+    computeMainAxisAllocation,
+    minimizedCrossAxisPx,
+    resolveRowSlipTargets,
+    collapsedExtentPx,
+} from "../lib/layoutGeometry";
 import { resizeNode, splitVertical } from "../lib/layoutTree";
 import { FlexDirection, type LayoutNode } from "../lib/types";
 
@@ -517,5 +522,85 @@ describe("computeMainAxisAllocation with slipChildIds", () => {
         const { px } = computeMainAxisAllocation([a, b], true, 1000, size, 3);
         expect(px[1]).toBe(MinimizedRowSlotWidthPx + 3);
         expect(px[0]).toBeCloseTo(1000 - (MinimizedRowSlotWidthPx + 3));
+    });
+});
+
+// ── Cross-split: a branch nested PERPENDICULAR to its parent ────────────────
+// Regression for ANALYSIS_PANE_MINIMIZE_ROW_BRANCH_DISTORTIONS_2026_08_30 §2.
+// The suite's prior branch-level minimize coverage was all Column-inside-
+// Column, which is the one shape the old countLeafPanes formula got right.
+describe("collapsedExtentPx — cross-split (perpendicular nested branch)", () => {
+    const gap = 3;
+    const chipH = HeaderHeightPx + gap;
+    const chipW = MinimizedRowSlotWidthPx + gap;
+    const minLeaf = (id: string) => {
+        const n = newLayoutNode(FlexDirection.Row, 10, undefined, { blockId: id });
+        n.minimized = true;
+        return n;
+    };
+
+    it("a minimized leaf is one chip on either axis", () => {
+        const leaf = minLeaf("a");
+        expect(collapsedExtentPx(leaf, true, gap)).toBe(chipH);
+        expect(collapsedExtentPx(leaf, false, gap)).toBe(chipW);
+    });
+
+    it("a COLUMN branch stacks: N chips deep vertically, one chip wide", () => {
+        const col = newLayoutNode(FlexDirection.Column, 5, [minLeaf("a"), minLeaf("b"), minLeaf("c")]);
+        expect(collapsedExtentPx(col, true, gap)).toBe(3 * chipH);
+        expect(collapsedExtentPx(col, false, gap)).toBe(chipW);
+    });
+
+    it("a ROW branch is a strip: ONE chip deep vertically, N chips wide", () => {
+        const row = newLayoutNode(FlexDirection.Row, 5, [minLeaf("a"), minLeaf("b"), minLeaf("c")]);
+        // The bug: this used to return 3 * chipH via countLeafPanes, so the
+        // parent Column handed the row 3 header-heights for a 1-header-high
+        // strip of chips -> 2 header-heights of dead space beneath it.
+        expect(collapsedExtentPx(row, true, gap)).toBe(chipH);
+        expect(collapsedExtentPx(row, false, gap)).toBe(3 * chipW);
+    });
+
+    it("minimizedCrossAxisPx: a fully-minimized ROW branch needs one header height, not N", () => {
+        const row = newLayoutNode(FlexDirection.Row, 5, [minLeaf("a"), minLeaf("b"), minLeaf("c")]);
+        expect(minimizedCrossAxisPx(row, gap)).toBe(chipH);
+    });
+
+    it("no dead space: the reported layout — Column[top, Row[A,B,C], bottom]", () => {
+        const size = (n: LayoutNode) => n.size;
+        const row = newLayoutNode(FlexDirection.Row, 10, [minLeaf("A"), minLeaf("B"), minLeaf("C")]);
+        const top = newLayoutNode(FlexDirection.Row, 10, undefined, { blockId: "top" });
+        const bottom = newLayoutNode(FlexDirection.Row, 10, undefined, { blockId: "bottom" });
+
+        // What the parent Column allocates to the row on its main (vertical) axis.
+        const outer = computeMainAxisAllocation([top, row, bottom], false, 900, size, gap);
+        const allocatedToRow = outer.px[1];
+
+        // What the row actually fills: its chips laid out side by side are one
+        // chip-height deep, whatever the container gives them.
+        const consumed = minimizedCrossAxisPx(row, gap);
+
+        expect(allocatedToRow).toBe(chipH);
+        expect(consumed).toBe(chipH);
+        expect(allocatedToRow - consumed).toBe(0); // <- was 2 * chipH of dead space
+    });
+
+    it("mirror case: a fully-minimized ROW branch inside a ROW parent gets N chip-widths, not one", () => {
+        const size = (n: LayoutNode) => n.size;
+        const row = newLayoutNode(FlexDirection.Row, 10, [minLeaf("A"), minLeaf("B")]);
+        const expanded = newLayoutNode(FlexDirection.Row, 10, undefined, { blockId: "keep" });
+        const alloc = computeMainAxisAllocation([row, expanded], true, 1200, size, gap);
+        // Previously minimizedFixedPx returned a flat MinimizedRowSlotWidthPx
+        // for ANY minimized child of a Row parent, so this branch was given
+        // one chip's width for two side-by-side chips (under-allocation).
+        expect(alloc.px[0]).toBe(2 * chipW);
+    });
+
+    it("deep nesting resolves per level, not by leaf count", () => {
+        // Column[ Row[a,b], c ] fully minimized, measured vertically:
+        //   Row[a,b] is a strip -> 1 chip deep; plus leaf c -> 1 chip.
+        //   Total 2 chip-heights, NOT the 3 that leaf-counting would give.
+        const inner = newLayoutNode(FlexDirection.Row, 5, [minLeaf("a"), minLeaf("b")]);
+        const outer = newLayoutNode(FlexDirection.Column, 5, [inner, minLeaf("c")]);
+        expect(collapsedExtentPx(outer, true, gap)).toBe(2 * chipH);
     });
 });
