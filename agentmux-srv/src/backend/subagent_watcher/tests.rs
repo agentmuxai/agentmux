@@ -2070,3 +2070,134 @@ fn journal_counts_skips_unterminated_trailing_line() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+// ── backfill replay must not assert false-Active state ───────────────
+//
+// docs/reports/REPORT_AGENT_PANE_LOAD_RENDER_ARCHITECTURE_2026_08_27.md §2:
+// a cold backfill replayed ~200 historical spawns straight into the live
+// `Active` set, and `reconcile_stale_subagents` then retracted all 200 a few
+// hundred ms later — while the pane was still loading. For that window
+// `subagent.ListActive` (the RPC the Activity Dock's rows are built from)
+// genuinely returned rows the backend was about to disown, which is what the
+// dock rendered as rows appearing and vanishing on every reopen.
+//
+// These cover the insert-time decision only. The reconcile pass keeps its own
+// tests above; it remains the authority whenever the insert can't decide.
+
+/// Writes a single-line transcript with no `result` event — i.e. the file
+/// alone gives no reason to think the subagent finished.
+fn write_unfinished_transcript(dir: &std::path::Path, agent_id: &str) -> std::path::PathBuf {
+    std::fs::create_dir_all(dir).unwrap();
+    let p = dir.join(format!("agent-{agent_id}.jsonl"));
+    std::fs::write(
+        &p,
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"working\"}]}}\n",
+    )
+    .unwrap();
+    p
+}
+
+#[test]
+fn backfill_replay_is_born_abandoned_when_the_parent_turn_is_confirmed_idle() {
+    let block_id = format!("backfill-idle-{}", now_millis());
+    register_stub_controller(&block_id, false);
+    let dir = std::env::temp_dir().join(format!("amx-backfill-idle-{}", now_millis()));
+    let jsonl_path = write_unfinished_transcript(&dir, "sub-replay");
+
+    let watcher = fixture_watcher();
+    // live: false — this is a cold-backfill replay, not a real spawn.
+    watcher.process_jsonl_change("parent-1", &block_id, &jsonl_path, false);
+
+    let info = watcher.get_info("sub-replay").expect("subagent recorded");
+    assert_eq!(
+        info.status,
+        SubAgentStatus::Abandoned,
+        "a replayed spawn under a confirmed-idle parent must never enter the Active set"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn live_spawn_stays_active_even_when_the_parent_turn_reads_idle() {
+    // The turn_active flag can lag a genuine spawn, so `live` must win — this
+    // is the regression that would break real-time subagent rows.
+    let block_id = format!("backfill-live-{}", now_millis());
+    register_stub_controller(&block_id, false);
+    let dir = std::env::temp_dir().join(format!("amx-backfill-live-{}", now_millis()));
+    let jsonl_path = write_unfinished_transcript(&dir, "sub-live");
+
+    let watcher = fixture_watcher();
+    watcher.process_jsonl_change("parent-1", &block_id, &jsonl_path, true);
+
+    let info = watcher.get_info("sub-live").expect("subagent recorded");
+    assert_eq!(info.status, SubAgentStatus::Active);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn backfill_replay_stays_active_when_the_parent_turn_is_running() {
+    // A live turn can legitimately own still-running subagents whose files are
+    // already on disk, so the replay must not disown them. Same predicate
+    // `reconcile_stale_subagents` uses, applied earlier.
+    let block_id = format!("backfill-busy-{}", now_millis());
+    register_stub_controller(&block_id, true);
+    let dir = std::env::temp_dir().join(format!("amx-backfill-busy-{}", now_millis()));
+    let jsonl_path = write_unfinished_transcript(&dir, "sub-busy");
+
+    let watcher = fixture_watcher();
+    watcher.process_jsonl_change("parent-1", &block_id, &jsonl_path, false);
+
+    let info = watcher.get_info("sub-busy").expect("subagent recorded");
+    assert_eq!(info.status, SubAgentStatus::Active);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn backfill_replay_stays_active_when_no_controller_is_registered() {
+    // Unknown, not idle: `scan_session_subagents` can run before the
+    // controller registers. Falling back to today's behaviour keeps
+    // `reconcile_stale_subagents`'s retry path as the authority rather than
+    // guessing Abandoned from absence of information.
+    let block_id = format!("backfill-unknown-{}", now_millis());
+    let dir = std::env::temp_dir().join(format!("amx-backfill-unknown-{}", now_millis()));
+    let jsonl_path = write_unfinished_transcript(&dir, "sub-unknown");
+
+    let watcher = fixture_watcher();
+    watcher.process_jsonl_change("parent-1", &block_id, &jsonl_path, false);
+
+    let info = watcher.get_info("sub-unknown").expect("subagent recorded");
+    assert_eq!(info.status, SubAgentStatus::Active);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_finished_replayed_transcript_is_completed_not_abandoned() {
+    // The file's own `result` event outranks the turn-idle inference — a
+    // subagent that demonstrably finished its work is Completed, and must not
+    // be relabelled as abandoned just because it arrived via backfill.
+    let block_id = format!("backfill-done-{}", now_millis());
+    register_stub_controller(&block_id, false);
+    let dir = std::env::temp_dir().join(format!("amx-backfill-done-{}", now_millis()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let jsonl_path = dir.join("agent-sub-done.jsonl");
+    std::fs::write(
+        &jsonl_path,
+        concat!(
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n",
+            "{\"type\":\"result\",\"result\":\"final answer\"}\n",
+        ),
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    watcher.process_jsonl_change("parent-1", &block_id, &jsonl_path, false);
+
+    let info = watcher.get_info("sub-done").expect("subagent recorded");
+    assert_eq!(info.status, SubAgentStatus::Completed);
+
+    std::fs::remove_dir_all(&dir).ok();
+}
