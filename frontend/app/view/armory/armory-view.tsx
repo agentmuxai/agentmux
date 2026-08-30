@@ -12,21 +12,27 @@ import { GlobalBrainManager } from "@/app/view/brain/global-brain-manager";
 import { McpManager } from "@/app/view/mcp/mcp-manager";
 import { SkillManager } from "@/app/view/skill/skill-manager";
 import { NativeMemoryManager } from "@/app/view/native-memory/native-memory-manager";
-import { ARMORY_SECTION_LABELS, type ArmorySection, type ArmoryViewModel } from "./armory-model";
+import { ARMORY_SECTION_LABELS, type ArmorySection, type ArmoryViewModel, type MemorySubsection } from "./armory-model";
 import "./armory-view.scss";
 
-// Global Memory + Personal Memory sit together right below Accounts,
-// deliberately adjacent — the user-facing framing is one "Memory" concept
-// split in two by scope (workspace-wide vs. per-agent), not two unrelated
-// features that happen to share a rail. See
-// docs/specs/SPEC_ARMORY_MEMORY_GLOBAL_PERSONAL_RENAME_2026_08_22.md.
+// Memory sits right below Accounts — a single tab covering both Global
+// (workspace-wide, composes into every agent's CLAUDE.md) and Personal
+// (per-agent version history) scopes, presented as sections inside the one
+// pane rather than two adjacent rail tabs. See
+// docs/specs/SPEC_ARMORY_MEMORY_TAB_MERGE_2026_08_30.md (supersedes the
+// two-tab split from
+// docs/specs/SPEC_ARMORY_MEMORY_GLOBAL_PERSONAL_RENAME_2026_08_22.md).
 const RAIL: { id: ArmorySection; label: string; tooltip?: string; icon: string }[] = [
     { id: "accounts", label: ARMORY_SECTION_LABELS.accounts, icon: "key" },
-    { id: "memory",   label: ARMORY_SECTION_LABELS.memory,   tooltip: "Workspace-wide — composes into every agent's CLAUDE.md", icon: "brain" },
-    { id: "native_memory", label: ARMORY_SECTION_LABELS.native_memory, tooltip: "Per-agent — version history, diff and revert", icon: "clock-rotate-left" },
+    { id: "memory",   label: ARMORY_SECTION_LABELS.memory,   tooltip: "Global (workspace-wide) and Personal (per-agent) memory", icon: "brain" },
     { id: "skills",   label: ARMORY_SECTION_LABELS.skills,   icon: "wand-magic-sparkles" },
     { id: "mcp",      label: ARMORY_SECTION_LABELS.mcp,      icon: "plug" },
     { id: "bundles",  label: ARMORY_SECTION_LABELS.bundles,  tooltip: "Armory Bundle Format (ABF)", icon: "layer-group" },
+];
+
+const MEMORY_SUBNAV: { id: MemorySubsection; label: string }[] = [
+    { id: "global", label: "Global" },
+    { id: "personal", label: "Personal" },
 ];
 
 export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Element {
@@ -39,6 +45,12 @@ export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Elem
         void RpcApi.SetMetaCommand(TabRpcClient, {
             oref: `block:${model.blockId}`,
             meta: { "armory:section": id },
+        });
+    const subsection = model.memorySubsectionAtom;
+    const setSubsection = (id: MemorySubsection) =>
+        void RpcApi.SetMetaCommand(TabRpcClient, {
+            oref: `block:${model.blockId}`,
+            meta: { "armory:memory:subsection": id },
         });
     let viewRef: HTMLDivElement | undefined;
 
@@ -118,14 +130,37 @@ export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Elem
                 </nav>
                 <div class="bundle-manager-section">
                     {/*
-                     * All six managers stay mounted — toggling is instant and
+                     * All five managers stay mounted — toggling is instant and
                      * never re-fetches. All stay consistent via WPS *:changed events.
                      */}
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "accounts" }}>
                         <AccountsManager />
                     </div>
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "memory" }}>
-                        <GlobalBrainManager />
+                        <div class="memory-pane">
+                            <nav class="memory-subnav" aria-label="Memory scope">
+                                <For each={MEMORY_SUBNAV}>
+                                    {(item) => (
+                                        <button
+                                            type="button"
+                                            classList={{ "is-active": subsection() === item.id }}
+                                            aria-pressed={subsection() === item.id}
+                                            onClick={() => setSubsection(item.id)}
+                                        >
+                                            {item.label}
+                                        </button>
+                                    )}
+                                </For>
+                            </nav>
+                            <div class="memory-subnav-content">
+                                <div class="bundle-manager-pane" classList={{ "is-hidden": subsection() !== "global" }}>
+                                    <GlobalBrainManager />
+                                </div>
+                                <div class="bundle-manager-pane" classList={{ "is-hidden": subsection() !== "personal" }}>
+                                    <NativeMemoryManager />
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "skills" }}>
                         <SkillManager />
@@ -135,9 +170,6 @@ export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Elem
                     </div>
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "bundles" }}>
                         <MemoryManager />
-                    </div>
-                    <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "native_memory" }}>
-                        <NativeMemoryManager />
                     </div>
                 </div>
             </div>

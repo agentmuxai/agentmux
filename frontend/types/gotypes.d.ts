@@ -1577,7 +1577,13 @@ declare global {
         "subagent:session"?: string;
         // Selected rail section, meta-backed so it survives a block remount
         // and the view model can react to it (armory-model.ts/warden-model.ts).
+        // "native_memory" is a legacy value (pre SPEC_ARMORY_MEMORY_TAB_MERGE_
+        // 2026_08_30.md) — no longer written, but still accepted on read and
+        // normalized to "memory" by armory-model.ts's sectionAtom.
         "armory:section"?: "accounts" | "memory" | "skills" | "mcp" | "bundles" | "native_memory";
+        // Sub-tab inside the merged Memory pane (Global vs Personal) — see
+        // SPEC_ARMORY_MEMORY_TAB_MERGE_2026_08_30.md.
+        "armory:memory:subsection"?: "global" | "personal";
         "warden:section"?: "host" | "lan" | "internet" | "audit" | "supervisor";
         // Set once by quick-fork.ts right after a fork lands on a provider
         // with no --fork-session equivalent and a parent session existed to
