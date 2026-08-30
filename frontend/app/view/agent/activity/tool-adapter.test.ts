@@ -11,7 +11,12 @@ function mkBash(overrides: Partial<ToolNode> = {}): ToolNode {
         id: "tool-1",
         tool: "Bash",
         status: "running",
-        params: { command: "sleep 300" },
+        // NOT a sleep, deliberately. `sleep-detect.ts` promotes a
+        // whole-command sleep immediately, bypassing TOOL_PROMOTION_MS — so a
+        // `sleep` fixture here would make every threshold assertion below
+        // vacuously pass. This must stay a command that only the duration rule
+        // can catch.
+        params: { command: "cargo test -p agentmux-srv" },
         collapsed: false,
         summary: "",
         timestamp: 0,
@@ -21,7 +26,7 @@ function mkBash(overrides: Partial<ToolNode> = {}): ToolNode {
 
 describe("toolToActivity", () => {
     it("maps a running Bash node to a running, non-stoppable activity", () => {
-        const n = mkBash({ id: "t1", timestamp: 1000, params: { command: "sleep 300" } });
+        const n = mkBash({ id: "t1", timestamp: 1000, params: { command: "cargo test -p agentmux-srv" } });
         const a = toolToActivity(n);
         expect(a.id).toBe("t1");
         expect(a.kind).toBe("tool");
@@ -29,7 +34,7 @@ describe("toolToActivity", () => {
         expect(a.startedAt).toBe(1000);
         expect(a.endedAt).toBeUndefined();
         expect(a.canStop).toBe(false);
-        expect(a.title).toBe("sleep 300");
+        expect(a.title).toBe("cargo test -p agentmux-srv");
         expect(a.tool).toBe(n);
     });
 
@@ -272,5 +277,63 @@ describe("toolActivities — backgrounded calls", () => {
         expect(acts).toHaveLength(1);
         expect(acts[0].id).toBe("fg");
         expect(acts[0].status).toBe("running");
+    });
+});
+
+describe("whole-command sleeps promote immediately (sleep-detect.ts)", () => {
+    const sleepNode = (over: Partial<ToolNode> = {}) =>
+        mkBash({ id: "s1", timestamp: 1000, params: { command: "sleep 300" }, ...over });
+
+    /** The point of the feature: a self-declared wait needs no detection
+     *  window. Measured median for these in real transcripts is 61s, so the
+     *  old behaviour spent the first 30s of every one saying "Working…". */
+    it("docks a bare sleep at t=0, without waiting for TOOL_PROMOTION_MS", () => {
+        const nodes: DocumentNode[] = [sleepNode()];
+        expect(toolActivities(nodes, 1000).map((a) => a.id)).toEqual(["s1"]);
+        expect(toolActivities(nodes, 1001).map((a) => a.id)).toEqual(["s1"]);
+    });
+
+    it("carries sleepMs so the row can render a real countdown", () => {
+        expect(toolActivities([sleepNode()], 1000)[0].sleepMs).toBe(300_000);
+    });
+
+    it("suppresses the working row's tool text immediately too", () => {
+        // Otherwise the dock would show the sleep while AgentWorkingRow went on
+        // repeating it for another 30s.
+        expect(hasRunningPromotedTool([sleepNode()], 1000)).toBe(true);
+    });
+
+    it("schedules no promotion timer — it is already promoted", () => {
+        expect(nextToolPromotionAt([sleepNode()], 1000)).toBeNull();
+    });
+
+    /** It was docked from t=0, so it must RESOLVE in place (done, then normal
+     *  retention) rather than vanish the instant it ends — which is what the
+     *  duration rule alone would do for anything under the threshold. */
+    it("keeps a short sleep's row after it finishes, instead of dropping it", () => {
+        const finished = sleepNode({ params: { command: "sleep 12" }, status: "success", duration: 12 });
+        const acts = toolActivities([finished], 1000 + 12_000 + 1_000);
+        expect(acts).toHaveLength(1);
+        expect(acts[0].status).toBe("done");
+        expect(acts[0].endedAt).toBe(1000 + 12_000);
+    });
+
+    /** The 76%-wrong case from the real-transcript measurement. A compound
+     *  sleep must follow the ordinary duration rule — it is not a pure wait,
+     *  and its total runtime is unknowable from the text. */
+    it("does NOT fast-path a compound sleep, and gives it no countdown", () => {
+        const compound = mkBash({ id: "c1", timestamp: 1000, params: { command: "sleep 90; tail -30 /tmp/b.log" } });
+        expect(toolActivities([compound], 1000)).toEqual([]);
+        expect(nextToolPromotionAt([compound], 1000)).toBe(1000 + TOOL_PROMOTION_MS);
+        const promoted = toolActivities([compound], 1000 + TOOL_PROMOTION_MS);
+        expect(promoted.map((a) => a.id)).toEqual(["c1"]);
+        expect(promoted[0].sleepMs).toBeUndefined();
+    });
+
+    /** A micro-delay is below sleep-detect's floor, so it stays on the ordinary
+     *  path and never takes a dock row at all. */
+    it("ignores a micro-delay sleep entirely", () => {
+        const micro = mkBash({ id: "m1", timestamp: 1000, params: { command: "sleep 2" }, status: "success", duration: 2 });
+        expect(toolActivities([micro], 1000 + 60_000)).toEqual([]);
     });
 });

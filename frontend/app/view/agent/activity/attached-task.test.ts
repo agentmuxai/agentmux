@@ -26,7 +26,9 @@ function mkBash(overrides: Partial<ToolNode> = {}): ToolNode {
         id: "tool-1",
         tool: "Bash",
         status: "running",
-        params: { command: "sleep 300" },
+        // Not a sleep — see the same note in tool-adapter.test.ts's mkBash:
+        // a whole-command sleep skips the threshold entirely.
+        params: { command: "cargo test -p agentmux-srv" },
         collapsed: false,
         summary: "",
         timestamp: 0,
