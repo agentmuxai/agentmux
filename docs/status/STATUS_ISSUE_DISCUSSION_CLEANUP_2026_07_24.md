@@ -1,5 +1,21 @@
 # Status: GitHub Issue/Discussion Cleanup Pass (2026-07-24)
 
+> **HISTORICAL as of 2026-08-29 (docs-cleanup Phase 3).** This is the record
+> of a completed one-time triage, not a plan with open work — it should be
+> read as "what was true on 2026-07-24," which §5 already asks of the reader.
+>
+> **Its one outstanding action item is now closed:** PR **#2291**
+> (`fix(term): drop await on init resync to stop N-pane spawn
+> serialization`) — flagged here as "still needs human review/merge" — was
+> **merged 2026-07-25**, the day after this pass.
+>
+> **Its headline numbers have since drifted, as §5 predicted they would:**
+> this pass ended at 25 open issues; there are **40** open today. That is
+> expected drift from five weeks of normal work, not a regression against
+> the cleanup — and §5's own recommendation ("re-triage periodically — the
+> last general cleanup appears to have been ad hoc, not scheduled") still
+> stands as the live follow-up.
+
 A full triage of every open issue and discussion in `agentmuxai/agentmux`, done at the user's
 request ("clean up our open issues/discussions"). 5 parallel agents read every item's full body
 + comments and cross-checked it against current repo state (code, CLAUDE.md, merged PRs, git

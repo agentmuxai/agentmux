@@ -1,5 +1,21 @@
 # Findings: Tool-Call Scroll Oscillation — Correlated Live Repro Data (2026-08-21)
 
+> **SUPERSEDED IN SCALE by
+> `docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_LIVE_INSTANCE_DATA_2026_08_22.md`**
+> (added 2026-08-29, docs-cleanup Phase 4). This document correlates **8
+> events from one pane in one short dev-branch session**; the 08-22
+> follow-up covers two running instances with hours of real usage —
+> roughly two orders of magnitude more data — and surfaces two distinct
+> anomalies this dataset was too small to separate: a recurring ~251px
+> shrink, and multiple panes' `scrollHeight` dropping to exactly `0px`
+> within milliseconds of each other. The 08-22 doc is explicit that this
+> second phenomenon's mechanism is unknown — treat it as measured pane
+> state, not a window-lifecycle event.
+>
+> This doc's conclusions aren't retracted, but **don't size the problem
+> from this dataset**. The root-cause fix remains open — issues **#2648**
+> and **#2718**.
+
 Follow-up to `docs/analysis/ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md`,
 which shipped the `[wave-scroll-shrink]` diagnostic (commit `70c6decb`,
 2026-08-17) and theorized three unproven sources, with the explicit

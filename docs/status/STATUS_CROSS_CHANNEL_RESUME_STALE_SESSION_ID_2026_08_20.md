@@ -1,6 +1,25 @@
 # Status: Cross-Channel `--resume` Silently Starts a Blank Conversation on a Stale Registry `session_id` (2026-08-20)
 
+> **RESOLVED 2026-08-29 (docs-cleanup Phase 3).** §3's actual bug — the
+> shared registry's `session_id` being effectively write-once, so it never
+> self-corrected — was fixed by **#2755** (`fix(agent): make cross-channel
+> resume session_id a live pointer, not write-once`). The blank-conversation
+> symptom §1 describes was separately mitigated first by **#2693**
+> (`fix(agent): recover the largest on-disk session before falling back to a
+> blank conversation on a stale --resume`), and the silent-failure UX gap by
+> **#2776** (`fix(agent): surface a Reconnecting… status during stale-resume
+> retry`). **#2833** later added knowing at pane open whether a conversation
+> will resume or start new.
+>
+> §6's "recommended fix directions (not implemented here)" are therefore now
+> implemented — see `STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md`,
+> which re-confirmed them with fresh evidence and whose §6.1/§6.2 map onto
+> #2755/#2776 respectively.
+>
+> Everything below is preserved as the original investigation record.
+
 **Status: root cause confirmed, precise code evidence, not yet fixed.**
+*(Accurate when written — fixed since; see the banner above.)*
 Live-reproduced today: opening agent "AgentX" from a fresh channel
 (`0.55.18`) after this same agent had been running continuously in another
 channel for days silently dropped all conversation history and started a

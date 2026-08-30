@@ -6,6 +6,20 @@
 > window-close → srv notify chain), and the teardown backstop's Phase 2 landed — closing
 > the last open item from Discussion #1680's §9 scorecard.
 
+> **SWEPT 2026-08-29 (docs-cleanup Phase 3) — STILL OPEN, deliberately not
+> marked resolved.** §6's ranked roadmap still describes real unfinished
+> work: non-Windows close-path verification (#2186, blocked on hardware),
+> the srv↔host/launcher reconciliation pass, the pool-promote colour flash,
+> and Pillar 3 follow-ons. None of these were re-verified item-by-item in
+> this sweep — a docs-status pass is the wrong instrument for auditing an
+> in-flight architecture program, and guessing is the exact failure mode
+> `SPEC_DOCS_CLEANUP_AUDIT_2026_08_22.md` §2.2 warns about.
+>
+> **Take this document's own advice seriously — it is now ~6 weeks old.**
+> The "Verify before acting" line immediately below asks you to re-check
+> `file:line` references if reading more than a few days after writing;
+> `main` has moved several hundred commits since.
+
 **Type:** Status snapshot + forward roadmap, not a plan doc.
 **Verify before acting:** re-check file:line references if read more than a few days after
 2026-07-16 — this subsystem moves fast.

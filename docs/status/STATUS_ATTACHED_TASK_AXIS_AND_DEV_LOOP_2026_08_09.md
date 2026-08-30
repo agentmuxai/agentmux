@@ -1,8 +1,20 @@
 # Status: Long-Running Attached Tasks — Why "Working…" Is Still Broken and `task dev` Still Fights the Agent Loop
 
+> **SUPERSEDED 2026-08-29 (docs-cleanup Phase 3) — read
+> `docs/status/STATUS_ATTACHED_TASK_AXIS_AND_DEV_LOOP_2026_08_15.md`
+> instead.** That doc continues this one's rung numbering, re-audits it
+> against later code, and records what shipped in the interim. This snapshot
+> is kept for the record, not as a current diagnosis.
+>
+> Both of the "next unstarted rungs" this ladder pointed at have since
+> shipped and their issues are closed: **#2491** (bashwrap idle-timeout
+> killing declared long-running tasks) by **#2589**, and **#2492**
+> (backgrounded tasks dying on session teardown) by **#2590**/**#2681**/**#2683**.
+
 **Date:** 2026-08-09
 **Author:** Camper (camper-0622h)
 **Status:** Diagnosis current as of `main` @ `18f424828`. Partial wiring in progress in this working tree (see §6).
+*(Accurate when written — superseded, see the banner above.)*
 **Supersedes nothing** — this consolidates and updates the status across:
 - `docs/retro/retro-persistent-agent-working-status-stuck-2026-07-16.md` (Agent1: 12h "Working…" over a healthy dev server)
 - `docs/specs/REPORT_LONGRUNNING_TOOLCALL_DOCK_VISIBILITY_2026_07_16.md` (Agent2: original design direction)

@@ -1,5 +1,24 @@
 # Status — Lifecycle / OOM Refactor Program
 
+> **SWEPT 2026-08-29 (docs-cleanup Phase 3) — STILL OPEN, and now two
+> months stale.** This is a living program doc with genuinely unfinished
+> work, so it is deliberately *not* being marked resolved. But it is a
+> snapshot dated 2026-06-30 and its status table has drifted; treat every
+> 🟡/⬜ row as needing re-verification before acting on it.
+>
+> **What this sweep did check:** issue **#864** ("layout single writer",
+> the Pillar 1 prerequisite) is **CLOSED as completed** — consistent with
+> the table's own "Weak cutover COMPLETE (2026-07-06)" row. Note the
+> Pillar 1 row's "unblocked, not yet started" refers to *host reproject*,
+> not to #864, and was not re-verified here.
+>
+> **What this sweep did NOT check:** Pillar 2 stages 2–3, Pillar 3
+> follow-ons (queue-and-drain, per-agent cap, badge), the optional
+> `UpdateObject`→intents flip, the `TODO(owner)` on making PR CI a
+> *required* branch-protection check, and "Saga collapse + persistence
+> paydown". Per-item verification of an in-flight architecture program is
+> out of scope for a docs-status sweep — flagged rather than guessed at.
+
 **Date:** 2026-06-30
 **Type:** Living status doc (snapshot of an in-progress program)
 **Program:** Make the recurring Windows OOM crashes + lifecycle/teardown churn survivable by
