@@ -294,6 +294,19 @@ impl AgentMuxHandler {
                 // Install on every top-level — both `main` and Subwindow.
                 if is_top_level_window && !is_popup {
                     unsafe { install_top_level_focus_restore_hook(hwnd); }
+
+                    // Shift+window-edge resize (spec SPEC_RESIZE_DEFAULT_FLIP_
+                    // AND_WINDOW_EDGE_SHIFT_2026_08_26.md §3.4): observe the
+                    // native size loop (WM_SIZING/WM_EXITSIZEMOVE) and forward
+                    // windowresize:* events to this window's renderer. Pure
+                    // observer-passthrough — safe on main and Subwindows alike.
+                    unsafe {
+                        super::wndproc::install_window_edge_resize_hook(
+                            &self.state,
+                            hwnd,
+                            &label,
+                        );
+                    }
                 }
 
                 // OS-close routing (task #30): Alt+F4 / taskbar-close
@@ -1017,6 +1030,33 @@ impl AgentMuxHandler {
                         label: lbl.to_string(),
                     },
                 );
+            }
+        }
+
+        // A credential-approval subwindow (opened via `open_subwindow`,
+        // `initial_view=credential-approval`) closing before the human
+        // decided — parent window closing cascades down to it same as any
+        // other subwindow. No-op (empty Vec) for every ordinary window
+        // close; the registry only ever has entries keyed by an actual
+        // approval subwindow's label. See `credential_broker::approval`'s
+        // own doc comment — this is the mirror of `browser_pane::auth`'s
+        // pane-close cleanup below, just window-close instead of
+        // pane-close.
+        if let Some(ref lbl) = label {
+            let cancelled = crate::credential_broker::approval::cancel_for_window(lbl);
+            if !cancelled.is_empty() {
+                use cef::ImplAuthCallback;
+                tracing::info!(
+                    "[credential-broker] approval window {} closed before a decision — \
+                     cancelling {} parked auth request(s)",
+                    lbl,
+                    cancelled.len(),
+                );
+                for request_id in &cancelled {
+                    if let Some(cb) = crate::browser_pane::auth::take(request_id) {
+                        cb.cancel();
+                    }
+                }
             }
         }
 

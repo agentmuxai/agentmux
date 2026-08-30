@@ -135,7 +135,7 @@ fn register_fleet_bulk_stop(engine: &Arc<WshRpcEngine>, state: &AppState) {
             Box::pin(async move {
                 let cmd: CommandFleetBulkStopData = serde_json::from_value(data)
                     .map_err(|e| format!("fleet.bulk-stop: {e}"))?;
-                let result = fleet_bulk_stop_impl(&state, cmd.targets, cmd.signal.as_deref(), cmd.staged);
+                let result = fleet_bulk_stop_impl(&state, cmd.targets, cmd.signal.as_deref(), cmd.staged).await;
                 Ok(Some(serde_json::to_value(&result).unwrap()))
             })
         }),
@@ -161,7 +161,71 @@ const FLEET_BULK_STOP_AUDIT_ACTION: &str = "fleet.bulk-stop";
 /// unattempted — tripping the threshold on the LAST batch (nothing left to
 /// skip) must not report "aborted early" when the full list actually ran
 /// (reagent P2, same review).
-pub(crate) fn fleet_bulk_stop_impl(
+/// Look up `block_id` in the shared cross-channel registry (this host,
+/// other channels — same registry `server/reactive.rs`'s inject cascade
+/// tier-2b already reads) and forward a stop request over loopback HTTP to
+/// that channel's own srv (`/agentmux/agent/stop`), using its own
+/// `auth_key` from the registry entry — identical trust model to the
+/// inject cascade's own cross-channel forward (same host, same user).
+///
+/// Returns `None` when `block_id` isn't in the shared registry at all, or
+/// every matching entry is filtered out (not loopback, or a stale
+/// self-entry pointing at THIS instance) — the caller falls through to the
+/// normal local "not running" error in that case, same message as before
+/// this feature existed. `Some((agent_name, outcome))` otherwise.
+pub(crate) async fn forward_stop_to_shared_channel(
+    state: &AppState,
+    block_id: &str,
+    signal: Option<&str>,
+) -> Option<(String, Result<(), String>)> {
+    let shared_dir = crate::registry::resolve_shared_reactive_dir()?;
+    let entry = crate::backend::reactive::registry::list_all_shared(&shared_dir)
+        .into_iter()
+        .find(|e| e.block_id == block_id)?;
+
+    let is_loopback = entry.local_url.starts_with("http://127.0.0.1")
+        || entry.local_url.starts_with("http://localhost")
+        || entry.local_url.starts_with("http://[::1]");
+    if !is_loopback || entry.local_url == state.local_web_url {
+        return None;
+    }
+
+    let url = format!("{}/agentmux/agent/stop", entry.local_url);
+    let mut req = state.http_client.post(&url).json(&serde_json::json!({
+        "block_id": block_id,
+        "signal": signal,
+    }));
+    if !entry.auth_key.is_empty() {
+        req = req.header("X-AuthKey", &entry.auth_key);
+    }
+    let outcome = async {
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| format!("cross-channel forward failed: {e}"))?;
+        if !resp.status().is_success() {
+            return Err(format!("cross-channel forward: HTTP {}", resp.status()));
+        }
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| format!("cross-channel forward: response parse failed: {e}"))?;
+        if body.get("success").and_then(|v| v.as_bool()) == Some(true) {
+            Ok(())
+        } else {
+            Err(body
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("cross-channel forward failed")
+                .to_string())
+        }
+    }
+    .await;
+
+    Some((entry.agent_id, outcome))
+}
+
+pub(crate) async fn fleet_bulk_stop_impl(
     state: &AppState,
     targets: Vec<String>,
     signal: Option<&str>,
@@ -177,14 +241,21 @@ pub(crate) fn fleet_bulk_stop_impl(
         let batch_len = batch.len();
         let mut batch_failures = 0usize;
         for block_id in batch {
-            let target_agent = state
-                .reactive_handler
-                .get_agent_by_block(&block_id)
-                .map(|a| a.agent_id)
-                .unwrap_or_else(|| block_id.clone());
             let request_id = uuid::Uuid::new_v4().to_string();
-            match stop_one_agent_block(&block_id, signal) {
-                Ok(_) => {
+            // Local (this instance's own in-process controller registry)
+            // first — unchanged, fast path. Only reach for the shared
+            // cross-channel registry when nothing local matches
+            // (REPORT_CROSS_INSTANCE_CONTROL_ROBUSTNESS_AUDIT_2026_08_22.md
+            // §3.2 — this was host-tier-only before).
+            let (target_agent, outcome) = match state.reactive_handler.get_agent_by_block(&block_id) {
+                Some(agent) => (agent.agent_id, stop_one_agent_block(&block_id, signal).map(|_| ())),
+                None => match forward_stop_to_shared_channel(state, &block_id, signal).await {
+                    Some((agent_name, outcome)) => (agent_name, outcome),
+                    None => (block_id.clone(), stop_one_agent_block(&block_id, signal).map(|_| ())),
+                },
+            };
+            match outcome {
+                Ok(()) => {
                     state.reactive_handler.log_fleet_action_audit(
                         None, &target_agent, &block_id, FLEET_BULK_STOP_AUDIT_ACTION,
                         true, None, &request_id,

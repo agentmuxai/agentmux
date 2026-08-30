@@ -73,6 +73,13 @@ type MarkdownProps = {
     onClickExecute?: (cmd: string) => void;
     resolveOpts?: MarkdownResolveOpts;
     scrollable?: boolean;
+    /** When true, skip OverlayScrollbars entirely and let `.content` use its
+     *  plain CSS `overflow` — a real native/webkit scrollbar, styled by the
+     *  same universal `*::-webkit-scrollbar` rule (app.scss) every other
+     *  native scroll surface (CodeMirror, etc.) already uses, instead of
+     *  OverlayScrollbars' JS-rendered auto-hide overlay track. No effect
+     *  when `scrollable` is false. */
+    nativeScrollbar?: boolean;
     rehype?: boolean;
     /** When false, skip the (expensive) syntax-highlighting rehype plugin
      *  while keeping every other plugin (sanitize, etc.). Read reactively so
@@ -101,6 +108,7 @@ const Markdown = (props: MarkdownProps) => {
         fontSizeOverride,
         fixedFontSizeOverride,
         scrollable = true,
+        nativeScrollbar = false,
         rehype = true,
         onClickExecute,
     } = props;
@@ -133,14 +141,18 @@ const Markdown = (props: MarkdownProps) => {
 
     createEffect(() => {
         const heading = focusedHeading();
-        if (heading && contentsOs) {
-            const { viewport } = contentsOs.elements();
-            const el = document.getElementById(idPrefix() + heading.slice(1));
-            if (el) {
-                const headingRect = el.getBoundingClientRect();
-                const viewportRect = viewport.getBoundingClientRect();
-                viewport.scrollBy({ top: headingRect.top - viewportRect.top });
-            }
+        if (!heading) return;
+        // In OverlayScrollbars mode the real scrolling element is its
+        // generated viewport, not contentsEl itself; in nativeScrollbar mode
+        // contentsEl IS the scrolling element (plain CSS overflow, no
+        // OverlayScrollbars restructuring ever happened).
+        const viewport = contentsOs ? contentsOs.elements().viewport : contentsEl;
+        if (!viewport) return;
+        const el = document.getElementById(idPrefix() + heading.slice(1));
+        if (el) {
+            const headingRect = el.getBoundingClientRect();
+            const viewportRect = viewport.getBoundingClientRect();
+            viewport.scrollBy({ top: headingRect.top - viewportRect.top });
         }
     });
 
@@ -297,7 +309,7 @@ const Markdown = (props: MarkdownProps) => {
     const tocItems = createMemo<TocItem[]>(() => renderedMarkdown().toc);
 
     onMount(() => {
-        if (scrollable && contentsEl) {
+        if (scrollable && !nativeScrollbar && contentsEl) {
             contentsOs = OverlayScrollbars(contentsEl, { scrollbars: { autoHide: "leave" } });
             onCleanup(() => contentsOs?.destroy());
         }

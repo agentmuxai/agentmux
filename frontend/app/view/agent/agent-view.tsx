@@ -54,6 +54,7 @@ import {
     pushBlockOntoStack,
     setActiveBlockInStack,
 } from "@/layout/index";
+import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reveal";
 import { getTrail } from "@/log/render-trail";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, type JSX } from "solid-js";
@@ -103,6 +104,8 @@ import { computeTermSizeFromEl, usePtyWidth } from "./hooks/usePtyWidth";
 import { useScrollToNode } from "./hooks/useScrollToNode";
 import { useSnapshotPersistence } from "./hooks/useSnapshotPersistence";
 import { injectHistoryLink } from "./inject-history-link";
+import { buildResumePreflightNode, injectResumePreflight } from "./inject-resume-preflight";
+import { useResumePreflight } from "./hooks/useResumePreflight";
 import { HISTORY_TAB_FOR_META_KEY, openOrFocusHistoryTab } from "./open-history-tab";
 import { getProvider } from "./providers";
 import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
@@ -119,6 +122,12 @@ import { useAgentStream } from "./useAgentStream";
 // cursor, recolor arbitrary regions, or otherwise corrupt the shared terminal's
 // rendered state (this text is not our own trusted output; it's shell-command
 // output the user chose to run).
+// Matches BrainSpinner.scss's own `.is-fading` opacity transition duration —
+// the AgentPicker->AgentPresentationView cross-fade (AgentViewWrapper, below)
+// reuses the same visual timing so the two fades feel like one brand moment
+// rather than two differently-tuned animations back to back.
+const PICKER_FADE_OUT_MS = 200;
+
 const ANSI_SEQUENCE_RE = new RegExp(
     "[\\u001B\\u009B][[\\]()#;?]*(?:(?:(?:(?:;[-a-zA-Z\\d/#&.:=?%@~_]+)*|" +
         "[a-zA-Z\\d]+(?:;[-a-zA-Z\\d/#&.:=?%@~_]*)*)?\\u0007)|" +
@@ -165,6 +174,65 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
     // back: closing this reading posture is closing the tab, not swapping
     // content in place. See SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.1.
     const isHistoryTab = () => !!block()?.meta?.[HISTORY_TAB_FOR_META_KEY];
+
+    // Cross-fade AgentPicker -> AgentPresentationView instead of an instant
+    // hard cut when this SAME block gains an agentId in place (launching an
+    // agent from a blank "+" tab's picker — no block-stack mutation, no
+    // node remount, so PR #2761's leaf reveal gate never covers this
+    // transition at all). SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md
+    // §2.3/§4 Option B.
+    //
+    // Same stuck-visible race as block.tsx's ready()-gate (see
+    // docs/retro/retro-block-ready-gate-spinner-stuck-visible-race-2026-08-23.md):
+    // seeding `pickerVisible` from `!agentId()` read once at construction,
+    // then relying on `on(agentId, ..., {defer: true})`'s first (swallowed)
+    // run to treat "agentId already set" as "nothing to do," is two
+    // different reads of `agentId()` taken at two different times. If
+    // `agentId()` resolves in the gap between them, the seed is never
+    // corrected. Fixed the same way: the first observation and the seed
+    // are now the same read, inside the same effect.
+    const [pickerVisible, setPickerVisible] = createSignal(true);
+    const [pickerFadingOut, setPickerFadingOut] = createSignal(false);
+    let pickerFadeRaf: number | undefined;
+    let pickerFadeTimeout: ReturnType<typeof setTimeout> | undefined;
+    let pickerGateInitialized = false;
+    onCleanup(() => {
+        if (pickerFadeRaf !== undefined) cancelAnimationFrame(pickerFadeRaf);
+        clearTimeout(pickerFadeTimeout);
+    });
+    createEffect(() => {
+        const id = agentId();
+        if (pickerFadeRaf !== undefined) cancelAnimationFrame(pickerFadeRaf);
+        clearTimeout(pickerFadeTimeout);
+        if (!pickerGateInitialized) {
+            // First observation of `agentId()` for this mount: reflect it
+            // directly, no fade — there's nothing painted yet to fade from
+            // either way.
+            pickerGateInitialized = true;
+            setPickerVisible(!id);
+            setPickerFadingOut(false);
+            return;
+        }
+        if (id) {
+            if (!pickerVisible()) return; // already past the transition
+            // One rAF so the picker paints at full opacity at least once
+            // before the fade starts — flipping straight to the
+            // "is-fading" class in this same tick would apply opacity:0
+            // on the very first paint, with nothing to visibly transition
+            // from.
+            pickerFadeRaf = requestAnimationFrame(() => setPickerFadingOut(true));
+            pickerFadeTimeout = setTimeout(() => {
+                setPickerVisible(false);
+                setPickerFadingOut(false);
+            }, PICKER_FADE_OUT_MS);
+        } else {
+            // Lost the agentId (not a normal path, but stay correct) —
+            // show the picker again immediately, no fade needed going
+            // this direction.
+            setPickerFadingOut(false);
+            setPickerVisible(true);
+        }
+    });
 
     // Portal target for the marching-ants progress bar (below) — the bar's
     // own working-state/turn-phase reads live inside AgentPresentationView
@@ -296,7 +364,14 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
         if (!node) return;
         const stack = node.data?.blockStack?.length ? node.data.blockStack : [model.blockId];
         if (stack.includes(targetBlockId)) {
+            // Switching to an ALREADY-OPEN pill forces the same remount as
+            // creating a new one — layoutStack.ts's setActiveBlockInStack
+            // evicts the NodeModel just like pushBlockOntoStack does.
+            // Codex's review of PR #2761 caught that this path (unlike
+            // create-new) had no reveal gate at all.
+            const gen = holdLeafRevealGate(node.id);
             setActiveBlockInStack(layoutModel, node.id, targetBlockId);
+            scheduleLeafRevealLift(node.id, gen);
         } else {
             refocusNode(targetBlockId);
         }
@@ -310,36 +385,49 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
     // pane's own stack. No modal, no implicit fork of the current
     // conversation.
     const handleNewAgentTab = async (): Promise<void> => {
-        if (!layoutModel.getNodeByBlockId(model.blockId)) return;
-        let paneOpenResult: { block_id: string };
+        const initialNode = layoutModel.getNodeByBlockId(model.blockId);
+        if (!initialNode) return;
+        // Hide this pane while the new tab settles — pane.open's RPC round
+        // trip plus pushBlockOntoStack's forced remount (layoutStack.ts's
+        // own doc comment) is exactly the piecemeal-paint flicker
+        // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22 addresses.
+        const revealGen = holdLeafRevealGate(initialNode.id);
         try {
-            paneOpenResult = (await TabRpcClient.rpcCall(
-                "pane.open",
-                { view: "agent", skip_placement: true, meta: { view: "agent" } },
-                {}
-            )) as { block_id: string };
-        } catch (e: unknown) {
-            pushNotification({
-                icon: "fa-triangle-exclamation",
-                title: "New tab failed",
-                message: e instanceof Error ? e.message : String(e),
-                timestamp: new Date().toISOString(),
-                type: "error",
-                expiration: Date.now() + 8000,
-            });
-            return;
+            let paneOpenResult: { block_id: string };
+            try {
+                paneOpenResult = (await TabRpcClient.rpcCall(
+                    "pane.open",
+                    { view: "agent", skip_placement: true, meta: { view: "agent" } },
+                    {}
+                )) as { block_id: string };
+            } catch (e: unknown) {
+                pushNotification({
+                    icon: "fa-triangle-exclamation",
+                    title: "New tab failed",
+                    message: e instanceof Error ? e.message : String(e),
+                    timestamp: new Date().toISOString(),
+                    type: "error",
+                    expiration: Date.now() + 8000,
+                });
+                return;
+            }
+            // This pane could have closed while the RPC above was in flight —
+            // re-resolve the node fresh rather than trusting a pre-await
+            // reference. If it's gone, the skip_placement block we just
+            // created has nowhere to attach to; delete it instead of leaving
+            // an orphaned, unreachable block behind.
+            const node = layoutModel.getNodeByBlockId(model.blockId);
+            if (!node) {
+                await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
+                return;
+            }
+            pushBlockOntoStack(layoutModel, node.id, paneOpenResult.block_id);
+        } finally {
+            // Pair with holdLeafRevealGate above — runs on every exit path
+            // (success, RPC failure, pane-closed-mid-flight) so the leaf
+            // never stays hidden forever.
+            scheduleLeafRevealLift(initialNode.id, revealGen);
         }
-        // This pane could have closed while the RPC above was in flight —
-        // re-resolve the node fresh rather than trusting a pre-await
-        // reference. If it's gone, the skip_placement block we just
-        // created has nowhere to attach to; delete it instead of leaving
-        // an orphaned, unreachable block behind.
-        const node = layoutModel.getNodeByBlockId(model.blockId);
-        if (!node) {
-            await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
-            return;
-        }
-        pushBlockOntoStack(layoutModel, node.id, paneOpenResult.block_id);
     };
     // × on a tab (also middle-click, via PaneTabStrip's onMouseDown).
     // Mirrors term.tsx's handleTermTabClose: resolve the block's OWNING
@@ -347,11 +435,29 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
     // that block; last member closes the pane), for a cross-pane fork tab
     // it's that other pane (same semantics apply there). closeBlockInStack
     // guards against a blockId that isn't a member, so a stale tab entry
-    // can't close the wrong thing.
+    // can't close the wrong thing. Gated the same as handleTabSwitch, and
+    // ONLY when targetBlockId is the resolved node's own active member
+    // (reagent's follow-up review of PR #2761: gating unconditionally hides
+    // the leaf's real, unchanging content for the close+settle window when
+    // closing a background tab, since gatingNodeIds() hides the whole node
+    // regardless of whether a remount is actually about to happen) —
+    // popping the ACTIVE member out of a multi-member stack reassigns
+    // activeBlockId and evicts the NodeModel, the identical forced-remount
+    // pattern as switching; popping a background member changes nothing
+    // visible. Note: `node` here may be a different pane than this
+    // component's own (the cross-pane fork tab case), so this checks the
+    // resolved node's own activeBlockId, not this pane's activeBlockId().
     const handleTabClose = (targetBlockId: string) => {
         const node = layoutModel.getNodeByBlockId(targetBlockId);
         if (!node) return;
-        void closeBlockInStack(layoutModel, node.id, targetBlockId);
+        if (node.data?.activeBlockId !== targetBlockId) {
+            void closeBlockInStack(layoutModel, node.id, targetBlockId);
+            return;
+        }
+        const gen = holdLeafRevealGate(node.id);
+        void closeBlockInStack(layoutModel, node.id, targetBlockId).finally(() => {
+            scheduleLeafRevealLift(node.id, gen);
+        });
     };
     // Double-click a tab to rename it (only meaningful once it has launched
     // an agent — a still-blank picker tab has nothing to rename). TWO writes
@@ -414,11 +520,12 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
                 the pane and clipping the composer off the bottom (found
                 live 2026-08-09: "agent pane has no text input"). */}
             <div class="agent-pane-stack">
-                {/* Progress bar's own row — always reserved, above the tab
-                    strip, below wherever the block-frame's own pane header
-                    ends. Empty div; its only content is whatever
-                    AgentPresentationView portals into it below. Sized in
-                    agent-view.scss (.agent-pane-progress-bar-slot). */}
+                {/* Progress bar's own overlay strip — floats above the tab
+                    strip, never reserving layout space (SPEC_AGENT_PANE_
+                    PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md). Empty div;
+                    its only content is whatever AgentPresentationView
+                    portals into it below. Positioned in agent-view.scss
+                    (.agent-pane-progress-bar-slot). */}
                 <div class="agent-pane-progress-bar-slot" ref={(el) => setProgressBarSlot(el)} />
                 <div class="agent-pane-stack-content">
                     {/* Tab strip floats over the content instead of
@@ -460,14 +567,39 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
                     <Show
                         when={isHistoryTab()}
                         fallback={
-                            <Show when={agentId()} fallback={<AgentPicker model={model} />}>
-                                <AgentPresentationView
-                                    model={model}
-                                    agentId={agentId()}
-                                    agentDefinitions={agentDefinitions}
-                                    progressBarMount={progressBarSlot}
-                                />
-                            </Show>
+                            <>
+                                <Show when={agentId()}>
+                                    <AgentPresentationView
+                                        model={model}
+                                        agentId={agentId()}
+                                        agentDefinitions={agentDefinitions}
+                                        progressBarMount={progressBarSlot}
+                                    />
+                                </Show>
+                                {/* Cross-fades out on top of AgentPresentationView
+                                    once agentId() is set, instead of the two
+                                    Shows above hard-swapping instantly — see
+                                    pickerVisible/pickerFadingOut above.
+                                    SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.3. */}
+                                <Show when={pickerVisible()}>
+                                    <div
+                                        class="agent-picker-host"
+                                        classList={{
+                                            // Applied the instant agentId()
+                                            // is set (same render as
+                                            // AgentPresentationView
+                                            // appearing) so this never sits
+                                            // in normal flow alongside it,
+                                            // even for one frame.
+                                            "is-overlay": !!agentId(),
+                                            "is-fading": pickerFadingOut(),
+                                            "is-reduced-motion": atoms.prefersReducedMotionAtom(),
+                                        }}
+                                    >
+                                        <AgentPicker model={model} />
+                                    </div>
+                                </Show>
+                            </>
                         }
                     >
                         {/* No progressBarMount here — a history tab is a
@@ -626,6 +758,7 @@ const AgentPresentationView = ({
                 compacting: a.compactingAtom[1],
                 attachedTask: a.attachedTaskAtom[1],
                 registryAttachedTaskSince: a.registryAttachedTaskSinceAtom[1],
+                reconnecting: a.reconnectingAtom[1],
             },
         });
         registerAgentActivity(model.blockId, a.turnPhaseAtom[0]);
@@ -874,6 +1007,12 @@ const AgentPresentationView = ({
         log,
     });
 
+    // Will the next spawn continue the conversation this pane is displaying, or
+    // start a new one? Asked once on mount, before the user can type — the
+    // whole point is to beat the first send, since every other continuity
+    // signal is retrospective. See `hooks/useResumePreflight.ts`.
+    const resumePreflight = useResumePreflight(model.blockId);
+
     // True when content older than the working session exists out of view:
     // set by the restore/pagination clamp paths (scopeClamped) OR derived
     // from a live clamp — after the reducer's StreamFlush trim, the fresh
@@ -893,7 +1032,15 @@ const AgentPresentationView = ({
     // setter, so pairing a derived read with the real write side is safe
     // (nothing writes through this pair, so there's nothing to desync).
     const displayDocumentAtom: SignalPair<DocumentNode[]> = [
-        () => injectHistoryLink(agentAtoms().documentAtom[0](), earlierHistoryAvailable()),
+        () =>
+            injectResumePreflight(
+                injectHistoryLink(agentAtoms().documentAtom[0](), earlierHistoryAvailable()),
+                buildResumePreflightNode(
+                    agentAtoms().documentAtom[0](),
+                    resumePreflight.result(),
+                    resumePreflight.showSteps(),
+                ),
+            ),
         agentAtoms().documentAtom[1],
     ];
 
@@ -1222,12 +1369,10 @@ const AgentPresentationView = ({
             // REGARDLESS of code (reducer.ts's FailureCleared case), so
             // dispatching it unconditionally here would ALSO silently wipe
             // an unrelated concurrent failure (rate_limited, overloaded,
-            // context_exceeded, unresponsive, etc.) that happens to be
-            // showing the moment a turn-active event arrives, even though
-            // that unrelated problem was never actually resolved. Mirrors
-            // the established pattern at useAgentFailure.ts's silent
-            // self-heal handler ("never blow away an unrelated concurrent
-            // failure"). reagentx P1 on PR #2338 (thirty-fifth re-review).
+            // context_exceeded, etc.) that happens to be showing the moment
+            // a turn-active event arrives, even though that unrelated
+            // problem was never actually resolved. reagentx P1 on PR #2338
+            // (thirty-fifth re-review).
             if (paneSnapshot(model.blockId)?.failure?.data.code === "auth") {
                 dispatchPane(model.blockId, { type: "FailureCleared" }, "system");
             }
@@ -1362,7 +1507,10 @@ const AgentPresentationView = ({
     // owns dedup against in-flight history loads and the truncate-suppress
     // invariant that prevents the mid-session wipe bug.
     const pendingMessagesAtom = agentAtoms().pendingMessagesAtom;
-    useAgentStream({
+    // Forwarded to ActivityDock so it can render registry-known background
+    // tasks the transcript itself has no record of (Tier 1 of
+    // docs/reports/REPORT_AGENT_PANE_ACTIVITY_DOCK_ARCHITECTURE_ANALYSIS_2026_08_25.md).
+    const backgroundTasksAtom = useAgentStream({
         blockId: model.blockId,
         // Pass the per-pane model so the hook's dispatch sites are
         // default-safe against post-unmount races — the disposed-flag
@@ -1420,7 +1568,13 @@ const AgentPresentationView = ({
     const workingRowLoading = createMemo(
         () => showingLaunchActivity() || workingFromPhase(agentAtoms().turnPhaseAtom[0]())
     );
-    const workingRowVisible = createMemo(() => workingRowLoading() || agentAtoms().sessionStatsAtom[0]() != null);
+    const workingRowVisible = createMemo(
+        () =>
+            workingRowLoading() ||
+            agentAtoms().sessionStatsAtom[0]() != null ||
+            agentAtoms().compactingAtom[0]() != null ||
+            agentAtoms().reconnectingAtom[0]() != null,
+    );
 
     // Ref CALLBACK, not a one-shot onMount(): originally fixed a bug where
     // Agent History's now-removed `bodyMode` in-place swap (PR #2509)
@@ -1700,15 +1854,6 @@ const AgentPresentationView = ({
         onLoginViaTerminal: () => {
             log("auth", "Login via terminal — opening a console window for browser login");
             void status.loginViaTerminal();
-        },
-        // unresponsive recovery — the process is alive but wedged (backend
-        // health monitor's Dead classification), so there's nothing a plain
-        // retry could reach. Kill + respawn via the same mechanism already
-        // trusted for the post-login stale-process case. See
-        // docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md §4.
-        onRestart: () => {
-            log("agent", "Restart — the agent process was unresponsive, respawning it");
-            void status.forceControllerRefresh("restart");
         },
     });
 
@@ -2013,7 +2158,26 @@ const AgentPresentationView = ({
                 <Show when={workingRowVisible()}>
                     <div
                         class="agent-working-row-backdrop"
-                        classList={{ "agent-working-row-backdrop--loading": workingRowLoading() }}
+                        classList={{
+                            // Must mirror AgentWorkingRow's OWN loading gate
+                            // (`props.loading || !!props.compacting ||
+                            // !!props.reconnecting`, AgentFooter.tsx), not
+                            // just `workingRowLoading()` — reagent P1 on
+                            // PR #2826: since `workingRowVisible()` above
+                            // already renders this backdrop for
+                            // compacting/reconnecting too, using only
+                            // `workingRowLoading()` here left the backdrop in
+                            // its `--worked` (non-loading) color while the
+                            // row itself rendered its loading/accent-tinted
+                            // variant during those two states — the exact
+                            // backdrop/row color-mismatch
+                            // SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md
+                            // fixed for the plain loading case.
+                            "agent-working-row-backdrop--loading":
+                                workingRowLoading() ||
+                                agentAtoms().compactingAtom[0]() != null ||
+                                agentAtoms().reconnectingAtom[0]() != null,
+                        }}
                     />
                 </Show>
 
@@ -2077,6 +2241,8 @@ const AgentPresentationView = ({
                                 const phase = agentAtoms().turnPhaseAtom[0]();
                                 return phase.kind === "Streaming" ? (phase.retryAfterMs ?? null) : null;
                             })()}
+                            compacting={agentAtoms().compactingAtom[0]()}
+                            reconnecting={agentAtoms().reconnectingAtom[0]()}
                         />
                     </Show>
                 </div>
@@ -2215,7 +2381,11 @@ const AgentPresentationView = ({
                 subagents) sit just above the composer so task status is adjacent
                 to where the user's attention already is. Moved from the top per
                 SPEC_ACTIVITY_DOCK_BOTTOM_MOVE_2026_06_20. */}
-            <ActivityDock documentAtom={agentAtoms().documentAtom} blockId={model.blockId} />
+            <ActivityDock
+                documentAtom={agentAtoms().documentAtom}
+                blockId={model.blockId}
+                backgroundTasksAtom={backgroundTasksAtom}
+            />
 
             {/* Composer status strip — single 28-32px row with live
                 activity ticker and Log button that toggles the log panel.

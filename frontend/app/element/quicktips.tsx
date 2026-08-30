@@ -210,7 +210,7 @@ const QuickTips = (): JSX.Element => {
                             <KeyBinding keyDecl="Ctrl:Shift:s + Arrows" />
                         </div>
                         <div class="flex flex-col gap-0.5 p-2 rounded-md hover:bg-white/5 transition-colors">
-                            <span class="text-[15px]">Resize All Panes Together</span>
+                            <span class="text-[15px]">Resize Single Border</span>
                             <KeyBinding keyDecl="Shift + Drag" />
                         </div>
                     </div>

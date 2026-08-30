@@ -56,7 +56,44 @@ import { DualProviderLogo } from "@/element/DualProviderLogo";
 import { formatTimeAgo } from "@/util/format-time";
 import { Logger } from "@/util/logger";
 import { resolveEffectiveVendor } from "../providers/catalog";
+import type { AgentSortOption } from "./AgentPickerFilterBar";
 import { RuntimeBadge } from "./RuntimeBadge";
+
+/** "type" sort groups Host before Sandbox (Container) before anything
+ *  unrecognized, matching `RuntimeBadge`'s own known-runtime ordering —
+ *  not alphabetical ("container" < "host" would put Sandbox first, which
+ *  reads backwards next to the badge's own HOST/SANDBOX vocabulary).
+ *
+ *  Codex P2, PR #2789: `"standalone"` is the LEGACY default `agent_type`
+ *  (`default_agent_type()`, `backend/storage/agents.rs`) for definitions
+ *  predating the container feature, and every non-`"container"` value is
+ *  treated as the host controller at launch (`agent_open.rs`'s
+ *  `controller_type = if agent.agent_type == "container" {...} else {...}`)
+ *  — "standalone" IS a host agent, effectively, just under an older name.
+ *  Without this, legacy definitions would rank as "unknown" (last),
+ *  splitting them from genuinely host-labeled agents instead of grouping
+ *  correctly with them. */
+const TYPE_SORT_RANK: Record<string, number> = { host: 0, standalone: 0, container: 1 };
+const typeSortRank = (agentType: string): number => TYPE_SORT_RANK[agentType] ?? 2;
+
+function compareRows(sort: AgentSortOption, a: RecentSessionRow, b: RecentSessionRow): number {
+    switch (sort) {
+        case "name":
+            return (a.instance_name || a.definition_name).localeCompare(b.instance_name || b.definition_name, undefined, {
+                sensitivity: "base",
+            });
+        case "type": {
+            const rankDiff = typeSortRank(a.agent_type) - typeSortRank(b.agent_type);
+            if (rankDiff !== 0) return rankDiff;
+            return (a.instance_name || a.definition_name).localeCompare(b.instance_name || b.definition_name, undefined, {
+                sensitivity: "base",
+            });
+        }
+        case "recent":
+        default:
+            return b.started_at - a.started_at;
+    }
+}
 
 /** Empty-state copy varies based on whether an identity filter was
  * applied — surfaced so the integration test can match it. */
@@ -93,6 +130,11 @@ export interface MyAgentsListProps {
      *  filter searches the full backend-capped set, not just the default
      *  page — see SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md. */
     nameFilter?: Accessor<string | null | undefined>;
+    /** Optional reactive accessor for the sort order — client-side, over
+     *  the already-fetched/filtered row set (no backend RPC change).
+     *  Defaults to `"recent"` (today's implicit backend ordering) when
+     *  omitted. See docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md §3. */
+    sortBy?: Accessor<AgentSortOption>;
     /** Called when the user clicks an entry that is NOT currently open
      *  in another pane. The parent (AgentPicker) hands this to
      *  `AgentViewModel.launchAgentDefinition` with the continuation
@@ -388,6 +430,18 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
     // filter narrowed them all away — not "you have no agents."
     const isNoMatch = () => !isLoading() && !fetchError() && (rows() ?? []).length > 0 && filteredRows().length === 0;
 
+    // Sort applied AFTER filtering, over whatever's already in memory — no
+    // backend RPC change (§3 of the audit report above). `.slice()` before
+    // `.sort()` since Array.prototype.sort mutates in place and
+    // `filteredRows()` may be the SAME array reference `rows()` returned
+    // when there's no active name filter (see filteredRows's own `return
+    // all` fast path) — sorting that in place would mutate the resource's
+    // cached value out from under Solid's stale-while-revalidate.
+    const sortedRows = createMemo(() => {
+        const sort = props.sortBy?.() ?? "recent";
+        return filteredRows().slice().sort((a, b) => compareRows(sort, a, b));
+    });
+
     return (
         <div class="agent-recent-sessions" data-testid="agent-my-agents-list">
             <div class="agent-recent-sessions-header">
@@ -445,7 +499,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                 }
             >
                 <ul class="agent-recent-sessions-list">
-                    <For each={filteredRows()}>
+                    <For each={sortedRows()}>
                         {(row) => {
                             const isActive = () => (props.openDefinitions?.() ?? new Map()).has(row.definition_id);
                             const forkState = () => getForkState(row.definition_id);
@@ -487,9 +541,15 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                         "SANDBOX" in the pane the row launches into). */}
                                                     <RuntimeBadge runtime={row.agent_type} size="tag" />
                                                 </Show>
-                                                <span class="agent-recent-sessions-meta">
-                                                    {row.identity_name || "(ambient creds)"}
-                                                </span>
+                                            </span>
+                                            {/* Own line, not squeezed onto line1 via flex:1 next to
+                                                the name — the account is as important as the name
+                                                itself for a user managing multiple accounts, and
+                                                needs reliable space rather than competing ellipsis
+                                                with it. See
+                                                docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md §2. */}
+                                            <span class="agent-recent-sessions-account">
+                                                {row.identity_name || "(ambient creds)"}
                                             </span>
                                             <Show
                                                 when={row.preview}
@@ -511,23 +571,14 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                     </span>
                                                 </span>
                                             </Show>
+                                            {/* Most-relevant-first, not chronological (Created →
+                                                Launch → Active): a picker exists to answer "what did
+                                                I last touch," which is Last Active (or Last Launch if
+                                                never active) — not when the agent was originally
+                                                created, which is the least actionable fact on the
+                                                row. See
+                                                docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md §2. */}
                                             <span class="agent-recent-sessions-timestamps">
-                                                <Show when={row.agent_created_at > 0}>
-                                                    <span class="agent-recent-sessions-ts">
-                                                        <span class="agent-recent-sessions-ts-label">Created</span>
-                                                        <span class="agent-recent-sessions-ts-value">
-                                                            {formatTimeAgo(row.agent_created_at, now())}
-                                                        </span>
-                                                    </span>
-                                                </Show>
-                                                <Show when={row.started_at > 0}>
-                                                    <span class="agent-recent-sessions-ts">
-                                                        <span class="agent-recent-sessions-ts-label">Last Launch</span>
-                                                        <span class="agent-recent-sessions-ts-value">
-                                                            {formatTimeAgo(row.started_at, now())}
-                                                        </span>
-                                                    </span>
-                                                </Show>
                                                 <Show
                                                     when={
                                                         row.has_snapshot &&
@@ -539,6 +590,22 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                         <span class="agent-recent-sessions-ts-label">Last Active</span>
                                                         <span class="agent-recent-sessions-ts-value">
                                                             {formatTimeAgo(row.last_active_at, now())}
+                                                        </span>
+                                                    </span>
+                                                </Show>
+                                                <Show when={row.started_at > 0}>
+                                                    <span class="agent-recent-sessions-ts">
+                                                        <span class="agent-recent-sessions-ts-label">Last Launch</span>
+                                                        <span class="agent-recent-sessions-ts-value">
+                                                            {formatTimeAgo(row.started_at, now())}
+                                                        </span>
+                                                    </span>
+                                                </Show>
+                                                <Show when={row.agent_created_at > 0}>
+                                                    <span class="agent-recent-sessions-ts">
+                                                        <span class="agent-recent-sessions-ts-label">Created</span>
+                                                        <span class="agent-recent-sessions-ts-value">
+                                                            {formatTimeAgo(row.agent_created_at, now())}
                                                         </span>
                                                     </span>
                                                 </Show>

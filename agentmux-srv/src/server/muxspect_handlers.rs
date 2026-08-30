@@ -85,8 +85,17 @@ pub struct LastErrorFrame {
 /// `agent_handlers/input.rs`'s container `ensure_running` path, the only
 /// four call sites that build this frame today). `message` should have
 /// the `[AgentMux] ` prefix already stripped.
+///
+/// codex P2, PR #2802: `SpawnGateError::AmbientHomeDirNotAllowed`'s wording
+/// starts with "this agent's", not either prefix this function originally
+/// recognized — without this branch every ambient-home refusal reported
+/// `unknown` instead of `identity`, regressing this diagnostic for exactly
+/// the pre-spawn refusal case it exists to classify.
 fn classify_last_error_source(message: &str) -> &'static str {
-    if message.starts_with("no credentials for") || message.starts_with("credential injection could not run") {
+    if message.starts_with("no credentials for")
+        || message.starts_with("credential injection could not run")
+        || message.starts_with("this agent's")
+    {
         "identity"
     } else if message.starts_with("container exec failed") || message.starts_with("container ensure_running failed")
     {
@@ -1175,6 +1184,11 @@ mod tests {
         );
         assert_eq!(
             classify_last_error_source("credential injection could not run (task join failed); the spawn was refused rather than falling back to the global CLI login. Retry, and check `muxlog auth` if it persists."),
+            "identity"
+        );
+        // codex P2, PR #2802: SpawnGateError::AmbientHomeDirNotAllowed.
+        assert_eq!(
+            classify_last_error_source("this agent's claude identity points directly at your personal claude config directory (C:\\Users\\asafe\\.claude) instead of an isolated AgentMux account — AgentMux no longer allows spawning an agent against your own global CLI login. Re-bind this identity to an isolated account in Armory \u{2192} Accounts (delete the current claude account and log in again to create a fresh, isolated one), then retry."),
             "identity"
         );
         assert_eq!(

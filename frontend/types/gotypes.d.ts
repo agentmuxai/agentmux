@@ -94,8 +94,7 @@ declare global {
             | "killed"
             | "no_output"
             | "spawn_failure"
-            | "unknown_non_zero"
-            | "unresponsive";
+            | "unknown_non_zero";
         title: string;
         detail: string;
         exitCode?: number;
@@ -411,6 +410,17 @@ declare global {
          * see ARCHITECTURE_MANDATORY_ABF_RETHINK_2026_08_14.md §3.1.
          */
         memory_id?: string;
+        /**
+         * This agent's own disclosure policy for an incoming cross-tier
+         * `transcript_request` jekt (`muxspect` Phase B/C — LAN/WAN
+         * conversation visibility). One of "private" (default,
+         * auto-deny) / "trusted_peers" (auto-approve an allow-listed
+         * requester) / "ask" (force human escalation). Channel-local
+         * only, like model_vendor_base_url/memory_id above — a
+         * cross-channel-reopened agent starts back at the safe
+         * "private" default. Schema v26.
+         */
+        conversation_visibility?: string;
     };
 
     // ── v6: identity, instance, junction ────────────────────────────────────
@@ -486,6 +496,13 @@ declare global {
         sort_order?: number;
         created_at: number;
         updated_at: number;
+        /** AgentMux-controlled, highest-priority Global Memory tier — always
+         *  also is_global, injected first with explicit override wording.
+         *  Writable only through upsertsystemmemory/deletesystemmemory; the
+         *  ordinary upsertmemory/deletememory/reorderglobalbrain all refuse
+         *  to touch a row with this set. See
+         *  docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md. */
+        is_system?: boolean;
     };
 
     // ── Browser pane bookmarks ───────────────────────────────────────────
@@ -1948,6 +1965,11 @@ declare global {
     type TimeSeriesData = {
         ts: number;
         values: {[key: string]: number};
+        // Backend uptime in seconds, from srv's monotonic clock. Present only
+        // on the top-level sysinfo tick, absent on per-block stats and the
+        // CPU-stream RPCs. Never derive uptime from `ts` — see
+        // frontend/app/statusbar/backend-uptime.ts.
+        uptime_secs?: number;
     };
 
     // uctypes.UIChat
@@ -2632,6 +2654,39 @@ declare global {
         suggestion: string;
         // Absent under the same conditions as ActivitySummaryResult.tokens.
         tokens?: TokenCounts;
+    };
+
+    // wshrpc.CommandSessionResumePreflightData
+    type CommandSessionResumePreflightData = {
+        block_id: string;
+    };
+
+    // wshrpc.ResumePreflightStep — one row of the pane's progress list.
+    // `ok: false` is normal (it's how the sequence narrows), not an error.
+    type ResumePreflightStep = {
+        id: string;
+        label: string;
+        ok: boolean;
+        detail: string;
+        duration_ms: number;
+    };
+
+    // wshrpc.SessionResumePreflightResult — what the next spawn will do to this
+    // pane's conversation, decided before anything is spawned.
+    //   resume  — the exact session is present; it will be continued
+    //   recover — the held id is dead but a real session on disk will be
+    //             picked up by the retry path (continuity survives a pause)
+    //   fresh   — the next turn starts with none of the prior conversation
+    //   unknown — not determinable (no resume flag / no config dir); say nothing
+    type SessionResumePreflightResult = {
+        block_id: string;
+        verdict: "resume" | "recover" | "fresh" | "unknown";
+        session_id?: string;
+        // A real session on disk the next spawn will NOT reach for — set only
+        // alongside "fresh", as evidence history exists though nothing loads it.
+        recoverable_session_id?: string;
+        steps: ResumePreflightStep[];
+        duration_ms: number;
     };
 
     // wshrpc.CommandSessionArchiveData

@@ -230,6 +230,18 @@ export function initGlobalEventSubs(initOpts: AgentMuxInitOpts) {
             },
         },
         {
+            eventType: WpsEvent.WaveObjBatchedUpdates,
+            handler: (event) => {
+                // All updates from one atomic backend transition, applied in
+                // one batch() flush (updateWaveObjects) so the UI can't paint
+                // a half-applied state — e.g. CloseTab's tab delete blanking
+                // the still-mounted tab before the workspace update unmounts
+                // it. See SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md §7.
+                const updates: WaveObjUpdate[] = event.data ?? [];
+                WOS.updateWaveObjects(updates);
+            },
+        },
+        {
             eventType: WpsEvent.Config,
             handler: (event) => {
                 const fullConfig = (event.data as WatcherUpdate).fullconfig;

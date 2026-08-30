@@ -32,6 +32,7 @@ import { atoms, pushNotification, WOS } from "@/app/store/global";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { ObjectService } from "@/app/store/services";
+import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reveal";
 import { resolveEffectiveLaunchProvider } from "./agent-launch-env";
 import { PROVIDERS, resolveProviderAlias } from "./providers";
 import { lastLinkedAccountId } from "./providers/provider-id-aliases";
@@ -127,6 +128,13 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
     // closes that race.
     const ownerTabId = atoms.activeTabId();
 
+    // Hide this pane while the fork settles — the whole RPC chain below
+    // (fork, identity lookup, pane.open, launch) precedes the same
+    // pushBlockOntoStack-forced remount `handleNewAgentTab`/
+    // `openOrFocusHistoryTab` are also gated against.
+    // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md.
+    const revealGen = holdLeafRevealGate(node.id);
+
     // Declared outside the try so the catch block below can tell whether a
     // block was actually pushed onto the stack before the failure — only
     // then is there something to clean up. `launchAgentDefinition`'s own
@@ -152,122 +160,127 @@ export async function quickForkAgent(model: QuickForkModel): Promise<boolean> {
     };
 
     try {
-        const forkedDef = await RpcApi.ForkAgentDefinitionCommand(TabRpcClient, {
-            source_id: definitionId,
-            branch_label: "",
-        });
+        try {
+            const forkedDef = await RpcApi.ForkAgentDefinitionCommand(TabRpcClient, {
+                source_id: definitionId,
+                branch_label: "",
+            });
 
-        // Same resolution as launchAgentDefinition itself (agent-model.ts):
-        // effective provider -> PROVIDERS lookup, with an alias fallback.
-        const effectiveProvider = await resolveEffectiveLaunchProvider(forkedDef);
-        const canonicalForkProvider = resolveProviderAlias(effectiveProvider);
-        const provider = PROVIDERS[effectiveProvider] ?? PROVIDERS[canonicalForkProvider];
+            // Same resolution as launchAgentDefinition itself (agent-model.ts):
+            // effective provider -> PROVIDERS lookup, with an alias fallback.
+            const effectiveProvider = await resolveEffectiveLaunchProvider(forkedDef);
+            const canonicalForkProvider = resolveProviderAlias(effectiveProvider);
+            const provider = PROVIDERS[effectiveProvider] ?? PROVIDERS[canonicalForkProvider];
 
-        // Spec §5 (revised 2026-08-22): always inherit the source's own
-        // bound account — see this function's doc comment for why an
-        // "unbound" alternative wouldn't actually be a safer/different
-        // option (binding never copies the credential; it's shared by
-        // account_id regardless of who links to it).
-        //
-        // A lookup failure here is NOT swallowed into "proceed unbound"
-        // (Codex's review of PR #2756): the backend's OAuth-class layer-3
-        // spawn gate (`identity/resolver/inject.rs`) blocks a definition
-        // with no resolved binding at all, unless it opted into ambient
-        // login — so an unresolved lookup would let `launchAgentDefinition`
-        // report success while the new agent can never actually spawn its
-        // first turn, silently contradicting quick-fork's own "always
-        // inherits identity" promise. Rethrown into the outer catch, which
-        // already handles cleanup + notification identically.
-        const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
-            agent_id: definitionId,
-        });
-        const accountId = lastLinkedAccountId(links, provider?.id ?? canonicalForkProvider) ?? "";
+            // Spec §5 (revised 2026-08-22): always inherit the source's own
+            // bound account — see this function's doc comment for why an
+            // "unbound" alternative wouldn't actually be a safer/different
+            // option (binding never copies the credential; it's shared by
+            // account_id regardless of who links to it).
+            //
+            // A lookup failure here is NOT swallowed into "proceed unbound"
+            // (Codex's review of PR #2756): the backend's OAuth-class layer-3
+            // spawn gate (`identity/resolver/inject.rs`) blocks a definition
+            // with no resolved binding at all, unless it opted into ambient
+            // login — so an unresolved lookup would let `launchAgentDefinition`
+            // report success while the new agent can never actually spawn its
+            // first turn, silently contradicting quick-fork's own "always
+            // inherits identity" promise. Rethrown into the outer catch, which
+            // already handles cleanup + notification identically.
+            const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, {
+                agent_id: definitionId,
+            });
+            const accountId = lastLinkedAccountId(links, provider?.id ?? canonicalForkProvider) ?? "";
 
-        // Non-Claude fallback note — only relevant when there was actually
-        // a session to lose (an empty sessionId is already a fresh start
-        // regardless of provider — nothing silently changed).
-        const showNoHistoryFallback = !!sessionId && provider?.id !== "claude";
+            // Non-Claude fallback note — only relevant when there was actually
+            // a session to lose (an empty sessionId is already a fresh start
+            // regardless of provider — nothing silently changed).
+            const showNoHistoryFallback = !!sessionId && provider?.id !== "claude";
 
-        // Allocate the new block WITHOUT placing it — same primitive
-        // open-history-tab.ts / handleNewAgentTab (agent-view.tsx) use to
-        // add a sibling into THIS pane's own stack.
-        paneOpenResult = (await TabRpcClient.rpcCall(
-            "pane.open",
-            { view: "agent", skip_placement: true, tab_id: ownerTabId, meta: { view: "agent" } },
-            {},
-        )) as { block_id: string };
+            // Allocate the new block WITHOUT placing it — same primitive
+            // open-history-tab.ts / handleNewAgentTab (agent-view.tsx) use to
+            // add a sibling into THIS pane's own stack.
+            paneOpenResult = (await TabRpcClient.rpcCall(
+                "pane.open",
+                { view: "agent", skip_placement: true, tab_id: ownerTabId, meta: { view: "agent" } },
+                {},
+            )) as { block_id: string };
 
-        // The pane could have closed while the RPCs above were in flight —
-        // re-resolve fresh rather than trusting the pre-await `node`
-        // reference (same defensive check as open-history-tab.ts /
-        // handleNewAgentTab).
-        const freshNode = layoutModel.getNodeByBlockId(model.blockId);
-        if (!freshNode) {
-            await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
-            return false;
-        }
-        pushBlockOntoStack(layoutModel, freshNode.id, paneOpenResult.block_id);
+            // The pane could have closed while the RPCs above were in flight —
+            // re-resolve fresh rather than trusting the pre-await `node`
+            // reference (same defensive check as open-history-tab.ts /
+            // handleNewAgentTab).
+            const freshNode = layoutModel.getNodeByBlockId(model.blockId);
+            if (!freshNode) {
+                await ObjectService.DeleteBlock(paneOpenResult.block_id).catch(() => {});
+                return false;
+            }
+            pushBlockOntoStack(layoutModel, freshNode.id, paneOpenResult.block_id);
 
-        const launched = await model.launchAgentDefinition(
-            forkedDef,
-            {
-                instanceName: forkedDef.name,
-                agentType: (forkedDef.agent_type as "host" | "container") || "host",
-                environment: forkedDef.agent_type === "container" ? "docker" : "local",
-                accountId,
-                memoryId: "",
-                continueSessionId: sessionId,
-                forkSession: true,
-            },
-            paneOpenResult.block_id,
-            ownerTabId,
-        );
-        if (!launched) {
-            Logger.warn("quick-fork", "launchAgentDefinition reported failure", { blockId: paneOpenResult.block_id });
-            // Don't leave the user on a blank/broken pane-stack tab — pop it
-            // back out and delete the block, same as the "pane closed
-            // mid-flight" cleanup above (Codex P2 on PR #2746).
+            const launched = await model.launchAgentDefinition(
+                forkedDef,
+                {
+                    instanceName: forkedDef.name,
+                    agentType: (forkedDef.agent_type as "host" | "container") || "host",
+                    environment: forkedDef.agent_type === "container" ? "docker" : "local",
+                    accountId,
+                    memoryId: "",
+                    continueSessionId: sessionId,
+                    forkSession: true,
+                },
+                paneOpenResult.block_id,
+                ownerTabId,
+            );
+            if (!launched) {
+                Logger.warn("quick-fork", "launchAgentDefinition reported failure", { blockId: paneOpenResult.block_id });
+                // Don't leave the user on a blank/broken pane-stack tab — pop it
+                // back out and delete the block, same as the "pane closed
+                // mid-flight" cleanup above (Codex P2 on PR #2746).
+                await cleanupPushedBlock();
+                // The cleanup above is otherwise silent — without this, the fork
+                // just flashes in and back out with no indication anything went
+                // wrong (Codex's second-round review of PR #2746).
+                pushNotification({
+                    icon: "fa-triangle-exclamation",
+                    title: "Quick Fork failed",
+                    message: "The forked agent could not be launched.",
+                    timestamp: new Date().toISOString(),
+                    type: "error",
+                    expiration: Date.now() + 8000,
+                });
+            } else if (showNoHistoryFallback) {
+                await RpcApi.SetMetaCommand(TabRpcClient, {
+                    oref: WOS.makeORef("block", paneOpenResult.block_id),
+                    meta: { [FORK_NO_HISTORY_FALLBACK_META_KEY]: true },
+                }).catch((e: any) =>
+                    Logger.warn("quick-fork", "failed to set no-history-fallback meta", { error: String(e) }),
+                );
+            }
+            return launched;
+        } catch (e: any) {
+            Logger.error("quick-fork", "failed", { error: String(e) });
+            // launchAgentDefinition's own doc comment claims it never throws,
+            // but that only covers its internal try/catches — several awaited
+            // calls inside it (resolveEffectiveLaunchProvider,
+            // checkNodejsForProvider, ensureAuthDir) run unguarded before
+            // those, so a rejection here CAN happen after the block was
+            // already pushed onto the stack (Codex's review of this PR).
+            // cleanupPushedBlock() is a no-op if paneOpenResult was never set
+            // (e.g. ForkAgentDefinitionCommand itself failed, before any block
+            // existed to clean up).
             await cleanupPushedBlock();
-            // The cleanup above is otherwise silent — without this, the fork
-            // just flashes in and back out with no indication anything went
-            // wrong (Codex's second-round review of PR #2746).
             pushNotification({
                 icon: "fa-triangle-exclamation",
                 title: "Quick Fork failed",
-                message: "The forked agent could not be launched.",
+                message: e instanceof Error ? e.message : String(e),
                 timestamp: new Date().toISOString(),
                 type: "error",
                 expiration: Date.now() + 8000,
             });
-        } else if (showNoHistoryFallback) {
-            await RpcApi.SetMetaCommand(TabRpcClient, {
-                oref: WOS.makeORef("block", paneOpenResult.block_id),
-                meta: { [FORK_NO_HISTORY_FALLBACK_META_KEY]: true },
-            }).catch((e: any) =>
-                Logger.warn("quick-fork", "failed to set no-history-fallback meta", { error: String(e) }),
-            );
+            return false;
         }
-        return launched;
-    } catch (e: any) {
-        Logger.error("quick-fork", "failed", { error: String(e) });
-        // launchAgentDefinition's own doc comment claims it never throws,
-        // but that only covers its internal try/catches — several awaited
-        // calls inside it (resolveEffectiveLaunchProvider,
-        // checkNodejsForProvider, ensureAuthDir) run unguarded before
-        // those, so a rejection here CAN happen after the block was
-        // already pushed onto the stack (Codex's review of this PR).
-        // cleanupPushedBlock() is a no-op if paneOpenResult was never set
-        // (e.g. ForkAgentDefinitionCommand itself failed, before any block
-        // existed to clean up).
-        await cleanupPushedBlock();
-        pushNotification({
-            icon: "fa-triangle-exclamation",
-            title: "Quick Fork failed",
-            message: e instanceof Error ? e.message : String(e),
-            timestamp: new Date().toISOString(),
-            type: "error",
-            expiration: Date.now() + 8000,
-        });
-        return false;
+    } finally {
+        // Pair with holdLeafRevealGate above — runs on every exit path.
+        scheduleLeafRevealLift(node.id, revealGen);
     }
 }

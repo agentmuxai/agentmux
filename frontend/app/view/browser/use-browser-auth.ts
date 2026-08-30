@@ -55,14 +55,29 @@ export function useBrowserAuth(params: {
             origin: c.origin || `${c.host}:${c.port}`,
             realm: c.realm,
             isProxy: c.is_proxy,
-            onSubmit: (username, password) => {
+            onSubmit: (username, password, save) => {
                 pendingAuthIds.delete(c.request_id);
-                diag(`auth-submit request_id=${c.request_id}`);
+                diag(`auth-submit request_id=${c.request_id} save=${save}`);
                 void invokeCommand("browser_pane_auth_submit", {
                     request_id: c.request_id,
                     username,
                     password,
                 }).catch((e) => diag(`auth-submit-failed err=${String(e)}`));
+                // Opt-in save — a wholly separate IPC call (not a flag on
+                // browser_pane_auth_submit) so that command's contract
+                // stays byte-for-byte unchanged. A save failure never
+                // affects the page load: auth already succeeded via the
+                // call above regardless of what happens here.
+                if (save) {
+                    void invokeCommand("browser_pane_auth_save", {
+                        block_id: model.blockId,
+                        origin: c.origin,
+                        realm: c.realm,
+                        is_proxy: c.is_proxy,
+                        username,
+                        password,
+                    }).catch((e) => diag(`auth-save-failed err=${String(e)}`));
+                }
                 authActive = false;
                 drainAuthQueue();
             },

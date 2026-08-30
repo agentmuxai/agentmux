@@ -820,6 +820,7 @@ mod effective_skills_tests {
 
     fn insert_agent(store: &Store, id: &str) {
         let mut def = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: id.to_string(),
             slug: String::new(),
             name: "Test Agent".to_string(),
@@ -963,6 +964,7 @@ mod effective_skills_tests {
 
     fn insert_agent_with_bundle(store: &Store, id: &str, memory_id: &str) {
         let mut def = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: id.to_string(),
             slug: String::new(),
             name: "Test Agent".to_string(),
@@ -1014,6 +1016,7 @@ mod effective_skills_tests {
                 sort_order: 0,
                 created_at: 1_700_000_000_000,
                 updated_at: 1_700_000_000_000,
+                is_system: false,
             })
             .unwrap();
     }
@@ -1181,6 +1184,7 @@ mod bundle_ref_tests {
                 sort_order: 0,
                 created_at: 1_700_000_000_000,
                 updated_at: 1_700_000_000_000,
+                is_system: false,
             })
             .unwrap();
     }

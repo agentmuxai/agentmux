@@ -14,7 +14,7 @@
  * ("running", frozen timestamp/event count) indefinitely.
  */
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ActiveSubagent } from "../../swarm/swarm-model";
 import * as wos from "@/app/store/wos";
 
@@ -66,6 +66,14 @@ async function flushMicrotasks(): Promise<void> {
     await Promise.resolve();
 }
 
+// Fake timers for the whole file: every event-triggered refresh now goes
+// through createDebouncedRefresh (SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23.md),
+// so tests need to advance past its wait window. Fake timers don't affect
+// Promise microtask resolution, so flushMicrotasks() above still works
+// unchanged alongside them.
+beforeEach(() => vi.useFakeTimers());
+afterEach(() => vi.useRealTimers());
+
 describe("subagent-source — subagent:abandoned wiring", () => {
     it("registered a handler for subagent:abandoned (the fix's own precondition)", () => {
         expect(hub.handlers.has("subagent:abandoned")).toBe(true);
@@ -81,6 +89,7 @@ describe("subagent-source — subagent:abandoned wiring", () => {
         const handler = hub.handlers.get("subagent:abandoned");
         expect(handler).toBeDefined();
         handler!({ data: {} });
+        await vi.advanceTimersByTimeAsync(150); // past the debounce window
         await flushMicrotasks();
 
         expect(callBackendServiceSpy).toHaveBeenCalledWith("subagent", "ListActive", []);
@@ -93,11 +102,93 @@ describe("subagent-source — subagent:abandoned wiring", () => {
         callBackendServiceSpy.mockResolvedValue([]);
 
         hub.handlers.get("subagent:spawned")!({ data: {} });
+        await vi.advanceTimersByTimeAsync(150);
         await flushMicrotasks();
         expect(callBackendServiceSpy).toHaveBeenCalledTimes(1);
 
         hub.handlers.get("subagent:completed")!({ data: {} });
+        await vi.advanceTimersByTimeAsync(150);
         await flushMicrotasks();
         expect(callBackendServiceSpy).toHaveBeenCalledTimes(2);
+    });
+});
+
+// SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23.md /
+// docs/reports/REPORT_AGENT_PANE_REOPEN_SUBAGENT_STORM_2026_08_23.md: a
+// backfill-replay burst on pane reopen used to fire one uncoalesced
+// ListActive call per event (up to ~200 in a real trace). These events must
+// now collapse into a single call once the burst goes quiet.
+describe("subagent-source — refresh coalescing", () => {
+    it("collapses a rapid burst of subagent:spawned events into a single ListActive call", async () => {
+        await flushMicrotasks(); // let the module-load-time refresh() settle
+        callBackendServiceSpy.mockClear();
+        callBackendServiceSpy.mockResolvedValue([]);
+
+        const spawned = hub.handlers.get("subagent:spawned")!;
+        for (let i = 0; i < 50; i++) spawned({ data: {} });
+        await flushMicrotasks();
+        expect(callBackendServiceSpy).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(150); // past the debounce window
+        expect(callBackendServiceSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("still refreshes under a SUSTAINED burst, via the max-wait ceiling, without waiting for it to fully quiet", async () => {
+        await flushMicrotasks();
+        callBackendServiceSpy.mockClear();
+        callBackendServiceSpy.mockResolvedValue([]);
+
+        const spawned = hub.handlers.get("subagent:spawned")!;
+        // Re-fire every 60ms (under the 100ms debounce window) for longer
+        // than the 1000ms ceiling — mirrors the real trace's ~14ms average
+        // spacing across a multi-second backfill burst.
+        for (let i = 0; i < 20; i++) {
+            spawned({ data: {} });
+            await vi.advanceTimersByTimeAsync(60);
+        }
+        await flushMicrotasks();
+        expect(callBackendServiceSpy.mock.calls.length).toBeGreaterThanOrEqual(1);
+    });
+});
+
+// docs/retro/retro-activity-dock-flicker-survives-debounce-fix-2026-08-24.md:
+// the debounce above coalesces request VOLUME, but each surviving call
+// during a burst is still a genuinely different, real, still-converging
+// snapshot — rows still visibly appear/vanish. backfill-tracker.ts closes
+// this by suppressing refresh entirely while ANY block's backfill is
+// reported in flight, firing exactly one once it's genuinely done. Mirrors
+// dispatch-source.test.ts's identical coverage for the sibling singleton.
+describe("subagent-source — backfill-aware suppression", () => {
+    it("suppresses refresh entirely for events arriving while a backfill is in flight, firing exactly one once it settles", async () => {
+        await flushMicrotasks();
+        callBackendServiceSpy.mockClear();
+        callBackendServiceSpy.mockResolvedValue([]);
+
+        const backfillStatus = hub.handlers.get("subagent:backfill_status")!;
+        expect(backfillStatus).toBeDefined();
+        backfillStatus({ scopes: ["block:b1"], data: { status: "started" } });
+
+        const spawned = hub.handlers.get("subagent:spawned")!;
+        for (let i = 0; i < 50; i++) spawned({ data: {} });
+        await vi.advanceTimersByTimeAsync(1200); // well past both debounce windows
+        expect(callBackendServiceSpy).not.toHaveBeenCalled(); // suppressed, not just debounced
+
+        backfillStatus({ scopes: ["block:b1"], data: { status: "done" } });
+        await flushMicrotasks();
+        expect(callBackendServiceSpy).toHaveBeenCalledTimes(1); // exactly one, on settle
+    });
+
+    it("resumes ordinary debounced behavior for events after the backfill settles", async () => {
+        await flushMicrotasks();
+        const backfillStatus = hub.handlers.get("subagent:backfill_status")!;
+        backfillStatus({ scopes: ["block:b2"], data: { status: "started" } });
+        backfillStatus({ scopes: ["block:b2"], data: { status: "done" } });
+        await flushMicrotasks();
+
+        callBackendServiceSpy.mockClear();
+        callBackendServiceSpy.mockResolvedValue([]);
+        hub.handlers.get("subagent:spawned")!({ data: {} });
+        await vi.advanceTimersByTimeAsync(150);
+        expect(callBackendServiceSpy).toHaveBeenCalledTimes(1);
     });
 });

@@ -8,7 +8,7 @@
  *     gets a hover-to-peek time/estimate overlay (2026-08-03 user request,
  *     same treatment ToolBlock/MarkdownBlock already have).
  *   - startup injection (`isStartup === true`): collapsed by default,
- *     hover-expand after 150ms, click-to-pin. The hover-expand body is
+ *     hover-expand after 50ms, click-to-pin. The hover-expand body is
  *     PeekOverlay (Portal-rendered at document.body, top-anchored to the
  *     row) — migrated off its own bespoke position:absolute overlay,
  *     which had the same virtualized-row stacking-context bug PeekOverlay
@@ -109,7 +109,7 @@ describe("UserMessageBlock — regular user input", () => {
             ));
             const root = container.querySelector(".agent-user-message") as HTMLElement;
             fireEvent.mouseEnter(root);
-            // No advanceTimersByTime — still within the 150ms delay.
+            // No advanceTimersByTime — still within the 50ms delay.
             expect(document.body.querySelector(".agent-node-peek-overlay")).toBeNull();
         });
 
@@ -200,7 +200,7 @@ describe("UserMessageBlock — startup injection", () => {
         // Drives the codex round-3 flow: hover to expand the body,
         // then click 📌 to pin. Without this affordance, the user
         // would have to leave + re-enter the collapsed summary
-        // before the 150ms enter-delay restarted — defeating the
+        // before the 50ms enter-delay restarted — defeating the
         // "hover to peek · click to pin" hint. Hovering (not pinned)
         // → overlay mode → Portal-rendered at document.body.
         vi.useFakeTimers();
@@ -250,7 +250,7 @@ describe("UserMessageBlock — startup injection", () => {
         expect(root.classList.contains("agent-user-message--expanded")).toBe(true);
     });
 
-    it("hover (mouseenter→delay) expands the body after 150ms", async () => {
+    it("hover (mouseenter→delay) expands the body after 50ms", async () => {
         // The summary is now ALWAYS mounted. Only the BODY's
         // presence changes across the hover transition. `screen`
         // queries the whole document (including document.body, where
@@ -266,11 +266,11 @@ describe("UserMessageBlock — startup injection", () => {
             expect(screen.queryByText("Session context")).not.toBeNull();
             expect(screen.queryByText(/Identity/)).toBeNull();
             fireEvent.mouseEnter(root);
-            // 100ms in — still pre-threshold.
-            vi.advanceTimersByTime(100);
+            // 30ms in — still pre-threshold.
+            vi.advanceTimersByTime(30);
             expect(screen.queryByText(/Identity/)).toBeNull();
             // Past the threshold — body now visible alongside summary.
-            vi.advanceTimersByTime(60);
+            vi.advanceTimersByTime(20);
             expect(screen.queryByText(/Identity/)).not.toBeNull();
             expect(screen.queryByText("Session context")).not.toBeNull();
         } finally {
@@ -286,7 +286,7 @@ describe("UserMessageBlock — startup injection", () => {
             ));
             const root = container.querySelector(".agent-user-message") as HTMLElement;
             fireEvent.mouseEnter(root);
-            vi.advanceTimersByTime(100);
+            vi.advanceTimersByTime(30);
             fireEvent.mouseLeave(root);
             vi.advanceTimersByTime(200);
             // Still collapsed — the pending timer was cleared on leave.

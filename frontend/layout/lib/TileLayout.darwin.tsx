@@ -6,6 +6,8 @@
 // WKWebView doesn't support pragmatic-dnd's dragHandle option (sets draggable="true/false"
 // on child/parent which breaks drag). Registering directly on the header avoids that.
 
+import { atoms } from "@/app/store/global";
+import { gatingNodeIds } from "@/app/store/tab-reveal";
 import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { preventUnhandled } from "@atlaskit/pragmatic-drag-and-drop/prevent-unhandled";
 import clsx from "clsx";
@@ -363,12 +365,27 @@ const DisplayNode = (props: DisplayNodeProps) => {
 
     const tileTransform = () => addlProps()?.transform;
 
+    // SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22 — hide this leaf while
+    // it's mid-remount (a block-stack push/switch, e.g. "+", Quick Fork,
+    // Agent History all force `<Key>` above to tear down and rebuild this
+    // subtree). Merged into the same style object as `tileTransform()`
+    // rather than a separate wrapper element, so the leaf's own absolute
+    // positioning is untouched. Mirrors `workspace.tsx`'s identical
+    // visibility+opacity treatment for the whole-tab reveal gate.
+    const isRevealGated = () => gatingNodeIds().has(props.node.id);
+    const tileStyle = createMemo<JSX.CSSProperties>(() => ({
+        ...(tileTransform() as JSX.CSSProperties),
+        visibility: isRevealGated() ? "hidden" : undefined,
+        opacity: atoms.prefersReducedMotionAtom() ? undefined : isRevealGated() ? 0 : 1,
+        transition: atoms.prefersReducedMotionAtom() ? undefined : "opacity 120ms ease-out",
+    }));
+
     return (
         <div
             class={clsx("tile-node", { dragging: isDragging(), "tile-hidden": magnifyActive() })}
             ref={tileNodeRef}
             id={props.node.id}
-            style={tileTransform() as JSX.CSSProperties}
+            style={tileStyle()}
             onPointerEnter={generatePreviewImage}
             onPointerOver={(event) => event.stopPropagation()}
         >
@@ -413,7 +430,9 @@ const ResizeHandle = (props: ResizeHandleComponentProps) => {
     const handlePointerMove = throttle(10, (event: PointerEvent) => {
         if (trackingPointer() === event.pointerId) {
             const { clientX, clientY } = event;
-            props.layoutModel.onResizeMove(props.resizeHandleProps, clientX, clientY, event.shiftKey);
+            // Flipped defaults (SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26 §2):
+            // plain drag = group resize, Shift+drag = direct 2-node transfer.
+            props.layoutModel.onResizeMove(props.resizeHandleProps, clientX, clientY, !event.shiftKey);
         }
     });
 

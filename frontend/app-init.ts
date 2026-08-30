@@ -12,7 +12,7 @@ import { modalsModel } from "@/app/store/modalmodel";
 import { ClientService, ObjectService, WindowService, WorkspaceService } from "@/app/store/services";
 import { RpcApi } from "@/app/store/rpc-api";
 import { initWshrpc, TabRpcClient } from "@/app/store/rpc-util";
-import { getLayoutModelForStaticTab } from "@/layout/index";
+import { getLayoutModelForStaticTab, installWindowEdgeResizeListener } from "@/layout/index";
 import {
     atoms,
     countersClear,
@@ -343,7 +343,7 @@ async function initHostWave(): Promise<void> {
         // graceful quit (the destroy-on-close cascade always empties it) or
         // on a truly first-ever launch. Pass `restoreIfAvailable: true` so
         // srv replays the last-session snapshot if one was saved on close,
-        // instead of always seeding the hardcoded default 3-pane layout.
+        // instead of always seeding the hardcoded default 4-pane layout.
         if (!windowId) {
             t = performance.now();
             const newWindow = await withTimeout(WindowService.CreateWindow(null, "", currentWindowLabel(), true), RPC_TIMEOUT, "CreateWindow");
@@ -677,7 +677,15 @@ async function initAppInner() {
                     await initHostNewWindow();
                     const coldSearchParams = new URL(window.location.href).searchParams;
                     const coldInitialView = coldSearchParams.get("initialView");
-                    if (coldInitialView) {
+                    // "credential-approval" is not a real pane view — it's
+                    // rendered by app.tsx as this window's ENTIRE content,
+                    // bypassing the normal Workspace/pane tree on purpose
+                    // (see CredentialApprovalWindow's own doc comment for
+                    // why: a pane opened via pane.open gets a
+                    // [data-blockid] wrapper, which would make its Approve
+                    // button reachable by any agent's UIQuery/UIClick).
+                    // Opening it as a real pane here would defeat that.
+                    if (coldInitialView && coldInitialView !== "credential-approval") {
                         const coldMetaRaw = coldSearchParams.get("initialMeta");
                         let coldMeta: Record<string, unknown> | undefined;
                         try { coldMeta = coldMetaRaw ? JSON.parse(coldMetaRaw) : undefined; } catch { /* ignore */ }
@@ -1032,6 +1040,10 @@ async function initWave(initOpts: AgentMuxInitOpts) {
     initGlobalEventSubs(initOpts);
     subscribeToConnEvents();
     installFloatingRedockHoverListener();
+    // Shift + OS-window-edge resize (Windows host emits windowresize:*
+    // during the native size loop; inert elsewhere). See
+    // SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26.md §3.
+    installWindowEdgeResizeListener();
     tlog("initEventSubs", t);
 
     // Prime the identity-account cache from the DB so synchronous callers

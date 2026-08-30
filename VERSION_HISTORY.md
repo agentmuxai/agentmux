@@ -1,5 +1,108 @@
 # AgentMux Version History
 
+## 0.55.27 — 2026-08-27
+
+- chore(agent-pane): upgrade Claude Code CLI pin to 2.1.247, relabel Opus 5
+- fix(tab): optimistic tab removal on close — close flash structurally impossible
+- feat(layout): plain drag now group-resizes the row/column; Shift+drag moves a single border
+- feat(layout): Shift+window-edge resize feeds only the edge panes (Windows)
+- fix(agent): remove false-positive-prone 'agent unresponsive' detection, keep turn-active tracking
+- fix(agent-pane): consolidate Reconnecting…/Compacting… status into the Working row
+
+
+## 0.55.26 — 2026-08-26
+
+- fix(agent): suppress Activity Dock refresh during backfill bursts and reconcile registry-known background tasks into dock rows
+- feat(agent-pane): hover-to-peek now fires on every transcript node kind, 50ms delay
+- feat(agentmux-mcp): DiscoverWindows tool + pid-based CaptureWindow targeting
+- fix(agent-pane): real DOM-measurement-based composer strip zone balance
+- fix(agent-pane): row-based composer strip layout so every rendered line has both a left and right occupant
+- fix(agent-pane): composer strip zoom/gap unit mismatch and stale shed-slot measurement on resize
+- fix(agent-pane): composer strip stuck multi-row — stats zone wrapper measured instead of its content
+- fix(tab): eliminate tab-close flash — batch multi-object WS updates into one frame, emit parent-before-child on deletes
+- feat(agent-pane): composer strip edge priority — interactive elements flush against row edges
+- feat(agent-pane): element-level edge priority + conservative fit rounding in composer strip
+- fix(agent-pane): composer strip stats eviction middle tier — no more 1-to-3-line jump
+- fix(agent-pane): evicted composer strip stats float above the rows
+
+
+## 0.55.25 — 2026-08-25
+
+- feat(widgets): reorder default pinned widgets to Agent, Swarm, Armory, Sysinfo
+- feat(armory): show ambient ~/.claude/CLAUDE.md as a second Global Memory read-only block
+- fix(armory): rename ambient CLAUDE.md block, group External Claude Code files clearly
+- fix(identity): block agent spawns/bindings from resolving to the ambient home dir
+- fix(armory): tone down Global Memory explanations, shrink text
+- fix(splash,agent-pane): darkened splash border + agent-pane tab-strip gap/centering
+- fix(agent): scroll support for AskUserQuestion panel, keep buttons reachable
+- fix(armory): hide Claude Code CLI branding in Accounts sign-in surfaces, keep Anthropic
+
+
+## 0.55.24 — 2026-08-24
+
+- fix(agent-pane): strip common indentation from mid-file tool previews
+- fix(agent): gate the BrainSpinner on subagent backfill so the Activity Dock never flickers
+- feat(armory): add AgentMux-controlled, highest-priority system tier to Global Memory
+- feat(linux): recover from AppArmor's unprivileged-userns sandbox restriction
+- fix(ci): move nightly release auto-tagging to gh-reporter (workflow_run trigger never fired)
+- fix(agent-pane): render tool-preview tabs at 2 spaces instead of the inherited 4
+- feat(agent-picker): on-demand Haiku activity summary fallback when no conversation snapshot exists
+- feat(agent-view): pause AskUserQuestion auto-timeout on keyboard activity, not just mouse hover
+- feat(agent,armory): write provider-specific startup instructions filenames (AGENTS.md, GEMINI.md, QWEN.md, ...) instead of always CLAUDE.md; surface the mapping in Global Memory
+- feat(agent-picker): sort control, reordered fields, distinct account-failure text
+- feat(toolchain): one-click install of git/Node/npm/Python via winget/brew/system package manager
+- fix(tabs): remove the active-tab color line spanning the whole tab strip
+- fix(armory,warden,settings): move the narrow-width responsive tab bar to the top of the pane; highlight ABF
+- feat(armory): surface ~/.claude/CLAUDE.md (read-only) in Global Memory
+
+
+## 0.55.23 — 2026-08-23
+
+- fix(agent): surface a Reconnecting… status during stale-resume retry
+- fix(agent-pane): stop the block-mount BrainSpinner overlay getting stuck visible forever
+
+
+## 0.55.22 — 2026-08-23
+
+- fix(muxspect): wire transcript_request jekt tier enforcement into the WAN delivery path (Phase C)
+- feat(layout): cross-fade the remaining pane-mount hard cuts (Phase 3-4)
+- fix(editor): align markdown preview scrollbar to the pane edge, matching source mode
+- fix(agent): stop Activity Dock flashing stale shell rows on pane load
+- feat(ci): nightly workflow auto-tags and publishes the latest pending version bump
+- fix(agent-spawn): inject per-agent git commit identity, stop misattributing every agent's commits to whoever's real identity sits in the shared machine gitconfig
+- fix(activity-dock): coalesce event-triggered refreshes to stop a pane-reopen request storm
+- fix(editor): use a real native scrollbar for markdown preview, matching source exactly
+
+
+## 0.55.21 — 2026-08-22
+
+- feat(tabs): quick-fork keybinding, non-Claude fallback banner, and inherit-identity variant
+- fix(statusbar): stop double-applying chrome zoom to status bar popovers
+- fix(muxlog): srv logs honor AGENTMUX_LOG_DIR, fix channels/ glob depth mismatch
+- fix(muxlog): prefer caller's own $AGENTMUX_CHANNEL over global freshest when resolving a log
+- fix(editor): strip Windows' verbatim prefix so live-reload matching works
+- fix(jekt): match plural forms of whole-word sensitive keywords
+- feat(muxlog): ls gains a LIVE column via real TCP liveness probe of each instance's ipc-port
+- docs(claude): PR title Agent@host prefix for shared-identity agents
+- feat(settings): add drag-and-drop file-attach controls to Advanced section
+- feat(muxspect): cross-instance find — which channel has this block_id/agent
+- fix(tabs): move quick-fork from the window tab-strip into the per-agent pane, landing forks as a sibling pane tab
+- feat(agent-config): protect a pre-existing project CLAUDE.md from being overwritten
+- feat(settings): add agent watchdog threshold controls to Terminal section
+- feat(muxspect): stamp every response with x-agentmux-srv-version, self-diagnosing stale-build 404s
+- feat(muxlog): swarm -d/--dispatch <id> filters + prints a correlated match-count verdict
+- feat(settings): add Recording/Input section — voice engine config, device picker, test-your-mic
+- fix(voice): redact groqApiKey from renderer, fix engine-switch/test-cancel bugs
+- fix(agent): stop 'Agent unresponsive' from firing during legitimate context compaction
+- fix(agent): propagate resumed session_id to shared cross-channel registry
+- fix(tabs): quick-fork always inherits identity, dropping the redundant second menu item
+- fix(subagent-watcher): watch the identity-bound Claude config dir, not a stale spawn-time snapshot
+- feat(fleet): FleetBroadcast reaches cross-channel/LAN/WAN targets, not just this instance
+- feat(layout): generalize the tab-content reveal gate to leaf/pane scope, fixing flicker on +, Quick Fork, and Agent History
+- feat(fleet): FleetBulkStop reaches cross-channel targets, not just this instance
+- feat(muxspect): Phase B policy infrastructure + jekt tier enforcement for transcript_request
+
+
 ## 0.55.20 — 2026-08-22
 
 - feat(mcp): add CaptureWindow tool for cross-instance/OS window screenshots

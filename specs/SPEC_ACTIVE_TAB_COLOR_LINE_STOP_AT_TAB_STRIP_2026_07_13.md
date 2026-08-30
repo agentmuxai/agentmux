@@ -2,7 +2,15 @@
 
 **Date:** 2026-07-13
 **Author:** Agent2
-**Status:** Draft
+**Status:** Superseded — the whole `active-tab-color-line` feature this
+spec narrows was removed outright on 2026-08-24 (repo-owner-confirmed
+request: "we want to eliminate those lines that span under the tab bar").
+`frontend/app/tab/tab-color-line.ts` deleted; `tabbar.tsx`'s
+`<Portal>`-rendered `.active-tab-color-line` div removed. The per-tab
+`tab:color` feature itself (the whole tab's own background tint —
+`.tab-colored` in `tab.scss`) is unaffected; only this full-strip
+underline is gone. Kept here as historical record of the geometry
+decision, not current behavior.
 **Scope:** `frontend/app/tab/tabbar.tsx` (the `measureLine`/`active-tab-color-line` mechanism only — no other tab-bar behavior).
 **Related (must-read first):**
 `docs/specs/SPEC_TAB_CONTENT_FOLDER_SURFACE_2026_06_03.md` §10.6 (the plain hairline-boundary mechanic this feature extends with color),

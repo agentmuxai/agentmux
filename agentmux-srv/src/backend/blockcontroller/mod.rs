@@ -163,7 +163,7 @@ pub struct BlockControllerRuntimeStatus {
     /// this is the only signal that distinguishes "actively generating a
     /// turn" from "process alive, idle between turns" — `shellprocstatus`
     /// stays `"running"` for the whole process lifetime either way. Backed
-    /// by `HealthMonitor.active_turn` (see `blockcontroller/health.rs`).
+    /// by `TurnActivityTracker.active_turn` (see `blockcontroller/health.rs`).
     /// Frontend seeds `TurnPhase` from this at mount instead of always
     /// defaulting to `Idle` — see
     /// docs/specs/REPORT_AGENT_PANE_STATE_RECONCILIATION_2026_07_07.md
@@ -248,18 +248,6 @@ pub trait Controller: Send + Sync {
     /// identity mismatch). Default no-op for controller types that don't
     /// override [`agent_id`](Controller::agent_id) either.
     fn set_agent_id(&self, _id: Option<String>) {}
-
-    /// This controller's `HealthMonitor`, if it owns one. Default `None`,
-    /// mirroring [`agent_id`](Controller::agent_id)'s default-None pattern
-    /// — only controller types actually wired to a `HealthMonitor`
-    /// (persistent, host_spawn/subprocess, container_spawn) override this.
-    /// Used by `handle_wps_publish` (`server/mod.rs`) to forward a
-    /// `compaction_started` WPS event into the right block's health
-    /// monitor — see
-    /// docs/specs/SPEC_UNRESPONSIVE_FALSE_POSITIVE_DURING_COMPACTION_2026_08_22.md.
-    fn health_monitor(&self) -> Option<Arc<health::HealthMonitor>> {
-        None
-    }
 
     /// Downcast support for concrete controller types.
     fn as_any(&self) -> &dyn Any;

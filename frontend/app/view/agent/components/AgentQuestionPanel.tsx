@@ -13,15 +13,19 @@
  * the agent's turn forever: any question the user hasn't touched by zero is
  * filled in with its recommended option and the (possibly-merged) answer is
  * submitted automatically. See §2.3 for why this merges rather than
- * disarming on first interaction. Hovering the panel hides the countdown and
- * pauses the underlying deadline for a flat 15s from that hover, then
+ * disarming on first interaction. Hovering the panel — or, as of the
+ * keyboard-pause spec below, pressing any key while focus is inside the
+ * panel (Tab-navigating options, typing into "Other") — hides the countdown
+ * and pauses the underlying deadline for a flat 15s from that trigger, then
  * unconditionally resumes at a fresh timeout regardless of whether the mouse
- * is still there — a bounded, self-resuming pause, not the permanent disarm
- * §2.3/§5.1 rejected. See the hover-pause spec above.
+ * or keyboard is still active — a bounded, self-resuming pause, not the
+ * permanent disarm §2.3/§5.1 rejected. Both triggers share one mechanism —
+ * see the keyboard-pause spec below.
  *
  * Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md,
  * docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md,
- * docs/specs/SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md.
+ * docs/specs/SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md,
+ * docs/specs/SPEC_ASK_USER_QUESTION_TIMEOUT_KEYBOARD_PAUSE_2026_08_20.md.
  */
 
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, type Accessor, type JSX } from "solid-js";
@@ -392,6 +396,36 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
         return el.isContentEditable;
     };
 
+    // Shared gate for both keyboard-pause trigger paths below (`handleKey`'s
+    // keydown and `handleFocusIn`'s focusin). A target counts as
+    // pause-worthy engagement only if it's actually inside this panel's own
+    // DOM AND the panel is in its expanded (non-minimized) state AND we're
+    // not already paused:
+    //  - `!minimized()`: while minimized, `rootRef` is reassigned to the
+    //    separate `<button class="agent-question-panel-minimized">` (below),
+    //    so a keydown/Tab landing on that focusable button would otherwise
+    //    read as "inside the panel" and incorrectly pause a countdown that's
+    //    supposed to keep running unaffected while minimized — codex P2,
+    //    PR #2787.
+    //  - `!hidden()`: only the *transition into* the paused state re-arms
+    //    the flat HOVER_HIDE_GRACE_MS window. Unlike `mouseenter` — which a
+    //    real browser only fires on an actual boundary-crossing, so it can't
+    //    be spammed by normal use — `keydown` fires on every keystroke,
+    //    including OS key-repeat while a key is held and every character of
+    //    continuous typing. Re-arming unconditionally on every one of those
+    //    (the original implementation) meant typing faster than 15s apart,
+    //    or simply holding a key, suppressed the auto-timeout indefinitely —
+    //    reagentx P1, PR #2787, breaking the "paused for at most one
+    //    HOVER_HIDE_GRACE_MS window" invariant documented on the timer
+    //    effect above. Gating here bounds every pause to exactly one window
+    //    regardless of how many qualifying events fire inside it; a fresh
+    //    trigger only re-arms once that window has actually elapsed and
+    //    `hidden()` has flipped back to false.
+    const maybePauseFor = (target: EventTarget | null) => {
+        const inPanel = !!rootRef && !!target && rootRef.contains(target as Node);
+        if (inPanel && !minimized() && !hidden()) onPanelPointerEnter();
+    };
+
     const handleKey = (e: KeyboardEvent) => {
         const target = e.target as HTMLElement | null;
         // Scope to this panel's own pane so a question in pane A doesn't
@@ -404,6 +438,24 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
         // DOM (an option, the "Other" input, or the panel root itself) —
         // mirrors AgentDecisionPanel's `inPanel` (AgentDecisionPanel.tsx:208).
         const inPanel = !!rootRef && !!target && rootRef.contains(target);
+
+        // Any keydown that lands inside this panel counts as engagement,
+        // the same as a mouseenter — reuses the exact same pause mechanism
+        // (hide the countdown, resume unconditionally after a flat
+        // HOVER_HIDE_GRACE_MS) rather than a parallel one, so a user
+        // answering entirely by keyboard (Tab between options, typing into
+        // "Other") gets the same breathing room a mouse-hovering user
+        // already does. Scoped to `inPanel`, NOT the broader `paneRoot`
+        // scope Escape uses below — a keystroke elsewhere in this pane
+        // (the chat composer, Ctrl+F) isn't engagement with this question.
+        // Deliberately unconditional on which key, including Enter/Escape:
+        // both already tear down or reset this same pause state via their
+        // own existing paths immediately below/in `defer()`, so firing this
+        // first for them is a harmless, immediately-superseded no-op, not
+        // worth special-casing out. See
+        // SPEC_ASK_USER_QUESTION_TIMEOUT_KEYBOARD_PAUSE_2026_08_20.md §2,
+        // and §8 for the `maybePauseFor` gating added after review.
+        maybePauseFor(target);
 
         if (e.key === "Enter" && !e.shiftKey) {
             // Outside the panel, don't hijack Enter from a real editable
@@ -420,6 +472,17 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
         }
     };
 
+    // Tab moving focus INTO the panel from outside it fires its `keydown`
+    // with `e.target` still the element that's *about to lose* focus —
+    // browsers move focus only after the keydown's default action runs — so
+    // `handleKey`'s `inPanel` check above misses exactly the keystroke that
+    // causes a keyboard-only user's first entry into the panel via Tab.
+    // `focusin` bubbles and fires once focus has actually landed inside the
+    // panel, so listening for it separately (reusing the same
+    // `maybePauseFor` gate) catches that case without complicating
+    // `handleKey`'s own target-at-dispatch-time logic — codex P2, PR #2787.
+    const handleFocusIn = (e: FocusEvent) => maybePauseFor(e.target);
+
     // Global capture-phase listener, mirroring AgentDecisionPanel: the panel
     // has tabindex=-1 and never auto-focuses, so a plain onKeyDown on the
     // root div only fired once the user had already clicked something
@@ -428,7 +491,12 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
         if (!request()) return;
         const onWindowKey = (e: KeyboardEvent) => handleKey(e);
         window.addEventListener("keydown", onWindowKey, true);
-        onCleanup(() => window.removeEventListener("keydown", onWindowKey, true));
+        // `focusin` already bubbles to `window`, so no capture flag needed.
+        window.addEventListener("focusin", handleFocusIn);
+        onCleanup(() => {
+            window.removeEventListener("keydown", onWindowKey, true);
+            window.removeEventListener("focusin", handleFocusIn);
+        });
     });
 
     const countdownSeconds = () => Math.ceil(remainingMs() / 1000);
@@ -499,63 +567,75 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
                             </Show>
                         </div>
 
-                        <For each={r.questions}>
-                            {(q, qi) => (
-                                <fieldset class="agent-question-panel-q">
-                                    <legend class="agent-question-panel-q-prompt">
-                                        <span class="agent-question-panel-q-chip">{q.header}</span>
-                                        {q.question}
-                                    </legend>
-                                    <div class="agent-question-panel-options">
-                                        <For each={q.options}>
-                                            {(opt) => {
-                                                const checked = () =>
-                                                    state()[qi()]?.selected.includes(opt.label) ?? false;
-                                                // Highlight which option(s) the 30s auto-timeout would pick,
-                                                // so a watching user can predict the outcome before it
-                                                // happens. Display-neutral: the label text itself (including
-                                                // any "(Recommended)" suffix) is unchanged.
-                                                const recommended = () =>
-                                                    recommendedOptions(q.options).some((o) => o.label === opt.label);
-                                                return (
-                                                    <label
-                                                        class="agent-question-panel-option"
-                                                        classList={{
-                                                            "agent-question-panel-option--checked": checked(),
-                                                            "agent-question-panel-option--recommended": recommended(),
-                                                        }}
-                                                    >
-                                                        <input
-                                                            type={q.multiSelect ? "checkbox" : "radio"}
-                                                            name={`amux-q-${r.tool_use_id}-${qi()}`}
-                                                            checked={checked()}
-                                                            onChange={() => toggleOption(qi(), opt.label, q.multiSelect)}
-                                                        />
-                                                        <span class="agent-question-panel-option-body">
-                                                            <span class="agent-question-panel-option-label">{opt.label}</span>
-                                                            <Show when={opt.description}>
-                                                                <span class="agent-question-panel-option-desc">{opt.description}</span>
-                                                            </Show>
-                                                        </span>
-                                                    </label>
-                                                );
-                                            }}
-                                        </For>
-                                        <label class="agent-question-panel-other">
-                                            <span class="agent-question-panel-other-label">Other</span>
-                                            <input
-                                                type="text"
-                                                class="agent-question-panel-other-input"
-                                                placeholder="Type a custom answer…"
-                                                value={state()[qi()]?.other ?? ""}
-                                                onInput={(e) => setOther(qi(), e.currentTarget.value, q.multiSelect)}
-                                                onContextMenu={showTextInputContextMenu}
-                                            />
-                                        </label>
-                                    </div>
-                                </fieldset>
-                            )}
-                        </For>
+                        {/* Scrollable middle region — header (above) and actions
+                            (below) are flex-shrink: 0 so they never give up space
+                            to this region, keeping the countdown and Submit/
+                            Answer-later buttons visible regardless of how long
+                            the question set is (NOT position: sticky — see
+                            AgentQuestionPanel.scss's comments on
+                            .agent-question-panel-header for why sticky is inert
+                            here; header/actions are siblings of this scroll
+                            region, not nested inside it).
+                            Spec: docs/specs/SPEC_ASK_USER_QUESTION_PANEL_SCROLL_2026_08_25.md. */}
+                        <div class="agent-question-panel-scroll">
+                            <For each={r.questions}>
+                                {(q, qi) => (
+                                    <fieldset class="agent-question-panel-q">
+                                        <legend class="agent-question-panel-q-prompt">
+                                            <span class="agent-question-panel-q-chip">{q.header}</span>
+                                            {q.question}
+                                        </legend>
+                                        <div class="agent-question-panel-options">
+                                            <For each={q.options}>
+                                                {(opt) => {
+                                                    const checked = () =>
+                                                        state()[qi()]?.selected.includes(opt.label) ?? false;
+                                                    // Highlight which option(s) the 30s auto-timeout would pick,
+                                                    // so a watching user can predict the outcome before it
+                                                    // happens. Display-neutral: the label text itself (including
+                                                    // any "(Recommended)" suffix) is unchanged.
+                                                    const recommended = () =>
+                                                        recommendedOptions(q.options).some((o) => o.label === opt.label);
+                                                    return (
+                                                        <label
+                                                            class="agent-question-panel-option"
+                                                            classList={{
+                                                                "agent-question-panel-option--checked": checked(),
+                                                                "agent-question-panel-option--recommended": recommended(),
+                                                            }}
+                                                        >
+                                                            <input
+                                                                type={q.multiSelect ? "checkbox" : "radio"}
+                                                                name={`amux-q-${r.tool_use_id}-${qi()}`}
+                                                                checked={checked()}
+                                                                onChange={() => toggleOption(qi(), opt.label, q.multiSelect)}
+                                                            />
+                                                            <span class="agent-question-panel-option-body">
+                                                                <span class="agent-question-panel-option-label">{opt.label}</span>
+                                                                <Show when={opt.description}>
+                                                                    <span class="agent-question-panel-option-desc">{opt.description}</span>
+                                                                </Show>
+                                                            </span>
+                                                        </label>
+                                                    );
+                                                }}
+                                            </For>
+                                            <label class="agent-question-panel-other">
+                                                <span class="agent-question-panel-other-label">Other</span>
+                                                <input
+                                                    type="text"
+                                                    class="agent-question-panel-other-input"
+                                                    placeholder="Type a custom answer…"
+                                                    value={state()[qi()]?.other ?? ""}
+                                                    onInput={(e) => setOther(qi(), e.currentTarget.value, q.multiSelect)}
+                                                    onContextMenu={showTextInputContextMenu}
+                                                />
+                                            </label>
+                                        </div>
+                                    </fieldset>
+                                )}
+                            </For>
+                        </div>
 
                         <div class="agent-question-panel-actions">
                             <button

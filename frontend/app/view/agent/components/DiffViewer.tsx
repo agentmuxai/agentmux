@@ -25,6 +25,7 @@ import type { EditParams, EditResult } from "../types";
 import { detectLanguage } from "./detectLanguage";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
+import { stripCommonIndentSharedPrefix } from "./dedent";
 
 const ShikiTheme = "github-dark-high-contrast";
 
@@ -133,7 +134,14 @@ export const DiffViewer = (props: DiffViewerProps): JSX.Element => {
         if (succeeded) {
             const p = props.params;
             if (p && (p.old_string != null || p.new_string != null)) {
-                return buildDiffFromParams(p.old_string ?? "", p.new_string ?? "");
+                // Dedent BEFORE building the diff, with one prefix shared
+                // across both sides (SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md
+                // §3.2.2) — an independent per-side dedent could shift one
+                // side by a different amount than the other (e.g. new_string
+                // adding a shallower wrapper line) and manufacture a phantom
+                // indentation diff that was never actually part of the edit.
+                const { oldStr, newStr } = stripCommonIndentSharedPrefix(p.old_string ?? "", p.new_string ?? "");
+                return buildDiffFromParams(oldStr, newStr);
             }
         }
         return undefined;

@@ -267,8 +267,8 @@ export function renderRequest(
                             req.onCancel();
                             api.close();
                         }}
-                        onSubmit={(username, password) => {
-                            req.onSubmit(username, password);
+                        onSubmit={(username, password, save) => {
+                            req.onSubmit(username, password, save);
                             api.close();
                         }}
                     />

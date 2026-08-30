@@ -37,7 +37,7 @@
 
 import { getFileSubject } from "@/app/store/wps";
 import { base64ToArray } from "@/util/util";
-import { onCleanup, onMount } from "solid-js";
+import { onCleanup, onMount, type Accessor } from "solid-js";
 import { createTranslator } from "./providers/translator-factory";
 import type { PendingMessage, SignalPair } from "./state";
 import { ClaudeCodeStreamParser } from "./stream-parser";
@@ -52,6 +52,7 @@ import { useToolChunkStream } from "./hooks/useToolChunkStream";
 import { useShellNodeStream } from "./hooks/useShellNodeStream";
 import { useCompactionStream } from "./hooks/useCompactionStream";
 import { useDockClearStream } from "./hooks/useDockClearStream";
+import { useResumeRetryStream } from "./hooks/useResumeRetryStream";
 import { useBackgroundTaskRegistry } from "./hooks/useBackgroundTaskRegistry";
 import { useTurnLifecycle } from "./hooks/useTurnLifecycle";
 import { usePendingMessageAcceptance } from "./hooks/usePendingMessageAcceptance";
@@ -212,7 +213,7 @@ export function useAgentStream({
     provider,
     agentName,
     onTurnStartFromQueue,
-}: UseAgentStreamOpts): void {
+}: UseAgentStreamOpts): Accessor<BackgroundTaskView[]> {
     // Mutable state that doesn't trigger re-renders. Kept here (not
     // extracted) because it's tightly coupled to the NDJSON parse loop
     // below: lineBuffer/translator/parser accumulate per-byte parse state
@@ -246,10 +247,14 @@ export function useAgentStream({
     // model.dispatchDoc (disposal-safe), not the raw dispatch, since this
     // WPS handler can fire after the pane unregisters.
     useDockClearStream({ blockId, model });
+    useResumeRetryStream({ blockId, model });
     // Seeds/refreshes attachedTask from the durable db_background_tasks
     // registry — see that hook's own module doc comment for why this is
     // additive-only (never clears) relative to the transcript-derived path.
-    useBackgroundTaskRegistry({ blockId, model });
+    // Returns the raw task list too, forwarded to the caller so the dock can
+    // render registry-known rows the transcript has no record of (Tier 1 of
+    // docs/reports/REPORT_AGENT_PANE_ACTIVITY_DOCK_ARCHITECTURE_ANALYSIS_2026_08_25.md).
+    const backgroundTasksAtom = useBackgroundTaskRegistry({ blockId, model });
 
     onMount(() => {
         if (!enabled || !blockId) return;
@@ -652,4 +657,6 @@ export function useAgentStream({
             queueMicrotask(() => model.dispatchDoc({ type: "SessionEnd", at }));
         });
     });
+
+    return backgroundTasksAtom;
 }

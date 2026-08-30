@@ -141,6 +141,34 @@ pub struct SubagentWatcher {
     /// case rather than panicking, matching this module's existing
     /// "unknown/untracked -> safe no-op" convention (see `set_display_name`).
     self_ref: Mutex<Option<std::sync::Weak<SubagentWatcher>>>,
+    /// The scoped, persisted WPS broker -- used only for
+    /// `subagent:backfill_status` (`scan.rs`'s `publish_backfill_status`),
+    /// so a pane can query "is my own backfill still in progress" via
+    /// `EventReadHistoryCommand` rather than relying solely on live-event
+    /// timing (mirrors the identical `agent-resume-retry` design,
+    /// `docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md`
+    /// section 6.2). Deliberately separate from `event_bus` above (the raw,
+    /// unscoped, unpersisted WS fan-out every OTHER event in this module
+    /// uses) -- this one event specifically needs the scope+persist
+    /// semantics only `wps::Broker` provides. `None` until `set_broker` is
+    /// called (bootstrap only, after both this watcher and the broker
+    /// exist) -- every test call site built via bare `new()` skips this
+    /// event entirely rather than panicking, same posture as `self_ref`.
+    broker: Mutex<Option<Arc<crate::backend::wps::Broker>>>,
+    /// reagentx P2 (PR #2781): `scan_session_subagents` can be called twice
+    /// for the SAME `parent_block_id` in overlapping fashion (the same
+    /// block re-registered under a new `agent_id` -- see
+    /// `server/reactive.rs`'s caller comment -- while an earlier call for
+    /// that same block id is still mid-scan). Without this, an OLDER call's
+    /// "done" can publish after a NEWER call's "started" already fired,
+    /// prematurely clearing the `subagent:backfill_status` gate while the
+    /// newer scan is still running. Keyed by `parent_block_id`, incremented
+    /// at the start of every call; a call only publishes "done" if its own
+    /// captured generation is STILL the latest recorded one for that block
+    /// id when it finishes -- a stale call silently skips "done" entirely,
+    /// leaving the (correctly still-in-progress) gate to whichever call is
+    /// actually current. See `scan.rs`'s `scan_session_subagents`.
+    backfill_generation: Mutex<HashMap<String, u64>>,
 }
 
 impl SubagentWatcher {
@@ -154,7 +182,16 @@ impl SubagentWatcher {
             pending_activity: Mutex::new(HashMap::new()),
             naming_triggered: Mutex::new(std::collections::HashSet::new()),
             self_ref: Mutex::new(None),
+            broker: Mutex::new(None),
+            backfill_generation: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Wire in the shared WPS broker post-construction (bootstrap only) --
+    /// see the `broker` field's own doc comment for why this is optional
+    /// and set separately rather than a constructor parameter.
+    pub fn set_broker(&self, broker: Arc<crate::backend::wps::Broker>) {
+        *self.broker.lock().unwrap() = Some(broker);
     }
 
     /// Create a new SubagentWatcher and return it wrapped in Arc. Also
@@ -616,6 +653,17 @@ impl SubagentWatcher {
             pruned = true;
         }
         drop(pending);
+
+        // reagentx P2 (PR #2781, round 3): `backfill_generation` is keyed
+        // by `parent_block_id` (see its own doc comment) but was never
+        // pruned here like every other per-block map above — every
+        // distinct block_id that ever called `scan_session_subagents` left
+        // a permanent entry for the life of the srv process, even after
+        // the block was deleted. Not counted toward `pruned` below —
+        // that return value is specifically about DERIVED subagent/
+        // dispatch data clients might need to refresh over, not internal
+        // bookkeeping with no client-visible effect.
+        self.backfill_generation.lock().unwrap().remove(block_id);
 
         self.unwatch_block(block_id);
 

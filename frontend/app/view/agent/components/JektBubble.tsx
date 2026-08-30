@@ -17,10 +17,15 @@
  */
 
 import clsx from "clsx";
-import { Show, type JSX } from "solid-js";
+import { Show, createMemo, type JSX } from "solid-js";
 import type { JektMessageNode } from "../types";
 import { JEKT_DELIVERY_ICONS, JEKT_TIER_ICONS } from "../types";
 import { LinkifiedText } from "@/app/element/linkified-text";
+import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
+import { formatExactTime, formatTimeAgo } from "@/util/format-time";
+import { useTick } from "@/app/hook/useTick";
+import { useNodePeek } from "../hooks/useNodePeek";
+import { PeekOverlay } from "./PeekOverlay";
 
 interface JektBubbleProps {
     node: JektMessageNode;
@@ -36,8 +41,26 @@ export const JektBubble = (props: JektBubbleProps): JSX.Element => {
     // Don't destructure props — see AgentMessageBlock/MarkdownBlock
     // for why (codex P1 on PR #786 + family of virt-redesign issues).
     // Same reactivity discipline applies here.
+
+    // Peek tooltip (SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25).
+    // Not gated on `props.collapsed` — the expanded view's own timestamp
+    // line is plain `toLocaleString()`, no relative "ago"; the peek adds
+    // that even when already expanded.
+    const peekTick = useTick(1000);
+    const { isPeeking, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } = useNodePeek();
+    const peekTimeText = createMemo(() => {
+        if (!isPeeking()) return null;
+        peekTick();
+        return `${formatExactTime(props.node.timestamp)} · ${formatTimeAgo(props.node.timestamp)}`;
+    });
+    const peekEstimateText = createMemo(() => {
+        const count = estimateTokenCount(props.node.message);
+        return count > 0 ? `~${formatCompactNumber(count)} tok (est.)` : null;
+    });
+
     return (
         <div
+            ref={setPeekRowEl}
             class={clsx("agent-jekt-bubble", {
                 incoming: props.node.direction === "incoming",
                 outgoing: props.node.direction === "outgoing",
@@ -45,6 +68,8 @@ export const JektBubble = (props: JektBubbleProps): JSX.Element => {
                 [`tier-${props.node.tier}`]: true,
             })}
             onClick={props.onToggle}
+            onMouseEnter={handlePeekEnter}
+            onMouseLeave={handlePeekLeave}
         >
             <div class="agent-jekt-summary">
                 <span class="agent-jekt-chevron">{props.collapsed ? "▸" : "▾"}</span>
@@ -85,6 +110,14 @@ export const JektBubble = (props: JektBubbleProps): JSX.Element => {
                     </details>
                 </div>
             </Show>
+            <PeekOverlay show={isPeeking()} rowEl={peekRowEl}>
+                <Show when={peekTimeText()}>
+                    <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
+                </Show>
+                <Show when={peekEstimateText()}>
+                    <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
+                </Show>
+            </PeekOverlay>
         </div>
     );
 };

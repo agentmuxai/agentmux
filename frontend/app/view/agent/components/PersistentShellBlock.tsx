@@ -14,10 +14,13 @@
 import clsx from "clsx";
 import { For, Show, createMemo, createSignal, type JSX } from "solid-js";
 import { useTick } from "@/app/hook/useTick";
-import { formatElapsedClock } from "@/util/format-time";
+import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
+import { formatElapsedClock, formatExactTime, formatTimeAgo } from "@/util/format-time";
+import { useNodePeek } from "../hooks/useNodePeek";
 import { capChars, createChunkCapper, createSpinnerCollapser, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { LinkifiedText } from "@/app/element/linkified-text";
+import { PeekOverlay } from "./PeekOverlay";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import type { ShellNode, ToolLogChunk } from "../types";
@@ -66,6 +69,21 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
 
     const expanded = () => props.pinned;
 
+    // Peek tooltip (SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25).
+    // Suppressed once expanded — the full command is already visible in the
+    // panel header (`.agent-shell-header-cmd`), same rule ToolBlock uses.
+    const peekTick = useTick(1000);
+    const { isPeeking, rowEl: peekRowEl, setRowEl: setPeekRowEl, handlePeekEnter, handlePeekLeave } = useNodePeek();
+    const peekTimeText = createMemo(() => {
+        if (!isPeeking()) return null;
+        peekTick();
+        return `${formatExactTime(props.node.spawnedAt)} · ${formatTimeAgo(props.node.spawnedAt)}`;
+    });
+    const peekEstimateText = createMemo(() => {
+        const count = estimateTokenCount(props.node.cmd);
+        return count > 0 ? `~${formatCompactNumber(count)} tok (est.)` : null;
+    });
+
     // Stop button (Phase 3): tree-kills the running process. Status updates
     // arrive via the `stopped` exit event, so we don't optimistically mutate.
     const [stopping, setStopping] = createSignal(false);
@@ -106,6 +124,7 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
 
     return (
         <div
+            ref={setPeekRowEl}
             class={clsx("agent-shell-block", {
                 "running": props.node.status === "running",
                 "exited-ok": props.node.status === "exited-ok",
@@ -114,6 +133,8 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
                 "expanded": expanded(),
                 "collapsed": !expanded(),
             })}
+            onMouseEnter={handlePeekEnter}
+            onMouseLeave={handlePeekLeave}
         >
             <div class="agent-shell-summary" onClick={props.onTogglePin}>
                 <span class="agent-shell-sigil">{statusSigil()}</span>
@@ -173,6 +194,15 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
                     </div>
                 </div>
             </div>
+            <PeekOverlay show={isPeeking() && !expanded()} rowEl={peekRowEl}>
+                <Show when={peekTimeText()}>
+                    <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
+                </Show>
+                <Show when={peekEstimateText()}>
+                    <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
+                </Show>
+                <div class="agent-node-peek-tooltip-body">{props.node.cmd}</div>
+            </PeekOverlay>
         </div>
     );
 };

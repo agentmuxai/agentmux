@@ -70,6 +70,12 @@ struct InstallCheckReq {
 pub struct InstallSessionRegistry {
     sessions: Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<()>>>,
     active_providers: Mutex<std::collections::HashSet<String>>,
+    /// Same idea as `active_providers`, but a separate set keyed by
+    /// system-tool id (`"git"`, `"node"`, …) rather than provider id — a
+    /// distinct namespace so a future provider literally named e.g. "git"
+    /// can never collide with a system-tool claim. See
+    /// `system_install_handlers.rs` / `SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md`.
+    active_system_tools: Mutex<std::collections::HashSet<String>>,
 }
 
 impl InstallSessionRegistry {
@@ -77,7 +83,7 @@ impl InstallSessionRegistry {
         Arc::new(Self::default())
     }
 
-    fn insert(&self, session_id: String, tx: tokio::sync::oneshot::Sender<()>) {
+    pub(crate) fn insert(&self, session_id: String, tx: tokio::sync::oneshot::Sender<()>) {
         self.sessions.lock().insert(session_id, tx);
     }
 
@@ -91,6 +97,16 @@ impl InstallSessionRegistry {
         self.active_providers.lock().remove(provider_id);
     }
 
+    /// Try to claim a system tool (git/node/npm/python); returns false if
+    /// another session is already installing this tool.
+    pub(crate) fn try_claim_system_tool(&self, tool_id: &str) -> bool {
+        self.active_system_tools.lock().insert(tool_id.to_string())
+    }
+
+    pub(crate) fn release_system_tool(&self, tool_id: &str) {
+        self.active_system_tools.lock().remove(tool_id);
+    }
+
     fn cancel(&self, session_id: &str) -> bool {
         if let Some(tx) = self.sessions.lock().remove(session_id) {
             let _ = tx.send(());
@@ -100,7 +116,7 @@ impl InstallSessionRegistry {
         }
     }
 
-    fn drop_session(&self, session_id: &str) {
+    pub(crate) fn drop_session(&self, session_id: &str) {
         self.sessions.lock().remove(session_id);
     }
 }
@@ -153,7 +169,7 @@ fn provider_install_dir(provider_id: &str) -> Option<std::path::PathBuf> {
 /// system dependencies are installed. The probe is path-only — never
 /// executes the tool — so it's safe to call without side effects.
 /// See SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md.
-async fn resolve_tool_path(tool: &str) -> Option<String> {
+pub(crate) async fn resolve_tool_path(tool: &str) -> Option<String> {
     let cmd = if cfg!(windows) { "where" } else { "which" };
     let mut c = tokio::process::Command::new(cmd);
     c.arg(tool);

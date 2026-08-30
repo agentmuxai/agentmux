@@ -48,9 +48,35 @@ import { realAccountIdOrEmpty } from "../identity-carry-over";
 import { getProvider } from "../providers";
 import { AgentCard } from "./AgentCard";
 import type { LaunchOverrides } from "./AgentLaunchModal";
-import { AgentPickerFilterBar } from "./AgentPickerFilterBar";
+import { AgentPickerFilterBar, DEFAULT_AGENT_SORT, type AgentSortOption } from "./AgentPickerFilterBar";
 import { HiddenTemplatesSection } from "./HiddenTemplatesSection";
 import { MyAgentsList } from "./MyAgentsList";
+
+/** This-machine-only preference — no cross-device sync, no existing
+ *  localStorage precedent in this component tree to extend (a new small
+ *  pattern, not a reuse). Wrapped defensively: localStorage can throw in
+ *  some embedding contexts (private browsing, storage quota), and a sort
+ *  preference is never worth a hard failure over. */
+const AGENT_SORT_STORAGE_KEY = "agentPicker:sortBy";
+
+function loadStoredSort(): AgentSortOption {
+    try {
+        const raw = localStorage.getItem(AGENT_SORT_STORAGE_KEY);
+        if (raw === "recent" || raw === "name" || raw === "type") return raw;
+    } catch {
+        // ignore — fall through to the default
+    }
+    return DEFAULT_AGENT_SORT;
+}
+
+function storeSort(sort: AgentSortOption): void {
+    try {
+        localStorage.setItem(AGENT_SORT_STORAGE_KEY, sort);
+    } catch {
+        // best-effort only — a failed write just means the preference
+        // doesn't survive to the next picker open, not a functional break
+    }
+}
 
 // ── useAgentDefinitions hook ───────────────────────────────────────────────────────
 
@@ -145,6 +171,15 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
     // an *existing agent*, and a shared query risks the template grid
     // silently shrinking for an unrelated reason right next to it.
     const [filterQuery, setFilterQuery] = createSignal("");
+    // Sort control, far right of the filter bar (SPEC follow-up — see
+    // docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md §3).
+    // Same narrowing-scope decision as filterQuery above: only MyAgentsList,
+    // not the template grid.
+    const [sortBy, setSortByState] = createSignal<AgentSortOption>(loadStoredSort());
+    const setSortBy = (sort: AgentSortOption) => {
+        setSortByState(sort);
+        storeSort(sort);
+    };
     const [agents, definitionsLoading] = useAgentDefinitions();
     const modalLayer = useModalLayer();
 
@@ -905,9 +940,12 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                             value={filterQuery}
                             onInput={setFilterQuery}
                             onClear={() => setFilterQuery("")}
+                            sortBy={sortBy}
+                            onSortChange={setSortBy}
                         />
                         <MyAgentsList
                             nameFilter={filterQuery}
+                            sortBy={sortBy}
                             onReattach={handleReattach}
                             openDefinitions={openDefinitions}
                             onFork={handleFork}

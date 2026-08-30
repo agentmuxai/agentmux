@@ -53,6 +53,41 @@ export interface AgentViewState {
     disengageStickToBottom: () => void;
 
     /**
+     * True as of the last-observed geometry that this pane's content
+     * overflowed its viewport (`scrollHeight > clientHeight`). A pane
+     * transitioning from `false` to `true` cannot have a legitimate "user
+     * scrolled away" state — there is nowhere to have scrolled away to
+     * yet — so the view layer uses that specific transition to force-pin
+     * instead of trusting whatever geometry a scroll event reports at
+     * that instant.
+     *
+     * Bidirectional, NOT a one-time latch: `markNotOverflowing()` re-arms
+     * it when content collapses back to non-overflowing (the documented
+     * whole-pane `scrollHeight → 0px` case in
+     * FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_LIVE_INSTANCE_DATA_2026_08_22.md
+     * §3, or a `/clear` emptying the transcript without remounting this
+     * component) — otherwise a pane that lives through that
+     * collapse-and-regrow only gets this protection once, ever, for its
+     * whole mounted lifetime, rather than every time the transition
+     * genuinely recurs.
+     *
+     * The view layer's `syncOverflowState()` is the ONLY thing allowed to
+     * call `markOverflowing`/`markNotOverflowing`, and it runs
+     * unconditionally from every geometry-observation point (every scroll
+     * event, both ResizeObservers, the itemized content-signal effect) —
+     * deliberately NOT gated on `stickToBottom()` already being true, the
+     * way the actual re-pin action (`scrollToTrueBottom()`) is. A pane
+     * scrolled away reading history can still collapse or regrow while
+     * disengaged, and this flag has to track that regardless of whether
+     * anything chooses to act on it. See
+     * docs/specs/SPEC_AGENT_PANE_FIRST_OVERFLOW_SCROLL_PIN_FIX_2026_08_29.md
+     * (codex P2 and reagent P1 on PR #2834).
+     */
+    isOverflowing: Accessor<boolean>;
+    markOverflowing: () => void;
+    markNotOverflowing: () => void;
+
+    /**
      * Captured anchor for restoring scroll position after a prepend
      * (history pagination) or remount (tab switch). null when sticky
      * to bottom or when no anchor has been captured.
@@ -109,6 +144,9 @@ export function createAgentViewState(documentAtom: SignalPair<DocumentNode[]>): 
     });
 
     const [stickToBottom, setStickToBottom] = createSignal(true);
+    const [isOverflowing, setIsOverflowing] = createSignal(false);
+    const markOverflowing = () => setIsOverflowing(true);
+    const markNotOverflowing = () => setIsOverflowing(false);
     const [headAnchor, setHeadAnchor] = createSignal<ScrollAnchor | null>(null);
     const [streamingNodeId, setStreamingNodeId] = createSignal<string | null>(null);
     const [historyReady, setHistoryReady] = createSignal(false);
@@ -152,6 +190,9 @@ export function createAgentViewState(documentAtom: SignalPair<DocumentNode[]>): 
         stickToBottom,
         engageStickToBottom,
         disengageStickToBottom,
+        isOverflowing,
+        markOverflowing,
+        markNotOverflowing,
         headAnchor,
         captureHeadAnchor,
         clearHeadAnchor,

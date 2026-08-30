@@ -149,9 +149,9 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
                     ));
                 }
             }
-            // Seed the default 3-pane launch layout (agent + sysinfo +
-            // swarm) into the fresh tab so "Open another window" matches
-            // first launch instead of opening blank. Only this
+            // Seed the default 4-pane launch layout (agent + swarm +
+            // armory + sysinfo) into the fresh tab so "Open another
+            // window" matches first launch instead of opening blank. Only this
             // fresh-workspace branch seeds; tear-off (existing workspace,
             // the `else` arm) reattaches its populated workspace as-is.
             // Non-fatal: a seed failure leaves an empty tab (the prior
@@ -178,9 +178,10 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
                 }
                 _ => None,
             }) {
-                // Dispatch the three seed blocks through the reducer.
+                // Dispatch the four seed blocks through the reducer, in the
+                // target display order (SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md).
                 let mut seeded_ids: Vec<String> = Vec::new();
-                for view in ["agent", "sysinfo", "swarm"] {
+                for view in ["agent", "swarm", "armory", "sysinfo"] {
                     let evs = dispatch_to_reducer(
                         state,
                         agentmux_common::ipc::Command::CreateBlock {
@@ -225,17 +226,18 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
                     block_seed_events.extend(evs);
                 }
 
-                if seeded_ids.len() == 3 {
+                if seeded_ids.len() == 4 {
                     // SPEC_864 Phase 3 — post-bootstrap seed routes
                     // through the reducer (single writer of
                     // db_layout); the tree shape is shared with the
                     // pre-bootstrap store-direct first-launch seed
-                    // via `default_three_pane_tree`.
+                    // via `default_four_pane_tree`.
                     let (tree, focused, leaforder) =
-                        crate::backend::wcore::default_three_pane_tree(
+                        crate::backend::wcore::default_four_pane_tree(
                             &seeded_ids[0],
                             &seeded_ids[1],
                             &seeded_ids[2],
+                            &seeded_ids[3],
                         );
                     if let Err(e) = super::reducer_helpers::seed_layout_via_reducer(
                         state,
@@ -418,7 +420,7 @@ mod create_window_seed_tests {
 
     /// Regression for the 2nd-window-tear-off desync (#1681).
     ///
-    /// "Open another window" used to seed its three default blocks straight
+    /// "Open another window" used to seed its four default blocks straight
     /// into SQLite (`seed_default_layout` → `create_block`), bypassing the
     /// reducer. The handler runs after bootstrap, so those blocks never
     /// reached the in-memory `srv_state`. The frontend rendered them (it reads
@@ -441,14 +443,14 @@ mod create_window_seed_tests {
             .expect("window has a workspaceid")
             .to_string();
 
-        // The fix: the three seed blocks are present in the in-memory reducer
+        // The fix: the four seed blocks are present in the in-memory reducer
         // state, attached to the new window's tab.
         let (tab_id, block_id) = {
             let s = state.srv_state.lock().await;
             assert_eq!(
                 s.blocks.len(),
-                blocks_before + 3,
-                "the 3 seed blocks must be tracked in srv_state, not only SQLite"
+                blocks_before + 4,
+                "the 4 seed blocks must be tracked in srv_state, not only SQLite"
             );
             let ws = s
                 .workspaces
@@ -458,8 +460,8 @@ mod create_window_seed_tests {
             let tab = s.tabs.get(&tab_id).expect("new tab is in the reducer");
             assert_eq!(
                 tab.block_ids.len(),
-                3,
-                "the new window's tab must hold its 3 seed blocks in the reducer"
+                4,
+                "the new window's tab must hold its 4 seed blocks in the reducer"
             );
             (tab_id, tab.block_ids[0].clone())
         };

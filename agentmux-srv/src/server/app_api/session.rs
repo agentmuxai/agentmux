@@ -3,9 +3,147 @@ use super::*;
 pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     register_session_activity_summary(engine, state);
     register_session_next_prompt_suggestion(engine, state);
+    register_session_resume_preflight_handler(engine, state);
     register_session_archive_handler(engine, state);
     register_session_restore_handler(engine, state);
     register_session_export_handler(engine, state);
+}
+
+/// `session:resume_preflight` — read-only, mutates nothing, spawns nothing.
+///
+/// The pane calls this on mount so it can say whether the conversation it's
+/// displaying will actually be continued, instead of the user finding out by
+/// typing and watching the transcript clear
+/// (`crate::backend::resume_preflight`'s module doc).
+fn register_session_resume_preflight_handler(engine: &Arc<WshRpcEngine>, state: &AppState) {
+    let wstore = state.wstore.clone();
+    // Needed to resolve an identity-bound pane's REAL config dir — see
+    // `preflight_input_from_meta`.
+    let id_store = state.id_store.clone();
+    let identity_store = state.identity_store.clone();
+
+    engine.register_handler(
+        COMMAND_SESSION_RESUME_PREFLIGHT,
+        Box::new(move |data, _ctx| {
+            let wstore = wstore.clone();
+            let id_store = id_store.clone();
+            let identity_store = identity_store.clone();
+            Box::pin(async move {
+                let cmd: CommandSessionResumePreflightData = serde_json::from_value(data)
+                    .map_err(|e| format!("session:resume_preflight: {e}"))?;
+
+                let block = wstore
+                    .must_get::<Block>(&cmd.block_id)
+                    .map_err(|e| format!("session:resume_preflight: {e}"))?;
+
+                let bound_config_dir = crate::identity::resolver::resolve_bound_oauth_config_dir(
+                    &wstore,
+                    &id_store,
+                    &identity_store,
+                    &cmd.block_id,
+                );
+                let input = preflight_input_from_meta(&block.meta, bound_config_dir);
+
+                // Blocking file I/O (one `is_file`, at most one `read_dir` of a
+                // single directory) off the async runtime's worker threads —
+                // small, but a pane open shouldn't be able to stall the
+                // reactor on a cold or network-backed home directory.
+                let result = tokio::task::spawn_blocking(move || crate::backend::resume_preflight::preflight(&input))
+                    .await
+                    .map_err(|e| format!("session:resume_preflight: {e}"))?;
+
+                tracing::info!(
+                    block_id = %cmd.block_id,
+                    verdict = %result.verdict.as_str(),
+                    duration_ms = result.duration_ms,
+                    "session:resume_preflight"
+                );
+
+                Ok(Some(
+                    serde_json::to_value(&SessionResumePreflightResult {
+                        block_id: cmd.block_id,
+                        verdict: result.verdict.as_str().to_string(),
+                        session_id: result.session_id,
+                        recoverable_session_id: result.recoverable_session_id,
+                        steps: result
+                            .steps
+                            .into_iter()
+                            .map(|s| ResumePreflightStep {
+                                id: s.id.to_string(),
+                                label: s.label,
+                                ok: s.ok,
+                                detail: s.detail,
+                                duration_ms: s.duration_ms,
+                            })
+                            .collect(),
+                        duration_ms: result.duration_ms,
+                    })
+                    .unwrap(),
+                ))
+            })
+        }),
+    );
+}
+
+/// Lift a block's meta into a [`resume_preflight::PreflightInput`].
+///
+/// **Every default here must match what the real spawn path uses for the
+/// same key**, or the preflight predicts something the spawn won't do —
+/// which is worse than not predicting at all, since the pane then states a
+/// falsehood confidently.
+///
+/// `agent:resume_flag` defaulting to `"--resume"` is that rule doing real
+/// work (reagent P1 on PR #2833): it was `""` here while all four real
+/// spawn-path readers default to `"--resume"`
+/// (`agent_handlers/input.rs:400,422`, `app_api/agent_io.rs:265,287` — the
+/// first of those is the exact line that builds `PersistentSpawnConfig`).
+/// `agent_open.rs` only started writing the key recently, so any Claude pane
+/// created before that and not respawned since has no `agent:resume_flag`
+/// at all: the spawn still attaches `--resume`, but the preflight was
+/// reporting `Unknown` and silently suppressing the notice for exactly the
+/// long-lived panes this feature exists for.
+/// `bound_config_dir` is `identity::resolver::resolve_bound_oauth_config_dir`'s
+/// answer for this block, and **takes precedence over `cmd:env`** whenever
+/// it's `Some` (reagent P1, second pass on PR #2833).
+///
+/// For an agent bound to an Armory OAuth identity, the `cmd:env` snapshot is
+/// simply not where the CLI will look: the real spawn resolves the isolated
+/// dir dynamically through `inject_identity_env_async`
+/// (`agent_handlers/input.rs:224`, `app_api/agent_io.rs:184`), and
+/// `reactive.rs` already documents that "identity-bound agents' real
+/// `CLAUDE_CONFIG_DIR` is never the stale `cmd:env` snapshot"
+/// (`SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22.md`).
+/// Checking reachability against the wrong directory is worse than not
+/// checking: it can warn "fresh" at a pane that will resume perfectly well,
+/// or stay quiet at one that's about to lose its conversation.
+///
+/// `None` — not identity-bound, or a non-OAuth provider — keeps the
+/// `cmd:env` read, which is correct for those. Same helper and same
+/// precedence order `subagent_watcher` already uses for this exact
+/// pre-spawn question.
+fn preflight_input_from_meta(
+    meta: &crate::backend::obj::MetaMapType,
+    bound_config_dir: Option<std::path::PathBuf>,
+) -> crate::backend::resume_preflight::PreflightInput {
+    // `CLAUDE_CONFIG_DIR` from the block's own `cmd:env` map — the fallback
+    // when this pane isn't identity-bound.
+    let config_dir = match bound_config_dir {
+        Some(dir) => dir.to_string_lossy().to_string(),
+        None => meta
+            .get(crate::backend::blockcontroller::META_KEY_CMD_ENV)
+            .and_then(|v| v.as_object())
+            .and_then(|env| env.get("CLAUDE_CONFIG_DIR"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+    };
+
+    crate::backend::resume_preflight::PreflightInput {
+        resume_flag: obj::meta_get_string(meta, "agent:resume_flag", "--resume"),
+        session_id: obj::meta_get_string(meta, "agent:sessionid", ""),
+        working_dir: obj::meta_get_string(meta, "cmd:cwd", ""),
+        config_dir,
+    }
 }
 
 fn register_session_archive_handler(engine: &Arc<WshRpcEngine>, state: &AppState) {
@@ -189,6 +327,217 @@ pub(crate) async fn generate_pushed_activity_summary(
     result.filter(|(summary, _)| !summary.is_empty())
 }
 
+/// Ambient-call purpose tag for the on-demand, once-per-definition activity
+/// summary used as the AgentPicker's "My Agents" conversation-preview
+/// fallback — see `generate_definition_activity_summary` below and
+/// `db_agent_activity_summaries` (OBJECT_SCHEMA_VERSION v28).
+const AMBIENT_PURPOSE_DEFINITION_SUMMARY: &str = "definition_summary";
+
+/// Max simultaneous Haiku CLI spawns for definition-summary generation.
+/// Deliberately its OWN semaphore, not `pull_call_semaphore()` (reagent P1,
+/// PR #2786): that one is reserved for live, user-turn-triggered pull RPCs
+/// specifically so background bursts don't queue behind or block them (see
+/// its own doc comment above) — this call is background-triggered (a
+/// `listrecentsessions` poll, not a direct user action), the same class as
+/// `activity_watcher.rs`'s pushed-summary sweep, which likewise gets its
+/// own dedicated semaphore rather than sharing this one. Capped at 1: this
+/// is best-effort background fill-in, not latency-sensitive.
+const MAX_CONCURRENT_DEFINITION_SUMMARIES: usize = 1;
+
+fn definition_summary_semaphore() -> &'static tokio::sync::Semaphore {
+    static SEM: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    SEM.get_or_init(|| tokio::sync::Semaphore::new(MAX_CONCURRENT_DEFINITION_SUMMARIES))
+}
+
+/// Max simultaneous Haiku CLI spawns for `SubagentWatcher::resolve_unnamed_backlog`'s
+/// bounded backfill-naming pass. Deliberately its OWN semaphore, not
+/// `pull_call_semaphore()` — same reasoning as `definition_summary_semaphore()`
+/// above: this is a background burst triggered by a Swarm-pane-open, not a
+/// live user-turn-triggered call (`subagent.GenerateName`'s on-click path
+/// still uses `pull_call_semaphore()` directly), so it must not queue behind
+/// or block that one. Capped at 1: this is best-effort backlog fill-in for
+/// historical rows, not latency-sensitive — see
+/// docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md for why an
+/// unbounded version of this exact call pattern is the incident this is
+/// designed not to repeat.
+const MAX_CONCURRENT_BACKLOG_NAMING: usize = 1;
+
+pub(crate) fn backlog_naming_semaphore() -> &'static tokio::sync::Semaphore {
+    static SEM: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    SEM.get_or_init(|| tokio::sync::Semaphore::new(MAX_CONCURRENT_BACKLOG_NAMING))
+}
+
+/// Read-only CLI path lookup for `provider_id` — checks the versioned
+/// local-install dir, then falls back to system PATH. Deliberately never
+/// installs anything (unlike the `resolvecli` RPC handler / `agent_open.rs`'s
+/// launch-time resolution, which both trigger an npm install as a fallback):
+/// this is a best-effort BACKGROUND call, not a user-initiated launch —
+/// silently installing a CLI as a side effect of a picker preview summary
+/// would be a surprising, unwanted cost. Returns `None` (not an error) for
+/// an unknown provider or a CLI that isn't already available either way;
+/// the caller treats that the same as any other unresolvable case.
+async fn resolve_provider_cli_path_readonly(provider_id: &str) -> Option<String> {
+    const AGENTMUX_VERSION: &str = env!("CARGO_PKG_VERSION");
+    let provider = crate::backend::providers::get_provider(provider_id)?;
+    let paths = agentmux_common::DataPaths::from_env()?;
+    let provider_dir = paths
+        .home_dir
+        .join("instances")
+        .join(format!("v{AGENTMUX_VERSION}"))
+        .join("cli")
+        .join(provider.id);
+    let npm_bin = if cfg!(windows) {
+        provider_dir.join("node_modules").join(".bin").join(format!("{}.cmd", provider.cli_command))
+    } else {
+        provider_dir.join("node_modules").join(".bin").join(provider.cli_command)
+    };
+    if npm_bin.exists() {
+        return Some(npm_bin.to_string_lossy().to_string());
+    }
+    crate::server::cli_handlers::resolve_cli_on_path(provider.cli_command).await
+}
+
+/// Generate (and persist) a short activity summary for a definition whose
+/// AgentPicker row has no structured `output.state.json` conversation
+/// snapshot to preview — legacy rows predating snapshot persistence, per
+/// `has_snapshot` in `agent_handlers::session::listrecentsessions`. Built
+/// from the instance's raw terminal capture (the `"output"` filestore file,
+/// written unconditionally by the CLI pipeline, independent of the newer
+/// structured snapshot), reusing `read_recent_activity_digest` — the same
+/// extraction `generate_pushed_activity_summary` above uses.
+///
+/// One-shot per definition, not per-turn: `generation` is always the
+/// constant `1`, mirroring `generate_subagent_name`'s cache-once posture —
+/// the caller only invokes this when `agent_activity_summary_get` found
+/// nothing persisted yet, so there is no "newer turn" to supersede an
+/// in-flight call here (unlike the pull/pushed activity-summary RPCs,
+/// which regenerate every turn for a LIVE conversation).
+///
+/// CLI path resolution (reagent P1, PR #2786): the row shape this feature
+/// actually targets is a CLOSED pane — `DeleteBlock`
+/// (`sagas::delete_block::run`) removes the `Block` row entirely on pane
+/// close while the instance row and raw filestore output survive. For such
+/// rows there is no live block to read `cmd`/`cmd:env` meta from at all, so
+/// this prefers the block record when it still exists (richer: carries the
+/// per-block auth env the CLI needs) and falls back to
+/// `resolve_provider_cli_path_readonly` + an EMPTY auth env otherwise —
+/// best-effort: a provider that needs per-block injected credentials (no
+/// ambient/global login available) fails the Haiku call cleanly (`None`,
+/// same as any other unresolvable case here), not a wrong result.
+///
+/// Fire-and-forget by design: the caller (`listrecentsessions`) spawns this
+/// in the background and does not await it inline. The row that triggered
+/// generation still shows its existing fallback text on THIS response; on
+/// success this broadcasts `agents:changed`, which `MyAgentsList.tsx`
+/// already refetches on, picking up the now-persisted summary on the next
+/// load. Returns `None` (nothing persisted, nothing broadcast) when there's
+/// no raw output to summarize, the CLI path isn't resolvable, this call was
+/// superseded/capped, or the CLI failed — the caller treats all of these as
+/// "still nothing to show," not an error.
+pub(crate) async fn generate_definition_activity_summary(
+    wstore: &Store,
+    filestore: &crate::backend::storage::filestore::FileStore,
+    broker: &Arc<crate::backend::wps::Broker>,
+    definition_id: &str,
+    block_id: &str,
+    provider_id: &str,
+) -> Option<(String, Option<crate::agents::TokenCounts>)> {
+    let key = crate::ambient::AmbientCallKey::new(definition_id.to_string(), AMBIENT_PURPOSE_DEFINITION_SUMMARY);
+    let guard = match crate::ambient::gateway().admit(key, 1) {
+        crate::ambient::Admission::Proceed(guard) => guard,
+        crate::ambient::Admission::StaleOnArrival => return None,
+    };
+    let cancel = guard.cancellation();
+
+    // Background-call semaphore, not `pull_call_semaphore()` — see
+    // `definition_summary_semaphore`'s own doc comment above.
+    let permit = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => None,
+        permit = definition_summary_semaphore().acquire() => permit.ok(),
+    };
+    let Some(_permit) = permit else {
+        drop(guard);
+        return None;
+    };
+
+    let Some(digest) = read_recent_activity_digest(filestore, block_id) else {
+        drop(guard);
+        return None;
+    };
+
+    let (cli_path, meta): (String, MetaMapType) = match wstore.get::<Block>(block_id) {
+        Ok(Some(block)) => {
+            let p = obj::meta_get_string(&block.meta, "cmd", "");
+            if p.is_empty() {
+                let Some(p) = resolve_provider_cli_path_readonly(provider_id).await else {
+                    drop(guard);
+                    return None;
+                };
+                (p, MetaMapType::new())
+            } else {
+                (p, block.meta.clone())
+            }
+        }
+        _ => {
+            let Some(p) = resolve_provider_cli_path_readonly(provider_id).await else {
+                drop(guard);
+                return None;
+            };
+            (p, MetaMapType::new())
+        }
+    };
+
+    let prompt = format!(
+        "Summarize in 12 words or fewer what this conversation/session was \
+         about, based on the raw terminal output below. Plain text only — \
+         no markdown, no code fences, no backticks, no quotes, no \
+         punctuation at the end, no preamble.\n\n\
+         Recent activity:\n\n{digest}"
+    );
+
+    let result = invoke_ambient_haiku_call(&cli_path, &prompt, &meta, cancel).await.ok();
+    drop(guard);
+
+    let (summary, tokens) = result?;
+    let summary = summary.trim().to_string();
+    if summary.is_empty() {
+        return None;
+    }
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    match wstore.agent_activity_summary_set(definition_id, &summary, now) {
+        Ok(()) => {
+            broker.publish(crate::backend::wps::WaveEvent {
+                event: "agents:changed".to_string(),
+                scopes: vec![],
+                sender: String::new(),
+                persist: 0,
+                data: None,
+            });
+        }
+        Err(e) => {
+            // reagent P2, PR #2786: the caller's definition_summary_attempted()
+            // gate already permanently claims definition_id before spawning —
+            // a persistence failure here silently and permanently discards a
+            // successfully generated (and billed) summary with no diagnostic
+            // trail otherwise, unlike every other fallible store call this PR
+            // touches (agent_activity_summary_get's error path logs).
+            tracing::warn!(
+                error = %e,
+                definition_id = %definition_id,
+                "generate_definition_activity_summary: agent_activity_summary_set \
+                 failed — a successfully generated summary was discarded"
+            );
+        }
+    }
+
+    Some((summary, tokens))
+}
+
 /// Ambient-call purpose tag for the on-demand subagent display name (see
 /// `generate_subagent_name`). One-shot per subagent — `generation` is always
 /// the constant `1` since a name, once generated, is cached on
@@ -216,6 +565,7 @@ pub(crate) async fn generate_subagent_name(
     wstore: &Store,
     subagent_watcher: &Arc<crate::backend::subagent_watcher::SubagentWatcher>,
     agent_id: &str,
+    semaphore: &'static tokio::sync::Semaphore,
 ) -> Option<(String, Option<crate::agents::TokenCounts>)> {
     let info = subagent_watcher.get_info(agent_id)?;
     if let Some(existing) = info.display_name {
@@ -229,13 +579,14 @@ pub(crate) async fn generate_subagent_name(
     };
     let cancel = guard.cancellation();
 
-    // Same cross-block concurrency cap as the pull RPCs above — a user
-    // rapidly expanding several subagent rows shouldn't spawn unbounded
-    // concurrent Haiku CLIs either.
+    // Concurrency cap — `pull_call_semaphore()` for the live on-click path
+    // (a user rapidly expanding several subagent rows shouldn't spawn
+    // unbounded concurrent Haiku CLIs either), `backlog_naming_semaphore()`
+    // for the bounded backfill pass — see each call site.
     let permit = tokio::select! {
         biased;
         _ = cancel.cancelled() => None,
-        permit = pull_call_semaphore().acquire() => permit.ok(),
+        permit = semaphore.acquire() => permit.ok(),
     };
     let Some(_permit) = permit else {
         drop(guard);
@@ -310,6 +661,7 @@ pub(crate) async fn generate_dispatch_name(
     subagent_watcher: &Arc<crate::backend::subagent_watcher::SubagentWatcher>,
     dispatch_id: &str,
     first_member_agent_id: &str,
+    semaphore: &'static tokio::sync::Semaphore,
 ) -> Option<(String, Option<crate::agents::TokenCounts>)> {
     let info = subagent_watcher.get_info(first_member_agent_id)?;
 
@@ -320,12 +672,12 @@ pub(crate) async fn generate_dispatch_name(
     };
     let cancel = guard.cancellation();
 
-    // Same cross-block concurrency cap as every other ambient caller — see
-    // AMBIENT_PURPOSE_SUBAGENT_NAME's comment above.
+    // Concurrency cap — see `generate_subagent_name`'s matching comment
+    // above; same two possible callers, same two possible semaphores.
     let permit = tokio::select! {
         biased;
         _ = cancel.cancelled() => None,
-        permit = pull_call_semaphore().acquire() => permit.ok(),
+        permit = semaphore.acquire() => permit.ok(),
     };
     let Some(_permit) = permit else {
         drop(guard);
@@ -1034,6 +1386,22 @@ mod build_session_title_prompt_tests {
     }
 }
 
+/// reagent P1, PR #2786: `generate_definition_activity_summary` falls back
+/// to this resolver when the instance's `Block` row is gone (the closed-
+/// pane case this feature actually targets). Only the cheap, deterministic
+/// "unknown provider" early return is exercised here — the filesystem/PATH
+/// probing branches depend on this machine's actual CLI install state and
+/// aren't meaningfully unit-testable without mocking the filesystem.
+#[cfg(test)]
+mod resolve_provider_cli_path_readonly_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn unknown_provider_returns_none_without_touching_the_filesystem() {
+        assert!(resolve_provider_cli_path_readonly("not-a-real-provider-xyz").await.is_none());
+    }
+}
+
 #[cfg(test)]
 mod pull_call_semaphore_tests {
     use super::*;
@@ -1177,5 +1545,132 @@ mod sanitize_ambient_text_tests {
         // string while failing to match.
         let s = "\u{0130} think we should refactor this";
         assert_eq!(sanitize_ambient_text(s), s);
+    }
+}
+
+#[cfg(test)]
+mod preflight_input_tests {
+    use super::preflight_input_from_meta;
+
+    // ── resume-preflight meta extraction (reagent P1 on PR #2833) ────────
+    //
+    // The divergence these guard: the preflight must read every meta key with
+    // the SAME default the real spawn path uses, or it predicts a spawn that
+    // won't happen. Unit-testing `preflight` itself (as the rest of the suite
+    // does) can't catch that — it takes an explicit `PreflightInput`, so the
+    // extraction defaults are exactly the part those tests skip.
+
+    fn meta_of(pairs: &[(&str, serde_json::Value)]) -> crate::backend::obj::MetaMapType {
+        let mut m = crate::backend::obj::MetaMapType::new();
+        for (k, v) in pairs {
+            m.insert(k.to_string(), v.clone());
+        }
+        m
+    }
+
+    /// The regression itself: a Claude pane predating `agent_open.rs` writing
+    /// `agent:resume_flag`. The spawn attaches `--resume` via its own default,
+    /// so the preflight must not read this as "provider can't resume" and go
+    /// silent.
+    #[test]
+    fn absent_resume_flag_defaults_to_the_same_value_the_spawn_path_uses() {
+        let input = preflight_input_from_meta(&meta_of(&[]), None);
+        assert_eq!(
+            input.resume_flag, "--resume",
+            "must match agent_handlers/input.rs:400's default, or the preflight              reports Unknown for panes whose spawn really will --resume",
+        );
+    }
+
+    /// A provider that genuinely has no resume flag writes an explicit empty
+    /// string; that must survive as empty rather than being back-filled with
+    /// the default, or the preflight would claim resume support that isn't there.
+    #[test]
+    fn an_explicitly_empty_resume_flag_is_preserved_not_defaulted() {
+        let input = preflight_input_from_meta(&meta_of(&[("agent:resume_flag", serde_json::json!(""))]), None);
+        assert_eq!(input.resume_flag, "");
+    }
+
+    #[test]
+    fn an_explicit_resume_flag_is_read_verbatim() {
+        let input = preflight_input_from_meta(&meta_of(&[("agent:resume_flag", serde_json::json!("-r"))]), None);
+        assert_eq!(input.resume_flag, "-r");
+    }
+
+    #[test]
+    fn config_dir_is_read_out_of_the_cmd_env_map() {
+        let input = preflight_input_from_meta(&meta_of(&[(
+            "cmd:env",
+            serde_json::json!({ "CLAUDE_CONFIG_DIR": "/home/dev/.claude", "OTHER": "x" }),
+        )]), None);
+        assert_eq!(input.config_dir, "/home/dev/.claude");
+    }
+
+    /// No `cmd:env` at all, or no `CLAUDE_CONFIG_DIR` within it, must yield an
+    /// empty config dir — `preflight` turns that into `Unknown` and stays
+    /// silent, which is the correct posture when there's nowhere to look.
+    #[test]
+    fn a_missing_config_dir_is_empty_rather_than_a_guess() {
+        assert_eq!(preflight_input_from_meta(&meta_of(&[]), None).config_dir, "");
+        assert_eq!(
+            preflight_input_from_meta(&meta_of(&[("cmd:env", serde_json::json!({ "PATH": "/usr/bin" }))]), None)
+                .config_dir,
+            ""
+        );
+        assert_eq!(
+            preflight_input_from_meta(&meta_of(&[("cmd:env", serde_json::json!("not-an-object"))]), None).config_dir,
+            ""
+        );
+    }
+
+    #[test]
+    fn session_id_and_working_dir_default_to_empty() {
+        let input = preflight_input_from_meta(&meta_of(&[]), None);
+        assert_eq!(input.session_id, "");
+        assert_eq!(input.working_dir, "");
+
+        let input = preflight_input_from_meta(&meta_of(&[
+            ("agent:sessionid", serde_json::json!("sid-1")),
+            ("cmd:cwd", serde_json::json!("/work/dir")),
+        ]), None);
+        assert_eq!(input.session_id, "sid-1");
+        assert_eq!(input.working_dir, "/work/dir");
+    }
+
+    /// reagent P1 (second pass): an identity-bound pane's real config dir
+    /// comes from the identity resolver, never the `cmd:env` snapshot, so a
+    /// resolved dir must win outright — including when `cmd:env` disagrees.
+    #[test]
+    fn a_bound_identity_config_dir_overrides_the_cmd_env_snapshot() {
+        let meta = meta_of(&[(
+            "cmd:env",
+            serde_json::json!({ "CLAUDE_CONFIG_DIR": "/stale/from/spawn/snapshot" }),
+        )]);
+        let input = preflight_input_from_meta(
+            &meta,
+            Some(std::path::PathBuf::from("/identities/acct-7/claude")),
+        );
+        assert_eq!(
+            input.config_dir, "/identities/acct-7/claude",
+            "the identity-resolved dir is where the CLI will actually look",
+        );
+    }
+
+    /// …and a resolved dir must still win when there's no `cmd:env` at all.
+    #[test]
+    fn a_bound_identity_config_dir_is_used_with_no_cmd_env_present() {
+        let input = preflight_input_from_meta(
+            &meta_of(&[]),
+            Some(std::path::PathBuf::from("/identities/acct-9/claude")),
+        );
+        assert_eq!(input.config_dir, "/identities/acct-9/claude");
+    }
+
+    /// `None` means "not identity-bound, or not an OAuth provider" — for
+    /// those the `cmd:env` snapshot IS what the spawn uses, so it must still
+    /// be read rather than dropped.
+    #[test]
+    fn an_unbound_pane_still_falls_back_to_cmd_env() {
+        let meta = meta_of(&[("cmd:env", serde_json::json!({ "CLAUDE_CONFIG_DIR": "/home/dev/.claude" }))]);
+        assert_eq!(preflight_input_from_meta(&meta, None).config_dir, "/home/dev/.claude");
     }
 }

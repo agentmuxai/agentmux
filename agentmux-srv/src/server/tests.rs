@@ -1237,130 +1237,6 @@ async fn wps_publish_omits_persist_defaults_to_zero() {
     assert_eq!(resp.status(), StatusCode::OK);
 }
 
-// ---- compaction_started -> HealthMonitor wiring (SPEC_UNRESPONSIVE_FALSE_POSITIVE_DURING_COMPACTION_2026_08_22) ----
-
-/// Minimal test double: the only thing that matters is `health_monitor()`
-/// returning a real, inspectable `HealthMonitor`. Every other `Controller`
-/// method is a harmless no-op, mirroring `blockcontroller::mod`'s own
-/// `CountingController` test-double pattern.
-struct CompactionTestController {
-    block_id: String,
-    health: std::sync::Arc<crate::backend::blockcontroller::health::HealthMonitor>,
-}
-
-impl crate::backend::blockcontroller::Controller for CompactionTestController {
-    fn start(
-        &self,
-        _: crate::backend::obj::MetaMapType,
-        _: Option<serde_json::Value>,
-        _: bool,
-    ) -> Result<(), String> {
-        Ok(())
-    }
-    fn stop(&self, _graceful: bool, _new_status: &str) -> Result<(), String> {
-        Ok(())
-    }
-    fn get_runtime_status(&self) -> crate::backend::blockcontroller::BlockControllerRuntimeStatus {
-        crate::backend::blockcontroller::BlockControllerRuntimeStatus {
-            blockid: self.block_id.clone(),
-            ..Default::default()
-        }
-    }
-    fn send_input(
-        &self,
-        _: crate::backend::blockcontroller::BlockInputUnion,
-        _: Option<u64>,
-    ) -> Result<(), String> {
-        Ok(())
-    }
-    fn controller_type(&self) -> &str {
-        "test-compaction"
-    }
-    fn block_id(&self) -> &str {
-        &self.block_id
-    }
-    fn health_monitor(&self) -> Option<std::sync::Arc<crate::backend::blockcontroller::health::HealthMonitor>> {
-        Some(std::sync::Arc::clone(&self.health))
-    }
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
-/// A `compaction_started` publish for a block with a registered controller
-/// must reach that controller's own `HealthMonitor::set_compacting(true)` —
-/// the actual production wiring path (`agentmux-bashwrap precompact` → this
-/// HTTP endpoint → `get_controller` → `health_monitor()`), exercised
-/// end-to-end through the real router rather than calling `set_compacting`
-/// directly.
-#[tokio::test]
-async fn wps_publish_compaction_started_marks_the_target_blocks_health_monitor_compacting() {
-    let block_id = "test-compaction-wired-block";
-    let health = std::sync::Arc::new(crate::backend::blockcontroller::health::HealthMonitor::new(
-        block_id.to_string(),
-        None,
-        None,
-        None,
-    ));
-    let controller = std::sync::Arc::new(CompactionTestController {
-        block_id: block_id.to_string(),
-        health: health.clone(),
-    });
-    crate::backend::blockcontroller::register_controller(block_id, controller);
-
-    assert!(!health.is_compacting(), "precondition: not compacting yet");
-
-    let app = test_router();
-    let body = serde_json::json!({
-        "event": "compaction_started",
-        "scopes": [format!("block:{block_id}")],
-        "persist": 0,
-        "data": { "trigger": "auto", "sessionId": "sess-1", "startedAt": "2026-08-22T00:00:00Z" }
-    });
-    let req = Request::builder()
-        .method("POST")
-        .uri("/agentmux/wps/publish")
-        .header("X-AuthKey", "test-secret-key")
-        .header("Content-Type", "application/json")
-        .body(Body::from(body.to_string()))
-        .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-    assert!(health.is_compacting(), "compaction_started must reach the target block's HealthMonitor");
-
-    crate::backend::blockcontroller::delete_controller(block_id);
-}
-
-/// A `compaction_started` publish for a block with NO registered controller
-/// (unknown/stale block id) must still succeed — this is best-effort
-/// observability wiring, matching the `PreCompact` hook's own "never
-/// fail/delay the operation" contract; a missing controller must never turn
-/// into an HTTP error.
-#[tokio::test]
-async fn wps_publish_compaction_started_for_an_unregistered_block_is_a_harmless_no_op() {
-    // Deliberately never registered — assert_ne against the registry isn't
-    // needed; get_controller returning None is exactly the case under test.
-    let block_id = "test-compaction-unregistered-block-xyz";
-    assert!(crate::backend::blockcontroller::get_controller(block_id).is_none());
-
-    let app = test_router();
-    let body = serde_json::json!({
-        "event": "compaction_started",
-        "scopes": [format!("block:{block_id}")],
-        "persist": 0,
-        "data": { "trigger": "manual", "sessionId": "", "startedAt": "2026-08-22T00:00:00Z" }
-    });
-    let req = Request::builder()
-        .method("POST")
-        .uri("/agentmux/wps/publish")
-        .header("X-AuthKey", "test-secret-key")
-        .header("Content-Type", "application/json")
-        .body(Body::from(body.to_string()))
-        .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK, "an unregistered block id must not fail the publish");
-}
-
 // ---- First-class agent API (SPEC_AGENT_API_FIRST_CLASS_SURFACE) ----
 
 /// `GET /api/v1/self` resolves the seeded agent block to its tab / window /
@@ -1887,7 +1763,7 @@ async fn layout_seeders_route_through_reducer_coherently() {
         })
         .unwrap();
 
-    // ── three-pane seed (the CreateWindow post-bootstrap path) ──
+    // ── four-pane seed (the CreateWindow post-bootstrap path) ──
     let tab_evs = dispatch_apply(
         &state,
         Command::CreateTab {
@@ -1909,30 +1785,30 @@ async fn layout_seeders_route_through_reducer_coherently() {
     // reducer-routed seeders — see
     // docs/investigations/INVESTIGATION_LAYOUT_DEAD_SPACE_STALE_TREE_RESURRECTION_2026_07_08.md)
     // now prunes any seeded leaf whose block_id isn't live.
-    for bid in ["b-agent", "b-sysinfo", "b-swarm"] {
+    for bid in ["b-agent", "b-swarm", "b-armory", "b-sysinfo"] {
         srv_state.lock().await.blocks.insert(
             bid.to_string(),
             crate::state::BlockRecord { block_id: bid.to_string(), tab_id: tab1.clone() },
         );
     }
     let (tree, focused, leaforder) =
-        crate::backend::wcore::default_three_pane_tree("b-agent", "b-sysinfo", "b-swarm");
+        crate::backend::wcore::default_four_pane_tree("b-agent", "b-swarm", "b-armory", "b-sysinfo");
     crate::server::service::seed_layout_via_reducer(
         &state, &tab1, tree, focused, leaforder, String::new(),
     )
     .await
-    .expect("three-pane seed via reducer");
+    .expect("four-pane seed via reducer");
 
     let layout_oid = wstore.get::<Tab>(&tab1).unwrap().unwrap().layoutstate;
     let row = wstore.get::<LayoutState>(&layout_oid).unwrap().unwrap();
-    assert_eq!(row.leaforder.as_ref().unwrap().len(), 3);
+    assert_eq!(row.leaforder.as_ref().unwrap().len(), 4);
     assert!(!row.focusednodeid.is_empty(), "focus persisted");
     {
         let s = srv_state.lock().await;
         let rec = s.tabs.get(&tab1).expect("reducer knows tab1");
         assert_eq!(
             rec.rootnode, row.rootnode,
-            "TabRecord == db_layout after three-pane seed"
+            "TabRecord == db_layout after four-pane seed"
         );
         assert_eq!(rec.focused_node_id, row.focusednodeid);
     }
@@ -1983,7 +1859,7 @@ async fn layout_seeders_route_through_reducer_coherently() {
 async fn layout_seed_unknown_tab_errors() {
     let state = test_state();
     let (tree, focused, leaforder) =
-        crate::backend::wcore::default_three_pane_tree("a", "b", "c");
+        crate::backend::wcore::default_four_pane_tree("a", "b", "c", "d");
     let err = crate::server::service::seed_layout_via_reducer(
         &state, "ghost-tab", tree, focused, leaforder, String::new(),
     )
@@ -2664,15 +2540,15 @@ mod fleet_tests {
         assert_eq!(good_outcome_count, 1, "the registered target must produce exactly one outcome");
     }
 
-    fn stop_result(state: &AppState, targets: Vec<String>, staged: Option<StagePlanInput>) -> FleetActionResult {
-        fleet_bulk_stop_impl(state, targets, None, staged)
+    async fn stop_result(state: &AppState, targets: Vec<String>, staged: Option<StagePlanInput>) -> FleetActionResult {
+        fleet_bulk_stop_impl(state, targets, None, staged).await
     }
 
     #[tokio::test]
     async fn bulk_stop_reports_a_failure_per_target_with_no_live_controller() {
         let state = test_state();
         let targets = vec!["blk-a".to_string(), "blk-b".to_string(), "blk-c".to_string()];
-        let result = stop_result(&state, targets.clone(), None);
+        let result = stop_result(&state, targets.clone(), None).await;
 
         assert!(result.succeeded.is_empty());
         assert_eq!(result.failed.len(), 3);
@@ -2697,7 +2573,7 @@ mod fleet_tests {
             &state,
             targets.clone(),
             Some(StagePlanInput { batch_size: 2, max_fail_percentage: 50 }),
-        );
+        ).await;
 
         assert!(result.aborted_early);
         assert!(result.succeeded.is_empty());
@@ -2725,7 +2601,7 @@ mod fleet_tests {
             &state,
             targets.clone(),
             Some(StagePlanInput { batch_size: 2, max_fail_percentage: 100 }),
-        );
+        ).await;
 
         assert!(!result.aborted_early);
         assert_eq!(result.failed.len(), 5);
@@ -2748,7 +2624,7 @@ mod fleet_tests {
             &state,
             targets.clone(),
             Some(StagePlanInput { batch_size: 5, max_fail_percentage: 50 }),
-        );
+        ).await;
 
         assert_eq!(result.failed.len(), 5, "every target was still attempted");
         for f in &result.failed {
@@ -2780,7 +2656,7 @@ mod fleet_tests {
         let block_id = format!("fleet-audit-block-{unique}");
         state.reactive_handler.register_agent(&agent_id, &block_id, None).unwrap();
 
-        let _ = stop_result(&state, vec![block_id.clone()], None);
+        let _ = stop_result(&state, vec![block_id.clone()], None).await;
         let matching: Vec<_> = state
             .reactive_handler
             .get_audit_log(10_000)
@@ -2893,6 +2769,208 @@ mod fleet_tests {
             .unwrap()
             .unwrap();
         assert!(!resp.error.is_empty(), "updating a nonexistent group must error, not silently no-op");
+    }
+
+    // ── Cross-channel bulk-stop forward
+    // (SPEC_FLEET_BULK_STOP_CROSS_CHANNEL_2026_08_22.md) ──────────────────
+
+    use crate::server::app_api::fleet::forward_stop_to_shared_channel;
+
+    /// Serializes every test in this sub-block that mutates the
+    /// process-global `AGENTMUX_HOME_OVERRIDE` env var (which
+    /// `resolve_shared_reactive_dir` reads) — same lock already used
+    /// elsewhere in this crate for this exact var (e.g.
+    /// `identity::resolver::inject`'s tests), not a new one, per
+    /// `test_support::ISOLATED_AUTH_ENV_LOCK`'s own doc comment about
+    /// avoiding a proliferation of module-local locks around shared env
+    /// vars.
+    fn home_override_guard() -> std::sync::MutexGuard<'static, ()> {
+        crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Write an `AgentEntry` directly (not via `registry::write_shared`,
+    /// which always stamps `local_auth_key()` — a process-global `OnceLock`
+    /// this test can't control) so tests can assert on a SPECIFIC auth_key
+    /// value being forwarded. Layout only needs to satisfy
+    /// `list_all_shared`'s generic "any `*.json` file under a subdirectory
+    /// of `shared_dir`" walk, not `write_shared`'s own path convention.
+    fn write_raw_shared_entry(
+        shared_dir: &std::path::Path,
+        agent_id: &str,
+        local_url: &str,
+        block_id: &str,
+        auth_key: &str,
+    ) {
+        let dir = shared_dir.join(agent_id);
+        std::fs::create_dir_all(&dir).unwrap();
+        let entry = crate::backend::reactive::registry::AgentEntry {
+            agent_id: agent_id.to_string(),
+            local_url: local_url.to_string(),
+            block_id: block_id.to_string(),
+            pid: std::process::id(),
+            updated_at: 0,
+            auth_key: auth_key.to_string(),
+            channel: "test-channel".to_string(),
+            registration_nonce: 0,
+        };
+        std::fs::write(dir.join("test-channel.json"), serde_json::to_string(&entry).unwrap()).unwrap();
+    }
+
+    /// Fake `/agentmux/agent/stop` responder — records the `X-AuthKey`
+    /// header it received (or `None`) and returns `response_body` verbatim.
+    /// Mirrors `spawn_fake_browser_api`'s established pattern (raw TCP +
+    /// hand-built HTTP response — no real CEF host needed).
+    async fn spawn_fake_agent_stop_endpoint(
+        response_body: &'static str,
+    ) -> (String, std::sync::Arc<std::sync::Mutex<Option<String>>>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let received_auth: std::sync::Arc<std::sync::Mutex<Option<String>>> = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let received_auth_clone = received_auth.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else { return };
+                let received_auth = received_auth_clone.clone();
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    let mut buf = [0u8; 4096];
+                    let Ok(n) = stream.read(&mut buf).await else { return };
+                    let req = String::from_utf8_lossy(&buf[..n]);
+                    let auth = req
+                        .lines()
+                        .find_map(|l| l.strip_prefix("X-AuthKey: ").or_else(|| l.strip_prefix("x-authkey: ")))
+                        .map(|v| v.trim_end_matches('\r').to_string());
+                    *received_auth.lock().unwrap() = auth;
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        response_body.len(),
+                        response_body
+                    );
+                    let _ = stream.write_all(resp.as_bytes()).await;
+                });
+            }
+        });
+        (format!("http://127.0.0.1:{port}"), received_auth)
+    }
+
+    #[tokio::test]
+    async fn forward_stop_returns_none_when_shared_registry_has_no_matching_entry() {
+        let _guard = home_override_guard();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        let state = test_state();
+
+        let result = forward_stop_to_shared_channel(&state, "no-such-block", None).await;
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+
+        assert!(result.is_none(), "no matching shared entry must fall through to the caller's local-error path");
+    }
+
+    #[tokio::test]
+    async fn forward_stop_ignores_a_non_loopback_entry() {
+        let _guard = home_override_guard();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        let shared_dir = tmp.path().join("shared").join("agents").join("reactive");
+        let unique = uuid::Uuid::new_v4();
+        let block_id = format!("blk-remote-{unique}");
+        // A real IP, not loopback — must never be treated as a same-host
+        // cross-channel peer (this is the same defense-in-depth check
+        // `server/reactive.rs`'s inject cascade already applies).
+        write_raw_shared_entry(&shared_dir, "remote-agent", "http://203.0.113.5:9999", &block_id, "some-key");
+        let state = test_state();
+
+        let result = forward_stop_to_shared_channel(&state, &block_id, None).await;
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+
+        assert!(result.is_none(), "a non-loopback entry must never be forwarded to");
+    }
+
+    #[tokio::test]
+    async fn forward_stop_ignores_a_stale_self_entry() {
+        let _guard = home_override_guard();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        let shared_dir = tmp.path().join("shared").join("agents").join("reactive");
+        let unique = uuid::Uuid::new_v4();
+        let block_id = format!("blk-self-{unique}");
+        let mut state = test_state();
+        state.local_web_url = "http://127.0.0.1:12345".to_string();
+        // An entry whose local_url IS this instance's own — a stale
+        // self-registration from a prior crash, not a real peer.
+        write_raw_shared_entry(&shared_dir, "self-agent", &state.local_web_url.clone(), &block_id, "some-key");
+
+        let result = forward_stop_to_shared_channel(&state, &block_id, None).await;
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+
+        assert!(result.is_none(), "a stale self-entry must never be forwarded to (would be forwarding to itself)");
+    }
+
+    #[tokio::test]
+    async fn forward_stop_succeeds_against_a_real_loopback_peer_with_its_own_auth_key() {
+        let _guard = home_override_guard();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        let shared_dir = tmp.path().join("shared").join("agents").join("reactive");
+        let unique = uuid::Uuid::new_v4();
+        let block_id = format!("blk-peer-{unique}");
+        let (peer_url, received_auth) =
+            spawn_fake_agent_stop_endpoint(r#"{"success":true,"result":{"block_id":"x","status":"done"}}"#).await;
+        write_raw_shared_entry(&shared_dir, "peer-agent", &peer_url, &block_id, "peer-secret-key");
+        let state = test_state();
+
+        let result = forward_stop_to_shared_channel(&state, &block_id, None).await;
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+
+        let (agent_name, outcome) = result.expect("a loopback entry must be forwarded to");
+        assert_eq!(agent_name, "peer-agent");
+        assert!(outcome.is_ok(), "a success:true response must resolve Ok: {outcome:?}");
+        assert_eq!(
+            received_auth.lock().unwrap().as_deref(),
+            Some("peer-secret-key"),
+            "the peer's OWN auth_key (from the registry entry) must be sent, not this instance's"
+        );
+    }
+
+    #[tokio::test]
+    async fn forward_stop_propagates_a_peer_side_failure() {
+        let _guard = home_override_guard();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        let shared_dir = tmp.path().join("shared").join("agents").join("reactive");
+        let unique = uuid::Uuid::new_v4();
+        let block_id = format!("blk-fail-{unique}");
+        let (peer_url, _received_auth) =
+            spawn_fake_agent_stop_endpoint(r#"{"success":false,"error":"NOT_RUNNING: no controller for block x"}"#).await;
+        write_raw_shared_entry(&shared_dir, "peer-agent", &peer_url, &block_id, "peer-secret-key");
+        let state = test_state();
+
+        let result = forward_stop_to_shared_channel(&state, &block_id, None).await;
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+
+        let (_agent_name, outcome) = result.expect("a loopback entry must still be forwarded to");
+        let err = outcome.expect_err("a success:false response must resolve Err");
+        assert!(err.contains("NOT_RUNNING"), "the peer's own error text must propagate: {err}");
+    }
+
+    #[tokio::test]
+    async fn bulk_stop_reaches_a_target_only_present_in_the_shared_cross_channel_registry() {
+        let _guard = home_override_guard();
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("AGENTMUX_HOME_OVERRIDE", tmp.path());
+        let shared_dir = tmp.path().join("shared").join("agents").join("reactive");
+        let unique = uuid::Uuid::new_v4();
+        let block_id = format!("blk-e2e-{unique}");
+        let (peer_url, _received_auth) =
+            spawn_fake_agent_stop_endpoint(r#"{"success":true,"result":{"block_id":"x","status":"done"}}"#).await;
+        write_raw_shared_entry(&shared_dir, "peer-agent-e2e", &peer_url, &block_id, "peer-secret-key");
+        let state = test_state();
+
+        let result = fleet_bulk_stop_impl(&state, vec![block_id.clone()], None, None).await;
+        std::env::remove_var("AGENTMUX_HOME_OVERRIDE");
+
+        assert_eq!(result.succeeded, vec![block_id], "a target absent from THIS instance's own registry, but present cross-channel, must succeed via the forward — not fail with NOT_RUNNING");
+        assert!(result.failed.is_empty());
     }
 }
 

@@ -4,14 +4,16 @@
 /**
  * Pure config-synthesis helpers extracted from agent-model.ts (see
  * docs/specs — modularization pass, 2026-07-23). These build the
- * CLAUDE.md / .claude/settings.json / .mcp.json content written into a
- * freshly-launched agent's working directory.
+ * startup-instructions-file (CLAUDE.md/AGENTS.md/GEMINI.md/...) /
+ * .claude/settings.json / .mcp.json content written into a freshly-launched
+ * agent's working directory.
  *
  * Pure functions only: no `this`, no RpcApi calls, no SolidJS. Callers
  * (agent-model.ts's `launchAgentDefinition`) own all I/O.
  */
 
 import { Logger } from "@/util/logger";
+import { PROVIDERS, resolveProviderAlias } from "./providers";
 
 /**
  * `skill_type` value that materializes a skill as an Agent Skills-format
@@ -23,23 +25,32 @@ const SKILL_TYPE_AGENT_SKILL = "agent-skill";
 
 /**
  * Build the list of config files to write to the agent working directory.
- * Assembles CLAUDE.md from soul + agentmd + memory + skills index,
- * writes each skill as a slash command in .claude/commands/ (or an Agent
- * Skills-format SKILL.md under .claude/skills/, for skill_type ===
- * SKILL_TYPE_AGENT_SKILL), writes hooks.json if present, auto-injects
- * AgentMux MCP server, and applies template variable substitution.
+ * Assembles the startup instructions file (CLAUDE.md, AGENTS.md,
+ * GEMINI.md, ... — resolved per `providerId` via
+ * `PROVIDERS[providerId]?.startupInstructionsFilename`; see
+ * docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md) from
+ * soul + agentmd + memory + skills index, writes each skill as a slash
+ * command in .claude/commands/ (or an Agent Skills-format SKILL.md under
+ * .claude/skills/, for skill_type === SKILL_TYPE_AGENT_SKILL), writes
+ * hooks.json if present, auto-injects AgentMux MCP server, and applies
+ * template variable substitution. An omitted/unrecognized `providerId`
+ * falls back to `"claude"` (`CLAUDE.md`) — the pre-existing default for
+ * every call site that predates this parameter, so adding it is
+ * non-breaking; only a provider explicitly resolved to no native file
+ * (currently only `kimi`) gets no instructions file written.
  */
 export function buildConfigFiles(
     contentMap: Record<string, string>,
     skills: AgentSkill[] = [],
     agent?: AgentDefinition,
     instanceName?: string,
+    providerId?: string,
 ): AgentConfigFile[] {
     const files: AgentConfigFile[] = [];
 
     // Template variables for {{}} substitution. `AGENT` / `AGENT_DISPLAY`
     // prefer the resolved instance name so templates that reference
-    // the agent identity (CLAUDE.md, skills) match what the shell
+    // the agent identity (startup instructions file, skills) match what the shell
     // and MCP advertise for this run.
     const templateVars: Record<string, string> = {};
     if (agent) {
@@ -52,33 +63,43 @@ export function buildConfigFiles(
     }
     templateVars["DATE"] = new Date().toISOString().slice(0, 10);
 
-    // Build CLAUDE.md content: Soul + AgentMD + Memory + Skills Index
-    const claudeMdParts: string[] = [];
+    // Build the startup instructions file content: Soul + AgentMD + Memory + Skills Index
+    const instructionsParts: string[] = [];
     if (contentMap["soul"]) {
-        claudeMdParts.push(expandTemplate(contentMap["soul"], templateVars));
+        instructionsParts.push(expandTemplate(contentMap["soul"], templateVars));
     }
     if (contentMap["agentmd"]) {
-        if (claudeMdParts.length > 0) claudeMdParts.push("\n---\n");
-        claudeMdParts.push(expandTemplate(contentMap["agentmd"], templateVars));
+        if (instructionsParts.length > 0) instructionsParts.push("\n---\n");
+        instructionsParts.push(expandTemplate(contentMap["agentmd"], templateVars));
     }
     if (contentMap["memory"]) {
-        claudeMdParts.push("\n# Memory\n");
-        claudeMdParts.push(contentMap["memory"]);
+        instructionsParts.push("\n# Memory\n");
+        instructionsParts.push(contentMap["memory"]);
     }
 
     // Append skill index with trigger references
     if (skills.length > 0) {
-        claudeMdParts.push("\n# Available Skills\n\n");
-        claudeMdParts.push("Use `/<trigger>` to invoke a skill.\n\n");
+        instructionsParts.push("\n# Available Skills\n\n");
+        instructionsParts.push("Use `/<trigger>` to invoke a skill.\n\n");
         for (const skill of skills) {
             const triggerPart = skill.trigger ? ` (trigger: /${skill.trigger})` : "";
             const descPart = skill.description ? ` — ${skill.description}` : "";
-            claudeMdParts.push(`- **${skill.name}**${triggerPart}${descPart}\n`);
+            instructionsParts.push(`- **${skill.name}**${triggerPart}${descPart}\n`);
         }
     }
 
-    if (claudeMdParts.length > 0) {
-        files.push({ path: "CLAUDE.md", content: claudeMdParts.join("") });
+    // Resolved per-provider (docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md).
+    // An omitted providerId falls back to "claude" (CLAUDE.md) — backward
+    // compatible with every pre-existing call site that predates this
+    // parameter. An explicitly-passed but unrecognized providerId, or one
+    // resolved to a provider with no confirmed native file (currently only
+    // kimi), gets no instructions file — never a silent CLAUDE.md fallback
+    // that could mask a typo'd provider ID.
+    const resolvedProviderId = providerId ?? "claude";
+    const providerDef = PROVIDERS[resolvedProviderId] ?? PROVIDERS[resolveProviderAlias(resolvedProviderId)];
+    const instructionsFilename = providerDef?.startupInstructionsFilename;
+    if (instructionsParts.length > 0 && instructionsFilename) {
+        files.push({ path: instructionsFilename, content: instructionsParts.join("") });
     }
 
     // Write each skill as either a slash command (.claude/commands/{trigger}.md,

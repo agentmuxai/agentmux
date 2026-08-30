@@ -1,0 +1,138 @@
+name: Nightly Release — Auto-Publish Pending Version Bump (manual fallback)
+
+# HISTORY: this workflow originally auto-tagged the latest pending
+# `chore: release vX.Y.Z` commit via a `workflow_run` trigger chained off
+# another nightly workflow's completion. Confirmed (via direct GitHub API
+# investigation — see docs/reports/REPORT_NIGHTLY_RELEASE_STUCK_AT_0_55_21_2026_08_24.md)
+# that trigger never fired automatically, even once, despite every
+# checkable precondition (name match, listener present on `main` well
+# before the upstream run, upstream run itself succeeding) being satisfied.
+#
+# The actual automated tag-and-publish responsibility now lives in
+# a5af/shared-infrastructure's gh-reporter Lambda instead — it already runs
+# reliably on its own AWS EventBridge schedule (every 30 min, not just
+# nightly) and already has the GitHub API credentials this needs. See
+# a5af/shared-infrastructure's docs/specs/GH_REPORTER_RELEASE_AUTO_TAG_SPEC_2026_08_24.md
+# for the design, and docs/specs/SPEC_NIGHTLY_RELEASE_CHANNEL_2026_08_23.md
+# in this repo for the original (now superseded, for the tagging half only)
+# design.
+#
+# This workflow is KEPT, not deleted, as a manual escape hatch — e.g. if
+# gh-reporter's Lambda or its PAT is ever down, someone can still run this
+# by hand (Actions tab → "Run workflow") exactly as it always worked. The
+# automatic `workflow_run` trigger is removed rather than left in place:
+# leaving two independent "automatic" taggers active would be redundant
+# (harmless in the common case — the second one just finds "already
+# tagged" and no-ops — but confusing) now that gh-reporter is the one that
+# actually works.
+#
+# It does NOT run `task release`, does NOT touch .changesets/, and does NOT
+# decide a version bump — it only finds the most recent `chore: release`
+# commit on main and tags it if (and only if) that tag doesn't exist yet.
+#
+# REQUIRES repo secret NIGHTLY_TAG_PAT: a PAT (contents:write is enough)
+# belonging to a service/bot identity — NOT a stand-in for the default
+# GITHUB_TOKEN. GitHub does not allow a push/tag event made by the default
+# GITHUB_TOKEN to trigger *other* workflows' `on: push` listeners (the
+# anti-recursion guard) — if this workflow pushed the tag using
+# GITHUB_TOKEN, release.yml and container-image.yml would silently never
+# fire.
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# Two overlapping manual `workflow_dispatch` runs could both read the same
+# untagged pending release and race to tag/push it — the second push would
+# just fail (tag already exists) rather than corrupt anything, but it's an
+# easily-avoided race for a job with a push side effect. Queue rather than
+# cancel — killing a run mid-push could leave a tag pushed with no
+# corresponding downstream build ever having started. This guard predates
+# the removal of the automatic workflow_run trigger below, but stays —
+# cheap insurance regardless of how many trigger types remain.
+concurrency:
+  group: nightly-release
+  cancel-in-progress: false
+
+jobs:
+  detect-and-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main (full history)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          # actions/checkout otherwise leaves a git-config extraheader
+          # (Authorization: token <GITHUB_TOKEN>) for github.com that
+          # silently overrides the URL-embedded NIGHTLY_TAG_PAT credential
+          # used by the push step below — a well-known checkout gotcha for
+          # any job that needs to push with a different identity than the
+          # default token. Without this, the push would authenticate as
+          # GITHUB_TOKEN (read-only per this job's `permissions:` block)
+          # and fail every run.
+          persist-credentials: false
+
+      - name: Find latest pending release commit and tag it if needed
+        env:
+          NIGHTLY_TAG_PAT: ${{ secrets.NIGHTLY_TAG_PAT }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Filter on the formatted SUBJECT only, not `git log --grep`,
+          # which matches anywhere in the full commit message — a merge
+          # commit whose body happens to mention an old release title
+          # (real example in this repo's history: 919b9327, "Merge pull
+          # request #1983 from .../release-v0.50.3", whose body's second
+          # line is "chore: release v0.50.3") would otherwise be selected
+          # ahead of the actual latest release commit.
+          match=$(git log HEAD --format='%H%x09%s' | grep -m1 -E $'\tchore: release v[0-9]+\\.[0-9]+\\.[0-9]+' || true)
+          if [ -z "$match" ]; then
+            echo "No \`chore: release\` commit found on main at all — nothing to do." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          sha="${match%%$'\t'*}"
+          subject="${match#*$'\t'}"
+          version=$(grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' <<<"$subject" || true)
+
+          if [ -z "$version" ]; then
+            echo "Found a release commit but couldn't parse a version out of its subject: \`$subject\`" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          # persist-credentials: false (above) means `origin` has no auth
+          # configured, so this read must authenticate itself explicitly
+          # rather than relying on an anonymous request. Falls back to a
+          # plain `origin` read only when NIGHTLY_TAG_PAT isn't set yet
+          # (bootstrap period) — works today since this repo is public, but
+          # an authenticated read is correct regardless of that and doesn't
+          # depend on the repo staying public.
+          if [ -n "${NIGHTLY_TAG_PAT:-}" ]; then
+            remote="https://x-access-token:${NIGHTLY_TAG_PAT}@github.com/${REPO}.git"
+          else
+            remote="origin"
+          fi
+
+          if git ls-remote --exit-code --tags "$remote" "refs/tags/${version}" >/dev/null 2>&1; then
+            echo "Latest release commit (\`${version}\`, \`${sha:0:9}\`) is already tagged — nothing pending. Skipping." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if [ -z "${NIGHTLY_TAG_PAT:-}" ]; then
+            echo "::error::Found untagged pending release ${version} (${sha:0:9}), but NIGHTLY_TAG_PAT is not set — cannot push a tag that will trigger release.yml/container-image.yml (the default GITHUB_TOKEN can't do this, see this file's header comment)." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          echo "Tagging ${sha:0:9} as ${version}" | tee -a "$GITHUB_STEP_SUMMARY"
+          git config user.name "agentmux-nightly-release"
+          git config user.email "nightly-release@agentmux.ai"
+          git tag -a "$version" "$sha" -m "Release ${version} (nightly automation)"
+          # $remote is guaranteed PAT-authenticated here — the NIGHTLY_TAG_PAT
+          # empty-check above already exited if it weren't set.
+          git push "$remote" "$version"
+
+          echo "Pushed tag \`${version}\` — release.yml and container-image.yml should start momentarily." | tee -a "$GITHUB_STEP_SUMMARY"

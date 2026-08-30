@@ -71,6 +71,7 @@ mod resolve_vendor_env_override_tests {
 
     fn base_agent(model_vendor_base_url: &str) -> AgentDefinition {
         AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "a1".to_string(),
             slug: "a1".to_string(),
             name: "T".to_string(),
@@ -629,18 +630,10 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                             });
                         }
                     }
-                    for update in &updates {
-                        let oref = format!("{}:{}", update.otype, update.oid);
-                        if let Ok(data) = serde_json::to_value(update) {
-                            event_bus.broadcast_event(
-                                &crate::backend::eventbus::WSEventType {
-                                    eventtype: "waveobj:update".to_string(),
-                                    oref,
-                                    data: Some(data),
-                                },
-                            );
-                        }
-                    }
+                    // One batched frame so the renderer applies all of them in
+                    // a single reactive flush — see
+                    // EventBus::broadcast_wave_obj_updates.
+                    event_bus.broadcast_wave_obj_updates(&updates);
                 }
 
                 Ok(Some(serde_json::to_value(&AgentOpenResult {
@@ -732,6 +725,7 @@ pub(super) fn write_agent_config_files(
         &agent.id,
         agent_slug,
         work_dir,
+        &agent.provider,
     );
 
     // v1 MCP: same rule. Globals + synthetic "agentmux" are always emitted; the
@@ -863,6 +857,21 @@ pub(super) fn write_agent_config_files(
             );
             continue;
         };
+        // Every OTHER provider's startup-instructions filename (AGENTS.md,
+        // GEMINI.md, QWEN.md, .pi/APPEND_SYSTEM.md) never overwrites a
+        // pre-existing file — codex P1, PR #2788: unlike CLAUDE.md's full
+        // ownership-aware materialization above, this is a plain
+        // exists-guard (see write_startup_instructions_respecting_existing's
+        // own doc comment for why a fuller mechanism isn't attempted here).
+        if crate::backend::providers::is_known_startup_instructions_filename(&file.filename) {
+            crate::backend::agent_config::write_startup_instructions_respecting_existing(
+                base_path,
+                &file.filename,
+                &file.content,
+            )
+            .map_err(|e| format!("failed to write {}: {e}", file.filename))?;
+            continue;
+        }
         if let Some(parent) = file_path.parent() {
             if !parent.exists() {
                 let _ = std::fs::create_dir_all(parent);
@@ -895,6 +904,7 @@ mod write_agent_config_files_tests {
 
     fn make_agent(id: &str, working_directory: &str) -> AgentDefinition {
         AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: id.to_string(),
             slug: String::new(),
             name: "Test Agent".to_string(),
@@ -1079,6 +1089,7 @@ mod write_agent_config_files_tests {
                 sort_order: 0,
                 created_at: 1_700_000_000_000,
                 updated_at: 1_700_000_000_000,
+                is_system: false,
             })
             .unwrap();
         wstore

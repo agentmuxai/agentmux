@@ -313,9 +313,11 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
             .await;
             emit_client_singleton(&wstore, &event_bus, "SrvWindowOpened").await;
         }
+        // Parent (Client singleton) update first, window delete second —
+        // same delete-ordering rationale as the TabDeleted arm below.
         Event::SrvWindowClosed { window_id, .. } => {
-            emit_delete(&event_bus, OTYPE_WINDOW, &window_id);
             emit_client_singleton(&wstore, &event_bus, "SrvWindowClosed").await;
+            emit_delete(&event_bus, OTYPE_WINDOW, &window_id);
         }
 
         // ----- Tab (Phase 2) -----
@@ -333,16 +335,26 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
             )
             .await;
         }
+        // Delete ordering: PARENT UPDATE FIRST, child delete second — the
+        // reverse of the create arms above. These are two separate WS
+        // frames the renderer applies (and paints) independently; if the
+        // tab delete lands first, the still-mounted <Tab>'s own signal
+        // goes null and it blanks in place for a paint before the
+        // workspace update finally unmounts it (the §6 flash of
+        // SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md, riding in
+        // through the WS push path — §7). Parent-first, the component
+        // unmounts with its data still intact and the late child delete
+        // touches an unsubscribed signal — nothing paints.
         Event::TabDeleted {
             workspace_id,
             tab_id,
             ..
         } => {
-            emit_delete(&event_bus, OTYPE_TAB, &tab_id);
             emit_fetched::<Workspace>(
                 &wstore, &event_bus, OTYPE_WORKSPACE, workspace_id, "TabDeleted parent",
             )
             .await;
+            emit_delete(&event_bus, OTYPE_TAB, &tab_id);
         }
         Event::TabRenamed { tab_id, .. } | Event::TabMetaUpdated { tab_id, .. } => {
             emit_fetched::<Tab>(&wstore, &event_bus, OTYPE_TAB, tab_id, "Tab*").await;
@@ -398,14 +410,16 @@ async fn dispatch_event(event: Event, wstore: Arc<Store>, event_bus: Arc<EventBu
             )
             .await;
         }
+        // Parent update first, block delete second — same delete-ordering
+        // rationale as the TabDeleted arm above.
         Event::BlockDeleted {
             tab_id, block_id, ..
         } => {
-            emit_delete(&event_bus, OTYPE_BLOCK, &block_id);
             emit_fetched::<Tab>(
                 &wstore, &event_bus, OTYPE_TAB, tab_id, "BlockDeleted parent",
             )
             .await;
+            emit_delete(&event_bus, OTYPE_BLOCK, &block_id);
         }
         Event::BlockMetaUpdated { block_id, .. } => {
             emit_fetched::<Block>(
@@ -549,5 +563,151 @@ async fn run_wave_obj_bridge(
                 return;
             }
         }
+    }
+}
+
+// ====================================================================
+// Tests
+// ====================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::obj::{MetaMapType, Workspace};
+
+    fn test_workspace(oid: &str, tabids: Vec<String>) -> Workspace {
+        Workspace {
+            oid: oid.to_string(),
+            version: 1,
+            name: "test-ws".to_string(),
+            tabids,
+            pinnedtabids: vec![],
+            activetabid: String::new(),
+            meta: MetaMapType::new(),
+        }
+    }
+
+    fn test_tab(oid: &str) -> Tab {
+        Tab {
+            oid: oid.to_string(),
+            version: 1,
+            name: "test-tab".to_string(),
+            layoutstate: String::new(),
+            blockids: vec![],
+            meta: MetaMapType::new(),
+        }
+    }
+
+    /// SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md §7: the bridge's
+    /// TabDeleted arm must broadcast the PARENT workspace update BEFORE the
+    /// tab delete. These are two separate WS frames the renderer applies
+    /// (and paints) independently — delete-first blanks the still-mounted
+    /// <Tab> in place for a paint before the workspace update unmounts it.
+    #[tokio::test]
+    async fn test_tab_deleted_broadcasts_parent_update_before_tab_delete() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
+        let event_bus = Arc::new(EventBus::new());
+
+        let ws_id = "11111111-1111-1111-1111-111111111111";
+        let deleted_tab_id = "22222222-2222-2222-2222-222222222222";
+        let surviving_tab_id = "33333333-3333-3333-3333-333333333333";
+        // Post-delete state: the workspace no longer lists the deleted tab.
+        let mut ws = test_workspace(ws_id, vec![surviving_tab_id.to_string()]);
+        wstore.insert(&mut ws).unwrap();
+
+        let mut receivers = event_bus.register_ws("test-conn", "test-tab");
+
+        dispatch_event(
+            Event::TabDeleted {
+                workspace_id: ws_id.to_string(),
+                tab_id: deleted_tab_id.to_string(),
+                block_ids: vec![],
+                version: 1,
+            },
+            Arc::clone(&wstore),
+            Arc::clone(&event_bus),
+        )
+        .await;
+
+        let first = tokio::time::timeout(std::time::Duration::from_secs(2), receivers.priority.recv())
+            .await
+            .expect("timed out waiting for first broadcast")
+            .expect("priority channel closed");
+        assert_eq!(first.get("eventtype").and_then(|v| v.as_str()), Some("waveobj:update"));
+        assert_eq!(
+            first.get("oref").and_then(|v| v.as_str()),
+            Some(format!("workspace:{ws_id}").as_str()),
+            "first frame must be the parent workspace update, got: {first}"
+        );
+        assert_eq!(
+            first.get("data").and_then(|d| d.get("updatetype")).and_then(|v| v.as_str()),
+            Some("update"),
+        );
+
+        let second = tokio::time::timeout(std::time::Duration::from_secs(2), receivers.priority.recv())
+            .await
+            .expect("timed out waiting for second broadcast")
+            .expect("priority channel closed");
+        assert_eq!(
+            second.get("oref").and_then(|v| v.as_str()),
+            Some(format!("tab:{deleted_tab_id}").as_str()),
+            "second frame must be the tab delete, got: {second}"
+        );
+        assert_eq!(
+            second.get("data").and_then(|d| d.get("updatetype")).and_then(|v| v.as_str()),
+            Some("delete"),
+        );
+    }
+
+    /// Same delete-ordering contract for BlockDeleted: parent tab update
+    /// first, block delete second.
+    #[tokio::test]
+    async fn test_block_deleted_broadcasts_parent_update_before_block_delete() {
+        let tmp = tempfile::tempdir().unwrap();
+        let wstore = Arc::new(Store::open(&tmp.path().join("objects.db")).unwrap());
+        let event_bus = Arc::new(EventBus::new());
+
+        let tab_id = "44444444-4444-4444-4444-444444444444";
+        let deleted_block_id = "55555555-5555-5555-5555-555555555555";
+        let mut tab = test_tab(tab_id);
+        wstore.insert(&mut tab).unwrap();
+
+        let mut receivers = event_bus.register_ws("test-conn", "test-tab");
+
+        dispatch_event(
+            Event::BlockDeleted {
+                tab_id: tab_id.to_string(),
+                block_id: deleted_block_id.to_string(),
+                version: 1,
+            },
+            Arc::clone(&wstore),
+            Arc::clone(&event_bus),
+        )
+        .await;
+
+        let first = tokio::time::timeout(std::time::Duration::from_secs(2), receivers.priority.recv())
+            .await
+            .expect("timed out waiting for first broadcast")
+            .expect("priority channel closed");
+        assert_eq!(
+            first.get("oref").and_then(|v| v.as_str()),
+            Some(format!("tab:{tab_id}").as_str()),
+            "first frame must be the parent tab update, got: {first}"
+        );
+
+        let second = tokio::time::timeout(std::time::Duration::from_secs(2), receivers.priority.recv())
+            .await
+            .expect("timed out waiting for second broadcast")
+            .expect("priority channel closed");
+        assert_eq!(
+            second.get("oref").and_then(|v| v.as_str()),
+            Some(format!("block:{deleted_block_id}").as_str()),
+            "second frame must be the block delete, got: {second}"
+        );
+        assert_eq!(
+            second.get("data").and_then(|d| d.get("updatetype")).and_then(|v| v.as_str()),
+            Some("delete"),
+        );
     }
 }

@@ -108,6 +108,16 @@ pub struct ProviderConfig {
     /// to a custom endpoint independent of whether that endpoint's vendor
     /// is even listed here.
     pub supported_vendors: &'static [&'static str],
+    /// Path (relative to the agent's working directory) this provider
+    /// natively auto-discovers its startup instructions from — e.g.
+    /// `"CLAUDE.md"`, `"AGENTS.md"`, `".pi/APPEND_SYSTEM.md"`. `None` when
+    /// no native file-based convention is confirmed to exist (currently
+    /// only `kimi`) — `build_config_files` skips writing the instructions
+    /// file entirely in that case rather than writing inert content nobody
+    /// reads. Set only where independently verified against the provider's
+    /// own docs, not guessed — same discipline as `base_url_env_var` above.
+    /// See docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2.
+    pub startup_instructions_filename: Option<&'static str>,
 }
 
 impl ProviderConfig {
@@ -202,11 +212,12 @@ static CLAUDE: ProviderConfig = ProviderConfig {
     // agentmux-cef/src/commands/providers.rs `CLAUDE_VERSION`, and
     // .github/workflows/container-image.yml `claude_version` default — enforced by
     // frontend/app/view/agent/providers/pin-consistency.test.ts.
-    pinned_version: "2.1.198",
+    pinned_version: "2.1.247",
     // Documented Claude Code behavior: redirects the CLI at a non-Anthropic
     // (or proxied) backend — Bedrock, Vertex, OpenRouter, a custom proxy.
     base_url_env_var: Some("ANTHROPIC_BASE_URL"),
     supported_vendors: &["anthropic"],
+    startup_instructions_filename: Some("CLAUDE.md"),
 };
 
 static CODEX: ProviderConfig = ProviderConfig {
@@ -235,6 +246,10 @@ static CODEX: ProviderConfig = ProviderConfig {
     pinned_version: "0.116.0",
     base_url_env_var: None,
     supported_vendors: &["openai"],
+    // Confirmed: SPEC_CODEX_PROVIDER_INTEGRATION_2026_08_08.md §10.2 —
+    // "Codex's native project instruction discovery continues to load
+    // user/repository AGENTS.md files normally."
+    startup_instructions_filename: Some("AGENTS.md"),
 };
 
 static GEMINI: ProviderConfig = ProviderConfig {
@@ -257,6 +272,11 @@ static GEMINI: ProviderConfig = ProviderConfig {
     pinned_version: "0.32.1",
     base_url_env_var: None,
     supported_vendors: &["google"],
+    // Confirmed: Gemini CLI docs — context files default to GEMINI.md;
+    // AGENTS.md support exists but requires an explicit contextFileName
+    // override, so GEMINI.md is the correct default-behavior target. See
+    // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2.
+    startup_instructions_filename: Some("GEMINI.md"),
 };
 
 // Qwen Code — Alibaba's open-source coding agent, a fork of Gemini CLI.
@@ -295,6 +315,12 @@ static QWEN: ProviderConfig = ProviderConfig {
     // override mechanism, so this stays unset rather than guessed.
     base_url_env_var: None,
     supported_vendors: &["openrouter"],
+    // Confirmed: Qwen Code settings docs — QWEN.md is a built-in default
+    // contextFileName; AGENTS.md needs explicit config (open feature
+    // requests QwenLM/qwen-code#2006, #504 ask for it to become default,
+    // confirming it isn't yet). See
+    // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2.
+    startup_instructions_filename: Some("QWEN.md"),
 };
 
 static KIMI: ProviderConfig = ProviderConfig {
@@ -323,6 +349,19 @@ static KIMI: ProviderConfig = ProviderConfig {
     pinned_version: "",
     base_url_env_var: None,
     supported_vendors: &["moonshot"],
+    // Confirmed absence: docs/specs/KIMI_PROVIDER_INTEGRATION_SPEC.md
+    // already researched this — Kimi has no auto-read markdown convention
+    // ("does not appear to auto-read CLAUDE.md... skip KIMI.md
+    // generation"). Re-verified 2026-08-24: Kimi's only file-based prompt
+    // customization is --agent-file <yaml> with a system_prompt_path field
+    // (a CLI flag this provider's launch_args above doesn't pass), and an
+    // open, unshipped feature request (MoonshotAI/kimi-cli#1856) for a
+    // project-level system_prompt.md override. Writing any markdown file
+    // here would be inert output nobody reads — None, not a guessed
+    // filename. build_config_files skips the instructions file entirely
+    // for a provider with None here. See
+    // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2.
+    startup_instructions_filename: None,
 };
 
 static OPENCLAW: ProviderConfig = ProviderConfig {
@@ -358,6 +397,15 @@ static OPENCLAW: ProviderConfig = ProviderConfig {
     pinned_version: "2026.6.10",
     base_url_env_var: None,
     supported_vendors: &["openai", "anthropic", "google"],
+    // Confirmed convention, UNCONFIRMED path: docs.openclaw.ai/reference/AGENTS.default
+    // — AGENTS.md is a required bootstrap file OpenClaw itself creates,
+    // read from each agent's workspace at session start. Whether that
+    // workspace maps 1:1 onto AgentMux's own working_directory for an
+    // ACP-bridged `openclaw acp` session (vs. OpenClaw's own
+    // Gateway-daemon-managed sandbox) is not independently verified here —
+    // best-effort root-level AGENTS.md, flagged as a known gap. See
+    // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2, §6.
+    startup_instructions_filename: Some("AGENTS.md"),
 };
 
 static PI: ProviderConfig = ProviderConfig {
@@ -380,6 +428,14 @@ static PI: ProviderConfig = ProviderConfig {
     pinned_version: "0.73.1",
     base_url_env_var: None,
     supported_vendors: &["pi"],
+    // Confirmed: npmjs.com/package/@mariozechner/pi-coding-agent docs —
+    // .pi/SYSTEM.md REPLACES pi's default system prompt; .pi/APPEND_SYSTEM.md
+    // APPENDS to it. AgentMux's Soul+AgentMD+Memory content is additive
+    // background, not a full system-prompt replacement (pi's own default
+    // prompt carries pi's own tool-usage instructions) — APPEND_SYSTEM.md
+    // is the correct target, not SYSTEM.md. See
+    // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2.
+    startup_instructions_filename: Some(".pi/APPEND_SYSTEM.md"),
 };
 
 // Mux Code — AgentMux's first-party agentic coding CLI.
@@ -411,6 +467,11 @@ static MUX_CODE: ProviderConfig = ProviderConfig {
     pinned_version: "0.1.0",
     base_url_env_var: None,
     supported_vendors: &["ollama", "anthropic", "openai"],
+    // Confirmed by design intent: this provider's own doc comment above
+    // states it "emits claude-compatible stream-json NDJSON... handled
+    // without modification [by ClaudeTranslator]" — a deliberate
+    // compatibility choice by the same team that owns both, not a guess.
+    startup_instructions_filename: Some("CLAUDE.md"),
 };
 
 // GitHub Copilot CLI — Microsoft's coding agent. Runs in ACP mode via
@@ -437,6 +498,13 @@ static COPILOT: ProviderConfig = ProviderConfig {
     pinned_version: "1.0.65",
     base_url_env_var: None,
     supported_vendors: &["github"],
+    // Confirmed: GitHub Copilot CLI custom-instructions docs — supports
+    // AGENTS.md (root, single-file, no subdirectory needed) alongside
+    // .github/copilot-instructions.md, CLAUDE.md, GEMINI.md. AGENTS.md
+    // chosen as the one canonical target since Copilot has no single
+    // privileged default the way Gemini/Qwen do. See
+    // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2.
+    startup_instructions_filename: Some("AGENTS.md"),
 };
 
 // Antigravity (AGY) — Google's agentic coding CLI harness. Emits the same
@@ -466,6 +534,14 @@ static ANTIGRAVITY: ProviderConfig = ProviderConfig {
     pinned_version: "1.0.0",
     base_url_env_var: None,
     supported_vendors: &["google"],
+    // INFERRED, not independently doc-confirmed: Antigravity CLI's own
+    // settings live at ~/.gemini/antigravity-cli/settings.json — same
+    // ~/.gemini/ namespace root as Gemini CLI itself, consistent with this
+    // provider's own doc comment above (shares Gemini CLI's NDJSON
+    // schema). No explicit Antigravity docs page independently confirms
+    // GEMINI.md context-file behavior. Flagged as a known gap. See
+    // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2, §6.
+    startup_instructions_filename: Some("GEMINI.md"),
 };
 
 // ─── Static registry ─────────────────────────────────────────────────────────
@@ -538,6 +614,103 @@ pub fn get_provider(id: &str) -> Option<&'static ProviderConfig> {
     // Fall back to alias resolution.
     let canonical = ALIASES.get(id).copied()?;
     REGISTRY.get(canonical).copied()
+}
+
+/// True when `dir` resolves to `provider`'s literal ambient home directory
+/// (e.g. `~/.claude` for Claude Code) rather than an AgentMux-isolated dir.
+/// Used to block identity bindings/spawns from ever pointing a spawned
+/// agent at the operator's own global CLI login — a real, currently-live
+/// instance of exactly this was found in this repo's own data (an account's
+/// `secret_ref.dir` set to the literal ambient path — see
+/// `docs/status/STATUS_IDENTITY_ISOLATION_GATE_NOT_ENFORCING_2026_08_20.md`
+/// §8), which nothing in the codebase previously validated against. See
+/// `docs/specs/SPEC_BLOCK_AMBIENT_HOME_DIR_IDENTITY_BINDING_2026_08_25.md`.
+///
+/// Canonicalizes both sides when possible (defeats `..`, symlink, and
+/// Windows `\\?\`-prefix tricks — same approach `identity::cleanup`'s
+/// containment check already uses); falls back to a normalized lexical
+/// comparison when either path doesn't exist yet on disk (e.g. validating a
+/// not-yet-materialized dir at account-creation time), so a not-yet-created
+/// ambient path can't slip past the guard just by not existing at check
+/// time.
+pub fn is_provider_ambient_home_dir(provider: &ProviderConfig, dir: &str) -> bool {
+    let ambient = crate::backend::base::get_home_dir().join(format!(".{}", provider.auth_dir_name));
+    paths_resolve_to_same_dir(&ambient, dir)
+}
+
+/// The actual comparison, split out with the reference side pre-resolved
+/// (not calling `get_home_dir()` internally) so it's directly testable
+/// against a tempdir instead of the real `$HOME`/`%USERPROFILE%` — same
+/// "inject the path, don't resolve it internally" pattern
+/// `read_claude_global_config` already uses (`agent_handlers/memory.rs`).
+fn paths_resolve_to_same_dir(reference: &std::path::Path, candidate: &str) -> bool {
+    let candidate_path = std::path::Path::new(candidate);
+
+    if let (Ok(canon_reference), Ok(canon_candidate)) =
+        (std::fs::canonicalize(reference), std::fs::canonicalize(candidate_path))
+    {
+        return canon_reference == canon_candidate;
+    }
+
+    normalize_path_lexically(reference) == normalize_path_lexically(candidate_path)
+}
+
+/// Lexically normalizes a path with NO filesystem access (unlike
+/// `canonicalize`, safe to call on a path that doesn't exist). Collapses
+/// `.` and `..` components (codex P1, PR #2802: without this, a not-yet-
+/// created dir like `$HOME/.claude/.` compared unequal to `$HOME/.claude`
+/// under plain string comparison, bypassing the guard entirely on a fresh
+/// machine — a `..` segment is normalized the same way for the same
+/// reason). Never pops past a root/prefix/leading `..` — a leading `..`
+/// with nothing to cancel stays literal, standard lexical-normalization
+/// semantics.
+fn normalize_path_lexically(p: &std::path::Path) -> String {
+    use std::path::Component;
+
+    let mut normalized: Vec<Component> = Vec::new();
+    for component in p.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if matches!(normalized.last(), Some(Component::Normal(_))) {
+                    normalized.pop();
+                } else {
+                    normalized.push(component);
+                }
+            }
+            other => normalized.push(other),
+        }
+    }
+    let joined: std::path::PathBuf = normalized.into_iter().collect();
+    let as_str = joined.to_string_lossy().replace('\\', "/");
+    let trimmed = as_str.trim_end_matches('/');
+
+    // codex P2, PR #2802: case-fold only on platforms whose default
+    // filesystem is case-insensitive (Windows, macOS). Unconditionally
+    // lowercasing made a not-yet-created `$HOME/.CLAUDE` compare equal to
+    // `$HOME/.claude` on Linux (case-sensitive ext4) — once both existed,
+    // canonicalize would correctly tell them apart, so the guard's
+    // verdict depended on creation order instead of being deterministic.
+    if cfg!(target_os = "windows") || cfg!(target_os = "macos") {
+        trimmed.to_lowercase()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Whether `path` matches ANY registered provider's
+/// `startup_instructions_filename` — used by the "click Launch" RPC write
+/// path (`editor_handlers.rs`'s `WriteAgentConfig` handler), which receives
+/// an already-built file list from the frontend with no accompanying
+/// provider ID, so it can't otherwise tell "this is the startup
+/// instructions file" from "this is some other config file" without either
+/// re-deriving the mapping itself (drift risk) or checking membership here
+/// (single source of truth). See
+/// docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §3.
+pub fn is_known_startup_instructions_filename(path: &str) -> bool {
+    REGISTRY
+        .values()
+        .any(|p| p.startup_instructions_filename == Some(path))
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -696,6 +869,131 @@ mod tests {
                 p.base_url_env_var.is_none(),
                 "provider '{id}' should not declare base_url_env_var yet (unverified)"
             );
+        }
+    }
+
+    // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2's
+    // per-provider table, pinned so a future edit can't silently drift from
+    // the researched/cited values.
+    #[test]
+    fn startup_instructions_filename_matches_researched_table() {
+        let expected: &[(&str, Option<&str>)] = &[
+            ("claude", Some("CLAUDE.md")),
+            ("codex", Some("AGENTS.md")),
+            ("gemini", Some("GEMINI.md")),
+            ("qwen", Some("QWEN.md")),
+            ("copilot", Some("AGENTS.md")),
+            ("openclaw", Some("AGENTS.md")),
+            ("pi", Some(".pi/APPEND_SYSTEM.md")),
+            ("antigravity", Some("GEMINI.md")),
+            ("muxcode", Some("CLAUDE.md")),
+            ("kimi", None),
+        ];
+        for (id, filename) in expected {
+            let p = get_provider(id).unwrap_or_else(|| panic!("provider '{id}' not registered"));
+            assert_eq!(
+                p.startup_instructions_filename, *filename,
+                "provider '{id}' startup_instructions_filename mismatch"
+            );
+        }
+    }
+
+    #[test]
+    fn kimi_has_no_startup_instructions_filename() {
+        let p = get_provider("kimi").unwrap();
+        assert!(
+            p.startup_instructions_filename.is_none(),
+            "kimi has no confirmed native startup-instructions file — see SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2"
+        );
+    }
+
+    // docs/specs/SPEC_BLOCK_AMBIENT_HOME_DIR_IDENTITY_BINDING_2026_08_25.md.
+    // `paths_resolve_to_same_dir` takes the reference side pre-resolved
+    // (not `get_home_dir()` itself) specifically so these tests don't
+    // depend on the real $HOME/%USERPROFILE% — see its own doc comment.
+    mod ambient_home_dir_tests {
+        use super::*;
+
+        #[test]
+        fn identical_existing_dirs_match_via_canonicalize() {
+            let dir = tempfile::tempdir().unwrap();
+            assert!(paths_resolve_to_same_dir(dir.path(), &dir.path().to_string_lossy()));
+        }
+
+        #[test]
+        fn different_existing_dirs_do_not_match() {
+            let a = tempfile::tempdir().unwrap();
+            let b = tempfile::tempdir().unwrap();
+            assert!(!paths_resolve_to_same_dir(a.path(), &b.path().to_string_lossy()));
+        }
+
+        #[test]
+        fn nonexistent_paths_fall_back_to_lexical_comparison() {
+            // Neither side exists on disk — canonicalize fails for both,
+            // so this exercises the lexical fallback, not the
+            // canonicalize branch. Confirms a not-yet-created ambient
+            // path still gets caught (the whole point of the guard —
+            // §7's "can't slip past by not existing at check time").
+            let reference = std::path::Path::new("/tmp/agentmux-test-does-not-exist-ambient/.claude");
+            assert!(paths_resolve_to_same_dir(reference, "/tmp/agentmux-test-does-not-exist-ambient/.claude"));
+            assert!(!paths_resolve_to_same_dir(reference, "/tmp/agentmux-test-does-not-exist-ambient/.codex"));
+        }
+
+        #[test]
+        fn lexical_fallback_ignores_trailing_slash() {
+            let reference = std::path::Path::new("/tmp/agentmux-test-nonexistent/.claude");
+            assert!(paths_resolve_to_same_dir(reference, "/tmp/agentmux-test-nonexistent/.claude/"));
+        }
+
+        // codex P2, PR #2802: case-folding must match the current platform's
+        // default filesystem case-sensitivity, not be unconditional —
+        // asserts whichever behavior is CORRECT for whatever OS actually
+        // runs this test, so it's meaningful on both windows-latest and
+        // ubuntu-latest CI legs.
+        #[test]
+        fn lexical_fallback_case_folding_matches_platform_default() {
+            let reference = std::path::Path::new("/tmp/agentmux-test-nonexistent/.claude");
+            let matches = paths_resolve_to_same_dir(reference, "/TMP/agentmux-test-nonexistent/.CLAUDE");
+            if cfg!(target_os = "windows") || cfg!(target_os = "macos") {
+                assert!(matches, "case-insensitive platforms must fold case in the lexical fallback");
+            } else {
+                assert!(!matches, "case-sensitive platforms must NOT fold case — a not-yet-created dir must not be conflated with a differently-cased one");
+            }
+        }
+
+        // codex P1, PR #2802: without dot-segment collapsing, a binding
+        // like `$HOME/.claude/.` compared unequal to `$HOME/.claude` under
+        // plain string comparison whenever neither existed yet (the fresh-
+        // machine case), bypassing the guard — Claude Code would then
+        // create and use the literal ambient dir once launched.
+        #[test]
+        fn lexical_fallback_collapses_dot_and_dotdot_segments() {
+            let reference = std::path::Path::new("/tmp/agentmux-test-nonexistent/.claude");
+            assert!(paths_resolve_to_same_dir(reference, "/tmp/agentmux-test-nonexistent/.claude/."));
+            assert!(paths_resolve_to_same_dir(
+                reference,
+                "/tmp/agentmux-test-nonexistent/sibling/../.claude",
+            ));
+            // A genuinely different directory reached via `..` must still
+            // correctly NOT match — this isn't "ignore everything after a
+            // dot-segment," it's real lexical normalization.
+            assert!(!paths_resolve_to_same_dir(
+                reference,
+                "/tmp/agentmux-test-nonexistent/.claude/../.codex",
+            ));
+        }
+
+        #[test]
+        fn is_provider_ambient_home_dir_matches_the_real_configured_provider_home_suffix() {
+            // Not asserting against the real $HOME (see module doc comment) —
+            // just confirming the public wrapper joins get_home_dir() with
+            // ".{auth_dir_name}" as documented, by checking the suffix
+            // shape rather than an exact path.
+            let claude = get_provider("claude").unwrap();
+            assert_eq!(claude.auth_dir_name, "claude");
+            // A dir that can't possibly be the real ambient home (this
+            // process's actual $HOME/.claude) must never match.
+            assert!(!is_provider_ambient_home_dir(claude, "/tmp/agentmux-test-definitely-not-ambient"));
         }
     }
 }

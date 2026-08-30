@@ -1,12 +1,40 @@
 # SPEC: Tool preview common-indentation stripping (dedent)
 
 **Date:** 2026-08-08
-**Status:** proposed — verified unimplemented as of 2026-08-10 (sibling refinement #2467 shipped; this one did not).
+**Status:** implemented 2026-08-24. `stripCommonIndentSharedPrefix` was added
+as a third exported helper (not spelled out in §3.1's two-function sketch) to
+keep the Edit call site's "one shared prefix across two related strings"
+concern inside this module rather than duplicated at the DiffViewer call
+site. Live-pane visual verification (§5) not yet done as of this PR — see
+the PR body for why, and do it before/at merge if practical.
+
+Two issues found by reagent review on PR #2780, both fixed same-day: (1)
+`renderWrite` was calling the Read-specific numbered-line dedent variant on
+raw Write content, misreading a genuine tab-delimited data file's leading
+numeric column as a line-number gutter — switched to the plain
+`stripCommonIndent`. (2) `capText`'s char-budget truncation marker is a
+column-0 line that can land inside capped preview text and was not excluded
+from the common-prefix computation, silently defeating dedent (or, on the
+numbered Read path, the "every line numbered" check) for any node whose
+content exceeded `MAX_TOOL_OUTPUT_CHARS` — `dedent.ts` now treats the
+marker as ignorable exactly like a blank line.
 **Scope:** `frontend/app/view/agent/components/ToolOverlayLog.tsx`,
 `frontend/app/view/agent/components/DiffViewer.tsx`, one new shared util
 (+ tests)
 **Related:** `SPEC_TOOL_PREVIEW_SCROLLBAR_EDGE_PADDING_2026_08_08.md`
 (refinement #1 of this series — this is refinement #2)
+
+**Follow-up (2026-08-24):** tab-indented previews rendered noticeably wider
+than space-indented ones — `dedent.ts` only strips the COMMON leading
+prefix (deliberately never conflating tabs with spaces, §3.3), so a literal
+tab in the RELATIVE indentation that's left over was rendering at the
+global `tab-size: 4` (`reset.scss`, inherited app-wide, including the
+Editor pane's CodeMirror instance). Fixed as a CSS-only change, not a
+`dedent.ts` change: `tab-size: 2` scoped to `.agent-tool-panel`
+(`frontend/app/view/agent/styles/_document-nodes.scss`) — the shared
+ancestor of every Read/Write/Edit/Diff preview path (Shiki and plain-
+fallback alike) — rather than the global `reset.scss` rule, so the Editor
+pane keeps its own 4-wide default unaffected.
 
 ---
 

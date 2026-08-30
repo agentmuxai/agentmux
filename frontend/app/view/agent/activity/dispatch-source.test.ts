@@ -1,8 +1,26 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentDispatch } from "../../swarm/swarm-model";
+import * as wos from "@/app/store/wos";
+
+const hub = vi.hoisted(() => ({
+    handlers: new Map<string, (e: unknown) => void>(),
+}));
+
+// Mirrors subagent-source.test.ts's mocking pattern exactly — see that
+// file's own comment for why only `wps` is mocked, not the whole `wos`
+// module.
+vi.mock("@/app/store/wps", () => ({
+    waveEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
+        hub.handlers.set(sub.eventType, sub.handler);
+        return () => hub.handlers.delete(sub.eventType);
+    }),
+}));
+
+const callBackendServiceSpy = vi.spyOn(wos, "callBackendService").mockResolvedValue([]);
+
 import { msUntilNextQuietWindowRefresh } from "./dispatch-source";
 
 function mkDispatch(overrides: Partial<AgentDispatch> & Pick<AgentDispatch, "dispatch_id">): AgentDispatch {
@@ -55,5 +73,108 @@ describe("msUntilNextQuietWindowRefresh", () => {
     it("ignores a dispatch with member_count 0 (nothing to be complete about)", () => {
         const d = mkDispatch({ dispatch_id: "d1", member_count: 0, members_done: 0, status: "running" });
         expect(msUntilNextQuietWindowRefresh([d], 0)).toBeNull();
+    });
+});
+
+// SPEC_ACTIVITY_DOCK_REFRESH_COALESCING_2026_08_23.md /
+// docs/reports/REPORT_AGENT_PANE_REOPEN_SUBAGENT_STORM_2026_08_23.md: a
+// backfill-replay burst on pane reopen used to fire one uncoalesced
+// ListDispatches call per subagent:spawned/completed/named/abandoned or
+// dispatch:updated event (up to ~200 in a real trace). These events must
+// now collapse into a single call once the burst goes quiet. Mirrors
+// subagent-source.test.ts's own coalescing tests for its sibling singleton.
+describe("dispatch-source — refresh coalescing", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    async function flushMicrotasks(): Promise<void> {
+        await Promise.resolve();
+        await Promise.resolve();
+    }
+
+    it("registered handlers for every event this module is documented to refresh on", () => {
+        for (const type of ["subagent:spawned", "subagent:completed", "subagent:named", "subagent:abandoned", "dispatch:updated"]) {
+            expect(hub.handlers.has(type)).toBe(true);
+        }
+    });
+
+    it("collapses a rapid burst of subagent:spawned events into a single ListDispatches call", async () => {
+        await flushMicrotasks(); // let the module-load-time refresh() settle
+        callBackendServiceSpy.mockClear();
+        callBackendServiceSpy.mockResolvedValue([]);
+
+        const spawned = hub.handlers.get("subagent:spawned")!;
+        for (let i = 0; i < 50; i++) spawned({ data: {} });
+        await flushMicrotasks();
+        expect(callBackendServiceSpy).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(150); // past the debounce window
+        expect(callBackendServiceSpy).toHaveBeenCalledWith("subagent", "ListDispatches", []);
+        expect(callBackendServiceSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("collapses a MIXED burst across different event types into a single call", async () => {
+        await flushMicrotasks();
+        callBackendServiceSpy.mockClear();
+        callBackendServiceSpy.mockResolvedValue([]);
+
+        hub.handlers.get("subagent:spawned")!({ data: {} });
+        hub.handlers.get("subagent:completed")!({ data: {} });
+        hub.handlers.get("dispatch:updated")!({ data: {} });
+        hub.handlers.get("subagent:abandoned")!({ data: {} });
+        await flushMicrotasks();
+        expect(callBackendServiceSpy).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(150);
+        expect(callBackendServiceSpy).toHaveBeenCalledTimes(1);
+    });
+});
+
+// docs/retro/retro-activity-dock-flicker-survives-debounce-fix-2026-08-24.md:
+// the debounce above coalesces request VOLUME, but each surviving call
+// during a burst is still a genuinely different, real, still-converging
+// snapshot — rows still visibly appear/vanish. backfill-tracker.ts closes
+// this by suppressing refresh entirely while ANY block's backfill is
+// reported in flight, firing exactly one once it's genuinely done.
+describe("dispatch-source — backfill-aware suppression", () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    async function flushMicrotasks(): Promise<void> {
+        await Promise.resolve();
+        await Promise.resolve();
+    }
+
+    it("suppresses refresh entirely for events arriving while a backfill is in flight, firing exactly one once it settles", async () => {
+        await flushMicrotasks();
+        callBackendServiceSpy.mockClear();
+        callBackendServiceSpy.mockResolvedValue([]);
+
+        const backfillStatus = hub.handlers.get("subagent:backfill_status")!;
+        expect(backfillStatus).toBeDefined();
+        backfillStatus({ scopes: ["block:b1"], data: { status: "started" } });
+
+        const spawned = hub.handlers.get("subagent:spawned")!;
+        for (let i = 0; i < 50; i++) spawned({ data: {} });
+        await vi.advanceTimersByTimeAsync(1200); // well past both debounce windows
+        expect(callBackendServiceSpy).not.toHaveBeenCalled(); // suppressed, not just debounced
+
+        backfillStatus({ scopes: ["block:b1"], data: { status: "done" } });
+        await flushMicrotasks();
+        expect(callBackendServiceSpy).toHaveBeenCalledTimes(1); // exactly one, on settle
+    });
+
+    it("resumes ordinary debounced behavior for events after the backfill settles", async () => {
+        await flushMicrotasks();
+        const backfillStatus = hub.handlers.get("subagent:backfill_status")!;
+        backfillStatus({ scopes: ["block:b2"], data: { status: "started" } });
+        backfillStatus({ scopes: ["block:b2"], data: { status: "done" } });
+        await flushMicrotasks();
+
+        callBackendServiceSpy.mockClear();
+        callBackendServiceSpy.mockResolvedValue([]);
+        hub.handlers.get("subagent:spawned")!({ data: {} });
+        await vi.advanceTimersByTimeAsync(150);
+        expect(callBackendServiceSpy).toHaveBeenCalledTimes(1);
     });
 });

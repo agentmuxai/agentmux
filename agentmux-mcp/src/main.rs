@@ -263,14 +263,25 @@ const UI_QUERY_TOOL: &str = r#"{
 // something to back into accidentally via a narrower tool's scope creep.
 const CAPTURE_WINDOW_TOOL: &str = r#"{
   "name": "CaptureWindow",
-  "description": "Screenshot a DIFFERENT AgentMux window/instance by (partial, case-insensitive) title match — e.g. a separate task dev build running alongside this one. Scoped to AgentMux's own windows only, not arbitrary desktop applications (unlike a general OS computer-use tool), and never your own instance's window. Every call is logged (who, what, outcome) to an audit trail in this instance's own data dir — a full approval/capability-flag gate is tracked separately, not yet built. Returns a file path; use the Read tool on that path to view it yourself, or OpenMedia to show it to the user.",
+  "description": "Screenshot a DIFFERENT AgentMux window/instance — by pid (preferred; get one from DiscoverWindows) or by (partial, case-insensitive) title match, e.g. a separate task dev build running alongside this one. Prefer pid: AgentMux's own frontend actively manages its window title (tab switches, workspace renames, even other AgentMux windows opening/closing elsewhere can all rewrite it), so a title match can go stale mid-session in a way a pid never does. Scoped to AgentMux's own windows only, not arbitrary desktop applications (unlike a general OS computer-use tool), and never your own instance's window. If title_contains matches more than one window and you didn't pass an explicit index, this returns every candidate (pid + title) instead of guessing — pass one of those pids back in, or use DiscoverWindows first. A single process can also own multiple top-level windows sharing the same pid — if pid matches more than one, pass an explicit index alongside it the same way. Every call is logged (who, what, outcome) to an audit trail in this instance's own data dir — a full approval/capability-flag gate is tracked separately, not yet built. Returns a file path; use the Read tool on that path to view it yourself, or OpenMedia to show it to the user. The result may note likely_unrendered if the captured frame looks solid/near-solid-color even after a couple of internal retries — that CAN mean the window hasn't painted its first real frame yet, but it's only a heuristic (a legitimately solid-colored window trips it too), not a reliable signal of how old the window is.",
   "inputSchema": {
     "type": "object",
     "properties": {
-      "title_contains": { "type": "string", "description": "Substring to match against other AgentMux windows' titles, case-insensitive" },
-      "index": { "type": "number", "description": "If multiple AgentMux windows match, which one to capture (0-based, default 0). The error message lists all matching AgentMux window titles when this is ambiguous." }
-    },
-    "required": ["title_contains"]
+      "pid": { "type": "number", "description": "Process id of the target window's owning process — from DiscoverWindows. Preferred over title_contains: stable for the process's whole lifetime, unlike its title. If more than one window shares this pid, also pass index to disambiguate." },
+      "title_contains": { "type": "string", "description": "Substring to match against other AgentMux windows' titles, case-insensitive. Ignored if pid is given." },
+      "index": { "type": "number", "description": "If multiple AgentMux windows match title_contains (or share the given pid), which one to capture (0-based). Omit this when you expect exactly one match — if more than one actually matches, the tool returns the full candidate list instead of silently picking one." }
+    }
+  }
+}"#;
+
+const DISCOVER_WINDOWS_TOOL: &str = r#"{
+  "name": "DiscoverWindows",
+  "description": "List every AgentMux-owned top-level window currently open on this machine — read-only: no screenshot taken, nothing written to disk. Use this BEFORE CaptureWindow so you have real candidates (pid, title, exe_path) instead of guessing a title substring or an index. Pass the pid of whichever window you want straight into CaptureWindow(pid: ...) — a pid stays valid for that process's whole lifetime, unlike its title, which AgentMux's own frontend can rewrite at any time (tab switches, workspace renames, even unrelated AgentMux windows opening/closing elsewhere on the machine). exe_path can reveal the OS username of a different instance's owner on a shared machine, so — same as CaptureWindow — every call is logged (who, what, outcome) to this instance's own audit trail.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "include_self": { "type": "boolean", "description": "Include this agent's own AgentMux instance's window(s) in the results. Default false, matching CaptureWindow's own scope — CaptureWindow can never target your own instance even if you pass its pid here." }
+    }
   }
 }"#;
 
@@ -733,6 +744,8 @@ async fn main() {
                 let ui_query: Value = serde_json::from_str(UI_QUERY_TOOL).expect("static json");
                 let capture_window: Value =
                     serde_json::from_str(CAPTURE_WINDOW_TOOL).expect("static json");
+                let discover_windows: Value =
+                    serde_json::from_str(DISCOVER_WINDOWS_TOOL).expect("static json");
                 let fleet_list: Value = serde_json::from_str(FLEET_LIST_TOOL).expect("static json");
                 let fleet_broadcast: Value =
                     serde_json::from_str(FLEET_BROADCAST_TOOL).expect("static json");
@@ -761,7 +774,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, open_media, send_message, discover_agents, get_agent_transcript, list_conversations, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, capture_window, fleet_list, fleet_broadcast, fleet_bulk_stop, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, open_media, send_message, discover_agents, get_agent_transcript, list_conversations, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {
@@ -932,96 +945,252 @@ fn own_instance_pids() -> std::collections::HashSet<u32> {
     result
 }
 
-/// The actual `CaptureWindow` logic — window enumeration, own-instance and
-/// third-party-app exclusion, capture, and save. Extracted to its own
-/// function (rather than living inline in the `"CaptureWindow" =>` match
-/// arm) so its `Result` can be captured once and unconditionally audit-
-/// logged by the caller before propagating — see `audit_log_capture_window`.
-fn capture_window_impl(title_contains: &str, index: usize) -> Result<String> {
+/// One AgentMux-owned top-level window, with the metadata both
+/// `DiscoverWindows` and `CaptureWindow` need. Shared via
+/// `enumerate_agentmux_windows()` so the two tools can't drift on what
+/// counts as "AgentMux's own window" or "the calling agent's own instance"
+/// — see `own_instance_pids()`'s doc comment for how `is_self` is decided.
+struct AgentMuxWindowInfo {
+    window: xcap::Window,
+    pid: u32,
+    title: String,
+    exe_path: String,
+    is_self: bool,
+}
+
+/// Enumerate every top-level OS window belonging to an AgentMux process
+/// (matched via `app_name()`, not `title()` — AgentMux's own process names
+/// are version-stamped, e.g. `agentmux-0.55.18`, not a single fixed
+/// string, but they all share the `agentmux` prefix — reagent P1, PR
+/// #2709 round 2, which also found the original unscoped version could
+/// screenshot a KeePass password-manager window with zero gating).
+/// `is_self` marks windows belonging to the calling agent's OWN instance
+/// (`own_instance_pids()`) — surfaced as a flag here (for `DiscoverWindows`,
+/// which is read-only and fine showing "yes this is you"), then hard-
+/// excluded downstream by `capture_window_impl` (which must never let an
+/// agent screenshot its own instance — reagent P0, PR #2709 round 3: one
+/// AgentMux instance's top-level window contains every agent's pane in it,
+/// so that exclusion is the actual isolation boundary, not a nicety).
+fn enumerate_agentmux_windows() -> Result<Vec<AgentMuxWindowInfo>> {
     let windows =
         xcap::Window::all().map_err(|e| anyhow::anyhow!("failed to enumerate windows: {e}"))?;
-    // Scoped to AgentMux's own processes only — reagent P1 (PR #2709
-    // round 2): as originally written, this reached ANY top-level OS
-    // window (confirmed in testing: it could screenshot a KeePass
-    // password-manager window with zero gating), which is the
-    // "arbitrary third-party app" capability `docs/specs/computer-use-pane.md`
-    // already scoped out as needing its own per-app approval model —
-    // not this tool's actual motivating need, which was only ever
-    // "see a different AgentMux instance's window." `app_name()`
-    // matching (not `title()`) because AgentMux's own process names
-    // are version-stamped (`agentmux-0.55.18`, etc.), not a single
-    // fixed string, but they all share the `agentmux` prefix.
-    // Excludes the CALLING agent's own instance — reagent P0 (PR
-    // #2709 round 3): the app_name()-only filter above matches every
-    // AgentMux instance's windows, including this one. One AgentMux
-    // instance's top-level window contains every agent's pane in it
-    // (pane-level isolation is enforced only inside that window, via
-    // the signed-identity scheme UIScreenshot/UIClick/UIQuery use —
-    // see the doc comment above CAPTURE_WINDOW_TOOL). Without this
-    // exclusion, any agent could pass a title_contains matching its
-    // OWN instance's window and capture every other agent's pane
-    // content in that same window — exactly the isolation boundary
-    // this tool claims not to cross. See own_instance_pids()'s own
-    // doc comment for how "same instance" is determined.
     let own_pids = own_instance_pids();
-    let agentmux_windows: Vec<&xcap::Window> = windows
-        .iter()
-        .filter(|w| {
-            let is_agentmux = w
-                .app_name()
-                .map(|a| a.to_lowercase().starts_with("agentmux"))
-                .unwrap_or(false);
-            let is_own_instance = w.pid().map(|p| own_pids.contains(&p)).unwrap_or(true);
-            is_agentmux && !is_own_instance
-        })
-        .collect();
-    let needle = title_contains.to_lowercase();
-    let matches: Vec<&&xcap::Window> = agentmux_windows
-        .iter()
-        .filter(|w| {
-            w.title()
-                .map(|t| t.to_lowercase().contains(&needle))
-                .unwrap_or(false)
-        })
-        .collect();
+    let sys = sysinfo::System::new_all();
+    let mut out = Vec::new();
+    for window in windows {
+        let is_agentmux = window
+            .app_name()
+            .map(|a| a.to_lowercase().starts_with("agentmux"))
+            .unwrap_or(false);
+        if !is_agentmux {
+            continue;
+        }
+        // Fails safe, same discipline as the pre-existing own-instance
+        // check this replaces: an unresolvable pid is treated as "assume
+        // it's mine" (is_self: true) rather than silently dropped, so
+        // DiscoverWindows still surfaces that the window exists instead
+        // of hiding it, while capture_window_impl's hard exclusion of
+        // is_self windows still keeps it out of reach either way.
+        let pid = window.pid().unwrap_or(0);
+        let is_self = pid == 0 || own_pids.contains(&pid);
+        let title = window.title().unwrap_or_default();
+        let exe_path = sys
+            .process(sysinfo::Pid::from(pid as usize))
+            .and_then(|p| p.exe())
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        out.push(AgentMuxWindowInfo {
+            window,
+            pid,
+            title,
+            exe_path,
+            is_self,
+        });
+    }
+    Ok(out)
+}
 
-    if matches.is_empty() {
-        // Only lists OTHER AgentMux windows' titles, not every
-        // window on the desktop — reagent P2 (PR #2709 round 2):
-        // the original version dumped every visible window's title
-        // on any miss, which let a caller enumerate arbitrary
-        // window titles (confirmed in testing: this leaked a
-        // password manager's document title) with no real match
-        // required at all. Still helpful for the actual in-scope
-        // case (multiple AgentMux instances open) without that leak.
-        let titles: Vec<String> = agentmux_windows
+/// Cheap heuristic for "this capture is probably a blank/unpainted frame,
+/// not a real render" — sample ~200 evenly-spaced pixels and check they're
+/// all within a small tolerance of the first one. Not real image analysis
+/// (a legitimately solid-color themed window would also trip this) —
+/// deliberately cheap and approximate, used only to decide whether a short
+/// bounded retry is worth attempting, and to set `likely_unrendered` as a
+/// hint, never as a hard failure.
+fn looks_unrendered(img: &image::RgbaImage) -> bool {
+    let pixels = img.as_raw();
+    if pixels.len() < 4 {
+        return true;
+    }
+    let (r0, g0, b0) = (pixels[0], pixels[1], pixels[2]);
+    let pixel_count = pixels.len() / 4;
+    let step = (pixel_count / 200).max(1);
+    let mut sampled = 0usize;
+    for i in (0..pixel_count).step_by(step) {
+        let idx = i * 4;
+        sampled += 1;
+        if pixels[idx].abs_diff(r0) > 8 || pixels[idx + 1].abs_diff(g0) > 8 || pixels[idx + 2].abs_diff(b0) > 8 {
+            return false;
+        }
+    }
+    sampled > 0
+}
+
+/// The actual `CaptureWindow` logic — window enumeration, own-instance and
+/// third-party-app exclusion, targeting (by pid or by title), capture, and
+/// save. Extracted to its own function (rather than living inline in the
+/// `"CaptureWindow" =>` match arm) so its `Result` can be captured once and
+/// unconditionally audit-logged by the caller before propagating — see
+/// `audit_log_capture_window`.
+///
+/// `index: None` with more than one `title_contains` match is an error
+/// listing every candidate, NOT a silent pick of match 0 — see
+/// docs/reports/REPORT_AGENT_SCREENSHOT_WINDOW_CONTROL_BLOCKERS_2026_08_24.md
+/// §1 for the real incident (an ambiguous match silently captured an
+/// unrelated, sensitive window) this specifically fixes. `index: Some(i)`
+/// is still honored directly against whatever matched, unchanged from the
+/// original behavior, for callers who already disambiguate explicitly.
+fn capture_window_impl(
+    title_contains: Option<&str>,
+    index: Option<usize>,
+    pid: Option<u32>,
+) -> Result<String> {
+    let all = enumerate_agentmux_windows()?;
+    let foreign: Vec<&AgentMuxWindowInfo> = all.iter().filter(|w| !w.is_self).collect();
+
+    let target: &AgentMuxWindowInfo = if let Some(target_pid) = pid {
+        // A single host process can own multiple top-level windows sharing
+        // the same pid (agentmux-cef/src/browser_pane/hwnd.rs:200-204,
+        // agentmux-cef/src/commands/window/lifecycle.rs:410-426) — codex P1
+        // on PR #2810: the original `.find()` here silently captured
+        // whichever matching window enumerated first, which could be a
+        // pool/sub-window rather than the one the caller meant, reintroducing
+        // the wrong-window capture this PR exists to prevent. Same
+        // ambiguity-rejection shape as the title_contains branch below:
+        // `index` disambiguates, an unqualified ambiguous match does not.
+        let matches: Vec<&AgentMuxWindowInfo> = foreign
             .iter()
-            .filter_map(|w| w.title().ok())
-            .filter(|t| !t.is_empty())
+            .filter(|w| w.pid == target_pid)
+            .copied()
             .collect();
-        if titles.is_empty() {
+        if matches.is_empty() {
             anyhow::bail!(
-                "no AgentMux window title contains {title_contains:?} — \
-                 no other AgentMux windows are currently open"
+                "no AgentMux window found for pid {target_pid} (or it belongs to your \
+                 own instance, which CaptureWindow can never target) — call \
+                 DiscoverWindows to see current candidates"
             );
         }
-        anyhow::bail!(
-            "no AgentMux window title contains {title_contains:?}. \
-             Open AgentMux window titles: {}",
-            titles.join(", ")
-        );
-    }
-    let window = matches.get(index).ok_or_else(|| {
-        anyhow::anyhow!(
-            "index {index} out of range — only {} window(s) matched {title_contains:?}",
-            matches.len()
-        )
-    })?;
-    let title = window.title().unwrap_or_default();
+        match index {
+            Some(i) => *matches.get(i).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "index {i} out of range — only {} window(s) matched pid {target_pid}",
+                    matches.len()
+                )
+            })?,
+            None if matches.len() == 1 => matches[0],
+            None => {
+                let candidates: Vec<String> = matches
+                    .iter()
+                    .map(|w| format!("title={:?}", w.title))
+                    .collect();
+                anyhow::bail!(
+                    "{} windows matched pid {target_pid} — a single process can own \
+                     multiple top-level windows; pass an explicit index (0-based) \
+                     alongside pid to disambiguate. Candidates: {}",
+                    matches.len(),
+                    candidates.join("; ")
+                );
+            }
+        }
+    } else {
+        let title_contains = title_contains
+            .ok_or_else(|| anyhow::anyhow!("must provide either pid or title_contains"))?;
+        let needle = title_contains.to_lowercase();
+        let matches: Vec<&AgentMuxWindowInfo> = foreign
+            .iter()
+            .filter(|w| w.title.to_lowercase().contains(&needle))
+            .copied()
+            .collect();
 
-    let image = window
+        if matches.is_empty() {
+            // Only lists OTHER AgentMux windows' titles, not every
+            // window on the desktop — reagent P2 (PR #2709 round 2):
+            // the original version dumped every visible window's title
+            // on any miss, which let a caller enumerate arbitrary
+            // window titles (confirmed in testing: this leaked a
+            // password manager's document title) with no real match
+            // required at all. Still helpful for the actual in-scope
+            // case (multiple AgentMux instances open) without that leak.
+            let titles: Vec<&str> = foreign
+                .iter()
+                .map(|w| w.title.as_str())
+                .filter(|t| !t.is_empty())
+                .collect();
+            if titles.is_empty() {
+                anyhow::bail!(
+                    "no AgentMux window title contains {title_contains:?} — \
+                     no other AgentMux windows are currently open"
+                );
+            }
+            anyhow::bail!(
+                "no AgentMux window title contains {title_contains:?}. \
+                 Open AgentMux window titles: {}",
+                titles.join(", ")
+            );
+        }
+
+        match index {
+            Some(i) => *matches.get(i).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "index {i} out of range — only {} window(s) matched {title_contains:?}",
+                    matches.len()
+                )
+            })?,
+            None if matches.len() == 1 => matches[0],
+            None => {
+                // The fix for blocker #1 in the report: an ambiguous
+                // match with no explicit index used to silently capture
+                // index 0 despite this tool's own docstring claiming it
+                // would list candidates instead. It now actually does.
+                let candidates: Vec<String> = matches
+                    .iter()
+                    .map(|w| format!("pid={} title={:?}", w.pid, w.title))
+                    .collect();
+                anyhow::bail!(
+                    "{} windows matched {title_contains:?} — pass an explicit index (0-based), \
+                     or better, one of these pids directly (preferred: stable, unlike title). \
+                     Candidates: {}",
+                    matches.len(),
+                    candidates.join("; ")
+                );
+            }
+        }
+    };
+
+    let title = target.title.clone();
+
+    // Short bounded retry for a freshly-created window that hasn't
+    // painted its first real frame yet — see looks_unrendered()'s doc
+    // comment. std::thread::sleep (not tokio::time::sleep): this fn is
+    // plain sync code called from the async dispatch path, and the
+    // bounded ~800ms worst case is a deliberate, request-scoped wait
+    // directly serving this call, not background work stealing the
+    // runtime from anything else.
+    let mut image = target
+        .window
         .capture_image()
         .map_err(|e| anyhow::anyhow!("capture failed: {e}"))?;
+    let mut likely_unrendered = looks_unrendered(&image);
+    let mut attempts = 1;
+    while likely_unrendered && attempts < 3 {
+        std::thread::sleep(Duration::from_millis(400));
+        image = target
+            .window
+            .capture_image()
+            .map_err(|e| anyhow::anyhow!("capture failed: {e}"))?;
+        likely_unrendered = looks_unrendered(&image);
+        attempts += 1;
+    }
 
     let dir = capture_window_dir();
     std::fs::create_dir_all(&dir)
@@ -1037,8 +1206,23 @@ fn capture_window_impl(title_contains: &str, index: usize) -> Result<String> {
     // write path.
     prune_old_captures(&dir);
 
+    // codex P2 on PR #2810: no process start time is collected or checked
+    // anywhere, so claiming "this window was created recently" was
+    // unsupported and misleading for a mature window that just happens to
+    // render a near-uniform frame (looks_unrendered's own doc comment
+    // already acknowledges that legitimate case). State only what was
+    // actually observed.
+    let hint = if likely_unrendered {
+        " (likely_unrendered: true — the captured frame looks solid or \
+           near-solid-color even after retrying, which can mean the window \
+           hasn't painted its first real frame yet, or that it genuinely \
+           looks like this; consider calling CaptureWindow again shortly if \
+           that's unexpected)"
+    } else {
+        ""
+    };
     Ok(format!(
-        "Captured window {title:?} to {} — use Read on that path to view it yourself, or OpenMedia to show it to the user.",
+        "Captured window {title:?} to {}{hint} — use Read on that path to view it yourself, or OpenMedia to show it to the user.",
         path.display()
     ))
 }
@@ -1056,7 +1240,7 @@ fn capture_window_impl(title_contains: &str, index: usize) -> Result<String> {
 /// itself — `prune_old_captures`'s PNG-only extension filter already
 /// leaves a `.log` file in that same directory untouched, so this doesn't
 /// need (or want) its own separate directory alongside it.
-fn audit_log_capture_window(title_contains: &str, outcome: &Result<String>) {
+fn audit_log_capture_window(query_desc: &str, outcome: &Result<String>) {
     let entry = serde_json::json!({
         "timestamp": std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1064,12 +1248,50 @@ fn audit_log_capture_window(title_contains: &str, outcome: &Result<String>) {
             .unwrap_or(0),
         "agent_id": agent_slug().unwrap_or_else(|_| "unknown".to_string()),
         "tool": "CaptureWindow",
-        "title_contains": title_contains,
+        // "pid=N" or "title_contains=\"...\"" — whichever targeting mode
+        // the caller used (SPEC_AGENT_APP_API_WINDOW_CONTROL_ROBUSTNESS_2026_08_24.md
+        // added pid-based targeting as an alternative to title matching).
+        "query": query_desc,
         "outcome": match outcome {
             Ok(msg) => serde_json::json!({"result": "success", "detail": msg}),
             Err(e) => serde_json::json!({"result": "error", "detail": e.to_string()}),
         },
     });
+    append_window_audit_log_entry(&entry);
+}
+
+/// Audit trail for `DiscoverWindows` — reagent P1 on PR #2810: this tool
+/// discloses `exe_path` (a full filesystem path, typically embedding the OS
+/// username) for windows belonging to OTHER AgentMux instances/users on a
+/// shared machine — the exact same disclosure-across-a-human-boundary risk
+/// `audit_log_capture_window` above already exists to log, but this tool
+/// shipped with none. Same shape, same file (a single window-related audit
+/// trail is easier to review than two): best-effort, never blocks the
+/// tool's own result.
+fn audit_log_discover_windows(include_self: bool, windows: &[Value]) {
+    let entry = serde_json::json!({
+        "timestamp": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+        "agent_id": agent_slug().unwrap_or_else(|_| "unknown".to_string()),
+        "tool": "DiscoverWindows",
+        "query": format!("include_self={include_self}"),
+        "outcome": serde_json::json!({
+            "result": "success",
+            "window_count": windows.len(),
+            "windows": windows,
+        }),
+    });
+    append_window_audit_log_entry(&entry);
+}
+
+/// Shared append-only NDJSON writer for both window-tool audit trails above
+/// — best-effort (a logging failure must never break the tool itself),
+/// inside `capture_window_dir()` itself since `prune_old_captures`'s
+/// PNG-only extension filter already leaves a `.log` file in that same
+/// directory untouched, so this doesn't need (or want) its own directory.
+fn append_window_audit_log_entry(entry: &Value) {
     let dir = capture_window_dir();
     if std::fs::create_dir_all(&dir).is_err() {
         return;
@@ -2366,15 +2588,31 @@ async fn call_tool(
             ))
         }
         "CaptureWindow" => {
+            // `index` stays an Option all the way into capture_window_impl —
+            // NOT defaulted to 0 here. Defaulting it here is exactly what
+            // let an ambiguous match silently capture the wrong (and once,
+            // a genuinely unrelated/sensitive) window with no warning —
+            // see docs/reports/REPORT_AGENT_SCREENSHOT_WINDOW_CONTROL_BLOCKERS_2026_08_24.md
+            // §1. Losing "the caller didn't specify an index at all" vs.
+            // "the caller explicitly asked for index 0" was the bug.
             let title_contains = arguments
                 .get("title_contains")
                 .and_then(|v| v.as_str())
-                .ok_or_else(|| anyhow::anyhow!("missing required parameter: title_contains"))?
-                .to_string();
+                .map(|s| s.to_string());
             let index = arguments
                 .get("index")
                 .and_then(|v| v.as_u64())
-                .unwrap_or(0) as usize;
+                .map(|v| v as usize);
+            let pid = arguments
+                .get("pid")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u32);
+
+            let query_desc = match (pid, title_contains.as_deref()) {
+                (Some(p), _) => format!("pid={p}"),
+                (None, Some(t)) => format!("title_contains={t:?}"),
+                (None, None) => "<no target given>".to_string(),
+            };
 
             // Audit trail, not a capability gate — reagent P1 (PR #2709
             // round 4): a real per-agent opt-in gate is a bigger feature
@@ -2388,9 +2626,35 @@ async fn call_tool(
             // one — logging every call (who, what was requested, what
             // happened) is the honest, shippable Phase-1 answer while the
             // real gate is tracked separately (operator-confirmed).
-            let outcome = capture_window_impl(&title_contains, index);
-            audit_log_capture_window(&title_contains, &outcome);
+            let outcome = capture_window_impl(title_contains.as_deref(), index, pid);
+            audit_log_capture_window(&query_desc, &outcome);
             return outcome;
+        }
+        "DiscoverWindows" => {
+            let include_self = arguments
+                .get("include_self")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let windows = enumerate_agentmux_windows()?;
+            let list: Vec<Value> = windows
+                .iter()
+                .filter(|w| include_self || !w.is_self)
+                .map(|w| {
+                    json!({
+                        "pid": w.pid,
+                        "title": w.title,
+                        "exe_path": w.exe_path,
+                        "is_self": w.is_self,
+                    })
+                })
+                .collect();
+            // reagent P1 on PR #2810: exe_path (embeds the OS username) for
+            // OTHER instances/users on a shared machine is the same
+            // disclosure-across-a-human-boundary risk CaptureWindow already
+            // logs — this tool must too, not just the tool that follows it.
+            audit_log_discover_windows(include_self, &list);
+            return Ok(serde_json::to_string_pretty(&json!({ "windows": list }))
+                .unwrap_or_else(|_| "{\"windows\":[]}".to_string()));
         }
         "UIClick" => {
             require_agent_env(local_url, auth_key, block_id)?;
@@ -3161,6 +3425,54 @@ mod tests {
         );
     }
 
+    /// `looks_unrendered()` is the retry/hint trigger for
+    /// `CaptureWindow` (SPEC_AGENT_APP_API_WINDOW_CONTROL_ROBUSTNESS_2026_08_24.md
+    /// Fix 4) — must flag a truly uniform-color frame (the "blank capture,
+    /// no signal" bug the report documents) and must NOT flag a frame with
+    /// real visual variation, even a subtle one, as long as it exceeds the
+    /// tolerance.
+    #[test]
+    fn looks_unrendered_flags_a_solid_color_frame() {
+        let img = image::RgbaImage::from_pixel(32, 32, image::Rgba([20, 20, 20, 255]));
+        assert!(looks_unrendered(&img), "a fully solid-color frame must be flagged");
+    }
+
+    #[test]
+    fn looks_unrendered_does_not_flag_a_varied_frame() {
+        let mut img = image::RgbaImage::from_pixel(32, 32, image::Rgba([20, 20, 20, 255]));
+        // A single differing pixel could land between two sampled indices
+        // (sampling is spaced across the image, not exhaustive — see
+        // looks_unrendered's doc comment) and be missed entirely. Fill a
+        // whole row instead, so several sampled indices are guaranteed to
+        // fall inside it regardless of the exact sample step for this
+        // image size.
+        for x in 0..32 {
+            img.put_pixel(x, 16, image::Rgba([220, 30, 30, 255]));
+        }
+        assert!(
+            !looks_unrendered(&img),
+            "a frame with a clearly differing region must not be flagged as unrendered"
+        );
+    }
+
+    #[test]
+    fn looks_unrendered_ignores_noise_within_tolerance() {
+        // Real compositor output isn't perfectly uniform even for a
+        // genuinely "blank" themed window (subpixel AA, slight gradient
+        // banding) — small per-channel noise within the tolerance must
+        // still read as unrendered, or every real blank frame would dodge
+        // the retry.
+        let mut img = image::RgbaImage::from_pixel(32, 32, image::Rgba([20, 20, 20, 255]));
+        for (i, px) in img.pixels_mut().enumerate() {
+            let jitter = (i % 5) as u8; // stays within the +/-8 tolerance
+            *px = image::Rgba([20 + jitter, 20, 20, 255]);
+        }
+        assert!(
+            looks_unrendered(&img),
+            "small within-tolerance noise must still read as unrendered"
+        );
+    }
+
     /// `audit_log_capture_window` must append one valid NDJSON line per
     /// call, for both success and failure outcomes, without ever panicking
     /// or returning an error to its caller (it's a fire-and-forget
@@ -3185,12 +3497,49 @@ mod tests {
 
         let first: Value = serde_json::from_str(lines[0]).unwrap();
         assert_eq!(first["tool"], "CaptureWindow");
-        assert_eq!(first["title_contains"], "first query");
+        assert_eq!(first["query"], "first query");
         assert_eq!(first["outcome"]["result"], "success");
 
         let second: Value = serde_json::from_str(lines[1]).unwrap();
-        assert_eq!(second["title_contains"], "second query");
+        assert_eq!(second["query"], "second query");
         assert_eq!(second["outcome"]["result"], "error");
+    }
+
+    /// reagent P1 on PR #2810: `DiscoverWindows` discloses `exe_path`
+    /// (embeds the OS username for a foreign instance/user on a shared
+    /// machine) and shipped with zero audit logging, unlike `CaptureWindow`
+    /// which logs every call for exactly this reason. Pins that it now
+    /// does, into the SAME log file (one window-tool audit trail, not two).
+    #[test]
+    fn audit_log_discover_windows_appends_ndjson_with_window_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let _guard = DATA_HOME_ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var("AGENTMUX_DATA_HOME", dir.path()) };
+
+        let windows = vec![json!({
+            "pid": 4242,
+            "title": "AgentMux",
+            "exe_path": "C:\\Users\\someone\\agentmux.exe",
+            "is_self": false,
+        })];
+        audit_log_discover_windows(false, &windows);
+
+        unsafe { std::env::remove_var("AGENTMUX_DATA_HOME") };
+
+        let log_path = dir.path().join("tmp/capture-window/capture-window-audit.log");
+        let content = std::fs::read_to_string(&log_path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 1, "one NDJSON line for this call");
+
+        let entry: Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(entry["tool"], "DiscoverWindows");
+        assert_eq!(entry["query"], "include_self=false");
+        assert_eq!(entry["outcome"]["result"], "success");
+        assert_eq!(entry["outcome"]["window_count"], 1);
+        assert_eq!(
+            entry["outcome"]["windows"][0]["exe_path"],
+            "C:\\Users\\someone\\agentmux.exe"
+        );
     }
 
     /// Every tool advertised by `tools/list` must be valid JSON with a `name`
@@ -3235,6 +3584,7 @@ mod tests {
             FLEET_BROADCAST_TOOL,
             FLEET_BULK_STOP_TOOL,
             CAPTURE_WINDOW_TOOL,
+            DISCOVER_WINDOWS_TOOL,
             LIST_CONVERSATIONS_TOOL,
         ];
         // This array (and its count) has drifted from the real `tools/list`
@@ -3250,7 +3600,10 @@ mod tests {
         // LIST_CONVERSATIONS_TOOL added here too
         // (SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md
         // Phase A) — same reasoning, not fixing the pre-existing drift.
-        assert_eq!(defs.len(), 35, "tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools + 1 CaptureWindow + 1 ListConversations");
+        // DISCOVER_WINDOWS_TOOL added here too
+        // (SPEC_AGENT_APP_API_WINDOW_CONTROL_ROBUSTNESS_2026_08_24.md) — same
+        // reasoning, not fixing the pre-existing drift.
+        assert_eq!(defs.len(), 36, "tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools + 1 CaptureWindow + 1 ListConversations + 1 DiscoverWindows");
         for d in defs {
             let v: Value = serde_json::from_str(d).expect("tool def must be valid JSON");
             assert!(

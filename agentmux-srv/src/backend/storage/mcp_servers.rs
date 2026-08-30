@@ -615,6 +615,7 @@ mod bundle_ref_tests {
                 sort_order: 0,
                 created_at: 1_700_000_000_000,
                 updated_at: 1_700_000_000_000,
+                is_system: false,
             })
             .unwrap();
     }
@@ -802,6 +803,7 @@ mod bundle_ref_tests {
 
     fn insert_agent_with_bundle(store: &Store, id: &str, memory_id: &str) {
         let mut def = crate::backend::storage::store::AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: id.to_string(),
             slug: String::new(),
             name: "Test Agent".to_string(),
@@ -897,6 +899,7 @@ mod bundle_ref_tests {
     fn effective_mcp_servers_is_unaffected_when_agent_has_no_bundle() {
         let store = make_store();
         let mut def = crate::backend::storage::store::AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "agent-no-bundle".to_string(),
             slug: String::new(),
             name: "No Bundle".to_string(),

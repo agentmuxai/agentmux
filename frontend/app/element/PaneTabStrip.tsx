@@ -22,9 +22,14 @@
  * Spec: docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §3.1.
  */
 
-import { For, Show, type Accessor, type JSX } from "solid-js";
+import { createEffect, For, on, onCleanup, Show, type Accessor, type JSX } from "solid-js";
+import { atoms } from "@/store/global";
 import { Tooltip } from "./tooltip";
 import "./PaneTabStrip.scss";
+
+// Matches the other reveal-gate/cross-fade durations added alongside this
+// one in SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md §2.4.
+const WIDTH_TRANSITION_MS = 160;
 
 export interface PaneTabStripProps<T> {
     tabs: T[];
@@ -38,6 +43,18 @@ export interface PaneTabStripProps<T> {
      *  across every pane in the window. Omit for 1 (unzoomed). See
      *  docs/specs/SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md §A. */
     zoomFactor?: Accessor<number>;
+
+    /** Opt in to animating this strip's own shrink-to-fit width across a
+     *  tab-count change (SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md
+     *  §2.4) instead of an instant snap. Only meaningful for a consumer
+     *  that actually leaves the strip shrink-to-fit — the agent pane
+     *  overrides it to a fixed `left:0;right:0` full-width box
+     *  (SPEC_PANE_TAB_STRIP_TRAILING_BLUR_2026_08_12.md), where measuring
+     *  and forcing an explicit `width` would fight that override (an
+     *  explicit `left`+`width`+`right` all set is over-constrained — the
+     *  browser drops `right`, un-stretching the strip for the animation's
+     *  duration). Defaults to false: opt-in per consumer, not automatic. */
+    animateWidth?: boolean;
 
     getId: (tab: T) => string;
     getLabel: (tab: T) => string;
@@ -66,9 +83,92 @@ export interface PaneTabStripProps<T> {
 }
 
 export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
+    let stripRef: HTMLDivElement | undefined;
+    let lastMeasuredWidth: number | undefined;
+    let widthResetTimeout: ReturnType<typeof setTimeout> | undefined;
+    onCleanup(() => clearTimeout(widthResetTimeout));
+
+    // FLIP-style width transition, opt-in via `animateWidth` (see that
+    // prop's own doc comment for why it's opt-in, and PaneTabStrip.scss's
+    // comment for why a plain CSS transition can't do this at all). Tracks
+    // `tabs.length` specifically — that's the exact signal
+    // `visibleTabs()`/`visibleTermTabs()` flip on (empty when there's
+    // nothing to switch between, the full list once a 2nd tab exists),
+    // matching §2.4's actual complaint (the strip's sudden appearance/
+    // growth), not a general "animate on every possible width change"
+    // feature.
+    //
+    // Measure AFTER each change (Solid's effects run after the DOM patch,
+    // so `getBoundingClientRect()` here already reflects the NEW tab
+    // count) and compare against whatever was measured on the PREVIOUS
+    // run — that previous measurement naturally serves as "before" for
+    // this change without needing to read the DOM pre-update at all. Then:
+    // hold the box at the old width, force a synchronous reflow, and
+    // transition to the new width — the standard FLIP technique. The
+    // inline `width`/`transition` are cleared back to the CSS-driven
+    // shrink-to-fit `auto` once the transition ends, so a later window
+    // resize/zoom change isn't fighting a stale explicit pixel width.
+    //
+    // Deliberately NOT `{ defer: true }`: this effect must also run once
+    // at mount, to record the initial width into `lastMeasuredWidth` with
+    // no animation (nothing to animate FROM before mount). Deferring would
+    // skip that first run, leaving `lastMeasuredWidth` unset going into the
+    // very FIRST real tab-count change — exactly the 0-tabs-to-1-tab
+    // transition §2.4 is about — silently skipping the one change this
+    // feature exists to smooth, and only animating the second-and-later
+    // ones. `lastMeasuredWidth !== undefined` below is what actually
+    // distinguishes "first run, no prior measurement" from "no-op, sizes
+    // matched" — not `on`'s own defer option.
+    //
+    // reagent's review of PR #2768: a second tabs.length change arriving
+    // before the FIRST transition's cleanup timeout fires used to measure
+    // `newWidth` while `el.style.width` was still pinned to the first
+    // transition's in-flight interpolated value — reading garbage instead
+    // of the true natural width for the current tab count, then holding at
+    // a width unrelated to either state until the trailing timeout finally
+    // cleared it. Fixed by clearing any still-pinned width/transition
+    // FIRST (`wasAnimating` below) before measuring `newWidth`, and using
+    // the box's actual current visual position (not the stale
+    // `lastMeasuredWidth` target) as the hold point when interrupting an
+    // in-flight transition — `lastMeasuredWidth` itself is only a valid
+    // "before" reference for the SETTLED case, where layout is already
+    // lazily dirty from Solid's DOM patch by the time this effect runs and
+    // there's no other way to recover the pre-change size at all.
+    createEffect(
+        on(
+            () => props.tabs.length,
+            () => {
+                if (!props.animateWidth) return;
+                const el = stripRef;
+                if (!el) return;
+                const wasAnimating = widthResetTimeout !== undefined;
+                const holdWidth = wasAnimating ? el.getBoundingClientRect().width : lastMeasuredWidth;
+                clearTimeout(widthResetTimeout);
+                el.style.transition = "none";
+                el.style.width = "";
+                // Forces the reflow that reveals the TRUE natural width for
+                // the current tab count — only trustworthy once the line
+                // above has cleared any lingering override.
+                const newWidth = el.getBoundingClientRect().width;
+                if (holdWidth !== undefined && holdWidth !== newWidth && !atoms.prefersReducedMotionAtom()) {
+                    el.style.width = `${holdWidth}px`;
+                    el.getBoundingClientRect(); // force reflow before the transition kicks in
+                    el.style.transition = `width ${WIDTH_TRANSITION_MS}ms ease-out`;
+                    el.style.width = `${newWidth}px`;
+                    widthResetTimeout = setTimeout(() => {
+                        el.style.width = "";
+                        el.style.transition = "";
+                    }, WIDTH_TRANSITION_MS + 20);
+                }
+                lastMeasuredWidth = newWidth;
+            }
+        )
+    );
+
     return (
         <div
             class="pane-tab-strip"
+            ref={(el) => { stripRef = el; }}
             // Double-click inside the strip should never bubble up and
             // maximize the pane — matches the icon-toggle pattern from
             // blockframe.tsx. True for every consumer, not just the editor.
@@ -111,7 +211,10 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                         aria-label={props.addTitle ?? "New tab"}
                         onClick={() => props.onAdd!()}
                     >
-                        +
+                        {/* Wrapped so the glyph itself can be nudged (PaneTabStrip.scss's
+                            .pane-tab-strip-add-glyph) without moving the button's own
+                            box/hover-background/border — see that rule's comment. */}
+                        <span class="pane-tab-strip-add-glyph">+</span>
                     </button>
                 </Show>
             </div>

@@ -781,7 +781,10 @@ export const AgentLaunchModalPanel = (props: AgentLaunchModalPanelProps): JSX.El
                                     <Show when={!memoryId()}>
                                         <option value="" disabled>— Pick a bundle —</option>
                                     </Show>
-                                    <For each={(memories() ?? []).filter((m) => !m.is_blank)}>
+                                    {/* is_system entries are AgentMux-controlled workspace policy,
+                                        not a selectable per-agent bundle — bundle_memory_upsert
+                                        would refuse any later edit anyway. reagent P1, PR #2782. */}
+                                    <For each={(memories() ?? []).filter((m) => !m.is_blank && !m.is_system)}>
                                         {(memory) => (
                                             <option value={memory.id}>{memory.name}</option>
                                         )}

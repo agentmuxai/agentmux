@@ -11,13 +11,23 @@
  * errors have no in-place fix.
  */
 
-import { cleanup, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DocumentRow } from "./DocumentRow";
-import type { AgentErrorNode, CompactionStartedNode, ContextCompactedNode, DocumentNode, DocumentState } from "../types";
+import type {
+    AgentErrorNode,
+    CompactionStartedNode,
+    ContextCompactedNode,
+    DayDividerNode,
+    DocumentNode,
+    DocumentState,
+    HistoryLinkNode,
+    SectionNode,
+    SessionOutcomeNode,
+} from "../types";
 
 afterEach(() => cleanup());
 
@@ -160,5 +170,153 @@ describe("DocumentRow — compaction nodes", () => {
         renderRow(startedNode("auto"));
         expect(screen.getByText(/Compacting conversation/i)).toBeInTheDocument();
         expect(screen.getByText(/context filled up/i)).toBeInTheDocument();
+    });
+});
+
+/**
+ * DocumentRow — peek tooltip for the inline node kinds
+ * (SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25). These six kinds
+ * (section/agent_error/context_compacted/compaction_started/day_divider/
+ * session_outcome) render inline in DocumentNodeBody rather than through
+ * their own dedicated component, and previously had NO peek at all.
+ * history_link is the one deliberate exception — no timestamp/content field
+ * exists on it to peek.
+ */
+describe("DocumentRow — peek tooltip on the inline node kinds", () => {
+    const hover = (container: HTMLElement, selector: string) => {
+        const el = container.querySelector(selector) as HTMLElement;
+        fireEvent.mouseEnter(el);
+        vi.advanceTimersByTime(100);
+    };
+
+    afterEach(() => vi.useRealTimers());
+
+    it("section: shows time + estimate(title) on hover", () => {
+        vi.useFakeTimers();
+        const node: SectionNode = {
+            type: "section",
+            id: "sec-1",
+            level: 1,
+            title: "Deploy pipeline",
+            collapsible: true,
+            collapsed: false,
+            timestamp: Date.now() - 65_000,
+        };
+        const { container } = renderRow(node);
+        hover(container, ".agent-section");
+        const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
+        expect(metaLines.length).toBe(2);
+        expect(metaLines[0].textContent).toMatch(/\d{2}:\d{2}:\d{2} · 1m ago/);
+        expect(metaLines[1].textContent).toMatch(/~\d+ tok \(est\.\)/);
+    });
+
+    it("agent_error: shows only the estimate line — no timestamp field exists on this node", () => {
+        vi.useFakeTimers();
+        const { container } = renderRow(errorNode(500, "a somewhat longer error message body"));
+        hover(container, ".agent-error-block");
+        const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
+        expect(metaLines.length).toBe(1);
+        expect(metaLines[0].textContent).toMatch(/~\d+ tok \(est\.\)/);
+    });
+
+    it("context_compacted: shows a time-only peek", () => {
+        vi.useFakeTimers();
+        const node: ContextCompactedNode = {
+            type: "context_compacted",
+            id: "cc-3",
+            tokensBefore: 100_000,
+            tokensAfter: 5_000,
+            timestamp: Date.now() - 65_000,
+            source: "real",
+            trigger: "manual",
+        };
+        const { container } = renderRow(node);
+        hover(container, ".agent-context-compacted");
+        const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
+        expect(metaLines.length).toBe(1);
+        expect(metaLines[0].textContent).toMatch(/\d{2}:\d{2}:\d{2} · 1m ago/);
+    });
+
+    it("compaction_started: shows a time-only peek from startedAt", () => {
+        vi.useFakeTimers();
+        const node: CompactionStartedNode = {
+            type: "compaction_started",
+            id: "cs-2",
+            trigger: "manual",
+            startedAt: Date.now() - 65_000,
+        };
+        const { container } = renderRow(node);
+        hover(container, ".agent-compaction-started");
+        const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
+        expect(metaLines.length).toBe(1);
+        expect(metaLines[0].textContent).toMatch(/\d{2}:\d{2}:\d{2} · 1m ago/);
+    });
+
+    it("day_divider: shows the exact local-midnight instant on hover", () => {
+        vi.useFakeTimers();
+        const node: DayDividerNode = {
+            type: "day_divider",
+            id: "day-2026-08-25",
+            dayLabel: "Tue, Aug 25 2026",
+            timestamp: Date.now() - 65_000,
+        };
+        const { container } = renderRow(node);
+        hover(container, ".agent-day-divider");
+        const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
+        expect(metaLines.length).toBe(1);
+        expect(metaLines[0].textContent).toMatch(/\d{2}:\d{2}:\d{2} · 1m ago/);
+    });
+
+    it("session_outcome: shows time + attempted/actual session ids", () => {
+        vi.useFakeTimers();
+        const node: SessionOutcomeNode = {
+            type: "session_outcome",
+            id: "so-1",
+            outcome: "fresh",
+            attemptedSid: "sid-attempted",
+            actualSid: "sid-actual",
+            timestamp: Date.now() - 65_000,
+        };
+        const { container } = renderRow(node);
+        hover(container, ".agent-session-outcome");
+        expect(document.body.querySelector(".agent-node-peek-tooltip-meta")?.textContent).toMatch(/\d{2}:\d{2}:\d{2} · 1m ago/);
+        expect(document.body.querySelector(".agent-node-peek-tooltip-body")?.textContent).toBe(
+            "attempted: sid-attempted · actual: sid-actual"
+        );
+    });
+
+    it("session_outcome: an empty attemptedSid reads as '—', not a blank", () => {
+        vi.useFakeTimers();
+        // srv emits `attempted_sid: ""` when the spawn had no session id to
+        // resume at all (the cross-channel-open case its
+        // `fresh_start_needs_disclosure` gate covers) — distinct from having
+        // attempted an id that was rejected.
+        const node: SessionOutcomeNode = {
+            type: "session_outcome",
+            id: "so-2",
+            outcome: "fresh",
+            attemptedSid: "",
+            actualSid: null,
+            timestamp: Date.now() - 65_000,
+        };
+        const { container } = renderRow(node);
+        hover(container, ".agent-session-outcome");
+        expect(document.body.querySelector(".agent-node-peek-tooltip-body")?.textContent).toBe(
+            "attempted: — · actual: —"
+        );
+    });
+
+    it("history_link: no peek anchor at all — nothing to show", () => {
+        vi.useFakeTimers();
+        const node: HistoryLinkNode = { type: "history_link", id: "history-link" };
+        const [n] = createSignal<DocumentNode>(node);
+        const [state] = createSignal<DocumentState>(emptyState());
+        const { container } = render(() => (
+            <DocumentRow node={n} documentState={state} onToggleCollapse={() => {}} onTogglePin={() => {}} />
+        ));
+        const row = container.querySelector(".agent-history-link-row") as HTMLElement;
+        fireEvent.mouseEnter(row);
+        vi.advanceTimersByTime(100);
+        expect(document.body.querySelector(".agent-node-peek-overlay")).toBeNull();
     });
 });

@@ -16,6 +16,7 @@
 //! (`crate::server::service::…`, `super::service::…`) unchanged.
 
 mod client;
+mod credential;
 mod host_ipc;
 mod introspect;
 pub(crate) mod layout_helpers;
@@ -94,19 +95,17 @@ pub(crate) async fn run_service_call(state: &AppState, call: &WebCallType) -> We
     // of handlers (agent.open, blockcontroller events) broadcast
     // manually, so an external harness's CreateTab / UpdateObject
     // were invisible to the frontend.
+    //
+    // One batched frame, not one frame per update: these WS frames also
+    // reach the CALLING renderer, and they land BEFORE the HTTP response
+    // body — so N individual frames repaint the UI in N unbatched steps
+    // and the response body's batched application (wos.ts
+    // `updateWaveObjects`) arrives too late to matter (version-guarded to
+    // a no-op). CloseTab's `[delete tab, update workspace]` pair sent as
+    // two frames is exactly the blank-tab flash of
+    // SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md §7.
     if let Some(updates) = &result.updates {
-        for update in updates {
-            if let Ok(data) = serde_json::to_value(update) {
-                let oref = format!("{}:{}", update.otype, update.oid);
-                state.event_bus.broadcast_event(
-                    &crate::backend::eventbus::WSEventType {
-                        eventtype: "waveobj:update".to_string(),
-                        oref,
-                        data: Some(data),
-                    },
-                );
-            }
-        }
+        state.event_bus.broadcast_wave_obj_updates(updates);
     }
 
     result
@@ -116,6 +115,7 @@ async fn dispatch_service(state: &AppState, call: &WebCallType) -> WebReturnType
     match call.service.as_str() {
         "object" => object::handle_object_service(state, call).await,
         "client" => client::handle_client_service(state, call).await,
+        "credential" => credential::handle_credential_service(state, call).await,
         "window" => window::handle_window_service(state, call).await,
         "workspace" => workspace::handle_workspace_service(state, call).await,
         "host_ipc" => host_ipc::handle_host_ipc_service(state, call).await,

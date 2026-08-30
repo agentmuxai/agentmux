@@ -14,6 +14,28 @@ impl AgentMuxHandler {
 
         let title_str = title.map(|t| t.to_string()).unwrap_or_default();
 
+        // Main-window-only display title. Appends the "running unsandboxed"
+        // indicator (see linux_sandbox::RUNNING_UNSANDBOXED's doc comment)
+        // ONLY when this is the main app window — never for Browser-widget
+        // panes showing arbitrary web content. This handler fires for every
+        // Browser instance, including user-opened Browser panes (reagent P1
+        // on PR #2783: a Browser pane showing e.g. google.com would
+        // otherwise report its title as "Google — Sandbox Disabled" via the
+        // browser-pane-title-change event below for the rest of the
+        // session). `title_str` itself stays exactly what the page
+        // reported, unmodified, for that event.
+        #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
+        let mut display_title_str = title_str.clone();
+        #[cfg(target_os = "linux")]
+        if !self.is_browser_pane
+            && crate::linux_sandbox::RUNNING_UNSANDBOXED.load(std::sync::atomic::Ordering::Relaxed)
+        {
+            display_title_str.push_str(" — Sandbox Disabled");
+        }
+        let had_title = title.is_some();
+        let owned_title = CefString::from(display_title_str.as_str());
+        let title: Option<&CefString> = if had_title { Some(&owned_title) } else { None };
+
         // Update the window title via CEF Views.
         let mut browser = browser.cloned();
         if let Some(browser_view) = browser_view_get_for_browser(browser.as_mut()) {
@@ -34,7 +56,7 @@ impl AgentMuxHandler {
                 if let Some(host) = browser.host() {
                     let hwnd = host.window_handle();
                     if !hwnd.0.is_null() {
-                        let title_wide: Vec<u16> = title_str
+                        let title_wide: Vec<u16> = display_title_str
                             .encode_utf16()
                             .chain(std::iter::once(0))
                             .collect();

@@ -170,7 +170,7 @@ describe("ArmoryView pane title", () => {
         expect(skillsPane?.classList.contains("is-hidden")).toBe(false);
     });
 
-    it("clicking a bottom tab-bar item writes armory:section via SetMetaCommand and updates viewName()", () => {
+    it("clicking a tab-bar item writes armory:section via SetMetaCommand and updates viewName()", () => {
         const { model } = renderArmory();
         const tabBar = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-tab-bar" });
         const mcpButton = Array.from(tabBar.querySelectorAll("button")).find(
@@ -182,6 +182,25 @@ describe("ArmoryView pane title", () => {
             { oref: "block:test-block", meta: { "armory:section": "mcp" } },
         );
         expect(model.viewName()).toBe("MCP Servers");
+    });
+
+    // SPEC_RESPONSIVE_TAB_BAR_TOP_POSITION_2026_08_24.md
+    it("renders the tab-bar before the content section, so it sits at the top of the pane", () => {
+        renderArmory();
+        const tabBar = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-tab-bar" });
+        const section = document.querySelector(".bundle-manager-section");
+        expect(tabBar.compareDocumentPosition(section as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("highlights only the ABF entry in both the rail and the tab-bar", () => {
+        renderArmory();
+        const rail = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-rail" });
+        const tabBar = screen.getByLabelText("Armory section", { selector: "nav.bundle-manager-tab-bar" });
+        for (const nav of [rail, tabBar]) {
+            const highlighted = Array.from(nav.querySelectorAll("button.is-abf-highlight"));
+            expect(highlighted).toHaveLength(1);
+            expect(highlighted[0].textContent).toContain("ABF");
+        }
     });
 
     it("viewName() reflects a pre-seeded armory:section meta value", () => {

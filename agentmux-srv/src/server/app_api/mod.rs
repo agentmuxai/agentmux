@@ -26,7 +26,13 @@ use super::AppState;
 use crate::server::cli_handlers::resolve_cli_on_path;
 
 mod agent_open;
-mod agent_io;
+// pub(crate): `server/mod.rs`'s `/agentmux/agent/stop` handler (the
+// cross-channel bulk-stop forward target,
+// SPEC_FLEET_BULK_STOP_CROSS_CHANNEL_2026_08_22.md) calls
+// `stop_one_agent_block` directly — same function `fleet_bulk_stop_impl`
+// already uses for a LOCAL target, reused rather than duplicated for a
+// forwarded one.
+pub(crate) mod agent_io;
 mod agent_define;
 /// Re-exported so the human-facing creation/edit RPC handlers
 /// (`server::agent_handlers::template`/`core`) can reuse the same
@@ -300,18 +306,9 @@ pub async fn open_pane(state: &AppState, cmd: CommandPaneOpenData) -> Result<Pan
                 });
             }
         }
-        for update in &updates {
-            let oref = format!("{}:{}", update.otype, update.oid);
-            if let Ok(data) = serde_json::to_value(update) {
-                event_bus.broadcast_event(
-                    &crate::backend::eventbus::WSEventType {
-                        eventtype: "waveobj:update".to_string(),
-                        oref,
-                        data: Some(data),
-                    },
-                );
-            }
-        }
+        // One batched frame so the renderer applies all of them in a single
+        // reactive flush — see EventBus::broadcast_wave_obj_updates.
+        event_bus.broadcast_wave_obj_updates(&updates);
     }
 
     Ok(PaneOpenResult {
@@ -460,6 +457,7 @@ pub(crate) async fn agent_define_core(
         model_vendor_base_url: cmd_model_vendor_base_url.clone(),
         auto_continue_enabled: 0,
         memory_id: String::new(),
+        conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
     };
 
     // Atomic check-then-insert.
@@ -1163,6 +1161,7 @@ mod memory_version_impl_tests {
 
     fn agent_def(id: &str, working_directory: &str) -> crate::backend::storage::AgentDefinition {
         crate::backend::storage::AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: id.to_string(),
             slug: id.to_string(),
             name: "Test Agent".to_string(),
@@ -2574,6 +2573,7 @@ mod identity_self_accounts_tests {
         let state = test_state();
 
         let mut def = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: uuid::Uuid::new_v4().to_string(),
             slug: String::new(),
             name: "test agent".to_string(),
@@ -2648,6 +2648,7 @@ mod identity_self_accounts_tests {
 
         let state = test_state();
         let mut def = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: uuid::Uuid::new_v4().to_string(),
             slug: "agenty".to_string(),
             name: "AgentY".to_string(),

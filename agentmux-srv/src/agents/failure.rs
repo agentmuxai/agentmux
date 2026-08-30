@@ -45,14 +45,6 @@ pub enum FailureClass {
     SpawnFailure,
     /// Non-zero exit with no recognized cause.
     UnknownNonZero,
-    /// The process is still alive but has produced no meaningful output for
-    /// `HealthMonitor::DEAD_SECS` during an active turn — not exit-based
-    /// (unlike every other variant here), so it has no exit code/signal to
-    /// report. Not retryable via the normal "re-send the last message" path
-    /// (the process must be killed and respawned first, since it's the
-    /// process itself that's wedged) — surfaced with a "Restart" action
-    /// instead. See docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md §4.
-    Unresponsive,
 }
 
 /// A classified agent failure: the class, a user-facing title + detail,
@@ -223,6 +215,29 @@ pub fn classify(
             &tail,
         );
     }
+    // The identity spawn gate's ambient-home-dir refusal (identity/resolver/
+    // errors.rs's `SpawnGateError::AmbientHomeDirNotAllowed` Display impl —
+    // same reasoning as the MissingCredentials branch above: this never
+    // reaches the API, and a bare "Retry" would be a dead end since the
+    // gate blocks every respawn identically until the identity is rebound.
+    if hay.contains("instead of an isolated agentmux account") {
+        let provider_phrase = extract_ambient_home_provider(&combined)
+            .map(|p| format!("This agent's {} identity", capitalize_provider(&p)))
+            .unwrap_or_else(|| "This agent's identity".to_string());
+        return build(
+            FailureClass::Auth,
+            "Identity points at your personal login",
+            &format!(
+                "{provider_phrase} is bound directly to your personal CLI login \
+                 directory, which AgentMux no longer allows. Re-bind it to an \
+                 isolated account in Armory \u{2192} Accounts, then retry."
+            ),
+            false,
+            exit_code,
+            signal,
+            &tail,
+        );
+    }
     if hay.contains("authentication_error")
         || hay.contains("authentication_failed")
         || hay.contains("invalid authentication")
@@ -370,6 +385,24 @@ fn extract_spawn_gate_provider(combined: &str) -> Option<String> {
     let start = combined.find(marker)? + marker.len();
     let rest = &combined[start..];
     let end = rest.find(':')?;
+    let provider = rest[..end].trim();
+    if provider.is_empty() {
+        None
+    } else {
+        Some(provider.to_string())
+    }
+}
+
+/// Pulls the provider id out of
+/// `SpawnGateError::AmbientHomeDirNotAllowed`'s own Display wording
+/// ("this agent's {provider} identity points directly at your personal …" —
+/// identity/resolver/errors.rs). Same "return None on any mismatch rather
+/// than guessing" contract as `extract_spawn_gate_provider` above.
+fn extract_ambient_home_provider(combined: &str) -> Option<String> {
+    let marker = "this agent's ";
+    let start = combined.find(marker)? + marker.len();
+    let rest = &combined[start..];
+    let end = rest.find(" identity points directly")?;
     let provider = rest[..end].trim();
     if provider.is_empty() {
         None
@@ -651,6 +684,54 @@ mod tests {
         assert_eq!(f.code, FailureClass::Auth);
         assert!(f.detail.contains("Gemini"), "detail: {}", f.detail);
         assert!(!f.detail.contains("Claude"), "detail: {}", f.detail);
+    }
+
+    #[test]
+    fn spawn_gate_ambient_home_dir_is_auth_not_unknown() {
+        // docs/specs/SPEC_BLOCK_AMBIENT_HOME_DIR_IDENTITY_BINDING_2026_08_25.md
+        // — same "must not fall through to a dead-end Retry" reasoning as
+        // the MissingCredentials branch above, for the sibling
+        // AmbientHomeDirNotAllowed gate refusal (identity/resolver/errors.rs).
+        let frame = json!({
+            "type": "result",
+            "is_error": true,
+            "subtype": "error_during_execution",
+            "error": { "message": "[AgentMux] this agent's claude identity points directly at your personal claude config directory (C:\\Users\\asafe\\.claude) instead of an isolated AgentMux account — AgentMux no longer allows spawning an agent against your own global CLI login. Re-bind this identity to an isolated account in Armory \u{2192} Accounts (delete the current claude account and log in again to create a fresh, isolated one), then retry." }
+        });
+        let f = classify(Some(1), None, "", Some(&frame));
+        assert_eq!(f.code, FailureClass::Auth);
+        assert!(!f.retryable, "a bare retry can never succeed against this gate");
+        assert!(f.detail.contains("Claude"), "detail: {}", f.detail);
+        assert!(f.title.to_lowercase().contains("identity"), "title: {}", f.title);
+    }
+
+    #[test]
+    fn spawn_gate_ambient_home_dir_names_the_actual_provider_not_claude() {
+        let frame = json!({
+            "type": "result",
+            "is_error": true,
+            "subtype": "error_during_execution",
+            "error": { "message": "[AgentMux] this agent's codex identity points directly at your personal codex config directory (/home/user/.codex) instead of an isolated AgentMux account — AgentMux no longer allows spawning an agent against your own global CLI login. Re-bind this identity to an isolated account in Armory \u{2192} Accounts (delete the current codex account and log in again to create a fresh, isolated one), then retry." }
+        });
+        let f = classify(Some(1), None, "", Some(&frame));
+        assert_eq!(f.code, FailureClass::Auth);
+        assert!(f.detail.contains("Codex"), "detail: {}", f.detail);
+        assert!(!f.detail.contains("Claude"), "detail: {}", f.detail);
+    }
+
+    #[test]
+    fn extract_ambient_home_provider_reads_the_provider_out_of_the_gate_wording() {
+        assert_eq!(
+            extract_ambient_home_provider(
+                "this agent's gemini identity points directly at your personal gemini config directory (/x)."
+            ),
+            Some("gemini".to_string()),
+        );
+    }
+
+    #[test]
+    fn extract_ambient_home_provider_returns_none_on_wording_mismatch() {
+        assert_eq!(extract_ambient_home_provider("some unrelated error text"), None);
     }
 
     #[test]

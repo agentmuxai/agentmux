@@ -274,6 +274,7 @@ mod tests {
 
         let store = Store::open_in_memory().unwrap();
         let mut def = crate::backend::storage::store::AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: "agent-1".to_string(),
             slug: String::new(),
             name: "T".to_string(),
@@ -339,6 +340,7 @@ mod tests {
 
     fn insert_test_agent_and_link(store: &Store, agent_id: &str, account_id: &str) {
         let mut def = crate::backend::storage::store::AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: agent_id.to_string(),
             slug: String::new(),
             name: "T".to_string(),

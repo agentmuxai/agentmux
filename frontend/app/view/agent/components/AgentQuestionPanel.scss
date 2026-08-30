@@ -28,12 +28,57 @@
     box-shadow: var(--shadow-lg, 0 12px 24px rgba(0, 0, 0, 0.35));
     color: var(--main-text-color);
     outline: none;
+    // Fixed px, not vh/% — .agent-view only supports width-based container
+    // queries (container-type: inline-size), and vh is relative to the OS
+    // window, not this specific split pane, which can be much shorter.
+    // See SPEC_ASK_USER_QUESTION_PANEL_SCROLL_2026_08_25.md §3.2. Matches
+    // the existing .agent-decision-panel-preview precedent (max-height:
+    // 160px), just larger since this panel holds more than one preview block.
+    max-height: 420px;
+    // REQUIRED (Codex P1, PR #2805): as a flex item of .agent-view, this
+    // panel's automatic minimum height defaults to its content's min-content
+    // size — which wins over max-height when they conflict, per the flex
+    // sizing algorithm (used-size = max(min-size, min(max-size, tentative))).
+    // Without this override, max-height above is silently ineffective the
+    // moment content is taller than 420px: the panel still grows to fit all
+    // content and .agent-view's overflow: hidden clips it exactly as before
+    // this fix. min-height: 0 lets the panel actually shrink to whatever
+    // .agent-view can spare (down to 0, capped up to 420px) instead of
+    // always claiming its full content height.
+    min-height: 0;
 }
 
 .agent-question-panel-header {
     display: flex;
     align-items: center;
     gap: var(--space-2);
+    // Kept visible while question content scrolls beneath it — NOT via
+    // position: sticky (Codex P2, PR #2805: sticky only sticks within a
+    // scrolling ancestor, and this header is a *sibling* of
+    // .agent-question-panel-scroll, not nested inside it — .agent-view
+    // never scrolls either, so there is no scroll container for sticky to
+    // stick within here; it would be inert). The actual mechanism is
+    // flex-shrink: 0 below: when the panel shrinks to fit a short pane,
+    // only .agent-question-panel-scroll (flex-shrink: 1, the default) gives
+    // up space, so this header simply never needs to move.
+    flex-shrink: 0;
+}
+
+// Scrollable middle region between the header and actions bar above/below it
+// (visually fixed via flex-shrink: 0 on both, not position: sticky — see the
+// comment on .agent-question-panel-header for why sticky doesn't apply here).
+// SPEC_ASK_USER_QUESTION_PANEL_SCROLL_2026_08_25.md §3.1.
+.agent-question-panel-scroll {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3); // was .agent-question-panel's own gap, now spaces
+                          // multiple stacked .agent-question-panel-q blocks
+    overflow-y: auto;
+    // REQUIRED: flex items default to min-height: auto, which silently
+    // defeats overflow-y: auto by growing the box to fit its content
+    // instead of scrolling. See spec §3.3 — the classic flexbox scroll
+    // gotcha, easy to lose in a later refactor if this comment goes away.
+    min-height: 0;
 }
 
 .agent-question-panel-icon {
@@ -197,6 +242,16 @@
     display: flex;
     justify-content: flex-end;
     gap: var(--space-2);
+    // Submit answer / Answer later stay reachable even when the question
+    // content above is scrolled — see spec §2 for why this matters beyond
+    // cosmetics (the 30s auto-timeout still fires regardless of whether the
+    // user can reach these buttons). NOT via position: sticky (Codex P2,
+    // PR #2805 — see .agent-question-panel-header's comment for why sticky
+    // is inert here); flex-shrink: 0 below is what actually keeps this bar
+    // at its natural size while .agent-question-panel-scroll absorbs any
+    // squeeze.
+    padding-top: var(--space-2);
+    flex-shrink: 0;
 }
 
 .agent-question-panel-btn {

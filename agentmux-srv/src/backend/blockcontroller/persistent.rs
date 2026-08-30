@@ -32,7 +32,7 @@ use super::{
     STATUS_RUNNING,
 };
 use super::core;
-use super::health::{classify_output_line, is_compact_boundary_frame, HealthMonitor};
+use super::health::TurnActivityTracker;
 use super::persistent_resume;
 use crate::backend::eventbus::EventBus;
 use crate::backend::storage::filestore::FileStore;
@@ -81,6 +81,113 @@ fn session_outcome_line(
             "timestamp": chrono::Utc::now().to_rfc3339(),
         })
     )
+}
+
+/// Should a spawn that attached NO `--resume` disclose itself as a fresh
+/// start (subject to the caller also confirming prior history actually
+/// exists — see `has_prior_transcript`)?
+///
+/// SPEC_AGENT_PANE_HISTORY_ALIGNMENT_2026_08_05.md §2.1 deliberately left
+/// this case unreported, reasoning that a spawn with no session id has
+/// "nothing to lose". That's true for a brand-new agent and false for the
+/// case `docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`
+/// recorded: a long-lived named agent opened in a fresh channel whose shared
+/// registry pointer is empty gets no `--resume` at all, so the CLI never
+/// errors, `persistent_resume` never tracks anything, and no outcome is ever
+/// emitted — while the pane renders the entire prior conversation through
+/// `blockfile.rs`'s cross-channel read fallback. That is exactly the silent
+/// disagreement between "what the pane shows" and "what the model has" that
+/// `EmitSessionOutcome` exists to prevent.
+///
+/// `generation == 1` restricts this to a controller's FIRST spawn. Later
+/// generations also spawn without `--resume`, but each already has its own
+/// disclosure or deliberately has none: `retry_after_resume_failure`'s
+/// no-recovery-candidate path emits `Fresh` itself, and
+/// `respawn_once_for_leftover_queue` restarts a session whose fresh-vs-resumed
+/// status was decided on an earlier generation. Only a first spawn can be the
+/// "pane just opened onto history this process never had" case.
+///
+/// Kept a pure free function (the FileStore lookup stays at the call site) so
+/// the gate is unit-testable without a controller or a spawned process.
+fn fresh_start_needs_disclosure(attempted_resume_sid: Option<&str>, generation: u64) -> bool {
+    attempted_resume_sid.is_none() && generation == 1
+}
+
+#[cfg(test)]
+mod fresh_start_disclosure_tests {
+    use super::fresh_start_needs_disclosure;
+
+    /// The case STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md
+    /// recorded: a pane's first spawn, no registry pointer to resume, prior
+    /// history on disk. Nothing else in the resume machinery reports this.
+    #[test]
+    fn a_first_spawn_with_no_resume_is_disclosed() {
+        assert!(fresh_start_needs_disclosure(None, 1));
+    }
+
+    /// A resume WAS attempted — `persistent_resume`'s own tracking owns the
+    /// outcome from here (Resumed, or Fresh via the retry/recovery cascade).
+    /// Disclosing here too would double-report and could contradict it.
+    #[test]
+    fn a_spawn_that_attempted_a_resume_is_never_disclosed_here() {
+        assert!(!fresh_start_needs_disclosure(Some("some-sid"), 1));
+        assert!(!fresh_start_needs_disclosure(Some("some-sid"), 4));
+    }
+
+    /// Later generations spawn without `--resume` too, but each already has
+    /// its own disclosure or deliberately has none —
+    /// `retry_after_resume_failure` emits `Fresh` itself when no recovery
+    /// candidate exists, and `respawn_once_for_leftover_queue` restarts a
+    /// session already decided on an earlier generation. Re-disclosing would
+    /// stack a second divider onto an unchanged conversation.
+    #[test]
+    fn a_later_generation_respawn_is_not_re_disclosed() {
+        assert!(!fresh_start_needs_disclosure(None, 2));
+        assert!(!fresh_start_needs_disclosure(None, 17));
+    }
+
+    /// Generation 0 never reaches a spawn (`spawn_process` bumps before use),
+    /// but the gate must not treat the sentinel as a first spawn.
+    #[test]
+    fn generation_zero_is_not_treated_as_a_first_spawn() {
+        assert!(!fresh_start_needs_disclosure(None, 0));
+    }
+}
+
+/// Publish a `wps::EVENT_AGENT_RESUME_RETRY` status ping — a free function
+/// (not a method) for the same reason `session_outcome_line` above is one:
+/// callable from the stdout-reader/process-waiter match arms, which only
+/// hold `_read`/`_wait`-suffixed clones, not `&self`. `status` is `"retrying"`
+/// (set when a stale `--resume` is detected and a retry/recovery attempt is
+/// about to fire) or `"resolved"` (set the moment the retry's outcome —
+/// Fresh or Resumed — is actually known). See
+/// `docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md` §6.2.
+/// No-ops if `broker` is `None` (tests / non-wired controllers), same
+/// posture as every other best-effort WPS publish in this file.
+fn publish_resume_retry_status(broker: &Option<Arc<wps::Broker>>, block_id: &str, status: &str) {
+    let Some(broker) = broker else { return };
+    let mut data = serde_json::json!({ "status": status });
+    if status == "retrying" {
+        data["startedAt"] = serde_json::Value::String(chrono::Utc::now().to_rfc3339());
+    }
+    broker.publish(wps::WaveEvent {
+        event: wps::EVENT_AGENT_RESUME_RETRY.to_string(),
+        scopes: vec![format!("block:{}", block_id)],
+        sender: String::new(),
+        // `persist: 2`, not 1 — `Broker::persist_event` trims history down
+        // to exactly this many MOST RECENT events per (event, scope): a
+        // bare `persist: 1` would let the "resolved" publish immediately
+        // evict "retrying" from history, so a pane that (re)subscribes in
+        // the narrow window right after resolution sees only "resolved"
+        // with no record a retry ever happened — harmless for the simple
+        // "currently reconnecting?" check, but makes this event's own
+        // history useless for anything else. 2 keeps the latest
+        // retrying→resolved pair together; a later cascaded "retrying"
+        // still correctly evicts the OLDER pair's "retrying", not this
+        // one's "resolved".
+        persist: 2,
+        data: Some(data),
+    });
 }
 
 /// Resolve the muxbus address (the agent's display name) from a spawn env map.
@@ -570,14 +677,14 @@ pub struct PersistentSubprocessController {
     wstore: Option<Arc<Store>>,
     /// FileStore for write-through persistence of output lines (Phase 1.3).
     filestore: Option<Arc<FileStore>>,
-    health_monitor: Arc<HealthMonitor>,
+    health_monitor: Arc<TurnActivityTracker>,
     /// Monotonic counter bumped for every stdout line (including control frames).
     /// The AskUserQuestion dead-air fallback snapshots this *before* sending the
     /// answer and re-checks after a short window; any increment means the CLI
     /// produced output (assistant content OR a follow-up control_request), i.e.
-    /// the turn resumed. Counting *all* frames — not just `record_output`, which
-    /// the reader skips for control frames — avoids a spurious fallback when the
-    /// resumed turn's first activity is a tool-permission round-trip.
+    /// the turn resumed. Counting *all* frames — including control frames the
+    /// reader otherwise skips — avoids a spurious fallback when the resumed
+    /// turn's first activity is a tool-permission round-trip.
     stdout_seq: Arc<AtomicU64>,
     /// Weak self-reference for the stale-`--resume`-session retry (see
     /// `retry_after_resume_failure`) — set by `set_self_ref` right after
@@ -644,12 +751,7 @@ impl PersistentSubprocessController {
         wstore: Option<Arc<Store>>,
         filestore: Option<Arc<FileStore>>,
     ) -> Self {
-        let health_monitor = Arc::new(HealthMonitor::new(
-            block_id.clone(),
-            broker.clone(),
-            wstore.clone(),
-            event_bus.clone(),
-        ));
+        let health_monitor = Arc::new(TurnActivityTracker::new(block_id.clone()));
         Self {
             tab_id,
             block_id,
@@ -735,14 +837,12 @@ impl PersistentSubprocessController {
     /// of those fire. See REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md
     /// §4 item 5. Duplicates `get_status_snapshot`'s field construction
     /// rather than calling it, since the spawned task only holds cloned
-    /// `Arc`s, not `&self` — matches the existing precedent noted on
-    /// `core::spawn_health_watchdog` ("duplicated verbatim... before this
-    /// extraction"); worth factoring out if a second controller type needs
-    /// the same heartbeat.
+    /// `Arc`s, not `&self`; worth factoring out if a second controller type
+    /// needs the same heartbeat.
     ///
-    /// Same latent duplicate-loop race as `spawn_health_watchdog`'s existing,
-    /// already-accepted contract (reagent P2 on the PR that introduced this
-    /// function): if a turn ends and a new one starts again within one
+    /// A latent duplicate-loop race is an existing, already-accepted
+    /// contract (reagent P2 on the PR that introduced this function): if a
+    /// turn ends and a new one starts again within one
     /// `HEARTBEAT_SECS` window, the old loop hasn't yet woken up to observe
     /// `is_active_turn() == false` and break, so both the old and new loop
     /// can run concurrently for that window. Harmless — `publish_status`
@@ -800,18 +900,16 @@ impl PersistentSubprocessController {
         });
     }
 
-    /// Marks a turn active (re-arming the health watchdog and heartbeat
-    /// only if it was previously idle) and publishes the resulting status
-    /// flip. Shared by `send_message` and `retry_after_resume_failure` —
-    /// both represent "a user message is about to be delivered," just via
-    /// different spawn paths. See `send_message`'s original inline
-    /// comment (now here) for why the watchdog is re-armed conditionally:
-    /// a mid-turn steering send already has one running, so re-spawning on
-    /// every call would leak duplicate watchdog tasks.
+    /// Marks a turn active (re-arming the status heartbeat only if it was
+    /// previously idle) and publishes the resulting status flip. Shared by
+    /// `send_message` and `retry_after_resume_failure` — both represent "a
+    /// user message is about to be delivered," just via different spawn
+    /// paths. The heartbeat is re-armed conditionally: a mid-turn steering
+    /// send already has one running, so re-spawning on every call would
+    /// leak duplicate heartbeat tasks.
     fn mark_turn_active_and_publish(&self) {
         let was_active = self.health_monitor.mark_turn_active_returning_was_active();
         if !was_active {
-            core::spawn_health_watchdog(&self.health_monitor);
             self.spawn_status_heartbeat();
         }
         self.publish_status();
@@ -1565,6 +1663,53 @@ impl PersistentSubprocessController {
         );
     }
 
+    /// Does a transcript already exist for this pane — either in this
+    /// channel's own blockfile, or in the agent's GLOBAL transcript zone?
+    ///
+    /// The second half is the one that matters for
+    /// [`fresh_start_needs_disclosure`]: on a cross-channel or cross-version
+    /// open this channel's blockfile is empty, but the pane still renders the
+    /// full prior conversation through `app_api::global_output_source`'s read
+    /// fallback. Mirrors that function's checks (agent-anchored, not archived,
+    /// non-empty `output`) so "the pane will show history" and "we disclose a
+    /// fresh start" can't disagree.
+    ///
+    /// Two `stat` calls at most, on the spawn path only — cheap enough to run
+    /// unconditionally behind the caller's own generation gate.
+    fn has_prior_transcript(&self) -> bool {
+        if let Some(ref fs) = self.filestore {
+            if matches!(fs.stat(&self.block_id, PERSISTENT_OUTPUT_SUBJECT), Ok(Some(ref f)) if f.size > 0)
+            {
+                return true;
+            }
+        }
+        let Some(ref store) = self.wstore else {
+            return false;
+        };
+        let Ok(block) = store.must_get::<crate::backend::obj::Block>(&self.block_id) else {
+            return false;
+        };
+        let archived = block
+            .meta
+            .get(crate::backend::session_archive::META_SESSION_ARCHIVED_AT)
+            .and_then(|v| v.as_i64())
+            .map(|v| v > 0)
+            .unwrap_or(false);
+        if archived {
+            return false;
+        }
+        let Some(zone) = crate::backend::agent_session::agent_zone_for_block_meta(&block.meta) else {
+            return false;
+        };
+        let Some(gfs) = crate::backend::agent_session::global_transcript_store() else {
+            return false;
+        };
+        matches!(
+            gfs.stat(&zone, crate::backend::agent_session::OUTPUT_FILE),
+            Ok(Some(ref f)) if f.size > 0
+        )
+    }
+
     /// After a confirmed-stale `--resume` failure, try to recover a REAL
     /// session instead of giving up and starting blank
     /// (`docs/status/STATUS_CROSS_CHANNEL_RESUME_STALE_SESSION_ID_2026_08_20.md`).
@@ -1612,6 +1757,10 @@ impl PersistentSubprocessController {
         held_error_line: Option<String>,
         attempted_sid: String,
     ) {
+        // "Reconnecting…" starts here regardless of which branch below is
+        // taken — the user-visible gap begins the moment a retry is known
+        // to be needed, not once recovery search finishes. See §6.2.
+        publish_resume_retry_status(&self.broker, &self.block_id, "retrying");
         let recovered = self.find_recovery_session_id(&config);
         config.session_id = recovered.clone().unwrap_or_default();
         match &recovered {
@@ -1628,17 +1777,25 @@ impl PersistentSubprocessController {
             // `ConfirmedRetry` → this same function again, where
             // `find_recovery_session_id`'s poison guard refuses to
             // re-recover the identical dead id and this arm's `None`
-            // branch below correctly emits `Fresh` instead.
+            // branch below correctly emits `Fresh` instead. "Reconnecting…"
+            // is deliberately NOT resolved here — the eventual
+            // `EmitSessionOutcome` handling (stdout-reader / process-exit
+            // match arms) is what clears it, once the CLI actually confirms
+            // this recovered id one way or the other.
             Some(_) => {}
             // No recovery candidate — this IS genuinely, unambiguously a
             // fresh conversation, decided right now. Safe to emit
             // immediately: nothing downstream can turn this back into a
-            // resume.
-            None => self.emit_session_outcome_now(
-                persistent_resume::SessionOutcome::Fresh,
-                attempted_sid,
-                None,
-            ),
+            // resume. Also resolves "Reconnecting…" immediately, in step
+            // with the outcome itself.
+            None => {
+                publish_resume_retry_status(&self.broker, &self.block_id, "resolved");
+                self.emit_session_outcome_now(
+                    persistent_resume::SessionOutcome::Fresh,
+                    attempted_sid,
+                    None,
+                )
+            }
         }
         let Some(first) = (!entries.is_empty()).then(|| entries.remove(0)) else {
             // Nothing to retry at all (shouldn't happen in practice —
@@ -1903,12 +2060,11 @@ impl PersistentSubprocessController {
     pub fn send_user_message(&self, message: String) -> Result<(), String> {
         // Whether the process was busy or idle, delivering this message
         // (re)starts an active turn — see the comment in `send_message`,
-        // including the watchdog re-arm-only-if-was-idle rationale and why
+        // including the heartbeat re-arm-only-if-was-idle rationale and why
         // this must be the atomic read-and-set (send_message and
         // send_user_message can race on the same block).
         let was_active = self.health_monitor.mark_turn_active_returning_was_active();
         if !was_active {
-            core::spawn_health_watchdog(&self.health_monitor);
             self.spawn_status_heartbeat();
         }
         self.publish_status();
@@ -2305,11 +2461,31 @@ impl PersistentSubprocessController {
             }
         }
 
+        // This process starts with none of the conversation the pane is about
+        // to display — say so, in the transcript, before any of its own output
+        // lands. See `fresh_start_needs_disclosure` for why
+        // `persistent_resume`'s `SpawnedFresh` can't decide this itself.
+        //
+        // `attempted_sid` is empty: there was no id to attempt, which is the
+        // whole point. The frontend renders that as "—" rather than a blank
+        // (`DocumentRow.tsx`'s session-outcome body).
+        if fresh_start_needs_disclosure(attempted_resume_sid.as_deref(), my_generation)
+            && self.has_prior_transcript()
+        {
+            tracing::info!(
+                block_id = %self.block_id,
+                "spawned with no --resume while prior history exists — disclosing a fresh start"
+            );
+            self.emit_session_outcome_now(
+                persistent_resume::SessionOutcome::Fresh,
+                String::new(),
+                None,
+            );
+        }
+
         let pid = child.id().unwrap_or(0);
 
-        // Notify health monitor that a turn is starting. This arms the Stalled
-        // (30 s) and Dead (120 s) thresholds so the frontend learns the agent
-        // is not responding rather than silently waiting forever.
+        // Notify the turn-activity tracker that a turn is starting.
         self.health_monitor.set_active_turn(true);
 
         tracing::info!(
@@ -2550,9 +2726,9 @@ impl PersistentSubprocessController {
                     continue;
                 }
                 // Bump the activity counter for EVERY non-empty stdout line —
-                // including control frames (which `continue` below before
-                // `record_output`) — so the AskUserQuestion dead-air fallback can
-                // tell whether the turn resumed. See `answer_question`.
+                // including control frames handled via `continue` below — so
+                // the AskUserQuestion dead-air fallback can tell whether the
+                // turn resumed. See `answer_question`.
                 stdout_seq_read.fetch_add(1, Ordering::Relaxed);
 
                 // Track session metadata (debounced 1 s)
@@ -2566,7 +2742,8 @@ impl PersistentSubprocessController {
                 // every other line, matching today's behavior exactly.
                 let mut hold_back_for_resume_retry = false;
 
-                // Parse JSON for health monitoring and session ID capture
+                // Parse JSON for control-frame handling, turn-active tracking,
+                // and session ID capture
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&line) {
                     // Control-protocol frames (can_use_tool / AskUserQuestion) are
                     // NOT conversation output — handle them and skip the blockfile
@@ -2577,25 +2754,6 @@ impl PersistentSubprocessController {
                             Self::handle_control_frame(kind, &parsed, &block_id_read, &inner_read);
                             continue;
                         }
-                    }
-                    let (meaningful, _error) = classify_output_line(&parsed);
-                    // reagent P1: record_output must run BEFORE set_compacting(false)
-                    // here, not after. set_compacting(false) leaves last_meaningful_ts
-                    // untouched (by design — see its own doc comment) and immediately
-                    // re-evaluates health; evaluating against a last_meaningful_ts still
-                    // stale from before compaction started (routinely >120s for any
-                    // compaction that actually needed this fix) computes Dead and
-                    // publishes "Agent unresponsive" for one tick, self-clearing the
-                    // instant record_output's own re-evaluation runs — a transient
-                    // flicker at exactly the moment this fix exists to prevent.
-                    // Calling record_output first refreshes last_meaningful_ts to now
-                    // (compact_boundary is itself classified "meaningful" by
-                    // classify_output_line's default arm) while still compacting, so
-                    // set_compacting(false)'s own re-evaluation sees fresh output and
-                    // never dips through Dead at all.
-                    health_read.record_output(meaningful);
-                    if is_compact_boundary_frame(&parsed) {
-                        health_read.set_compacting(false);
                     }
                     let is_result_frame =
                         parsed.get("type").and_then(|v| v.as_str()) == Some("result");
@@ -2724,6 +2882,27 @@ impl PersistentSubprocessController {
                                         attempted_sid,
                                         actual_sid,
                                     } => {
+                                        // The retry (if any led here) is now resolved one
+                                        // way or the other — clear "Reconnecting…". A no-op
+                                        // publish (still fine) when this outcome came from a
+                                        // plain first-time resume that was never retried.
+                                        publish_resume_retry_status(&broker_read, &block_id_read, "resolved");
+                                        // A recovery scan can turn an
+                                        // already-disclosed resume failure
+                                        // into a genuine resume — retract the
+                                        // banner so it can't contradict the
+                                        // `resumed` divider appended just
+                                        // below. See
+                                        // `session_recovery::clear_resume_failed`.
+                                        if matches!(outcome, persistent_resume::SessionOutcome::Resumed) {
+                                            if let Some(ref store) = wstore_read {
+                                                super::session_recovery::clear_resume_failed(
+                                                    store,
+                                                    &event_bus_read,
+                                                    &block_id_read,
+                                                );
+                                            }
+                                        }
                                         if let Some(ref broker) = broker_read {
                                             let line = session_outcome_line(outcome, attempted_sid, actual_sid);
                                             super::shell::handle_append_block_file(
@@ -2954,11 +3133,6 @@ impl PersistentSubprocessController {
             tracing::info!(block_id = %block_id_read, "persistent stdout reader finished");
         });
 
-        // Spawn health watchdog — checks every 5 s while turn is active.
-        // Emits `agenthealth` WPS events when the process stalls (30 s) or
-        // dies (120 s) without producing meaningful output, giving the
-        // frontend enough signal to show a "not responding" warning.
-        core::spawn_health_watchdog(&self.health_monitor);
         self.spawn_status_heartbeat();
 
         // Spawn process waiter task
@@ -3134,7 +3308,7 @@ impl PersistentSubprocessController {
                     // actively-running generation's own state as if IT
                     // had exited. reagentx round 8: the round-6 fix only
                     // gated the field writes above, missing
-                    // `health_wait.set_exited` (a shared `HealthMonitor`
+                    // `health_wait.set_exited` (a shared `TurnActivityTracker`
                     // across generations) and the deregistration block
                     // below — both keyed by `block_id`/`agent_id`, not
                     // generation, so a stale exit incorrectly marked a
@@ -3248,6 +3422,21 @@ impl PersistentSubprocessController {
                                 attempted_sid,
                                 actual_sid,
                             } => {
+                                publish_resume_retry_status(&broker_wait, &block_id_wait, "resolved");
+                                // Same retraction as the stdout-reader site
+                                // above — this arm reaches `Fresh` today, but
+                                // the clear is keyed on the outcome rather
+                                // than on which arm produced it, so it stays
+                                // correct if that ever changes.
+                                if matches!(outcome, persistent_resume::SessionOutcome::Resumed) {
+                                    if let Some(ref store) = wstore_wait {
+                                        super::session_recovery::clear_resume_failed(
+                                            store,
+                                            &event_bus_wait,
+                                            &block_id_wait,
+                                        );
+                                    }
+                                }
                                 if let Some(ref broker) = broker_wait {
                                     let line = session_outcome_line(outcome, attempted_sid, actual_sid);
                                     super::shell::handle_append_block_file(
@@ -3262,6 +3451,13 @@ impl PersistentSubprocessController {
                             }
                             persistent_resume::ResumeEffect::PersistImmediately(line)
                             | persistent_resume::ResumeEffect::FlushErrorLine(line) => {
+                                // Safety net: a "Reconnecting…" left showing from
+                                // an earlier retry attempt on this same block must
+                                // not get stuck forever just because THIS exit
+                                // ended up genuinely non-retryable — a harmless
+                                // no-op publish in the (common) case where no
+                                // retry was in flight at all.
+                                publish_resume_retry_status(&broker_wait, &block_id_wait, "resolved");
                                 if let Some(ref broker) = broker_wait {
                                     super::shell::handle_append_block_file(
                                         broker,
@@ -3310,7 +3506,7 @@ impl PersistentSubprocessController {
                                 if let Some(ctrl) = self_ref_wait.upgrade() {
                                     tracing::warn!(
                                         block_id = %block_id_wait,
-                                        "stale --resume session id caused this exit — retrying fresh, without --resume"
+                                        "stale --resume session id caused this exit — retrying now (find_recovery_session_id may still resume a real, on-disk session rather than starting blank)"
                                     );
                                     ctrl.retry_after_resume_failure(
                                         my_generation_wait,
@@ -3319,7 +3515,15 @@ impl PersistentSubprocessController {
                                         held_error_line,
                                         attempted_sid,
                                     );
-                                } else if let Some(line) = held_error_line {
+                                } else {
+                                    // reagentx P2 on PR #2776: the controller
+                                    // itself is already gone — no retry will
+                                    // ever fire for this batch, so any
+                                    // "Reconnecting…" left showing from an
+                                    // earlier attempt on this same block must
+                                    // be resolved here; nothing else will.
+                                    publish_resume_retry_status(&broker_wait, &block_id_wait, "resolved");
+                                    if let Some(line) = held_error_line {
                                     // The controller itself is already gone
                                     // (weak ref invalidated) — nothing can
                                     // retry this batch at all, so flush
@@ -3335,6 +3539,7 @@ impl PersistentSubprocessController {
                                             filestore_wait.as_ref(),
                                             global_output_zone_wait.as_deref(),
                                         );
+                                    }
                                     }
                                 }
                             }
@@ -3511,6 +3716,21 @@ impl PersistentSubprocessController {
                     }
                     drop(inner);
 
+                    // reagentx P1 on PR #2776: a user-initiated Stop can
+                    // land at any point, including mid stale-`--resume`
+                    // retry — "Reconnecting…" has no other clearing path on
+                    // this branch (unlike `compacting`, which several
+                    // turn-end transitions defensively reset), so without
+                    // this it would stick on-screen forever with a growing
+                    // counter, and a later retry on the same pane would
+                    // wrongly keep the stale `startedAt` (ResumeRetryStarted
+                    // is a no-op while already reconnecting). Unconditional
+                    // and un-gated by `is_current_generation` on purpose —
+                    // a harmless no-op when nothing was reconnecting, and
+                    // the pane is stopping either way, so there's no
+                    // "which generation" ambiguity worth encoding here.
+                    publish_resume_retry_status(&broker_wait, &block_id_wait, "resolved");
+
                     // Flush a held-back error line now, if the resume
                     // state machine produced one — the `StopRequested`
                     // sent above guarantees `ProcessExited` resolves via
@@ -3553,8 +3773,8 @@ impl PersistentSubprocessController {
                     }
 
                     if is_current_generation {
-                        // Notify health monitor so Stalled/Dead watchdog
-                        // stops — shared `Arc<HealthMonitor>` across
+                        // Notify the turn-activity tracker of the exit —
+                        // shared `Arc<TurnActivityTracker>` across
                         // generations, gated the same way as the
                         // child.wait() arm above.
                         health_wait.set_exited(-1);
@@ -3728,10 +3948,6 @@ impl Controller for PersistentSubprocessController {
         *self.agent_id.lock().unwrap() = id;
     }
 
-    fn health_monitor(&self) -> Option<Arc<HealthMonitor>> {
-        Some(Arc::clone(&self.health_monitor))
-    }
-
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -3850,6 +4066,17 @@ mod send_input_tests {
     /// (issue #2365 — retry batches carry identity, not just text).
     fn qentry(seq: u64, json: &str) -> persistent_resume::QueuedRetryEntry {
         persistent_resume::QueuedRetryEntry { seq, json: json.to_string() }
+    }
+
+    /// `has_prior_transcript` gates the fresh-start disclosure, so a false
+    /// positive would stamp "New session started" onto a brand-new agent's
+    /// very first turn — and, worse, clamp its scrollback against a boundary
+    /// that has nothing before it. With no filestore and no store there is
+    /// provably no history, and it must say so rather than defaulting to
+    /// "assume there might be".
+    #[test]
+    fn has_prior_transcript_is_false_without_any_backing_store() {
+        assert!(!controller().has_prior_transcript());
     }
 
     /// codex P1 on PR #2500 (second round): the fresh-start clear must
@@ -4012,7 +4239,7 @@ mod send_input_tests {
     // send_message()/the stdout reader, which both require a real spawned
     // process.
     #[test]
-    fn status_snapshot_turn_active_tracks_health_monitor() {
+    fn status_snapshot_turn_active_tracks_turn_activity_tracker() {
         let c = controller();
         assert!(
             !c.get_status_snapshot().turn_active,
@@ -4022,7 +4249,7 @@ mod send_input_tests {
         c.health_monitor.set_active_turn(true);
         assert!(
             c.get_status_snapshot().turn_active,
-            "turn_active must flip true once the health monitor marks a turn active"
+            "turn_active must flip true once the turn-activity tracker marks a turn active"
         );
 
         c.health_monitor.set_active_turn(false);
@@ -5390,6 +5617,114 @@ mod send_input_tests {
         assert!(
             !content.contains("agentmux_session_outcome"),
             "must not claim any outcome until the CLI actually confirms the recovered id — got: {content:?}"
+        );
+    }
+
+    /// docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md
+    /// §6.2: a stale-`--resume` retry must publish a "Reconnecting…" status
+    /// ping so the pane can show *something* during the gap instead of going
+    /// silent. When no recovery candidate exists, the retry AND its
+    /// resolution are both known synchronously in the same call — both
+    /// pings must land, in order.
+    #[test]
+    fn retry_after_resume_failure_publishes_retrying_then_resolved_when_no_recovery_found() {
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let filestore = Arc::new(FileStore::open_in_memory().unwrap());
+        let block_id = "block-reconnecting-no-recovery".to_string();
+        let c = PersistentSubprocessController::new(
+            "tab".to_string(),
+            block_id.clone(),
+            Some(broker.clone()),
+            None,
+            None,
+            Some(filestore),
+        );
+        let config = PersistentSpawnConfig {
+            cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+            cli_args: vec![],
+            working_dir: String::new(),
+            env_vars: HashMap::new(),
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: "dead-sid".to_string(),
+            message_id: None,
+        };
+        c.retry_after_resume_failure(1, config, vec![qentry(1, "{}")], None, "dead-sid".to_string());
+
+        let history = broker.read_event_history(
+            crate::backend::wps::EVENT_AGENT_RESUME_RETRY,
+            &format!("block:{block_id}"),
+            10,
+        );
+        let statuses: Vec<Option<&str>> = history
+            .iter()
+            .map(|e| e.data.as_ref().and_then(|d| d.get("status")).and_then(|v| v.as_str()))
+            .collect();
+        assert_eq!(
+            statuses,
+            vec![Some("retrying"), Some("resolved")],
+            "expected retrying then resolved, got: {statuses:?}"
+        );
+        let retrying_data = history[0].data.as_ref().unwrap();
+        assert!(
+            retrying_data.get("startedAt").and_then(|v| v.as_str()).is_some(),
+            "the retrying ping must carry a startedAt timestamp for the frontend's elapsed-time readout"
+        );
+    }
+
+    /// The other half of the pair above: when a recovery candidate IS found,
+    /// only "retrying" fires within this call — "resolved" is deferred to
+    /// whichever `EmitSessionOutcome` handling site eventually confirms the
+    /// recovered id (or rejects it, cascading into another retry — which
+    /// would republish "retrying" again, not "resolved").
+    #[test]
+    fn retry_after_resume_failure_only_publishes_retrying_when_recovery_is_found() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config_dir = tmp.path().to_string_lossy().to_string();
+        let working_dir = r"C:\Users\asafe\.agentmux\agents\agentx-0623n".to_string();
+        let slug = crate::backend::session_backfill::encode_project_slug(&working_dir);
+        let dir = tmp.path().join("projects").join(&slug);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("972a6a4f-live.jsonl"), vec![b'x'; 2_800_000]).unwrap();
+
+        let broker = Arc::new(crate::backend::wps::Broker::new());
+        let filestore = Arc::new(FileStore::open_in_memory().unwrap());
+        let block_id = "block-reconnecting-with-recovery".to_string();
+        let c = PersistentSubprocessController::new(
+            "tab".to_string(),
+            block_id.clone(),
+            Some(broker.clone()),
+            None,
+            None,
+            Some(filestore),
+        );
+        let mut env_vars = HashMap::new();
+        env_vars.insert("CLAUDE_CONFIG_DIR".to_string(), config_dir);
+        let config = PersistentSpawnConfig {
+            cli_command: "definitely-not-a-real-binary-xyz".to_string(),
+            cli_args: vec![],
+            working_dir,
+            env_vars,
+            session_id_field: "session_id".to_string(),
+            resume_flag: "--resume".to_string(),
+            session_id: "d019e2e4-stale".to_string(),
+            message_id: None,
+        };
+        c.retry_after_resume_failure(1, config, vec![qentry(1, "{}")], None, "d019e2e4-stale".to_string());
+
+        let history = broker.read_event_history(
+            crate::backend::wps::EVENT_AGENT_RESUME_RETRY,
+            &format!("block:{block_id}"),
+            10,
+        );
+        let statuses: Vec<Option<&str>> = history
+            .iter()
+            .map(|e| e.data.as_ref().and_then(|d| d.get("status")).and_then(|v| v.as_str()))
+            .collect();
+        assert_eq!(
+            statuses,
+            vec![Some("retrying")],
+            "must not resolve yet — the CLI hasn't confirmed the recovered id — got: {statuses:?}"
         );
     }
 

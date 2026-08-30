@@ -152,16 +152,9 @@ pub(super) async fn open_pane_floating(
                 obj: Some(obj::wave_obj_to_value(&b)),
             });
         }
-        for update in &updates {
-            let oref = format!("{}:{}", update.otype, update.oid);
-            if let Ok(data) = serde_json::to_value(update) {
-                event_bus.broadcast_event(&crate::backend::eventbus::WSEventType {
-                    eventtype: "waveobj:update".to_string(),
-                    oref,
-                    data: Some(data),
-                });
-            }
-        }
+        // One batched frame so the renderer applies all of them in a single
+        // reactive flush — see EventBus::broadcast_wave_obj_updates.
+        event_bus.broadcast_wave_obj_updates(&updates);
     }
 
     // Ask the source window's frontend to open the floating OS window — scoped

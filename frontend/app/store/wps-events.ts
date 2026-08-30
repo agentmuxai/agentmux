@@ -12,13 +12,20 @@ export const WpsEvent = {
     SysInfo: "sysinfo",
     ControllerStatus: "controllerstatus",
     WaveObjUpdate: "waveobj:update",
+    // One WS frame carrying an ARRAY of WaveObjUpdates from a single atomic
+    // backend transition (e.g. CloseTab's [update workspace, delete tab]
+    // pair) — applied in one Solid batch() flush so the UI can't paint a
+    // half-applied intermediate state. Mirrors
+    // WS_EVENT_WAVE_OBJ_BATCHED_UPDATES in
+    // agentmux-srv/src/backend/eventbus.rs. See
+    // docs/specs/SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md §7.
+    WaveObjBatchedUpdates: "waveobj:batchedupdates",
     InstallProgress: "install_progress",
     Config: "config",
     UserInput: "userinput",
     AgentMessageAccepted: "agent-message-accepted",
     RouteGone: "route:gone",
     BlockStats: "blockstats",
-    AgentHealth: "agenthealth",
     AgentFailure: "agentfailure",
     ShellNodeCreate: "shell_node_create",
     ShellChunk: "shell_chunk",
@@ -26,6 +33,14 @@ export const WpsEvent = {
     // instant Claude Code begins compacting — see
     // docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md §4.2.
     CompactionStarted: "compaction_started",
+    // Published by the persistent controller's stale-`--resume` recovery
+    // path — `{status:"retrying"|"resolved"}`. See
+    // docs/status/STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md §6.2.
+    AgentResumeRetry: "agent-resume-retry",
+    // Published by SubagentWatcher::scan_session_subagents (pane-reopen
+    // cold-backfill entry point) — `{status:"started"|"done"}`. See
+    // docs/retro/retro-activity-dock-flicker-survives-debounce-fix-2026-08-24.md §5.
+    SubagentBackfillStatus: "subagent:backfill_status",
     BlockActivity: "block:activity",
     // Fired when a file open in at least one editor/preview tab changes on
     // disk. Payload: `{ path }` — a wake signal only, no content; handlers

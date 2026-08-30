@@ -31,6 +31,7 @@
 @use "styles/decision-panel";
 @use "styles/shell-node";
 @use "styles/loading-overlay";
+@use "styles/picker-fade";
 
 // Wrapper stack for the pane-level tab strip (AgentViewWrapper): strip on
 // top, content region filling the remainder. ModalLayer's mount is a plain
@@ -41,10 +42,10 @@
     flex-direction: column;
     height: 100%;
     width: 100%;
-
-    > .agent-pane-progress-bar-slot {
-        flex: 0 0 auto;
-    }
+    // Containing block for .agent-pane-progress-bar-slot below, which is
+    // now position: absolute (out of flex flow) rather than a flex child —
+    // SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md.
+    position: relative;
 }
 
 .agent-pane-stack-content {
@@ -205,11 +206,16 @@
     }
 }
 
-// Progress bar's own row, between the tab strip and the content — never
-// overlapping either. Always present at this fixed height (not
-// conditionally rendered), so the bar fading in/out via opacity never
-// shifts the tab strip or content by so much as a pixel; only what's
-// drawn inside the slot changes, never the layout around it.
+// Progress bar's own overlay strip, above the tab strip — never taking
+// layout space, active or not (SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_
+// 2026_08_25.md, superseding this rule's own previous "always-reserved 3px
+// row" — see that spec's §2.1 for why removing the reservation entirely
+// still preserves the original no-layout-shift guarantee rather than
+// reintroducing the problem it solved). Out of flex flow entirely
+// (position: absolute against .agent-pane-stack) so the tab strip below —
+// itself position: absolute; top: 0 relative to .agent-pane-stack-content —
+// now starts flush at the very top of the pane, with no reserved gap
+// between it and the pane header above.
 //
 // AgentPresentationView (deep inside .agent-pane-stack-content, itself
 // BELOW the tab strip in DOM order) portals .agent-pane-progress-bar into
@@ -220,9 +226,18 @@
 // absolutely-positioned escape could ever become visible above the tab
 // strip.
 .agent-pane-progress-bar-slot {
-    position: relative;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
     height: 3px;
     overflow: hidden;
+    pointer-events: none;
+    // Above .pane-tab-strip (z: var(--z-pane-overlay, 4)) so the bar, when
+    // active, draws visibly on top of the tab strip's own top edge — both
+    // now occupy the same top:0 coordinates once neither reserves flex
+    // space.
+    z-index: calc(var(--z-pane-overlay, 4) + 1);
 }
 
 // === Marching-ants Progress Bar ===

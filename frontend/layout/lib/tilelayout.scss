@@ -96,6 +96,14 @@
 
         .tile-leaf {
             overflow: hidden;
+            // Containing block for Block's own ready()-gate spinner overlay
+            // (block.tsx's block-ready-gate-host, SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md
+            // §2.3/§4 Option B) — without this, an absolutely-positioned
+            // child would skip past this (padded, in a split layout — see
+            // the `:not(:only-child)` rule below) static box straight to
+            // `.tile-node`'s own positioned box, ignoring this element's
+            // padding and slightly overlapping the inter-pane gap.
+            position: relative;
         }
 
         .tile-preview-container {

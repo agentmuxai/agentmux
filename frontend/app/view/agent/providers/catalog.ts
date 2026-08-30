@@ -72,7 +72,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // agentmux-cef/src/commands/providers.rs `CLAUDE_VERSION`, and
         // .github/workflows/container-image.yml `claude_version` default — enforced by
         // ./pin-consistency.test.ts.
-        pinnedVersion: "2.1.198",
+        pinnedVersion: "2.1.247",
         docsUrl: "https://docs.anthropic.com/claude-code",
         windowsInstallCommand: "irm https://claude.ai/install.ps1 | iex",
         unixInstallCommand: "curl -fsSL https://claude.ai/install.sh | bash",
@@ -85,6 +85,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // Mirrors agentmux-srv/src/backend/providers.rs `base_url_env_var`.
         baseUrlEnvVar: "ANTHROPIC_BASE_URL",
         supportedVendors: ["anthropic"],
+        startupInstructionsFilename: "CLAUDE.md",
         launchArgs: ["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--dangerously-skip-permissions"],
         resumeFlag: "--resume",
         sessionIdField: "session_id",
@@ -117,7 +118,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // desyncs the strip's Model dropdown from the actual default and is a
         // trap for any `models.find(m => m.default)` reader.
         models: [
-            { value: "opus", label: "Opus 4.8", description: "Claude Opus 4.8 — highest quality", aliases: ["claude-opus"] },
+            { value: "opus", label: "Opus 5", description: "Claude Opus 5 — highest quality", aliases: ["claude-opus"] },
             { value: "sonnet", label: "Sonnet 5", default: true, description: "Claude Sonnet 5 — balanced", aliases: ["claude-sonnet"] },
             { value: "haiku", label: "Haiku 4.5", description: "Claude Haiku 4.5 — fastest", aliases: ["claude-haiku"] },
             // No confirmed generic "fable" alias (unlike opus/sonnet/haiku above), so this
@@ -149,6 +150,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authConfigDirEnvVar: "CODEX_HOME",
         authDirName: "codex",
         supportedVendors: ["openai"],
+        startupInstructionsFilename: "AGENTS.md",
         launchArgs: ["exec", "--json", "--dangerously-bypass-approvals-and-sandbox", "-"],
         // Codex resume requires a subcommand change (exec resume <id>), not a simple flag.
         resumeFlag: null,
@@ -193,6 +195,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authConfigDirEnvVar: "MUXCODE_CONFIG_DIR",
         authDirName: "muxcode",
         supportedVendors: ["ollama", "anthropic", "openai"],
+        startupInstructionsFilename: "CLAUDE.md",
         launchArgs: ["run", "-p"],
         resumeFlag: "--resume",
         sessionIdField: "session_id",
@@ -221,6 +224,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authConfigDirEnvVar: "GEMINI_CLI_HOME",
         authDirName: "gemini",
         supportedVendors: ["google"],
+        startupInstructionsFilename: "GEMINI.md",
         authExtraEnv: { GEMINI_FORCE_FILE_STORAGE: "true" },
         launchArgs: ["--output-format", "stream-json", "--yolo", "-p", ""],
         resumeFlag: "-r",
@@ -261,6 +265,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authConfigDirEnvVar: "QWEN_HOME",
         authDirName: "qwen",
         supportedVendors: ["openrouter"],
+        startupInstructionsFilename: "QWEN.md",
         launchArgs: ["--output-format", "stream-json", "--yolo", "-p", ""],
         resumeFlag: null,
         sessionIdField: "session_id",
@@ -315,6 +320,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authConfigDirEnvVar: "OPENCLAW_HOME",
         authDirName: "openclaw",
         supportedVendors: ["openai", "anthropic", "google"],
+        startupInstructionsFilename: "AGENTS.md",
         launchArgs: ["acp"],
         resumeFlag: null,
         sessionIdField: "sessionId",
@@ -382,6 +388,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authConfigDirEnvVar: "COPILOT_HOME",
         authDirName: "copilot",
         supportedVendors: ["github"],
+        startupInstructionsFilename: "AGENTS.md",
         launchArgs: ["--acp"],
         resumeFlag: null,
         sessionIdField: "sessionId",
@@ -411,6 +418,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authConfigDirEnvVar: "PI_HOME",
         authDirName: "pi",
         supportedVendors: ["pi"],
+        startupInstructionsFilename: ".pi/APPEND_SYSTEM.md",
         launchArgs: ["--json"],
         resumeFlag: null,
         sessionIdField: "sessionId",
@@ -442,6 +450,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         authDirName: "antigravity",
         authExtraEnv: { ANTIGRAVITY_FORCE_FILE_STORAGE: "true" },
         supportedVendors: ["google"],
+        startupInstructionsFilename: "GEMINI.md",
         launchArgs: ["--output-format", "stream-json", "--yolo", "-p", ""],
         resumeFlag: "-r",
         sessionIdField: "session_id",

@@ -64,7 +64,7 @@ pub(crate) async fn compensate_via_reducer(
 /// it inside ONE hold of the reducer mutex, so persist order equals
 /// dispatch order — the same contract as `UpdateObject`'s Phase-2 route in
 /// `object.rs`. Replaces the wcore-direct seeders
-/// (`write_default_three_pane_layout` post-bootstrap caller,
+/// (`write_default_four_pane_layout` post-bootstrap caller,
 /// `setup_torn_off_block_layout`): the reducer's `TabRecord.rootnode` is
 /// authoritative, and the persist subscriber is the sole `db_layout`
 /// writer on this path.

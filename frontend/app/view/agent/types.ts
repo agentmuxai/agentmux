@@ -53,7 +53,7 @@ export type InitState = {
 /**
  * Document node types that make up the agent's markdown document
  */
-export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | JektMessageNode | SessionOutcomeNode | DayDividerNode | HistoryLinkNode;
+export type DocumentNode = MarkdownNode | SectionNode | ToolNode | AgentMessageNode | UserMessageNode | ShellNode | AgentErrorNode | ContextCompactedNode | CompactionStartedNode | JektMessageNode | SessionOutcomeNode | DayDividerNode | HistoryLinkNode | ResumePreflightNode;
 
 /**
  * Raw markdown text block
@@ -508,6 +508,35 @@ export interface DayDividerNode {
 export interface HistoryLinkNode {
     type: "history_link";
     id: "history-link";
+}
+
+/**
+ * Pane-open continuity notice — "the conversation below won't be continued",
+ * known before anything is spawned (`useResumePreflight`, backed by
+ * `agentmux-srv/src/backend/resume_preflight.rs`).
+ *
+ * A render-time synthetic like `HistoryLinkNode`: injected by
+ * `injectResumePreflight`, never persisted, never in the reducer store. It has
+ * to be a document node rather than a banner because the pane's other banner
+ * host (`AgentControlBar`) renders only while the details panel is open, and
+ * this notice is worthless if it can be missed.
+ *
+ * Distinct from `SessionOutcomeNode`, which reports what a resume attempt
+ * *did*. This reports what the next one *will* do, and disappears once the
+ * real outcome is known — the two never claim to describe the same event.
+ *
+ * `pending` is the progress-list state: the preflight is still running and has
+ * been for long enough to be worth showing (`STEPS_VISIBLE_AFTER_MS`).
+ */
+export interface ResumePreflightNode {
+    type: "resume_preflight";
+    id: "resume-preflight";
+    /** Omitted while `pending` — there's no verdict yet. */
+    verdict?: "fresh" | "recover";
+    /** A real session on disk that the next spawn won't reach for. */
+    recoverableSessionId?: string;
+    pending: boolean;
+    steps: ResumePreflightStep[];
 }
 
 /**

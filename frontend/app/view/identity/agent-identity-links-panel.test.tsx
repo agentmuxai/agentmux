@@ -69,9 +69,27 @@ vi.mock("./identity-model", () => ({
             display_name: "Claude Work",
             status: "valid",
         },
+        // No display_name — mirrors what identity_auth_persist.rs actually
+        // writes for a fresh Anthropic OAuth login (name is the internal
+        // "claude-oauth", display_name is empty). reagent P2 on PR #2806:
+        // the row must fall back to the "Anthropic" brand label here, not
+        // leak this internal name.
+        {
+            id: "acc-claude-nodisplay",
+            name: "claude-oauth",
+            provider: "claude",
+            kind: "oauth",
+            display_name: "",
+            status: "valid",
+        },
     ],
     subscribeAccountChanges: () => () => {},
-    PROVIDER_LABELS: { github: "GitHub", claude: "Claude" },
+    // Matches the real PROVIDER_LABELS shape (identity-model.ts) — keyed by
+    // brand, not raw CLI provider id. No "claude" key on purpose: a
+    // regression that dropped the brandForProvider() mapping and read
+    // row.provider directly would fall through to the raw "claude" string
+    // instead of a label here, the same way it would in production.
+    PROVIDER_LABELS: { github: "GitHub", anthropic: "Anthropic" },
 }));
 
 const claudeLoginPanel = vi.fn();
@@ -171,6 +189,20 @@ describe("AgentIdentityLinksPanel", () => {
             );
         });
 
+        it("codex P2 / reagent P2 on PR #2806: renders the Anthropic brand, not the raw 'claude' provider id or the internal 'claude-oauth' account name, for a claude row whose account has no display_name", async () => {
+            listAllAgentIdentities.mockResolvedValue([
+                mkLink({ agent_id: "agent-1", account_id: "acc-claude-nodisplay", provider: "claude" }),
+            ]);
+
+            render(() => <AgentIdentityLinksPanel agentId="agent-1" />);
+
+            // Provider column + Account column both fall back to the brand.
+            const cells = await screen.findAllByText("Anthropic");
+            expect(cells).toHaveLength(2);
+            expect(screen.queryByText("claude-oauth")).not.toBeInTheDocument();
+            expect(screen.queryByText("claude", { selector: "td" })).not.toBeInTheDocument();
+        });
+
         it("reagent P2 on PR #2414 (round 5): passes the link row's own account id, not the (possibly cache-lagging) joined Account's, so a click while the local accounts cache hasn't caught up still refreshes the RIGHT account instead of minting a new one", async () => {
             // "acc-not-yet-cached" has no matching entry in the mocked
             // loadAccounts() list (acc-1/acc-2/acc-claude-1 only) — this is
@@ -212,7 +244,7 @@ describe("AgentIdentityLinksPanel", () => {
             expect(within(table).queryByRole("button", { name: /re-login|connect/i })).not.toBeInTheDocument();
         });
 
-        it("reagent P1 on PR #2414 (round 6): STILL offers 'Connect Claude account' when the agent has other-provider links but no claude/claude-code row of its own — the per-row button can't cover this since no claude row exists to attach it to", async () => {
+        it("reagent P1 on PR #2414 (round 6): STILL offers 'Connect Anthropic account' when the agent has other-provider links but no claude/claude-code row of its own — the per-row button can't cover this since no claude row exists to attach it to", async () => {
             listAllAgentIdentities.mockResolvedValue([
                 mkLink({ agent_id: "agent-1", account_id: "acc-1", provider: "github" }),
             ]);
@@ -220,7 +252,7 @@ describe("AgentIdentityLinksPanel", () => {
             render(() => <AgentIdentityLinksPanel agentId="agent-1" />);
 
             await waitFor(() => expect(screen.getByText("Work GitHub")).toBeInTheDocument());
-            const button = await screen.findByRole("button", { name: "Connect Claude account" });
+            const button = await screen.findByRole("button", { name: "Connect Anthropic account" });
             button.click();
 
             expect(claudeLoginPanel).toHaveBeenCalledWith(
@@ -231,7 +263,7 @@ describe("AgentIdentityLinksPanel", () => {
             );
         });
 
-        it("reagent P1 on PR #2414 (round 6): does NOT offer 'Connect Claude account' anywhere for a non-claude agent that has other-provider links but no claude row — that would link an unrelated Claude account to an agent whose actual provider is something else entirely", async () => {
+        it("reagent P1 on PR #2414 (round 6): does NOT offer 'Connect Anthropic account' anywhere for a non-claude agent that has other-provider links but no claude row — that would link an unrelated Claude account to an agent whose actual provider is something else entirely", async () => {
             listAllAgentIdentities.mockResolvedValue([
                 mkLink({ agent_id: "agent-3", account_id: "acc-1", provider: "github" }),
             ]);
@@ -280,12 +312,12 @@ describe("AgentIdentityLinksPanel", () => {
             );
         });
 
-        it("empty state offers 'Connect Claude account' for an agent with NO links at all (the v0.54.9 stuck-instance case — no row exists to attach a per-row button to)", async () => {
+        it("empty state offers 'Connect Anthropic account' for an agent with NO links at all (the v0.54.9 stuck-instance case — no row exists to attach a per-row button to)", async () => {
             listAllAgentIdentities.mockResolvedValue([]);
 
             render(() => <AgentIdentityLinksPanel agentId="agent-1" />);
 
-            const button = await screen.findByRole("button", { name: "Connect Claude account" });
+            const button = await screen.findByRole("button", { name: "Connect Anthropic account" });
             button.click();
 
             expect(claudeLoginPanel).toHaveBeenCalledWith(
@@ -296,7 +328,7 @@ describe("AgentIdentityLinksPanel", () => {
             );
         });
 
-        it("reagent P2 on PR #2414 (round 3): does NOT offer 'Connect Claude account' for an agent whose own provider isn't claude — that would link an unrelated Claude account instead of the agent's actual provider", async () => {
+        it("reagent P2 on PR #2414 (round 3): does NOT offer 'Connect Anthropic account' for an agent whose own provider isn't claude — that would link an unrelated Claude account instead of the agent's actual provider", async () => {
             listAllAgentIdentities.mockResolvedValue([]);
 
             render(() => <AgentIdentityLinksPanel agentId="agent-3" />);
@@ -304,14 +336,14 @@ describe("AgentIdentityLinksPanel", () => {
             await waitFor(() => {
                 expect(screen.getByText(/no linked accounts yet/i)).toBeInTheDocument();
             });
-            expect(screen.queryByRole("button", { name: "Connect Claude account" })).not.toBeInTheDocument();
+            expect(screen.queryByRole("button", { name: "Connect Anthropic account" })).not.toBeInTheDocument();
         });
 
         // #2594 — the CTA gate must resolve through the agent's bound
         // bundle, not the possibly-drifted `agent.provider` column
         // directly (same "gate vs. actual launch can disagree" risk
         // class #2592/#2596/#2607/#2609/#2610 fixed).
-        it("#2594: offers 'Connect Claude account' when the drifted column says non-claude but the bound bundle resolves to claude", async () => {
+        it("#2594: offers 'Connect Anthropic account' when the drifted column says non-claude but the bound bundle resolves to claude", async () => {
             listAllAgentIdentities.mockResolvedValue([]);
             getMemoryCommand.mockImplementation(async (_c: unknown, data: { id: string }) =>
                 data.id === "mem-4" ? { provider: "claude" } : undefined,
@@ -319,11 +351,11 @@ describe("AgentIdentityLinksPanel", () => {
 
             render(() => <AgentIdentityLinksPanel agentId="agent-4" />);
 
-            const button = await screen.findByRole("button", { name: "Connect Claude account" });
+            const button = await screen.findByRole("button", { name: "Connect Anthropic account" });
             expect(button).toBeInTheDocument();
         });
 
-        it("#2594: does NOT offer 'Connect Claude account' when the drifted column says claude but the bound bundle resolves away from it", async () => {
+        it("#2594: does NOT offer 'Connect Anthropic account' when the drifted column says claude but the bound bundle resolves away from it", async () => {
             listAllAgentIdentities.mockResolvedValue([]);
             getMemoryCommand.mockImplementation(async (_c: unknown, data: { id: string }) =>
                 data.id === "mem-5" ? { provider: "codex" } : undefined,
@@ -334,19 +366,19 @@ describe("AgentIdentityLinksPanel", () => {
             await waitFor(() => {
                 expect(screen.getByText(/no linked accounts yet/i)).toBeInTheDocument();
             });
-            expect(screen.queryByRole("button", { name: "Connect Claude account" })).not.toBeInTheDocument();
+            expect(screen.queryByRole("button", { name: "Connect Anthropic account" })).not.toBeInTheDocument();
         });
 
-        it("reagent P2 on PR #2414 (round 3): does NOT offer 'Connect Claude account' before the initial load resolves or after it fails — only once genuinely confirmed empty", async () => {
+        it("reagent P2 on PR #2414 (round 3): does NOT offer 'Connect Anthropic account' before the initial load resolves or after it fails — only once genuinely confirmed empty", async () => {
             let resolveLoad!: (v: unknown[]) => void;
             listAllAgentIdentities.mockReturnValue(new Promise((res) => { resolveLoad = res; }));
 
             render(() => <AgentIdentityLinksPanel agentId="agent-1" />);
 
-            expect(screen.queryByRole("button", { name: "Connect Claude account" })).not.toBeInTheDocument();
+            expect(screen.queryByRole("button", { name: "Connect Anthropic account" })).not.toBeInTheDocument();
 
             resolveLoad([]);
-            const button = await screen.findByRole("button", { name: "Connect Claude account" });
+            const button = await screen.findByRole("button", { name: "Connect Anthropic account" });
             expect(button).toBeInTheDocument();
         });
     });

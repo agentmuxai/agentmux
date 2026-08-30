@@ -287,6 +287,27 @@ fn prune_block_prunes_matching_pending_activity_and_leaves_others() {
     assert!(pending.contains_key("wf_2"));
 }
 
+/// reagentx P2 (PR #2781, round 3): `backfill_generation` is keyed by
+/// `parent_block_id` like every other per-block map `prune_block` already
+/// cleans up above -- without pruning it too, every distinct block that
+/// ever called `scan_session_subagents` would leak an entry for the life
+/// of the srv process.
+#[test]
+fn prune_block_prunes_matching_backfill_generation_and_leaves_others() {
+    let watcher = fixture_watcher();
+    {
+        let mut gens = watcher.backfill_generation.lock().unwrap();
+        gens.insert("block-1".to_string(), 3);
+        gens.insert("block-2".to_string(), 1);
+    }
+
+    watcher.prune_block("block-1");
+
+    let gens = watcher.backfill_generation.lock().unwrap();
+    assert!(!gens.contains_key("block-1"));
+    assert!(gens.contains_key("block-2"));
+}
+
 #[test]
 fn prune_block_on_unknown_block_is_noop_and_returns_false() {
     let watcher = fixture_watcher();
@@ -704,6 +725,160 @@ fn process_jsonl_change_never_claims_naming_triggered_during_backfill_replay() {
     );
 
     std::fs::remove_dir_all(&dir).ok();
+}
+
+/// Issue: agentmuxai/agentmux#2829 — `select_unnamed_backlog`'s core
+/// contract: unnamed solo subagents come back most-recently-active first,
+/// an already-named one is excluded, an unnamed Workflow dispatch comes
+/// back too (using a current member as its representative), and every
+/// returned item's `dispatch_id` ends up claimed in `naming_triggered`
+/// (same dedup structure the live eager path uses) so a later live spawn
+/// of the same dispatch can't double-fire naming.
+#[test]
+fn select_unnamed_backlog_returns_unnamed_items_most_recent_first_and_claims_them() {
+    let watcher = fixture_watcher();
+    let block_id = format!("backlog-basic-{}", now_millis());
+    let dispatch_id = "wf-backlog-1";
+
+    {
+        let mut sessions = watcher.sessions.lock().unwrap();
+        let mut s1 = SessionWatch { subagents: HashMap::new() };
+
+        let mut older = fixture_state_for_block(&block_id, "sub-older", "s1");
+        older.info.last_event_at = 100;
+        s1.subagents.insert("sub-older".to_string(), older);
+
+        let mut newer = fixture_state_for_block(&block_id, "sub-newer", "s1");
+        newer.info.last_event_at = 200;
+        s1.subagents.insert("sub-newer".to_string(), newer);
+
+        let mut already_named = fixture_state_for_block(&block_id, "sub-named", "s1");
+        already_named.info.last_event_at = 300;
+        already_named.info.display_name = Some("Already named".to_string());
+        s1.subagents.insert("sub-named".to_string(), already_named);
+
+        // A representative member for the Workflow dispatch below — its
+        // own dispatch_id is the workflow's, not "solo:...", so it must
+        // never be selected as a solo candidate itself.
+        let mut wf_member = fixture_state_for_block(&block_id, "sub-wf-member", "s1");
+        wf_member.info.dispatch_id = dispatch_id.to_string();
+        wf_member.info.last_event_at = 250;
+        s1.subagents.insert("sub-wf-member".to_string(), wf_member);
+
+        sessions.insert("s1".to_string(), s1);
+    }
+    {
+        let mut dispatches = watcher.dispatches.lock().unwrap();
+        let mut wf = fixture_dispatch_state(dispatch_id, &block_id);
+        wf.info.last_event_at = 150;
+        dispatches.insert(dispatch_id.to_string(), wf);
+    }
+
+    let selected = watcher.select_unnamed_backlog(10);
+
+    assert_eq!(selected.len(), 3, "the already-named solo subagent must be excluded");
+
+    let dispatch_ids: Vec<String> = selected.iter().map(|item| item.dispatch_id()).collect();
+    assert_eq!(
+        dispatch_ids,
+        vec!["solo:sub-newer".to_string(), dispatch_id.to_string(), "solo:sub-older".to_string()],
+        "must be sorted most-recently-active first (200, 150, 100), by dispatch"
+    );
+
+    match &selected[1] {
+        BacklogNamingItem::Workflow { dispatch_id: got_id, representative_agent_id } => {
+            assert_eq!(got_id, dispatch_id);
+            assert_eq!(representative_agent_id, "sub-wf-member");
+        }
+        BacklogNamingItem::Solo { .. } => panic!("expected the Workflow item at this position"),
+    }
+
+    for id in ["solo:sub-newer", "solo:sub-older", dispatch_id] {
+        assert!(watcher.naming_triggered_contains(id), "{id} must be claimed after selection");
+    }
+    assert!(
+        !watcher.naming_triggered_contains("solo:sub-named"),
+        "an already-named subagent was never a candidate, so it must never be claimed either"
+    );
+}
+
+/// A dispatch_id already claimed in `naming_triggered` (e.g. a live spawn
+/// of the same dispatch won the race first) must never be re-selected by
+/// the backlog pass — this is what keeps a live claim and a backlog claim
+/// from ever double-firing naming for the same dispatch.
+#[test]
+fn select_unnamed_backlog_excludes_items_already_in_naming_triggered() {
+    let watcher = fixture_watcher();
+    let block_id = format!("backlog-already-claimed-{}", now_millis());
+    {
+        let mut sessions = watcher.sessions.lock().unwrap();
+        let mut s1 = SessionWatch { subagents: HashMap::new() };
+        s1.subagents.insert("sub-a".to_string(), fixture_state_for_block(&block_id, "sub-a", "s1"));
+        sessions.insert("s1".to_string(), s1);
+    }
+    {
+        let mut naming_triggered = watcher.naming_triggered.lock().unwrap();
+        naming_triggered.insert("solo:sub-a".to_string());
+    }
+
+    let selected = watcher.select_unnamed_backlog(10);
+    assert!(selected.is_empty(), "an already-claimed dispatch_id must never be re-selected");
+}
+
+/// Two calls with a limit smaller than the backlog must return disjoint
+/// sets — proves the claim inside `select_unnamed_backlog` actually
+/// prevents re-selection, which is what makes it safe to fire on every
+/// Swarm-pane-open with no extra debounce (`resolve_unnamed_backlog`'s doc
+/// comment).
+#[test]
+fn select_unnamed_backlog_two_calls_return_disjoint_sets_and_respect_limit() {
+    let watcher = fixture_watcher();
+    let block_id = format!("backlog-disjoint-{}", now_millis());
+    {
+        let mut sessions = watcher.sessions.lock().unwrap();
+        let mut s1 = SessionWatch { subagents: HashMap::new() };
+        for (i, agent_id) in ["sub-1", "sub-2", "sub-3", "sub-4", "sub-5"].iter().enumerate() {
+            let mut state = fixture_state_for_block(&block_id, agent_id, "s1");
+            state.info.last_event_at = i as u64;
+            s1.subagents.insert(agent_id.to_string(), state);
+        }
+        sessions.insert("s1".to_string(), s1);
+    }
+
+    let first = watcher.select_unnamed_backlog(3);
+    assert_eq!(first.len(), 3, "capped at the given limit");
+
+    let second = watcher.select_unnamed_backlog(3);
+    assert_eq!(second.len(), 2, "only the 2 remaining unclaimed items are left");
+
+    let first_ids: std::collections::HashSet<String> = first.iter().map(|i| i.dispatch_id()).collect();
+    let second_ids: std::collections::HashSet<String> = second.iter().map(|i| i.dispatch_id()).collect();
+    assert!(first_ids.is_disjoint(&second_ids), "the two calls must never select the same dispatch_id twice");
+    assert_eq!(first_ids.len() + second_ids.len(), 5, "together, every candidate is eventually drained");
+}
+
+/// A Workflow dispatch with no currently-visible member (e.g. its member
+/// file hasn't been picked up by the filesystem watcher yet — the same
+/// lag `reconcile_stale_subagents_does_not_abandon_a_workflow_dispatch_when_a_member_is_not_yet_visible`
+/// guards against) has no task prompt to name from — must be silently
+/// skipped, not panic or produce an item with an empty representative.
+#[test]
+fn select_unnamed_backlog_skips_a_workflow_dispatch_with_no_visible_member() {
+    let watcher = fixture_watcher();
+    let block_id = format!("backlog-no-member-{}", now_millis());
+    let dispatch_id = "wf-backlog-orphan";
+    {
+        let mut dispatches = watcher.dispatches.lock().unwrap();
+        dispatches.insert(dispatch_id.to_string(), fixture_dispatch_state(dispatch_id, &block_id));
+    }
+    // No matching member ever inserted into `sessions`.
+
+    let selected = watcher.select_unnamed_backlog(10);
+    assert!(selected.is_empty());
+    assert!(
+        !watcher.naming_triggered_contains(dispatch_id),
+        "a skipped (never-selected) dispatch must not be claimed either — it should be retried on a later pass"
+    );
 }
 
 fn p(s: &str) -> PathBuf {
@@ -1147,6 +1322,115 @@ fn scan_session_subagents_is_a_noop_for_an_unknown_session_id() {
     assert!(watcher.list_active().is_empty(), "unknown session id must not fall back to scanning everything");
 
     std::fs::remove_dir_all(&config_dir).ok();
+}
+
+// ── subagent:backfill_status (docs/retro/retro-activity-dock-flicker-survives-debounce-fix-2026-08-24.md) ──
+
+/// `scan_session_subagents` must publish "started" then "done", in that
+/// order, regardless of whether the target session directory is actually
+/// found -- the whole point is to bracket the pane's own backfill attempt,
+/// not to report whether anything was backfilled.
+#[test]
+fn scan_session_subagents_publishes_started_then_done_when_session_is_found() {
+    let config_dir = std::env::temp_dir()
+        .join(format!("amx-scan-backfill-status-found-{}", now_millis()));
+    let target_session = "target-session-uuid";
+    let target_dir = config_dir.join("projects").join("ws-enc").join(target_session).join("subagents");
+    std::fs::create_dir_all(&target_dir).unwrap();
+    std::fs::write(
+        target_dir.join("agent-wanted.jsonl"),
+        "{\"type\":\"result\",\"result\":\"done\"}\n",
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    let broker = Arc::new(crate::backend::wps::Broker::new());
+    watcher.set_broker(broker.clone());
+    watcher.scan_session_subagents("parent-1", "block-status-found", &config_dir, target_session);
+
+    let history = broker.read_event_history(
+        crate::backend::wps::EVENT_SUBAGENT_BACKFILL_STATUS,
+        "block:block-status-found",
+        10,
+    );
+    let statuses: Vec<Option<&str>> = history
+        .iter()
+        .map(|e| e.data.as_ref().and_then(|d| d.get("status")).and_then(|v| v.as_str()))
+        .collect();
+    assert_eq!(statuses, vec![Some("started"), Some("done")], "got: {statuses:?}");
+
+    std::fs::remove_dir_all(&config_dir).ok();
+}
+
+/// The other half: even when the session directory is never found at all
+/// (the existing `..._is_a_noop_for_an_unknown_session_id` case above),
+/// "done" must still fire -- a pane whose backfill attempt found nothing
+/// must not be left permanently gated as "still backfilling."
+#[test]
+fn scan_session_subagents_publishes_started_then_done_when_session_is_not_found() {
+    let config_dir = std::env::temp_dir()
+        .join(format!("amx-scan-backfill-status-notfound-{}", now_millis()));
+    std::fs::create_dir_all(config_dir.join("projects")).unwrap();
+
+    let watcher = fixture_watcher();
+    let broker = Arc::new(crate::backend::wps::Broker::new());
+    watcher.set_broker(broker.clone());
+    watcher.scan_session_subagents("parent-1", "block-status-notfound", &config_dir, "never-existed");
+
+    let history = broker.read_event_history(
+        crate::backend::wps::EVENT_SUBAGENT_BACKFILL_STATUS,
+        "block:block-status-notfound",
+        10,
+    );
+    let statuses: Vec<Option<&str>> = history
+        .iter()
+        .map(|e| e.data.as_ref().and_then(|d| d.get("status")).and_then(|v| v.as_str()))
+        .collect();
+    assert_eq!(statuses, vec![Some("started"), Some("done")], "got: {statuses:?}");
+
+    std::fs::remove_dir_all(&config_dir).ok();
+}
+
+/// A `SubagentWatcher` built via bare `fixture_watcher()` (no `set_broker`
+/// call) must not panic -- every existing test in this file already
+/// exercises this implicitly, but this pins the "no broker wired" no-op
+/// posture explicitly, matching `self_ref`'s established convention.
+#[test]
+fn scan_session_subagents_does_not_panic_without_a_broker_wired() {
+    let config_dir = std::env::temp_dir()
+        .join(format!("amx-scan-backfill-status-nobroker-{}", now_millis()));
+    std::fs::create_dir_all(config_dir.join("projects")).unwrap();
+
+    let watcher = fixture_watcher();
+    watcher.scan_session_subagents("parent-1", "block-1", &config_dir, "never-existed");
+
+    std::fs::remove_dir_all(&config_dir).ok();
+}
+
+/// reagentx P2 (PR #2781, round 2): two overlapping `scan_session_subagents`
+/// calls for the same `parent_block_id` (a block re-registered under a new
+/// `agent_id` while an earlier scan for it is still in flight, see
+/// `server/reactive.rs`'s caller comment) must not let the OLDER call's
+/// "done" fire after a NEWER call has already started -- that would
+/// prematurely clear the gate while the newer scan is still running. Tests
+/// `is_backfill_generation_current` directly rather than fabricating real
+/// thread-level concurrency in a synchronous unit test: the two
+/// end-to-end tests above already prove the ordinary (non-overlapping)
+/// single-caller path publishes "started" then "done" correctly.
+#[test]
+fn is_backfill_generation_current_returns_false_once_superseded() {
+    let watcher = fixture_watcher();
+    watcher.backfill_generation.lock().unwrap().insert("block-1".to_string(), 1);
+    assert!(watcher.is_backfill_generation_current("block-1", 1));
+
+    // A newer, overlapping call bumps the generation before generation 1's
+    // own scan has finished.
+    watcher.backfill_generation.lock().unwrap().insert("block-1".to_string(), 2);
+    assert!(
+        !watcher.is_backfill_generation_current("block-1", 1),
+        "generation 1 must now be considered superseded"
+    );
+    assert!(watcher.is_backfill_generation_current("block-1", 2));
 }
 
 // ── scan_subagents_dir backfill cap (docs/retro/retro-subagent-backfill-storm-oom-2026-07-17.md) ──

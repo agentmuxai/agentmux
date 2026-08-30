@@ -17,7 +17,7 @@ import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { AgentFooter } from "./AgentFooter";
+import { AgentFooter, AgentWorkingRow } from "./AgentFooter";
 import { ObjectService } from "@/app/store/services";
 import type { AgentViewModel } from "../agent-model";
 
@@ -475,5 +475,54 @@ describe("AgentFooter composer draft persistence (SPEC_AGENT_HISTORY_AS_TAB_AND_
 
         render(() => <AgentFooter agentName="Test" />);
         expect(getComposer().value).toBe("");
+    });
+});
+
+/**
+ * Reconnecting/Compacting sub-states, relocated onto AgentWorkingRow from
+ * AgentComposerStrip's now-removed rightText() display (2026-08-27, Part 2
+ * of docs/specs/SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md §10).
+ * Both states must render the row even with `loading={false}` and no
+ * `sessionStats` — that's the whole point of the relocation (a stale-resume
+ * reconnect fires only after the underlying process has already exited, so
+ * `loading` is typically false while it's in progress).
+ */
+describe("AgentWorkingRow compacting/reconnecting sub-states (SPEC_REMOVE_AGENT_UNRESPONSIVE_DETECTION_2026_08_25.md Part 2)", () => {
+    it('renders "Reconnecting…" in the left zone and an elapsed counter in the right zone, even with loading=false and no sessionStats', () => {
+        const { container } = render(() => (
+            <AgentWorkingRow loading={false} reconnecting={{ startedAt: Date.now() }} />
+        ));
+
+        expect(container.querySelector(".agent-working-row--loading")).toBeTruthy();
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Reconnecting…");
+        expect(container.querySelector(".agent-working-row-right")?.textContent).toMatch(/^\d+s$/);
+    });
+
+    it('renders "Compacting…" similarly when compacting is set (and reconnecting is not)', () => {
+        const { container } = render(() => (
+            <AgentWorkingRow loading={false} compacting={{ trigger: "auto", startedAt: Date.now() }} />
+        ));
+
+        expect(container.querySelector(".agent-working-row--loading")).toBeTruthy();
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Compacting…");
+        expect(container.querySelector(".agent-working-row-right")?.textContent).toMatch(/^\d+s$/);
+    });
+
+    it("reconnecting takes priority over compacting when both are somehow set", () => {
+        const { container } = render(() => (
+            <AgentWorkingRow
+                loading={false}
+                compacting={{ trigger: "auto", startedAt: Date.now() }}
+                reconnecting={{ startedAt: Date.now() }}
+            />
+        ));
+
+        expect(container.querySelector(".agent-working-row-left")?.textContent).toBe("Reconnecting…");
+    });
+
+    it("is not visible (no worked-summary/nothing) when neither loading, compacting, nor reconnecting is set and there's no sessionStats", () => {
+        const { container } = render(() => <AgentWorkingRow loading={false} />);
+
+        expect(container.querySelector(".agent-working-row")).toBeNull();
     });
 });

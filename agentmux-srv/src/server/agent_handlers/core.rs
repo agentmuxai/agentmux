@@ -137,6 +137,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // Supervisor panel (not this RPC) once that ships.
                     auto_continue_enabled: 0,
                     memory_id: String::new(),
+                    conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
                 };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("createagent: {e}"))?;
                 // Every agent gets its own dedicated ABF bundle
@@ -264,6 +265,13 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // needs the real value: it's what gets serialized back
                     // to the frontend as the "updated" agent.
                     memory_id: old.memory_id.clone(),
+                    // Not yet exposed by this RPC's own command schema
+                    // (CommandUpdateAgentData has no conversation_visibility
+                    // field) — preserve the existing value, same as
+                    // memory_id just above, rather than silently resetting
+                    // a configured agent back to the default on an
+                    // unrelated name/icon/accounts edit.
+                    conversation_visibility: old.conversation_visibility.clone(),
                 };
                 let found = wstore.agent_def_update(&mut agent).map_err(|e| format!("updateagent: {e}"))?;
                 if !found {
@@ -465,6 +473,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     model_vendor_base_url: String::new(),
                     auto_continue_enabled: 0,
                     memory_id: String::new(),
+                    conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
                 };
                 wstore.agent_def_insert(&mut agent).map_err(|e| format!("importagentfromclaw: {e}"))?;
                 wstore.agent_def_provision_and_bind_bundle(&id_store, &mut agent, now);
@@ -607,6 +616,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         model_vendor_base_url: String::new(),
                         auto_continue_enabled: 0,
                         memory_id: String::new(),
+                        conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
                     };
 
                     if let Err(e) = wstore.agent_def_insert(&mut agent) {
@@ -769,6 +779,7 @@ mod tests {
             sort_order: 0,
             created_at: 0,
             updated_at: 0,
+            is_system: false,
         };
         state.id_store.bundle_memory_upsert(&bundle).unwrap();
     }
@@ -783,6 +794,7 @@ mod tests {
     // seed the imported agent's bundle with the wrong provider.
     fn seed_drifted_agent(state: &AppState, def_id: &str, bundle_id: &str) {
         let mut def = AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
             id: def_id.to_string(),
             slug: def_id.to_string(),
             name: "Drifted Agent".to_string(),

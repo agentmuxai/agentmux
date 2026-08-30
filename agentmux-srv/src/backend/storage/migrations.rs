@@ -52,7 +52,11 @@ use super::error::StoreError;
 ///        the mirror in v6 only ever holds the current value, with no way
 ///        to see what a file contained before its last write. See
 ///        docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md.
-pub const SHARED_STORE_SCHEMA_VERSION: i64 = 8;
+///   v9 — db_bundles.is_system: AgentMux-controlled, highest-priority
+///        Global Memory tier — see OBJECT_SCHEMA_VERSION's v27 doc
+///        comment (objects.db, above run_object_schema) for the full
+///        design; this store just needs schema parity.
+pub const SHARED_STORE_SCHEMA_VERSION: i64 = 9;
 
 /// `user_version` value stamped into `objects.db` after `run_object_schema`.
 /// The flat schema reset the counter to 1 (the pre-flatten chain never set
@@ -213,7 +217,57 @@ pub const SHARED_STORE_SCHEMA_VERSION: i64 = 8;
 ///        memory-version-history PR, which independently claimed v24 for
 ///        an unrelated table (see that entry above for the same class of
 ///        collision this codebase has hit before, e.g. v20→v22).
-pub const OBJECT_SCHEMA_VERSION: i64 = 25;
+///   v26 — db_agent_definitions.conversation_visibility (TEXT, default
+///        'private') + db_conversation_trust_grants: `muxspect` Phase B/C's
+///        per-agent disclosure policy for an incoming cross-tier
+///        `transcript_request` jekt (LAN/WAN conversation visibility —
+///        docs/specs/SPEC_MUXSPECT_CROSS_TIER_CONVERSATION_VISIBILITY_2026_08_21.md,
+///        jekt tier rules confirmed in
+///        docs/specs/SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md).
+///        One of "private" (default, auto-deny)/"trusted_peers" (auto-
+///        approve an allow-listed requester)/"ask" (force human
+///        escalation). Also dual-written to `db_agents` (mirrors
+///        `auto_continue_enabled`'s treatment exactly — a simple per-agent
+///        opt-in-style setting, unlike `memory_id`/`model_vendor_base_url`,
+///        which use a differently-named column there). Deliberately NOT
+///        added to `DefinitionRecordV1`'s cross-channel wire format —
+///        channel-local only, same precedent as those two fields; a
+///        cross-channel-reopened agent starts back at the safe "private"
+///        default. `db_conversation_trust_grants` mirrors
+///        `db_lan_peer_pubkey_pins`'s exact shape (own module,
+///        get/set-style methods, case-insensitive agent_id lookups).
+///   v27 — db_bundles.is_system: an AgentMux-controlled, highest-priority
+///        Global Memory tier (INTEGER, default 0). A system row is always
+///        also is_global=1 (enforced in code, not a CHECK constraint —
+///        see `bundle_memory_upsert_system`). Writable only through the
+///        dedicated `upsertsystemmemory`/`deletesystemmemory` RPCs and
+///        `Store::bundle_memory_upsert_system`/`_delete_system` — the
+///        generic `bundle_memory_upsert`/`_delete`/`_reorder` all refuse
+///        to touch an is_system=1 row. Injected first in
+///        `format_global_brain_block`'s output, wrapped in explicit
+///        override wording, ahead of every ordinary Global Memory
+///        section. See docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md.
+///   v28 — db_agent_activity_summaries: one-shot, on-demand Haiku-generated
+///        activity summary per `definition_id`, used as the AgentPicker's
+///        "My Agents" conversation-preview fallback when a row has no
+///        structured `output.state.json` snapshot to preview (legacy rows
+///        predating snapshot persistence — see `has_snapshot` in
+///        `listrecentsessions`, `agent_handlers/session.rs`). Generated
+///        from the instance's raw `"output"` filestore file (present even
+///        when the newer structured snapshot isn't) via the same shared
+///        Ambient Model Call gateway `dispatch_name`/`term:ambient_summary`
+///        already use (`invoke_ambient_haiku_call`,
+///        `docs/specs/SPEC_AMBIENT_MODEL_CALLS_FRAMEWORK_2026_07_03.md`).
+///        Generated lazily (first picker load that needs it, not on every
+///        turn) and cached forever once non-empty — mirrors
+///        `SubAgent.display_name`'s cache-once posture, not
+///        `term:ambient_summary`'s per-turn refresh. Renumbered from an
+///        earlier v27 — merged alongside the Global Memory system-tier PR
+///        (#2782), which independently claimed v27 for an unrelated
+///        column (same collision class as this file's own v20→v22 and
+///        v24→v25 history, see those entries above). See
+///        docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md §5a.
+pub const OBJECT_SCHEMA_VERSION: i64 = 28;
 /// `user_version` value stamped into `filestore.db`.
 pub const FILESTORE_SCHEMA_VERSION: i64 = 1;
 /// `user_version` value stamped into `sagas.db`.
@@ -430,7 +484,8 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             skills        TEXT NOT NULL DEFAULT '[]',
             sort_order    INTEGER NOT NULL DEFAULT 0,
             created_at    INTEGER NOT NULL DEFAULT 0,
-            updated_at    INTEGER NOT NULL DEFAULT 0
+            updated_at    INTEGER NOT NULL DEFAULT 0,
+            is_system     INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_bundles_is_blank
             ON db_bundles(is_blank);
@@ -807,6 +862,35 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
             name       TEXT NOT NULL,
             member_ids TEXT NOT NULL DEFAULT '[]',
             created_at INTEGER NOT NULL DEFAULT 0
+        );
+
+        -- v26: allowlist for a responding agent's 'trusted_peers'
+        -- conversation_visibility mode — see OBJECT_SCHEMA_VERSION's v26
+        -- doc comment above. Mirrors db_lan_peer_pubkey_pins's exact shape
+        -- (own module, get/set-style methods, case-insensitive agent_id
+        -- lookups). `agent_id` is the RESPONDING agent (whose transcript
+        -- may be disclosed); `granted_peer_agent_id` is the requester it
+        -- trusts; `tier` records which delivery tier the grant applies to
+        -- ('lan'/'wan') since a grant for one tier's cryptographic
+        -- identity guarantee should not be silently assumed to hold for a
+        -- weaker one.
+        CREATE TABLE IF NOT EXISTS db_conversation_trust_grants (
+            agent_id             TEXT NOT NULL,
+            granted_peer_agent_id TEXT NOT NULL,
+            tier                 TEXT NOT NULL,
+            granted_at           INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (agent_id, granted_peer_agent_id, tier)
+        );
+
+        -- v28: one-shot, on-demand activity summary per definition — see
+        -- OBJECT_SCHEMA_VERSION's v28 doc comment above. `summary` is empty
+        -- only transiently (a row is only ever inserted once generation
+        -- succeeds); there is no 'pending' state stored here — an absent
+        -- row IS the pending state.
+        CREATE TABLE IF NOT EXISTS db_agent_activity_summaries (
+            definition_id TEXT PRIMARY KEY,
+            summary       TEXT NOT NULL DEFAULT '',
+            updated_at    INTEGER NOT NULL DEFAULT 0
         );",
     )?;
 
@@ -888,6 +972,16 @@ pub fn run_object_schema(conn: &Connection) -> Result<(), StoreError> {
         // comment for why, and OBJECT_SCHEMA_VERSION's v19 entry.
         "ALTER TABLE db_agent_definitions ADD COLUMN memory_id TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE db_agents ADD COLUMN default_memory_id TEXT NOT NULL DEFAULT ''",
+        // v26: muxspect Phase B/C per-agent conversation-disclosure policy —
+        // see OBJECT_SCHEMA_VERSION's v26 doc comment above. Dual-written
+        // to db_agents under the SAME column name (a simple opt-in-style
+        // setting, like auto_continue_enabled above — not a differently-
+        // named-on-db_agents case like memory_id/default_memory_id).
+        "ALTER TABLE db_agent_definitions ADD COLUMN conversation_visibility TEXT NOT NULL DEFAULT 'private'",
+        "ALTER TABLE db_agents ADD COLUMN conversation_visibility TEXT NOT NULL DEFAULT 'private'",
+        // v27: AgentMux-controlled, highest-priority Global Memory tier —
+        // see OBJECT_SCHEMA_VERSION's v27 doc comment above.
+        "ALTER TABLE db_bundles ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
@@ -1043,7 +1137,8 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
             skills        TEXT NOT NULL DEFAULT '[]',
             sort_order    INTEGER NOT NULL DEFAULT 0,
             created_at    INTEGER NOT NULL DEFAULT 0,
-            updated_at    INTEGER NOT NULL DEFAULT 0
+            updated_at    INTEGER NOT NULL DEFAULT 0,
+            is_system     INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_ss_bundles_is_blank
             ON db_bundles(is_blank);
@@ -1177,6 +1272,9 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
         "ALTER TABLE db_cron_jobs ADD COLUMN max_age_secs INTEGER",
         // v7: provider-scoped bundle instructions (ABF v0.2 §2.2).
         "ALTER TABLE db_bundles ADD COLUMN instructions_by_provider TEXT NOT NULL DEFAULT '{}'",
+        // v9: AgentMux-controlled, highest-priority Global Memory tier —
+        // see OBJECT_SCHEMA_VERSION's v27 doc comment above.
+        "ALTER TABLE db_bundles ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0",
     ] {
         if let Err(e) = conn.execute_batch(stmt) {
             let msg = e.to_string();
@@ -1217,7 +1315,17 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
 ///        read path (mirroring what v2 did for db_accounts) is not blocked
 ///        on a missing table. See
 ///        docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md.
-pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 3;
+///   v4 — db_bundles.is_system, for schema parity with OBJECT_SCHEMA_VERSION
+///        v27 / SHARED_STORE_SCHEMA_VERSION v9 (same column, same reasoning
+///        as v3 above — this store's `db_bundles` copy is not an actively-
+///        written duplicate either). Real ALTER TABLE ADD COLUMN added to
+///        `run_identity_store_schema` in the same change, so this counter
+///        MUST bump alongside it — an unbumped counter would leave an
+///        existing identity-store.db stamped at the old user_version
+///        forever, silently defeating check_schema_compat/stamp_version's
+///        forward-compat lock for this one store (reagent P1, PR #2782).
+///        See docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md.
+pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 4;
 
 /// Initialize (or re-validate) the `~/.agentmux/shared/identity-store.db`
 /// schema — the permanently-global store introduced by
@@ -1302,7 +1410,8 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
             skills        TEXT NOT NULL DEFAULT '[]',
             sort_order    INTEGER NOT NULL DEFAULT 0,
             created_at    INTEGER NOT NULL DEFAULT 0,
-            updated_at    INTEGER NOT NULL DEFAULT 0
+            updated_at    INTEGER NOT NULL DEFAULT 0,
+            is_system     INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_ids_bundles_is_blank
             ON db_bundles(is_blank);
@@ -1403,6 +1512,18 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
             (id, name, description, is_blank, created_at, updated_at)
          VALUES ('blank', '__blank__', 'Vanilla CLI — no instructions, no context', 1, 0, 0);",
     )?;
+
+    // Additive column added after this store's tables were first created —
+    // same idempotent pattern as run_shared_store_schema's own ALTER loop.
+    // db_bundles.is_system: see OBJECT_SCHEMA_VERSION's v27 doc comment.
+    if let Err(e) = conn.execute_batch(
+        "ALTER TABLE db_bundles ADD COLUMN is_system INTEGER NOT NULL DEFAULT 0",
+    ) {
+        let msg = e.to_string();
+        if !msg.contains("duplicate column") {
+            return Err(e.into());
+        }
+    }
 
     Ok(())
 }

@@ -2,9 +2,26 @@
 
 **Date:** 2026-08-21
 **Author:** Camper
-**Status:** Phase A implemented. Phase B/C blocked on repo-owner
-confirmation of the CLAUDE.md jekt rule change described below (not yet
-obtained — do not implement without it).
+**Status:** Phase A implemented. Phase B/C's CLAUDE.md jekt rule change
+confirmed live 2026-08-22 — see `SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md`
+and `CLAUDE.md`'s jekt security rules section. Phase B's policy
+infrastructure and jekt-rule enforcement are now implemented — see
+`SPEC_MUXSPECT_PHASE_B_POLICY_AND_TIER_ENFORCEMENT_2026_08_22.md`
+(`conversation_visibility` setting, `db_conversation_trust_grants`, the
+`transcript_request`/`transcript_response` wire payload, and the actual
+`TIER=sensitive`/`ESCALATE=required` computation this whole spec exists to
+gate). The auto-resolve short-circuit (private auto-deny / trusted_peers
+auto-approve, invisible to the target agent), the `ask`-mode
+approve/deny CLI, the `RequestTranscript`/`PollTranscriptRequest` MCP
+tools, and per-request-type rate limiting are still not built — see that
+spec's §3 for why deferring those specifically was a safe scope cut, not a
+gap. Phase C (WAN) tier enforcement now also implemented — see
+`SPEC_MUXSPECT_PHASE_C_WAN_TIER_ENFORCEMENT_2026_08_22.md` (the same rule
+1/rule 2 computation, now also wired into the WAN delivery path,
+`muxbus::cloud_subscriber`, which bypasses `handle_reactive_inject`/HTTP
+entirely). Phase C's own WAN-specific differences (settings-UI guidance,
+no-cache `ask` approval, bench-tuned `max_lines`) are all N/A until the
+same deferred auto-responder/settings-UI pieces above are built.
 **Motivated by:** direct request — agents need a fast way to see what every
 other agent (this host, other channels on this host, LAN, connected WAN) is
 currently saying/doing, without manual filesystem archaeology or a
@@ -201,19 +218,23 @@ pinned key, per CLAUDE.md):
   cloud relay — a concrete number needs bench data before Phase C ships,
   not guessed here.
 
-## CLAUDE.md change required before Phase B/C (blocking prerequisite)
+## CLAUDE.md change required before Phase B/C (blocking prerequisite) — DONE
 
-This spec proposes a new forced-`TIER=sensitive` rule (any
+This spec proposed a new forced-`TIER=sensitive` rule (any
 `transcript_request`) and a new case where `ESCALATE=required` is NOT
 relaxed by a verified sender (`ask` mode). Per CLAUDE.md's own stated
 process, changes to the jekt security rules require **explicit repo-owner
 confirmation in a live conversation**, followed by a real spec + code diff +
 tests + PR review — exactly the process every existing tier rule
-(2026-08-14 through 2026-08-17) went through. **This document is that
-proposal, not that confirmation.** Phase B must not ship until that
-confirmation happens and `CLAUDE.md`'s jekt section is updated to match
-(both this repo's copy and `amx/CLAUDE.md`, which this section is required
-to mirror exactly).
+(2026-08-14 through 2026-08-17) went through. This document was that
+proposal, not that confirmation — **confirmation happened separately,
+live, 2026-08-22, see `SPEC_JEKT_TRANSCRIPT_REQUEST_TIER_RULES_2026_08_22.md`
+and this repo's own `CLAUDE.md` jekt security rules section, both now
+updated to match.** (This repo's own copy only — `amx/CLAUDE.md` is a
+different, separate project this session has no access to; this repo's
+own copy is the source of truth for `agentmux`'s own jekt-handling code.)
+Phase B/C implementation itself is unblocked as of this confirmation, but
+not yet built — tracked separately.
 
 ## Non-goals
 

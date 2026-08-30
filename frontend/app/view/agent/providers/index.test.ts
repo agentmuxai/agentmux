@@ -51,6 +51,32 @@ describe("PROVIDERS", () => {
         }
     });
 
+    // docs/specs/SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md §2's
+    // per-provider table, pinned so a future edit can't silently drift from
+    // the researched/cited values. Mirrors the Rust registry's
+    // `startup_instructions_filename_matches_researched_table` test.
+    test("startupInstructionsFilename matches researched table", () => {
+        const expected: Record<string, string | undefined> = {
+            claude: "CLAUDE.md",
+            codex: "AGENTS.md",
+            gemini: "GEMINI.md",
+            qwen: "QWEN.md",
+            copilot: "AGENTS.md",
+            openclaw: "AGENTS.md",
+            pi: ".pi/APPEND_SYSTEM.md",
+            antigravity: "GEMINI.md",
+            muxcode: "CLAUDE.md",
+            kimi: undefined,
+        };
+        for (const [id, filename] of Object.entries(expected)) {
+            expect(PROVIDERS[id]?.startupInstructionsFilename).toBe(filename);
+        }
+    });
+
+    test("kimi has no startupInstructionsFilename — no confirmed native startup-instructions file", () => {
+        expect(PROVIDERS.kimi.startupInstructionsFilename).toBeUndefined();
+    });
+
     test("API-key CLI providers are in raw output mode with no default args", () => {
         for (const id of API_KEY_CLI_IDS) {
             const provider = PROVIDERS[id];

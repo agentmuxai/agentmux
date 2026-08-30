@@ -260,6 +260,40 @@ export const IdentityApi = {
         return client.rpcCall("resolve.prereqs", data, opts);
     },
 
+    // ── System-toolchain install (SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md) ──
+
+    // command "toolchain.resolve_install_command" — read-only preview:
+    // resolves what command WOULD run to install `toolId` (git/node/npm/
+    // python) via the platform's own package manager (winget/brew/a
+    // detected Linux package manager), without side effects. `available:
+    // false` means no installable command exists on this platform/machine
+    // (e.g. brew not installed on macOS, no known package manager found
+    // on Linux) — callers must fall back to the existing link+copy-command
+    // UI, never treat this as an error.
+    ToolchainResolveInstallCommandCommand(
+        client: RpcClient,
+        data: { toolId: string },
+        opts?: RpcOpts,
+    ): Promise<
+        | { available: false }
+        | { available: true; program: string; args: string[]; needsElevation: boolean; commandPreview: string }
+    > {
+        return client.rpcCall("toolchain.resolve_install_command", data, opts);
+    },
+
+    // command "toolchain.install_system_tool" — spawns the resolved
+    // install command and streams output via the SAME `install_chunk` WPS
+    // event shape `install.start` uses, scoped `install:<sessionId>`.
+    // `InstallCancelCommand` above already works unchanged for these
+    // sessions (shared session registry) — no separate cancel command.
+    ToolchainInstallSystemToolCommand(
+        client: RpcClient,
+        data: { toolId: string },
+        opts?: RpcOpts,
+    ): Promise<{ sessionId: string }> {
+        return client.rpcCall("toolchain.install_system_tool", data, opts);
+    },
+
     // command "identity.ensureaccountdir" — mints (or resolves, when
     // existingAccountId is set) a per-account isolated config dir without
     // spawning a CLI or an OAuth handshake. Used by the seed-from-global

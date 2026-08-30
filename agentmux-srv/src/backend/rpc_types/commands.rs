@@ -104,6 +104,11 @@ pub const COMMAND_AGENT_STOP: &str = "agentstop";
 pub const COMMAND_SHELL_EXEC: &str = "shellexec";
 /// Stop a running persistent shell node (Phase 3) — UI stop button.
 pub const COMMAND_SHELL_STOP: &str = "shellstop";
+/// Query a persistent shell node's current running state (Phase 3) —
+/// used by useShellNodeStream to resolve a `shell_node_create` replay's
+/// TRUE current status instead of assuming "running" (see
+/// docs/retro/retro-activity-dock-stale-shell-flash-on-load-2026-08-22.md).
+pub const COMMAND_SHELL_STATUS: &str = "shellstatus";
 pub const COMMAND_WRITE_AGENT_CONFIG: &str = "writeagentconfig";
 pub const COMMAND_RESOLVE_CLI: &str = "resolvecli";
 pub const COMMAND_CHECK_CLI_AUTH: &str = "checkcliauth";
@@ -216,6 +221,46 @@ pub const COMMAND_DELETE_MEMORY: &str = "deletememory";
 /// v9 — set the global-brain section order. `ids` is the full ordered list
 /// of global bundle ids; each row's `sort_order` becomes its index.
 pub const COMMAND_REORDER_GLOBAL_BRAIN: &str = "reorderglobalbrain";
+/// v27 — the ONLY commands that can write `db_bundles.is_system=1`. See
+/// docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md. Deliberately
+/// separate from `upsertmemory`/`deletememory` (never wired to any MCP
+/// tool) so the ordinary Global Memory editor, the per-agent Bundle
+/// editor, and ABF import/export can never touch a system entry even by
+/// accident — `Store::bundle_memory_upsert`/`_delete` refuse outright the
+/// moment they see an existing `is_system=1` row.
+pub const COMMAND_UPSERT_SYSTEM_MEMORY: &str = "upsertsystemmemory";
+pub const COMMAND_DELETE_SYSTEM_MEMORY: &str = "deletesystemmemory";
+/// Read-only. Returns the CLAUDE.md at AgentMux's shared Claude provider
+/// config dir (`DataPaths::provider_auth_dir("claude")` — the
+/// `CLAUDE_CONFIG_DIR` a non-identity-bound spawned Claude agent actually
+/// gets). NOTE: this is Claude Code's own home-relocation path, NOT the
+/// file AgentMux's Global Memory actually composes into — that's
+/// `<agent working_directory>/CLAUDE.md` (or its `AGENTMUX_MEMORY.md`
+/// companion when foreign), written by `agent_config.rs`'s
+/// `write_claude_md_respecting_ownership`, a per-agent path this command
+/// does not cover. This command exists purely to surface a
+/// Claude-Code-managed reference file for operator visibility ("External
+/// Claude Code files" section — SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md
+/// §7 is the main feature this whole spec chain converged on). No
+/// parameters (the path is fixed, not caller-supplied — no
+/// path-traversal surface) and no write counterpart. See
+/// docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §5, §7.
+pub const COMMAND_GET_CLAUDE_GLOBAL_CONFIG: &str = "getclaudeglobalconfig";
+/// Read-only. Returns `~/.claude/CLAUDE.md` — Claude Code's own global
+/// config, read by a host-level Claude Code CLI running outside
+/// AgentMux's `CLAUDE_CONFIG_DIR` isolation entirely (e.g. an external
+/// coding-agent harness). Deliberately a SEPARATE command/block from
+/// `getclaudeglobalconfig` above rather than a replacement — the two
+/// paths have different audiences and neither implies coverage of the
+/// other; both are "External Claude Code files" reference displays, not
+/// part of AgentMux's own Global Memory composition (see that command's
+/// doc comment). Renamed from `getclaudeambientconfig` (§7) — "ambient"
+/// already means something else in this codebase (`term:ambient_summary`,
+/// a per-turn activity paraphrase — see `activitySummary.ts`), so this
+/// command/its UI badge dropped the word entirely rather than picking a
+/// second meaning for it. No parameters, no write counterpart. See
+/// docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6, §7.
+pub const COMMAND_GET_CLAUDE_HOST_CONFIG: &str = "getclaudehostconfig";
 
 // Agent instances
 pub const COMMAND_LIST_AGENT_INSTANCES: &str = "listagentinstances";
@@ -491,6 +536,10 @@ pub const COMMAND_MCP_CATALOG_UNBIND_FROM_BUNDLE: &str = "mcp.catalog.unbind_fro
 pub const COMMAND_MCP_CATALOG_LIST_FOR_BUNDLE: &str = "mcp.catalog.list_for_bundle";
 // See the identical comment on COMMAND_SKILL_CATALOG_UPSERT_FOR_BUNDLE above.
 pub const COMMAND_MCP_CATALOG_UPSERT_FOR_BUNDLE: &str = "mcp.catalog.upsert_for_bundle";
+
+// Pane-open resume preflight — "will this conversation resume, or start new?"
+// answered before anything is spawned. See crate::backend::resume_preflight.
+pub const COMMAND_SESSION_RESUME_PREFLIGHT: &str = "session:resume_preflight";
 
 // App API Tier 1 — session archival commands
 pub const COMMAND_SESSION_ARCHIVE: &str = "session:archive";
