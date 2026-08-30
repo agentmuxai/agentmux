@@ -1530,7 +1530,21 @@ pub(super) fn global_zone_line_count(
         }
     }
 
-    crate::backend::blockcontroller::shell::rebuild_output_idx(gfs, zone, output_size)
+    // Stale or missing. `extend_output_idx` scans only the appended bytes when
+    // it can anchor on the existing index, and falls back to a full rebuild
+    // when it can't (missing, unreadable, no entries, or `output` shrank).
+    //
+    // The count must stay EXACT. Returning a stale one instead was tried and
+    // is wrong: this feeds `useHistoryPagination`'s tail window
+    // (`offset = total - PAGE_SIZE`), so an undercount silently drops the most
+    // recent history on reopen — codex P1 on PR #2838. Only the COST of
+    // keeping it exact was ever negotiable, which is what the incremental scan
+    // buys: `output` grows continuously for a live agent, so "stale" is the
+    // steady state, and a 30-second line-count poll was driving a full
+    // O(file-size) rescan every time — 37 rebuilds in 19 minutes on a 759 MB
+    // transcript, mean 3168 ms, ~10% permanent duty cycle. See
+    // docs/reports/REPORT_AGENT_PANE_LOAD_RENDER_ARCHITECTURE_2026_08_27.md §5.
+    crate::backend::blockcontroller::shell::extend_output_idx(gfs, zone, output_size)
 }
 
 /// Resolve a tab ID: use the provided one, or fall back to the first workspace's active tab.
@@ -1864,6 +1878,101 @@ mod cross_channel_tests {
             Some(2),
             "must trust the fresh cached index rather than rescanning `output`",
         );
+    }
+
+    /// `seed_output` creates the file, so it can only be called once per zone.
+    /// These tests need to grow (and shrink) an existing `output`.
+    fn append_output(fs: &Arc<FileStore>, zone: &str, body: &[u8]) {
+        fs.append_data(zone, OUTPUT_FILE, body).unwrap();
+    }
+
+    fn replace_output(fs: &Arc<FileStore>, zone: &str, body: &[u8]) {
+        fs.write_file(zone, OUTPUT_FILE, body).unwrap();
+    }
+
+    #[test]
+    fn global_zone_line_count_is_exact_after_an_append() {
+        // The count MUST stay exact. Returning a stale index's count was the
+        // first attempt at this fix and is wrong: the count feeds
+        // useHistoryPagination's tail window (offset = total - PAGE_SIZE), so
+        // an undercount silently drops the newest history on reopen (codex P1
+        // on PR #2838). Only the cost of exactness was negotiable.
+        let global = mem_store();
+        let zone = "agent:def-cc-6:current";
+        seed_output(&global, zone, b"{\"a\":1}\n{\"b\":2}\n");
+        assert_eq!(global_zone_line_count(&global, zone), Some(2));
+
+        append_output(&global, zone, b"{\"c\":3}\n{\"d\":4}\n");
+        assert_eq!(
+            global_zone_line_count(&global, zone),
+            Some(4),
+            "an append must be reflected exactly, not answered from the stale index",
+        );
+    }
+
+    #[test]
+    fn global_zone_line_count_handles_a_line_completed_after_the_previous_build() {
+        // The boundary case that makes a naive "scan from covered_size"
+        // incremental index wrong. When the previous build ran the file ended
+        // MID-LINE (no trailing newline), so that partial line already has an
+        // index entry. Bytes appended since continue that same line rather
+        // than starting a new one — so the extend re-scans from the last
+        // entry's offset and re-derives it instead of treating the
+        // continuation as new. Getting this wrong double-counts the
+        // straddling line (5 instead of 4 here).
+        let global = mem_store();
+        let zone = "agent:def-cc-8:current";
+        seed_output(&global, zone, b"{\"a\":1}\n{\"b\":2}\n{\"par");
+        assert_eq!(
+            global_zone_line_count(&global, zone),
+            Some(3),
+            "the partial trailing line is itself indexed",
+        );
+
+        append_output(&global, zone, b"tial\":3}\n{\"d\":4}\n");
+        assert_eq!(
+            global_zone_line_count(&global, zone),
+            Some(4),
+            "the completed line must not be counted twice",
+        );
+    }
+
+    #[test]
+    fn global_zone_line_count_rebuilds_when_output_shrank() {
+        // Rotation/truncation: the existing index covers more than the file
+        // now holds, so it can't be used as a base at all.
+        let global = mem_store();
+        let zone = "agent:def-cc-9:current";
+        seed_output(&global, zone, b"{\"a\":1}\n{\"b\":2}\n{\"c\":3}\n{\"d\":4}\n");
+        assert_eq!(global_zone_line_count(&global, zone), Some(4));
+
+        replace_output(&global, zone, b"{\"z\":9}\n");
+        assert_eq!(
+            global_zone_line_count(&global, zone),
+            Some(1),
+            "a shrunken output must be rebuilt from scratch, not extended",
+        );
+    }
+
+    #[test]
+    fn global_zone_line_count_still_builds_when_no_index_exists() {
+        // The one case that must still pay for a build: without it the
+        // line_count handler falls through to `session:line_count` (absent for
+        // a zone this channel never wrote) and then the capped WPS ring, so a
+        // fresh cross-channel open would under-report and render a near-empty
+        // pane. Paid once per zone, not once per 30-second poll.
+        let global = mem_store();
+        let zone = "agent:def-cc-7:current";
+        seed_output(&global, zone, b"{\"a\":1}\n{\"b\":2}\n{\"c\":3}\n");
+
+        assert_eq!(
+            global_zone_line_count(&global, zone),
+            Some(3),
+            "a missing index must still be built so cross-channel opens count correctly",
+        );
+        // And the build must have persisted an index for subsequent calls.
+        let idx = global.stat(zone, "output.idx").expect("stat ok");
+        assert!(idx.is_some(), "the build should leave an index behind");
     }
 }
 
