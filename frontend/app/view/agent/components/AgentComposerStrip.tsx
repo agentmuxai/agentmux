@@ -1240,7 +1240,25 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // change how many rows exist. Iterating `rows()` objects directly
     // would repeat the exact reagent-P1 identity bug the slot-level fix
     // above already fixed, one level up.
-    const rowIndices = createMemo(() => rows().map((_, i) => i));
+    //
+    // The LAST row is deliberately NOT part of this list — it renders from
+    // its own fixed element below (Codex P2, PR #2839). `<For>` over
+    // indices only preserves a subtree while the row COUNT is unchanged:
+    // crossing 1 row -> 2 rows makes index 1 a brand-new subtree, so any
+    // slot moving into it is destroyed and rebuilt. That is exactly what
+    // the Rev 8 anchor constraint forces on `runtime`/`hostShell` (they're
+    // in the sole row at index 0 when single-row, the last row at index
+    // N-1 when multi-row), and `AgentRuntimeDropup` keeps its open/
+    // selectedOptIndex state in component-local signals — so resizing a
+    // pane across that boundary with the model menu open silently closed
+    // it and lost keyboard selection. Verified live over CDP: pre-change
+    // the trigger node survived the crossing, with the anchor constraint
+    // it did not. Hoisting the anchors' row out of the `<For>` gives them
+    // one stable home for every row count, which is the DOM expression of
+    // the same "these two never travel" requirement the constraint states
+    // at the layout level.
+    const precedingRowIndices = createMemo(() => rows().slice(0, -1).map((_, i) => i));
+    const lastRowIndex = createMemo(() => rows().length - 1);
 
     const renderSlot = (key: string, rowSide: "left" | "right") => {
         // untrack: see `slotByKey`'s own doc comment above — without
@@ -1323,19 +1341,39 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
             <Show when={!statsInline()}>{statsZone("multi")}</Show>
 
             <div class="agent-composer-strip-rows" ref={rowsRef}>
-                <For each={rowIndices()}>
+                <For each={precedingRowIndices()}>
                     {(rowIndex) => (
                         <div class="agent-composer-strip-row">
                             <span class="agent-composer-strip-row-left">
                                 <For each={rows()[rowIndex]?.left ?? []}>{(key) => renderSlot(key, "left")}</For>
                             </span>
-                            <Show when={statsInline()}>{statsZone("single")}</Show>
                             <span class="agent-composer-strip-row-right">
                                 <For each={rows()[rowIndex]?.right ?? []}>{(key) => renderSlot(key, "right")}</For>
                             </span>
                         </div>
                     )}
                 </For>
+                {/* The anchors' row, rendered from its own fixed element
+                    rather than as the `<For>`'s last entry — see
+                    `precedingRowIndices`'s doc comment (Codex P2, PR
+                    #2839). This is the row `runtime`/`hostShell` always
+                    occupy (the sole row when single-row, the bottom row
+                    when multi-row), so keeping it one stable subtree is
+                    what preserves `AgentRuntimeDropup`'s open state across
+                    a resize that changes the row count. The inline stats
+                    zone lives here too: `statsInline()` is only ever true
+                    at one row, and at one row this IS that row. */}
+                <Show when={rows().length > 0}>
+                    <div class="agent-composer-strip-row">
+                        <span class="agent-composer-strip-row-left">
+                            <For each={rows()[lastRowIndex()]?.left ?? []}>{(key) => renderSlot(key, "left")}</For>
+                        </span>
+                        <Show when={statsInline()}>{statsZone("single")}</Show>
+                        <span class="agent-composer-strip-row-right">
+                            <For each={rows()[lastRowIndex()]?.right ?? []}>{(key) => renderSlot(key, "right")}</For>
+                        </span>
+                    </div>
+                </Show>
             </div>
         </div>
     );
