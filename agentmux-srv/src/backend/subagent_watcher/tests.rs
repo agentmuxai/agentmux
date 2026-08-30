@@ -2201,3 +2201,92 @@ fn a_finished_replayed_transcript_is_completed_not_abandoned() {
 
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn a_racing_live_observation_promotes_a_replay_abandoned_entry_back_to_active() {
+    // codex P1 on PR #2837. A backfill scan and the filesystem watcher can
+    // race on a newly-created transcript: the scan reads the lagging
+    // turn_active == false and inserts Abandoned, then the live call arrives.
+    // Without the promotion, or_insert_with is skipped (entry exists),
+    // ordinary events never revive a status, and reconcile only downgrades
+    // Active -> Abandoned — so a genuinely running subagent would read as
+    // abandoned until a result line happened to show up.
+    let block_id = format!("backfill-race-{}", now_millis());
+    register_stub_controller(&block_id, false);
+    let dir = std::env::temp_dir().join(format!("amx-backfill-race-{}", now_millis()));
+    let jsonl_path = write_unfinished_transcript(&dir, "sub-race");
+
+    let watcher = fixture_watcher();
+
+    // 1. Backfill replay wins the race and marks it abandoned.
+    watcher.process_jsonl_change("parent-1", &block_id, &jsonl_path, false);
+    assert_eq!(
+        watcher.get_info("sub-race").expect("recorded").status,
+        SubAgentStatus::Abandoned,
+        "precondition: the replay inserted it as abandoned"
+    );
+
+    // 2. The watcher then observes real activity on the same file.
+    std::fs::write(
+        &jsonl_path,
+        "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"working\"}]}}\n\
+         {\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"still here\"}]}}\n",
+    )
+    .unwrap();
+    watcher.process_jsonl_change("parent-1", &block_id, &jsonl_path, true);
+
+    assert_eq!(
+        watcher.get_info("sub-race").expect("recorded").status,
+        SubAgentStatus::Active,
+        "a live observation must outrank the replay's inference"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn a_live_observation_does_not_resurrect_a_completed_subagent() {
+    // The promotion is scoped to Abandoned (an inference). Completed is
+    // established by the transcript's own result line and must stick, or a
+    // trailing live write would flip a finished subagent back to running.
+    let block_id = format!("backfill-done-race-{}", now_millis());
+    register_stub_controller(&block_id, false);
+    let dir = std::env::temp_dir().join(format!("amx-backfill-done-race-{}", now_millis()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let jsonl_path = dir.join("agent-sub-fin.jsonl");
+    std::fs::write(
+        &jsonl_path,
+        concat!(
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n",
+            "{\"type\":\"result\",\"result\":\"done\"}\n",
+        ),
+    )
+    .unwrap();
+
+    let watcher = fixture_watcher();
+    watcher.process_jsonl_change("parent-1", &block_id, &jsonl_path, false);
+    assert_eq!(
+        watcher.get_info("sub-fin").expect("recorded").status,
+        SubAgentStatus::Completed
+    );
+
+    // A trailing live append must not undo that.
+    std::fs::write(
+        &jsonl_path,
+        concat!(
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}}\n",
+            "{\"type\":\"result\",\"result\":\"done\"}\n",
+            "{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"trailing\"}]}}\n",
+        ),
+    )
+    .unwrap();
+    watcher.process_jsonl_change("parent-1", &block_id, &jsonl_path, true);
+
+    assert_eq!(
+        watcher.get_info("sub-fin").expect("recorded").status,
+        SubAgentStatus::Completed,
+        "Completed is observed from the transcript and must not be promoted"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}

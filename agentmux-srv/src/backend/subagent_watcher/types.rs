@@ -66,9 +66,25 @@ pub enum SubAgentStatus {
     /// The parent block's turn ended without a `Result` line ever appearing
     /// for this subagent — it crashed, was killed, or was interrupted by an
     /// app/srv restart mid-task. Distinct from `Completed`: the subagent
-    /// didn't finish, it was cut off. Set only by
-    /// `reconcile_stale_subagents`, never by `process_jsonl_change`'s
-    /// normal event processing.
+    /// didn't finish, it was cut off.
+    ///
+    /// **Always an inference, never an observation** — which is what decides
+    /// precedence against `Active` everywhere below.
+    ///
+    /// Two writers (the second added by PR #2837; this comment previously
+    /// said `reconcile_stale_subagents` was the only one — reagentx P2):
+    ///
+    /// 1. `reconcile_stale_subagents` (`scan.rs`) — downgrades `Active`
+    ///    entries once the parent turn is confirmed idle. Never promotes.
+    /// 2. `process_jsonl_change` (`jsonl.rs`) at INSERT time, for a
+    ///    cold-backfill replay (`live == false`) whose parent turn is already
+    ///    confirmed idle. Avoids asserting `Active` for something the replay
+    ///    cannot know is running, which `reconcile` would then have to retract.
+    ///
+    /// A live observation outranks both: `process_jsonl_change` promotes an
+    /// existing `Abandoned` entry back to `Active` when it sees real-time file
+    /// activity, since watching the file change is direct evidence and this
+    /// status is not.
     Abandoned,
 }
 
