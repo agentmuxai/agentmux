@@ -157,6 +157,7 @@ import { RuntimeBadge } from "./RuntimeBadge";
 export function computeBalancedLeftKeys(
     movable: { key: string; width: number }[],
     fixedRightWidth: number,
+    fixedLeftWidth = 0,
 ): Set<string> {
     const n = movable.length;
     const totalMovable = movable.reduce((sum, m) => sum + m.width, 0);
@@ -176,9 +177,17 @@ export function computeBalancedLeftKeys(
         // applied by the caller (zones() below) as a uniform override
         // regardless of which path (measured or fallback) produced the
         // split, so it's deliberately not special-cased again here.
-        if (leftKeys.size === 0) continue;
+        //
+        // `fixedLeftWidth > 0` (the anchored model selector — see
+        // `computeComposerRows`'s `anchorLeftKey`) means the left side is
+        // already occupied by something this search can't move, so an
+        // empty movable-left is a legitimate, genuinely-balanced answer
+        // rather than a dead zone. Without this carve-out the anchor
+        // would drag an arbitrary extra slot leftward purely to satisfy a
+        // rule that exists to prevent emptiness the anchor already prevents.
+        if (leftKeys.size === 0 && fixedLeftWidth === 0) continue;
         const rightWidth = fixedRightWidth + (totalMovable - leftWidth);
-        const diff = Math.abs(leftWidth - rightWidth);
+        const diff = Math.abs(fixedLeftWidth + leftWidth - rightWidth);
         if (diff < bestDiff) {
             bestDiff = diff;
             best = leftKeys;
@@ -220,6 +229,28 @@ export interface ComposerRow {
  *     END of the row list — "Shell always outermost" (Rev 4/5/6),
  *     expressed here as "always the last row's right occupant."
  *
+ * ANCHORED ELEMENTS (2026-08-29, user-directed — Rev 8). Two slots must
+ * never travel as the pane resizes: the model selector (`anchorLeftKey`,
+ * the `runtime` dropup) and the Shell toggle (`hostShellKey`). Both are
+ * pinned to the BOTTOM — nearest the composer input:
+ *
+ *   - Multi-row: they are reserved OUT of the pairing pool and emitted as
+ *     the final row, `{left: [anchor], right: [hostShell]}`. Reserving
+ *     exactly two slots preserves the remainder's parity, so §1's "at most
+ *     one singleton row" is unaffected.
+ *   - Single row: there is no "bottom" to speak of, so the constraint
+ *     degrades to its positional meaning — the anchor is the outermost
+ *     LEFT occupant, hostShell the outermost RIGHT one, on the one row
+ *     that exists.
+ *   - If the two anchors cannot physically share a line, the same
+ *     physical-capacity exception that governs any other pair applies:
+ *     two adjacent one-sided rows, still bottom-most, rather than an
+ *     overflowing row that `flex-wrap` would split anyway.
+ *
+ * This deliberately reverses the earlier "the model selector moving sides
+ * is acceptable" call recorded in the retro's step 3 — it was dismissed
+ * once as cosmetic and has now been made a hard constraint.
+ *
  * Deliberately a sort + two-pointer walk, not a search — the smallest
  * mechanism that can satisfy the invariant, matching this file's own
  * repeated lesson (SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md's
@@ -259,24 +290,47 @@ export function computeComposerRows(
     hostShellKey: string,
     availableWidth: number,
     gapPx: number,
+    anchorLeftKey?: string,
 ): ComposerRow[] {
     if (slots.length === 0) return [];
 
+    const anchorLeft = anchorLeftKey ? slots.find((s) => s.key === anchorLeftKey) : undefined;
+    const hostShell = slots.find((s) => s.key === hostShellKey);
+
     const totalWidth = slots.reduce((sum, s) => sum + s.width, 0) + Math.max(0, slots.length - 1) * gapPx;
     if (totalWidth <= availableWidth) {
-        const movable = slots.filter((s) => s.key !== hostShellKey);
-        const hostShellWidth = slots.find((s) => s.key === hostShellKey)?.width ?? 0;
-        const leftKeys = computeBalancedLeftKeys(movable, hostShellWidth);
+        // Single row: the anchors are the OUTERMOST occupant of their own
+        // side rather than a whole reserved row (there is only one row —
+        // "forget the top, it's just left and right respectively").
+        const movable = slots.filter((s) => s.key !== hostShellKey && s.key !== anchorLeft?.key);
+        const leftKeys = computeBalancedLeftKeys(movable, hostShell?.width ?? 0, anchorLeft?.width ?? 0);
         return [
             {
-                left: slots.filter((s) => leftKeys.has(s.key)).map((s) => s.key),
-                right: slots.filter((s) => !leftKeys.has(s.key)).map((s) => s.key),
+                left: [
+                    ...(anchorLeft ? [anchorLeft.key] : []),
+                    ...movable.filter((s) => leftKeys.has(s.key)).map((s) => s.key),
+                ],
+                right: [
+                    ...movable.filter((s) => !leftKeys.has(s.key)).map((s) => s.key),
+                    ...(hostShell ? [hostShell.key] : []),
+                ],
             },
         ];
     }
 
-    const sorted = [...slots].sort((a, b) => b.width - a.width);
-    const pairs: [string, string | undefined][] = [];
+    // Multi-row. When BOTH anchors exist they are reserved out of the
+    // pairing pool entirely and emitted as the final row, so neither one
+    // travels between rows as the pane resizes (the whole point of the
+    // constraint). Reserving exactly TWO slots preserves the parity of
+    // what's left, so spec §1's "at most one singleton row" still holds
+    // unchanged — pairing 2 fewer slots can't turn an even remainder odd.
+    const anchorsReserved = Boolean(anchorLeft && hostShell);
+    const pool = anchorsReserved
+        ? slots.filter((s) => s.key !== anchorLeft!.key && s.key !== hostShellKey)
+        : slots;
+
+    const sorted = [...pool].sort((a, b) => b.width - a.width);
+    const pairs: [string | undefined, string | undefined][] = [];
     let i = 0;
     let j = sorted.length - 1;
     while (i < j) {
@@ -293,18 +347,36 @@ export function computeComposerRows(
         pairs.push([sorted[i].key, undefined]);
     }
 
-    // hostShellKey is always present in `slots` by construction (the
-    // component always includes it in the pool passed here) — reorient
-    // whichever pair it landed in so it's the RIGHT occupant, then move
-    // that pair to the end.
-    const hostPairIdx = pairs.findIndex(([a, b]) => a === hostShellKey || b === hostShellKey);
-    if (hostPairIdx !== -1) {
-        let [a, b] = pairs[hostPairIdx];
-        if (a === hostShellKey) {
-            [a, b] = [b, a];
+    if (anchorsReserved) {
+        // The constraint row. If the two anchors genuinely cannot share a
+        // line at this width, the physical-capacity exception (spec §1)
+        // applies exactly as it does to any other pair — emit them as two
+        // adjacent one-sided rows rather than forcing an overflow that the
+        // row's own `flex-wrap` would silently split anyway (which is the
+        // one-sided-lines bug this file exists to prevent, reintroduced by
+        // a different route). They stay bottom-most and adjacent either
+        // way, so neither anchor travels; only their sharing of one line
+        // degrades.
+        if (anchorLeft!.width + hostShell!.width + gapPx <= availableWidth) {
+            pairs.push([anchorLeft!.key, hostShell!.key]);
+        } else {
+            pairs.push([anchorLeft!.key, undefined]);
+            pairs.push([undefined, hostShell!.key]);
         }
-        pairs.splice(hostPairIdx, 1);
-        pairs.push([a, b]);
+    } else {
+        // No anchor pair to reserve (e.g. the runtime slot is absent
+        // because controls are hidden) — fall back to the pre-anchor
+        // behavior: reorient whichever pair `hostShell` landed in so it's
+        // the RIGHT occupant, then move that pair to the end.
+        const hostPairIdx = pairs.findIndex(([a, b]) => a === hostShellKey || b === hostShellKey);
+        if (hostPairIdx !== -1) {
+            let [a, b] = pairs[hostPairIdx];
+            if (a === hostShellKey) {
+                [a, b] = [b, a];
+            }
+            pairs.splice(hostPairIdx, 1);
+            pairs.push([a, b]);
+        }
     }
 
     return pairs.map(([left, right]) => ({
@@ -1133,6 +1205,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
             "hostShell",
             width,
             gapPx,
+            "runtime",
         );
 
         // Stats share the single row's line only when slots PLUS stats
