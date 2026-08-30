@@ -30,6 +30,95 @@ pub(crate) fn rebuild_output_idx(
     block_id: &str,
     output_size: u64,
 ) -> Option<u64> {
+    build_output_idx_from(fs, block_id, output_size, 0, Vec::new(), 0)
+}
+
+/// Bring an existing `output.idx` up to `output`'s current size by scanning
+/// ONLY the appended bytes, instead of rescanning from byte zero.
+///
+/// Falls back to a full rebuild whenever the existing index can't be trusted
+/// as a base: missing, header unreadable, no entries yet, or `output` shrank
+/// below what the index already covers (rotation/truncation).
+///
+/// Why this exists: the index is a pure cache with no incremental mutation, so
+/// a stale one used to mean a full O(file-size) rescan. On a live agent
+/// `output` grows continuously, so "stale" was the steady state — a 30-second
+/// line-count poll drove 37 full rebuilds in 19 minutes on a 759 MB
+/// transcript, mean 3168 ms, ~10% duty cycle
+/// (docs/reports/REPORT_AGENT_PANE_LOAD_RENDER_ARCHITECTURE_2026_08_27.md §5).
+///
+/// Returning the stale count instead was tried and is WRONG: `line_count`
+/// feeds `useHistoryPagination`'s tail window (`offset = total - PAGE_SIZE`),
+/// so an undercount silently drops the most recent history on reopen — codex
+/// P1 on PR #2838. The count has to stay exact; only the cost of keeping it
+/// exact is negotiable.
+pub(crate) fn extend_output_idx(
+    fs: &FileStore,
+    block_id: &str,
+    output_size: u64,
+) -> Option<u64> {
+    const IDX: &str = "output.idx";
+
+    let full = || rebuild_output_idx(fs, block_id, output_size);
+
+    let Ok(Some(idx_stat)) = fs.stat(block_id, IDX) else { return full() };
+    if idx_stat.size < OUTPUT_IDX_HEADER_LEN {
+        return full();
+    }
+    let entry_count = ((idx_stat.size - OUTPUT_IDX_HEADER_LEN) / 8) as u64;
+    let Ok((_, header)) = fs.read_at(block_id, IDX, 0, OUTPUT_IDX_HEADER_LEN) else { return full() };
+    let Ok(header) = <[u8; 8]>::try_from(header.as_slice()) else { return full() };
+    let covered = u64::from_le_bytes(header);
+
+    if covered == output_size {
+        return Some(entry_count); // already current
+    }
+    // Shrank (rotated/truncated) or nothing to anchor on — a base we can't trust.
+    if covered > output_size || entry_count == 0 {
+        return full();
+    }
+
+    // Re-scan from the START of the last indexed line, not from `covered`. The
+    // previous build may have indexed a trailing line that had no newline yet;
+    // bytes appended since continue THAT line rather than starting a new one,
+    // so its entry has to be re-derived (it may also have been blank then and
+    // non-blank now). Everything before it is settled and is reused verbatim.
+    let seed_entries = entry_count - 1;
+    let last_entry_at = OUTPUT_IDX_HEADER_LEN + (seed_entries * 8) as i64;
+    let Ok((_, last_bytes)) = fs.read_at(block_id, IDX, last_entry_at, 8) else { return full() };
+    let Ok(last_bytes) = <[u8; 8]>::try_from(last_bytes.as_slice()) else { return full() };
+    let scan_start = u64::from_le_bytes(last_bytes);
+    if scan_start > output_size {
+        return full();
+    }
+
+    let seed = if seed_entries == 0 {
+        Vec::new()
+    } else {
+        match fs.read_at(block_id, IDX, OUTPUT_IDX_HEADER_LEN, (seed_entries * 8) as i64) {
+            Ok((_, bytes)) if bytes.len() == (seed_entries * 8) as usize => bytes,
+            _ => return full(),
+        }
+    };
+
+    build_output_idx_from(fs, block_id, output_size, scan_start, seed, seed_entries)
+}
+
+/// Shared scanner behind both entry points.
+///
+/// `scan_start` MUST be the byte offset of a line start (0, or an offset read
+/// back out of the index). `seed` is the raw offset bytes for the lines before
+/// it and `seed_count` how many — they are copied through untouched, so the
+/// blank/CRLF rules only ever get applied by the one loop below and the two
+/// paths can't drift apart.
+fn build_output_idx_from(
+    fs: &FileStore,
+    block_id: &str,
+    output_size: u64,
+    scan_start: u64,
+    seed: Vec<u8>,
+    seed_count: u64,
+) -> Option<u64> {
     const IDX: &str = "output.idx";
     const WIN: i64 = 1 << 20; // 1 MiB read window
 
@@ -42,16 +131,25 @@ pub(crate) fn rebuild_output_idx(
     // print — a slow rebuild is exactly the kind of thing worth being able
     // to correlate after the fact, the same way `mem_attribution` already is.
     let started = std::time::Instant::now();
-    tracing::info!(block_id = %block_id, covered = output_size, "output.idx rebuild starting");
+    tracing::info!(
+        block_id = %block_id,
+        covered = output_size,
+        scan_start,
+        scanned_bytes = output_size.saturating_sub(scan_start),
+        incremental = scan_start > 0,
+        "output.idx rebuild starting"
+    );
 
-    // Offsets buffer starts with the covered-size header.
+    // Offsets buffer starts with the covered-size header, then any reused
+    // entries for the region before `scan_start`.
     let mut buf: Vec<u8> = Vec::new();
     buf.extend_from_slice(&output_size.to_le_bytes());
+    buf.extend_from_slice(&seed);
 
-    let mut line_count: u64 = 0;
-    let mut cursor: u64 = 0; // byte offset where the current line begins
+    let mut line_count: u64 = seed_count;
+    let mut cursor: u64 = scan_start; // byte offset where the current line begins
     let mut line_buf: Vec<u8> = Vec::new(); // bytes of the current line, excluding '\n'
-    let mut read_pos: i64 = 0;
+    let mut read_pos: i64 = scan_start as i64;
 
     let flush_line = |line_buf: &mut Vec<u8>,
                       cursor: &mut u64,
