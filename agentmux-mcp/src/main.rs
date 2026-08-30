@@ -1010,6 +1010,7 @@ fn current_user_id(sys: &sysinfo::System) -> Option<String> {
 /// A completed capture. Richer than the bare message string it replaces so
 /// `audit_log_capture_window` can record WHAT was captured and at which tier,
 /// rather than only the caller's query and a success/failure flag.
+#[derive(Debug)]
 struct CaptureOutcome {
     /// Human-facing tool result, returned to the caller verbatim.
     message: String,
@@ -1259,22 +1260,36 @@ fn capture_window_impl(
             .collect();
 
         if matches.is_empty() {
-            // Same withheld-vs-absent distinction as the pid branch above: a
-            // title that matches ONLY a T3 window must audit as T3, not as a
-            // miss. Checked against the unfiltered set, but the error text
-            // deliberately does NOT echo that window's title — naming it would
-            // confirm a cross-user window's title to the caller, which is the
-            // disclosure this tier exists to prevent.
+            // A title matching ONLY a withheld window is recorded for the
+            // AUDIT — and deliberately changes nothing the caller sees.
+            //
+            // reagentx P1 on PR #2845: an earlier version bailed here with a
+            // distinguishable "exists but is T3" message. Withholding the
+            // literal title wasn't enough — differing *responses* are an
+            // existence oracle. An agent can probe substrings (binary-search
+            // over characters) and reconstruct a cross-user window's title
+            // without ever being granted capture, defeating the very boundary
+            // this tier exists to hold. Introduced while fixing the audit gap
+            // below it: making withheld-vs-absent legible to the auditor made
+            // it legible to the attacker too.
+            //
+            // The split that resolves it: the AUDIT is server-side and may
+            // know; the CALLER may not. So this records `resolved` and then
+            // falls through to the identical generic-miss message below —
+            // structurally the same code path and the same bytes either way,
+            // rather than two branches a future edit could let drift apart.
+            //
+            // The pid branch above is deliberately NOT symmetric: it does name
+            // the tier. A caller must already hold the pid to ask, `Discover
+            // Windows` never hands out T3 pids, and process ownership is
+            // already enumerable by anything with shell access — so the pid's
+            // existence is not a secret this tool is keeping, while a window
+            // TITLE is exactly the content it is.
             if let Some(blocked) = all
                 .iter()
                 .find(|w| !w.tier.allowed() && w.title.to_lowercase().contains(&needle))
             {
                 *resolved = Some((blocked.tier, candidate_label(blocked)));
-                anyhow::bail!(
-                    "a window matching {title_contains:?} exists but is {} — capture is \
-                     withheld for windows owned by a different OS user",
-                    blocked.tier.label()
-                );
             }
             // Only lists AGENTMUX windows' titles, never every window on the
             // desktop — reagent P2 (PR #2709 round 2): the original version
@@ -3838,6 +3853,35 @@ mod tests {
         );
         for w in withheld {
             assert_eq!(w.tier, CaptureTier::OtherUser, "only T3 is withheld");
+        }
+    }
+
+    /// reagentx P1 on PR #2845: withholding a cross-user window's TITLE is not
+    /// enough if the *response* differs — differing errors are an existence
+    /// oracle, and an agent can probe substrings to reconstruct that title
+    /// without ever capturing. The miss message must therefore never reveal
+    /// that a withheld window matched.
+    ///
+    /// Pins the observable property: no tier label may appear in a title-miss
+    /// error. If someone reintroduces a distinguishing branch, it will almost
+    /// certainly name the tier (that is what the reverted version did) and
+    /// this fails.
+    #[test]
+    fn a_title_miss_never_reveals_a_withheld_match() {
+        let mut resolved = None;
+        let err = capture_window_impl(
+            Some("zzz-nonexistent-window-title-zzz"),
+            None,
+            None,
+            &mut resolved,
+        )
+        .expect_err("a nonsense title cannot match");
+        let msg = err.to_string();
+        for leak in ["T3", "other-user", "withheld", "different OS user"] {
+            assert!(
+                !msg.contains(leak),
+                "title-miss error leaked withheld-window state via {leak:?}: {msg}"
+            );
         }
     }
 
