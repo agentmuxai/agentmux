@@ -111,6 +111,36 @@ impl SubagentWatcher {
                     );
                 }
             }
+            // A replayed spawn (`live == false`) describes a subagent whose
+            // transcript already existed on disk when this pane opened.
+            // Inserting it as `Active` asserts something the replay cannot
+            // know, and `reconcile_stale_subagents` (scan.rs) then retracts it
+            // moments later — up to 200 spurious abandon broadcasts per reopen,
+            // and a window where `subagent.ListActive` reports rows the backend
+            // is about to disown. See
+            // docs/reports/REPORT_AGENT_PANE_LOAD_RENDER_ARCHITECTURE_2026_08_27.md §2.
+            //
+            // Decided here using the SAME predicate reconcile uses, not a
+            // second independently-invented one — a confirmed-idle parent turn
+            // means nothing on disk can still be running. Two deliberate
+            // fallbacks to `Active`:
+            //   - `live` always wins. `turn_active` can lag a genuine spawn,
+            //     and mislabelling a real subagent would break live rows.
+            //   - An unregistered controller is UNKNOWN, not idle.
+            //     `scan_session_subagents` can run before the controller
+            //     registers, so this keeps reconcile's own retry path as the
+            //     authority rather than inferring `Abandoned` from absent
+            //     information.
+            let initial_status = if live {
+                SubAgentStatus::Active
+            } else {
+                match crate::backend::blockcontroller::get_block_controller_status(parent_block_id)
+                    .map(|s| s.turn_active)
+                {
+                    Some(false) => SubAgentStatus::Abandoned,
+                    _ => SubAgentStatus::Active,
+                }
+            };
             let state = session.subagents.entry(agent_id.clone()).or_insert_with(|| {
                 SubagentState {
                     info: SubAgent {
@@ -122,7 +152,7 @@ impl SubagentWatcher {
                         session_id: session_id.clone(),
                         spawned_at: now_millis(),
                         last_event_at: now_millis(),
-                        status: SubAgentStatus::Active,
+                        status: initial_status,
                         event_count: 0,
                         model: None,
                         dispatch_id: dispatch_id.clone(),
@@ -133,6 +163,28 @@ impl SubagentWatcher {
                     events: Vec::new(),
                 }
             });
+
+            // A live observation outranks a replay's inference.
+            //
+            // codex P1 on PR #2837: if a backfill scan races ahead of the
+            // filesystem watcher on a newly-created transcript, it can read the
+            // documented-lagging `turn_active == false` and insert the entry as
+            // `Abandoned`. The `live == true` call that follows would otherwise
+            // be stuck with that: `or_insert_with` doesn't run for an existing
+            // entry, ordinary events never revive a status, and
+            // `reconcile_stale_subagents` only ever downgrades `Active` ->
+            // `Abandoned`. A genuinely running subagent would read as abandoned
+            // until a `result` line happened to arrive.
+            //
+            // `Abandoned` is always an inference; watching the file change is a
+            // direct observation, so the observation wins. This can't strand a
+            // wrong answer in the other direction either: if the subagent has
+            // in fact finished, its own `result` event sets `Completed` below;
+            // if the parent turn really is idle, the next reconcile pass
+            // re-abandons it.
+            if live && state.info.status == SubAgentStatus::Abandoned {
+                state.info.status = SubAgentStatus::Active;
+            }
 
             state.file_offset = new_offset;
             state.info.dispatch_id = dispatch_id.clone();
