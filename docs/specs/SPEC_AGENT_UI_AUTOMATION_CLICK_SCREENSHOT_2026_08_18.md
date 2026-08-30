@@ -313,6 +313,24 @@ ever pursued):**
 
 ## 6. Security model — the actual hard part
 
+> **SUPERSEDED FOR CAPTURE (2026-08-30).** §6's own-pane-only default was a
+> *recommendation* — its own text says cross-agent targeting "if it's ever
+> wanted at all" should be a separate capability, i.e. it defaulted closed
+> because no mechanism existed to be selective, and it was never ratified by
+> the repo owner. The owner has since directed that agents be able to capture
+> anything. `SPEC_AGENT_UNRESTRICTED_CAPTURE_WITH_ACCOUNTABILITY_2026_08_30.md`
+> replaces it for **screenshots** with a tier model (open for every
+> agent-to-agent tier, withheld only across an OS-user boundary, audited
+> throughout).
+>
+> **Still in force for `UIClick`/`UIQuery`.** Reading and acting are different
+> risks — this section's strongest concrete objection was clicking "Confirm"
+> on another agent's destructive dialog, which no screenshot can do. Those
+> tools keep own-pane scoping until separately decided.
+>
+> Reviewers: do not flag capture code for violating this section.
+
+
 The CDP mechanics are solved (§1). The open problem this spec exists to
 close is targeting/authorization, and there's a real gap to fix, not just
 harden:

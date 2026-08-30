@@ -29,6 +29,10 @@ dirs = "5"
 # Version matches agentmux-srv's own pin — 0.34.2 had a real Windows
 # handle leak (STATUS_SRV_SECTION_HANDLE_LEAK_2026_08_08.md), fixed in 0.35+.
 sysinfo = "0.35"
+# Content hash recorded in the capture audit trail, so a leaked screenshot can
+# be traced back to the call that produced it (SPEC_AGENT_UNRESTRICTED_CAPTURE_
+# WITH_ACCOUNTABILITY_2026_08_30.md §6). Same pin as agentmux-common/srv.
+sha2 = "0.10"
 
 [dev-dependencies]
 tempfile = "3"
