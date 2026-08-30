@@ -220,6 +220,13 @@ const DisplayNode = (props: DisplayNodeProps) => {
     const [previewElementGeneration, setPreviewElementGeneration] = createSignal(0);
     const [previewImageGeneration, setPreviewImageGeneration] = createSignal(0);
 
+    // Monotonic token for in-flight rasterisations. `toPng` is async and a
+    // pane can be resized between two hovers, so two requests can be pending
+    // at once; without this the OLDER one resolving last overwrites the
+    // correctly-sized image, and the next drag uses that stale aspect ratio
+    // with no further pointerenter to repair it.
+    let previewRequestSeq = 0;
+
     const devicePixelRatio = () => window.devicePixelRatio ?? 1;
 
     const generatePreviewImage = () => {
@@ -250,7 +257,12 @@ const DisplayNode = (props: DisplayNodeProps) => {
             // already up-to-date preview image; used on next dragstart
         } else if (previewRef) {
             setPreviewImageGeneration(prevElGen);
+            const seq = ++previewRequestSeq;
             toPng(previewRef).then((url) => {
+                // A newer rasterisation was requested while this one was in
+                // flight — it measured the pane more recently, so drop this
+                // result rather than clobbering it.
+                if (seq !== previewRequestSeq) return;
                 const newImg = new Image();
                 newImg.src = url;
                 setPreviewImage({ img: newImg, size: measured });

@@ -30,6 +30,9 @@ export const DRAG_PREVIEW_MAX_PX = 360;
  * Shortest edge floor, in CSS px. An extreme aspect ratio (a very wide, short
  * pane) would otherwise scale to a sliver a few px tall that reads as a line
  * rather than a pane.
+ *
+ * Bounded by the pane's own dimension, so it can only ever undo part of a
+ * shrink — it never enlarges an axis past its real size.
  */
 export const DRAG_PREVIEW_MIN_PX = 96;
 
@@ -46,9 +49,10 @@ export type DragPreviewSize = { width: number; height: number };
  * Scale `rect` down to fit within `DRAG_PREVIEW_MAX_PX` on its longest edge,
  * preserving aspect ratio.
  *
- * Never scales UP: a pane already smaller than the box is shown at its own
- * size, since enlarging it would misrepresent what is being dragged and blur
- * the rasterised image.
+ * Never scales UP, on **either** axis: a pane already smaller than the box is
+ * shown at its own size, since enlarging it would misrepresent what is being
+ * dragged and blur the rasterised image. That applies to the short-edge floor
+ * too — see the `Math.min(w, …)` clamp below.
  */
 export function computeDragPreviewSize(rect: DragPreviewSize | null | undefined): DragPreviewSize {
     if (!rect || !Number.isFinite(rect.width) || !Number.isFinite(rect.height)) {
@@ -64,12 +68,24 @@ export function computeDragPreviewSize(rect: DragPreviewSize | null | undefined)
     const scale = Math.min(1, DRAG_PREVIEW_MAX_PX / Math.max(w, h));
     const scaled = { width: Math.round(w * scale), height: Math.round(h * scale) };
 
-    // Apply the floor to the short edge only, and only when it would otherwise
-    // collapse — raising it deliberately breaks aspect ratio for the extreme
-    // case rather than rendering an unreadable sliver.
+    // Raise a collapsed edge back to the floor, but never past the pane's own
+    // size. Both clamps are load-bearing:
+    //
+    //   `Math.max(…, floor)` rescues a genuine downscale sliver — a 4000x128
+    //   pane scales to 360x12, which reads as a line rather than a pane, so
+    //   the short edge is lifted to 96 and aspect ratio is deliberately broken.
+    //
+    //   `Math.min(w, …)` keeps the never-scale-up promise. Without it a 50x30
+    //   pane (already inside the box, so scale === 1) came back as 96x96 —
+    //   bigger than the thing being dragged, contradicting this function's own
+    //   docstring. It also removes a discontinuity at the cap: 360x40 and
+    //   361x40 now both yield 360x40 rather than jumping to 360x96.
+    //
+    // The floor is itself capped by MAX so the two constants cannot invert.
+    const floor = Math.min(DRAG_PREVIEW_MIN_PX, DRAG_PREVIEW_MAX_PX);
     return {
-        width: Math.max(scaled.width, Math.min(DRAG_PREVIEW_MIN_PX, DRAG_PREVIEW_MAX_PX)),
-        height: Math.max(scaled.height, Math.min(DRAG_PREVIEW_MIN_PX, DRAG_PREVIEW_MAX_PX)),
+        width: Math.min(w, Math.max(scaled.width, floor)),
+        height: Math.min(h, Math.max(scaled.height, floor)),
     };
 }
 
