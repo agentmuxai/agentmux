@@ -1,5 +1,25 @@
 # Status: Live Repro of Cross-Channel Stale `--resume` — Recovery Works, UX Gap Remains
 
+> **RESOLVED 2026-08-29 (docs-cleanup Phase 3) — §6's fix plan has shipped.**
+> - **§6.1** (make the shared registry `session_id` a live pointer — "highest
+>   leverage, addresses root cause") → **#2755**, `fix(agent): make
+>   cross-channel resume session_id a live pointer, not write-once`.
+> - **§6.2** (surface the recovery attempt to the user — "the UX gap this
+>   report is actually about") → **#2776**, `fix(agent): surface a
+>   Reconnecting… status during stale-resume retry`. **#2833** went further,
+>   making the resume-vs-new outcome known at pane open.
+> - **§6.3** (reword the misleading retry-decision log line at
+>   `persistent.rs:3313`) → the phrase it quotes ("retrying fresh, without
+>   `--resume`") no longer appears anywhere in the Rust sources, and the
+>   resume path has since been extracted into
+>   `agentmux-srv/src/backend/blockcontroller/persistent_resume.rs`. Treat as
+>   moot rather than confirmed-fixed: this sweep verified the misleading
+>   string is gone, not that it was removed deliberately.
+> - **§6.4** was explicitly *not* recommended as urgent and remains
+>   uninvestigated — correctly so.
+>
+> Everything below is preserved as the original investigation record.
+
 **Date:** 2026-08-23
 **Status:** Root cause confirmed via live incident on this exact machine/agent. Closes the
 outstanding live-repro item from `docs/specs/SPEC_PERSISTENT_SPAWN_GENERATION_AND_MESSAGE_IDENTITY_2026_08_09.md`

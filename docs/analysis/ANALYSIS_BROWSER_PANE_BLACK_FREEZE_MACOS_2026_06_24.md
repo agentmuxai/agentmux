@@ -1,5 +1,28 @@
 # Browser Pane: Black Appearance + UI Freeze on macOS/Linux
 
+> **RESOLVED — but on two different dates for the two platforms**
+> (resolution note added 2026-08-29, docs-cleanup Phase 4; the document
+> previously carried no indication it had been fixed at all):
+> - **Linux — partially fixed 2026-06-24** by **#1769**
+>   (`fix(browser-pane): black flash + UI freeze on macOS/Linux when opening
+>   a browser pane`), hours after this analysis was written. Per
+>   `RETRO_BROWSER_PANE_MACOS_FIX_2026_06_26.md`, #1769 fixed an ordering
+>   bug, which helps only where `set_size`/`set_position` actually work.
+> - **macOS — fixed 2026-06-27** by **#1778**
+>   (`fix/browser-pane-deferred-bounds-macos`). On macOS
+>   `set_size`/`set_position` are **no-ops**, so after #1769 the bounds were
+>   still wrong, the black screen persisted, and CEF's Views mouse-event
+>   routing still used uncommitted full-window bounds — i.e. the
+>   full-window input interception this document reports. #1778 added
+>   deferred overlay bounds plus an ObjC `NativeWidgetMacNSWindow` resize.
+>
+> Despite the filename, **do not read #1769 as having closed the macOS
+> half** — it did not.
+>
+> A retrospective on the fix exists alongside this file:
+> `docs/analysis/RETRO_BROWSER_PANE_MACOS_FIX_2026_06_26.md`. It was never
+> linked from here — which is why this analysis still read as an open bug.
+
 **Date:** 2026-06-24
 **Affected versions:** ≤ 0.47.4 (macOS/Linux only)
 **Symptom:** Opening a browser pane causes it to render solid black and freezes all

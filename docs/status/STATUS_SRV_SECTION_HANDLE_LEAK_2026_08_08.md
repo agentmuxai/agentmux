@@ -1,9 +1,31 @@
 # Status: `agentmux-srv` Leaking Windows Section Handles — Live Finding (2026-08-08)
 
+> **RESOLVED 2026-08-29 (docs-cleanup Phase 3).** Root cause was the
+> `sysinfo` crate's `CreateToolhelp32Snapshot` handle leak. Fixed by
+> **#2666** (`fix(srv): bump sysinfo 0.34→0.35 to fix
+> CreateToolhelp32Snapshot handle leak`) and confirmed by a 4-hour soak
+> test recorded in **#2673**. The follow-up recurrence investigation
+> (`STATUS_SRV_SECTION_HANDLE_LEAK_LIVE_RECURRENCE_2026_08_19.md`) is
+> resolved by the same fix.
+>
+> A *second, separate* handle leak in the same process — `FsWatchPool`'s
+> health sweep leaking a File+Semaphore pair per tick — was found later and
+> fixed independently in **#2722**; see
+> `STATUS_FS_WATCH_SWEEP_HANDLE_LEAK_2026_08_22.md`. Do not conflate the
+> two: different mechanisms, different fixes, both now shipped.
+>
+> **Caveat that outlived the fix:** an `agentmux-srv` process started
+> before #2666 shipped still carries the leak until it is restarted — the
+> fix is in the binary, not applied to already-running instances. A live
+> sighting on an old process is not a regression.
+>
+> Everything below is preserved as the original investigation record.
+
 > **Update 2026-08-09, ~13:22 UTC — the leaked process died and was
 > auto-recovered before the manual restart in §5 was ever executed.** Root
 > cause is still NOT fixed in code; this is a live data point on the
 > self-healing path, not a resolution. See §17.
+> *(Superseded by the RESOLVED banner above — accurate when written.)*
 
 **Related, but a different mechanism:** `docs/status/STATUS_PF_COMMIT_GROWTH_INVESTIGATION_2026_07_24.md`
 (RESOLVED 2026-07-25 — that investigation's root cause was an **Audiosrv**

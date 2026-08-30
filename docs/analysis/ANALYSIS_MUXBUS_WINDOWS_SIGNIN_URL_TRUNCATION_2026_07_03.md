@@ -1,7 +1,15 @@
 # ANALYSIS: MuxBus Cloud sign-in fails on Windows — OAuth URL truncated by `cmd /C start`
 
 **Date:** 2026-07-03
-**Status:** Root-caused, fix implemented (see `agent3/muxbus-windows-open-browser`)
+**Status:** **RESOLVED — shipped in #1938** (`fix(muxbus): quote Windows
+browser-open URL so cmd.exe doesn't truncate it at the first &`). Verified
+2026-08-29 (docs-cleanup Phase 4): `agentmux-srv/src/util.rs`'s
+`open_browser` now builds `start "" "{url}"` via `raw_arg`, with a comment
+recording exactly why `Command::arg` is wrong here (MSVCRT quote escaping
+vs. `cmd.exe`'s quote-toggle parser). Originally this line cited the
+in-flight branch `agent3/muxbus-windows-open-browser` rather than a merged
+PR — accurate when written, but it left the doc reading as unshipped work
+long after it landed.
 **Scope:** `agentmux-srv/src/muxbus/pkce.rs`, `agentmux-srv/src/identity/oauth_client.rs`
 **Trigger:** Clicking "Connect with AgentMux" (Armory → Accounts, the per-agent identity
 panel, or the statusbar HostPopover — all three share `AgentMuxConnectPanel.tsx`'s
