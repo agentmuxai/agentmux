@@ -1,8 +1,7 @@
 # SPEC: Agent Startup Sequence
 
 **Date:** 2026-04-16
-**Status:** Draft
-**Branch:** TBD
+**Status:** implemented — shipped in #408 ("structured agent startup sequence from Forge + Identity"). Verified 2026-08-23: `frontend/app/view/agent/startup/buildStartupPayload.ts` exists and implements this. Note: "Forge" (this spec's own terminology for the agent-config system) was later renamed/refactored elsewhere in the codebase (see ABF/bundle terminology in `CLAUDE.md`) — the underlying startup-injection mechanism this spec designed is live, but some of this doc's Forge-specific naming is no longer current. Not re-verified against a possibly-newer "Brief" terminology doc (commit `ea5c711da`, "pin down Brief = what-loads-at-startup") — flagging that as a related doc worth checking, not confirming a supersession relationship without reading it.
 
 ---
 

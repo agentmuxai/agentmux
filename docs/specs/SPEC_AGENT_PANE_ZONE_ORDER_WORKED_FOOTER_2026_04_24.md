@@ -1,7 +1,7 @@
 # Spec: Agent Pane Zone Reorder + Enriched "Worked" Footer
 
 **Date:** 2026-04-24
-**Status:** Draft, ready to implement
+**Status:** implemented — shipped in #549 ("zone reorder + enriched Worked footer"). Verified 2026-08-23: `frontend/app/view/agent/agent-view.tsx` positions `<PendingMessagesPanel>` with a code comment explicitly citing this spec by filename; `AgentFooter.tsx` has the primary/secondary Worked-line split this spec designed.
 **Owner:** AgentA
 **Touches:** `frontend/app/view/agent/agent-view.tsx`,
              `frontend/app/view/agent/components/AgentFooter.tsx`,
