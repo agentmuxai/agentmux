@@ -294,6 +294,8 @@ pub fn open_new_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
 pub fn open_subwindow(
     state: &Arc<AppState>,
     parent_instance_id: String,
+    initial_view: Option<&str>,
+    initial_meta: Option<&str>,
 ) -> Result<serde_json::Value, String> {
     // Reject if the parent isn't a known live FullInstance — prevents
     // orphan sub-windows and enforces the lifecycle rule in the spec.
@@ -328,8 +330,8 @@ pub fn open_subwindow(
         state,
         crate::state::WindowKind::Subwindow,
         Some(parent_instance_id),
-        None,
-        None,
+        initial_view,
+        initial_meta,
         None,
         false,
     )

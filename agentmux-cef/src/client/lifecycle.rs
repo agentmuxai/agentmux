@@ -1033,6 +1033,33 @@ impl AgentMuxHandler {
             }
         }
 
+        // A credential-approval subwindow (opened via `open_subwindow`,
+        // `initial_view=credential-approval`) closing before the human
+        // decided — parent window closing cascades down to it same as any
+        // other subwindow. No-op (empty Vec) for every ordinary window
+        // close; the registry only ever has entries keyed by an actual
+        // approval subwindow's label. See `credential_broker::approval`'s
+        // own doc comment — this is the mirror of `browser_pane::auth`'s
+        // pane-close cleanup below, just window-close instead of
+        // pane-close.
+        if let Some(ref lbl) = label {
+            let cancelled = crate::credential_broker::approval::cancel_for_window(lbl);
+            if !cancelled.is_empty() {
+                use cef::ImplAuthCallback;
+                tracing::info!(
+                    "[credential-broker] approval window {} closed before a decision — \
+                     cancelling {} parked auth request(s)",
+                    lbl,
+                    cancelled.len(),
+                );
+                for request_id in &cancelled {
+                    if let Some(cb) = crate::browser_pane::auth::take(request_id) {
+                        cb.cancel();
+                    }
+                }
+            }
+        }
+
         // Pane-specific on_before_close work (drain lifecycle entry) lives
         // in `crate::browser_pane::callbacks` after Phase 4.
         if let Some(ref lbl) = label {
