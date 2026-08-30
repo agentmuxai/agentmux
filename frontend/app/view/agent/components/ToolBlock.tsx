@@ -81,7 +81,19 @@ function fadeInOnMount(el: HTMLElement): void {
 
 function ToolElapsedTicker(props: { startMs: number }): JSX.Element {
     const tick = useTick(1000);
-    const elapsed = createMemo(() => (tick(), Math.floor((Date.now() - props.startMs) / 1000)));
+    // `startMs` is wall-clock, so a backwards system-clock step (NTP
+    // correction, manual set, VM resume) mid-tool-call makes this negative —
+    // and this ticker exists specifically for calls long-running enough to
+    // need one, which is exactly when a step has time to land. Rendered raw it
+    // would print e.g. "-1717984694s…" in the transcript and Activity Dock,
+    // the same class of bug as PR #2831 (status-bar uptime) and #2832 (sysinfo
+    // chart), both traced to one real clock step on this machine.
+    //
+    // `formatElapsedCompact`/`formatElapsedClock` in `util/format-time` already
+    // clamp for the same reason; this call site simply never routed through
+    // them. Clamping rather than hiding: a stalled-looking "0s…" is honest
+    // about having lost the reference point, where a negative is just wrong.
+    const elapsed = createMemo(() => (tick(), Math.max(0, Math.floor((Date.now() - props.startMs) / 1000))));
     return <>{elapsed()}s…</>;
 }
 
