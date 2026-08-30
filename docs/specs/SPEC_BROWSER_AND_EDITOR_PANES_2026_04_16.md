@@ -1,7 +1,7 @@
 # SPEC: Browser and Editor Panes
 
 **Date:** 2026-04-16
-**Status:** Draft
+**Status:** active — Editor pane shipped in #415 (CodeMirror 6, matching this spec's recommendation over Monaco/Ace); Browser pane shipped in #422/#423 (native CefBrowserView, matching Option A over the iframe fallback — an earlier iframe-based version (commit 03e0730ec) was superseded); LSP (this spec's optional Phase 4) landed as "LSP Phase 1" in #1074 (TypeScript diagnostics). Verified 2026-08-23 against `frontend/app/view/browser/`, `frontend/app/view/editor/` (including an `lsp/` subdirectory), `agentmux-cef/src/browser_pane/`. **What remains**: this spec's Phase 3 "Agent Integration" required both `OpenEditorPaneCommand`/`mcp__agentmux__open_editor` AND `OpenBrowserPaneCommand`/`mcp__agentmux__open_browser` (lines 257-261) — only the editor half shipped (`OpenEditor` exists in `agentmux-mcp`); no `OpenBrowser` equivalent exists. Kept as `active`, not `implemented`, until that's closed (Codex catch on this PR's first pass, which had wrongly called it `implemented` with the gap only as a footnote).
 **Priority:** Medium — enables agent workflows that need web access and file editing
 
 ---
