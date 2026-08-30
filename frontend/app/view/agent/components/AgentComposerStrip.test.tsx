@@ -16,6 +16,7 @@ import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { ComposerRow } from "./AgentComposerStrip";
 import { AgentComposerStrip, computeBalancedLeftKeys, computeComposerRows, computeStatsInline, orderKeysForEdgePriority } from "./AgentComposerStrip";
 
 // AgentRuntimeDropup (rendered via showControls()) imports this — same mock
@@ -414,6 +415,179 @@ describe("computeComposerRows", () => {
         const oneSidedCount = rows.filter((r) => r.left.length === 0 || r.right.length === 0).length;
         const maxAllowed = slots.length % 2 === 1 ? 1 : 0;
         expect(oneSidedCount).toBeLessThanOrEqual(maxAllowed);
+    });
+});
+
+/**
+ * Rev 8 (2026-08-29, user-directed): the model selector (`runtime`) and
+ * the Shell toggle (`hostShell`) must never travel as the pane resizes.
+ * Both anchor to the BOTTOM row — nearest the composer input — with the
+ * model selector on its left and Shell on its right. In the single-row
+ * case there is no "bottom," so the constraint degrades to its positional
+ * meaning: outermost-left and outermost-right of the one row.
+ *
+ * This deliberately reverses the "the model selector moving sides is
+ * acceptable" call recorded in
+ * docs/retro/retro-composer-strip-one-sided-lines-misdiagnosis-2026-08-26.md
+ * step 3, which dismissed it once as cosmetic.
+ */
+describe("computeComposerRows — anchored model selector + Shell (Rev 8)", () => {
+    const lastRow = (rows: ComposerRow[]) => rows[rows.length - 1];
+
+    it("single row: the model selector is the outermost LEFT occupant, Shell the outermost RIGHT", () => {
+        const slots = [
+            { key: "runtime", width: 60 },
+            { key: "auth", width: 40 },
+            { key: "ctx", width: 40 },
+            { key: "hostShell", width: 50 },
+        ];
+        const rows = computeComposerRows(slots, "hostShell", 500, 5, "runtime");
+        expect(rows).toHaveLength(1);
+        expect(rows[0].left[0]).toBe("runtime");
+        expect(rows[0].right[rows[0].right.length - 1]).toBe("hostShell");
+    });
+
+    it("single row: the model selector stays LEFT even when pure width-balance would move it right", () => {
+        // Widths chosen so the UNANCHORED balancer genuinely prefers
+        // runtime on the right: one wide passive slot alone on the left
+        // (100) balances runtime+hostShell (10+10) better than any split
+        // that keeps runtime left. That's exactly the "model selector
+        // travelled sides" regression the retro dismissed as cosmetic and
+        // this constraint now forbids.
+        const slots = [
+            { key: "runtime", width: 10 },
+            { key: "wide", width: 100 },
+            { key: "hostShell", width: 10 },
+        ];
+        const unanchored = computeComposerRows(slots, "hostShell", 500, 5);
+        expect(unanchored[0].left).not.toContain("runtime");
+        expect(unanchored[0].right).toContain("runtime");
+
+        const anchored = computeComposerRows(slots, "hostShell", 500, 5, "runtime");
+        expect(anchored[0].left[0]).toBe("runtime");
+        expect(anchored[0].right.at(-1)).toBe("hostShell");
+    });
+
+    it("multi-row: the anchors are reserved as the LAST row, model selector left / Shell right", () => {
+        const slots = [
+            { key: "runtime", width: 60 },
+            { key: "w1", width: 100 },
+            { key: "w2", width: 80 },
+            { key: "w3", width: 40 },
+            { key: "hostShell", width: 50 },
+        ];
+        const rows = computeComposerRows(slots, "hostShell", 200, 5, "runtime");
+        expect(lastRow(rows)).toEqual({ left: ["runtime"], right: ["hostShell"] });
+    });
+
+    it("multi-row: neither anchor ever appears in any row but the last", () => {
+        const slots = [
+            { key: "runtime", width: 60 },
+            { key: "w1", width: 100 },
+            { key: "w2", width: 80 },
+            { key: "w3", width: 40 },
+            { key: "hostShell", width: 50 },
+        ];
+        const rows = computeComposerRows(slots, "hostShell", 200, 5, "runtime");
+        for (const row of rows.slice(0, -1)) {
+            expect([...row.left, ...row.right]).not.toContain("runtime");
+            expect([...row.left, ...row.right]).not.toContain("hostShell");
+        }
+    });
+
+    it("reserving exactly two anchors preserves parity — the singleton budget is unchanged", () => {
+        // 5 slots (odd) → still at most ONE one-sided row, even though 2
+        // of them are now reserved out of the pairing pool. Reserving a
+        // PAIR can't flip the remainder's parity; that's why the anchor
+        // constraint doesn't weaken spec §1.
+        const slots = [
+            { key: "runtime", width: 60 },
+            { key: "w1", width: 100 },
+            { key: "w2", width: 80 },
+            { key: "w3", width: 40 },
+            { key: "hostShell", width: 50 },
+        ];
+        const rows = computeComposerRows(slots, "hostShell", 200, 5, "runtime");
+        const oneSided = rows.filter((r) => r.left.length === 0 || r.right.length === 0);
+        expect(oneSided.length).toBeLessThanOrEqual(1);
+    });
+
+    it("keeps the anchors on ONE row even when they cannot fit side by side (reagent P1, PR #2839)", () => {
+        // runtime(120) + hostShell(120) + gap(5) = 245 > availableWidth
+        // 200. An earlier revision split these into two adjacent one-sided
+        // rows via the generic physical-capacity exception — but only the
+        // LAST row is hoisted out of the render's <For>, so that put
+        // `runtime` back inside it and destroyed AgentRuntimeDropup on any
+        // resize across the split boundary. The row's own flex-wrap
+        // renders the same two visual lines without moving either anchor
+        // between DOM subtrees, so the row must stay singular here.
+        const slots = [
+            { key: "runtime", width: 120 },
+            { key: "w1", width: 100 },
+            { key: "w2", width: 90 },
+            { key: "hostShell", width: 120 },
+        ];
+        const rows = computeComposerRows(slots, "hostShell", 200, 5, "runtime");
+        expect(rows[rows.length - 1]).toEqual({ left: ["runtime"], right: ["hostShell"] });
+    });
+
+    it("the anchors share exactly one row at EVERY width, so neither can change rows on resize", () => {
+        // The property the P1 above is really about: sweep a wide range of
+        // available widths and assert the anchors are always together on
+        // the final row. If that holds everywhere, no resize can ever move
+        // them between the hoisted element and a <For> index.
+        const slots = [
+            { key: "runtime", width: 120 },
+            { key: "w1", width: 100 },
+            { key: "w2", width: 90 },
+            { key: "auth", width: 40 },
+            { key: "hostShell", width: 120 },
+        ];
+        for (const availableWidth of [1000, 700, 500, 400, 300, 240, 200, 150, 100, 50]) {
+            const rows = computeComposerRows(slots, "hostShell", availableWidth, 5, "runtime");
+            const last = rows[rows.length - 1];
+            expect(last.left).toContain("runtime");
+            expect(last.right).toContain("hostShell");
+            for (const r of rows.slice(0, -1)) {
+                expect([...r.left, ...r.right]).not.toContain("runtime");
+                expect([...r.left, ...r.right]).not.toContain("hostShell");
+            }
+        }
+    });
+
+    it("falls back to the pre-anchor behavior when the model selector is absent (controls hidden)", () => {
+        const slots = [
+            { key: "w1", width: 100 },
+            { key: "w2", width: 80 },
+            { key: "w3", width: 60 },
+            { key: "hostShell", width: 50 },
+        ];
+        // Same pool, same widths, with and without an anchorLeftKey that
+        // matches nothing — identical output, so hiding the runtime slot
+        // can never change how the remaining slots lay out.
+        expect(computeComposerRows(slots, "hostShell", 200, 5, "runtime")).toEqual(
+            computeComposerRows(slots, "hostShell", 200, 5),
+        );
+    });
+
+    it("keeps Shell rightmost on the last row across a wide→narrow→wide round-trip", () => {
+        // Round-trip, not a one-way sweep — the exact verification shape
+        // PR #2814's one-way-trap regression proved is necessary here.
+        const slots = [
+            { key: "runtime", width: 60 },
+            { key: "w1", width: 100 },
+            { key: "w2", width: 80 },
+            { key: "hostShell", width: 50 },
+        ];
+        const wide = computeComposerRows(slots, "hostShell", 500, 5, "runtime");
+        const narrow = computeComposerRows(slots, "hostShell", 200, 5, "runtime");
+        const wideAgain = computeComposerRows(slots, "hostShell", 500, 5, "runtime");
+
+        expect(wide).toEqual(wideAgain);
+        expect(lastRow(wide).right.at(-1)).toBe("hostShell");
+        expect(lastRow(narrow).right.at(-1)).toBe("hostShell");
+        expect(lastRow(wide).left[0]).toBe("runtime");
+        expect(lastRow(narrow).left[0]).toBe("runtime");
     });
 });
 
