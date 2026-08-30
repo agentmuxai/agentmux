@@ -1,5 +1,23 @@
 # Status: Long-Running Attached Tasks — Rungs 1–2 Verified Shipped, the Architecture Rethink for Rungs 3–5
 
+> **PARTIALLY RESOLVED 2026-08-29 (docs-cleanup Phase 3).** The two issues
+> this doc identifies as "exactly the next unstarted rungs" are both now
+> **closed as completed**:
+> - **#2491** (bashwrap idle-timeout kills declared long-running tasks) →
+>   **#2589**, `fix(bashwrap): exempt declared-background tasks from the
+>   idle-kill timeout`.
+> - **#2492** (backgrounded agent tasks die on session teardown) →
+>   **#2590** (durable Background Task Registry, `db_background_tasks`),
+>   **#2681** (wire `db_background_tasks.pid` into a real production path),
+>   and **#2683** (`declared-background tasks survive a session restart, not
+>   just idle-timeout`).
+>
+> **Not resolved:** this doc's §-level *architectural* proposal — the
+> "deeper architectural fix rather than two point patches" it argues for.
+> What shipped is closer to the two point patches. Whether the rethink is
+> still wanted is an open product question, not a stale-status problem, so
+> this doc stays open rather than being marked resolved outright.
+
 **Date:** 2026-08-15
 **Author:** AgentA
 **Status:** Report — code audit against `main` @ `44b3c6a17` (today), consolidating what's shipped since the 08-09 ladder doc, confirming #2491/#2492 are exactly the next unstarted rungs, and proposing a deeper architectural fix rather than two point patches.

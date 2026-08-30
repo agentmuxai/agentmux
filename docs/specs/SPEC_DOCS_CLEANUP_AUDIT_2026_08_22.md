@@ -223,6 +223,36 @@ spot-check) and either add a clear "RESOLVED — see PR #N" line or leave it
 explicitly open. This is small enough to do as a single pass, unlike the
 spec directories.
 
+> **✅ EXECUTED 2026-08-29.** **15 files, not 13** — two were added after
+> this spec was written (`STATUS_COMPOSER_STRIP_ZONE_BALANCE_HANDOFF_2026_08_25`,
+> `STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23`). Outcome:
+>
+> | Outcome | Count | Files |
+> |---|---|---|
+> | Newly marked **RESOLVED** with PR citations | 4 | srv section handle leak (08-08) + its live recurrence (08-19) → #2666/#2673; cross-channel stale `session_id` (08-20) → #2755/#2693/#2776; stale-resume repro + fix plan (08-23) → §6.1→#2755, §6.2→#2776 |
+> | Newly marked **SUPERSEDED** | 1 | attached-task ladder (08-09) → the 08-15 doc |
+> | **Partially** resolved, left open | 1 | attached-task axis (08-15) — #2491/#2492 closed via #2589/#2590/#2681/#2683, but its architectural proposal is unbuilt |
+> | **Corrected** stale content, still open | 1 | messenger integrations (07-07) — §4's per-platform table said "Not started" for Slack/Telegram/WhatsApp, all shipped (#2026/#2022/#2028) |
+> | Marked **HISTORICAL** | 1 | issue/discussion cleanup (07-24) — its one open item, PR #2291, merged 2026-07-25 |
+> | **Left explicitly open** with a dated staleness note | 3 | app-freeze (08-22), lifecycle+crash architecture (07-16), lifecycle/OOM refactor (06-30) |
+> | Already RESOLVED and already citing PRs — untouched | 4 | fs-watch sweep leak, composer strip, identity isolation gate, pagefile growth |
+>
+> **Two findings worth carrying forward:**
+> 1. **Docs went stale *internally*, not just against code.** The messenger
+>    doc contradicted itself — its §1 table and update block recorded four
+>    shipped bridges while §4 still read "Not started" for three of them.
+>    A sweep that only diffs docs against *code* would have missed this.
+> 2. **"RESOLVED" was under-propagated across linked docs.** The 08-19
+>    recurrence doc opened by calling the 08-08 doc "still open, unpatched"
+>    long after #2666 fixed it. When a fix lands, the docs that *cite* the
+>    broken one need updating too, not just the doc that owns the bug.
+>
+> Deliberately **not** done: per-item verification of the two in-flight
+> architecture programs (lifecycle/OOM, lifecycle+crash). A docs-status
+> sweep is the wrong instrument for auditing an active program, and
+> guessing is precisely this spec's §2.2 failure mode. Both carry an
+> explicit note saying what was and was not checked.
+
 ### 5.4 Phase 4 (optional, lower priority) — one check on docs/analysis
 Spot-check whether any `docs/analysis/` findings docs describe a bug that
 has since been fixed without a resolution note (mirroring §5.3's method) —

@@ -1,5 +1,23 @@
 # Status: Cross-Channel Opening an Old Agent Locks the Whole App for Minutes, Not Just That Pane
 
+> **STILL OPEN as of 2026-08-29 (docs-cleanup Phase 3) — but two
+> contributing leaks found while investigating this have since been
+> fixed.** Neither was confirmed to be *the* cause of the multi-second-to-
+> 70-second gaps, so this stays open rather than being marked resolved:
+> - **#2666** (+ soak test **#2673**) fixed the `sysinfo`
+>   `CreateToolhelp32Snapshot` Section-handle leak —
+>   `STATUS_SRV_SECTION_HANDLE_LEAK_2026_08_08.md`.
+> - **#2722** fixed `FsWatchPool`'s health sweep leaking a File+Semaphore
+>   pair per tick — `STATUS_FS_WATCH_SWEEP_HANDLE_LEAK_2026_08_22.md`,
+>   which was found *while* investigating this very complaint (same day,
+>   same host) and explicitly displaced this doc's leading hypothesis (a
+>   concurrent `output.idx` rebuild).
+>
+> **Anyone reopening this should re-measure on a build containing both
+> fixes before re-deriving the timeline** — the original measurements were
+> taken against a process carrying two known handle leaks, so the gap
+> figures in this doc may not reproduce.
+
 **Status: incident timeline reconstructed, several plausible mechanisms
 ruled out, the actual cause of the multi-second-to-70-second gaps NOT
 established. Not fixed. Revised after PR review caught the original

@@ -1,7 +1,26 @@
 # Status: Live Recurrence of the `agentmux-srv` Section Handle Leak — Windows 11 (2026-08-19)
 
+> **RESOLVED 2026-08-29 (docs-cleanup Phase 3).** Fixed by **#2666**
+> (`fix(srv): bump sysinfo 0.34→0.35 to fix CreateToolhelp32Snapshot handle
+> leak`), with a 4-hour soak test confirming it in **#2673** — both landed
+> after this document was written. The Win10-vs-Win11 framing this doc
+> answers in §(a) is unaffected; the leak itself is gone.
+>
+> **Why a live sighting after the fix would not be a regression:** the fix
+> ships in the binary, so an `agentmux-srv` process started before #2666
+> keeps leaking until restarted. Check the running process's build before
+> reopening.
+>
+> A separate `FsWatchPool` sweep leak (File+Semaphore pair per tick) was
+> found later and fixed in **#2722** —
+> `STATUS_FS_WATCH_SWEEP_HANDLE_LEAK_2026_08_22.md`. Different mechanism,
+> different fix.
+>
+> Everything below is preserved as the original investigation record.
+
 **This is a follow-up to `docs/status/STATUS_SRV_SECTION_HANDLE_LEAK_2026_08_08.md`
-(still open, unpatched).** Today's investigation started from a user report
+(open and unpatched at the time this was written — both are now resolved by
+#2666/#2673, see the banner above).** Today's investigation started from a user report
 framed as "AgentMux causes growing Page File pressure on Windows 11; Windows
 10 doesn't have it" and a request to check repo history. This doc (a) answers
 the Win10-vs-Win11 framing directly, (b) reports a live, current-day
