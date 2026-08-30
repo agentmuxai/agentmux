@@ -259,6 +259,37 @@ has since been fixed without a resolution note (mirroring §5.3's method) —
 only worth doing if Phase 3 turns up a pattern suggesting this family has the
 same problem; not committing to it here without evidence.
 
+> **✅ TRIGGER MET, SPOT-CHECK EXECUTED 2026-08-29.** Phase 3's finding that
+> "RESOLVED" was under-propagated across *linked* docs is exactly the
+> evidence this phase was gated on, so it was run — as the spot-check this
+> section specifies, **not** a sweep. `docs/analysis/` holds **132 files**;
+> a full pass belongs with §5.5's deferred effort, not here.
+>
+> **Sample: 8 files**, chosen for relevance rather than at random — the
+> scroll-oscillation chain (adjacent to Phase 3's live threads) plus four
+> unrelated bug analyses picked to test whether the pattern generalises
+> beyond the cluster already known to be active.
+>
+> **4 hits in 8 — the pattern does generalise:**
+>
+> | File | Problem | Fixed by |
+> |---|---|---|
+> | `ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17` | §6 still says its key question "needs a live repro this agent cannot drive." That repro ran twice since; no forward pointer existed. | Not fixed — but the blocker moved. Repros in the 08-21 and 08-22 findings docs; root cause still open (#2648, #2718) |
+> | `FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_21` | Dead-ends at 8 events from one pane; no pointer to the ~100× larger dataset that followed. | Superseded in scale by the 08-22 findings doc |
+> | `ANALYSIS_BROWSER_PANE_BLACK_FREEZE_MACOS_2026_06_24` | Read as an open bug. Carried **no resolution note at all** — despite a retro on the fix sitting in the same directory, unlinked. | **#1769** (same day) + **#1778** |
+> | `ANALYSIS_MUXBUS_WINDOWS_SIGNIN_URL_TRUNCATION_2026_07_03` | Status cited an in-flight **branch**, not a merged PR — so it read as unshipped long after it landed. | **#1938**, verified live in `util.rs`'s `open_browser` |
+>
+> All four were corrected in place. The other 4 sampled files were fine.
+>
+> **What this says about §5.5.** A 50% hit rate on a small relevance-weighted
+> sample is not a clean estimate for all 132 files, and shouldn't be quoted
+> as one. But it does confirm `docs/analysis/` has the same disease as
+> `docs/specs/`, and adds a failure mode the §2.1 sampling never looked for:
+> **the doc that owns a bug and the doc that records its fix can both be
+> correct while nothing links them.** Any batch process for §5.5 needs to
+> check cross-document linkage, not just each file against code — three of
+> the four hits above were invisible to a file-vs-code check.
+
 ### 5.5 Explicitly deferred — the full ~847-file spec audit
 Given the ~40% stale rate found on a 15-file `docs/specs/`-only sample, a
 defensible estimate is several hundred specs need a corrected Status line

@@ -1,5 +1,18 @@
 # Browser Pane: Black Appearance + UI Freeze on macOS/Linux
 
+> **RESOLVED — fixed the same day this was written** (resolution note added
+> 2026-08-29, docs-cleanup Phase 4; the document previously carried no
+> indication it had been fixed at all):
+> - **#1769** `fix(browser-pane): black flash + UI freeze on macOS/Linux
+>   when opening a browser pane` — 2026-06-24, hours after this analysis.
+> - **#1778** (`fix/browser-pane-deferred-bounds-macos`, merged 2026-06-27)
+>   — follow-ups: deferred overlay bounds, and resizing
+>   `NativeWidgetMacNSWindow` via ObjC for the residual macOS black screen.
+>
+> A retrospective on the fix exists alongside this file:
+> `docs/analysis/RETRO_BROWSER_PANE_MACOS_FIX_2026_06_26.md`. It was never
+> linked from here — which is why this analysis still read as an open bug.
+
 **Date:** 2026-06-24
 **Affected versions:** ≤ 0.47.4 (macOS/Linux only)
 **Symptom:** Opening a browser pane causes it to render solid black and freezes all

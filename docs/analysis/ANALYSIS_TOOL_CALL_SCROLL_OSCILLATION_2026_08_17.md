@@ -1,10 +1,27 @@
 # Analysis: agent-pane scroll "spins backward" during tool-call streaming
 
+> **§6'S LIVE REPRO HAS SINCE HAPPENED — read the follow-ups before acting
+> on this document** (added 2026-08-29, docs-cleanup Phase 4):
+> 1. `docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_21.md` —
+>    correlated a single dev-branch repro's 8 `[wave-scroll-shrink]` events
+>    against this doc's three theorised sources.
+> 2. `docs/analysis/FINDINGS_TOOL_CALL_SCROLL_OSCILLATION_LIVE_INSTANCE_DATA_2026_08_22.md`
+>    — two running instances, hours of real usage, ~2 orders of magnitude
+>    more data. Surfaced **two distinct anomalies**: a recurring ~251px
+>    shrink and a whole-window collapse to 0px.
+>
+> The diagnostic this doc recommended shipped in commit `70c6decb`. **The
+> root-cause fix is still open** — tracked in issues **#2648** ("diagnostic
+> shipped, root-cause fix still blocked on live verification") and
+> **#2718** (the two anomalies). So this document is *not* resolved; its
+> §6 "needs a live repro" framing is simply no longer the blocker.
+
 **Date:** 2026-08-17
 **Status:** Root-cause analysis from direct code inspection + prior internal
 docs. No code changed. One question (§6) needs a live repro this agent
 cannot drive (no GUI automation available in this environment — same
 limitation `PLAN_AGENT_PANE_RESIZE_SCROLL_PIN_2026_08_05.md` §7 hit).
+*(That repro has since been run — see the banner above.)*
 
 ## Addendum 2026-08-17 (same day) — corrections from a first implementation pass, plus diagnostic instrumentation shipped
 
