@@ -72,6 +72,12 @@ export interface AgentTurnContext {
     blockId: string;
     agentName: string;
     costUsd?: number;
+    /** The provider's own reported turn count for this one finalized
+     *  turn (SessionStats.num_turns) — a single finalizeTurn call can
+     *  bundle more than one provider-side turn. Falls back to 1 when
+     *  absent, matching accumulateStats' own fallback in
+     *  agent-pane-state/reducer.ts so the two accumulators agree. */
+    numTurns?: number;
 }
 
 const AMBIENT_KEY = "__ambient__";
@@ -119,18 +125,27 @@ function accumulateServiceUsage(current: ServiceUsage, tokens: ServiceUsage): Se
  * Record a completed turn's tokens under `provider`, and — for real
  * agent turns — under the agent identified by `agent`. Omitting `agent`
  * (the four ambient/internal call sites) files the turn under the
- * shared ambient bucket instead. No-op if the tokens are missing or both
- * counts are zero (nothing to aggregate).
+ * shared ambient bucket instead.
+ *
+ * No-op if there is genuinely nothing to record: both token counts are
+ * zero/missing AND `agent` carries no cost/turn-count signal either. A
+ * stats-only `session_end` (cost_usd/num_turns reported, no token usage
+ * at all — the Claude translator can emit exactly this shape) still
+ * needs to land even with `tokens` null/zero, or the popover would
+ * silently discard real cost/turn-count data just because token usage
+ * happened to be unavailable for that turn. Codex P2 on PR #2849.
  */
 export function recordTurn(
     provider: string,
     tokens: ServiceUsage | null | undefined,
     agent?: AgentTurnContext,
 ): void {
-    if (!provider || !tokens) return;
-    const input = tokens.input ?? 0;
-    const output = tokens.output ?? 0;
-    if (input === 0 && output === 0) return;
+    if (!provider) return;
+    const input = tokens?.input ?? 0;
+    const output = tokens?.output ?? 0;
+    const hasTokens = input !== 0 || output !== 0;
+    const hasAgentSignal = agent != null && (agent.costUsd != null || agent.numTurns != null);
+    if (!hasTokens && !hasAgentSignal) return;
     const id = provider.toLowerCase();
     // Breakdown fields accumulate only when provided by THIS turn — see
     // accumulateServiceUsage's use of `hasBreakdown` — so a provider that
@@ -157,7 +172,14 @@ export function recordTurn(
     // freshInput absent" unambiguously means the TokenCounts shape, where
     // `input` IS the fresh count. accumulateServiceUsage applies this same
     // normalization to both the byService and byAgent aggregates below.
-    setState("byService", id, (current) => accumulateServiceUsage(current ?? { input: 0, output: 0 }, tokens));
+    //
+    // Skip the service-map mutation entirely for a zero-token,
+    // signal-only turn (stats-only session_end) — accumulateServiceUsage
+    // would add nothing anyway, and skipping avoids inserting a
+    // zero-valued phantom row into the per-service breakdown.
+    if (hasTokens) {
+        setState("byService", id, (current) => accumulateServiceUsage(current ?? { input: 0, output: 0 }, tokens!));
+    }
 
     const agentKey = agent?.blockId ?? AMBIENT_KEY;
     setState("byAgent", agentKey, (current) => {
@@ -172,8 +194,8 @@ export function recordTurn(
             byService: {},
         };
         const serviceCurrent = base.byService[id] ?? { input: 0, output: 0 };
-        const serviceNext = accumulateServiceUsage(serviceCurrent, tokens);
-        const byServiceNext = { ...base.byService, [id]: serviceNext };
+        const serviceNext = hasTokens ? accumulateServiceUsage(serviceCurrent, tokens!) : serviceCurrent;
+        const byServiceNext = hasTokens ? { ...base.byService, [id]: serviceNext } : base.byService;
         // Summed across every service this agent has used (usually one —
         // a mid-session provider fork is the only way it's more than
         // one), not just the service this particular turn belongs to.
@@ -188,7 +210,13 @@ export function recordTurn(
             input: base.input + input,
             output: base.output + output,
             costUsd: base.costUsd + (agent?.costUsd ?? 0),
-            numTurns: base.numTurns + 1,
+            // The provider's own reported count for this one finalized
+            // turn — can be > 1 (a single finalizeTurn bundling several
+            // provider-side turns). Falls back to 1 when absent, same as
+            // accumulateStats in agent-pane-state/reducer.ts. Codex P2 on
+            // PR #2849 — this used to always add exactly 1, understating
+            // the total relative to the pane's own accumulator.
+            numTurns: base.numTurns + (agent?.numTurns ?? 1),
             freshInput: breakdown.freshInput,
             cacheCreation: breakdown.cacheCreation,
             cacheRead: breakdown.cacheRead,

@@ -113,7 +113,14 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
         // one-shot (non-reactive) block-meta read is enough here: we
         // only need the name at this exact instant, not a live
         // subscription. See SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30.md.
-        if (opts.provider && tokens) {
+        //
+        // Called even when `tokens` is null — a stats-only session_end
+        // (cost_usd/num_turns reported, no token usage at all) is a real
+        // shape the Claude translator emits; recordTurn's own no-op
+        // check handles the case where there's truly nothing to record.
+        // Codex P2 on PR #2849 — this used to be gated on `tokens` being
+        // truthy, silently dropping that cost/turn-count data.
+        if (opts.provider) {
             const agentName =
                 WOS.getObjectValue<Block>(WOS.makeORef("block", opts.blockId))?.meta?.agentName
                 ?? opts.blockId.slice(0, 7);
@@ -121,6 +128,7 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
                 blockId: opts.blockId,
                 agentName,
                 costUsd: stats?.cost_usd,
+                numTurns: stats?.num_turns,
             });
         }
         // Detect user-initiated stop via the reducer's turn phase.

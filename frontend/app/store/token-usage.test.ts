@@ -130,4 +130,31 @@ describe("token-usage store — by-agent breakdown (SPEC_STATUSBAR_TOKEN_PANEL_B
         resetSession();
         expect(getAgentBreakdown()).toHaveLength(0);
     });
+
+    // Codex P2 on PR #2849: a stats-only session_end (cost_usd/num_turns
+    // reported, no token usage at all) used to be dropped entirely
+    // because recordTurn required truthy tokens.
+    it("still records cost and turn count when tokens is null (stats-only session_end)", () => {
+        recordTurn("claude", null, { blockId: "block-1", agentName: "Manoz", costUsd: 0.08, numTurns: 1 });
+        const rows = getAgentBreakdown();
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({ blockId: "block-1", input: 0, output: 0, numTurns: 1 });
+        expect(rows[0].costUsd).toBeCloseTo(0.08, 5);
+    });
+
+    it("still no-ops for a genuinely empty ambient call (no tokens, no agent context)", () => {
+        recordTurn("ambient:next_prompt_suggestion", { input: 0, output: 0 });
+        expect(getAgentBreakdown()).toHaveLength(0);
+    });
+
+    // Codex P2 on PR #2849: recordTurn always added exactly 1 to
+    // numTurns regardless of what the provider itself reported for that
+    // finalized turn, understating the total relative to the pane's own
+    // sessionTotals accumulator (agent-pane-state/reducer.ts).
+    it("adds the provider-reported num_turns instead of always incrementing by 1", () => {
+        recordTurn("claude", { input: 100, output: 10 }, { blockId: "block-1", agentName: "Manoz", numTurns: 3 });
+        recordTurn("claude", { input: 50, output: 5 }, { blockId: "block-1", agentName: "Manoz" }); // no numTurns → falls back to 1
+        const rows = getAgentBreakdown();
+        expect(rows[0].numTurns).toBe(4);
+    });
 });
