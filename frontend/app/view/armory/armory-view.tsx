@@ -130,7 +130,9 @@ export function ArmoryView(props: ViewComponentProps<ArmoryViewModel>): JSX.Elem
                 </nav>
                 <div class="bundle-manager-section">
                     {/*
-                     * All five managers stay mounted — toggling is instant and
+                     * All six manager components stay mounted (AccountsManager,
+                     * GlobalBrainManager, NativeMemoryManager, SkillManager,
+                     * McpManager, MemoryManager) — toggling is instant and
                      * never re-fetches. All stay consistent via WPS *:changed events.
                      */}
                     <div class="bundle-manager-pane" classList={{ "is-hidden": section() !== "accounts" }}>
