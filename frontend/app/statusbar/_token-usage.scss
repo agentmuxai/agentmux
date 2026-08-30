@@ -108,6 +108,16 @@
         justify-content: space-between;
         padding: var(--space-0-5) var(--space-3);
         font-size: 12px;
+        width: 100%;
+        // Rows that are <button>s (agent rows, the ambient toggle) need
+        // to shed native button chrome to read identically to the
+        // plain-<div> total/service rows around them.
+        background: transparent;
+        border: none;
+        color: inherit;
+        font-family: inherit;
+        text-align: left;
+        cursor: default;
 
         &.token-usage-breakdown-total {
             margin-top: var(--space-1);
@@ -117,8 +127,43 @@
         }
     }
 
+    // Real-agent rows are clickable (focus that agent's pane) — give
+    // them a hover affordance the plain total/service rows don't have.
+    .token-usage-breakdown-agent-row,
+    .token-usage-breakdown-ambient-toggle {
+        &:hover {
+            background: var(--hover-bg-color, rgba(255, 255, 255, 0.06));
+        }
+    }
+
+    .token-usage-breakdown-agent-row {
+        flex-wrap: wrap;
+        row-gap: 1px;
+    }
+
     .token-usage-breakdown-row-name {
         color: var(--main-text-color);
+        display: flex;
+        align-items: center;
+        gap: var(--space-1);
+    }
+
+    .token-usage-breakdown-row-cache {
+        font-size: 9px;
+        font-weight: 400;
+        color: var(--secondary-text-color);
+        opacity: 0.8;
+    }
+
+    // Turn count + cost — sits between the agent name and the token
+    // counts on its own implicit line when the row wraps (agent names
+    // can run long).
+    .token-usage-breakdown-row-meta {
+        flex: 1 1 100%;
+        order: 3;
+        font-size: 10px;
+        color: var(--secondary-text-color);
+        opacity: 0.85;
     }
 
     .token-usage-breakdown-row-counts {
@@ -129,6 +174,22 @@
             opacity: 0.55;
             margin-right: 1px;
         }
+    }
+
+    .token-usage-breakdown-ambient {
+        margin-top: var(--space-1);
+        border-top: 1px dashed var(--border-color);
+    }
+
+    .token-usage-breakdown-ambient-detail {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .token-usage-breakdown-ambient-row {
+        padding-left: calc(var(--space-3) + var(--space-2));
+        opacity: 0.8;
+        font-size: 11px;
     }
 
     .token-usage-breakdown-total .token-usage-breakdown-row-counts {

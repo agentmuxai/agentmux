@@ -106,8 +106,22 @@ export function useTurnLifecycle(opts: UseTurnLifecycleOptions): UseTurnLifecycl
         // indicator + breakdown popover stay up to date. Guarded
         // against double-counting by recordTurn's own no-op-on-zero
         // check — see SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24.md §5.1.
+        //
+        // This is the only recordTurn call site with real pane/agent
+        // identity in scope — pass it through so the status bar's
+        // breakdown can group by agent instead of just by provider. A
+        // one-shot (non-reactive) block-meta read is enough here: we
+        // only need the name at this exact instant, not a live
+        // subscription. See SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30.md.
         if (opts.provider && tokens) {
-            recordTurn(opts.provider, tokens);
+            const agentName =
+                WOS.getObjectValue<Block>(WOS.makeORef("block", opts.blockId))?.meta?.agentName
+                ?? opts.blockId.slice(0, 7);
+            recordTurn(opts.provider, tokens, {
+                blockId: opts.blockId,
+                agentName,
+                costUsd: stats?.cost_usd,
+            });
         }
         // Detect user-initiated stop via the reducer's turn phase.
         // PR G: replaces the legacy `stoppingAtom` getter — the

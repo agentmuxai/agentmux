@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { getCacheHitRate, getTotal, recordTurn, resetSession } from "./token-usage";
+import { getAgentBreakdown, getAgentCacheHitRate, getCacheHitRate, getTotal, recordTurn, resetSession } from "./token-usage";
 
 describe("token-usage store — cache-hit-rate normalization", () => {
     beforeEach(() => {
@@ -48,5 +48,86 @@ describe("token-usage store — cache-hit-rate normalization", () => {
         const total = getTotal();
         expect(total.input).toBe(1050);
         expect(total.output).toBe(55);
+    });
+});
+
+describe("token-usage store — by-agent breakdown (SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30.md)", () => {
+    beforeEach(() => {
+        resetSession();
+    });
+
+    it("keys a real agent turn by blockId and carries its agentName/costUsd/turn count", () => {
+        recordTurn("claude", { input: 1000, output: 50 }, { blockId: "block-1", agentName: "Manoz", costUsd: 0.12 });
+        recordTurn("claude", { input: 500, output: 20 }, { blockId: "block-1", agentName: "Manoz", costUsd: 0.05 });
+        const rows = getAgentBreakdown();
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({
+            blockId: "block-1",
+            agentName: "Manoz",
+            isAmbient: false,
+            input: 1500,
+            output: 70,
+            numTurns: 2,
+        });
+        expect(rows[0].costUsd).toBeCloseTo(0.17, 5);
+    });
+
+    it("collapses turns with no agent context into a single ambient bucket", () => {
+        recordTurn("ambient:next_prompt_suggestion", { input: 100, output: 5 });
+        recordTurn("ambient:activity_summary", { input: 40, output: 2 });
+        const rows = getAgentBreakdown();
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({
+            blockId: null,
+            isAmbient: true,
+            agentName: "AgentMux internal",
+            input: 140,
+            output: 7,
+            numTurns: 2,
+        });
+    });
+
+    it("sorts real agents before the ambient bucket regardless of size", () => {
+        recordTurn("ambient:next_prompt_suggestion", { input: 100_000, output: 5_000 });
+        recordTurn("claude", { input: 10, output: 1 }, { blockId: "block-1", agentName: "Manoz", costUsd: 0.01 });
+        const rows = getAgentBreakdown();
+        expect(rows.map((r) => r.isAmbient)).toEqual([false, true]);
+    });
+
+    it("sorts real agents by cost descending when any row has a nonzero cost", () => {
+        recordTurn("claude", { input: 100, output: 10 }, { blockId: "block-cheap", agentName: "Cheap", costUsd: 0.01 });
+        recordTurn("claude", { input: 100, output: 10 }, { blockId: "block-pricey", agentName: "Pricey", costUsd: 0.5 });
+        const rows = getAgentBreakdown();
+        expect(rows.map((r) => r.agentName)).toEqual(["Pricey", "Cheap"]);
+    });
+
+    it("falls back to token total ordering when no agent has reported a cost", () => {
+        recordTurn("codex", { input: 100, output: 10 }, { blockId: "block-small", agentName: "Small" });
+        recordTurn("codex", { input: 900, output: 90 }, { blockId: "block-big", agentName: "Big" });
+        const rows = getAgentBreakdown();
+        expect(rows.map((r) => r.agentName)).toEqual(["Big", "Small"]);
+    });
+
+    it("re-asserts agentName on later turns so an early unresolved name doesn't strand the fallback", () => {
+        recordTurn("claude", { input: 10, output: 1 }, { blockId: "block-1", agentName: "block-1" });
+        recordTurn("claude", { input: 10, output: 1 }, { blockId: "block-1", agentName: "Manoz" });
+        const rows = getAgentBreakdown();
+        expect(rows[0].agentName).toBe("Manoz");
+    });
+
+    it("computes a per-agent cache hit rate independent of other agents' breakdowns", () => {
+        recordTurn("claude", { input: 1000, output: 50, freshInput: 100, cacheCreation: 0, cacheRead: 900 }, { blockId: "block-1", agentName: "Manoz" });
+        recordTurn("codex", { input: 500, output: 20 }, { blockId: "block-2", agentName: "Other" });
+        const rows = getAgentBreakdown();
+        const manoz = rows.find((r) => r.blockId === "block-1")!;
+        const other = rows.find((r) => r.blockId === "block-2")!;
+        expect(getAgentCacheHitRate(manoz)).toBeCloseTo(0.9, 5);
+        expect(getAgentCacheHitRate(other)).toBeNull();
+    });
+
+    it("resetSession clears byAgent alongside byService", () => {
+        recordTurn("claude", { input: 10, output: 1 }, { blockId: "block-1", agentName: "Manoz" });
+        resetSession();
+        expect(getAgentBreakdown()).toHaveLength(0);
     });
 });
