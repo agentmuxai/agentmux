@@ -1,5 +1,20 @@
 # AgentMux Version History
 
+## 0.55.28 — 2026-08-29
+
+- fix(agent): disclose a fresh start when a pane spawns with no --resume but prior history exists
+- feat(agent): tell the pane at open whether its conversation will resume or start new
+- fix(swarm): bounded backfill-naming backlog pass for historical subagents/dispatches
+- fix(statusbar): report backend uptime from a monotonic clock so a system clock step can't make it negative
+- fix(sysinfo): keep the chart correct across a backwards system-clock step
+- feat(browser-pane): credential-isolated HTTP auth auto-fill
+- fix(agent-pane): force stick-to-bottom on a pane's first overflow
+- fix(subagent-watcher): replayed subagents are born Abandoned when the parent turn is confirmed idle
+- fix(blockfile): stop a 30s line-count poll forcing a full output.idx rebuild
+- fix(agent-pane): anchor the model selector and Shell to the composer strip's bottom row
+- fix(agent-pane): clamp the tool elapsed ticker so a backwards clock step can't render a negative
+
+
 ## 0.55.27 — 2026-08-27
 
 - chore(agent-pane): upgrade Claude Code CLI pin to 2.1.247, relabel Opus 5
