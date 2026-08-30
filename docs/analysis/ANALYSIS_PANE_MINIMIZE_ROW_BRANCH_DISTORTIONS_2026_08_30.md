@@ -1,19 +1,32 @@
 # Analysis: pane-minimize distortions when a Row of panes sits between a top and a bottom pane
 
 **Date:** 2026-08-30
-**Status:** Analysis only — **no code changed**. Four distortions identified and
-reproduced against the real geometry functions; fix directions proposed but not
-implemented or tested.
+**Status:** Analysis only — **no code changed**. Two defects (§2, §3) reproduced
+end-to-end through the real `LayoutModel.updateTree()`; one seam flagged for a
+product decision (§4); one item investigated and **withdrawn as a defect** — it
+turned out to be intentional, regression-locked behaviour (§5).
 **Area:** `frontend/layout/lib/layoutGeometry.ts`, `frontend/layout/lib/layoutMinimize.ts`
 **Trigger:** operator report — "multiple panes open side-by-side with 1 pane atop
 and 1 below; if I start minimizing the middle panes, we get distorted behavior."
 
-**Confidence, stated up front:** every number below was produced by calling the
-actual exported functions (`computeMainAxisAllocation`, `resolveRowSlipTargets`,
-`minimizedCrossAxisPx`) in a scratch vitest file, not by reading the code and
-reasoning. What I have **not** done is run the app and watch it happen. So these
-are demonstrated defects in the geometry layer; which one(s) produced the visual
-the operator actually saw is not established — see §6.
+**Confidence, per finding — these are not all the same strength:**
+
+| § | Finding | How it was measured |
+|---|---|---|
+| §2 | Dead space under a minimized Row branch | **End-to-end**: built the tree, called `model.updateTree()`, read `model.additionalProps()` |
+| §3 | Resize handles vanish | **End-to-end**: same, read `resizeHandles` off the parent's props |
+| §4 | Discontinuous chip reflow | Exported pure functions (`resolveRowSlipTargets`, `computeMainAxisAllocation`) |
+| §5 | Zero-height host | **Not a defect** — existing intended behaviour, see §5 |
+
+An earlier revision of this document claimed all findings came from calling
+exported functions. That was wrong for two of them, which were measured by
+copying non-exported snippets (the Phase C handle predicate, the Phase B host
+arithmetic) into a scratch test — and it contradicted this document's own §7.
+Codex caught it on the PR. §2 and §3 have since been genuinely re-measured
+through `updateTree`; the numbers did not change.
+
+What I still have **not** done is run the app and watch it happen. Which finding
+produced the visual the operator actually saw is not established — see §6.
 
 ---
 
@@ -45,13 +58,18 @@ Constants used throughout: `HeaderHeightPx = 33`, `gap = 3`,
 
 ## 2. Finding A — 72px of dead space once all three middle panes are minimized (root cause)
 
-**Measured:**
+**Measured end-to-end** — tree built, `model.updateTree()` called, rects read
+back from `model.additionalProps()` (800×600 container, gap 3):
 
 | | |
 |---|---|
-| Vertical space the root Column allocates to MIDDLE | **108px** |
-| Vertical space MIDDLE actually fills | **36px** |
-| **Dead space** | **72px** |
+| MIDDLE's rect | top 246, height **108px** |
+| Chip heights (A, B, C) | 36, 36, 36 |
+| Chip widths (A, B, C) | 183, 183, 183 |
+| Bottom of the chip strip | y = **282** |
+| Bottom of MIDDLE's rect | y = **354** |
+| **Dead space** | **72px** (y 282 → 354) |
+| BOTTOM pane starts at | y = 354 |
 
 Same subtree declared as a Column branch instead: allocated 108, consumed 108 —
 exact. The defect is direction-specific.
@@ -109,13 +127,15 @@ passes and this doesn't.
 
 ## 3. Finding B — minimizing a middle pane deletes the resize handle between its two expanded neighbours
 
-**Measured**, for `A | B(minimized) | C`:
+**Measured end-to-end** for `A | B(minimized) | C` via `model.updateTree()`,
+reading `resizeHandles` off the parent's own props (800px-wide container):
 
 | | |
 |---|---|
 | Resize handles generated | **0** |
-| Child widths A, B, C | **600, 0, 600** |
-| Baseline (nothing minimized) | 2 handles (`0|1`, `1|2`) |
+| Baseline, nothing minimized | **2** |
+| Rendered rects (left, width) | A (0, 400), C (400, 400) — **flush at x=400** |
+| B's chip | (400, 400) — docked on top of C |
 
 B contributes zero main-axis width (it slips onto C), so **A and C are rendered
 flush against each other** — and there is no divider between them anywhere in
@@ -169,41 +189,46 @@ seam.
 
 ---
 
-## 5. Finding D — enough docked chips crush their host pane to zero height
+## 5. WITHDRAWN — "docked chips crush their host to zero height" is intended behaviour
 
-**Measured**, 6 panes in a 120px-tall row, 5 minimized onto the survivor:
+**An earlier revision of this document listed this as a fourth defect and
+proposed adding a minimum host height. That was wrong, and the proposed fix
+would have reverted a regression test.**
 
-| | |
-|---|---|
-| Combined chip height | 180px |
-| Row height | 120px |
-| `clampedSlipHeight` | 120px |
-| **Host pane's resulting height** | **0px** |
-
-The row's only expanded pane renders at zero height and disappears.
-
-**Root cause.** Phase B scales the *chips* down to fit
-(`scale = clampedSlipHeight / totalSlipHeight`, added for an earlier reagent P1)
-but computes the host's rect independently:
+The behaviour is real — with enough minimized panes docking onto one short row,
+Phase B's arithmetic yields a host height of exactly 0:
 
 ```ts
 const clampedSlipHeight = Math.min(totalSlipHeight, targetProps.rect.height);
 const shrunkRect = { ...targetProps.rect,
-    top: originalTop + clampedSlipHeight,
-    height: targetProps.rect.height - clampedSlipHeight };
+    height: targetProps.rect.height - clampedSlipHeight };   // → 0 when saturated
 ```
 
-When `totalSlipHeight ≥ rect.height`, `clampedSlipHeight` equals the full height
-and the subtraction yields exactly 0. The chips are made to fit; the pane they
-docked onto is not given a floor.
+But it is **deliberate and locked in by a test**.
+`frontend/layout/tests/layoutModel.test.ts` (the "scales down chip heights
+proportionally when a slip group's total height exceeds the target's space" case,
+added for a reagent P1 on **PR #2211**) sets up exactly this saturated slip group
+and asserts:
 
-**Fix direction.** Reserve a minimum host height and scale the chip stack against
-`rect.height − minHostPx` instead of `rect.height`. Requires a product call on
-what the floor is — one header height, or something content-bearing.
+```ts
+// The anchor's own content area is fully consumed (0 height left) —
+// the whole container is chips when they overflow this badly.
+expect(props[anchor.id].rect.height).toBeCloseTo(0, 0);
+```
 
-**Reachability.** Needs ~5 minimized panes docking onto one short row, so it is
-less likely than A–C in the reported 3-pane scenario. Included because it is the
-same class of defect and cheap to fix alongside.
+So "the whole row becomes chips" is the specified outcome when the stack
+saturates, not an accident. Reserving a host-height floor would break that test
+by design.
+
+**What remains, reframed as a product question rather than a bug:** *is
+"saturate to all-chips" the behaviour we want when a slip group overflows, or
+should the host keep a minimum visible height?* There is a defensible argument
+either way — the current rule is at least predictable and has no dead space. Any
+change here is a deliberate reversal of #2211's decision and needs to be made as
+one, with that test updated intentionally rather than "fixed".
+
+Recorded here rather than deleted, so the next person who notices the
+zero-height host finds the reasoning instead of re-opening it.
 
 ---
 
@@ -226,25 +251,37 @@ same class of defect and cheap to fix alongside.
 
 ## 7. Reproducing the measurements
 
-Findings A–D were produced by a scratch vitest file (since deleted) calling the
-exported pure functions directly. To regenerate: build the tree shapes described
-in each section with `newLayoutNode` from `frontend/layout/lib/layoutNode`, then
-call `computeMainAxisAllocation` / `resolveRowSlipTargets` /
-`minimizedCrossAxisPx` from `frontend/layout/lib/layoutGeometry`, using
-`HeaderHeightPx = 33`, `gap = 3`. The Phase C handle predicate in §3 and the
-Phase B host-height arithmetic in §5 are copied verbatim from
-`updateTreeHelper`, since neither is separately exported.
+All measurements came from scratch vitest files, since deleted.
+
+**§2 and §3 (end-to-end).** Copy the preamble of
+`frontend/layout/tests/layoutModel.test.ts` (lines 1–99: its imports, the
+`@/app/store/global` `vi.mock`, and `createLayoutModel()`), then build the tree
+shape with `newLayoutNode`, set `n.minimized = true` on the intended leaves,
+assign `model.treeState.rootNode`, call `model.updateTree()`, and read
+`model.additionalProps()`. §2 reads each node's `rect`; §3 reads
+`props[rootNode.id].resizeHandles`. This exercises the real
+`updateTreeHelper` — Phases A, B and C — not a reimplementation of it.
+
+**§4 (pure functions).** `resolveRowSlipTargets` and
+`computeMainAxisAllocation`, both exported from
+`frontend/layout/lib/layoutGeometry.ts`, called directly.
+
+Constants: `HeaderHeightPx = 33`, gap 3, container 800×600 unless stated.
+`createLayoutModel()`'s default bounding rect is 800×600, which is where §2's
+absolute y-coordinates come from.
 
 ## 8. Suggested order of work
 
-1. **Finding A** — replace `countLeafPanes` with the direction-aware
-   `collapsedExtent`. Root cause of the visible dead space, self-contained, and
-   the existing test suite's blind spot is easy to close (add the Row-branch
-   mirror of the current Column-branch test).
-2. **Finding D** — host-height floor in Phase B. Small, adjacent to A.
-3. **Finding B** — rendered-slot-adjacency handles. Needs care around
-   `parentIndex` and `onResizeMove`'s lookup.
-4. **Finding C** — product decision first, then implementation if wanted.
+1. **§2 (dead space)** — replace `countLeafPanes` with the direction-aware
+   `collapsedExtent`. Root cause of the visible band, self-contained, and the
+   suite's blind spot is easy to close: add the Row-branch mirror of the
+   existing Column-branch test.
+2. **§3 (missing handles)** — handles between adjacent *rendered* slots rather
+   than adjacent array indices. Needs care around `parentIndex` and
+   `onResizeMove`'s lookup, so it is not a one-line predicate change.
+3. **§4 (discontinuous reflow)** — product decision first, implementation only
+   if wanted.
+4. **§5** — nothing to do unless we deliberately reverse PR #2211.
 
 ## References
 
