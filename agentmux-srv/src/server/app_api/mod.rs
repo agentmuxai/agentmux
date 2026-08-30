@@ -1521,15 +1521,40 @@ pub(super) fn global_zone_line_count(
     if let Ok(Some(idx_stat)) = gfs.stat(zone, "output.idx") {
         if idx_stat.size >= OUTPUT_IDX_HEADER_LEN {
             if let Ok((_, header)) = gfs.read_at(zone, "output.idx", 0, OUTPUT_IDX_HEADER_LEN) {
-                if let Ok(bytes) = <[u8; 8]>::try_from(header.as_slice()) {
-                    if u64::from_le_bytes(bytes) == output_size {
-                        return Some(((idx_stat.size - OUTPUT_IDX_HEADER_LEN) / 8) as u64);
-                    }
+                if <[u8; 8]>::try_from(header.as_slice()).is_ok() {
+                    // Fresh OR stale — either way the cached entry count is
+                    // returned without rescanning. A stale index trails the
+                    // true total by however many lines were appended since it
+                    // was built, which is immaterial for a line COUNT and is
+                    // vastly cheaper than the alternative.
+                    //
+                    // Rebuilding on staleness is what made this pathological:
+                    // `output` grows continuously for a live agent, so the
+                    // header never matches, and the 30-second snapshot poll
+                    // (`useSnapshotPersistence`) drove a FULL rescan every
+                    // time. Measured on a 759 MB / 823k-line transcript: 37
+                    // rebuilds in 19 minutes, mean 3168 ms, a ~10% permanent
+                    // duty cycle of full-file scanning on the shared runtime —
+                    // and the caller's own RPC times out at 3000 ms, so most
+                    // of that work was discarded and repeated 30 s later. See
+                    // docs/reports/REPORT_AGENT_PANE_LOAD_RENDER_ARCHITECTURE_2026_08_27.md §5.
+                    //
+                    // The read_range path builds its own index when it needs a
+                    // CURRENT one (blockfile.rs); this counter never does.
+                    return Some(((idx_stat.size - OUTPUT_IDX_HEADER_LEN) / 8) as u64);
                 }
             }
         }
     }
 
+    // No usable index at all — build one. This is the first-open cost for a
+    // cross-channel zone and it is load-bearing: without it the handler falls
+    // through to `session:line_count` (absent for a zone this channel has
+    // never written) and then to the WPS ring (capped at 4096), so a fresh
+    // cross-channel open would under-report and render a near-empty pane —
+    // the exact failure the global path exists to prevent
+    // (ANALYSIS_CROSS_CHANNEL_CONVERSATION_HISTORY_2026_06_14.md). Paid once
+    // per zone, not once per poll.
     crate::backend::blockcontroller::shell::rebuild_output_idx(gfs, zone, output_size)
 }
 
@@ -1864,6 +1889,61 @@ mod cross_channel_tests {
             Some(2),
             "must trust the fresh cached index rather than rescanning `output`",
         );
+    }
+
+    #[test]
+    fn global_zone_line_count_does_not_rebuild_a_merely_stale_index() {
+        // The regression this fixes: `output` grows continuously for a live
+        // agent, so a covered_size header effectively never matches, and the
+        // old code answered every call with a FULL rescan. A 30-second UI
+        // poll therefore drove ~10% permanent duty-cycle scanning of a 759 MB
+        // file (REPORT_AGENT_PANE_LOAD_RENDER_ARCHITECTURE_2026_08_27.md §5).
+        //
+        // Same proof technique as the fresh-index test above: seed a
+        // deliberately-wrong index whose header does NOT match the current
+        // output size. Returning the cached (wrong) 2 proves no rescan
+        // happened; the old always-rebuild code returns the true 3.
+        let global = mem_store();
+        let zone = "agent:def-cc-6:current";
+        let body: &[u8] = b"{\"a\":1}\n{\"b\":2}\n{\"c\":3}\n";
+        seed_output(&global, zone, body);
+
+        let mut idx = Vec::new();
+        // covered_size deliberately STALE — smaller than the real output size.
+        idx.extend_from_slice(&((body.len() - 9) as u64).to_le_bytes());
+        idx.extend_from_slice(&0u64.to_le_bytes());
+        idx.extend_from_slice(&9u64.to_le_bytes());
+        global
+            .make_file(zone, "output.idx", FileMeta::default(), FileOpts::default())
+            .unwrap();
+        global.write_file(zone, "output.idx", &idx).unwrap();
+
+        assert_eq!(
+            global_zone_line_count(&global, zone),
+            Some(2),
+            "a stale index must be reused for a COUNT, not rebuilt by a full rescan",
+        );
+    }
+
+    #[test]
+    fn global_zone_line_count_still_builds_when_no_index_exists() {
+        // The one case that must still pay for a build: without it the
+        // line_count handler falls through to `session:line_count` (absent for
+        // a zone this channel never wrote) and then the capped WPS ring, so a
+        // fresh cross-channel open would under-report and render a near-empty
+        // pane. Paid once per zone, not once per 30-second poll.
+        let global = mem_store();
+        let zone = "agent:def-cc-7:current";
+        seed_output(&global, zone, b"{\"a\":1}\n{\"b\":2}\n{\"c\":3}\n");
+
+        assert_eq!(
+            global_zone_line_count(&global, zone),
+            Some(3),
+            "a missing index must still be built so cross-channel opens count correctly",
+        );
+        // And the build must have persisted an index for subsequent calls.
+        let idx = global.stat(zone, "output.idx").expect("stat ok");
+        assert!(idx.is_some(), "the build should leave an index behind");
     }
 }
 
