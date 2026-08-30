@@ -13,9 +13,27 @@ reopening at `19:47:33Z` today on `0.55.26`, block
 correlating the host `[fe]` console bridge against the `agentmux-srv` log, plus
 a direct read of the current gate/transport code on `main` (`84cc072d4`). Not a
 synthetic repro, and not doc archaeology.
-**Status:** Analysis only. No code changed. §2 and §5 are established by direct
+**Status:** Analysis only when written. §2 and §5 are established by direct
 evidence; §3 and §4 are structural findings from the code; §6 lists what this
 report deliberately does **not** claim.
+
+**Update 2026-08-29** — this status line is the only edit; the analysis below is
+left exactly as written. All three findings were re-verified against `main` at
+`f2aca1f09` and still hold. Follow-up work, in the §7 order:
+
+- §2 (replay asserts false-`Active` subagents, then retracts them) — being fixed
+  now. `jsonl.rs:125` still inserts `SubAgentStatus::Active` for a replayed
+  spawn and `scan.rs:265` still retracts it moments later.
+- §5 (`output.idx` fully rebuilt every 30 s) — being fixed now at the caller
+  (`useSnapshotPersistence`'s line-count poll); the deeper index work
+  (append-only rebuild, `spawn_blocking` offload) is tracked separately rather
+  than bundled here.
+- §4 (participant-registered paint gate) — not started; tracked, not bundled.
+
+Separately, the clock step that §5's trace ran across turned out to be the same
+one behind two now-merged fixes: PR #2831 (backend uptime) and PR #2832 (sysinfo
+chart). Neither is in this report's scope; noted so a future reader doesn't
+re-derive the connection.
 
 ---
 
