@@ -30,9 +30,26 @@
 
 import { extractToolDetail } from "../stream-parser";
 import type { BashParams, BashResult, DocumentNode, ToolNode } from "../types";
+import { wholeCommandSleepMs } from "./sleep-detect";
 import type { ActivityStatus, PinnedActivity } from "./types";
 
 export const TOOL_PROMOTION_MS = 30_000;
+
+/**
+ * Milliseconds a call will spend sleeping, when the command is *nothing but*
+ * a wait — see `sleep-detect.ts` for why that narrowness is the whole point.
+ * `null` for 99%+ of calls, which then follow the ordinary duration rule.
+ *
+ * Such a call is promoted IMMEDIATELY rather than after `TOOL_PROMOTION_MS`:
+ * the threshold exists to *detect* undeclared long work, and a bare `sleep
+ * 300` has already declared itself — waiting 30s to show it is 30s of
+ * "Working…" for a pane that is, provably, doing nothing. Measured median for
+ * these in real transcripts is 61s, so the old behaviour spent half the wait
+ * saying the wrong thing.
+ */
+function pureSleepMs(n: ToolNode): number | null {
+    return wholeCommandSleepMs((n.params as BashParams | undefined)?.command);
+}
 
 /** The harness's literal acceptance-message prefix for a genuinely detached
  *  launch (see BashParams.run_in_background's doc comment). Exported so any
@@ -148,7 +165,10 @@ function backgroundCompletions(nodes: ReadonlyArray<DocumentNode>): Map<string, 
  *  already finished (that case is handled entirely by its retained,
  *  terminal-status dock row, not by anything time-gated). */
 function isRunningPastThreshold(n: ToolNode, now: number): boolean {
-    return n.status === "running" && now - n.timestamp! >= TOOL_PROMOTION_MS;
+    if (n.status !== "running") return false;
+    // A self-declared pure wait needs no detection window (`pureSleepMs`).
+    if (pureSleepMs(n) != null) return true;
+    return now - n.timestamp! >= TOOL_PROMOTION_MS;
 }
 
 /** True once `n` is known to have run for at least `TOOL_PROMOTION_MS`,
@@ -157,6 +177,11 @@ function isRunningPastThreshold(n: ToolNode, now: number): boolean {
  *  is the "did this call ever deserve a dock row" gate for `toolActivities`. */
 function everCrossedThreshold(n: ToolNode, now: number): boolean {
     if (n.status === "running") return isRunningPastThreshold(n, now);
+    // A finished pure sleep keeps its row through the ordinary retention
+    // window. It was docked from the moment it started, so dropping it the
+    // instant it ends (which the duration rule would do for anything under
+    // TOOL_PROMOTION_MS) would make the row vanish rather than resolve.
+    if (pureSleepMs(n) != null) return true;
     if (n.duration != null) return n.duration * 1000 >= TOOL_PROMOTION_MS;
     return false;
 }
@@ -175,10 +200,15 @@ function toolActivityStatus(status: ToolNode["status"]): ActivityStatus {
 
 export function toolToActivity(n: ToolNode): PinnedActivity {
     const detail = extractToolDetail(n.tool, (n.params as Record<string, any>) ?? {});
+    const sleepMs = pureSleepMs(n);
     return {
         id: n.id,
         kind: "tool",
         title: detail || n.toolName || n.tool,
+        // Only set for a whole-command sleep, which is the only case where the
+        // remaining time is actually KNOWN rather than guessed — the row shows
+        // a countdown instead of a blind elapsed timer.
+        ...(sleepMs != null ? { sleepMs } : {}),
         status: toolActivityStatus(n.status),
         startedAt: n.timestamp!,
         endedAt: n.status !== "running" && n.duration != null ? n.timestamp! + n.duration * 1000 : undefined,
@@ -247,6 +277,10 @@ export function nextToolPromotionAt(nodes: ReadonlyArray<DocumentNode>, now: num
     let next: number | null = null;
     for (const n of nodes) {
         if (!isBashToolNode(n) || n.status !== "running") continue;
+        // Pure sleeps promoted the instant they started — there is no future
+        // moment to schedule a timer for, and treating one as pending would
+        // wake the pane for a promotion that already happened.
+        if (pureSleepMs(n) != null) continue;
         const promotesAt = n.timestamp! + TOOL_PROMOTION_MS;
         if (promotesAt <= now) continue;
         if (next == null || promotesAt < next) next = promotesAt;

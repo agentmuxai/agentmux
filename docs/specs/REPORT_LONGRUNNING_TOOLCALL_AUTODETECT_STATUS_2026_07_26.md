@@ -1,6 +1,39 @@
 # Report: auto-detecting long-running tool calls (sleep and beyond) and docking them — status refresh, 2026-07-26
 
-**Status:** Report — audit + design synthesis, all open questions resolved (§4), not yet implemented. This is **not** a from-scratch analysis: it verifies and consolidates two existing same-topic reports against `main` as of today, and updates them with what has (and hasn't) shipped in the 10 days since.
+**Status:** Report — audit + design synthesis, all open questions resolved (§4). **Largely implemented since; see the status table below (refreshed 2026-08-30).** This is **not** a from-scratch analysis: it verifies and consolidates two existing same-topic reports against `main` as of today, and updates them with what has (and hasn't) shipped in the 10 days since.
+
+### §3 implementation status (verified against `main`, 2026-08-30)
+
+| Step | State | Where |
+|---|---|---|
+| 1. Duration-threshold promotion | **shipped** | `activity/tool-adapter.ts`, `TOOL_PROMOTION_MS = 30_000` |
+| 1a. `sleep <N>` → immediate dock + "~Ns left" | **shipped 2026-08-30** | `activity/sleep-detect.ts` — see the note below |
+| 2. `run_in_background` end-to-end | **shipped** | issues #2490, #2518, #2491, #2492 |
+| 3. Two-axis pane status | **shipped** | `activity/attached-task.ts`, `SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md` |
+| 4. Feed the signal to Swarm | **partial** | `shellRows`/`cronRows` exist; dock-promoted Bash calls are still absent |
+| 5. Generalize beyond Bash | **not started** | `isBashToolNode` still gates on `tool === "Bash"` |
+
+**On 1a (§4.2's "cheap UX polish"), with the measurement §4.2 called for.**
+That section asked for "real-transcript validation, not just Agent1's one
+heartbeat example, before it ships." Done — 7,761 foreground Bash calls across
+12 production transcripts:
+
+- The **naive** rule §4.2 rejected ("command starts with `sleep`") matches 270
+  calls, of which **204 (76%) are not waits** — `sleep 90; tail -30 <log>`,
+  `sleep 60; ls <dir>`. The rejection was correct.
+- Restricting to commands that are a wait **and nothing else** matches 66, every
+  one genuine, median 61s. No false-positive surface: there is no second clause
+  to be wrong about. 18 of the 66 finish under 30s, i.e. the duration rule
+  misses them entirely.
+- All 204 compound sleeps ran 28–100s, so duration already catches every one —
+  ignoring them here costs nothing.
+
+Shipped as exactly what §4.2 specifies: an optimization layered on top of
+duration promotion, never the classifier. Also measured, and **rejected**:
+lowering `TOOL_PROMOTION_MS` to 10s. Median foreground Bash is 7.5s, so 10s
+lands on the steepest part of the distribution — 3.5× the dock rows, 21% of all
+calls newly promoted, and identical commands flipping across the line depending
+on cache state.
 **Author:** Agent3
 **Verified against:** `main` @ `45155f864` (pulled 2026-07-26).
 **Supersedes/updates:**
