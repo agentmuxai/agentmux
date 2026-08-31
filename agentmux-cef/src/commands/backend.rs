@@ -414,7 +414,7 @@ pub fn set_window_init_status(state: &Arc<AppState>, args: &serde_json::Value) -
 }
 
 /// First-paint signal from the frontend (Linux startup white-flash fix, see
-/// docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md). Sent via a
+/// docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md). Sent via a
 /// double-`requestAnimationFrame` at the very top of `bootstrap.ts` — the
 /// earliest reliable proxy for "the compositor actually presented a frame",
 /// as opposed to CEF's `on_load_end` which only means "main-frame HTML
