@@ -32,6 +32,7 @@ import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import { workingFromPhase } from "@/app/store/agent-pane-state/types";
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { buildRuntimeArgs, getRuntimeConfig } from "../buildRuntimeArgs";
+import { selectLaunchArgs } from "../launch-args";
 import { dispatchSlashCommand } from "../commands/dispatch";
 import { buildRegistry } from "../commands/registry";
 import type { SlashCommand, SlashCommandContext, SlashPickerSpec } from "../commands/types";
@@ -1264,9 +1265,15 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         const prov = opts.provider();
         if (prov) {
             const runtimeConfig = getRuntimeConfig(opts.block()?.meta);
-            const baseArgs = prov.controllerType === "persistent" && prov.persistentLaunchArgs
-                ? prov.persistentLaunchArgs
-                : prov.launchArgs;
+            // A container agent runs one `docker exec` per turn, so it must
+            // never be given the persistent controller's args — above all
+            // `--input-format stream-json`, which makes the CLI parse the
+            // startup markdown as JSON and die. This ran before EVERY send, so
+            // it rewrote the bad flags into cmd:args on every turn regardless
+            // of what launch time had chosen (reagent P1 on PR #2867 — the
+            // fourth copy of this rule, and the one that fires most often).
+            const agentMode = opts.block()?.meta?.["agentMode"] as string | undefined;
+            const baseArgs = selectLaunchArgs(prov, agentMode);
             const updatedArgs = buildRuntimeArgs(baseArgs, runtimeConfig, prov.id);
             try {
                 await RpcApi.SetMetaCommand(TabRpcClient, {
