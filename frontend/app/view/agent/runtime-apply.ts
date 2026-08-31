@@ -38,6 +38,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import * as WOS from "@/app/store/wos";
 import { staticTabId } from "@/app/store/global";
 import { buildRuntimeArgs } from "./buildRuntimeArgs";
+import { isPersistentLaunch, selectLaunchArgs } from "./launch-args";
 import type { AgentRuntimeConfig } from "./types";
 import type { ProviderDefinition } from "./providers";
 
@@ -50,6 +51,19 @@ export async function applyRuntimeChange(
     blockId: string,
     provider: ProviderDefinition | undefined,
     updated: AgentRuntimeConfig,
+    /**
+     * `block.meta["agentMode"]` — "host" or "container". REQUIRED for
+     * correctness on container agents, defaulted only so existing callers
+     * that predate it keep compiling.
+     *
+     * This function used to branch on `provider.controllerType === "persistent"`
+     * alone — a third, unmigrated copy of the rule `launch-args.ts` now owns
+     * (reagent P1 on PR #2867). On a container agent that rewrote
+     * `--input-format stream-json` straight back into persisted `cmd:args` on
+     * every /model, /effort or /mode change, undoing the launch-time fix, and
+     * forced a controller restart the container path never needed.
+     */
+    agentMode?: string,
 ): Promise<void> {
     const oref = WOS.makeORef("block", blockId);
     await RpcApi.SetMetaCommand(TabRpcClient, {
@@ -57,8 +71,12 @@ export async function applyRuntimeChange(
         meta: { "agent:runtime": updated },
     });
 
-    if (provider?.controllerType === "persistent") {
-        const baseArgs = provider.persistentLaunchArgs ?? provider.launchArgs;
+    // Container agents are one-shot per `docker exec`, so they neither take
+    // persistent args nor need the restart — `input.rs` reads `cmd:args` fresh
+    // from block meta on every turn, so a runtime change applies to the next
+    // one with no controller churn at all.
+    if (provider && isPersistentLaunch(provider, agentMode)) {
+        const baseArgs = selectLaunchArgs(provider, agentMode);
         const updatedArgs = buildRuntimeArgs(baseArgs, updated, provider.id);
         await RpcApi.SetMetaCommand(TabRpcClient, {
             oref,
