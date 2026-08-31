@@ -174,6 +174,17 @@ pub struct RecentSessionRow {
     /// block. False when the snapshot doesn't exist yet (no preview)
     /// or the block_id_hint was empty.
     pub has_snapshot: bool,
+    /// True when `has_snapshot` is false because the filestore lookup
+    /// itself ERRORED (I/O error, lock contention, DB read failure) —
+    /// distinct from a genuine `Ok(None)` (the block simply never wrote
+    /// a snapshot). Without this, a transient storage error renders
+    /// identically to "never had history," with no signal to the user
+    /// that this row's real state is unknown rather than confirmed
+    /// empty. See
+    /// docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md
+    /// §5.
+    #[serde(default)]
+    pub snapshot_check_failed: bool,
     /// When the agent definition was first created (ms since epoch).
     /// Shown as "Created" in the My Agents card.
     pub agent_created_at: i64,

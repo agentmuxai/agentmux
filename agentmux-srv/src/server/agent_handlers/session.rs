@@ -391,9 +391,18 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     // Stat first (cheap) — gives us the modts for
                     // sorting. Only fetch the full content if the
                     // snapshot exists.
-                    let (has_snapshot, last_active_at, mut preview, node_count) =
+                    //
+                    // docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md
+                    // §5: `Ok(None)` (the block genuinely never wrote a
+                    // snapshot) and `Err(_)` (a transient filestore I/O
+                    // error, lock contention, DB read failure) used to
+                    // collapse into the same `_ =>` arm — a real error on a
+                    // row that DOES have history rendered identically to
+                    // "never had one," silently. Split so the row can carry
+                    // that distinction downstream instead of losing it here.
+                    let (has_snapshot, last_active_at, mut preview, node_count, snapshot_check_failed) =
                         if inst.block_id.is_empty() {
-                            (false, inst.started_at, String::new(), 0usize)
+                            (false, inst.started_at, String::new(), 0usize, false)
                         } else {
                             match filestore.stat(&inst.block_id, "output.state.json") {
                                 Ok(Some(file)) => {
@@ -406,9 +415,23 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                                         &filestore,
                                         &inst.block_id,
                                     );
-                                    (true, modts, preview, node_count)
+                                    (true, modts, preview, node_count, false)
                                 }
-                                _ => (false, inst.started_at, String::new(), 0usize),
+                                Ok(None) => (false, inst.started_at, String::new(), 0usize, false),
+                                Err(e) => {
+                                    tracing::warn!(
+                                        error = %e,
+                                        definition_id = %inst.definition_id,
+                                        block_id = %inst.block_id,
+                                        "listrecentsessions: filestore.stat(output.state.json) failed — \
+                                         row will report snapshot_check_failed instead of silently \
+                                         looking like it never had a snapshot"
+                                    );
+                                    if !degraded.contains(&"snapshot_stat") {
+                                        degraded.push("snapshot_stat");
+                                    }
+                                    (false, inst.started_at, String::new(), 0usize, true)
+                                }
                             }
                         };
 
@@ -543,6 +566,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         node_count,
                         last_active_at,
                         has_snapshot,
+                        snapshot_check_failed,
                         agent_created_at: def.map(|d| d.created_at).unwrap_or(0),
                         started_at: inst.started_at,
                         agent_type: def.map(|d| d.agent_type.clone()).unwrap_or_default(),
@@ -1077,6 +1101,81 @@ mod tests {
         let row = &result.rows[0];
         assert!(!row.has_snapshot);
         assert_eq!(row.preview, "", "no summary persisted yet — preview must stay empty, not fabricated");
+    }
+
+    /// docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md
+    /// §5, bullet 1: `filestore.stat()`'s `Err` (I/O error, lock
+    /// contention, DB read failure) used to collapse into the exact same
+    /// branch as `Ok(None)` (genuinely no snapshot) — a transient storage
+    /// error on a row that DOES have real history rendered identically to
+    /// "never had one," with no log line. Forces the failure
+    /// deterministically the same way the identity_links test above does
+    /// (`DROP TABLE`), rather than relying on real I/O flakiness.
+    #[tokio::test]
+    async fn filestore_stat_error_is_distinguished_from_genuinely_no_snapshot() {
+        let state = test_state();
+        let mut def = local_agent_def("def-local-3");
+        state.wstore.agent_def_insert(&mut def).unwrap();
+        state
+            .wstore
+            .instance_create(&local_agent_instance("inst-local-3", "def-local-3", "block-local-3"))
+            .unwrap();
+
+        {
+            let conn = state.filestore.conn().lock().unwrap();
+            conn.execute("DROP TABLE db_wave_file", []).unwrap();
+        }
+
+        let (engine, mut output_rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        let resp = dispatch_list_recent_sessions(&engine, &mut output_rx).await;
+
+        assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
+        let result: ListRecentSessionsResult =
+            serde_json::from_value(resp.data.expect("expected result data")).unwrap();
+        assert_eq!(result.rows.len(), 1, "a stat() failure on one row must not zero out the whole list");
+        let row = &result.rows[0];
+        assert!(!row.has_snapshot, "a failed stat() is not evidence a snapshot exists");
+        assert!(
+            row.snapshot_check_failed,
+            "a stat() I/O error must be distinguishable from a genuine Ok(None) — \
+             otherwise a transient failure looks identical to \"never had history\""
+        );
+        assert!(
+            result.degraded.contains(&"snapshot_stat".to_string()),
+            "got: {:?}",
+            result.degraded
+        );
+    }
+
+    /// Counterpart: a genuine `Ok(None)` (the block really never wrote a
+    /// snapshot) must NOT set `snapshot_check_failed` — only an actual
+    /// `Err` does. Without this, the fix above could be made to pass by
+    /// setting the flag unconditionally whenever `has_snapshot` is false,
+    /// which would just move the ambiguity rather than remove it.
+    #[tokio::test]
+    async fn genuinely_missing_snapshot_does_not_set_the_check_failed_flag() {
+        let state = test_state();
+        let mut def = local_agent_def("def-local-4");
+        state.wstore.agent_def_insert(&mut def).unwrap();
+        state
+            .wstore
+            .instance_create(&local_agent_instance("inst-local-4", "def-local-4", "block-local-4"))
+            .unwrap();
+
+        let (engine, mut output_rx) = WshRpcEngine::new();
+        register(&engine, &state);
+        let resp = dispatch_list_recent_sessions(&engine, &mut output_rx).await;
+
+        assert!(resp.error.is_empty(), "unexpected error: {}", resp.error);
+        let result: ListRecentSessionsResult =
+            serde_json::from_value(resp.data.expect("expected result data")).unwrap();
+        let row = &result.rows[0];
+        assert!(!row.has_snapshot);
+        assert!(
+            !row.snapshot_check_failed,
+            "a genuine Ok(None) — the block simply never wrote a snapshot — is not a check failure"
+        );
     }
 
     /// reagent P1, PR #2786: without a dedup gate, a definition that can
