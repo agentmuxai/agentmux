@@ -66,6 +66,27 @@ The budget is deliberately capped: an auto-retry stays inside the same
 resets only on a genuine turn success or a genuinely fresh user message.
 That design is sound and is preserved.
 
+## 3.1 This was already diagnosed, a month earlier
+
+Both gaps fixed below were identified in
+`REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md`'s "Gaps vs.
+best practice" section on **2026-07-27**, verbatim:
+
+> 1. **Not exponential.** 5s → 10s is a fixed doubling for exactly two steps,
+>    not real exponential growth — a THIRD consecutive 429 has no automatic
+>    retry left at all and drops straight to manual, even though 429 bursts
+>    are frequently short and self-clearing over more than two attempts.
+> 2. **No jitter.** `armAutoRetry` fires at exactly T+5s / T+10s,
+>    deterministically. Multiple agent panes sharing one account/quota (a real
+>    scenario in this app — several agents, one Anthropic subscription) would
+>    all retry in lockstep and collide on the SAME rate limit again.
+
+The analysis was correct and nothing acted on it for five weeks. Worth noting
+as a process observation, not just a code one: the finding was filed inside a
+report about a *different* headline bug (login persistence + stuck working
+state), so it never became a tracked item of its own. A correct diagnosis
+buried in a larger document is, in practice, close to no diagnosis at all.
+
 ## 4. What changed in this PR
 
 ### 4.1 The ladder was too short (fixed)

@@ -54,7 +54,7 @@ Beyond the three reported symptoms: every future feature that needs to know "is 
 **Goals**
 - `AgentPaneState` becomes the sole place that can answer "is there an active failure for this pane, and did it end the current turn."
 - A backend `AgentFailure` for a pane whose `turnPhase` is `Submitting`/`Streaming`/`Interrupting` **always** force-transitions that phase to `Done{outcome: "errored"}` on receipt — no dependency on the CLI process actually exiting, no 3-minute backstop needed for this case.
-- The auto-retry countdown (5s → 10s, capped at 2) moves onto the established `schedule-*-timeout` / `*TimeoutElapsed` pattern already used for `SubmitTimeoutElapsed`/`InterruptTimeoutElapsed`, so it's driven by dispatched commands and testable the same way (fake timers + assert on `update()` output), instead of a hook-local `setInterval`.
+- The auto-retry countdown (a bounded ladder — `AUTO_RETRY_BACKOFF_S` in `useAgentFailure.ts` is the source of truth; `5s → 10s` capped at 2 when this spec was written, `5s → 15s → 30s → 60s → 120s` jittered as of 2026-08-31) moves onto the established `schedule-*-timeout` / `*TimeoutElapsed` pattern already used for `SubmitTimeoutElapsed`/`InterruptTimeoutElapsed`, so it's driven by dispatched commands and testable the same way (fake timers + assert on `update()` output), instead of a hook-local `setInterval`.
 - `useAgentFailure.ts` shrinks to: subscribe to the wave event, dispatch a command, read `state.failure` back out, wire the passed-in recovery effects (`onRetry`, `onLoginAgain`, etc.) — genuinely presentation-only, with no state of its own that anything else needs to agree with.
 - Fix the `StreamFlushObserved` clear-on-activity gap (Issue 2) as part of the same reducer touch-up, since it's in the immediately adjacent code.
 
@@ -85,7 +85,8 @@ export interface PaneFailure {
         /** Seconds remaining until the next scheduled retry, or null
          *  if no auto-retry is armed (budget exhausted / non-transient). */
         remainingS: number | null;
-        /** How many auto-retries have fired this episode (capped at 2). */
+        /** How many auto-retries have fired this episode (capped at the
+         *  `AUTO_RETRY_BACKOFF_S` ladder length). */
         count: number;
     } | null;
     /** True while a user-initiated or auto-fired retry is in flight
@@ -156,7 +157,8 @@ case "AutoRetryElapsed": {
     if (!state.failure) return { state, events: [] }; // already cleared/retried manually
     const count = state.failure.autoRetry?.count ?? 0;
     const events: AgentPaneEvent[] = [{ type: "auto-retry-fired" }];
-    // AUTO_RETRY_BACKOFF_S = [5, 10] then manual-only, same budget as today.
+    // Ladder length comes from AUTO_RETRY_BACKOFF_S, then manual-only —
+    // same budget semantics as the hook, whatever the rungs currently are.
     if (count >= AUTO_RETRY_BACKOFF_S.length) {
         return { state: { ...state, failure: { ...state.failure, autoRetry: null } }, events };
     }
