@@ -42,21 +42,34 @@ its renderer's Ctrl state is permanently false.
 ### What supports it
 
 - The floater is created `SW_SHOWNOACTIVATE` (`floating_pane.rs:854`).
-- `floating_pane_wndproc` handles `WM_NCCALCSIZE`, `WM_NCACTIVATE`, `WM_NCHITTEST`
-  and `WM_SIZE` — there is **no `WM_MOUSEACTIVATE` and no `SetFocus`** anywhere in
-  `floating_pane.rs`.
-- The one focus-restore path (`client/wndproc.rs:66`, on `WM_ACTIVATE`) restores to
-  `LAST_FOCUSED_BY_ROOT` — a map keyed on *browser panes*. Whether a floater's child
-  is ever registered there is unverified.
+
+That is the *entire* affirmative case, and it is weak — it describes the initial
+show only, not the steady state.
+
+### What does NOT support it, though an earlier draft claimed it did
+
+An earlier version of this document argued that the **absence** of
+`WM_MOUSEACTIVATE` and `SetFocus` from `floating_pane.rs` was evidence the CEF
+child never gets focus. **That reasoning is invalid** and is retracted here:
+
+- `floating_pane_wndproc` ends in `DefWindowProcW` (`floating_pane.rs:703`), so
+  every message it does not explicitly handle gets **default** Win32 processing —
+  including the ordinary click-to-activate and focus path.
+- The browser is embedded as a real child HWND (`floating_pane.rs:261`,
+  `WindowInfo::set_as_child`), so normal Win32/CEF focus handling applies to it.
+
+Absence of explicit focus code is therefore not evidence of absent focus; it is
+evidence that focus is left to the default, which very likely works. Recorded
+because the mistake is easy to repeat when reading this file.
 
 ### What cuts against it
 
-- Tear-off **does** call `SetForegroundWindow(dest_hwnd)` (`commands/drag.rs:651`),
-  so the floater's outer popup comes forward. If that also lands keyboard focus on
-  the CEF child, the hypothesis is dead.
+- Tear-off calls `SetForegroundWindow(dest_hwnd)` (`commands/drag.rs:651`), so the
+  floater's outer popup does come forward.
 
-That contradiction is precisely why this needs a measurement rather than another
-source reading.
+Taken together, the hypothesis is now only weakly supported and has two independent
+strikes against it. It is still worth testing because it is cheap to test — not
+because the source reading favours it. Get the measurement.
 
 ## 3. The two tests that settle it
 
@@ -83,11 +96,28 @@ would differ only if the main window's browser is configured to suppress it.
 
 ## 5. Fix shape (do not build until §3 confirms)
 
-The robust fix is the same one already proven for browser panes: intercept
-`WM_MOUSEWHEEL` in `floating_pane_wndproc`, test `wparam & 0x0008` (`MK_CONTROL`),
-and drive the existing zoom pipeline from there — bypassing the DOM's `ctrlKey`
-entirely. It is correct under **either** remaining mechanism, because `MK_CONTROL`
-is focus-independent.
+The idea is the one already proven for browser panes: intercept `WM_MOUSEWHEEL`,
+test `wparam & 0x0008` (`MK_CONTROL`), and drive the existing zoom pipeline from
+there — bypassing the DOM's `ctrlKey` entirely, since `MK_CONTROL` is
+focus-independent.
+
+**Where to hook is the load-bearing detail, and hooking `floating_pane_wndproc`
+alone is NOT sufficient.** The browser is a child HWND, and Chromium creates its
+own descendant HWNDs beneath it. A wheel message delivered to a descendant is
+handled there and the outer popup's WndProc may never observe it — which is exactly
+the case under §4's alternative mechanism. The existing implementation reflects
+this: `install_browser_pane_focus_redirect` (`browser_pane/hwnd.rs:312`) subclasses
+the outer HWND **and every descendant Chromium has already created**, and
+`WM_MOUSEWHEEL` is handled in that hook (`hwnd.rs:404`), not in any outer wndproc.
+
+That hook also has to be **re-applied after every navigation** — Chromium recreates
+`Chrome_RenderWidgetHostHWND` on each page load, so a subclass installed once ends
+up stranded on a destroyed HWND (see the doc comment at `browser_pane/hwnd.rs:312`,
+and its wiring from `on_after_created_browser_pane` *and* `on_load_end_browser_pane`).
+
+So the fix must hook the embedded browser hierarchy the same way, or use another
+guaranteed input path. Until it does, it cannot be described as correct under either
+mechanism.
 
 Unlike the browser-pane case, the floater cannot reuse `browser_panes::zoom_in`
 (that applies a CSS zoom to a browser pane's own document). A floater wraps exactly
