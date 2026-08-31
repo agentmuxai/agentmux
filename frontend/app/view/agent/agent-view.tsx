@@ -1797,8 +1797,9 @@ const AgentPresentationView = ({
         commands.stopAgent();
     };
 
-    // Failure-recovery accessory row (per-error-class actions + 5s auto-retry
-    // for transient throttling). SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.
+    // Failure-recovery accessory row (per-error-class actions + a bounded
+    // auto-retry ladder for transient throttling — see AUTO_RETRY_BACKOFF_S in
+    // useAgentFailure.ts). SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.
     const retryLastTurn = () => {
         const last = [...getDocument()].reverse().find((n) => n.type === "user_message");
         const msg = last && "message" in last ? (last as { message?: string }).message : undefined;
