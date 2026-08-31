@@ -22,7 +22,7 @@ agent pane changes height and the scroll position visibly jumps":
 | 08-17 | `ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION` | Retracted two of its own claims mid-document; shipped diagnostics only |
 | 08-21 | `FINDINGS_TOOL_CALL_SCROLL_OSCILLATION` | Corrected twice by PR review |
 | 08-22 | `FINDINGS_..._LIVE_INSTANCE_DATA` | Corrected twice by PR review |
-| 08-31 | this doc | Three further candidate fixes ruled out — see §3 |
+| 08-31 | this doc | Two further candidate fixes ruled out (§3); a third ruled out in draft, then withdrawn on review (§3a) |
 
 Every pass was made by someone reasoning carefully from the source, and most
 produced at least one confident conclusion that a later pass had to withdraw.
@@ -106,36 +106,54 @@ forced single-line row. The live-tail ↔ result-pill swap changes horizontal
 content only. Ruled out in the 08-17 addendum; re-proposed and re-ruled-out on
 08-31.
 
-**3.3 — "Fix the `heightStale` FLIP bypass for `denied`/`canceled` tools."**
-Newly ruled out by this document, and the reasoning is worth keeping.
-
-The bypass is real, and its mechanism is now understood: `.agent-tool-panel`'s
-close transition uses `content-visibility 120ms allow-discrete`
-(`_document-nodes.scss:403-413`), so `content-visibility` only flips to
-`hidden` at the *end* of the 120ms collapse — the panel is still visible and
-rendering throughout. But `ToolOverlayLog`'s `panelHidden` signal is driven by
-a `MutationObserver` on the `.agent-tool-panel--hidden` *class*, which is added
-instantly. So for the entire 120ms window the code believes the panel is
-unmeasurable and skips the FLIP.
-
-**However, fixing it buys nothing visible.** The only case where `heightStale`
-reliably fires is a `denied`/`canceled` tool, whose panel is collapsing to
-`max-height: 0` over those same 120ms anyway — the outer collapse is *already*
-eased by CSS. FLIPping the inner log's height inside an already-animating
-collapse to zero adds machinery (a `transitionend` listener plus a timeout
-fallback) and risks regressing the reagent P1 that introduced `heightStale` in
-#1975, in exchange for no user-visible change.
-
-Keep the mechanism documented; do not "fix" it in isolation. If the unified
-contract in §4 subsumes it, it disappears for free.
-
-**3.4 — The recurring ~251–252px shrink is not a fixed-height component.**
+**3.3 — The recurring ~251–252px shrink is not a fixed-height component.**
 `FINDINGS_..._LIVE_INSTANCE_DATA_2026_08_22.md` §5 recommended grepping for a
 component with a 251–252px height constant. Done, 08-31: no such constant
 exists anywhere under `frontend/app/view/agent/`. Consistent with that doc's
 own caveat that a repeated *net* delta between two pin-checks cannot establish
 a single discrete element. This lead is closed; it needs mutation-level
 instrumentation (§5) or nothing.
+
+### 3a. Open — the `heightStale` FLIP bypass, and a worked example of this document's own thesis
+
+The bypass is real and its mechanism is now understood: `.agent-tool-panel`'s
+close transition uses `content-visibility 120ms allow-discrete`
+(`_document-nodes.scss:403-413`), so `content-visibility` only flips to
+`hidden` at the *end* of the 120ms collapse — the panel is still visible and
+rendering throughout. But `ToolOverlayLog`'s `panelHidden` signal is driven by
+a `MutationObserver` on the `.agent-tool-panel--hidden` *class*, which is added
+instantly. So for the entire 120ms window the code believes the panel is
+unmeasurable and skips the inner FLIP.
+
+**The first draft of this document ruled the fix out. That was wrong, and how
+it was wrong is worth preserving.** The draft argued that fixing it buys
+nothing visible, because a `denied`/`canceled` tool's panel is collapsing to
+`max-height: 0` over those same 120ms anyway — "already eased by CSS."
+
+`max-height` is a **constraint, not a height.** The panel's rendered height is
+its intrinsic content height, *capped* by the interpolating maximum. So when
+the inner body swaps a tall streaming `ChunkList` for a short result while the
+interpolated max-height is still well above the new intrinsic height, the
+constraint is not yet binding — the panel drops to the new intrinsic height
+**immediately**, in one frame. Only the tail of the collapse, once the
+interpolated maximum falls below the intrinsic height, is actually eased. The
+skipped inner FLIP can therefore produce exactly the visible jump the draft
+dismissed.
+
+Caught by Codex in review of this PR. Two things follow:
+
+1. **This fix is open, not ruled out** — and per the same argument, it must be
+   settled by measurement, not by a third static argument in either direction.
+   It is a natural first consumer of step 1's instrumentation (§5).
+2. **The thesis of this document survived a live test.** §0 argues that careful
+   reasoning about this subsystem keeps producing confident conclusions that
+   later have to be withdrawn, because the behavior lives in interactions no
+   single file makes visible. That failure mode reproduced inside the very
+   document proposing to fix it — the author read the correct CSS, drew a
+   conclusion that followed plausibly from it, and missed that `max-height`
+   does not do what "the collapse is animated" implies. Treat every
+   height-behavior claim in this subsystem, including the ones above, as
+   provisional until instrumented.
 
 ---
 
@@ -164,7 +182,7 @@ consistently:
 - **Reduced-motion** — one check, not one per site (today only mechanism #4 checks).
 - **Hidden/unmeasurable subtrees** — one policy for `content-visibility: hidden`
   and zero-size elements, rather than #4's `heightStale` flag and #5's
-  `panelHidden` guard disagreeing about what "hidden" means (§3.3).
+  `panelHidden` guard disagreeing about what "hidden" means (§3a).
 - **Node-identity resets** — the streaming-buffer slot-reuse hazard that needed
   bespoke `prevNodeId` guards in both `ToolBlock.tsx` and `ToolOverlayLog.tsx`.
 - **Cancellation** — one in-flight transition per element, cancelled on re-entry.
@@ -190,22 +208,29 @@ replacement trades a known-fragmented system for an unknown one.
    still unactioned: a `MutationObserver`/`ResizeObserver` trace at the
    *component* level, finer-grained than the existing pin-check-level
    `[wave-scroll-shrink]` diagnostic. Every conclusion in the 08-21/08-22
-   findings was limited by that diagnostic's granularity, and §3.4 closed the
+   findings was limited by that diagnostic's granularity, and §3.3 closed the
    last lead that log-level data could reach. **This is the gating step — it
    is what tells us which call sites actually matter, rather than which ones
    look like they should.**
 2. **Land `resize-contract.ts` with no call sites**, plus its own unit tests.
    Zero runtime effect; reviewable in isolation.
 3. **Migrate `ToolOverlayLog.tsx`'s `flipHeight()` to it** — one call site, the
-   one with existing test coverage to prove equivalence. `heightStale` (§3.3)
+   one with existing test coverage to prove equivalence. `heightStale` (§3a)
    is resolved here or not at all.
 4. **Migrate `MarkdownBlock.tsx`'s throttled highlight commit** (mechanism #6)
    — the only fully unmitigated source, and the one that fires on the same
    cadence users describe ("during normal streaming, not just at turn
    boundaries").
-5. **Migrate `output-cap.ts`'s spinner reclassification** (mechanism #6) — the
-   lowest-amplitude source; do it last, or drop it if step 1's data says it
-   never mattered.
+5. **Migrate the spinner reclassification's *rendering* site** (mechanism #6) —
+   the lowest-amplitude source; do it last, or drop it if step 1's data says it
+   never mattered. Note the contract cannot be applied in `output-cap.ts`
+   itself: `createSpinnerCollapser` is a synchronous, DOM-independent data
+   transform with no element and no mutation callback to hand to
+   `withHeightContinuity`. The reclassification reaches the DOM through
+   `ChunkList`'s memo in `ToolOverlayLog.tsx`, so that component is the call
+   site. Applying it in the utility would couple a pure function to the DOM;
+   skipping the distinction would leave the height change unmitigated. (Codex,
+   review of this PR.)
 6. **Re-evaluate.** If steps 3–5 land and the symptom is gone, stop. Do not
    migrate mechanisms #1–#3.
 
