@@ -64,14 +64,38 @@ On Windows, `task dev` builds a production-parallel layout in `dist/cef-dev/` (l
 
 This `.cmd` wrapper prepends `Git\bin` to PATH (fixing Gap B) and calls `task.exe dev` by explicit extension (fixing Gap A). On macOS/Linux `task dev` works directly — no wrapper needed.
 
-**Diagnosing failed shells:** Check `shell.exit` events in the server log:
+**Always redirect the wrapper's output to a file and read it** — `ShellStatus`
+returns only `running`/`exit_code`/`line_count`, and the signatures below are
+NOT sufficient to identify the cause on their own:
+
+```json
+{ "cmd": "C:\\<repo>\\scripts\\dev-agent.cmd TITLE=my-branch > C:\\<repo>\\devrun.log 2>&1" }
+```
+
+**`TITLE=` must not contain spaces.** Quotes do not survive the
+MCP Shell → `cmd /C` → `.cmd` → `task` chain, so `TITLE="zoom fix PR 1234"`
+reaches go-task as separate arguments and it tries to run `zoom` as a task.
+
+**Signatures from `shell.exit` events in the server log** — treat as hints, not
+diagnoses:
 ```bash
 grep "shell\." ~/.agentmux/logs/agentmuxsrv-*.log.$(date +%Y-%m-%d)
 # line_count:2  + exit:1   + <100ms  → Gap A (bash cmd not found in MSYS2)
-# line_count:53 + exit:200 + <500ms  → Gap B (bash.exe not in cmd.exe PATH)
+# line_count:53 + exit:200 + <500ms  → AMBIGUOUS, see below
 ```
 
-See `docs/retro/retro-task-dev-agent-shell-path-2026-06-27.md` for full analysis.
+`line_count:53 + exit:200` was previously documented as meaning Gap B
+(`bash.exe` not in cmd.exe PATH). It has (at least) **two** causes: an invalid
+argument makes go-task print its full task list and exit 200, which is also ~53
+lines. The two are indistinguishable by signature — the real error is on the
+**last line** of the output, which is why the redirect above is mandatory:
+
+```
+task: Task "PR" does not exist        ← bad argument, not a PATH problem
+```
+
+See `docs/retro/retro-task-dev-agent-shell-path-2026-06-27.md` for the original
+Gap A/B analysis.
 
 #### Launching `task package` from an agent / MCP Shell (Windows)
 
