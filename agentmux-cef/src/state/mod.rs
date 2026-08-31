@@ -115,7 +115,7 @@ pub struct AppState {
     /// Window initialization status ("ready" or "wave-ready")
     pub window_init_status: Mutex<String>,
 
-    /// Linux startup white-flash fix (docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md).
+    /// Linux startup white-flash fix (docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md).
     /// Window labels whose native `window.show()`/focus + splash-ready-file has
     /// been deferred by `on_load_end` pending a real first-paint confirmation
     /// from the frontend (`report_first_paint` IPC command) or a safety-net

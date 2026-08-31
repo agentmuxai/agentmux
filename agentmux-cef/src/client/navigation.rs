@@ -14,7 +14,7 @@ use std::sync::Arc;
 #[cfg(target_os = "linux")]
 use crate::state::AppState;
 
-/// Linux startup white-flash fix (docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md).
+/// Linux startup white-flash fix (docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md).
 ///
 /// Bound on how long the real window + native splash can stay hidden/up
 /// waiting for the frontend's first-paint signal before we show anyway.
@@ -54,7 +54,7 @@ static PAINT_GATE_NEXT_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::
 /// still the one this specific timeout was scheduled for; if `on_load_end`
 /// re-armed the gate since (reload/retry mid-startup), this stale timeout is
 /// a no-op instead of revealing the window ahead of the *current*
-/// navigation's real paint (docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md,
+/// navigation's real paint (docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md,
 /// reagent PR #2151 review).
 ///
 /// Must run on the CEF UI thread.
@@ -183,7 +183,7 @@ const SHOW_WINDOW_RETRY_DELAY_MS: i64 = 50;
 /// primary resolution path and `ShowWindowRetryTask`'s retry path so BOTH
 /// respect the same Linux paint gating
 /// (`linux_paint_gate_pending`/`reveal_gated_window`,
-/// `SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md`) — reagentx P1 on this PR:
+/// `REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md`) — reagentx P1 on this PR:
 /// the retry path originally called `window.show()` unconditionally on every
 /// platform, bypassing the gate entirely. Whenever a *retry* (not the first
 /// `on_load_end` pass) is what actually resolves the window, that would
@@ -467,7 +467,7 @@ impl AgentMuxHandler {
         // has painted anything (the white-flash bug this gate fixes). Linux
         // writes the ready-file from `reveal_gated_window` instead, gated on the
         // same first-paint confirmation that unblocks the real window's show()
-        // below. See docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md.
+        // below. See docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md.
         #[cfg(target_os = "macos")]
         {
             if let Ok(path) = std::env::var("AGENTMUX_SPLASH_READY_FILE") {
@@ -503,7 +503,7 @@ impl AgentMuxHandler {
                         // dismiss above) until the frontend confirms a real
                         // compositor paint, instead of doing it here on mere
                         // load-complete — see reveal_gated_window and
-                        // docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md.
+                        // docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md.
                         // Falls back to the old immediate-show behavior if the
                         // window label can't be resolved (can't gate safely on
                         // an unknown label). Shared with ShowWindowRetryTask's
