@@ -282,7 +282,23 @@ export interface TileLayoutContents {
 export interface ResizeHandleProps {
     id: string;
     parentNodeId: string;
+    /** Child-array index of the pane on the BEFORE side of this handle. */
     parentIndex: number;
+    /**
+     * Child-array index of the pane on the AFTER side.
+     *
+     * Usually `parentIndex + 1`, but NOT always: a slip child (a minimized
+     * pane docked onto a sibling — see `resolveRowSlipTargets`) contributes
+     * zero main-axis extent, so the two expanded panes on either side of it
+     * render flush and share a single real boundary. The handle for that
+     * boundary spans the slip child, making the two indices non-adjacent.
+     *
+     * `onResizeMove` must read this rather than assuming `parentIndex + 1`
+     * — assuming it resolved the *minimized* pane as the after-node, whose
+     * own locked-edge guard then rejected the drag, which is why such a
+     * boundary previously got no working handle at all.
+     */
+    afterIndex: number;
     centerPx: number;
     /** Start of the handle's span on the perpendicular axis (container-local px).
      *  Row handle → top edge; Column handle → left edge. */

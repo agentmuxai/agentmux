@@ -665,3 +665,73 @@ describe("all-minimized Row: chips share the full width", () => {
         px.forEach((v) => expect(v).toBeLessThan(MinimizedRowSlotWidthPx));
     });
 });
+
+// ── Resize handles across a zero-extent slip child ─────────────────────────
+// Regression for ANALYSIS_PANE_MINIMIZE_ROW_BRANCH_DISTORTIONS_2026_08_30 §3.
+// Uses the real updateTree() (via layoutModel.test.ts's harness pattern) since
+// Phase C's handle generation isn't separately exported.
+describe("resize handles span a slipped (zero-width) minimized pane", () => {
+    const leaf = (id: string, min = false) => {
+        const n = newLayoutNode(FlexDirection.Row, 10, undefined, { blockId: id });
+        if (min) n.minimized = true;
+        return n;
+    };
+    // Mirror of Phase C's own pairing rule, kept in lockstep with the source.
+    const pairs = (children: LayoutNode[], slip: Set<string>) => {
+        const out: Array<[number, number]> = [];
+        let before = -1;
+        for (let i = 0; i < children.length; i++) {
+            const c = children[i];
+            if (slip.has(c.id)) continue;
+            if (isEffectivelyMinimized(c)) { before = -1; continue; }
+            if (before < 0) { before = i; continue; }
+            out.push([before, i]);
+            before = i;
+        }
+        return out;
+    };
+
+    it("A | B(minimized) | C — one handle, spanning B, flanking A and C", () => {
+        const A = leaf("A"), B = leaf("B", true), C = leaf("C");
+        const kids = [A, B, C];
+        const slip = new Set(resolveRowSlipTargets(kids).keys());
+        expect(slip.has(B.id)).toBe(true); // B docks onto C, contributing 0 width
+        // Was zero handles: both candidate pairs (A|B and B|C) were skipped.
+        expect(pairs(kids, slip)).toEqual([[0, 2]]);
+    });
+
+    it("the spanning handle's after-index is NOT parentIndex + 1", () => {
+        const kids = [leaf("A"), leaf("B", true), leaf("C")];
+        const slip = new Set(resolveRowSlipTargets(kids).keys());
+        const [[before, after]] = pairs(kids, slip);
+        expect(after).not.toBe(before + 1); // onResizeMove must read afterIndex
+        expect(after).toBe(2);
+    });
+
+    it("two adjacent slipped panes are both spanned by a single handle", () => {
+        const kids = [leaf("A"), leaf("B", true), leaf("C", true), leaf("D")];
+        const slip = new Set(resolveRowSlipTargets(kids).keys());
+        expect(pairs(kids, slip)).toEqual([[0, 3]]);
+    });
+
+    it("unchanged when nothing is minimized", () => {
+        const kids = [leaf("A"), leaf("B"), leaf("C")];
+        expect(pairs(kids, new Set())).toEqual([[0, 1], [1, 2]]);
+    });
+
+    it("a Column's minimized chip has real extent, so it is NOT spanned", () => {
+        // No slip in a Column (slip is Row-only), so the chip occupies a real
+        // header-height slot between A and C — they are not adjacent, and a
+        // handle across the chip would float on top of it.
+        const kids = [leaf("A"), leaf("B", true), leaf("C")];
+        const slip = new Set<string>(); // Column: resolveRowSlipTargets isn't consulted
+        expect(pairs(kids, slip)).toEqual([]);
+    });
+
+    it("an all-minimized row yields no handles (nothing expanded to resize)", () => {
+        const kids = [leaf("A", true), leaf("B", true), leaf("C", true)];
+        const slip = new Set(resolveRowSlipTargets(kids).keys());
+        expect(slip.size).toBe(0); // no anchor -> fixed chip slots, not slips
+        expect(pairs(kids, slip)).toEqual([]);
+    });
+});

@@ -301,6 +301,94 @@ describe("LayoutModel", () => {
         expect(props[anchor.id].rect.height).toBeCloseTo(0, 0);
     });
 
+    // End-to-end regression for ANALYSIS_PANE_MINIMIZE_ROW_BRANCH_DISTORTIONS
+    // _2026_08_30 §3, through the REAL updateTree rather than a reimplementation
+    // of Phase C's pairing rule (layoutMinimize.test.ts mirrors that rule for
+    // the enumeration cases; this one proves the shipped path agrees with it).
+    it("emits one resize handle SPANNING a slipped minimized pane, flanking the two expanded panes", () => {
+        const model = createLayoutModel();
+        const mk = (id: string, min = false) => {
+            const n = newLayoutNode(FlexDirection.Row, 10, undefined, { blockId: id });
+            if (min) n.minimized = true;
+            return n;
+        };
+        const A = mk("A"), B = mk("B", true), C = mk("C");
+        const root = newLayoutNode(FlexDirection.Row, 10, [A, B, C]);
+        model.treeState.rootNode = root;
+        model.updateTree();
+
+        const props = model.additionalProps();
+        const handles = props[root.id]?.resizeHandles ?? [];
+
+        // Was ZERO before this fix: Phase C skipped both A|B and B|C because
+        // B is minimized, leaving A and C rendered flush with nothing to drag.
+        expect(handles).toHaveLength(1);
+
+        // And it must flank A and C — not A and B. `afterIndex` is 2, so it is
+        // NOT parentIndex + 1; onResizeMove reads it rather than assuming.
+        expect(handles[0].parentIndex).toBe(0);
+        expect(handles[0].afterIndex).toBe(2);
+
+        // A and C really are flush — that adjacency is what makes a spanning
+        // handle correct rather than a hack.
+        const aRect = props[A.id].rect;
+        expect(props[C.id].rect.left).toBeCloseTo(aRect.left + aRect.width, 0);
+
+        // Note B's rect is NOT zero-width here even though its main-axis
+        // ALLOCATION is: Phase A gives a slip child 0px, then Phase B replaces
+        // that rect with the docked chip, which takes the host's geometry. So
+        // B's rect sits on top of C, which is exactly what "docked onto C"
+        // means — asserting width 0 here would be asserting the pre-Phase-B
+        // intermediate, not what renders.
+        expect(props[B.id].rect.left).toBeCloseTo(props[C.id].rect.left, 0);
+    });
+
+    // codex P2 on PR #2855: the spanning handle must cover only the edge the
+    // two flanking panes ACTUALLY share. Phase B pushes the slip host's top
+    // down to make room for the docked chip, so deriving the span from the
+    // before-pane alone put the handle alongside the chip.
+    it("the spanning handle covers only the flanking panes' shared edge, not the chip beside it", () => {
+        const model = createLayoutModel();
+        const mk = (id: string, min = false) => {
+            const n = newLayoutNode(FlexDirection.Row, 10, undefined, { blockId: id });
+            if (min) n.minimized = true;
+            return n;
+        };
+        const A = mk("A"), B = mk("B", true), C = mk("C");
+        const root = newLayoutNode(FlexDirection.Row, 10, [A, B, C]);
+        model.treeState.rootNode = root;
+        model.updateTree();
+
+        const props = model.additionalProps();
+        const handle = (props[root.id]?.resizeHandles ?? [])[0];
+        const aRect = props[A.id].rect;
+        const cRect = props[C.id].rect;
+
+        // C really was pushed down by the docked chip — otherwise this test
+        // proves nothing.
+        expect(cRect.top).toBeGreaterThan(aRect.top);
+
+        // The handle starts at the shared edge (C's top), NOT at A's top.
+        expect(handle.perpMinPx).toBeCloseTo(cRect.top, 0);
+        expect(handle.perpMinPx).toBeGreaterThan(aRect.top);
+        // ...and ends where the shorter of the two ends.
+        expect(handle.perpMaxPx).toBeCloseTo(Math.min(aRect.top + aRect.height, cRect.top + cRect.height), 0);
+    });
+
+    it("two ordinary siblings are unaffected — the intersection equals the full shared span", () => {
+        const model = createLayoutModel();
+        const mk = (id: string) => newLayoutNode(FlexDirection.Row, 10, undefined, { blockId: id });
+        const A = mk("A"), B = mk("B");
+        const root = newLayoutNode(FlexDirection.Row, 10, [A, B]);
+        model.treeState.rootNode = root;
+        model.updateTree();
+        const props = model.additionalProps();
+        const handle = (props[root.id]?.resizeHandles ?? [])[0];
+        const aRect = props[A.id].rect;
+        expect(handle.perpMinPx).toBeCloseTo(aRect.top, 0);
+        expect(handle.perpMaxPx).toBeCloseTo(aRect.top + aRect.height, 0);
+    });
+
     // End-to-end regression for the exact user-reported corruption
     // (2026-07-18): a blind InsertNode (e.g. a new pane created via the "+"
     // button or an agent creating a terminal) whose heuristic target
