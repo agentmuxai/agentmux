@@ -96,7 +96,7 @@ describe("UserMessageBlock — regular user input", () => {
                 vi.advanceTimersByTime(200);
                 const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
                 expect(metaLines.length).toBe(2);
-                expect(metaLines[0].textContent).toMatch(/\d{2}:\d{2}:\d{2} · 1m ago/);
+                expect(metaLines[0].textContent).toMatch(/\d{1,2}:\d{2}:\d{2} (?:AM|PM) · 1m ago/);
                 expect(metaLines[1].textContent).toMatch(/~\d+ tok \(est\.\)/);
             } finally {
                 vi.useRealTimers();

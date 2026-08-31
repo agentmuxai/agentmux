@@ -2100,7 +2100,19 @@
     gap: 4px;
     overflow-y: auto;
     overscroll-behavior: contain;
-    background-color: var(--block-bg-solid-color, var(--main-bg-color));
+    // Shrink-wrap to the content. PeekOverlay's default ("end") alignment
+    // sets no inline `width`, so this governs; the `"stretch"` variant
+    // (UserMessageBlock's body preview) sets an inline width, which wins.
+    width: max-content;
+    // Not a flat black slab: a translucent, blurred surface reads as
+    // floating ABOVE the transcript rather than punching a hole in it, and
+    // keeps the text underneath faintly legible. Same treatment as
+    // `pane-size-badge.scss`, this codebase's other small floating overlay
+    // ("legibility over busy content"). Hard corners per
+    // SPEC_HARD_CORNERS_2026_05_26 — deliberately no border-radius.
+    background: color-mix(in srgb, var(--main-bg-color) 88%, transparent);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
     border: 1px solid var(--border-color);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
     padding: var(--space-0-5) var(--space-1);
