@@ -1253,6 +1253,21 @@ pub async fn handle_muxspect_layout(
         }));
     }
 
+    // An explicit tab_id that matched nothing is a FAILED LOOKUP, not an
+    // empty result. Returning `{"layouts": []}` made a stale or mistyped id
+    // indistinguishable from a successful run over a tab with no panes --
+    // the CLI printed "no layouts found" and exited 0, which is exactly the
+    // wrong answer for a targeted diagnostic in a script (codex P2 on
+    // PR #2856). Same 200-with-`error` shape as the store-read failure above,
+    // for the same reason: a non-2xx would be reported by muxspect.mjs's
+    // apiGet() as "srv is unreachable".
+    if let Some(want) = q.tab_id.as_deref() {
+        if layouts.is_empty() {
+            return Json(json!({ "error": format!("no tab with id '{want}' in this instance") }))
+                .into_response();
+        }
+    }
+
     Json(json!({ "layouts": layouts })).into_response()
 }
 

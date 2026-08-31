@@ -515,7 +515,16 @@ function renderDock(data) {
  *
  * Exported (pure, no I/O) for muxspect.test.mjs.
  */
-function renderLayout(data) {
+export function renderLayout(data) {
+    // A whole-request failure (the store couldn't be read at all) comes back
+    // as 200 + {error} with NO `layouts` key — see handle_muxspect_layout for
+    // why it isn't a 4xx. Without this branch it fell through to "no layouts
+    // found" and exit 0, reporting success for exactly the on-disk failure
+    // this command exists to surface (reagent P1 on PR #2856).
+    if (data.error) {
+        console.error(`layout: ${data.error}`);
+        return;
+    }
     const layouts = data.layouts ?? [];
     if (!layouts.length) {
         console.log("no layouts found");
@@ -658,8 +667,12 @@ async function main() {
         if (json) console.log(JSON.stringify(data, null, 2));
         else renderLayout(data);
         // A tree with violations is a real finding — exit non-zero so a
-        // scripted caller notices without parsing stdout.
-        if ((data.layouts ?? []).some((l) => l.violations?.length || l.error)) process.exitCode = 1;
+        // scripted caller notices without parsing stdout. `data.error` is the
+        // whole-request failure (no `layouts` key at all); without it the
+        // command exited 0 on a store-read failure.
+        if (data.error || (data.layouts ?? []).some((l) => l.violations?.length || l.error)) {
+            process.exitCode = 1;
+        }
         return;
     }
 
