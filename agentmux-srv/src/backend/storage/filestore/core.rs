@@ -66,6 +66,12 @@ impl FileStore {
         Ok(store)
     }
 
+    /// Raw connection access for tests that need to force a specific
+    /// failure mode (e.g. dropping a table) — mirrors `Store::conn()`.
+    pub(crate) fn conn(&self) -> &Mutex<Connection> {
+        &self.conn
+    }
+
     /// Run `PRAGMA wal_checkpoint(TRUNCATE)` on the filestore connection.
     /// Same semantics as `Store::checkpoint` — 5s busy_timeout, partial
     /// truncate on contention is safe.

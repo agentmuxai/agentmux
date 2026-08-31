@@ -112,6 +112,33 @@ export const FETCH_ERROR = "Couldn't load your agents — check the connection a
  * rows isn't told they have no agents at all.
  * SPEC_AGENT_PICKER_FILTER_SEARCH_2026_08_17.md. */
 export const noMatchText = (query: string): string => `No agents match "${query}".`;
+
+/**
+ * Copy for a row with no preview text and no snapshot, split into its
+ * three genuinely distinct causes — collapsing them into one generic
+ * "(no conversation snapshot)" made a real backend error and a
+ * cross-channel row both read as "this agent has no history," which
+ * isn't true for either. See
+ * docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md
+ * §5.
+ *
+ * - `snapshot_check_failed` — the filestore lookup itself errored
+ *   (transient I/O/lock/DB failure); the real state is unknown, not
+ *   confirmed empty. Checked first: a stat() error on a cross-channel
+ *   row can't actually happen (session.rs skips the call entirely when
+ *   `block_id_hint` is empty), but ordering this first keeps the two
+ *   conditions from ever silently depending on which one wins.
+ * - `block_id_hint === ""` — a synthetic cross-channel row (no local
+ *   SQLite instance backs it); this channel's filestore genuinely has
+ *   nothing, but the real conversation may exist in another version.
+ * - otherwise — a genuine, confirmed `Ok(None)`: the block really never
+ *   wrote a snapshot.
+ */
+export const noSnapshotText = (row: Pick<RecentSessionRow, "snapshot_check_failed" | "block_id_hint">): string => {
+    if (row.snapshot_check_failed) return "(couldn't check for history)";
+    if (!row.block_id_hint) return "(history may exist in another version)";
+    return "(no conversation snapshot)";
+};
 /** Backend hard cap (`CommandListRecentSessionsData`, instance.rs) — the
  * limit MyAgentsList requests once a name filter is active, so filtering
  * covers the full available set instead of just the default first page. */
@@ -555,9 +582,7 @@ export const MyAgentsList = (props: MyAgentsListProps): JSX.Element => {
                                                 when={row.preview}
                                                 fallback={
                                                     <span class="agent-recent-sessions-preview agent-recent-sessions-preview--empty">
-                                                        {row.has_snapshot
-                                                            ? "(no user message yet)"
-                                                            : "(no conversation snapshot)"}
+                                                        {row.has_snapshot ? "(no user message yet)" : noSnapshotText(row)}
                                                     </span>
                                                 }
                                             >
