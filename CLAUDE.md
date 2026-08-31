@@ -59,8 +59,11 @@ On Windows, `task dev` builds a production-parallel layout in `dist/cef-dev/` (l
 **Use `scripts\dev-agent.cmd` instead of `task dev` directly:**
 
 ```json
-{ "cmd": "C:\\<repo>\\scripts\\dev-agent.cmd TITLE=\"zoom-fix: PR #1234\"" }
+{ "cmd": "C:\\<repo>\\scripts\\dev-agent.cmd TITLE=zoom-fix-pr1234 > C:\\<repo>\\devrun.log 2>&1" }
 ```
+
+Note the title has **no spaces** and the output is redirected — both are
+required, for the reasons under "Diagnosing failed shells" below.
 
 This `.cmd` wrapper prepends `Git\bin` to PATH (fixing Gap B) and calls `task.exe dev` by explicit extension (fixing Gap A). On macOS/Linux `task dev` works directly — no wrapper needed.
 
