@@ -13,12 +13,20 @@ reopening at `19:47:33Z` today on `0.55.26`, block
 correlating the host `[fe]` console bridge against the `agentmux-srv` log, plus
 a direct read of the current gate/transport code on `main` (`84cc072d4`). Not a
 synthetic repro, and not doc archaeology.
-**Status:** Analysis only when written. §2 and §5 are established by direct
-evidence; §3 and §4 are structural findings from the code; §6 lists what this
-report deliberately does **not** claim.
+**Status:** Analysis only when written; §2 and §5 have since been fixed and
+released (see the 2026-08-30 update below), §4 remains open. §2 and §5 are
+established by direct evidence; §3 and §4 are structural findings from the
+code; §6 lists what this report deliberately does **not** claim.
 
 **Update 2026-08-29** — all three findings were re-verified against `main` at
 `f2aca1f09` and still hold.
+
+**Update 2026-08-30 — two of the three findings are now FIXED and RELEASED.**
+Re-checked against `main` at `5936f8c98`; §2 and §5 are no longer open work,
+§4 is untouched. Read the per-finding status list below rather than the body
+prose, which still describes the 0.55.26 symptom in the present tense
+throughout — the diagnosis is preserved as written (it is the record of why
+these fixes were made), not rewritten to past tense.
 
 **This report has been substantively corrected since it was written**, unlike
 its predecessors in this family where only a status line changed. Codex's review
@@ -33,16 +41,30 @@ occur (§TL;DR, §1, §2, §4, §6, §7):
 2. §2's fix makes **two** of §3's four mechanisms redundant, not three. The
    debounce still prevents the §1 request storm and must stay.
 
-Follow-up work, in the §7 order:
+Follow-up work, in the §7 order (status as of 2026-08-30, `main` `5936f8c98`):
 
-- §2 (replay asserts false-`Active` subagents, then retracts them) — being fixed
-  now. `jsonl.rs:125` still inserts `SubAgentStatus::Active` for a replayed
-  spawn and `scan.rs:265` still retracts it moments later.
-- §5 (`output.idx` fully rebuilt every 30 s) — being fixed now at the caller
-  (`useSnapshotPersistence`'s line-count poll); the deeper index work
-  (append-only rebuild, `spawn_blocking` offload) is tracked separately rather
-  than bundled here.
-- §4 (participant-registered paint gate) — not started; tracked, not bundled.
+- §2 (replay asserts false-`Active` subagents, then retracts them) — **FIXED,
+  shipped in v0.55.28** via PR #2837 (`c58ce9f1a`). `process_jsonl_change` no
+  longer inserts `SubAgentStatus::Active` unconditionally: a non-`live` replay
+  now reads the parent block's controller status and is born `Abandoned` when
+  the turn is *confirmed* idle (`Some(false)`), with two deliberate fallbacks
+  to `Active` — `live` always wins, and an unregistered controller is treated
+  as UNKNOWN rather than idle, leaving `reconcile_stale_subagents`' own retry
+  path as the authority. The ~200 spurious spawn broadcasts per reopen, and
+  the window in which `subagent.ListActive` would have reported long-dead
+  subagents as running, are both gone. The shipped code cites this report by
+  path at that call site.
+- §5 (`output.idx` fully rebuilt every 30 s) — **FIXED, shipped in v0.55.28**
+  via PR #2838 (`693e6df60`), at the caller as proposed. The deeper index work
+  (append-only rebuild, `spawn_blocking` offload) remains tracked separately
+  and is still open.
+- §4 (participant-registered paint gate) — **still open, not started.** This is
+  now the only unaddressed finding in the report, and the one that carries its
+  actual architectural argument: that "brain, then one clean paint" cannot be
+  delivered by continuing to patch *when* the frontend samples state (§3's four
+  mechanisms), because each is another attempt to avoid observing a transient
+  rather than to stop producing one. §2 removed the specific transient this
+  trace caught; it did not introduce the paint gate §4 argues for.
 
 Separately, the clock step that §5's trace ran across turned out to be the same
 one behind two now-merged fixes: PR #2831 (backend uptime) and PR #2832 (sysinfo
@@ -357,10 +379,15 @@ per the entry immediately below, this one initially failed the same way:
   on PR #2836. Reconciliation finished at `33.954`; the earliest `ListActive`
   cannot have been issued before ~`34.019`. Every RPC in this trace sampled
   post-settlement, so the report cannot claim the dock rendered the
-  false-`Active` set. The transient exists (code-verified: `jsonl.rs` inserts
-  `Active`, `scan.rs` retracts it) and is worth removing on its own terms, but
-  the causal link to the visible symptom is unproven. Catching it would need a
-  trace with a fetch/render demonstrably inside the pre-reconciliation window.
+  false-`Active` set. The transient exists (code-verified at the time of
+  writing: `jsonl.rs` inserts `Active`, `scan.rs` retracts it) and is worth
+  removing on its own terms, but the causal link to the visible symptom is
+  unproven. Catching it would need a trace with a fetch/render demonstrably
+  inside the pre-reconciliation window. **As of 2026-08-30 the transient no
+  longer exists** (fixed in v0.55.28, PR #2837), so that confirming trace can
+  no longer be captured — the causal link stays permanently unproven rather
+  than disproven, and this caveat is now a closed question by removal, not by
+  evidence.
 - **Why three refresh rounds got through rather than one.** The gate logic in
   `createBackfillAwareTrigger` reads correctly, the event delivery path was
   verified to reach it, and the host process had been running for 12 hours so
@@ -385,23 +412,30 @@ per the entry immediately below, this one initially failed the same way:
 
 ## 7. Recommended sequence
 
-1. **§2 — stop asserting false-active state on replay.** Apply
+**Status 2026-08-30 (`main` `5936f8c98`):** steps 1 and 2 are DONE and released
+in v0.55.28 (PR #2837, PR #2838). Steps 3, 4 and 5 are still open — step 3
+(§4's paint gate) is the substantive remainder. Items are left as originally
+written below; this note is the only status overlay, so the recommended
+sequence still reads as the argument it was.
+
+1. ✅ **DONE (v0.55.28, PR #2837) — §2 — stop asserting false-active state on replay.** Apply
    `reconcile_stale_subagents`'s existing predicate at insert time in
    `process_jsonl_change` when `live: false`, so a replayed subagent whose
    parent turn has ended is born `Abandoned`. Highest value, backend-only,
    directly testable (assert `ListActive` never transiently exceeds its settled
    count across a backfill). It retires the two backfill gates in §3 — not the
    debounce, which still prevents the §1 request storm.
-2. **§5(a) — stop the snapshot poller forcing a 759 MB rescan every 30 s.**
+2. ✅ **DONE (v0.55.28, PR #2838) — §5(a) — stop the snapshot poller forcing a 759 MB rescan every 30 s.**
    One-line-ish frontend change, immediate and large win on exactly the heavy
    panes in question.
-3. **§4 — the participant-registered paint gate.** The actual "rethink," but
+3. ⬜ **OPEN — §4 — the participant-registered paint gate.** The actual "rethink," but
    scoped: one readiness primitive, not a rewrite. Do it after 1 so it is
-   hiding nothing.
-4. **§5(b,c) — append-only `output.idx` + `spawn_blocking`.** Independent
+   hiding nothing. (Step 1 has now shipped, so the stated precondition is met —
+   this is unblocked and is the report's main remaining ask.)
+4. ⬜ **OPEN — §5(b,c) — append-only `output.idx` + `spawn_blocking`.** Independent
    track; fixes a latent whole-app-stall risk documented on 08-22 and still
-   open.
-5. Then delete what 1 and 3 made redundant in §3, rather than leaving four
+   open. (Unaffected by step 2, which fixed the caller, not the index.)
+5. ⬜ **OPEN —** Then delete what 1 and 3 made redundant in §3, rather than leaving four
    overlapping guards in place. Per the 08-25 report's Tier 3 note, this should
    be a tracked item — 7 of 8 prior "clean this up later" notes in this family
    were never picked up.
