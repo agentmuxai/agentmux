@@ -3,12 +3,15 @@
 
 /**
  * TokenBreakdownPopover — click-opened popover anchored under the
- * TokenUsageIndicator. Lists per-service input/output totals, a
+ * TokenUsageIndicator. Lists per-agent totals (tokens, turns, cost), a
+ * collapsed "AgentMux internal" row for ambient/background usage, a
  * grand total row, and a destructive-gated "Reset counter" action.
+ * Clicking a real agent row focuses that agent's pane.
  *
  * Calls `usePaneOverlay` so the popover renders cleanly over any
  * browser pane HWND (same airspace pattern as MoreDropdown and the
- * canonical `<Modal>`). Spec: SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24.md §4.2.
+ * canonical `<Modal>`). Spec: SPEC_STATUSBAR_TOKEN_USAGE_2026_04_24.md §4.2,
+ * SPEC_STATUSBAR_TOKEN_PANEL_BY_AGENT_2026_08_30.md.
  */
 
 import { createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
@@ -18,13 +21,16 @@ import { computeMenuPosition } from "@/app/util/menu-position";
 import { ConfirmModal } from "@/element/modal";
 import { getCliCatalogEntry } from "@/app/view/agent/defaults/cli-catalog";
 import { formatCompactNumber } from "@/util/format-count";
+import { focusBlock } from "@/app/util/focus-block";
 import {
-    getBreakdown,
+    getAgentBreakdown,
+    getAgentCacheHitRate,
     getCacheHitRate,
     getSessionStartAt,
     getTotal,
     resetSession,
     tokenUsageState,
+    type AgentUsage,
     type ServiceRow,
 } from "@/store/token-usage";
 
@@ -38,6 +44,27 @@ function serviceDisplayName(id: string): string {
     if (entry) return entry.displayName;
     // Titlecase fallback for unknowns.
     return id.slice(0, 1).toUpperCase() + id.slice(1);
+}
+
+/** `AgentUsage.byService` as a sorted ServiceRow[] — same shape/order
+ *  getBreakdown() produces globally, scoped to one agent row. Used by
+ *  the "AgentMux internal" bucket's expanded per-service detail. */
+function serviceRowsOf(row: AgentUsage): ServiceRow[] {
+    const rows: ServiceRow[] = Object.entries(row.byService).map(([id, u]) => ({
+        id,
+        input: u.input,
+        output: u.output,
+        freshInput: u.freshInput,
+        cacheCreation: u.cacheCreation,
+        cacheRead: u.cacheRead,
+    }));
+    rows.sort((a, b) => {
+        const aTotal = a.input + a.output;
+        const bTotal = b.input + b.output;
+        if (bTotal !== aTotal) return bTotal - aTotal;
+        return a.id.localeCompare(b.id);
+    });
+    return rows;
 }
 
 interface TokenBreakdownPopoverProps {
@@ -55,13 +82,16 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
     usePaneOverlay(() => rootRef);
 
     const [confirmingReset, setConfirmingReset] = createSignal(false);
+    const [ambientExpanded, setAmbientExpanded] = createSignal(false);
 
     // Trigger reactivity on the store so breakdown re-renders when
     // a new turn lands while the popover is open.
-    const rows = createMemo((): ServiceRow[] => {
-        void tokenUsageState.byService;
-        return getBreakdown();
+    const agentRows = createMemo((): AgentUsage[] => {
+        void tokenUsageState.byAgent;
+        return getAgentBreakdown();
     });
+    const realAgentRows = createMemo(() => agentRows().filter((r) => !r.isAmbient));
+    const ambientRow = createMemo(() => agentRows().find((r) => r.isAmbient) ?? null);
     const total = createMemo(() => {
         void tokenUsageState.byService;
         return getTotal();
@@ -125,6 +155,12 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
         props.onClose();
     };
 
+    const handleAgentClick = (row: AgentUsage) => {
+        if (!row.blockId) return;
+        void focusBlock(row.blockId);
+        props.onClose();
+    };
+
     return (
         <>
             <div
@@ -142,7 +178,7 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                     </span>
                 </div>
                 <Show
-                    when={rows().length > 0}
+                    when={agentRows().length > 0}
                     fallback={
                         <div class="token-usage-breakdown-empty">
                             No turns completed yet this session.
@@ -150,22 +186,87 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                     }
                 >
                     <div class="token-usage-breakdown-rows">
-                        <For each={rows()}>
+                        <For each={realAgentRows()}>
+                            {(row) => {
+                                const agentCacheRate = createMemo(() => getAgentCacheHitRate(row));
+                                return (
+                                    <button
+                                        type="button"
+                                        class="token-usage-breakdown-row token-usage-breakdown-agent-row"
+                                        onClick={() => handleAgentClick(row)}
+                                        title={`Click to focus ${row.agentName}'s pane`}
+                                    >
+                                        <span class="token-usage-breakdown-row-name">
+                                            {row.agentName}
+                                            <Show when={agentCacheRate() != null}>
+                                                <span
+                                                    class="token-usage-breakdown-row-cache"
+                                                    title={`${Math.round((agentCacheRate() as number) * 100)}% of input served from cache`}
+                                                >
+                                                    {Math.round((agentCacheRate() as number) * 100)}%
+                                                </span>
+                                            </Show>
+                                        </span>
+                                        <span class="token-usage-breakdown-row-meta">
+                                            {row.numTurns} {row.numTurns === 1 ? "turn" : "turns"}
+                                            <Show when={row.costUsd > 0}>
+                                                {" "}·{" "}${row.costUsd.toFixed(3)}
+                                            </Show>
+                                        </span>
+                                        <span class="token-usage-breakdown-row-counts">
+                                            <span class="token-usage-indicator-arrow">↑</span>
+                                            {formatCompactNumber(row.input)}
+                                            {" "}
+                                            <span class="token-usage-indicator-arrow">↓</span>
+                                            {formatCompactNumber(row.output)}
+                                        </span>
+                                    </button>
+                                );
+                            }}
+                        </For>
+                        <Show when={ambientRow()}>
                             {(row) => (
-                                <div class="token-usage-breakdown-row">
-                                    <span class="token-usage-breakdown-row-name">
-                                        {serviceDisplayName(row.id)}
-                                    </span>
-                                    <span class="token-usage-breakdown-row-counts">
-                                        <span class="token-usage-indicator-arrow">↑</span>
-                                        {formatCompactNumber(row.input)}
-                                        {" "}
-                                        <span class="token-usage-indicator-arrow">↓</span>
-                                        {formatCompactNumber(row.output)}
-                                    </span>
+                                <div class="token-usage-breakdown-ambient">
+                                    <button
+                                        type="button"
+                                        class="token-usage-breakdown-row token-usage-breakdown-ambient-toggle"
+                                        onClick={() => setAmbientExpanded(!ambientExpanded())}
+                                        aria-expanded={ambientExpanded()}
+                                    >
+                                        <span class="token-usage-breakdown-row-name">
+                                            {ambientExpanded() ? "▾" : "▸"} {row().agentName}
+                                        </span>
+                                        <span class="token-usage-breakdown-row-counts">
+                                            <span class="token-usage-indicator-arrow">↑</span>
+                                            {formatCompactNumber(row().input)}
+                                            {" "}
+                                            <span class="token-usage-indicator-arrow">↓</span>
+                                            {formatCompactNumber(row().output)}
+                                        </span>
+                                    </button>
+                                    <Show when={ambientExpanded()}>
+                                        <div class="token-usage-breakdown-ambient-detail">
+                                            <For each={serviceRowsOf(row())}>
+                                                {(svc) => (
+                                                    <div class="token-usage-breakdown-row token-usage-breakdown-ambient-row">
+                                                        <span class="token-usage-breakdown-row-name">
+                                                            {serviceDisplayName(svc.id)}
+                                                        </span>
+                                                        <span class="token-usage-breakdown-row-counts">
+                                                            <span class="token-usage-indicator-arrow">↑</span>
+                                                            {formatCompactNumber(svc.input)}
+                                                            {" "}
+                                                            <span class="token-usage-indicator-arrow">↓</span>
+                                                            {formatCompactNumber(svc.output)}
+                                                        </span>
+                                                    </div>
+                                                )}
+                                            </For>
+                                        </div>
+                                    </Show>
                                 </div>
                             )}
-                        </For>
+                        </Show>
                         <div class="token-usage-breakdown-row token-usage-breakdown-total">
                             <span class="token-usage-breakdown-row-name">Total</span>
                             <span class="token-usage-breakdown-row-counts">
@@ -191,7 +292,7 @@ export const TokenBreakdownPopover = (props: TokenBreakdownPopoverProps): JSX.El
                         type="button"
                         class="token-usage-breakdown-reset"
                         onClick={handleResetClick}
-                        disabled={rows().length === 0}
+                        disabled={agentRows().length === 0}
                     >
                         Reset counter
                     </button>
