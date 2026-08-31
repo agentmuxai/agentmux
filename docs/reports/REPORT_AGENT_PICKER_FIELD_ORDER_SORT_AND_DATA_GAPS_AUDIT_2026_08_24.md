@@ -2,8 +2,8 @@
 
 **Date:** 2026-08-24
 **Author:** AgentY
-**Type:** Investigation + UX/architecture recommendations, since implemented
-(§2, §3, §4 shipped; §5/§5a shipped separately — PR #2786)
+**Type:** Investigation + UX/architecture recommendations — fully implemented
+as of 2026-08-31.
 **Scope:** `frontend/app/view/agent/components/AgentPicker.tsx`,
 `AgentPickerFilterBar.tsx`, `MyAgentsList.tsx`,
 `frontend/app/view/agent/styles/_recent-sessions.scss`,
@@ -11,8 +11,23 @@
 
 **Status update (2026-08-24, later same day):** §2 (field reorder), §3
 (sort control), and §4 (distinct account-failure text) implemented —
-see the PR that shipped this report's own recommendations. §5/§5a (the
-snapshot-preview fallback) shipped earlier, separately, as PR #2786.
+see the PR that shipped this report's own recommendations. §5a (the
+Haiku on-demand summary fallback) shipped earlier, separately, as PR #2786.
+
+**Correction (2026-08-31):** this status line previously also claimed "§5
+… shipped … PR #2786," which was inaccurate — PR #2786 shipped §5a only.
+§5's own two bullets (the `filestore.stat()` `Err`/`Ok(None)` conflation,
+and the cross-channel "no conversation snapshot" copy) were never actually
+implemented despite the claim, and shipped separately just now: the stat()
+error case sets a new `snapshot_check_failed` field (logged + tracked via
+the existing `degraded` mechanism, reusing §4's precedent of giving a real
+source failure its own distinct fallback text instead of reusing the
+genuinely-empty case's copy), and a cross-channel row (`block_id_hint ===
+""`) now reads "(history may exist in another version)" instead of the
+flatly inaccurate "(no conversation snapshot)". See
+`frontend/app/view/agent/components/MyAgentsList.tsx`'s `noSnapshotText`
+and `agentmux-srv/src/server/agent_handlers/session.rs`'s
+`snapshot_check_failed` handling.
 
 Prompted by direct user feedback: "a lot of the fields are out of order,"
 a request for name/launch-date/type sort controls at the right edge of the
@@ -163,13 +178,17 @@ nothing, but the row's real conversation may well exist in a *different*
 channel's filestore. `"(no conversation snapshot)"` reads as "there is no
 history," when the more accurate statement is "no history in THIS channel."
 
-**Recommendation:**
-- Fix the error-swallowing: distinguish `Err` from `Ok(None)` in the match
-  arm, log the error case, and consider a third UI state (or at least a
-  console/log signal) instead of silently reporting "no snapshot."
-- For the cross-channel case, adjust the copy to hint at the real situation
-  — e.g. "(history may exist in another version)" — rather than the flatly
-  incorrect-sounding "no conversation snapshot."
+**Implemented (2026-08-31):**
+- The error-swallowing is fixed: the match arm now distinguishes `Err` from
+  `Ok(None)`, logs the error case (`tracing::warn!`), and marks the new
+  `"snapshot_stat"` degraded source. The row carries a new
+  `snapshot_check_failed: bool` field so the frontend can render a third,
+  distinct state ("(couldn't check for history)") instead of silently
+  reporting "no snapshot."
+- The cross-channel case now reads "(history may exist in another version)"
+  — exactly the wording proposed here — driven by the existing
+  `block_id_hint === ""` signal the row already carried, no backend change
+  needed for this half.
 
 ### 5a. Addendum — a real fallback source exists (correction to an earlier draft of this report)
 
@@ -233,11 +252,12 @@ worth deciding before implementing.
 
 ## 7. Suggested next steps, in order
 
-1. Confirm the proposed field-order change and sort-control placement with
-   the user before implementing (design judgment call, not a pure bug fix).
-2. Fix `has_snapshot`'s `Err`/`Ok(None)` conflation (`session.rs:360-379`) —
-   smallest, most clearly a bug of the four findings here.
-3. Give the `identity_links`-failure case distinct fallback text from the
-   genuinely-empty case, matching the existing `FETCH_ERROR` pattern.
-4. Implement the sort control (client-side, over `filteredRows()`).
-5. Reorder row fields per §2, if confirmed.
+All five shipped as of 2026-08-31.
+
+1. ~~Confirm the proposed field-order change and sort-control placement with
+   the user before implementing~~ — confirmed, implemented per §2/§3.
+2. ~~Fix `has_snapshot`'s `Err`/`Ok(None)` conflation~~ — implemented per §5.
+3. ~~Give the `identity_links`-failure case distinct fallback text~~ —
+   implemented per §4.
+4. ~~Implement the sort control~~ — implemented per §3.
+5. ~~Reorder row fields per §2~~ — implemented.

@@ -146,6 +146,40 @@ describe("MyAgentsList — populated", () => {
         ).toBeInTheDocument();
     });
 
+    // docs/reports/REPORT_AGENT_PICKER_FIELD_ORDER_SORT_AND_DATA_GAPS_AUDIT_2026_08_24.md
+    // §5, bullet 2: a cross-channel row (no local block_id at all) reads
+    // "no conversation snapshot" identically to a row that genuinely never
+    // had one — but its history may well exist in a different channel's
+    // filestore. Distinguished here by `block_id_hint === ""`, the same
+    // signal `session.rs` already uses server-side to skip the stat() call
+    // entirely for a synthetic cross-channel row.
+    it("renders a distinct hint for a cross-channel row instead of claiming no history exists", async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
+            makeRow({ preview: "", has_snapshot: false, node_count: 0, block_id_hint: "" }),
+        ]));
+        render(() => <MyAgentsList onReattach={() => {}} />);
+        await screen.findByTestId("agent-my-agents-entry");
+        expect(
+            screen.getByText("(history may exist in another version)"),
+        ).toBeInTheDocument();
+        expect(screen.queryByText("(no conversation snapshot)")).toBeNull();
+    });
+
+    // §5, bullet 1: a real filestore.stat() error must not look identical
+    // to a genuine "never had a snapshot" — see session.rs's
+    // `snapshot_check_failed` field.
+    it("renders a distinct hint when the snapshot check itself failed", async () => {
+        vi.mocked(RpcApi.ListRecentSessionsCommand).mockResolvedValue(okResult([
+            makeRow({ preview: "", has_snapshot: false, node_count: 0, snapshot_check_failed: true }),
+        ]));
+        render(() => <MyAgentsList onReattach={() => {}} />);
+        await screen.findByTestId("agent-my-agents-entry");
+        expect(
+            screen.getByText("(couldn't check for history)"),
+        ).toBeInTheDocument();
+        expect(screen.queryByText("(no conversation snapshot)")).toBeNull();
+    });
+
     it("fires onReattach with the row when an entry is clicked", async () => {
         const onReattach = vi.fn();
         const row = makeRow({ instance_id: "click-me" });

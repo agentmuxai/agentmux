@@ -890,6 +890,12 @@ declare global {
         node_count: number;
         last_active_at: number;
         has_snapshot: boolean;
+        /**
+         * True when `has_snapshot` is false because the filestore lookup
+         * itself ERRORED (I/O error, lock contention, DB read failure) —
+         * distinct from a genuine "the block never wrote a snapshot".
+         */
+        snapshot_check_failed?: boolean;
         /** When the agent definition was first created (ms epoch). */
         agent_created_at: number;
         /** When this instance was most recently launched (ms epoch). */
