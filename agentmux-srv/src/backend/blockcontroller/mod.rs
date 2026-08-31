@@ -414,6 +414,24 @@ pub fn deliver_agent_message(block_id: &str, message: &str) -> Result<AgentDeliv
 /// 3. If existing controller needs replacing (type changed, conn changed, force), stop it
 /// 4. Create new controller if needed
 /// 5. Start if status is init or done
+/// Is this forced replace merely a runtime-config change (model / effort /
+/// permission) on a controller that stays persistent — i.e. the one case that
+/// may be deferred to the end of an in-flight turn rather than killing it?
+///
+/// Requires the type to be persistent on BOTH sides. Checking only the
+/// existing side was a real bug (reagent P2 on PR #2858): the container-agent
+/// override in `resync_controller` rewrites the target persistent ->
+/// subprocess, so a forced resync landing mid-turn on such a block would defer
+/// and silently keep the persistent controller — precisely the
+/// incompatibility that override exists to correct.
+///
+/// A genuine type change must replace immediately, mid-turn or not; losing an
+/// in-flight turn is the lesser harm against running a container agent on a
+/// controller that cannot do per-turn `docker exec` at all.
+fn is_runtime_config_only_replace(existing_type: &str, target_type: &str, force: bool) -> bool {
+    force && existing_type == BLOCK_CONTROLLER_PERSISTENT && target_type == BLOCK_CONTROLLER_PERSISTENT
+}
+
 pub fn resync_controller(
     block: &Block,
     tab_id: &str,
@@ -489,9 +507,17 @@ pub fn resync_controller(
         // baked in at spawn, so they could never have applied to the turn
         // already running.
         //
-        // Scoped to `force` only — a controller-TYPE change is a genuine
-        // replacement that has to happen now, not a runtime-config tweak.
-        if needs_replace && force && ctrl.controller_type() == BLOCK_CONTROLLER_PERSISTENT {
+        // Scoped to a runtime-config tweak: the controller must be persistent
+        // now AND still be persistent afterwards. A controller-TYPE change is a
+        // genuine replacement that has to happen immediately, even mid-turn.
+        //
+        // Checking only the EXISTING type was a real bug (reagent P2): the
+        // container-agent override a few lines above rewrites `controller_type`
+        // persistent -> subprocess, so a forced resync landing mid-turn on such
+        // a block would have deferred and silently kept the persistent
+        // controller — the exact incompatibility that override exists to
+        // correct, and the opposite of what this comment claims.
+        if needs_replace && is_runtime_config_only_replace(ctrl.controller_type(), &controller_type, force) {
             if let Some(p) = ctrl
                 .as_any()
                 .downcast_ref::<persistent::PersistentSubprocessController>()
@@ -624,6 +650,57 @@ pub fn publish_controller_status(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Deferred-restart guard (reagent P2 on PR #2858) ─────────────────
+
+    /// The case the deferral exists for: /model, /effort, /permission on a
+    /// pane that stays persistent.
+    #[test]
+    fn a_forced_persistent_to_persistent_replace_may_be_deferred() {
+        assert!(is_runtime_config_only_replace(
+            BLOCK_CONTROLLER_PERSISTENT,
+            BLOCK_CONTROLLER_PERSISTENT,
+            true
+        ));
+    }
+
+    /// The bug: the container-agent override rewrites the TARGET persistent ->
+    /// subprocess. Deferring here would keep a persistent controller on a
+    /// container agent, which cannot do per-turn `docker exec` — the exact
+    /// incompatibility that override exists to fix.
+    #[test]
+    fn a_type_change_to_subprocess_is_never_deferred_even_when_forced() {
+        assert!(!is_runtime_config_only_replace(
+            BLOCK_CONTROLLER_PERSISTENT,
+            BLOCK_CONTROLLER_SUBPROCESS,
+            true
+        ));
+    }
+
+    #[test]
+    fn a_type_change_from_a_non_persistent_controller_is_never_deferred() {
+        assert!(!is_runtime_config_only_replace(
+            BLOCK_CONTROLLER_SUBPROCESS,
+            BLOCK_CONTROLLER_PERSISTENT,
+            true
+        ));
+        assert!(!is_runtime_config_only_replace(
+            BLOCK_CONTROLLER_SHELL,
+            BLOCK_CONTROLLER_SHELL,
+            true
+        ));
+    }
+
+    /// Without `force` the replace is driven by a type or connection change,
+    /// never by a runtime-config tweak — nothing to defer.
+    #[test]
+    fn an_unforced_replace_is_never_deferred() {
+        assert!(!is_runtime_config_only_replace(
+            BLOCK_CONTROLLER_PERSISTENT,
+            BLOCK_CONTROLLER_PERSISTENT,
+            false
+        ));
+    }
 
     /// Test double for the stop_for_replace/remove_controller_entry_only
     /// tests below. Counts calls to `stop()` vs `stop_for_replace()`
