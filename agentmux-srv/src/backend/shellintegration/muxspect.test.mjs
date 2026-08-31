@@ -16,6 +16,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkSpawnerTier, logSrvVersion, parseArgs } from "./muxspect.mjs";
 
 describe("muxspect parseArgs", () => {
+    it("'layout' with no tab id parses as a bare command", () => {
+        expect(parseArgs(["layout"])).toEqual({ cmd: "layout", blockId: undefined, json: false, help: false });
+    });
+
+    it("'layout <tab_id>' puts the tab id in the generic positional", () => {
+        // `layout` reuses muxspect's single positional slot for an optional
+        // tab id rather than adding a parser special case.
+        expect(parseArgs(["layout", "tab-1"])).toEqual({
+            cmd: "layout",
+            blockId: "tab-1",
+            json: false,
+            help: false,
+        });
+    });
+
+    it("'layout --json' works with the flag on either side of the positional", () => {
+        expect(parseArgs(["layout", "tab-1", "--json"]).json).toBe(true);
+        expect(parseArgs(["--json", "layout", "tab-1"]).json).toBe(true);
+        expect(parseArgs(["--json", "layout", "tab-1"]).blockId).toBe("tab-1");
+    });
+
     it("no args defaults to 'list'", () => {
         expect(parseArgs([])).toEqual({ cmd: "list", blockId: undefined, json: false, help: false });
     });

@@ -463,6 +463,7 @@ pub fn build_router(state: AppState) -> Router {
         // reaches every other /api/v1/* route (X-AuthKey from the caller's
         // own environment, no new IPC).
         .route("/api/v1/muxspect/list", get(muxspect_handlers::handle_muxspect_list))
+        .route("/api/v1/muxspect/layout", get(muxspect_handlers::handle_muxspect_layout))
         .route("/api/v1/muxspect/describe", get(muxspect_handlers::handle_muxspect_describe))
         // Cross-instance lookup — Ext 4 of
         // docs/reports/REPORT_MUXSPECT_MUXLOG_CROSS_CHANNEL_INSPECTION_2026_08_22.md.

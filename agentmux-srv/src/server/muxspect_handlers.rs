@@ -1126,6 +1126,142 @@ pub async fn handle_muxspect_conversations(State(state): State<AppState>) -> imp
     Json(json!({ "agents": agents })).into_response()
 }
 
+/// Flatten one layout tree into a compact, renderable node list.
+///
+/// Deliberately a FLAT list carrying a `depth`, not nested JSON: the CLI
+/// renders an indented outline, and a flat list keeps both the wire shape and
+/// the renderer trivial.
+fn flatten_layout_nodes(
+    node: &agentmux_common::LayoutNode,
+    depth: usize,
+    index_path: &str,
+    out: &mut Vec<serde_json::Value>,
+) {
+    let is_branch = !node.children.is_empty();
+    out.push(json!({
+        "id": node.id,
+        "depth": depth,
+        "path": index_path,
+        "kind": if is_branch { "branch" } else { "leaf" },
+        "flex_direction": match node.flex_direction {
+            agentmux_common::FlexDirection::Row => "row",
+            agentmux_common::FlexDirection::Column => "column",
+        },
+        "size": node.size,
+        // `minimized` round-trips through the untyped `extra` catch-all on
+        // this side, not as a typed field — same access the reducer's own
+        // `is_node_locked` uses. Reported as "locked" rather than raw
+        // `minimized` because legacy pre-display-mode markers
+        // (`minimizedSize`/`slipMinimize`/`columnDissolve`) count too, and an
+        // unmigrated tree on disk is exactly the case this route should show.
+        "locked": crate::backend::layout::is_node_locked(node),
+        // A branch is "effectively minimized" when every leaf under it is —
+        // the state that drives chip geometry. Surfaced explicitly because it
+        // is NOT visible from the `minimized` flag alone on a branch.
+        "effectively_minimized": crate::backend::layout::is_effectively_minimized(node),
+        "block_id": node.data.as_ref().map(|d| d.block_id.clone()),
+        "child_count": node.children.len(),
+    }));
+    for (i, child) in node.children.iter().enumerate() {
+        let child_path = if index_path.is_empty() {
+            i.to_string()
+        } else {
+            format!("{index_path}.{i}")
+        };
+        flatten_layout_nodes(child, depth + 1, &child_path, out);
+    }
+}
+
+/// `GET /api/v1/muxspect/layout[?tab_id=X]` — the persisted layout tree for
+/// every tab (or one), plus the layout doctor's verdict on each.
+///
+/// Why this exists: layout state was previously only inspectable by reading
+/// `db_layout` out of SQLite by hand and walking the JSON, which is what
+/// diagnosing the cross-split minimize bugs (#2848, #2850, #2855) actually
+/// required. This applies `muxspect`'s existing "what is this instance doing
+/// right now" contract to layout.
+///
+/// It reports the PERSISTED tree, a genuinely different question from what
+/// the frontend currently renders: `validate_layout_invariants` normally runs
+/// at reducer write-time, so running it on demand here also catches
+/// corruption already sitting on disk, including trees written by older
+/// versions that never ran the check.
+///
+/// Read-only, like every route in this module except `dock clear`.
+pub async fn handle_muxspect_layout(
+    State(state): State<AppState>,
+    Query(q): Query<MuxspectLayoutQuery>,
+) -> impl IntoResponse {
+    let tabs = match state.wstore.get_all::<crate::backend::obj::Tab>() {
+        Ok(t) => t,
+        Err(e) => {
+            // 200 with an `error` field, not a 4xx/5xx — muxspect.mjs's
+            // apiGet() treats a non-2xx as a transport failure and prints a
+            // connection error, which would misattribute a store-read problem
+            // as "srv is unreachable".
+            return Json(json!({ "error": format!("failed to list tabs: {e}") })).into_response();
+        }
+    };
+
+    let mut layouts = Vec::new();
+    for tab in tabs {
+        if let Some(want) = q.tab_id.as_deref() {
+            if tab.oid != want {
+                continue;
+            }
+        }
+        let ls = match state
+            .wstore
+            .must_get::<crate::backend::obj::LayoutState>(&tab.layoutstate)
+        {
+            Ok(ls) => ls,
+            Err(e) => {
+                // A tab pointing at a missing layoutstate is itself a finding
+                // worth surfacing rather than skipping silently.
+                layouts.push(json!({
+                    "tab_id": tab.oid,
+                    "tab_name": tab.name,
+                    "layoutstate_oid": tab.layoutstate,
+                    "error": format!("layoutstate unreadable: {e}"),
+                }));
+                continue;
+            }
+        };
+
+        let violations = crate::backend::layout::validate_layout_invariants(&ls.rootnode);
+        let mut nodes = Vec::new();
+        if let Some(root) = ls.rootnode.as_ref() {
+            flatten_layout_nodes(root, 0, "", &mut nodes);
+        }
+        let leaf_count = nodes.iter().filter(|n| n["kind"] == "leaf").count();
+        let minimized_leaves = nodes
+            .iter()
+            .filter(|n| n["kind"] == "leaf" && n["locked"] == true)
+            .count();
+
+        layouts.push(json!({
+            "tab_id": tab.oid,
+            "tab_name": tab.name,
+            "layoutstate_oid": ls.oid,
+            "magnified_node_id": ls.magnifiednodeid,
+            "node_count": nodes.len(),
+            "leaf_count": leaf_count,
+            "minimized_leaf_count": minimized_leaves,
+            "violations": violations,
+            "healthy": violations.is_empty(),
+            "nodes": nodes,
+        }));
+    }
+
+    Json(json!({ "layouts": layouts })).into_response()
+}
+
+#[derive(serde::Deserialize)]
+pub struct MuxspectLayoutQuery {
+    /// Restrict to one tab. Omitted = every tab in this instance.
+    pub tab_id: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1794,6 +1930,83 @@ mod tests {
         let (preview, activity_ms) = last_line_preview_and_activity(&wstore, &filestore, "no-such-block");
         assert_eq!(preview, None);
         assert_eq!(activity_ms, None);
+    }
+
+    /// `flatten_layout_nodes` is what `muxspect layout` renders from, so its
+    /// shape is the contract. Covers the cross-split arrangement the layout
+    /// fixes (#2848/#2850/#2855) came from: a Row nested inside a Column.
+    #[test]
+    fn flatten_layout_nodes_reports_depth_path_and_effective_minimize() {
+        use agentmux_common::{FlexDirection, LayoutNode, LayoutNodeData};
+
+        fn leaf(id: &str, block: &str, minimized: bool) -> LayoutNode {
+            let mut n = LayoutNode {
+                id: id.to_string(),
+                flex_direction: FlexDirection::Row,
+                size: 10.0,
+                children: Vec::new(),
+                data: Some(LayoutNodeData {
+                    block_id: block.to_string(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            };
+            if minimized {
+                // Round-trips through `extra`, not a typed field — same as
+                // the frontend writes it.
+                n.extra.insert("minimized".to_string(), json!(true));
+            }
+            n
+        }
+
+        // Column[ top, Row[ A(min), B(min) ], bottom ]
+        let inner = LayoutNode {
+            id: "inner".into(),
+            flex_direction: FlexDirection::Row,
+            size: 10.0,
+            children: vec![leaf("a", "blk-a", true), leaf("b", "blk-b", true)],
+            data: None,
+            ..Default::default()
+        };
+        let root = LayoutNode {
+            id: "root".into(),
+            flex_direction: FlexDirection::Column,
+            size: 10.0,
+            children: vec![leaf("top", "blk-top", false), inner, leaf("bot", "blk-bot", false)],
+            data: None,
+            ..Default::default()
+        };
+
+        let mut out = Vec::new();
+        flatten_layout_nodes(&root, 0, "", &mut out);
+
+        // Flat, pre-order, one entry per node.
+        assert_eq!(out.len(), 6);
+        assert_eq!(out[0]["id"], "root");
+        assert_eq!(out[0]["depth"], 0);
+        assert_eq!(out[0]["kind"], "branch");
+        assert_eq!(out[0]["flex_direction"], "column");
+
+        // Index path is positional, so a reader can locate a node in the tree.
+        assert_eq!(out[1]["path"], "0");
+        assert_eq!(out[2]["path"], "1");
+        assert_eq!(out[3]["path"], "1.0");
+        assert_eq!(out[3]["depth"], 2);
+
+        // The inner Row is a BRANCH with no minimized flag of its own, but is
+        // effectively minimized because every leaf under it is — the state
+        // that drives chip geometry, and invisible from `locked` alone. This
+        // is the distinction the cross-split bugs turned on.
+        assert_eq!(out[2]["id"], "inner");
+        assert_eq!(out[2]["locked"], false);
+        assert_eq!(out[2]["effectively_minimized"], true);
+        assert_eq!(out[2]["child_count"], 2);
+
+        // Leaves carry their block id; the minimized ones report locked.
+        assert_eq!(out[3]["block_id"], "blk-a");
+        assert_eq!(out[3]["locked"], true);
+        assert_eq!(out[1]["locked"], false);
+        assert_eq!(out[1]["effectively_minimized"], false);
     }
 
     #[test]

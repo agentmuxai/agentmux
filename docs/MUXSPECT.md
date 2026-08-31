@@ -118,6 +118,49 @@ known channel" — not an error. Same LAN/WAN boundary as `conversations`
 above (host + cross-channel only). See
 `docs/specs/SPEC_MUXSPECT_CROSS_INSTANCE_FIND_2026_08_22.md`.
 
+## Inspecting the pane layout (`layout`)
+
+```bash
+node ~/.agentmux/shell/muxspect.mjs layout            # every tab
+node ~/.agentmux/shell/muxspect.mjs layout <tab_id>   # one tab
+node ~/.agentmux/shell/muxspect.mjs layout --json     # machine-readable
+```
+
+Prints the layout tree as an indented outline — each node's direction, flex
+size, block id, and whether it is minimized or magnified — followed by the
+layout doctor's verdict.
+
+```
+tab tab1  (4 pane(s), 2 minimized)  healthy
+  column (3)  size=10
+    leaf dbe65c4c  size=10
+    row (2)  size=10  [all-minimized]
+      leaf 44807f01  size=10  [minimized]
+      leaf 04cc1750  size=10  [minimized]
+    leaf dd598cf3  size=10
+```
+
+**`[all-minimized]` on a branch is the one non-obvious flag.** A branch never
+carries a `minimized` marker of its own; it is *effectively* minimized when
+every leaf beneath it is, and that derived state — not the raw flag — is what
+drives chip geometry. It was the distinction behind three pane-minimize bugs
+(#2848, #2850, #2855), and it is invisible if you only read the stored flags.
+
+Exits non-zero when any tree has invariant violations, so it can gate a script.
+
+### Two caveats worth knowing
+
+**It reports what is PERSISTED, not what is on screen.** The frontend derives
+minimize geometry fresh on every render pass and only writes structural
+changes back, so a tree here can lag what you are looking at. For "why does
+this pane look wrong right now", this tells you the structure; it does not
+tell you the rendered rects.
+
+**The doctor runs against the tree on disk.** `validate_layout_invariants`
+normally runs at reducer write-time, so violations here mean corruption that
+is already persisted — including in trees written by older builds that never
+ran the check. That is the case this command catches which nothing else does.
+
 ## What it can and can't see
 
 `muxspect` is a thin, read-only client over the same `ProcessBroker`
