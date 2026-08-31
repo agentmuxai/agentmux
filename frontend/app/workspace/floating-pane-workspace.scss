@@ -18,4 +18,31 @@
     .block-mask {
         border-color: transparent !important;
     }
+
+    // Drop the pane-interior padding for the same reason the focus ring goes:
+    // it is chrome that only makes sense between panes.
+    //
+    // `.block-content` carries `padding: 5px` by default (`block.scss:31`),
+    // opted out per-view via `noPadding` -> `.block-no-padding`
+    // (`block.tsx:245`). Views that opt out — agent, term, editor, browser,
+    // drone, swarm — render flush. Views that do NOT — **armory**, sysinfo,
+    // identity, memory — keep the 5px.
+    //
+    // Docked that is correct: it is interior breathing room next to sibling
+    // panes. In a floater the single pane fills the whole window, so the same
+    // 5px sits directly against the window edge, over the dark
+    // `#1e1e2e` window-class brush (`floating_pane.rs:765`), and reads as a
+    // thick border. That is exactly why a floating Armory looks bordered while
+    // a floating agent or terminal does not — measured at 6px of inset
+    // (5px padding + 1px block) for armory/sysinfo versus 0px for agent/term.
+    //
+    // Scoped to the floater rather than setting `noPadding` on Armory, because
+    // the docked rendering is right as it stands and must not change.
+    //
+    // No `!important` needed here, unlike the rule above: this is
+    // `.floating-pane-workspace .block .block-content` (0,3,0), which already
+    // outranks `.block .block-content` (0,2,0) without relying on source order.
+    .block .block-content {
+        padding: 0;
+    }
 }
