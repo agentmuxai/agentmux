@@ -2681,3 +2681,83 @@ describe("useAgentCommands — flushPendingControllerRefresh leaves the flag pen
         });
     });
 });
+
+/**
+ * The pre-turn `cmd:args` rebuild must obey the container rule.
+ *
+ * This is the fourth place the persistent-vs-one-shot rule was inlined
+ * (reagent P1 on PR #2867) and by far the most damaging: it runs before EVERY
+ * send, so it rewrote `--input-format stream-json` into `cmd:args` on every
+ * single turn — re-breaking a container agent no matter what launch time had
+ * chosen. `launch-args.ts` owns the rule now; these pin that this path uses it.
+ */
+describe("useAgentCommands — pre-turn cmd:args honours agentMode, not just controllerType", () => {
+    const claudeProvider = {
+        id: "claude",
+        controllerType: "persistent",
+        launchArgs: ["-p", "--output-format", "stream-json", "--verbose"],
+        persistentLaunchArgs: [
+            "--input-format", "stream-json",
+            "--output-format", "stream-json",
+            "--verbose",
+        ],
+    } as any;
+
+    /** Run one send with the given agentMode and return the persisted cmd:args. */
+    const argsWrittenFor = async (agentMode: string | undefined): Promise<string[]> => {
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        let written: string[] = [];
+        hub.setMeta.mockImplementation(async (_c: unknown, req: any) => {
+            if (req?.meta?.["cmd:args"]) written = req.meta["cmd:args"];
+        });
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => ({ meta: { agentMode } }) as any,
+                provider: () => claudeProvider,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                canRetry: () => false,
+                loginWaiting: () => false,
+                setAuthNotice: () => {},
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => true,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isCancelled: () => false,
+                resetCancelled: () => {},
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
+                backToPicker: async () => {},
+            });
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("hello", false);
+            dispose();
+        });
+        unregisterPane(BLOCK_ID);
+        return written;
+    };
+
+    /** The whole point: this is the flag that killed every container agent. */
+    it("never writes --input-format for a container agent", async () => {
+        expect(await argsWrittenFor("container")).not.toContain("--input-format");
+    });
+
+    it("writes the one-shot -p for a container agent", async () => {
+        expect(await argsWrittenFor("container")).toContain("-p");
+    });
+
+    /** A host agent is unchanged — it really does speak JSON envelopes. */
+    it("still writes --input-format for a host agent", async () => {
+        expect(await argsWrittenFor("host")).toContain("--input-format");
+    });
+
+    /** Blocks predating the agentMode meta key must keep host behaviour. */
+    it("treats a block with no agentMode as a host agent", async () => {
+        expect(await argsWrittenFor(undefined)).toContain("--input-format");
+    });
+});

@@ -25,6 +25,7 @@ import { parseSeedZoom } from "./agent-zoom-seed";
 import { resolveForkSessionArgs } from "./fork-session-args";
 import { HISTORY_TAB_FOR_META_KEY, openOrFocusHistoryTab } from "./open-history-tab";
 import { quickForkAgent } from "./quick-fork";
+import { isPersistentLaunch, selectLaunchArgs } from "./launch-args";
 
 export class AgentViewModel implements ViewModel {
     viewType = "agent";
@@ -420,11 +421,28 @@ export class AgentViewModel implements ViewModel {
                 ? `${agentmuxHome()}${persisted.slice("~/.agentmux".length)}`
                 : (persisted || `${agentmuxHome()}/agents/${slug}`);
 
-        // Build CLI args: use persistent args if available, otherwise standard launch args
-        const isPersistent = provider.controllerType === "persistent";
-        const cliArgs = isPersistent && provider.persistentLaunchArgs
-            ? [...provider.persistentLaunchArgs]
-            : [...provider.launchArgs];
+        // Build CLI args: use persistent args if available, otherwise standard launch args.
+        //
+        // A CONTAINER agent is never persistent, whatever the provider says.
+        // It runs one `docker exec` per turn (a subprocess-shaped lifecycle),
+        // so it must take `launchArgs` — NOT `persistentLaunchArgs`, which
+        // carry `--input-format stream-json`.
+        //
+        // Getting this wrong is not a cosmetic mismatch, it is fatal: the
+        // container's CLI then expects every stdin line to be a JSON envelope,
+        // while `container_spawn.rs` writes the raw message text, so the very
+        // first line dies with `Error parsing streaming input line: # Session
+        // Context: JSON Parse error: Unrecognized token '#'` and the exec EOFs
+        // in under a second. `--input-format stream-json` is only ever correct
+        // for the persistent controller, which owns a long-lived stdin and
+        // sends real envelopes over it.
+        //
+        // srv's own equivalent (`agent_open.rs`) already derives
+        // `is_persistent` AFTER applying this same container override; this is
+        // that rule, in the path the UI actually launches through.
+        const agentMode = overrides?.agentType ?? agent.agent_type ?? "host";
+        const isPersistent = isPersistentLaunch(provider, agentMode);
+        const cliArgs = selectLaunchArgs(provider, agentMode);
         if (agent.provider_flags) {
             cliArgs.push(...agent.provider_flags.split(/\s+/).filter(Boolean));
         }
@@ -517,8 +535,17 @@ export class AgentViewModel implements ViewModel {
             const [envVar, value] = vendorOverride;
             envVars[envVar] = value;
         }
-        // Only set exit delay for subprocess mode — persistent processes must stay alive
-        if (provider.controllerType !== "persistent") {
+        // Only set exit delay for subprocess mode — persistent processes must stay alive.
+        //
+        // Keyed on the EFFECTIVE `isPersistent`, not `provider.controllerType`
+        // (codex P1 on PR #2867): a container agent is one-shot even on a
+        // persistent-controllerType provider, and it is exactly the path that
+        // needs this. Without the delay, a Claude that emits its result but
+        // doesn't exit leaves the container output reader waiting on an EOF
+        // that never comes — `run_lock` stays held and every later message
+        // queues forever. `agent_open.rs` already keys this off its own
+        // effective value; this is the same rule on the UI launch path.
+        if (!isPersistent) {
             envVars["CLAUDE_CODE_EXIT_AFTER_STOP_DELAY"] = "30000";
         }
 
@@ -657,7 +684,10 @@ export class AgentViewModel implements ViewModel {
                 agentOutputFormat: provider.styledOutputFormat,
                 agentName: instanceName,
                 agentIcon: agent.icon,
-                agentMode: overrides?.agentType ?? agent.agent_type ?? "host",
+                // Same value `isPersistent` was derived from above — one
+                // expression, so the controller/args choice and the mode this
+                // block advertises can never disagree.
+                agentMode,
                 ...(overrides?.containerImage || agent.container_image ? { "agent:container_image": overrides?.containerImage || agent.container_image } : {}),
                 controller: isPersistent ? "persistent" : "subprocess",
                 cmd: cliBin,

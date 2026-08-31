@@ -106,7 +106,12 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
 
     const updateRuntime = async (patch: Partial<AgentRuntimeConfig>) => {
         try {
-            await applyRuntimeChange(props.blockId, getProvider(props.providerId), { ...runtime(), ...patch });
+            await applyRuntimeChange(
+                props.blockId,
+                getProvider(props.providerId),
+                { ...runtime(), ...patch },
+                props.blockAtom()?.meta?.["agentMode"] as string | undefined,
+            );
         } catch {
             // Silent — settings retry on next change (matches the prior
             // AgentComposerStrip.updateRuntime tolerance).
