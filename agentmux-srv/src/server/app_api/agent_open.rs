@@ -310,6 +310,14 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     .unwrap_or_else(|| format!("{}/.agentmux/shared/providers/{}", home, provider.auth_dir_name));
                 let _ = std::fs::create_dir_all(&auth_dir);
                 env_vars.insert(provider.auth_config_dir_env_var.to_string(), json!(auth_dir));
+                // Claude Code CLI's own user-level CLAUDE.md discovery falls
+                // through to the real $HOME/.claude/CLAUDE.md when this
+                // isolated dir has none of its own — CLAUDE_CONFIG_DIR only
+                // relocates credential/session/project storage, not this.
+                // See SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md.
+                if let Err(e) = providers::seed_claude_md_placeholder_if_missing(provider, &auth_dir) {
+                    tracing::warn!(auth_dir = %auth_dir, error = %e, "failed to seed CLAUDE.md isolation placeholder");
+                }
                 for (k, v) in provider.auth_extra_env {
                     env_vars.insert(k.to_string(), json!(v));
                 }

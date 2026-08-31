@@ -590,6 +590,21 @@ pub fn inject_identity_env_with_broker(
                             dir: dir.clone(),
                         });
                     }
+                    // `dir` is confirmed NOT the ambient home at this point —
+                    // but a genuinely separate isolated dir can still lack a
+                    // CLAUDE.md of its own, which Claude Code CLI treats as
+                    // "fall through to the real $HOME/.claude/CLAUDE.md,"
+                    // not "no user-level memory file." Idempotent — cheap
+                    // no-op after the first call. See
+                    // SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md.
+                    if let Err(e) = crate::backend::providers::seed_claude_md_placeholder_if_missing(provider_cfg, &dir) {
+                        tracing::warn!(
+                            target: "identity",
+                            dir = %dir,
+                            error = %e,
+                            "failed to seed CLAUDE.md isolation placeholder",
+                        );
+                    }
                 }
                 env_vars.insert(config_dir_env_var.to_string(), dir.clone());
                 // Canonicalized (codex P1 on PR #2377) — see def_provider's
