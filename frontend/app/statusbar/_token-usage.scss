@@ -128,9 +128,14 @@
     }
 
     // Real-agent rows are clickable (focus that agent's pane) — give
-    // them a hover affordance the plain total/service rows don't have.
+    // them a hover affordance the plain total/service rows don't have,
+    // plus an explicit pointer cursor (ReAgent P2 on PR #2849 — hover
+    // background alone under-signals interactivity for these two new
+    // row types specifically).
     .token-usage-breakdown-agent-row,
     .token-usage-breakdown-ambient-toggle {
+        cursor: pointer;
+
         &:hover {
             background: var(--hover-bg-color, rgba(255, 255, 255, 0.06));
         }
