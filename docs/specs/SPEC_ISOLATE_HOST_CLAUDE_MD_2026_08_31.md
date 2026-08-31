@@ -73,6 +73,11 @@ pub fn seed_claude_md_placeholder_if_missing(
     if provider.auth_dir_name != "claude" {
         return Ok(false); // Claude-CLI-specific fallback behavior; unverified for other providers.
     }
+    // Codex P2 on PR #2854: a blank config_dir would otherwise resolve
+    // relative to the server process's own CWD instead of erroring.
+    if config_dir.trim().is_empty() {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "config_dir is empty"));
+    }
     let path = std::path::Path::new(config_dir).join("CLAUDE.md");
     if path.exists() {
         return Ok(false);
@@ -103,14 +108,20 @@ not this file. See SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md.
 
 Right after the existing `create_dir_all(&auth_dir)` / `CLAUDE_CONFIG_DIR`
 env-var insert (~line 311-312), which already runs unconditionally on
-every `agent.open`:
+every `agent.open`. **Fails closed** (`?`, refusing the spawn) rather
+than warn-and-continue — Codex P1 + ReAgent P1 on PR #2854: continuing
+past a seed failure would launch the agent with exactly the unprotected
+condition this spec exists to close:
 
 ```rust
 let _ = std::fs::create_dir_all(&auth_dir);
 env_vars.insert(provider.auth_config_dir_env_var.to_string(), json!(auth_dir));
-if let Err(e) = providers::seed_claude_md_placeholder_if_missing(provider, &auth_dir) {
-    tracing::warn!(auth_dir = %auth_dir, error = %e, "failed to seed CLAUDE.md isolation placeholder");
-}
+providers::seed_claude_md_placeholder_if_missing(provider, &auth_dir).map_err(|e| {
+    format!(
+        "failed to isolate this agent's Claude Code config ({auth_dir}): {e}. \
+         Refusing to launch with an unprotected config dir."
+    )
+})?;
 ```
 
 ### Call site 2 — identity-bound agents: `agentmux-srv/src/identity/resolver/inject.rs`
@@ -119,7 +130,9 @@ Inside the existing `if let Some(provider_cfg) = ...` block (~line
 574-593) that already looks up `provider_cfg` to run the ambient-home-
 dir check — added right after that check passes (i.e., only once we
 know `dir` is NOT the ambient home, which is exactly the case this spec
-targets):
+targets). Also fails closed, via a new `SpawnGateError::ClaudeMdSeedFailed`
+variant — the same established mechanism the `AmbientHomeDirNotAllowed`
+check two lines above it already uses:
 
 ```rust
 if let Some(provider_cfg) =
@@ -128,8 +141,14 @@ if let Some(provider_cfg) =
     if crate::backend::providers::is_provider_ambient_home_dir(provider_cfg, &dir) {
         // ... existing block-spawn logic, unchanged ...
     }
-    if let Err(e) = crate::backend::providers::seed_claude_md_placeholder_if_missing(provider_cfg, &dir) {
-        tracing::warn!(target: "identity", dir = %dir, error = %e, "failed to seed CLAUDE.md isolation placeholder");
+    if let Err(e) =
+        crate::backend::providers::seed_claude_md_placeholder_if_missing(provider_cfg, &dir)
+    {
+        return Err(SpawnGateError::ClaudeMdSeedFailed {
+            provider: binding.provider.clone(),
+            dir: dir.clone(),
+            error: e.to_string(),
+        });
     }
 }
 env_vars.insert(config_dir_env_var.to_string(), dir.clone());
@@ -137,6 +156,21 @@ env_vars.insert(config_dir_env_var.to_string(), dir.clone());
 
 This path runs on every message send (per `inject_identity_env_with_broker`),
 so the seed check is a cheap `path.exists()` after the first run.
+
+### Failure classification
+
+Two existing components pattern-match `SpawnGateError`'s `Display` text
+by prefix to classify a pre-spawn refusal — both needed a branch added
+for the new `ClaudeMdSeedFailed` variant, the same class of gap
+`AmbientHomeDirNotAllowed` already hit once before (codex P2, PR #2802):
+
+- `agentmux-srv/src/agents/failure.rs` — `classify()`, so the agent pane
+  shows a specific "Could not isolate this agent's config" title/detail
+  instead of falling through to the generic `UnknownNonZero` "Agent
+  failed" (ReAgent P2).
+- `agentmux-srv/src/server/muxspect_handlers.rs` — `classify_last_error_source()`,
+  so `muxspect`'s last-error diagnostic reports `"identity"` instead of
+  `"unknown"` for this refusal (ReAgent P2).
 
 ### Tests
 
@@ -155,6 +189,19 @@ pattern `cli_handlers.rs`'s `selfheal_tests` already establishes):
 - creates the config dir first if it doesn't exist yet (mirrors the
   `create_dir_all` already done by both call sites, so the function is
   safe to call standalone too).
+- rejects an empty/whitespace-only `config_dir` with `InvalidInput`,
+  without touching the filesystem.
+
+`agentmux-srv/src/identity/resolver/inject.rs` — a new test exercising
+the fail-closed path end-to-end (an empty `SecretRef::OAuthConfigDir`
+deterministically triggers the seed rejection above, without relying on
+real filesystem permissions), asserting `ClaudeMdSeedFailed` is returned
+and no env var was injected before the refusal.
+
+`agentmux-srv/src/agents/failure.rs` and
+`agentmux-srv/src/server/muxspect_handlers.rs` — new/updated test cases
+covering the new classification branches, mirroring the existing
+`AmbientHomeDirNotAllowed` coverage in each file.
 
 ## Non-goals
 
