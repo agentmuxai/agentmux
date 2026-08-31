@@ -1,7 +1,7 @@
 # Analysis: Ctrl+Scroll zoom does not work in a torn-off floating pane
 
-**Status:** Diagnosis narrowed to one mechanism, **not yet empirically confirmed**.
-Two cheap tests below discriminate it. Do not implement a fix before running them.
+**Status:** **Test A has been run and the §2 hypothesis is DISPROVEN.** See §3.1.
+The live candidate is now §4. Do not implement §5 as written — its premise is gone.
 **Date:** 2026-08-31
 **Author:** AgentA
 **Reported by:** repo owner — *"ctrl+scroll zooming stops working once the pane is
@@ -81,18 +81,79 @@ Tear off an **agent or terminal** pane and type into it.
 - Typing does not work → hypothesis **confirmed**, and the bug is much bigger than
   zoom (a torn-off pane would be keyboard-dead).
 
-**Test B — is it focus-order dependent?**
+### 3.1 Test A result (2026-08-31) — hypothesis disproven
+
+Repo owner ran it: *"I typed into a floating terminal .. typing works but not zoom."*
+
+Typing works, so the floater's CEF child **does** have keyboard focus, its renderer
+**does** receive the Ctrl keydown, and `ev.ctrlKey` is therefore tracked correctly.
+The §2 mechanism is dead. This is the outcome Test A was written to produce, and it
+cost one keystroke instead of a speculative Win32 focus fix — the reason the fix was
+deliberately not built first.
+
+Note this also retires §5 as written: with `ev.ctrlKey` known-good, there is no
+longer any reason to bypass the DOM via `MK_CONTROL`. Whatever is wrong is either
+upstream of the DOM event or downstream in the zoom pipeline, and §5 addresses
+neither.
+
+**Test B is now moot** (it was a refinement of the dead hypothesis) and is kept only
+for the record. The next test is §4.1.
+
+**Test B — is it focus-order dependent? (SUPERSEDED — see §3.1)**
 In the floater: click the main window, then hover the floater and ctrl+scroll.
 Then click *inside* the floater once and ctrl+scroll again.
 
 - Only the second works → confirmed, and it is specifically an activation-order bug.
 - Neither works → focus is not the variable.
 
-## 4. Alternative if the tests kill the hypothesis
+## 4. The live candidates (post-Test-A)
 
-CEF is consuming Ctrl+Scroll before the DOM in the floater window (its native
-page-zoom path), so `preventDefault()` never gets the chance to run. The docked case
-would differ only if the main window's browser is configured to suppress it.
+With `ev.ctrlKey` established as trustworthy, the failure is on one of two sides of
+the DOM event, and they need to be separated before anything is built:
+
+**4a. Upstream — the wheel event never reaches the renderer with Ctrl set.** CEF
+consuming Ctrl+Scroll for its native page-zoom path before the DOM sees it, so
+`preventDefault()` never runs. Note the only host-side `WM_MOUSEWHEEL` interception
+in the tree (`browser_pane/hwnd.rs:403`) is scoped to browser panes, not floaters,
+so if this is the mechanism it is inside CEF rather than our own code.
+
+**4b. Downstream — the handler runs but the zoom pipeline no-ops.** For a terminal
+the path is `AppZoomHandler` → `target.closest("[data-blockid]")` →
+`zoomBlockIn/Out` → `getBlockZoom` → `getBlockComponentModel(blockId)`. That last
+call returns `null` when the block isn't in the module-level registry
+(`store/block-component-registry.ts:13`), and the caller then bails **silently** —
+which matches "nothing happens at all" exactly.
+
+Reading the source does not separate these: registration at `block.tsx:291` looks
+unconditional on mount, and the floater renders the standard `<TabContent>`, so 4b
+*should* work. It needs a measurement.
+
+### 4.1 The test that separates them
+
+In the floater window, open DevTools (hamburger ▸ DevTools, or View ▸ Toggle
+DevTools on macOS) and run:
+
+```js
+window.addEventListener('wheel', e => console.log('wheel ctrl=', e.ctrlKey, 'dy=', e.deltaY), { passive: false, capture: true });
+```
+
+Then Ctrl+Scroll over the pane body.
+
+| Observation | Conclusion |
+|---|---|
+| nothing logs | **4a** — the event is consumed before the renderer |
+| logs with `ctrl= false` | **4a** — modifier lost upstream (contradicts Test A; re-test typing) |
+| logs with `ctrl= true` | **4b** — the DOM is fine; the bug is in the zoom pipeline |
+
+If it is 4b, the follow-up is whether `[data-blockid]` resolves — in the same
+console:
+
+```js
+document.querySelectorAll('[data-blockid]').length
+```
+
+Zero means `AppZoomHandler`'s `closest()` lookup is what fails; non-zero points at
+the registry lookup inside `getBlockZoom`.
 
 ## 5. Fix shape (do not build until §3 confirms)
 
