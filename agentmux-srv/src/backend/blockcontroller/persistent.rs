@@ -285,6 +285,40 @@ struct PersistentInner {
     /// generated UUID) will never equal this one, so a stale poison value
     /// is permanently inert rather than something that needs clearing.
     resume_poisoned: Option<String>,
+    /// Set when a forced controller resync (a `/model`, `/effort` or
+    /// `/permission-mode` change — see `frontend/.../runtime-apply.ts`) lands
+    /// while a turn is in flight. The restart is DEFERRED to the end of that
+    /// turn instead of killing the process mid-turn.
+    ///
+    /// Killing it was the old behaviour and it silently destroyed the user's
+    /// in-flight message: `stop_process` records a `StopRequested`, which the
+    /// resume state machine treats as an explicit user stop and therefore
+    /// suppresses the retry; `remove_controller_entry_only` then discards the
+    /// controller (and its queue) outright; and the replacement controller
+    /// "spawns on first message", so nothing resumed. The message had already
+    /// been written to the dead process's stdin, so no queue entry survived to
+    /// replay. Net effect: the turn vanished with no response and no error —
+    /// the pane simply went quiet. Diagnosed live on AgentX, 2026-08-28.
+    ///
+    /// Deferring is correct rather than merely safer: model/effort flags are
+    /// baked in at spawn, so they could not have applied to the running turn
+    /// anyway. Waiting until it ends costs nothing and loses nothing.
+    restart_when_idle: bool,
+    /// A deferred restart has COMMITTED — `stop_process` has been called and
+    /// the process is on its way out, but `stdin_tx` is still live because
+    /// `stop_process` only sends on `kill_tx` and leaves the writer channel
+    /// alone until the process actually exits.
+    ///
+    /// Without this, `decide_send_action` would see a live `stdin_tx` and take
+    /// `DeliverDirect` for any message arriving in that window — writing it
+    /// into a process about to receive EOF, acknowledging it, and losing it
+    /// (codex P1 on PR #2858). The window is not hypothetical: the restart
+    /// fires exactly at turn end, which is precisely when the frontend flushes
+    /// its queued follow-ups.
+    ///
+    /// Set under the same lock that consumes `restart_when_idle`, cleared when
+    /// the replacement process spawns.
+    restart_pending: bool,
     /// This spawn generation's stale-`--resume` retry decision, plus any
     /// held-back terminal error-result line — see
     /// `persistent_resume::ResumeState`'s own doc comment for the full
@@ -761,6 +795,8 @@ impl PersistentSubprocessController {
                 status_version: 0,
                 session_id: None,
                 resume_poisoned: None,
+                restart_when_idle: false,
+                restart_pending: false,
                 resume: persistent_resume::ResumeState::default(),
                 spawning_in_progress: false,
                 pending_send_messages: VecDeque::new(),
@@ -974,7 +1010,15 @@ impl PersistentSubprocessController {
     /// silently dropped it).
     fn decide_send_action(&self, json_str: &str, skip_if_seq_queued: Option<u64>) -> SendAction {
         let mut inner = self.inner.lock().unwrap();
-        if inner.stdin_tx.is_some() && !inner.spawning_in_progress && !inner.drain_claim {
+        // `!restart_pending`: a committed deferred restart leaves `stdin_tx`
+        // live until the process actually exits, and writing into a process
+        // about to be killed loses the message (codex P1 on PR #2858). Falling
+        // through queues it for the replacement instead.
+        if inner.stdin_tx.is_some()
+            && !inner.spawning_in_progress
+            && !inner.drain_claim
+            && !inner.restart_pending
+        {
             SendAction::DeliverDirect
         } else if inner.spawning_in_progress || inner.drain_claim {
             let already_queued = skip_if_seq_queued
@@ -2410,6 +2454,25 @@ impl PersistentSubprocessController {
         // own doc comment for what this identifies and why.
         let (my_generation, superseded_effects) = {
             let mut inner = self.inner.lock().unwrap();
+            // The replacement process is here, so the quiesce window is over —
+            // messages may take `DeliverDirect` against this new `stdin_tx`
+            // again. Cleared unconditionally rather than only when set: any
+            // spawn ends the window by definition, whatever opened it.
+            inner.restart_pending = false;
+            // …and any deferred restart is moot now, for the same reason: this
+            // spawn read `cmd:args` fresh from block meta, so the new config is
+            // already applied and there is nothing left to restart FOR.
+            //
+            // This is what stops a leak (reagent P1 on PR #2858):
+            // `restart_when_idle` is consumed at the `is_result_frame` turn
+            // end, but a generation that dies abnormally instead — a user
+            // Stop/SIGINT, a crash, a permanently-failed turn resolving via
+            // `ProcessExited` + `PublishDone` — never reaches that branch. The
+            // stale `true` would then ride into an unrelated later generation
+            // and kill a healthy process at the end of some future turn.
+            // Clearing per-spawn scopes the flag to the generation that
+            // requested it, which is the only one it ever meant anything for.
+            inner.restart_when_idle = false;
             inner.spawn_generation += 1;
             let generation = inner.spawn_generation;
             let effects = match (attempted_resume_sid.clone(), resume_retry_payload) {
@@ -2682,6 +2745,10 @@ impl PersistentSubprocessController {
         let event_bus_read = self.event_bus.clone();
         let filestore_read = self.filestore.clone();
         let health_read = Arc::clone(&self.health_monitor);
+        // Weak, like every other self-reference here: the reader task must not
+        // keep the controller alive. Used only for the deferred
+        // runtime-config restart at turn end (`request_restart_when_idle`).
+        let self_ref_read = self.self_ref.lock().unwrap().clone();
         let stdout_seq_read = Arc::clone(&self.stdout_seq);
         let session_id_field = config.session_id_field.clone();
         let my_generation_read = my_generation;
@@ -2762,7 +2829,40 @@ impl PersistentSubprocessController {
                     // can go back to false without waiting for process exit —
                     // see `send_message`'s matching `set_active_turn(true)`.
                     if is_result_frame {
-                        health_read.set_active_turn(false);
+                        // A runtime-config change (model/effort/permission)
+                        // arrived mid-turn and was deferred rather than
+                        // killing this turn — see
+                        // `request_restart_when_idle`. The turn is over now,
+                        // so stop the process: the next message respawns it,
+                        // and `input.rs` rebuilds `cli_args` from block meta
+                        // at that point, so the new flags take effect then.
+                        // Not `poison_resume` and not a user Stop — the
+                        // session id is retained, so the respawn `--resume`s
+                        // the same conversation.
+                        // `set_active_turn(false)` happens under `inner` so it
+                        // serializes with `request_restart_when_idle`'s own
+                        // check — see that method for the interleaving this
+                        // closes. `restart_pending` is committed in the SAME
+                        // acquisition so no send can slip into `DeliverDirect`
+                        // between the decision and the kill.
+                        let deferred_restart = {
+                            let mut locked = inner_read.lock().unwrap();
+                            health_read.set_active_turn(false);
+                            let deferred = std::mem::replace(&mut locked.restart_when_idle, false);
+                            if deferred {
+                                locked.restart_pending = true;
+                            }
+                            deferred
+                        };
+                        if deferred_restart {
+                            tracing::info!(
+                                block_id = %block_id_read,
+                                "turn ended — applying the deferred runtime-config restart"
+                            );
+                            if let Some(ctrl) = self_ref_read.as_ref().and_then(|w| w.upgrade()) {
+                                let _ = ctrl.stop_process(false);
+                            }
+                        }
                         // Publish the flip so the Swarm view's live
                         // ControllerStatus subscription reflects "turn
                         // ended" immediately instead of only on the next
@@ -3863,6 +3963,50 @@ impl PersistentSubprocessController {
     pub fn session_id(&self) -> Option<String> {
         self.inner.lock().unwrap().session_id.clone()
     }
+
+    /// Ask this controller to restart itself once the current turn ends,
+    /// instead of being torn down and replaced right now.
+    ///
+    /// Returns `true` when the restart was deferred (a turn is in flight, so
+    /// the caller must NOT replace the controller), `false` when the pane is
+    /// idle and an immediate replace is safe — the caller then proceeds
+    /// exactly as before.
+    ///
+    /// Called from `resync_controller`'s forced-replace path. See
+    /// [`PersistentInner::restart_when_idle`] for what the old
+    /// kill-immediately behaviour destroyed.
+    ///
+    /// Deliberately keyed on the health monitor's `is_active_turn` rather
+    /// than on `stdin_tx.is_some()`: a live process between turns is idle and
+    /// should be replaced immediately (that's the common `/model` case, and
+    /// deferring it would leave the change unapplied until the next turn
+    /// happened to end). It's specifically an IN-FLIGHT turn that must not be
+    /// interrupted.
+    pub fn request_restart_when_idle(&self) -> bool {
+        // The turn-active read and the flag write happen under ONE acquisition
+        // of `inner`, and the turn-end consumer clears `active_turn` under that
+        // same lock — so the two serialize (codex P2 on PR #2858). Interleaved,
+        // this would otherwise observe an active turn, have the consumer run to
+        // completion (seeing `restart_when_idle` still false, so restarting
+        // nothing), and then set the flag — leaving it stuck until the NEXT
+        // turn ended, so the user's next prompt ran with the old config.
+        //
+        // Lock order is `inner` -> health monitor here and in the consumer;
+        // `TurnActivityTracker` never holds its own lock across an `inner`
+        // acquisition, so the order can't invert.
+        let mut inner = self.inner.lock().unwrap();
+        if !self.health_monitor.is_active_turn() {
+            return false;
+        }
+        inner.restart_when_idle = true;
+        drop(inner);
+        tracing::info!(
+            block_id = %self.block_id,
+            "runtime-config change arrived mid-turn — deferring the restart to the end of this turn \
+             instead of killing the in-flight message"
+        );
+        true
+    }
 }
 
 impl Controller for PersistentSubprocessController {
@@ -4060,6 +4204,177 @@ mod send_input_tests {
             None,
             None,
         )
+    }
+
+    // ── Deferred runtime-config restart (AgentX, 2026-08-28) ────────────
+    //
+    // A `/model` change mid-turn used to kill the CLI with the user's message
+    // already on its stdin: the retry was suppressed (StopRequested reads as a
+    // user stop), the queue died with the discarded controller, and the
+    // replacement only "spawns on first message". The turn vanished silently.
+
+    /// Mid-turn: the caller must be told to leave the controller alone, and
+    /// the intent must be recorded for the turn-end hook to act on.
+    #[test]
+    fn request_restart_when_idle_defers_while_a_turn_is_in_flight() {
+        let c = controller();
+        c.health_monitor.set_active_turn(true);
+
+        assert!(
+            c.request_restart_when_idle(),
+            "a turn is in flight — the caller must NOT replace the controller",
+        );
+        assert!(
+            c.inner.lock().unwrap().restart_when_idle,
+            "the deferred restart must be recorded for the turn-end hook",
+        );
+    }
+
+    /// Idle: an immediate replace is safe and is what should happen — this is
+    /// the ordinary `/model` case. Deferring here would strand the change
+    /// until some future turn happened to end.
+    #[test]
+    fn request_restart_when_idle_does_not_defer_on_an_idle_pane() {
+        let c = controller();
+        c.health_monitor.set_active_turn(false);
+
+        assert!(
+            !c.request_restart_when_idle(),
+            "no turn in flight — the caller should replace the controller immediately",
+        );
+        assert!(
+            !c.inner.lock().unwrap().restart_when_idle,
+            "nothing to defer, so nothing should be recorded",
+        );
+    }
+
+    /// The flag is consumed, not merely read: the turn-end hook uses
+    /// `mem::replace`, so a single deferred change causes exactly one restart
+    /// rather than one at the end of every subsequent turn.
+    #[test]
+    fn the_deferred_restart_flag_is_consumed_exactly_once() {
+        let c = controller();
+        c.health_monitor.set_active_turn(true);
+        c.request_restart_when_idle();
+
+        let first = std::mem::replace(&mut c.inner.lock().unwrap().restart_when_idle, false);
+        let second = std::mem::replace(&mut c.inner.lock().unwrap().restart_when_idle, false);
+        assert!(first, "the first turn-end must see the deferred restart");
+        assert!(!second, "a later turn-end must not restart again");
+    }
+
+    /// Repeated changes mid-turn (a user flipping model then effort) collapse
+    /// into one restart, not a queue of them.
+    #[test]
+    fn repeated_mid_turn_changes_collapse_into_one_restart() {
+        let c = controller();
+        c.health_monitor.set_active_turn(true);
+        assert!(c.request_restart_when_idle());
+        assert!(c.request_restart_when_idle());
+        assert!(c.request_restart_when_idle());
+
+        assert!(std::mem::replace(&mut c.inner.lock().unwrap().restart_when_idle, false));
+        assert!(!c.inner.lock().unwrap().restart_when_idle);
+    }
+
+    /// reagent P1 on PR #2858: `restart_when_idle` is consumed at the
+    /// `is_result_frame` turn end, but a generation that dies abnormally
+    /// instead — user Stop/SIGINT, a crash, a permanently-failed turn
+    /// resolving via `ProcessExited` + `PublishDone` — never reaches that
+    /// branch. A leaked `true` would ride into an unrelated later generation
+    /// and kill a healthy process at the end of some future turn. Scoping the
+    /// flag per-spawn is what prevents that.
+    #[test]
+    fn a_deferred_restart_does_not_leak_into_the_next_generation() {
+        let c = controller();
+        c.health_monitor.set_active_turn(true);
+        assert!(c.request_restart_when_idle());
+        assert!(c.inner.lock().unwrap().restart_when_idle);
+
+        // The generation dies WITHOUT a result frame (crash / user stop), so
+        // nothing consumed the flag. The next spawn must start clean —
+        // emulating spawn_process's own clear, which happens in the same
+        // acquisition that bumps the generation.
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.restart_pending = false;
+            inner.restart_when_idle = false;
+            inner.spawn_generation += 1;
+        }
+        assert!(
+            !c.inner.lock().unwrap().restart_when_idle,
+            "a new generation must not inherit the previous one's deferred restart",
+        );
+    }
+
+    /// codex P1 on PR #2858: `stop_process` only sends on `kill_tx` — it
+    /// leaves `stdin_tx` live until the process actually exits. A follow-up
+    /// arriving in that window (and turn end is EXACTLY when the frontend
+    /// flushes queued follow-ups) would take `DeliverDirect` into a process
+    /// about to receive EOF: acknowledged, then lost.
+    #[test]
+    fn a_committed_restart_refuses_deliver_direct_even_with_a_live_stdin() {
+        let c = controller();
+        let (tx, _rx) = mpsc::channel::<String>(4);
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = Some(tx);
+            // Sanity: without the restart commit this is DeliverDirect — so
+            // the assertion below is about `restart_pending`, not about some
+            // other precondition failing.
+            assert!(inner.stdin_tx.is_some());
+        }
+        assert!(matches!(c.decide_send_action("m1", None), SendAction::DeliverDirect));
+
+        c.inner.lock().unwrap().restart_pending = true;
+        assert!(
+            !matches!(c.decide_send_action("m2", None), SendAction::DeliverDirect),
+            "a message must not be written into a process that is being killed",
+        );
+    }
+
+    /// …and the message is not dropped either — it queues for the replacement.
+    #[test]
+    fn a_message_arriving_during_the_quiesce_window_is_queued_not_lost() {
+        let c = controller();
+        let (tx, _rx) = mpsc::channel::<String>(4);
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = Some(tx);
+            inner.restart_pending = true;
+        }
+        let action = c.decide_send_action("m1", None);
+        assert!(
+            matches!(action, SendAction::BecomeSpawner { .. } | SendAction::Queued),
+            "must fall through to the spawn/queue path, not vanish",
+        );
+        assert_eq!(
+            c.inner.lock().unwrap().pending_send_messages.len(),
+            1,
+            "the message must be retained for the replacement process",
+        );
+    }
+
+    /// The quiesce window ends when the replacement arrives — otherwise every
+    /// later send would keep queueing behind a flag nothing clears.
+    #[test]
+    fn the_quiesce_flag_does_not_outlive_the_restart() {
+        let c = controller();
+        c.inner.lock().unwrap().restart_pending = true;
+        // spawn_process clears it in the same acquisition that bumps the
+        // generation; emulate that contract here (spawning a real process in
+        // a unit test isn't practical).
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.restart_pending = false;
+            inner.spawn_generation += 1;
+        }
+        let (tx, _rx) = mpsc::channel::<String>(4);
+        c.inner.lock().unwrap().stdin_tx = Some(tx);
+        assert!(
+            matches!(c.decide_send_action("m1", None), SendAction::DeliverDirect),
+            "once the replacement is up, ordinary direct delivery resumes",
+        );
     }
 
     /// Shorthand for a retry-batch entry with an explicit queue seq
@@ -6158,6 +6473,8 @@ mod resume_poison_tests {
             status_version: 0,
             session_id: session_id.map(str::to_string),
             resume_poisoned: None,
+            restart_when_idle: false,
+            restart_pending: false,
             resume: persistent_resume::ResumeState::default(),
             spawning_in_progress: false,
             pending_send_messages: VecDeque::new(),
