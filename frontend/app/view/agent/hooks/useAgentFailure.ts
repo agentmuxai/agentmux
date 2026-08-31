@@ -41,7 +41,42 @@ import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import type { PaneFailure } from "@/app/store/agent-pane-state/types";
 import { failureToRow, isTransient, type FailureRow } from "../failure/failure-accessory";
 
-const AUTO_RETRY_BACKOFF_S = [5, 10] as const; // then manual-only
+/**
+ * Auto-retry ladder for transient provider failures (429 rate-limited, 529
+ * overloaded, network). Exponential, bounded, then manual-only.
+ *
+ * Was `[5, 10]` — two attempts, ~15s of coverage. That is shorter than a
+ * typical Anthropic 429/529 episode, so a genuinely transient overload
+ * routinely exhausted the budget and dropped to manual-only while still
+ * being retryable. This ladder covers ~4 minutes across 5 attempts, which
+ * spans the common case without becoming an unbounded retry loop (the cap
+ * is what stops a persistently-throttled turn from retrying forever — see
+ * `endEpisode`).
+ *
+ * Deliberately NOT infinite: a turn that is still failing after ~4 minutes
+ * is more likely a sustained outage or an account-level limit than a blip,
+ * and at that point a human should decide. `SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md` §6.
+ */
+const AUTO_RETRY_BACKOFF_S = [5, 15, 30, 60, 120] as const; // then manual-only
+
+/** Jitter fraction applied to each ladder rung (±20%). */
+const AUTO_RETRY_JITTER = 0.2;
+
+/**
+ * Spread concurrent retries so a fleet doesn't re-hit the API in lockstep.
+ *
+ * A Fleet broadcast, a cron sweep, or several loops can put many agents into
+ * the same failure at the same instant; without jitter every one of them
+ * retries on the identical second and can re-trigger the very 529 they are
+ * backing off from. Applies ±`AUTO_RETRY_JITTER` and floors at 1s so the
+ * visible countdown never starts at 0.
+ *
+ * Pure, with an injectable source, so the ladder is testable deterministically.
+ */
+export function jitteredBackoffSeconds(baseSeconds: number, rand: () => number = Math.random): number {
+    const factor = 1 + (rand() * 2 - 1) * AUTO_RETRY_JITTER;
+    return Math.max(1, Math.round(baseSeconds * factor));
+}
 
 export interface UseAgentFailureOptions {
     blockId: string;
@@ -128,7 +163,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
 
     const armAutoRetry = () => {
         if (autoRetries >= AUTO_RETRY_BACKOFF_S.length) return; // capped → manual only
-        const seconds = AUTO_RETRY_BACKOFF_S[autoRetries];
+        const seconds = jitteredBackoffSeconds(AUTO_RETRY_BACKOFF_S[autoRetries]);
         autoRetries += 1;
         setAutoRetryIn(seconds);
         countdown = setInterval(() => {
