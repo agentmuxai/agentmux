@@ -15,37 +15,67 @@ use crate::backend::blockcontroller;
 
 use super::super::AppState;
 
-/// Drop `--input-format <value>` from a container agent's argv.
+/// Rebuild a container agent's argv from the provider's ONE-SHOT `launch_args`,
+/// carrying over the user's own runtime choices.
 ///
-/// `--input-format stream-json` tells the CLI that every stdin line is a JSON
-/// envelope. That is true for the PERSISTENT controller, which owns a
-/// long-lived stdin and writes real envelopes — and false for a container
-/// agent, which runs one `docker exec` per turn and whose stdin is written by
-/// `container_spawn.rs` as the raw message text (`format!("{}\n", message)`).
+/// A container agent runs one `docker exec` per turn: `container_spawn.rs`
+/// writes the raw message, closes stdin, and reads until EOF. There is no
+/// long-lived stdin and no control channel. The PERSISTENT argv is wrong for
+/// that in three separate ways, and it is what stale blocks carry:
 ///
-/// Mixing the two is fatal rather than untidy: the first line the CLI reads is
-/// the startup markdown, and it dies with
-/// `Error parsing streaming input line: # Session Context: JSON Parse error:
-/// Unrecognized token '#'`, EOF'ing the exec in under a second. That is the
-/// whole reason container agents have never started (verified live,
-/// 2026-08-31).
+///   * `--input-format stream-json` — makes the CLI parse every stdin line as
+///     a JSON envelope, so it meets the startup markdown and dies with
+///     `JSON Parse error: Unrecognized token '#'`. This is the crash that kept
+///     container agents from EVER starting (verified live, 2026-08-31).
+///   * missing `-p` — the one-shot print flag. Without it the CLI is not in
+///     the mode this path drives at all.
+///   * `--permission-prompt-tool stdio` (+ a non-bypass `--permission-mode`) —
+///     routes tool permissions through the control protocol, which only the
+///     persistent controller speaks. A container turn has nothing to answer
+///     `can_use_tool`, so it rejects or hangs on the first permission check.
 ///
-/// The root cause is fixed at the source in `agent-model.ts`, which no longer
-/// picks `persistentLaunchArgs` for a container agent. This is the self-heal
-/// for blocks ALREADY persisted with the bad argv: `cmd:args` lives in block
-/// meta, so without this, every pane created before that fix keeps failing
-/// forever with no way back short of recreating the agent. Applied at the
-/// point of use so it cannot be bypassed by a block that never re-runs
-/// `resync_controller`.
+/// An earlier cut of this deleted only `--input-format` and left the other two
+/// (codex P1 on PR #2867) — that unblocks the immediate crash while leaving the
+/// pane in the wrong CLI mode, which is a worse failure because it looks like
+/// it works. Rebuilding from `launch_args` fixes all three at once.
 ///
-/// Removes the flag and its value; tolerates a trailing `--input-format` with
-/// no value rather than panicking on a malformed argv.
-fn strip_stream_json_input_format(args: Vec<String>) -> Vec<String> {
+/// User choices are preserved rather than reset: `--model` and `--effort` are
+/// what `buildRuntimeArgs` writes from the /model and /effort controls, so
+/// dropping them would silently revert a user's model on every stale pane.
+///
+/// The root cause is fixed at the source in `launch-args.ts`; this is the
+/// self-heal for blocks ALREADY persisted with the bad argv, since `cmd:args`
+/// lives in block meta and would otherwise stay wrong forever. Applied at the
+/// point of use so a block that never re-runs `resync_controller` can't bypass
+/// it.
+fn container_argv(stale: Vec<String>, provider_id: &str) -> Vec<String> {
+    let Some(provider) = crate::backend::providers::get_provider(provider_id) else {
+        // Unknown provider — fall back to removing the one flag that is
+        // outright fatal rather than guessing at a base argv.
+        return strip_flag_with_value(stale, "--input-format");
+    };
+    let mut out: Vec<String> = provider.launch_args.iter().map(|s| s.to_string()).collect();
+    // Carry over the user's runtime selections from the stale argv.
+    let mut it = stale.into_iter();
+    while let Some(a) = it.next() {
+        if a == "--model" || a == "--effort" {
+            if let Some(v) = it.next() {
+                out.push(a);
+                out.push(v);
+            }
+        }
+    }
+    out
+}
+
+/// Remove `flag` and the value token following it, everywhere it appears.
+/// Tolerates a trailing `flag` with no value rather than panicking.
+fn strip_flag_with_value(args: Vec<String>, flag: &str) -> Vec<String> {
     let mut out = Vec::with_capacity(args.len());
     let mut it = args.into_iter();
     while let Some(a) = it.next() {
-        if a == "--input-format" {
-            let _ = it.next(); // discard its value
+        if a == flag {
+            let _ = it.next();
             continue;
         }
         out.push(a);
@@ -561,8 +591,12 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                         let container_command = crate::backend::obj::meta_get_string(
                             &block.meta, "agent:container_command", "claude",
                         );
+                        // Provider id for the one-shot argv rebuild below.
+                        let agent_provider = crate::backend::obj::meta_get_string(
+                            &block.meta, "agentProvider", "claude",
+                        );
                         let mut base_cmd = vec![container_command];
-                        base_cmd.extend(strip_stream_json_input_format(cli_args));
+                        base_cmd.extend(container_argv(cli_args, &agent_provider));
 
                         let config = blockcontroller::subprocess::SubprocessSpawnConfig {
                             cli_command: String::new(), // unused by spawn_container_turn
@@ -713,74 +747,88 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
 #[cfg(test)]
 mod tests {
     use super::git_identity_env_vars;
-    use super::strip_stream_json_input_format;
+    use super::{container_argv, strip_flag_with_value};
 
     fn v(xs: &[&str]) -> Vec<String> {
         xs.iter().map(|s| s.to_string()).collect()
     }
 
-    /// The exact argv a container agent was getting before the fix — the
-    /// persistent controller's args, copied verbatim from a live broken block
-    /// (Moras, 2026-08-31). `--input-format stream-json` here is what killed
-    /// the exec on its first stdin line.
-    #[test]
-    fn strips_input_format_and_its_value_from_a_real_broken_argv() {
-        let got = strip_stream_json_input_format(v(&[
+    /// The exact argv a container agent carried before the fix — the persistent
+    /// controller's args, copied verbatim from the live broken block (Moras,
+    /// 2026-08-31).
+    fn stale_persistent_argv() -> Vec<String> {
+        v(&[
             "--input-format", "stream-json",
             "--output-format", "stream-json",
             "--verbose", "--include-partial-messages",
             "--permission-prompt-tool", "stdio",
-            "--dangerously-skip-permissions",
+            "--permission-mode", "default",
             "--model", "sonnet", "--effort", "high",
-        ]));
-        assert!(!got.iter().any(|a| a == "--input-format"), "the flag must be gone");
-        // Its VALUE must go too — a bare leftover `stream-json` would be
-        // parsed as a positional prompt argument.
-        assert_eq!(
-            got,
-            v(&[
-                "--output-format", "stream-json",
-                "--verbose", "--include-partial-messages",
-                "--permission-prompt-tool", "stdio",
-                "--dangerously-skip-permissions",
-                "--model", "sonnet", "--effort", "high",
-            ]),
+        ])
+    }
+
+    /// All three persistent-only defects must go, not just the fatal one
+    /// (codex P1 on PR #2867): the parse crash, the missing one-shot `-p`, and
+    /// the control-protocol permission flags a container turn cannot answer.
+    #[test]
+    fn rebuilds_a_stale_persistent_argv_into_the_one_shot_form() {
+        let got = container_argv(stale_persistent_argv(), "claude");
+
+        assert!(!got.iter().any(|a| a == "--input-format"), "the fatal parse flag must go");
+        assert!(got.iter().any(|a| a == "-p"), "one-shot print mode must be present");
+        assert!(
+            !got.iter().any(|a| a == "--permission-prompt-tool"),
+            "the container turn has no control channel to answer can_use_tool",
+        );
+        assert!(
+            !got.iter().any(|a| a == "--permission-mode"),
+            "non-bypass permission mode needs the control protocol",
+        );
+        assert!(
+            got.iter().any(|a| a == "--output-format"),
+            "output-format stream-json is how the pane parses the turn at all",
         );
     }
 
-    /// `--output-format stream-json` is REQUIRED — it is how the pane parses
-    /// the container's output at all. Only the input side is wrong.
+    /// A user's model/effort selections must survive the rebuild — silently
+    /// resetting someone's model on every stale pane would be its own bug.
     #[test]
-    fn leaves_output_format_untouched() {
-        let got = strip_stream_json_input_format(v(&["--output-format", "stream-json"]));
-        assert_eq!(got, v(&["--output-format", "stream-json"]));
+    fn preserves_the_users_model_and_effort_choices() {
+        let got = container_argv(stale_persistent_argv(), "claude");
+        let pos = |f: &str| got.iter().position(|a| a == f);
+        assert_eq!(got[pos("--model").expect("--model kept") + 1], "sonnet");
+        assert_eq!(got[pos("--effort").expect("--effort kept") + 1], "high");
+    }
+
+    /// An argv with no user flags rebuilds to exactly the provider baseline.
+    #[test]
+    fn a_stale_argv_with_no_user_flags_becomes_the_plain_baseline() {
+        let got = container_argv(v(&["--input-format", "stream-json", "--verbose"]), "claude");
+        let baseline: Vec<String> = crate::backend::providers::get_provider("claude")
+            .unwrap()
+            .launch_args
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(got, baseline);
+    }
+
+    /// An unknown provider has no baseline to rebuild from, so fall back to
+    /// removing only the outright-fatal flag rather than guessing.
+    #[test]
+    fn an_unknown_provider_falls_back_to_removing_only_the_fatal_flag() {
+        let got = container_argv(v(&["--input-format", "stream-json", "--custom"]), "no-such-provider");
+        assert_eq!(got, v(&["--custom"]));
     }
 
     #[test]
-    fn is_a_no_op_on_argv_that_never_had_the_flag() {
-        let args = v(&["--output-format", "stream-json", "--verbose"]);
-        assert_eq!(strip_stream_json_input_format(args.clone()), args);
-        assert_eq!(strip_stream_json_input_format(vec![]), Vec::<String>::new());
-    }
-
-    /// A malformed argv (flag with no value) must not panic — this runs on
-    /// every container turn, and a stale block could carry anything.
-    #[test]
-    fn tolerates_a_trailing_input_format_with_no_value() {
+    fn strip_flag_with_value_removes_every_occurrence_and_tolerates_a_missing_value() {
         assert_eq!(
-            strip_stream_json_input_format(v(&["--verbose", "--input-format"])),
-            v(&["--verbose"]),
+            strip_flag_with_value(v(&["--x", "1", "--keep", "--x", "2"]), "--x"),
+            v(&["--keep"]),
         );
-    }
-
-    /// Defensive: if a block somehow carries the flag twice, remove both
-    /// rather than leaving a stray one that reintroduces the failure.
-    #[test]
-    fn removes_every_occurrence() {
-        let got = strip_stream_json_input_format(v(&[
-            "--input-format", "stream-json", "--verbose", "--input-format", "stream-json",
-        ]));
-        assert_eq!(got, v(&["--verbose"]));
+        assert_eq!(strip_flag_with_value(v(&["--keep", "--x"]), "--x"), v(&["--keep"]));
+        assert_eq!(strip_flag_with_value(vec![], "--x"), Vec::<String>::new());
     }
 
     #[test]
