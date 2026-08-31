@@ -215,7 +215,11 @@ export function countdownSecondsRemaining(model: SwarmViewModel, rowKey: string,
 
 const fmtCtx = formatCompactNumber;
 
-function AgentRow({
+// Exported for `swarm-agent-row.render.test.tsx`, which pins the PR #2862
+// regression both reviewers caught: an agent whose only activity is a
+// long-running tool call must still show the expand affordance and render the
+// bucket. Same test-only export precedent as `DispatchActivityFeedEntry`.
+export function AgentRow({
     node,
     focusedBlockId,
     model,
