@@ -15,6 +15,44 @@ use crate::backend::blockcontroller;
 
 use super::super::AppState;
 
+/// Drop `--input-format <value>` from a container agent's argv.
+///
+/// `--input-format stream-json` tells the CLI that every stdin line is a JSON
+/// envelope. That is true for the PERSISTENT controller, which owns a
+/// long-lived stdin and writes real envelopes — and false for a container
+/// agent, which runs one `docker exec` per turn and whose stdin is written by
+/// `container_spawn.rs` as the raw message text (`format!("{}\n", message)`).
+///
+/// Mixing the two is fatal rather than untidy: the first line the CLI reads is
+/// the startup markdown, and it dies with
+/// `Error parsing streaming input line: # Session Context: JSON Parse error:
+/// Unrecognized token '#'`, EOF'ing the exec in under a second. That is the
+/// whole reason container agents have never started (verified live,
+/// 2026-08-31).
+///
+/// The root cause is fixed at the source in `agent-model.ts`, which no longer
+/// picks `persistentLaunchArgs` for a container agent. This is the self-heal
+/// for blocks ALREADY persisted with the bad argv: `cmd:args` lives in block
+/// meta, so without this, every pane created before that fix keeps failing
+/// forever with no way back short of recreating the agent. Applied at the
+/// point of use so it cannot be bypassed by a block that never re-runs
+/// `resync_controller`.
+///
+/// Removes the flag and its value; tolerates a trailing `--input-format` with
+/// no value rather than panicking on a malformed argv.
+fn strip_stream_json_input_format(args: Vec<String>) -> Vec<String> {
+    let mut out = Vec::with_capacity(args.len());
+    let mut it = args.into_iter();
+    while let Some(a) = it.next() {
+        if a == "--input-format" {
+            let _ = it.next(); // discard its value
+            continue;
+        }
+        out.push(a);
+    }
+    out
+}
+
 /// Per-agent git commit identity env vars for a spawned agent process
 /// (2026-08-22, docs/retro/retro-shared-git-identity-committer-misattribution-2026-08-22.md).
 ///
@@ -524,7 +562,7 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                             &block.meta, "agent:container_command", "claude",
                         );
                         let mut base_cmd = vec![container_command];
-                        base_cmd.extend(cli_args);
+                        base_cmd.extend(strip_stream_json_input_format(cli_args));
 
                         let config = blockcontroller::subprocess::SubprocessSpawnConfig {
                             cli_command: String::new(), // unused by spawn_container_turn
@@ -675,6 +713,75 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
 #[cfg(test)]
 mod tests {
     use super::git_identity_env_vars;
+    use super::strip_stream_json_input_format;
+
+    fn v(xs: &[&str]) -> Vec<String> {
+        xs.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// The exact argv a container agent was getting before the fix — the
+    /// persistent controller's args, copied verbatim from a live broken block
+    /// (Moras, 2026-08-31). `--input-format stream-json` here is what killed
+    /// the exec on its first stdin line.
+    #[test]
+    fn strips_input_format_and_its_value_from_a_real_broken_argv() {
+        let got = strip_stream_json_input_format(v(&[
+            "--input-format", "stream-json",
+            "--output-format", "stream-json",
+            "--verbose", "--include-partial-messages",
+            "--permission-prompt-tool", "stdio",
+            "--dangerously-skip-permissions",
+            "--model", "sonnet", "--effort", "high",
+        ]));
+        assert!(!got.iter().any(|a| a == "--input-format"), "the flag must be gone");
+        // Its VALUE must go too — a bare leftover `stream-json` would be
+        // parsed as a positional prompt argument.
+        assert_eq!(
+            got,
+            v(&[
+                "--output-format", "stream-json",
+                "--verbose", "--include-partial-messages",
+                "--permission-prompt-tool", "stdio",
+                "--dangerously-skip-permissions",
+                "--model", "sonnet", "--effort", "high",
+            ]),
+        );
+    }
+
+    /// `--output-format stream-json` is REQUIRED — it is how the pane parses
+    /// the container's output at all. Only the input side is wrong.
+    #[test]
+    fn leaves_output_format_untouched() {
+        let got = strip_stream_json_input_format(v(&["--output-format", "stream-json"]));
+        assert_eq!(got, v(&["--output-format", "stream-json"]));
+    }
+
+    #[test]
+    fn is_a_no_op_on_argv_that_never_had_the_flag() {
+        let args = v(&["--output-format", "stream-json", "--verbose"]);
+        assert_eq!(strip_stream_json_input_format(args.clone()), args);
+        assert_eq!(strip_stream_json_input_format(vec![]), Vec::<String>::new());
+    }
+
+    /// A malformed argv (flag with no value) must not panic — this runs on
+    /// every container turn, and a stale block could carry anything.
+    #[test]
+    fn tolerates_a_trailing_input_format_with_no_value() {
+        assert_eq!(
+            strip_stream_json_input_format(v(&["--verbose", "--input-format"])),
+            v(&["--verbose"]),
+        );
+    }
+
+    /// Defensive: if a block somehow carries the flag twice, remove both
+    /// rather than leaving a stray one that reintroduces the failure.
+    #[test]
+    fn removes_every_occurrence() {
+        let got = strip_stream_json_input_format(v(&[
+            "--input-format", "stream-json", "--verbose", "--input-format", "stream-json",
+        ]));
+        assert_eq!(got, v(&["--verbose"]));
+    }
 
     #[test]
     fn maps_agent_id_to_name_and_placeholder_email() {
