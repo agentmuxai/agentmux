@@ -489,10 +489,33 @@ function updateTreeHelper(
     // — onResizeMove uses it to look up flanking children by that index, and
     // Phase B never removes entries from node.children, only adjusts rects.
     const resizeHandles: ResizeHandleProps[] = [];
-    for (let i = 1; i < node.children.length; i++) {
-        const prevChild = node.children[i - 1];
+    // Walk the children and pair up consecutive RENDERED slots.
+    //
+    // A slip child is skipped over rather than breaking the chain: it
+    // contributes zero main-axis extent (Phase B docks its chip onto a
+    // sibling), so the expanded panes either side of it render FLUSH and
+    // share one real boundary. Pairing only on adjacent array indices left
+    // that boundary with no handle at all — `A | B(minimized) | C` produced
+    // ZERO handles while A and C sat edge-to-edge with nothing to drag.
+    //
+    // An ordinary minimized child — one with its own chip slot, i.e. a
+    // Column parent, or a Row where every child is minimized — is NOT
+    // skipped. It occupies real extent, so its neighbours are genuinely not
+    // adjacent and a handle spanning it would float on top of the chip.
+    // That case resets the chain instead.
+    let beforeIdx = -1;
+    for (let i = 0; i < node.children.length; i++) {
         const child = node.children[i];
-        if (isEffectivelyMinimized(prevChild) || isEffectivelyMinimized(child)) continue;
+        if (slipChildIds.has(child.id)) continue; // zero extent — span it
+        if (isEffectivelyMinimized(child)) {
+            beforeIdx = -1; // real chip slot — neighbours aren't adjacent
+            continue;
+        }
+        if (beforeIdx < 0) {
+            beforeIdx = i;
+            continue;
+        }
+        const prevChild = node.children[beforeIdx];
         const prevRect = additionalPropsMap[prevChild.id].rect;
         const halfResizeHandleSizePx = resizeHandleSizePx / 2;
         const resizeHandleDimensions: Dimensions = {
@@ -502,9 +525,12 @@ function updateTreeHelper(
             height: nodeIsRow ? prevRect.height : resizeHandleSizePx,
         };
         resizeHandles.push({
-            id: `${node.id}-${i - 1}`,
+            // Keyed on the BEFORE index — still unique, since each pane is
+            // the before-side of at most one boundary.
+            id: `${node.id}-${beforeIdx}`,
             parentNodeId: node.id,
-            parentIndex: i - 1,
+            parentIndex: beforeIdx,
+            afterIndex: i,
             transform: setTransform(resizeHandleDimensions, true, false),
             flexDirection: node.flexDirection,
             centerPx: (nodeIsRow ? resizeHandleDimensions.left : resizeHandleDimensions.top) + halfResizeHandleSizePx,
@@ -513,6 +539,7 @@ function updateTreeHelper(
                 ? resizeHandleDimensions.top + resizeHandleDimensions.height
                 : resizeHandleDimensions.left + resizeHandleDimensions.width,
         });
+        beforeIdx = i;
     }
 
     additionalPropsMap[node.id] = {

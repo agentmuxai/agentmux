@@ -306,7 +306,11 @@ export function onResizeMove(
     if (model.resizeContext?.handleId !== resizeHandle.id) {
         const parentNode = findNode(model.treeState.rootNode, resizeHandle.parentNodeId);
         const beforeNode = parentNode.children![resizeHandle.parentIndex];
-        const afterNode = parentNode.children![resizeHandle.parentIndex + 1];
+        // NOT `parentIndex + 1`: a handle can legitimately span a zero-extent
+        // slip child, so its two sides need not be adjacent in the child array
+        // (see ResizeHandleProps.afterIndex). `??` guards a stale handle
+        // produced by a frame from before this field existed.
+        const afterNode = parentNode.children![resizeHandle.afterIndex ?? resizeHandle.parentIndex + 1];
 
         // Minimized is a locked state: locked edges get no handle (layoutGeometry),
         // but a stale handle from a pre-suppression frame could still deliver a drag

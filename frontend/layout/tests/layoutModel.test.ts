@@ -301,6 +301,48 @@ describe("LayoutModel", () => {
         expect(props[anchor.id].rect.height).toBeCloseTo(0, 0);
     });
 
+    // End-to-end regression for ANALYSIS_PANE_MINIMIZE_ROW_BRANCH_DISTORTIONS
+    // _2026_08_30 §3, through the REAL updateTree rather than a reimplementation
+    // of Phase C's pairing rule (layoutMinimize.test.ts mirrors that rule for
+    // the enumeration cases; this one proves the shipped path agrees with it).
+    it("emits one resize handle SPANNING a slipped minimized pane, flanking the two expanded panes", () => {
+        const model = createLayoutModel();
+        const mk = (id: string, min = false) => {
+            const n = newLayoutNode(FlexDirection.Row, 10, undefined, { blockId: id });
+            if (min) n.minimized = true;
+            return n;
+        };
+        const A = mk("A"), B = mk("B", true), C = mk("C");
+        const root = newLayoutNode(FlexDirection.Row, 10, [A, B, C]);
+        model.treeState.rootNode = root;
+        model.updateTree();
+
+        const props = model.additionalProps();
+        const handles = props[root.id]?.resizeHandles ?? [];
+
+        // Was ZERO before this fix: Phase C skipped both A|B and B|C because
+        // B is minimized, leaving A and C rendered flush with nothing to drag.
+        expect(handles).toHaveLength(1);
+
+        // And it must flank A and C — not A and B. `afterIndex` is 2, so it is
+        // NOT parentIndex + 1; onResizeMove reads it rather than assuming.
+        expect(handles[0].parentIndex).toBe(0);
+        expect(handles[0].afterIndex).toBe(2);
+
+        // A and C really are flush — that adjacency is what makes a spanning
+        // handle correct rather than a hack.
+        const aRect = props[A.id].rect;
+        expect(props[C.id].rect.left).toBeCloseTo(aRect.left + aRect.width, 0);
+
+        // Note B's rect is NOT zero-width here even though its main-axis
+        // ALLOCATION is: Phase A gives a slip child 0px, then Phase B replaces
+        // that rect with the docked chip, which takes the host's geometry. So
+        // B's rect sits on top of C, which is exactly what "docked onto C"
+        // means — asserting width 0 here would be asserting the pre-Phase-B
+        // intermediate, not what renders.
+        expect(props[B.id].rect.left).toBeCloseTo(props[C.id].rect.left, 0);
+    });
+
     // End-to-end regression for the exact user-reported corruption
     // (2026-07-18): a blind InsertNode (e.g. a new pane created via the "+"
     // button or an agent creating a terminal) whose heuristic target
