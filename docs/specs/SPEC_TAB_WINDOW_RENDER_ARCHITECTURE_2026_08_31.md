@@ -150,23 +150,42 @@ transition. Give that transition an identity and carry it to the client.
 - Backend: every reducer dispatch stamps a monotonic `epoch: u64` on **all**
   `WaveObjUpdate`s it produces. Same transition → same epoch.
 - Wire: updates travel as `{ epoch, updates: [...] }`, never as bare objects.
-- Frontend: `wos.ts` gains an epoch-aware apply:
-  - Updates from epoch **N+1** apply as one `batch()`.
-  - An update whose epoch is **older** than the cell's current epoch is
-    dropped (this is today's version guard, generalized from per-object to
-    per-transition).
-  - A **partial** epoch — some objects arrived, some haven't — is held in a
-    staging buffer and not committed until complete, or until a short bounded
-    timeout elapses (then applied with a loud `console.warn`; a stuck staging
-    buffer must degrade to today's behaviour, never to a frozen UI).
+
+**Completeness contract (normative — an earlier draft left this undefined):**
+
+> **One epoch is delivered in exactly one frame, and that frame is always
+> complete.** A frame carries every `WaveObjUpdate` the reducer transition
+> produced. There is no such thing as a partial epoch on the wire, so the
+> client never has to decide whether more is coming.
+
+This is a *requirement on the producer*, and §3.2 is what makes it satisfiable:
+the bridge must resolve every object it needs (`emit_fetched`'s async SQLite
+reads) **before** emitting, then emit once. A producer that cannot assemble the
+whole set must not emit a partial epoch — it must fail the transition.
+
+Consequently the frontend apply is trivial, with **no staging buffer**:
+
+- `wos.ts` applies each received epoch frame as one `batch()`.
+- A frame whose epoch is **older** than the cell's current epoch is dropped
+  (today's version guard, generalized from per-object to per-transition).
+
+An earlier draft proposed staging partial epochs behind a bounded timeout.
+That is now explicitly rejected: it cannot work without either an expected
+update count or an end-of-epoch marker, and adding either buys nothing over
+just requiring complete frames — while introducing a stall risk and a
+timeout-tuning problem. **If a future transition genuinely cannot fit in one
+frame**, this contract must be reopened deliberately and given an explicit
+`{ epoch, part, final }` marker; it must not be papered over with a timeout.
 
 **Result:** "tab deleted but workspace not yet updated" stops being a state the
 UI can render. It isn't merely unlikely — it is unrepresentable.
 
-**Cost / risk:** touches every `WaveObjUpdate` producer. The staging buffer is
-the risky part (a missing object could stall a commit) — hence the bounded
-timeout and the warn. Ship behind a flag; compare warn-rate before flipping the
-default.
+**Cost / risk:** touches every `WaveObjUpdate` producer — that is the whole
+cost, and it is the reason §0 says not to fund this on the strength of the tab
+flash. With the staging buffer gone the client side is nearly trivial; the risk
+sits entirely in auditing producers for the completeness contract above. Ship
+behind a flag and assert the contract in dev builds (warn on an epoch whose
+object set doesn't match what the reducer transition declared).
 
 ### 3.2 One authoritative transport (`P2` collapse)
 
@@ -266,20 +285,29 @@ Before any further change:
 - A dev-only frame log that timestamps: each WOS epoch/update application, each
   `activeTabId` flip, each `tabSwitching` transition, each `updateTree()`, each
   `flushClip()` send **and host ack**.
-- Capture one close-via-modal gesture end to end.
-- **Deliverable:** the ordered list of what painted between the modal closing
-  and the settled frame. This either confirms §3.3 or redirects the whole plan.
+- Capture the affected gesture end to end, on a build confirmed to contain
+  whatever fixes are already believed to be in it.
+- **Deliverable:** the ordered list of what actually painted, from the gesture
+  to the settled frame. **Rank hypotheses on that list, not on narrative fit** —
+  the report's §0 records a case where an inferred mechanism was ranked above
+  an already-confirmed defect, and was wrong.
 
-Phase 0 is cheap, is the only step that can *falsify* this spec, and prevents a
-fifth confident-but-wrong fix.
+Phase 0 is cheap and is the only step that can *falsify* a hypothesis before
+it is built on.
 
-**Phase 1 — `PaneSurfaceSync` option (a)** (§3.3). Smallest change with the
-highest prior on being the residual cause. Re-test the gesture.
+**Phases 1-3 are deliberately unordered.** The tab-close case is closed, so
+there is no live symptom to sequence them against; ordering should come from
+Phase 0's trace of whatever the next symptom turns out to be.
 
-**Phase 2 — `WorkspaceEpoch`** (§3.1) + **transport collapse** (§3.2). The
-structural core. Behind a flag; compare staging-buffer warn rates.
-
-**Phase 3 — `LayoutReadiness`** (§3.4) and deletion of the suppressor layer (§4).
+- **`PaneSurfaceSync`** (§3.3) — a real unsynchronized seam with precedent
+  elsewhere, but **not** the tab-close cause. Do it when a trace implicates it.
+- **`WorkspaceEpoch`** (§3.1) + **transport collapse** (§3.2) — the structural
+  core, and the most expensive. Per §0, justified only for a surface that
+  cannot predict its own outcome *and* demonstrably tears. Ship behind a flag;
+  assert the §3.1 completeness contract in dev builds.
+- **`LayoutReadiness`** (§3.4) and deletion of the suppressor layer (§4) — the
+  highest-value remaining item per §0, since the timer-based reveal (80ms /
+  800ms) survives untouched and still guesses at readiness.
 
 ## 6. Non-goals
 
@@ -293,11 +321,20 @@ structural core. Behind a flag; compare staging-buffer warn rates.
 
 ## 7. Open questions
 
-1. **Is §3.3 actually the residual cause?** Phase 0 answers this. If it is not,
-   Phase 1 should be reordered behind Phase 2.
-2. **Can a partial epoch actually occur** given the bridge's fetch-then-emit
-   change, or is the staging buffer dead weight? If it can't, drop it and apply
-   epochs directly — simpler and removes the stall risk.
+1. ~~**Is §3.3 actually the residual cause?**~~ **Answered — no.** PR #2818
+   fixed the tab-close flash without touching the native compositor (§0, and
+   the report's §0 scorecard). Do **not** re-run this investigation for that
+   symptom. The open form of the question is now: *when a future flicker is
+   independently observed on an overlay-heavy path, is the `sendClip` → rAF →
+   async-HTTP seam its cause?* — a question for that symptom's own Phase 0,
+   with §3.3's documented precedent (`REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md`,
+   `SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md` Cause 2) as
+   prior art rather than as evidence.
+2. ~~**Can a partial epoch occur?**~~ **Resolved by fiat in §3.1** — the
+   completeness contract forbids it on the wire, and the staging buffer is
+   dropped. The residual question is an audit, not a design one: *does every
+   `WaveObjUpdate` producer already assemble its full set before emitting?*
+   The bridge's `emit_fetched` path is the one known to need restructuring.
 3. **Do LAN/multi-window renderers need epoch coordination**, or is per-renderer
    monotonicity enough? Suspect the latter; unverified.
 4. **Does the confirm modal need to exist on this path at all?** The gesture is
