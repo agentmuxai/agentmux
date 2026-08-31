@@ -834,6 +834,22 @@ mod tests {
         store.insert(&mut block).unwrap();
     }
 
+    /// A genuinely writable temp path for a test's `SecretRef::OAuthConfigDir`.
+    ///
+    /// `inject_identity_env` now really seeds a `CLAUDE.md` into the bound dir
+    /// and FAILS CLOSED if it can't (SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md),
+    /// so these tests need a dir that actually exists/can be created rather
+    /// than a synthetic absolute path. The previous `/var/agentmux/...`
+    /// literals were unwritable on Linux CI (`Permission denied`) while
+    /// silently resolving to the current drive on Windows — green locally,
+    /// red on the ubuntu leg.
+    fn test_config_dir(name: &str) -> String {
+        std::env::temp_dir()
+            .join(format!("agentmux-inject-test-{}-{name}", std::process::id()))
+            .to_string_lossy()
+            .into_owned()
+    }
+
     fn make_instance(block_id: &str, identity_id: &str) -> AgentInstance {
         AgentInstance {
             id: format!("inst-{block_id}"),
@@ -897,7 +913,7 @@ mod tests {
             "acct-claude",
             "claude",
             SecretRef::OAuthConfigDir {
-                dir: "/var/agentmux/identities/id-oauth/claude".to_string(),
+                dir: test_config_dir("id-oauth"),
             },
         );
         store.identity_upsert(&claude).unwrap();
@@ -917,8 +933,8 @@ mod tests {
 
         // OAuth dispatch sets the provider's config-dir env var.
         assert_eq!(
-            env.get("CLAUDE_CONFIG_DIR").map(String::as_str),
-            Some("/var/agentmux/identities/id-oauth/claude"),
+            env.get("CLAUDE_CONFIG_DIR").cloned(),
+            Some(test_config_dir("id-oauth")),
         );
         // And does NOT set the anthropic api-key env var — dispatch
         // is by provider class, not by token shape.
@@ -1151,7 +1167,7 @@ mod tests {
             "acct-migrated",
             "claude",
             SecretRef::OAuthConfigDir {
-                dir: "/var/agentmux/identities/id-migrated/claude".to_string(),
+                dir: test_config_dir("id-migrated"),
             },
         );
         identity_store.identity_upsert(&claude).unwrap();
@@ -1172,8 +1188,8 @@ mod tests {
              'account row not found' — this is the exact reported continuity bug: {res:?}"
         );
         assert_eq!(
-            env.get("CLAUDE_CONFIG_DIR").map(String::as_str),
-            Some("/var/agentmux/identities/id-migrated/claude"),
+            env.get("CLAUDE_CONFIG_DIR").cloned(),
+            Some(test_config_dir("id-migrated")),
         );
     }
 
@@ -1240,7 +1256,7 @@ mod tests {
             "acct-fresh",
             "claude",
             SecretRef::OAuthConfigDir {
-                dir: "/var/agentmux/identities/id-fresh/claude".to_string(),
+                dir: test_config_dir("id-fresh"),
             },
         );
         id_store.identity_upsert_with_mirror(&identity_store, &claude).unwrap();
@@ -1266,8 +1282,8 @@ mod tests {
              backfill) must still resolve after a channel switch: {res:?}"
         );
         assert_eq!(
-            env.get("CLAUDE_CONFIG_DIR").map(String::as_str),
-            Some("/var/agentmux/identities/id-fresh/claude"),
+            env.get("CLAUDE_CONFIG_DIR").cloned(),
+            Some(test_config_dir("id-fresh")),
         );
     }
 
@@ -1495,7 +1511,7 @@ mod tests {
             "acct-alias",
             "claude-code",
             SecretRef::OAuthConfigDir {
-                dir: "/var/agentmux/identities/id-alias/claude".to_string(),
+                dir: test_config_dir("id-alias"),
             },
         );
         store.identity_upsert(&claude).unwrap();
@@ -1513,8 +1529,8 @@ mod tests {
 
         assert!(res.is_ok(), "expected Ok, got {res:?}");
         assert_eq!(
-            env.get("CLAUDE_CONFIG_DIR").map(String::as_str),
-            Some("/var/agentmux/identities/id-alias/claude"),
+            env.get("CLAUDE_CONFIG_DIR").cloned(),
+            Some(test_config_dir("id-alias")),
         );
     }
 
@@ -1585,7 +1601,7 @@ mod tests {
             "acct-gone",
             "claude",
             SecretRef::OAuthConfigDir {
-                dir: "/var/agentmux/identities/id-x/claude".to_string(),
+                dir: test_config_dir("id-x"),
             },
         );
         store.identity_upsert(&claude).unwrap();
@@ -1633,7 +1649,7 @@ mod tests {
             "acct-gone-2",
             "claude",
             SecretRef::OAuthConfigDir {
-                dir: "/var/agentmux/identities/id-y/claude".to_string(),
+                dir: test_config_dir("id-y"),
             },
         );
         store.identity_upsert(&claude).unwrap();
@@ -2657,7 +2673,7 @@ mod tests {
             "acct-drift",
             "claude",
             SecretRef::OAuthConfigDir {
-                dir: "/var/agentmux/identities/id-drift/claude".to_string(),
+                dir: test_config_dir("id-drift"),
             },
         );
         id_store.identity_upsert_with_mirror(&identity_store, &claude).unwrap();
@@ -2674,8 +2690,8 @@ mod tests {
 
         assert!(res.is_ok(), "a valid claude account must not be blocked by a stale codex column: {res:?}");
         assert_eq!(
-            env.get("CLAUDE_CONFIG_DIR").map(String::as_str),
-            Some("/var/agentmux/identities/id-drift/claude"),
+            env.get("CLAUDE_CONFIG_DIR").cloned(),
+            Some(test_config_dir("id-drift")),
             "the claude binding must actually inject, proving the gate expected claude (from the bundle), not codex (from the drifted column)"
         );
     }
@@ -2727,7 +2743,7 @@ mod tests {
             "acct-claude",
             "claude",
             SecretRef::OAuthConfigDir {
-                dir: "/var/agentmux/identities/id-bound/claude".to_string(),
+                dir: test_config_dir("id-bound"),
             },
         );
         store.identity_upsert(&claude).unwrap();
@@ -2740,7 +2756,7 @@ mod tests {
         let resolved = resolve_bound_oauth_config_dir(&store, &store, &store, "block-bound");
         assert_eq!(
             resolved,
-            Some(std::path::PathBuf::from("/var/agentmux/identities/id-bound/claude")),
+            Some(std::path::PathBuf::from(test_config_dir("id-bound"))),
         );
     }
 
