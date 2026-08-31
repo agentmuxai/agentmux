@@ -497,23 +497,11 @@ function renderDock(data) {
 }
 
 /**
- * Split argv into `{ cmd, sub, blockId, nodeId, json, help }`,
- * flags-and-positionals separated regardless of ordering. Flags can
- * legally appear before OR after the positional args (both 'muxspect
- * describe --json <id>' and 'muxspect --json describe <id>' are natural to
- * type) — filtering them out first, then reading command/args
- * positionally, is what makes both orders work; indexing into the raw,
- * flag-interspersed argv (the original implementation) silently ran
- * 'list' instead of 'describe' — or picked up a flag string as the
- * block_id — depending on where the flag landed (reagent P2 on PR #2380).
+ * Render `muxspect layout` — the persisted pane tree per tab as an indented
+ * outline, plus the layout doctor's verdict.
  *
- * `dock clear <block_id> <node_id>` doesn't fit the flat `{cmd, blockId}`
- * shape the other subcommands use (three positionals after the flag
- * filter, not two) — `sub` disambiguates `dock <block_id>` (read) from
- * `dock clear <block_id> <node_id>` (write) so `main()` doesn't have to
- * re-parse positional[1] itself.
- *
- * Exported (pure, no I/O) for muxspect.test.mjs.
+ * Exported (pure apart from console output) for muxspect.test.mjs, so the
+ * failure paths are testable rather than asserted.
  */
 export function renderLayout(data) {
     // A whole-request failure (the store couldn't be read at all) comes back
@@ -560,6 +548,25 @@ export function renderLayout(data) {
     }
 }
 
+/**
+ * Split argv into `{ cmd, sub, blockId, nodeId, json, help }`,
+ * flags-and-positionals separated regardless of ordering. Flags can
+ * legally appear before OR after the positional args (both 'muxspect
+ * describe --json <id>' and 'muxspect --json describe <id>' are natural to
+ * type) — filtering them out first, then reading command/args
+ * positionally, is what makes both orders work; indexing into the raw,
+ * flag-interspersed argv (the original implementation) silently ran
+ * 'list' instead of 'describe' — or picked up a flag string as the
+ * block_id — depending on where the flag landed (reagent P2 on PR #2380).
+ *
+ * `dock clear <block_id> <node_id>` doesn't fit the flat `{cmd, blockId}`
+ * shape the other subcommands use (three positionals after the flag
+ * filter, not two) — `sub` disambiguates `dock <block_id>` (read) from
+ * `dock clear <block_id> <node_id>` (write) so `main()` doesn't have to
+ * re-parse positional[1] itself.
+ *
+ * Exported (pure, no I/O) for muxspect.test.mjs.
+ */
 export function parseArgs(argv) {
     const json = argv.includes("--json");
     const help = argv.includes("--help") || argv.includes("-h");
