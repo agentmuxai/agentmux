@@ -16,7 +16,7 @@
  * agree with. See docs/specs/SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md.
  *
  * What stays hook-local: the expanded-body toggle, the `retrying` flag, and
- * the 5s/10s auto-retry countdown/budget. None of these are facts anything
+ * the auto-retry countdown/budget. None of these are facts anything
  * else in the app needs to agree on — they're pure view-presentation timing,
  * the same class as a `<Show>` toggle — so there's no drift risk in keeping
  * them here (same rationale the spec used to leave `expanded` local).
@@ -24,9 +24,12 @@
  * The actual recovery *effects* (re-run the turn, re-auth, open Armory) are
  * passed in by the caller so this hook stays presentation-only otherwise.
  *
- * Auto-retry: for transient classes (rate-limit / overload / network) a 5 s
+ * Auto-retry: for transient classes (rate-limit / overload / network) a
  * countdown arms; clicking Retry fires immediately, reaching 0 fires
- * automatically, Dismiss cancels — capped at 2 auto-retries (5 s → 10 s).
+ * automatically, Dismiss cancels. Bounded by `AUTO_RETRY_BACKOFF_S` —
+ * 5 rungs (5 s → 15 s → 30 s → 60 s → 120 s, each ±20% jittered), ~3.9 min
+ * of coverage, then manual-only. See that constant for why the ladder is
+ * this long and why it is nonetheless finite.
  *
  * Spec: docs/specs/SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md §4–§6.
  */
@@ -240,7 +243,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
     // clears `state.failure` the instant that happens, which this effect
     // observes directly. An auto-fired or manually-clicked Retry ALSO clears
     // `state.failure` (via `clear()`), but must NOT reset the budget — same
-    // episode, still capped at 2 (`armAutoRetry`) — so `doRetry` sets
+    // episode, still bound by the same ladder cap (`armAutoRetry`) — so `doRetry` sets
     // `selfInitiatedClear` first; this effect consumes (and resets) that
     // flag on every transition it observes.
     //
