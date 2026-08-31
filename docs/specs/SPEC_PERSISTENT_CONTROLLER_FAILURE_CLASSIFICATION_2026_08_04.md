@@ -49,12 +49,14 @@ already works correctly — **for every provider except Claude**:
   to.
 - `frontend/app/view/agent/hooks/useAgentFailure.ts` — subscribes to that
   event, and for `isTransient(code)` classes (`rate_limited` / `overloaded`
-  / `network`, `failure-accessory.ts:79-81`) already arms a 5s → 10s
-  auto-retry countdown, capped at 2 attempts
-  (`AUTO_RETRY_BACKOFF_S = [5, 10]`, `useAgentFailure.ts:44`), plus a
-  manual Retry action beyond that. This is genuinely "best practice" retry
-  UX (bounded, exponential-ish, user-visible, cancelable) — nothing about
-  the *policy* needs to change.
+  / `network`, `failure-accessory.ts:79-81`) already arms an auto-retry
+  countdown, capped at the `AUTO_RETRY_BACKOFF_S` ladder length
+  (`[5, 10]` when this spec was written; widened to
+  `[5, 15, 30, 60, 120]` with ±20% jitter on 2026-08-31 — see that constant
+  in `useAgentFailure.ts` for the live values), plus a manual Retry action
+  beyond that. This is genuinely "best practice" retry UX (bounded,
+  exponential, user-visible, cancelable) — nothing about the *policy*
+  needed to change for this spec's own work.
 
 All four pieces are wired together correctly today in
 `agentmux-srv/src/backend/blockcontroller/subprocess/host_spawn.rs`
@@ -193,9 +195,11 @@ already in that set.
 
 ## Non-goals
 
-- **No change to the auto-retry policy itself** (5s/10s countdown, 2-attempt
-  cap) — that's `SPEC_AGENT_FAILURE_RECOVERY_UI`'s design, already shipped,
-  already correct.
+- **No change to the auto-retry policy itself** (a bounded countdown ladder;
+  `5s/10s` with a 2-attempt cap when this spec was written, widened to
+  `5s → 15s → 30s → 60s → 120s` jittered on 2026-08-31 — `AUTO_RETRY_BACKOFF_S`
+  in `useAgentFailure.ts` is the source of truth) — that's
+  `SPEC_AGENT_FAILURE_RECOVERY_UI`'s design, already shipped.
 - **No change to `persistent_resume`'s stale-`--resume` retry mechanism** —
   this spec only adds classification on the paths that mechanism has
   already decided are NOT being retried; the mechanism itself is untouched.

@@ -16,7 +16,7 @@
  * agree with. See docs/specs/SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md.
  *
  * What stays hook-local: the expanded-body toggle, the `retrying` flag, and
- * the 5s/10s auto-retry countdown/budget. None of these are facts anything
+ * the auto-retry countdown/budget. None of these are facts anything
  * else in the app needs to agree on — they're pure view-presentation timing,
  * the same class as a `<Show>` toggle — so there's no drift risk in keeping
  * them here (same rationale the spec used to leave `expanded` local).
@@ -24,9 +24,12 @@
  * The actual recovery *effects* (re-run the turn, re-auth, open Armory) are
  * passed in by the caller so this hook stays presentation-only otherwise.
  *
- * Auto-retry: for transient classes (rate-limit / overload / network) a 5 s
+ * Auto-retry: for transient classes (rate-limit / overload / network) a
  * countdown arms; clicking Retry fires immediately, reaching 0 fires
- * automatically, Dismiss cancels — capped at 2 auto-retries (5 s → 10 s).
+ * automatically, Dismiss cancels. Bounded by `AUTO_RETRY_BACKOFF_S` —
+ * 5 rungs (5 s → 15 s → 30 s → 60 s → 120 s, each ±20% jittered), ~3.9 min
+ * of coverage, then manual-only. See that constant for why the ladder is
+ * this long and why it is nonetheless finite.
  *
  * Spec: docs/specs/SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md §4–§6.
  */
@@ -41,7 +44,42 @@ import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import type { PaneFailure } from "@/app/store/agent-pane-state/types";
 import { failureToRow, isTransient, type FailureRow } from "../failure/failure-accessory";
 
-const AUTO_RETRY_BACKOFF_S = [5, 10] as const; // then manual-only
+/**
+ * Auto-retry ladder for transient provider failures (429 rate-limited, 529
+ * overloaded, network). Exponential, bounded, then manual-only.
+ *
+ * Was `[5, 10]` — two attempts, ~15s of coverage. That is shorter than a
+ * typical Anthropic 429/529 episode, so a genuinely transient overload
+ * routinely exhausted the budget and dropped to manual-only while still
+ * being retryable. This ladder covers ~4 minutes across 5 attempts, which
+ * spans the common case without becoming an unbounded retry loop (the cap
+ * is what stops a persistently-throttled turn from retrying forever — see
+ * `endEpisode`).
+ *
+ * Deliberately NOT infinite: a turn that is still failing after ~4 minutes
+ * is more likely a sustained outage or an account-level limit than a blip,
+ * and at that point a human should decide. `SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md` §6.
+ */
+const AUTO_RETRY_BACKOFF_S = [5, 15, 30, 60, 120] as const; // then manual-only
+
+/** Jitter fraction applied to each ladder rung (±20%). */
+const AUTO_RETRY_JITTER = 0.2;
+
+/**
+ * Spread concurrent retries so a fleet doesn't re-hit the API in lockstep.
+ *
+ * A Fleet broadcast, a cron sweep, or several loops can put many agents into
+ * the same failure at the same instant; without jitter every one of them
+ * retries on the identical second and can re-trigger the very 529 they are
+ * backing off from. Applies ±`AUTO_RETRY_JITTER` and floors at 1s so the
+ * visible countdown never starts at 0.
+ *
+ * Pure, with an injectable source, so the ladder is testable deterministically.
+ */
+export function jitteredBackoffSeconds(baseSeconds: number, rand: () => number = Math.random): number {
+    const factor = 1 + (rand() * 2 - 1) * AUTO_RETRY_JITTER;
+    return Math.max(1, Math.round(baseSeconds * factor));
+}
 
 export interface UseAgentFailureOptions {
     blockId: string;
@@ -128,7 +166,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
 
     const armAutoRetry = () => {
         if (autoRetries >= AUTO_RETRY_BACKOFF_S.length) return; // capped → manual only
-        const seconds = AUTO_RETRY_BACKOFF_S[autoRetries];
+        const seconds = jitteredBackoffSeconds(AUTO_RETRY_BACKOFF_S[autoRetries]);
         autoRetries += 1;
         setAutoRetryIn(seconds);
         countdown = setInterval(() => {
@@ -171,8 +209,8 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         });
 
         // Restore the full auto-retry budget once the LAST turn genuinely
-        // succeeded — a later unrelated transient failure must get its own 2
-        // auto-retries, not inherit a stale count from turns ago. `turn-ended`
+        // succeeded — a later unrelated transient failure must get its own full
+        // ladder, not inherit a stale count from turns ago. `turn-ended`
         // with outcome "completed" is the reducer's own authoritative verdict
         // (emitted only by the real `TurnEnd` command, driven by the CLI's own
         // session_end/result frame on stdout) — a strictly more reliable
@@ -205,7 +243,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
     // clears `state.failure` the instant that happens, which this effect
     // observes directly. An auto-fired or manually-clicked Retry ALSO clears
     // `state.failure` (via `clear()`), but must NOT reset the budget — same
-    // episode, still capped at 2 (`armAutoRetry`) — so `doRetry` sets
+    // episode, still bound by the same ladder cap (`armAutoRetry`) — so `doRetry` sets
     // `selfInitiatedClear` first; this effect consumes (and resets) that
     // flag on every transition it observes.
     //
