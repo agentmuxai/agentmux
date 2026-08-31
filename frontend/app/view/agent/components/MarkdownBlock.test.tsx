@@ -55,7 +55,7 @@ describe("MarkdownBlock — regular (non-thinking) text now gets a peek too", ()
             hoverBlock(container);
             const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
             expect(metaLines.length).toBe(2);
-            expect(metaLines[0].textContent).toMatch(/\d{2}:\d{2}:\d{2} · 1m ago/);
+            expect(metaLines[0].textContent).toMatch(/\d{1,2}:\d{2}:\d{2} (?:AM|PM) · 1m ago/);
             expect(metaLines[1].textContent).toMatch(/~\d+ tok \(est\.\)/);
         } finally {
             vi.useRealTimers();
@@ -73,7 +73,7 @@ describe("MarkdownBlock — thinking-clump peek tooltip", () => {
             hoverBlock(container);
             const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
             expect(metaLines.length).toBe(2);
-            expect(metaLines[0].textContent).toMatch(/\d{2}:\d{2}:\d{2} · 1m ago/);
+            expect(metaLines[0].textContent).toMatch(/\d{1,2}:\d{2}:\d{2} (?:AM|PM) · 1m ago/);
             expect(metaLines[1].textContent).toMatch(/~\d+ tok \(est\.\)/);
         } finally {
             vi.useRealTimers();
