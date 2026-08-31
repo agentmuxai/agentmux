@@ -35,7 +35,25 @@ fn register_blockfile_line_count(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 if let Some((gfs, zone)) =
                     global_output_source(&filestore, &global_store, &wstore, &cmd.block_id, &cmd.filename)
                 {
-                    if let Some(count) = global_zone_line_count(&gfs, &zone) {
+                    // Blocking pool (#2841): this extends or, when it can't
+                    // anchor on the existing index, fully rebuilds `output.idx`
+                    // — a streaming scan proportional to transcript size.
+                    let count = match tokio::task::spawn_blocking(move || {
+                        global_zone_line_count(&gfs, &zone)
+                    })
+                    .await
+                    {
+                        Ok(v) => v,
+                        Err(e) => {
+                            tracing::warn!(
+                                block_id = %cmd.block_id,
+                                error = %e,
+                                "blockfile:line_count: global zone count task failed; falling back"
+                            );
+                            None
+                        }
+                    };
+                    if let Some(count) = count {
                         return Ok(Some(
                             serde_json::to_value(&BlockfileLineCountResult { count }).unwrap(),
                         ));
@@ -131,19 +149,33 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // index of every non-blank line in `output`. It lets us seek directly
                 // to the requested line range instead of loading the whole file.
                 //
-                // The index is a pure cache of `output` with NO incremental mutation:
-                // its 8-byte header records the `output` size it was built for. If that
-                // equals `output`'s current size the index is fresh; otherwise we rebuild
-                // it from a single streaming scan (rebuild_output_idx). Because the index
-                // is always derived from the current `output` in one shot, it can never
-                // desync, mis-handle chunk-split lines, or miscount blank lines — the
-                // failure modes an incremental index would have.
+                // The index is a pure cache of `output`: its 8-byte header records
+                // the `output` size it was built for. If that equals `output`'s
+                // current size the index is fresh; otherwise THIS path rebuilds it
+                // from a single streaming scan (rebuild_output_idx), so the result
+                // is always derived from the current `output` in one shot and can
+                // never desync, mis-handle chunk-split lines, or miscount blanks.
+                //
+                // Note this describes the read_range path only. The line_count path
+                // does mutate the index incrementally (`extend_output_idx`, #2838),
+                // scanning just the appended bytes and anchoring on the start of the
+                // last indexed line so a straddling partial line isn't double-counted.
+                // Both produce an exact count; they differ only in cost.
                 //
                 // Gated to non-circular files: circular `output` (terminal ring buffers)
                 // drops early bytes, so absolute byte offsets wouldn't map cleanly.
                 use crate::backend::blockcontroller::shell::{rebuild_output_idx, OUTPUT_IDX_HEADER_LEN};
                 if cmd.filename == "output" {
-                    let idx_result: Option<BlockfileReadRangeResult> = (|| {
+                    // Runs on the blocking pool (#2841). A full rebuild is a
+                    // streaming scan of `output`, which reaches hundreds of MB
+                    // on a long-lived agent, and every index/output read below
+                    // is blocking file I/O as well — none of it may occupy a
+                    // Tokio runtime worker. The closure body is unchanged; only
+                    // where it runs is.
+                    let idx_result: Option<BlockfileReadRangeResult> = {
+                        let filestore = filestore.clone();
+                        let read_block = read_block.clone();
+                        let compute = move || -> Option<BlockfileReadRangeResult> {
                         let out_stat = filestore.stat(&read_block, "output").ok()??;
                         if out_stat.opts.circular {
                             return None; // circular files: fall back to slow path
@@ -261,7 +293,22 @@ fn register_blockfile_read_range(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         })();
 
                         Some(BlockfileReadRangeResult { lines, total: total_lines, stamps })
-                    })();
+                        };
+                        // A panic in the scan must degrade to the slow path
+                        // below, not fail the read — but it is logged rather
+                        // than silently swallowed.
+                        match tokio::task::spawn_blocking(compute).await {
+                            Ok(v) => v,
+                            Err(e) => {
+                                tracing::warn!(
+                                    block_id = %cmd.block_id,
+                                    error = %e,
+                                    "blockfile:read_range: output.idx task failed; falling back"
+                                );
+                                None
+                            }
+                        }
+                    };
                     if let Some(result) = idx_result {
                         tracing::debug!(
                             block_id = %cmd.block_id,
