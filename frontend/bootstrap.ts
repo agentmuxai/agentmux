@@ -19,7 +19,7 @@ import { invokeCommand } from "@/app/platform/ipc";
 initLogPipe();
 
 // ── First-paint signal (Linux startup white-flash fix) ──────────────────────
-// docs/specs/SPEC_LINUX_STARTUP_PAINT_GATING_2026_07_13.md.
+// docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md.
 //
 // Tell the host the moment the browser has actually composited a frame — not
 // "main-frame load complete" (CEF's `on_load_end`, which can fire before

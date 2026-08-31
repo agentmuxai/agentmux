@@ -1,12 +1,18 @@
 # Tab close (X) button — spurious select flash
 
-**Status:** §§2-3 (click-bubble race), §5 (double round trip), §6
-(unbatched RPC-response application), and §7 (unbatched WS-push
-application — the reason the flash survived §§5-6) are all implemented on
-branch `fix/tab-close-select-flash` (PR #2811, open — not yet merged to
-`main`, so no release build contains any of this yet).
+**Status:** **RESOLVED.** §§2-3 (click-bubble race), §5 (double round trip),
+§6 (unbatched RPC-response application) and §7 (unbatched WS-push application)
+merged in PR #2811 (`c0eb56d87`) — all four were real defects, but the flash
+survived them. It was actually fixed by §8 (**optimistic tab removal** — the
+strip stops depending on backend update ordering at all) and §9 (**targeted
+reveal gate**), merged in PR #2818 (`a2fbe5b4d`).
 **Owner:** unassigned
 **Date:** 2026-08-25
+**Why it took five rounds:** analysed in
+`docs/reports/REPORT_TAB_FLASH_SYSTEMIC_ANALYSIS_2026_08_31.md` — §§2-7 each
+tried to *win* an ordering race; only §8 left the race. That report also
+records the verification gap (no build ever contained §§5-7 together during
+testing) and the wider ~40-document flicker family this belongs to.
 **Scope:** `frontend/app/tab/tab.tsx`, `frontend/app/tab/tabbar.tsx`,
 `frontend/app/tab/droppable-tab.tsx`, `agentmux-srv/src/reducer/tab.rs`
 (`handle_set_active_tab`, `handle_delete_tab`)

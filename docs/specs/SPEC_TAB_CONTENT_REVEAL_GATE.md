@@ -1,6 +1,7 @@
 # Tab content reveal gate
 
-**Status:** Proposed (implemented — see note below)
+**Status:** Implemented — but this document describes the ORIGINAL design; two
+later specs changed its behaviour. Read those before relying on anything below.
 **Owner:** AgentA
 **Date:** 2026-05-09
 
@@ -8,6 +9,25 @@
 > exist, wired into `startup-splash.ts` and `editor-model.ts`. Status field
 > was never updated. See
 > `docs/reports/REPORT_DOCS_AND_DEAD_CODE_CLEANUP_AUDIT_2026_08_07.md`.
+>
+> **2026-08-31 amendment — the gate is no longer one global boolean:**
+> - `SPEC_PANE_BLOCK_STACK_MOUNT_FLICKER_2026_08_22.md` added a **leaf-scoped**
+>   gate (`gatingNodeIds()`, `holdLeafRevealGate`/`scheduleLeafRevealLift` with
+>   generation tokens) alongside this whole-tab one, for pane-local mounts that
+>   bypass `setActiveTab`.
+> - `SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md` §9 made the whole-tab
+>   gate **targeted**: `holdRevealGate(targetTabId)` names its destination, and
+>   `workspace.tsx` hides only that tab once it becomes active. Previously it
+>   gated whichever tab was active *at the time*, which — because `activeTabId`
+>   derives from the same `Workspace` object whose mutation is the transition —
+>   meant it gated the OUTGOING tab during a close and let the incoming one
+>   blank toward the 800ms cap.
+>
+> The timer-based lift below (80ms clean-frame settle / 800ms hard cap) is
+> unchanged and remains the known weak point — it guesses at readiness rather
+> than observing it. See
+> `docs/specs/SPEC_TAB_WINDOW_RENDER_ARCHITECTURE_2026_08_31.md` §3.4 for the
+> proposed causal replacement.
 **Driving observation:** Switching tabs in AgentMux reveals content in stages — title bar updates first, then pane shells, then block content fills in pane-by-pane, then final layout settles. The user perceives this as visual jank: "different parts of the window appear at different times." Reported as a general cleanup concern, not specific to any one pane type.
 
 ## Symptom
