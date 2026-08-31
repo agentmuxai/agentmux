@@ -253,6 +253,18 @@
     &--cron .swarm-bucket-label {
         color: var(--info-color);
     }
+    // Long-running tool calls (step 4 of
+    // REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md §3).
+    // Deliberately NOT a fifth saturated hue: the four above are all declared,
+    // addressable objects (a dispatch, a workflow, a shell, a cron), whereas
+    // this bucket is INFERRED from a tool call still running past a threshold.
+    // A quieter label carries that distinction, and grey still reads apart at a
+    // glance from blue/amber/green/purple. The alternative — minting a fifth
+    // theme token, as `--info-color` was minted for cron — would assert a
+    // semantic peer relationship this bucket doesn't have.
+    &--longrunning .swarm-bucket-label {
+        color: var(--secondary-text-color);
+    }
 }
 
 .swarm-bucket-header {
@@ -1039,3 +1051,41 @@
     }
 }
 
+
+// ── Long-running tool calls bucket ───────────────────────────────────────────
+// Step 4 of REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md §3.
+// Deliberately the same row geometry as .swarm-shell-row: both are flat,
+// mechanical, read-only rows, and a reader scanning an agent's children should
+// not have to re-orient between them.
+.swarm-longrunning-row {
+    display: flex;
+    align-items: center;
+    height: 30px;
+    padding: 0 6px 0 30px;
+    gap: 8px;
+    user-select: none;
+}
+
+.swarm-longrunning-title {
+    flex: 1;
+    font-size: 12px;
+    font-family: var(--monospace-font, monospace);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--main-text-color);
+}
+
+.swarm-longrunning-elapsed {
+    flex-shrink: 0;
+    font-size: 10px;
+    color: var(--secondary-text-color);
+}
+
+// Only present for a whole-command sleep — the one case where the remaining
+// time is known rather than guessed. Dimmer than the elapsed clock beside it.
+.swarm-longrunning-remaining {
+    flex-shrink: 0;
+    font-size: 10px;
+    color: var(--tertiary-text-color, rgba(255, 255, 255, 0.35));
+}
