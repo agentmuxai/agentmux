@@ -16,6 +16,7 @@ import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import { getBlockTurnPhase } from "@/app/store/agentActivity";
 import { recordTurn } from "@/app/store/token-usage";
 import { useTick } from "@/app/hook/useTick";
+import { longRunningToolRows, type LongRunningToolRow } from "./swarm-longrunning";
 import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedClock } from "@/util/format-time";
 import { focusBlock } from "@/app/util/focus-block";
@@ -214,7 +215,11 @@ export function countdownSecondsRemaining(model: SwarmViewModel, rowKey: string,
 
 const fmtCtx = formatCompactNumber;
 
-function AgentRow({
+// Exported for `swarm-agent-row.render.test.tsx`, which pins the PR #2862
+// regression both reviewers caught: an agent whose only activity is a
+// long-running tool call must still show the expand affordance and render the
+// bucket. Same test-only export precedent as `DispatchActivityFeedEntry`.
+export function AgentRow({
     node,
     focusedBlockId,
     model,
@@ -227,9 +232,22 @@ function AgentRow({
         phaseToDisplayStatus(node.blockId, node.agentStatus)
     );
     const collapsed = createMemo(() => model.isAgentCollapsed(node.blockId));
-    const totalRows = createMemo(
-        () => node.agentToolRows.length + node.workflowRows.length + node.shellRows.length + node.cronRows.length
-    );
+    // Computed HERE, not inside LongRunningBucket, so it can feed `totalRows`
+    // below (reagent P1 on PR #2862). Left in the bucket, an agent whose only
+    // active work was a promoted Bash/sleep call had `hasChildren() === false`
+    // -> no expand chevron -> collapsed by default -> the children container's
+    // `Show when={!collapsed()}` never rendered the bucket at all. That is the
+    // single most common case for this feature, so the bucket was invisible
+    // exactly when it mattered.
+    //
+    // Ticks in the view rather than the model because promotion is time-based:
+    // the list changes with the clock, not only with backend events.
+    const tick = useTick(1000);
+    const longRunningRows = createMemo(() => {
+        tick();
+        return longRunningToolRows(node.blockId, Date.now());
+    });
+    const totalRows = createMemo(() => agentChildRowCount(node, longRunningRows().length));
     const hasChildren = createMemo(() => totalRows() > 0);
 
     const [summaryFlash, setSummaryFlash] = createSignal(false);
@@ -335,6 +353,7 @@ function AgentRow({
                     <WorkflowBucket rows={node.workflowRows} model={model} />
                     <ShellBucket rows={node.shellRows} />
                     <CronBucket rows={node.cronRows} />
+                    <LongRunningBucket rows={longRunningRows()} />
                 </div>
             </Show>
         </div>
@@ -427,6 +446,85 @@ function ShellRow({ shell }: { shell: ActiveShell }): JSX.Element {
             <button class="swarm-shell-stop" title="Stop" onClick={handleStop}>
                 <i class="fa-solid fa-stop" />
             </button>
+        </div>
+    );
+}
+
+// Long-running tool calls — step 4 of
+// REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md §3 ("feed the
+// same signal to Swarm"). The gap the other four buckets leave: a `sleep 300`
+// or a four-minute build is an ordinary Bash tool call, owned by the CLI rather
+// than by srv, so it appeared in that pane's own Activity Dock and nowhere
+// else — the fleet view couldn't answer "which agents are sitting on a wait".
+//
+// Placed last, below Shell/Cron: those are declared, addressable objects with
+// their own lifecycle, whereas this bucket is inferred from a running tool
+// call. Same most-abstract-first ordering the Shell/Cron comments describe.
+//
+// Ticks here rather than in the model: promotion is time-based
+// (TOOL_PROMOTION_MS), so the list changes with the clock and not only with
+// backend events. Keeping the clock dependency in the view leaves
+// `buildTree`'s memo free of it.
+/**
+ * Total child rows under one agent — drives the expand chevron, the
+ * collapsed-count badge, and `hasChildren`.
+ *
+ * Exported and kept as a plain sum so every bucket's contribution is asserted
+ * in one place. BOTH reviewers independently caught the same omission on
+ * PR #2862: the long-running bucket wasn't in this sum, so an agent whose only
+ * activity was a promoted Bash/sleep call reported `hasChildren() === false` —
+ * no chevron, collapsed by default, and the children container's
+ * `Show when={!collapsed()}` meant the bucket never rendered at all. The
+ * feature was invisible in precisely its primary case.
+ *
+ * A future sixth bucket must be added here too; the test file enumerates each
+ * one so forgetting is a failing test rather than an invisible feature.
+ */
+export function agentChildRowCount(node: AgentTreeNode, longRunningCount: number): number {
+    return (
+        node.agentToolRows.length +
+        node.workflowRows.length +
+        node.shellRows.length +
+        node.cronRows.length +
+        longRunningCount
+    );
+}
+
+function LongRunningBucket({ rows }: { rows: LongRunningToolRow[] }): JSX.Element {
+    return (
+        <Show when={rows.length > 0}>
+            <div class="swarm-bucket swarm-bucket--longrunning">
+                <div class="swarm-bucket-header">
+                    <span class="swarm-bucket-label">Running</span>
+                    <span class="swarm-bucket-count">{rows.length}</span>
+                </div>
+                <For each={rows}>{(row) => <LongRunningRow row={row} />}</For>
+            </div>
+        </Show>
+    );
+}
+
+function LongRunningRow({ row }: { row: LongRunningToolRow }): JSX.Element {
+    const tick = useTick(1000);
+    const elapsed = createMemo(() => {
+        tick();
+        return formatElapsedClock(Date.now() - row.startedAt);
+    });
+    // Only a whole-command sleep knows its own remaining time (sleep-detect.ts);
+    // everything else shows elapsed alone rather than a guess. Clamped at 0 —
+    // the process is reaped slightly after its own deadline.
+    const remaining = createMemo(() => {
+        if (row.sleepMs == null) return "";
+        tick();
+        return `~${Math.ceil(Math.max(0, row.startedAt + row.sleepMs - Date.now()) / 1000)}s left`;
+    });
+    return (
+        <div class="swarm-longrunning-row" title={row.title}>
+            <span class="swarm-longrunning-title">{row.title}</span>
+            <span class="swarm-longrunning-elapsed">{elapsed()}</span>
+            <Show when={remaining()}>
+                <span class="swarm-longrunning-remaining">{remaining()}</span>
+            </Show>
         </div>
     );
 }
