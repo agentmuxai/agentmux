@@ -45,6 +45,15 @@ pub enum SpawnGateError {
     /// §8); this variant is the enforcement that closes that gap. See
     /// `docs/specs/SPEC_BLOCK_AMBIENT_HOME_DIR_IDENTITY_BINDING_2026_08_25.md`.
     AmbientHomeDirNotAllowed { provider: String, dir: String },
+    /// Failed to seed the isolated Claude Code config dir's `CLAUDE.md`
+    /// placeholder (`providers::seed_claude_md_placeholder_if_missing`).
+    /// Blocked rather than warn-and-continue: an isolated dir with no
+    /// `CLAUDE.md` of its own is exactly the condition where Claude Code
+    /// CLI falls through to the operator's real `~/.claude/CLAUDE.md` —
+    /// continuing to spawn would launch the agent with the leak this
+    /// fix exists to close. See
+    /// `docs/specs/SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md`.
+    ClaudeMdSeedFailed { provider: String, dir: String, error: String },
 }
 
 impl std::fmt::Display for SpawnGateError {
@@ -76,6 +85,12 @@ impl std::fmt::Display for SpawnGateError {
                  own global CLI login. Re-bind this identity to an isolated account \
                  in Armory → Accounts (delete the current {provider} account and log \
                  in again to create a fresh, isolated one), then retry.",
+            ),
+            SpawnGateError::ClaudeMdSeedFailed { provider, dir, error } => write!(
+                f,
+                "could not isolate this agent's {provider} config directory ({dir}): \
+                 {error}. Refusing to spawn with an unprotected config dir — retry, \
+                 and check the directory's permissions if it persists.",
             ),
         }
     }

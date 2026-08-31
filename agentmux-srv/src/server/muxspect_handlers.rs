@@ -91,10 +91,24 @@ pub struct LastErrorFrame {
 /// recognized — without this branch every ambient-home refusal reported
 /// `unknown` instead of `identity`, regressing this diagnostic for exactly
 /// the pre-spawn refusal case it exists to classify.
+///
+/// ReAgent P2, PR #2854: same regression again for
+/// `SpawnGateError::ClaudeMdSeedFailed` (a newer variant, wording starts
+/// with "could not isolate this agent's") — this function needs a new
+/// branch every time a `SpawnGateError` variant with distinct wording is
+/// added, since it infers the source from message text rather than the
+/// error's own type. A future variant will hit the same gap again unless
+/// this doc comment (and the parallel test below) are kept in sync.
 fn classify_last_error_source(message: &str) -> &'static str {
     if message.starts_with("no credentials for")
         || message.starts_with("credential injection could not run")
         || message.starts_with("this agent's")
+        // ReAgent P2 on PR #2854: SpawnGateError::ClaudeMdSeedFailed's own
+        // Display prefix — same regression this function's doc history
+        // already covers for AmbientHomeDirNotAllowed (codex P2, PR #2802),
+        // recurring for a newer SpawnGateError variant this function wasn't
+        // updated for when it was added.
+        || message.starts_with("could not isolate this agent's")
     {
         "identity"
     } else if message.starts_with("container exec failed") || message.starts_with("container ensure_running failed")
@@ -1189,6 +1203,11 @@ mod tests {
         // codex P2, PR #2802: SpawnGateError::AmbientHomeDirNotAllowed.
         assert_eq!(
             classify_last_error_source("this agent's claude identity points directly at your personal claude config directory (C:\\Users\\asafe\\.claude) instead of an isolated AgentMux account — AgentMux no longer allows spawning an agent against your own global CLI login. Re-bind this identity to an isolated account in Armory \u{2192} Accounts (delete the current claude account and log in again to create a fresh, isolated one), then retry."),
+            "identity"
+        );
+        // ReAgent P2, PR #2854: SpawnGateError::ClaudeMdSeedFailed.
+        assert_eq!(
+            classify_last_error_source("could not isolate this agent's claude config directory (C:\\Users\\asafe\\.agentmux\\shared\\identities\\id-1\\claude): permission denied. Refusing to spawn with an unprotected config dir — retry, and check the directory's permissions if it persists."),
             "identity"
         );
         assert_eq!(

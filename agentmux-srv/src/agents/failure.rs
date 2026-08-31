@@ -238,6 +238,31 @@ pub fn classify(
             &tail,
         );
     }
+    // The identity spawn gate's CLAUDE.md isolation-seed refusal
+    // (identity/resolver/errors.rs's `SpawnGateError::ClaudeMdSeedFailed`
+    // Display impl — same reasoning as the two branches above: this never
+    // reaches the API, so it needs its own title/detail instead of falling
+    // through to the generic UnknownNonZero fallback. ReAgent P2 on PR
+    // #2854 — added alongside AmbientHomeDirNotAllowed's sibling branch
+    // above but initially missed for this newer variant.
+    if hay.contains("refusing to spawn with an unprotected config dir") {
+        let provider_phrase = extract_claude_md_seed_provider(&combined)
+            .map(|p| format!("This agent's {} config directory", capitalize_provider(&p)))
+            .unwrap_or_else(|| "This agent's config directory".to_string());
+        return build(
+            FailureClass::Auth,
+            "Could not isolate this agent's config",
+            &format!(
+                "{provider_phrase} could not be prepared for isolated use — the spawn was \
+                 refused rather than risk it silently reading your personal CLI config. \
+                 Retry, and check the directory's permissions if it persists."
+            ),
+            false,
+            exit_code,
+            signal,
+            &tail,
+        );
+    }
     if hay.contains("authentication_error")
         || hay.contains("authentication_failed")
         || hay.contains("invalid authentication")
@@ -403,6 +428,22 @@ fn extract_ambient_home_provider(combined: &str) -> Option<String> {
     let start = combined.find(marker)? + marker.len();
     let rest = &combined[start..];
     let end = rest.find(" identity points directly")?;
+    let provider = rest[..end].trim();
+    if provider.is_empty() {
+        None
+    } else {
+        Some(provider.to_string())
+    }
+}
+
+/// Pulls the provider id out of
+/// `SpawnGateError::ClaudeMdSeedFailed`'s own Display wording ("could not
+/// isolate this agent's {provider} config directory (…): …").
+fn extract_claude_md_seed_provider(combined: &str) -> Option<String> {
+    let marker = "could not isolate this agent's ";
+    let start = combined.find(marker)? + marker.len();
+    let rest = &combined[start..];
+    let end = rest.find(" config directory")?;
     let provider = rest[..end].trim();
     if provider.is_empty() {
         None
@@ -717,6 +758,57 @@ mod tests {
         assert_eq!(f.code, FailureClass::Auth);
         assert!(f.detail.contains("Codex"), "detail: {}", f.detail);
         assert!(!f.detail.contains("Claude"), "detail: {}", f.detail);
+    }
+
+    #[test]
+    fn spawn_gate_claude_md_seed_failed_is_auth_not_unknown() {
+        // docs/specs/SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md — ReAgent P2
+        // on PR #2854: this newer SpawnGateError variant had no
+        // classification branch, so it fell through to the generic
+        // UnknownNonZero "Agent failed" instead of the guidance its own
+        // Display text already carries. Same "must not fall through to a
+        // dead-end Retry" reasoning as its MissingCredentials/
+        // AmbientHomeDirNotAllowed siblings above.
+        let frame = json!({
+            "type": "result",
+            "is_error": true,
+            "subtype": "error_during_execution",
+            "error": { "message": "[AgentMux] could not isolate this agent's claude config directory (C:\\Users\\asafe\\.agentmux\\shared\\identities\\id-1\\claude): permission denied. Refusing to spawn with an unprotected config dir — retry, and check the directory's permissions if it persists." }
+        });
+        let f = classify(Some(1), None, "", Some(&frame));
+        assert_eq!(f.code, FailureClass::Auth);
+        assert!(!f.retryable, "a bare retry may not succeed against a persistent permissions issue");
+        assert!(f.detail.contains("Claude"), "detail: {}", f.detail);
+        assert!(f.title.to_lowercase().contains("isolate"), "title: {}", f.title);
+    }
+
+    #[test]
+    fn spawn_gate_claude_md_seed_failed_names_the_actual_provider_not_claude() {
+        let frame = json!({
+            "type": "result",
+            "is_error": true,
+            "subtype": "error_during_execution",
+            "error": { "message": "[AgentMux] could not isolate this agent's codex config directory (/home/user/.agentmux/shared/providers/codex): permission denied. Refusing to spawn with an unprotected config dir — retry, and check the directory's permissions if it persists." }
+        });
+        let f = classify(Some(1), None, "", Some(&frame));
+        assert_eq!(f.code, FailureClass::Auth);
+        assert!(f.detail.contains("Codex"), "detail: {}", f.detail);
+        assert!(!f.detail.contains("Claude"), "detail: {}", f.detail);
+    }
+
+    #[test]
+    fn extract_claude_md_seed_provider_reads_the_provider_out_of_the_gate_wording() {
+        assert_eq!(
+            extract_claude_md_seed_provider(
+                "could not isolate this agent's gemini config directory (/x): some io error."
+            ),
+            Some("gemini".to_string()),
+        );
+    }
+
+    #[test]
+    fn extract_claude_md_seed_provider_returns_none_on_wording_mismatch() {
+        assert_eq!(extract_claude_md_seed_provider("some unrelated error text"), None);
     }
 
     #[test]

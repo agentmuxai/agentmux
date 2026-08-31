@@ -638,6 +638,68 @@ pub fn is_provider_ambient_home_dir(provider: &ProviderConfig, dir: &str) -> boo
     paths_resolve_to_same_dir(&ambient, dir)
 }
 
+/// Placeholder written by `seed_claude_md_placeholder_if_missing` — explains
+/// itself so an operator who opens the file isn't confused by an unexplained
+/// empty one.
+const CLAUDE_MD_ISOLATION_PLACEHOLDER: &str = "<!--\n\
+AgentMux: intentionally empty.\n\
+\n\
+This is an isolated Claude Code config directory (CLAUDE_CONFIG_DIR),\n\
+separate from your personal ~/.claude/CLAUDE.md, so this agent never\n\
+silently inherits your personal global instructions. To give every\n\
+agent shared instructions, use Armory -> Memory -> Global instead --\n\
+those compose into this agent's own project-level CLAUDE.md at launch,\n\
+not this file. See SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md.\n\
+-->\n";
+
+/// Seeds an empty placeholder `CLAUDE.md` into an isolated Claude Code
+/// `CLAUDE_CONFIG_DIR` the first time it's used, so Claude Code CLI's own
+/// user-level `CLAUDE.md` discovery always finds *something* there instead
+/// of silently falling through to the operator's real
+/// `$HOME/.claude/CLAUDE.md`. `CLAUDE_CONFIG_DIR` relocates credential/
+/// session/project storage but AgentMux never wrote a `CLAUDE.md` into the
+/// relocated dir — verified live on a real machine: 18+ isolated `claude`
+/// config dirs, none with a `CLAUDE.md`, and a session whose
+/// `CLAUDE_CONFIG_DIR` was a genuinely separate (non-ambient) dir still
+/// received the real host file's contents. See
+/// `docs/specs/SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md`.
+///
+/// Scoped to the `claude` provider only (`auth_dir_name == "claude"`) —
+/// this is a Claude Code CLI-specific fallback behavior; whether any other
+/// provider's CLI has an equivalent gap is unverified. Never overwrites an
+/// existing `CLAUDE.md` — Global Memory (or anything else) may have
+/// legitimately placed real content at that path. Returns `Ok(true)` only
+/// when it actually wrote the placeholder.
+pub fn seed_claude_md_placeholder_if_missing(
+    provider: &ProviderConfig,
+    config_dir: &str,
+) -> std::io::Result<bool> {
+    if provider.auth_dir_name != "claude" {
+        return Ok(false);
+    }
+    // Codex P2 on PR #2854: a blank config_dir would resolve
+    // `Path::new("").join("CLAUDE.md")` relative to the server process's
+    // own CWD (`create_dir_all("")` succeeds, silently no-op) instead of
+    // erroring — writing an unrelated file while leaving the actual
+    // (empty-string) CLAUDE_CONFIG_DIR still exposed to ambient fallback.
+    // Reject before touching the filesystem so the caller's fail-closed
+    // handling (both call sites now block spawn on any Err here) covers
+    // this case too, rather than silently succeeding at nothing.
+    if config_dir.trim().is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "config_dir is empty",
+        ));
+    }
+    let path = std::path::Path::new(config_dir).join("CLAUDE.md");
+    if path.exists() {
+        return Ok(false);
+    }
+    std::fs::create_dir_all(config_dir)?;
+    std::fs::write(&path, CLAUDE_MD_ISOLATION_PLACEHOLDER)?;
+    Ok(true)
+}
+
 /// The actual comparison, split out with the reference side pre-resolved
 /// (not calling `get_home_dir()` internally) so it's directly testable
 /// against a tempdir instead of the real `$HOME`/`%USERPROFILE%` — same
@@ -994,6 +1056,69 @@ mod tests {
             // A dir that can't possibly be the real ambient home (this
             // process's actual $HOME/.claude) must never match.
             assert!(!is_provider_ambient_home_dir(claude, "/tmp/agentmux-test-definitely-not-ambient"));
+        }
+    }
+
+    mod claude_md_placeholder_tests {
+        use super::*;
+
+        #[test]
+        fn writes_the_placeholder_when_claude_md_is_missing() {
+            let dir = tempfile::tempdir().unwrap();
+            let claude = get_provider("claude").unwrap();
+            let wrote = seed_claude_md_placeholder_if_missing(claude, &dir.path().to_string_lossy()).unwrap();
+            assert!(wrote);
+            let content = std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap();
+            assert!(content.contains("AgentMux: intentionally empty"));
+        }
+
+        #[test]
+        fn creates_the_config_dir_first_if_it_does_not_exist_yet() {
+            let base = tempfile::tempdir().unwrap();
+            let not_yet_created = base.path().join("nested").join("claude");
+            let claude = get_provider("claude").unwrap();
+            let wrote =
+                seed_claude_md_placeholder_if_missing(claude, &not_yet_created.to_string_lossy()).unwrap();
+            assert!(wrote);
+            assert!(not_yet_created.join("CLAUDE.md").exists());
+        }
+
+        #[test]
+        fn never_overwrites_an_existing_claude_md() {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::write(dir.path().join("CLAUDE.md"), "real user content, do not touch").unwrap();
+            let claude = get_provider("claude").unwrap();
+            let wrote = seed_claude_md_placeholder_if_missing(claude, &dir.path().to_string_lossy()).unwrap();
+            assert!(!wrote);
+            let content = std::fs::read_to_string(dir.path().join("CLAUDE.md")).unwrap();
+            assert_eq!(content, "real user content, do not touch");
+        }
+
+        #[test]
+        fn no_ops_for_a_non_claude_provider_even_with_no_claude_md() {
+            let dir = tempfile::tempdir().unwrap();
+            let codex = get_provider("codex").unwrap();
+            assert_eq!(codex.auth_dir_name, "codex");
+            let wrote = seed_claude_md_placeholder_if_missing(codex, &dir.path().to_string_lossy()).unwrap();
+            assert!(!wrote);
+            assert!(!dir.path().join("CLAUDE.md").exists());
+        }
+
+        // Codex P2 on PR #2854: an empty config_dir would otherwise resolve
+        // relative to the server process's own CWD instead of erroring.
+        #[test]
+        fn rejects_an_empty_config_dir() {
+            let claude = get_provider("claude").unwrap();
+            let err = seed_claude_md_placeholder_if_missing(claude, "").unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+            assert!(!std::path::Path::new("CLAUDE.md").exists(), "must not write into CWD");
+        }
+
+        #[test]
+        fn rejects_a_whitespace_only_config_dir() {
+            let claude = get_provider("claude").unwrap();
+            let err = seed_claude_md_placeholder_if_missing(claude, "   ").unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
         }
     }
 }
