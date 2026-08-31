@@ -1,7 +1,9 @@
 # Analysis: Ctrl+Scroll zoom does not work in a torn-off floating pane
 
-**Status:** **Test A has been run and the §2 hypothesis is DISPROVEN.** See §3.1.
-The live candidate is now §4. Do not implement §5 as written — its premise is gone.
+**Status:** **Root cause localised by direct measurement — see §6.** The entire
+in-page pipeline (DOM event → handler → RPC → read-back → font) is proven WORKING
+in a live floater. The failure is upstream of the renderer, in the OS→CEF input
+path. §2's focus hypothesis is dead; §4b is dead; §4a survives.
 **Date:** 2026-08-31
 **Author:** AgentA
 **Reported by:** repo owner — *"ctrl+scroll zooming stops working once the pane is
@@ -85,16 +87,20 @@ Tear off an **agent or terminal** pane and type into it.
 
 Repo owner ran it: *"I typed into a floating terminal .. typing works but not zoom."*
 
-Typing works, so the floater's CEF child **does** have keyboard focus, its renderer
-**does** receive the Ctrl keydown, and `ev.ctrlKey` is therefore tracked correctly.
-The §2 mechanism is dead. This is the outcome Test A was written to produce, and it
-cost one keystroke instead of a speculative Win32 focus fix — the reason the fix was
-deliberately not built first.
+Typing works, so the floater's CEF child **does** have keyboard focus for ordinary
+character input. The §2 mechanism — "the child never gets focus at all" — is dead.
+This is the outcome Test A was written to produce, and it cost one keystroke instead
+of a speculative Win32 focus fix, which is why the fix was deliberately not built
+first.
 
-Note this also retires §5 as written: with `ev.ctrlKey` known-good, there is no
-longer any reason to bypass the DOM via `MK_CONTROL`. Whatever is wrong is either
-upstream of the DOM event or downstream in the zoom pipeline, and §5 addresses
-neither.
+**Correction (Codex P2 on the PR adding this section):** an earlier draft of §3.1
+went further and declared `ev.ctrlKey` "known-good" on this evidence alone. That was
+an overclaim. Typing proves character input reaches the renderer; it does **not**
+prove that the Ctrl *modifier* is attached to a wheel event, which is a different
+delivery path. The narrower hypothesis — focus is fine, but the modifier or the
+wheel message itself is lost upstream — survived Test A untouched, and §6 shows it
+is in fact the live one. The overclaim would have wrongly retired §5 outright;
+§5 is instead **back on the table** (see §6.2).
 
 **Test B is now moot** (it was a refinement of the dead hypothesis) and is kept only
 for the record. The next test is §4.1.
@@ -106,10 +112,13 @@ Then click *inside* the floater once and ctrl+scroll again.
 - Only the second works → confirmed, and it is specifically an activation-order bug.
 - Neither works → focus is not the variable.
 
-## 4. The live candidates (post-Test-A)
+## 4. The candidates after Test A
 
-With `ev.ctrlKey` established as trustworthy, the failure is on one of two sides of
-the DOM event, and they need to be separated before anything is built:
+> **Resolved by §6: 4b is dead, 4a survives.** Kept as written because the reasoning
+> for *why* both were live is what §6's experiment was designed around.
+
+With keyboard focus ruled in, the failure is on one of two sides of the DOM event,
+and they need to be separated before anything is built:
 
 **4a. Upstream — the wheel event never reaches the renderer with Ctrl set.** CEF
 consuming Ctrl+Scroll for its native page-zoom path before the DOM sees it, so
@@ -128,32 +137,28 @@ Reading the source does not separate these: registration at `block.tsx:291` look
 unconditional on mount, and the floater renders the standard `<TabContent>`, so 4b
 *should* work. It needs a measurement.
 
-### 4.1 The test that separates them
+### 4.1 How to probe a floater — CDP, not DevTools
 
-In the floater window, open DevTools (hamburger ▸ DevTools, or View ▸ Toggle
-DevTools on macOS) and run:
+**A floater has no DevTools entry point of its own.** It renders the chromeless
+`FloatingPaneWorkspace` (no tab bar, no widgets bar, no hamburger), and the native
+View ▸ Toggle DevTools menu is macOS-only. The pane context menu's *Inspect Element*
+(`block/pane-actions.ts:203`) is the one in-app route on Windows/Linux.
 
-```js
-window.addEventListener('wheel', e => console.log('wheel ctrl=', e.ctrlKey, 'dy=', e.deltaY), { passive: false, capture: true });
+The route that actually worked, and that needs no UI interaction at all:
+
+```bash
+curl -s http://127.0.0.1:9223/json/list        # 9223 dev / 9222 release
 ```
 
-Then Ctrl+Scroll over the pane body.
+Each floater is its own page target, identifiable by `windowLabel=floating-…` in
+its URL, with a `webSocketDebuggerUrl`. Drive it over CDP (`Runtime.evaluate` to
+instrument, `Input.dispatchMouseEvent` with `type: "mouseWheel", modifiers: 2` to
+inject Ctrl+Wheel, `Page.captureScreenshot` to see the result).
 
-| Observation | Conclusion |
-|---|---|
-| nothing logs | **4a** — the event is consumed before the renderer |
-| logs with `ctrl= false` | **4a** — modifier lost upstream (contradicts Test A; re-test typing) |
-| logs with `ctrl= true` | **4b** — the DOM is fine; the bug is in the zoom pipeline |
-
-If it is 4b, the follow-up is whether `[data-blockid]` resolves — in the same
-console:
-
-```js
-document.querySelectorAll('[data-blockid]').length
-```
-
-Zero means `AppZoomHandler`'s `closest()` lookup is what fails; non-zero points at
-the registry lookup inside `getBlockZoom`.
+**Caveat that determines what this can and cannot prove:** `Input.dispatchMouseEvent`
+enters *below* the OS input layer and *above* CEF's own message pump. It therefore
+exercises everything from the renderer inward, and bypasses exactly the OS→CEF path
+where §4a would live. That asymmetry is what makes it decisive here — see §6.
 
 ## 5. Fix shape (do not build until §3 confirms)
 
@@ -195,3 +200,71 @@ this way would carry the same gap and must say so rather than appear cross-platf
 `docs/specs/REPORT_ARMORY_ZOOM_AND_PER_PANE_BROWSER_ZOOM_2026_07_20.md` covers
 Armory zoom and per-pane browser zoom but says nothing about floating panes or
 window focus. This is a new finding, not a regression of that work.
+
+---
+
+## 6. Measurement (2026-08-31) — the in-page pipeline is PROVEN WORKING
+
+Run against the live dev instance's floater over CDP, on a floating PowerShell
+terminal. Findings in order:
+
+1. **The DOM receives the event with `ctrl: true`**, and `closest('[data-blockid]')`
+   resolves to the floater's real block id. So `ev.ctrlKey` is delivered correctly
+   for an injected event.
+2. **Propagation stops after body-capture** — it never reaches `window`'s bubble
+   phase, so `AppZoomHandler` never runs. **This is by design, not the bug.** Each
+   view registers its own capture-phase Ctrl+Wheel handler that calls
+   `stopPropagation()` precisely so `AppZoomHandler` does not double-handle
+   (`term.tsx:384`, `armory-view.tsx:78`, `editor-view.tsx:129`, `swarm-view.tsx:54`,
+   `warden-view.tsx:55`). The **docked** window shows an identical trace, which is
+   what establishes it as designed behaviour rather than a floater defect.
+3. **The RPC is sent.** Captured off the wire by patching `WebSocket.prototype.send`:
+   ```json
+   {"command":"setmeta","data":{"oref":"block:3c936202-…","meta":{"term:zoom":2}}}
+   ```
+4. **The value round-trips.** Repeated injections accumulated 1.0 → 2.0 and clamped
+   there, which is only possible if `termZoomAtom()` was reading back each write.
+5. **The font is applied.** A screenshot showed the terminal text visibly enlarged,
+   wrapping `PowerShell 7.6.5` across three lines.
+
+**Conclusion: everything from the DOM event inward works in a floater.** §4b is dead.
+Since CDP injection bypasses the OS→CEF path and succeeds where real hardware input
+fails, **§4a is the surviving explanation by elimination**: a real Ctrl+Wheel from
+the mouse does not arrive at the floater's renderer as a Ctrl-modified wheel event.
+
+### 6.1 Two measurement errors made along the way
+
+Both were caught, and both are the kind that produce confident wrong answers:
+
+- **CSS `font-size` is meaningless here.** The wheel target is a `CANVAS` — xterm
+  uses the canvas renderer, where `terminal.options.fontSize` never reaches CSS. An
+  early probe read `14px` before and after and nearly concluded "zoom does nothing",
+  when the screenshot shows it plainly working. Measure rows/cols or pixels, not
+  computed style.
+- **Capture-phase listeners cannot observe `defaultPrevented`** from a bubble-phase
+  handler that has not run yet. A first probe reported `defaultPrevented: false` and
+  it proved nothing.
+
+### 6.2 What this means for the fix
+
+§5 is **back on the table**, with its original premise restored: bypass the DOM by
+intercepting `WM_MOUSEWHEEL` and reading the focus-independent `MK_CONTROL` bit.
+All of §5's constraints still apply in full — hook the **CEF child hierarchy**, not
+just `floating_pane_wndproc`, and **re-apply after every navigation**.
+
+### 6.3 The one gap left
+
+No control was obtained for **real** (non-injected) Ctrl+Wheel on a **docked**
+terminal — the dev instance's main window had no terminal pane, and injected input
+cannot answer it. The claim "works docked, not floating" still rests solely on the
+reporter's observation.
+
+The cheap discriminator, for a real mouse on a floating terminal: **does the terminal
+buffer scroll when you Ctrl+Scroll?**
+
+| Observation | Meaning |
+|---|---|
+| buffer scrolls | the wheel arrives but **the Ctrl modifier is stripped** — the handler's `if (!ev.ctrlKey) return` bails |
+| nothing happens at all | **the wheel message itself** is consumed before the renderer |
+
+These need different fixes, so this should be answered before code is written.
