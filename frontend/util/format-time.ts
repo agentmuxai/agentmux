@@ -57,7 +57,10 @@ export function formatTimeAgo(ms: number, now: number = Date.now()): string {
 }
 
 /**
- * Absolute local time, "HH:MM:SS" (24-hour). Adapted from the unshipped
+ * Absolute local time, 12-hour with an AM/PM suffix — "3:46:12 PM".
+ *
+ * Was "HH:MM:SS" (24-hour) until 2026-08-30; see the inline note in the
+ * body for what did and didn't change. Adapted from the unshipped
  * `docs/specs/node-timestamp-hover.md`'s draft — dropped the tenths-of-a-
  * second digit that draft used (not meaningful at the granularity this is
  * actually used at: hovering a tool call or thinking clump, not diagnosing
