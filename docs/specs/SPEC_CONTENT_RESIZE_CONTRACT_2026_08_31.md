@@ -44,12 +44,12 @@ change, none aware of the others. All six verified present as of `216c593c4`:
 
 | # | Mechanism | File | Reacts to |
 |---|---|---|---|
-| 1 | Itemized pin effect | `AgentDocumentVirtualList.tsx:494-513` | node count / `layoutView().totalSize` / `workingRowHeight` |
-| 2 | RO #1 (viewport) | `AgentDocumentVirtualList.tsx:535-555` | `scrollRef.clientHeight` |
-| 3 | RO #2 (content) | `AgentDocumentVirtualList.tsx:586-595` | `virtualContainerRef` / `streamingBufferRef` box size |
-| 4 | Local FLIP | `ToolOverlayLog.tsx:246-297` | its own `<Switch>` branch changing |
+| 1 | Itemized pin effect | `AgentDocumentVirtualList.tsx:521-544` | node count / `layoutView().totalSize` / `workingRowHeight` |
+| 2 | RO #1 (viewport) | `AgentDocumentVirtualList.tsx:566-588` | `scrollRef.clientHeight` |
+| 3 | RO #2 (content) | `AgentDocumentVirtualList.tsx:619-631` | `virtualContainerRef` / `streamingBufferRef` box size |
+| 4 | Local FLIP | `ToolOverlayLog.tsx:246-298` | its own `<Switch>` branch changing |
 | 5 | Local panel auto-scroll | `ToolOverlayLog.tsx:187-208` | `chunks()` / `panelHidden()`, panel-internal only |
-| 6 | Throttled re-render timers | `MarkdownBlock.tsx:62-78`, `output-cap.ts:369-440` | their own timers/heuristics, invisible to 1–5 |
+| 6 | Throttled re-render timers | `MarkdownBlock.tsx:62-81`, `output-cap.ts:369-440` | their own timers/heuristics, invisible to 1–5 |
 
 Each was added in response to one reported symptom. The result is what you
 would expect from six uncoordinated systems layered over four months:
