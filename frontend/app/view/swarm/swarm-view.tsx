@@ -228,9 +228,22 @@ function AgentRow({
         phaseToDisplayStatus(node.blockId, node.agentStatus)
     );
     const collapsed = createMemo(() => model.isAgentCollapsed(node.blockId));
-    const totalRows = createMemo(
-        () => node.agentToolRows.length + node.workflowRows.length + node.shellRows.length + node.cronRows.length
-    );
+    // Computed HERE, not inside LongRunningBucket, so it can feed `totalRows`
+    // below (reagent P1 on PR #2862). Left in the bucket, an agent whose only
+    // active work was a promoted Bash/sleep call had `hasChildren() === false`
+    // -> no expand chevron -> collapsed by default -> the children container's
+    // `Show when={!collapsed()}` never rendered the bucket at all. That is the
+    // single most common case for this feature, so the bucket was invisible
+    // exactly when it mattered.
+    //
+    // Ticks in the view rather than the model because promotion is time-based:
+    // the list changes with the clock, not only with backend events.
+    const tick = useTick(1000);
+    const longRunningRows = createMemo(() => {
+        tick();
+        return longRunningToolRows(node.blockId, Date.now());
+    });
+    const totalRows = createMemo(() => agentChildRowCount(node, longRunningRows().length));
     const hasChildren = createMemo(() => totalRows() > 0);
 
     const [summaryFlash, setSummaryFlash] = createSignal(false);
@@ -336,7 +349,7 @@ function AgentRow({
                     <WorkflowBucket rows={node.workflowRows} model={model} />
                     <ShellBucket rows={node.shellRows} />
                     <CronBucket rows={node.cronRows} />
-                    <LongRunningBucket blockId={node.blockId} />
+                    <LongRunningBucket rows={longRunningRows()} />
                 </div>
             </Show>
         </div>
@@ -448,20 +461,40 @@ function ShellRow({ shell }: { shell: ActiveShell }): JSX.Element {
 // (TOOL_PROMOTION_MS), so the list changes with the clock and not only with
 // backend events. Keeping the clock dependency in the view leaves
 // `buildTree`'s memo free of it.
-function LongRunningBucket({ blockId }: { blockId: string | null }): JSX.Element {
-    const tick = useTick(1000);
-    const rows = createMemo(() => {
-        tick();
-        return longRunningToolRows(blockId, Date.now());
-    });
+/**
+ * Total child rows under one agent — drives the expand chevron, the
+ * collapsed-count badge, and `hasChildren`.
+ *
+ * Exported and kept as a plain sum so every bucket's contribution is asserted
+ * in one place. BOTH reviewers independently caught the same omission on
+ * PR #2862: the long-running bucket wasn't in this sum, so an agent whose only
+ * activity was a promoted Bash/sleep call reported `hasChildren() === false` —
+ * no chevron, collapsed by default, and the children container's
+ * `Show when={!collapsed()}` meant the bucket never rendered at all. The
+ * feature was invisible in precisely its primary case.
+ *
+ * A future sixth bucket must be added here too; the test file enumerates each
+ * one so forgetting is a failing test rather than an invisible feature.
+ */
+export function agentChildRowCount(node: AgentTreeNode, longRunningCount: number): number {
     return (
-        <Show when={rows().length > 0}>
+        node.agentToolRows.length +
+        node.workflowRows.length +
+        node.shellRows.length +
+        node.cronRows.length +
+        longRunningCount
+    );
+}
+
+function LongRunningBucket({ rows }: { rows: LongRunningToolRow[] }): JSX.Element {
+    return (
+        <Show when={rows.length > 0}>
             <div class="swarm-bucket swarm-bucket--longrunning">
                 <div class="swarm-bucket-header">
                     <span class="swarm-bucket-label">Running</span>
-                    <span class="swarm-bucket-count">{rows().length}</span>
+                    <span class="swarm-bucket-count">{rows.length}</span>
                 </div>
-                <For each={rows()}>{(row) => <LongRunningRow row={row} />}</For>
+                <For each={rows}>{(row) => <LongRunningRow row={row} />}</For>
             </div>
         </Show>
     );

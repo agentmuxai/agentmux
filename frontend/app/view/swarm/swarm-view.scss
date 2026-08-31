@@ -253,6 +253,18 @@
     &--cron .swarm-bucket-label {
         color: var(--info-color);
     }
+    // Long-running tool calls (step 4 of
+    // REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md §3).
+    // Deliberately NOT a fifth saturated hue: the four above are all declared,
+    // addressable objects (a dispatch, a workflow, a shell, a cron), whereas
+    // this bucket is INFERRED from a tool call still running past a threshold.
+    // A quieter label carries that distinction, and grey still reads apart at a
+    // glance from blue/amber/green/purple. The alternative — minting a fifth
+    // theme token, as `--info-color` was minted for cron — would assert a
+    // semantic peer relationship this bucket doesn't have.
+    &--longrunning .swarm-bucket-label {
+        color: var(--secondary-text-color);
+    }
 }
 
 .swarm-bucket-header {
