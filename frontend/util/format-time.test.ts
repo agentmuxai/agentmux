@@ -58,12 +58,26 @@ describe("formatTimeAgo", () => {
 });
 
 describe("formatExactTime", () => {
-    it("renders local HH:MM:SS, zero-padded", () => {
+    // 2026-08-30: switched from a 24-hour clock to 12-hour with AM/PM at
+    // operator request. Local time throughout — `getHours()` always was.
+    it("renders local 12-hour time with an AM suffix, minutes/seconds zero-padded", () => {
         const d = new Date(2026, 0, 1, 9, 5, 3);
-        expect(formatExactTime(d.getTime())).toBe("09:05:03");
+        expect(formatExactTime(d.getTime())).toBe("9:05:03 AM");
     });
-    it("renders 24-hour time (no AM/PM)", () => {
+    it("renders afternoon times as PM on a 12-hour clock", () => {
         const d = new Date(2026, 0, 1, 14, 32, 7);
-        expect(formatExactTime(d.getTime())).toBe("14:32:07");
+        expect(formatExactTime(d.getTime())).toBe("2:32:07 PM");
+    });
+    it("midnight is 12 AM, not 0 AM", () => {
+        const d = new Date(2026, 0, 1, 0, 7, 9);
+        expect(formatExactTime(d.getTime())).toBe("12:07:09 AM");
+    });
+    it("noon is 12 PM, not 0 PM", () => {
+        const d = new Date(2026, 0, 1, 12, 0, 0);
+        expect(formatExactTime(d.getTime())).toBe("12:00:00 PM");
+    });
+    it("does not zero-pad the hour", () => {
+        const d = new Date(2026, 0, 1, 15, 4, 5);
+        expect(formatExactTime(d.getTime())).toBe("3:04:05 PM");
     });
 });

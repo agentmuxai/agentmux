@@ -65,8 +65,14 @@ export function formatTimeAgo(ms: number, now: number = Date.now()): string {
  */
 export function formatExactTime(ms: number): string {
     const d = new Date(ms);
-    const h = String(d.getHours()).padStart(2, "0");
+    // `getHours()` is already LOCAL time — this was never UTC. What changed
+    // (2026-08-30, operator request) is the presentation: 12-hour with an
+    // AM/PM suffix instead of a 24-hour clock. Hour is NOT zero-padded, per
+    // the usual 12-hour convention ("3:46:12 PM", not "03:46:12 PM");
+    // minutes and seconds still are.
+    const h24 = d.getHours();
+    const h = h24 % 12 === 0 ? 12 : h24 % 12;
     const m = String(d.getMinutes()).padStart(2, "0");
     const s = String(d.getSeconds()).padStart(2, "0");
-    return `${h}:${m}:${s}`;
+    return `${h}:${m}:${s} ${h24 < 12 ? "AM" : "PM"}`;
 }

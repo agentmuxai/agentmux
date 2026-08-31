@@ -206,7 +206,7 @@ describe("DocumentRow — peek tooltip on the inline node kinds", () => {
         hover(container, ".agent-section");
         const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
         expect(metaLines.length).toBe(2);
-        expect(metaLines[0].textContent).toMatch(/\d{2}:\d{2}:\d{2} · 1m ago/);
+        expect(metaLines[0].textContent).toMatch(/\d{1,2}:\d{2}:\d{2} (?:AM|PM) · 1m ago/);
         expect(metaLines[1].textContent).toMatch(/~\d+ tok \(est\.\)/);
     });
 
@@ -234,7 +234,7 @@ describe("DocumentRow — peek tooltip on the inline node kinds", () => {
         hover(container, ".agent-context-compacted");
         const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
         expect(metaLines.length).toBe(1);
-        expect(metaLines[0].textContent).toMatch(/\d{2}:\d{2}:\d{2} · 1m ago/);
+        expect(metaLines[0].textContent).toMatch(/\d{1,2}:\d{2}:\d{2} (?:AM|PM) · 1m ago/);
     });
 
     it("compaction_started: shows a time-only peek from startedAt", () => {
@@ -249,7 +249,7 @@ describe("DocumentRow — peek tooltip on the inline node kinds", () => {
         hover(container, ".agent-compaction-started");
         const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
         expect(metaLines.length).toBe(1);
-        expect(metaLines[0].textContent).toMatch(/\d{2}:\d{2}:\d{2} · 1m ago/);
+        expect(metaLines[0].textContent).toMatch(/\d{1,2}:\d{2}:\d{2} (?:AM|PM) · 1m ago/);
     });
 
     it("day_divider: shows the exact local-midnight instant on hover", () => {
@@ -264,7 +264,7 @@ describe("DocumentRow — peek tooltip on the inline node kinds", () => {
         hover(container, ".agent-day-divider");
         const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
         expect(metaLines.length).toBe(1);
-        expect(metaLines[0].textContent).toMatch(/\d{2}:\d{2}:\d{2} · 1m ago/);
+        expect(metaLines[0].textContent).toMatch(/\d{1,2}:\d{2}:\d{2} (?:AM|PM) · 1m ago/);
     });
 
     it("session_outcome: shows time + attempted/actual session ids", () => {
@@ -279,7 +279,7 @@ describe("DocumentRow — peek tooltip on the inline node kinds", () => {
         };
         const { container } = renderRow(node);
         hover(container, ".agent-session-outcome");
-        expect(document.body.querySelector(".agent-node-peek-tooltip-meta")?.textContent).toMatch(/\d{2}:\d{2}:\d{2} · 1m ago/);
+        expect(document.body.querySelector(".agent-node-peek-tooltip-meta")?.textContent).toMatch(/\d{1,2}:\d{2}:\d{2} (?:AM|PM) · 1m ago/);
         expect(document.body.querySelector(".agent-node-peek-tooltip-body")?.textContent).toBe(
             "attempted: sid-attempted · actual: sid-actual"
         );

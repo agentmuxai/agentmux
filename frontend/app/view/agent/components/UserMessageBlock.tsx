@@ -201,6 +201,11 @@ export const UserMessageBlock = (props: UserMessageBlockProps): JSX.Element => {
                 show={bodyMode() === "overlay"}
                 rowEl={() => rootEl}
                 class="agent-user-message-peek-overlay"
+                // Full width, left-aligned: this variant renders a real
+                // message body (sometimes kilobytes of startup payload),
+                // unlike the shrink-wrapped metadata peek every other
+                // caller uses.
+                align="stretch"
             >
                 <div class="agent-user-message-content">
                     {bodyContent()}

@@ -65,6 +65,27 @@ interface PeekOverlayProps {
      * context" preview) without forking the whole component.
      */
     class?: string;
+    /**
+     * How the panel sizes and sits against the anchored row.
+     *
+     * - `"end"` (default) — **shrink-wraps its content and pins its RIGHT
+     *   edge to the row's right edge**, growing leftward. This is what the
+     *   metadata peek wants: two short lines (timestamp, token estimate)
+     *   shouldn't stretch a full pane's width, and floating them right
+     *   keeps them off the text you're actually reading on the left.
+     * - `"stretch"` — full row width, left-aligned (the original
+     *   behaviour). Only `UserMessageBlock`'s "Session context" body
+     *   preview wants this: it renders a real message body, sometimes
+     *   kilobytes of it, where full width is the point.
+     *
+     * Right-alignment is done with `left: rect.right` + a
+     * `translateX(-100%)` rather than a `right:` offset, deliberately —
+     * `right` would need `window.innerWidth`, which is a different
+     * coordinate space from the `getBoundingClientRect()` values
+     * everything else here uses, and would break the CSS-`zoom` safety
+     * this component's header documents.
+     */
+    align?: "end" | "stretch";
     children?: JSX.Element;
 }
 
@@ -89,11 +110,25 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
         const rect = row.getBoundingClientRect();
         const container = findScrollContainerRect(row);
         const cap = Math.max(0, container.bottom - rect.top - BOTTOM_MARGIN_PX);
+        if ((props.align ?? "end") === "stretch") {
+            setFloatingStyle({
+                position: "fixed",
+                left: `${rect.left}px`,
+                top: `${rect.top}px`,
+                width: `${rect.width}px`,
+                "max-height": `${cap}px`,
+            });
+            return;
+        }
+        // Shrink-wrapped and right-anchored. No `width` is set at all, so the
+        // stylesheet's `width: max-content` governs; `max-width` still clamps
+        // it to the row so a long tool command can't escape the pane.
         setFloatingStyle({
             position: "fixed",
-            left: `${rect.left}px`,
+            left: `${rect.right}px`,
             top: `${rect.top}px`,
-            width: `${rect.width}px`,
+            transform: "translateX(-100%)",
+            "max-width": `${rect.width}px`,
             "max-height": `${cap}px`,
         });
     };
