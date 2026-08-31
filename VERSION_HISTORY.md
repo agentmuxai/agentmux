@@ -1,5 +1,16 @@
 # AgentMux Version History
 
+## 0.55.29 — 2026-08-30
+
+- feat(armory): merge Global Memory + Personal Memory into one Memory tab
+- feat(mcp): capture-tier model — agents can screenshot any window except another OS user's
+- fix(layout): derive a minimized branch's extent from its own direction, not its leaf count
+- fix(layout): drag ghost matches the dragged pane's aspect ratio instead of a fixed square
+- feat(statusbar): break out token usage panel by agent, with cost + turn count
+- fix(layout): an all-minimized row of panes fills the width instead of leaving dead space to the right
+- feat(agent-pane): dock a bare sleep immediately with a live countdown
+
+
 ## 0.55.28 — 2026-08-29
 
 - fix(agent): disclose a fresh start when a pane spawns with no --resume but prior history exists
