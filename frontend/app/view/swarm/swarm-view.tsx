@@ -16,6 +16,7 @@ import { getLayoutModelForTabById } from "@/layout/lib/layoutModelHooks";
 import { getBlockTurnPhase } from "@/app/store/agentActivity";
 import { recordTurn } from "@/app/store/token-usage";
 import { useTick } from "@/app/hook/useTick";
+import { longRunningToolRows, type LongRunningToolRow } from "./swarm-longrunning";
 import { formatCompactNumber } from "@/util/format-count";
 import { formatElapsedClock } from "@/util/format-time";
 import { focusBlock } from "@/app/util/focus-block";
@@ -335,6 +336,7 @@ function AgentRow({
                     <WorkflowBucket rows={node.workflowRows} model={model} />
                     <ShellBucket rows={node.shellRows} />
                     <CronBucket rows={node.cronRows} />
+                    <LongRunningBucket blockId={node.blockId} />
                 </div>
             </Show>
         </div>
@@ -427,6 +429,65 @@ function ShellRow({ shell }: { shell: ActiveShell }): JSX.Element {
             <button class="swarm-shell-stop" title="Stop" onClick={handleStop}>
                 <i class="fa-solid fa-stop" />
             </button>
+        </div>
+    );
+}
+
+// Long-running tool calls — step 4 of
+// REPORT_LONGRUNNING_TOOLCALL_AUTODETECT_STATUS_2026_07_26.md §3 ("feed the
+// same signal to Swarm"). The gap the other four buckets leave: a `sleep 300`
+// or a four-minute build is an ordinary Bash tool call, owned by the CLI rather
+// than by srv, so it appeared in that pane's own Activity Dock and nowhere
+// else — the fleet view couldn't answer "which agents are sitting on a wait".
+//
+// Placed last, below Shell/Cron: those are declared, addressable objects with
+// their own lifecycle, whereas this bucket is inferred from a running tool
+// call. Same most-abstract-first ordering the Shell/Cron comments describe.
+//
+// Ticks here rather than in the model: promotion is time-based
+// (TOOL_PROMOTION_MS), so the list changes with the clock and not only with
+// backend events. Keeping the clock dependency in the view leaves
+// `buildTree`'s memo free of it.
+function LongRunningBucket({ blockId }: { blockId: string | null }): JSX.Element {
+    const tick = useTick(1000);
+    const rows = createMemo(() => {
+        tick();
+        return longRunningToolRows(blockId, Date.now());
+    });
+    return (
+        <Show when={rows().length > 0}>
+            <div class="swarm-bucket swarm-bucket--longrunning">
+                <div class="swarm-bucket-header">
+                    <span class="swarm-bucket-label">Running</span>
+                    <span class="swarm-bucket-count">{rows().length}</span>
+                </div>
+                <For each={rows()}>{(row) => <LongRunningRow row={row} />}</For>
+            </div>
+        </Show>
+    );
+}
+
+function LongRunningRow({ row }: { row: LongRunningToolRow }): JSX.Element {
+    const tick = useTick(1000);
+    const elapsed = createMemo(() => {
+        tick();
+        return formatElapsedClock(Date.now() - row.startedAt);
+    });
+    // Only a whole-command sleep knows its own remaining time (sleep-detect.ts);
+    // everything else shows elapsed alone rather than a guess. Clamped at 0 —
+    // the process is reaped slightly after its own deadline.
+    const remaining = createMemo(() => {
+        if (row.sleepMs == null) return "";
+        tick();
+        return `~${Math.ceil(Math.max(0, row.startedAt + row.sleepMs - Date.now()) / 1000)}s left`;
+    });
+    return (
+        <div class="swarm-longrunning-row" title={row.title}>
+            <span class="swarm-longrunning-title">{row.title}</span>
+            <span class="swarm-longrunning-elapsed">{elapsed()}</span>
+            <Show when={remaining()}>
+                <span class="swarm-longrunning-remaining">{remaining()}</span>
+            </Show>
         </div>
     );
 }
