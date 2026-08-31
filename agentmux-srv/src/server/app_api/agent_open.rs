@@ -314,10 +314,18 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // through to the real $HOME/.claude/CLAUDE.md when this
                 // isolated dir has none of its own — CLAUDE_CONFIG_DIR only
                 // relocates credential/session/project storage, not this.
+                // Fail closed (block the spawn) rather than warn-and-continue
+                // on a seed failure: continuing would launch the agent with
+                // exactly the unprotected condition this fix exists to
+                // close (Codex P1 + ReAgent P1 on PR #2854). No-op (Ok) for
+                // non-claude providers, so this never blocks their spawns.
                 // See SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md.
-                if let Err(e) = providers::seed_claude_md_placeholder_if_missing(provider, &auth_dir) {
-                    tracing::warn!(auth_dir = %auth_dir, error = %e, "failed to seed CLAUDE.md isolation placeholder");
-                }
+                providers::seed_claude_md_placeholder_if_missing(provider, &auth_dir).map_err(|e| {
+                    format!(
+                        "failed to isolate this agent's Claude Code config ({auth_dir}): {e}. \
+                         Refusing to launch with an unprotected config dir."
+                    )
+                })?;
                 for (k, v) in provider.auth_extra_env {
                     env_vars.insert(k.to_string(), json!(v));
                 }

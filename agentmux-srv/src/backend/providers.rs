@@ -677,6 +677,20 @@ pub fn seed_claude_md_placeholder_if_missing(
     if provider.auth_dir_name != "claude" {
         return Ok(false);
     }
+    // Codex P2 on PR #2854: a blank config_dir would resolve
+    // `Path::new("").join("CLAUDE.md")` relative to the server process's
+    // own CWD (`create_dir_all("")` succeeds, silently no-op) instead of
+    // erroring — writing an unrelated file while leaving the actual
+    // (empty-string) CLAUDE_CONFIG_DIR still exposed to ambient fallback.
+    // Reject before touching the filesystem so the caller's fail-closed
+    // handling (both call sites now block spawn on any Err here) covers
+    // this case too, rather than silently succeeding at nothing.
+    if config_dir.trim().is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "config_dir is empty",
+        ));
+    }
     let path = std::path::Path::new(config_dir).join("CLAUDE.md");
     if path.exists() {
         return Ok(false);
@@ -1088,6 +1102,23 @@ mod tests {
             let wrote = seed_claude_md_placeholder_if_missing(codex, &dir.path().to_string_lossy()).unwrap();
             assert!(!wrote);
             assert!(!dir.path().join("CLAUDE.md").exists());
+        }
+
+        // Codex P2 on PR #2854: an empty config_dir would otherwise resolve
+        // relative to the server process's own CWD instead of erroring.
+        #[test]
+        fn rejects_an_empty_config_dir() {
+            let claude = get_provider("claude").unwrap();
+            let err = seed_claude_md_placeholder_if_missing(claude, "").unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+            assert!(!std::path::Path::new("CLAUDE.md").exists(), "must not write into CWD");
+        }
+
+        #[test]
+        fn rejects_a_whitespace_only_config_dir() {
+            let claude = get_provider("claude").unwrap();
+            let err = seed_claude_md_placeholder_if_missing(claude, "   ").unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
         }
     }
 }

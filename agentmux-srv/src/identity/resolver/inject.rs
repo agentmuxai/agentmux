@@ -595,15 +595,30 @@ pub fn inject_identity_env_with_broker(
                     // CLAUDE.md of its own, which Claude Code CLI treats as
                     // "fall through to the real $HOME/.claude/CLAUDE.md,"
                     // not "no user-level memory file." Idempotent — cheap
-                    // no-op after the first call. See
-                    // SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md.
-                    if let Err(e) = crate::backend::providers::seed_claude_md_placeholder_if_missing(provider_cfg, &dir) {
+                    // no-op after the first call. Fail closed (same as the
+                    // ambient-home-dir check above) rather than warn-and-
+                    // continue: Codex P1 + ReAgent P1 on PR #2854 — a
+                    // warn-only failure here would launch the agent with
+                    // exactly the unprotected condition this fix exists to
+                    // close. See SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md.
+                    if let Err(e) =
+                        crate::backend::providers::seed_claude_md_placeholder_if_missing(provider_cfg, &dir)
+                    {
                         tracing::warn!(
                             target: "identity",
-                            dir = %dir,
-                            error = %e,
-                            "failed to seed CLAUDE.md isolation placeholder",
+                            "identity.spawn.blocked: account {} for provider {} \
+                             failed CLAUDE.md isolation seed ({}) — refusing to \
+                             spawn (identity {})",
+                            binding.account_id,
+                            binding.provider,
+                            e,
+                            instance.identity_id,
                         );
+                        return Err(SpawnGateError::ClaudeMdSeedFailed {
+                            provider: binding.provider.clone(),
+                            dir: dir.clone(),
+                            error: e.to_string(),
+                        });
                     }
                 }
                 env_vars.insert(config_dir_env_var.to_string(), dir.clone());
@@ -987,6 +1002,85 @@ mod tests {
                 assert_eq!(dir, ambient_claude_dir);
             }
             other => panic!("expected AmbientHomeDirNotAllowed, got {other:?}"),
+        }
+        // The gate must block BEFORE anything is injected — no partial
+        // env-var leak from the refused binding.
+        assert!(env.get("CLAUDE_CONFIG_DIR").is_none());
+    }
+
+    /// Codex P1 + ReAgent P1 on PR #2854: seeding the CLAUDE.md isolation
+    /// placeholder must fail closed, not warn-and-continue — otherwise the
+    /// agent spawns with a CLAUDE_CONFIG_DIR that still has no CLAUDE.md,
+    /// exactly the condition that falls through to the ambient home. An
+    /// empty `dir` (rejected by seed_claude_md_placeholder_if_missing's own
+    /// InvalidInput guard) is a deterministic, cross-platform way to
+    /// trigger a seed failure without relying on real filesystem
+    /// permissions. It is also NOT the ambient home, so this exercises the
+    /// seed check specifically, not the AmbientHomeDirNotAllowed path
+    /// covered by the test above.
+    #[cfg(debug_assertions)]
+    #[test]
+    fn inject_oauth_class_blocks_spawn_when_claude_md_seed_fails() {
+        let store = make_store();
+
+        let mut def = crate::backend::storage::store::AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
+            id: "def-1".to_string(),
+            slug: String::new(),
+            name: "T".to_string(),
+            icon: "✦".to_string(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: String::new(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: String::new(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            memory_id: String::new(),
+        };
+        store.agent_def_insert(&mut def).unwrap();
+
+        let claude = make_account(
+            "acct-empty-dir",
+            "claude",
+            SecretRef::OAuthConfigDir { dir: String::new() },
+        );
+        store.identity_upsert(&claude).unwrap();
+        store
+            .agent_identity_link("def-1", "acct-empty-dir", "claude")
+            .unwrap();
+
+        insert_block_for_agent(&store, "block-empty-dir", "def-1");
+        let inst = make_instance("block-empty-dir", "id-empty-dir");
+        store.instance_create(&inst).unwrap();
+
+        let mut env: HashMap<String, String> = HashMap::new();
+        let err = inject_identity_env(store.clone(), store.clone(), store, "block-empty-dir", &mut env)
+            .expect_err("spawn must be refused when the CLAUDE.md isolation seed fails");
+
+        match err {
+            SpawnGateError::ClaudeMdSeedFailed { provider, dir, .. } => {
+                assert_eq!(provider, "claude");
+                assert_eq!(dir, "");
+            }
+            other => panic!("expected ClaudeMdSeedFailed, got {other:?}"),
         }
         // The gate must block BEFORE anything is injected — no partial
         // env-var leak from the refused binding.
