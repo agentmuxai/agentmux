@@ -473,6 +473,35 @@ pub fn resync_controller(
             status.shellprocconnname != new_conn
         };
 
+        // A forced resync that lands mid-turn on a persistent agent must NOT
+        // tear the controller down: doing so kills the CLI process with the
+        // user's in-flight message already written to its stdin, and nothing
+        // replays it — `stop_process` records a `StopRequested` (which the
+        // resume machine reads as an explicit user stop and so suppresses the
+        // retry), the old controller's queue is discarded with it, and the
+        // replacement "spawns on first message", i.e. does nothing. The turn
+        // vanished with no response and no error. Diagnosed live on AgentX,
+        // 2026-08-28.
+        //
+        // Instead the controller restarts itself the moment the turn ends,
+        // picking up the new `cmd:args` (rebuilt from block meta at spawn) on
+        // the next message. Nothing is lost by waiting: model/effort flags are
+        // baked in at spawn, so they could never have applied to the turn
+        // already running.
+        //
+        // Scoped to `force` only — a controller-TYPE change is a genuine
+        // replacement that has to happen now, not a runtime-config tweak.
+        if needs_replace && force && ctrl.controller_type() == BLOCK_CONTROLLER_PERSISTENT {
+            if let Some(p) = ctrl
+                .as_any()
+                .downcast_ref::<persistent::PersistentSubprocessController>()
+            {
+                if p.request_restart_when_idle() {
+                    return Ok(());
+                }
+            }
+        }
+
         if needs_replace {
             // stop_for_replace + remove_controller_entry_only, NOT stop +
             // delete_controller: a session restart/resync must not tear

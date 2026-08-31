@@ -10,10 +10,23 @@
  * its own, so we rebuild cmd:args AND forcerestart — killing the idle process
  * so the next send_message spawns with the new flags.
  *
- * forcerestart is safe when the agent is idle (STATUS_DONE). If triggered
- * mid-turn the streaming turn is interrupted; the partial response stays in the
- * blockfile but the pane recovers via TurnReset (slash path) or has no
- * TurnStart outstanding (UI dropdown path).
+ * forcerestart is safe when the agent is idle (STATUS_DONE), and — since
+ * 2026-08-30 — safe mid-turn too, because srv defers it.
+ *
+ * This comment previously claimed that a mid-turn forcerestart was survivable
+ * because "the pane recovers via TurnReset (slash path) or has no TurnStart
+ * outstanding (UI dropdown path)". Neither was true: `commands/global/runtime.ts`
+ * contains no TurnReset, and "no TurnStart outstanding" only holds when the pane
+ * is idle — the case the sentence had already excluded. Both paths fell through
+ * to nothing, and the kill destroyed the user's in-flight message outright (the
+ * turn simply went silent — diagnosed live on AgentX, 2026-08-28).
+ *
+ * The fix lives in srv rather than here, so it covers every caller of this
+ * function and survives a pane close: `resync_controller`'s forced-replace path
+ * asks a persistent controller to restart itself at the end of the current turn
+ * (`PersistentSubprocessController::request_restart_when_idle`) instead of
+ * tearing it down mid-flight. Nothing is lost by waiting — these flags are baked
+ * in at spawn, so they could never have applied to the turn already running.
  *
  * Shared by the `/model`·`/effort`·`/mode` slash commands
  * (`commands/global/runtime.ts`) AND the GUI control-bar dropdowns
