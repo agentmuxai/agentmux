@@ -187,9 +187,18 @@ button becomes a **countdown that fires itself**:
 - **Click → retry immediately** (cancel the timer, run §5.1).
 - **At 0 → auto-fire** the same Retry.
 - **Dismiss/×** cancels the timer (no retry).
-- **Bounded:** at most **2 auto-retries**, backoff `5s → 10s`, then the banner stays with a
+- **Bounded:** a fixed ladder of auto-retries, then the banner stays with a
   manual **Retry now** only (no more auto-firing) and a note "auto-retry stopped after N
   attempts." Prevents an infinite hammer on a sustained 429.
+  - *As designed (2026-06):* 2 auto-retries, backoff `5s → 10s`.
+  - *As shipped (2026-08-31):* 5 auto-retries, `5s → 15s → 30s → 60s → 120s`,
+    each ±20% jittered — ~3.9 min of coverage. The original ~15s was shorter
+    than a typical 429/529 episode, so genuinely transient failures exhausted
+    the budget while still retryable; jitter keeps a Fleet/cron burst from
+    retrying in lockstep. The live value is `AUTO_RETRY_BACKOFF_S` in
+    `frontend/app/view/agent/hooks/useAgentFailure.ts` — treat that as the
+    source of truth over this line. See
+    `docs/reports/REPORT_TRANSIENT_API_FAILURE_RETRY_STATE_2026_08_31.md`.
 - Implementation: a `createSignal` countdown + `setInterval`/`setTimeout` in the banner,
   cleaned up on `onCleanup` and on `lastFailure` change. Attempt count tracked on
   `AgentPaneState` (e.g. `failureAutoRetries: number`, reset on `TurnReset`).

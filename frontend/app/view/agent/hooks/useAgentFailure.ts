@@ -209,8 +209,8 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         });
 
         // Restore the full auto-retry budget once the LAST turn genuinely
-        // succeeded — a later unrelated transient failure must get its own 2
-        // auto-retries, not inherit a stale count from turns ago. `turn-ended`
+        // succeeded — a later unrelated transient failure must get its own full
+        // ladder, not inherit a stale count from turns ago. `turn-ended`
         // with outcome "completed" is the reducer's own authoritative verdict
         // (emitted only by the real `TurnEnd` command, driven by the CLI's own
         // session_end/result frame on stdout) — a strictly more reliable
