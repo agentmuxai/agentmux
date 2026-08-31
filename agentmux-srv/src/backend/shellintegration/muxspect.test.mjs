@@ -13,9 +13,30 @@
 // parser silently misbehaved depending on which side they landed on.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { checkSpawnerTier, logSrvVersion, parseArgs } from "./muxspect.mjs";
+import { checkSpawnerTier, logSrvVersion, parseArgs, renderLayout } from "./muxspect.mjs";
 
 describe("muxspect parseArgs", () => {
+    it("'layout' with no tab id parses as a bare command", () => {
+        expect(parseArgs(["layout"])).toEqual({ cmd: "layout", blockId: undefined, json: false, help: false });
+    });
+
+    it("'layout <tab_id>' puts the tab id in the generic positional", () => {
+        // `layout` reuses muxspect's single positional slot for an optional
+        // tab id rather than adding a parser special case.
+        expect(parseArgs(["layout", "tab-1"])).toEqual({
+            cmd: "layout",
+            blockId: "tab-1",
+            json: false,
+            help: false,
+        });
+    });
+
+    it("'layout --json' works with the flag on either side of the positional", () => {
+        expect(parseArgs(["layout", "tab-1", "--json"]).json).toBe(true);
+        expect(parseArgs(["--json", "layout", "tab-1"]).json).toBe(true);
+        expect(parseArgs(["--json", "layout", "tab-1"]).blockId).toBe("tab-1");
+    });
+
     it("no args defaults to 'list'", () => {
         expect(parseArgs([])).toEqual({ cmd: "list", blockId: undefined, json: false, help: false });
     });
@@ -225,5 +246,54 @@ describe("muxspect logSrvVersion", () => {
     it("returns undefined/falsy and logs nothing when the header is absent (older srv build)", () => {
         expect(logSrvVersion(fakeResponse(null))).toBeFalsy();
         expect(errSpy).not.toHaveBeenCalled();
+    });
+});
+
+describe("muxspect renderLayout - whole-request failure", () => {
+    let errSpy;
+    let logSpy;
+    beforeEach(() => {
+        errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    });
+    afterEach(() => {
+        errSpy.mockRestore();
+        logSpy.mockRestore();
+    });
+
+    // reagent P1 on PR #2856: a store-read failure returns 200 + {error} with
+    // NO `layouts` key. Falling through to `data.layouts ?? []` printed
+    // "no layouts found" and exited 0, reporting success for exactly the
+    // on-disk failure this command exists to surface.
+    it("prints the error to stderr instead of 'no layouts found'", () => {
+        renderLayout({ error: "failed to list tabs: db locked" });
+        expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("failed to list tabs"));
+        expect(logSpy).not.toHaveBeenCalledWith("no layouts found");
+    });
+
+    it("still says 'no layouts found' for a genuinely empty but SUCCESSFUL response", () => {
+        renderLayout({ layouts: [] });
+        expect(logSpy).toHaveBeenCalledWith("no layouts found");
+        expect(errSpy).not.toHaveBeenCalled();
+    });
+
+    it("renders a per-tab error without swallowing the rest of the tabs", () => {
+        renderLayout({
+            layouts: [
+                { tab_id: "t1", tab_name: "broken", error: "layoutstate unreadable" },
+                {
+                    tab_id: "t2",
+                    tab_name: "ok",
+                    healthy: true,
+                    violations: [],
+                    leaf_count: 1,
+                    minimized_leaf_count: 0,
+                    nodes: [],
+                },
+            ],
+        });
+        const printed = logSpy.mock.calls.map((c) => c.join(" ")).join(" | ");
+        expect(printed).toContain("layoutstate unreadable");
+        expect(printed).toContain("healthy");
     });
 });

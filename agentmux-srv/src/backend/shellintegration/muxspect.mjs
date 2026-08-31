@@ -80,6 +80,17 @@ Usage:
                                   (SPEC_MUXSPECT_VERIFY_SENDER_2026_08_21.md).
                                   Exits non-zero unless the verdict is
                                   'found'.
+  muxspect layout [tab_id] [--json]
+                                  the PERSISTED layout tree for every tab (or
+                                  one), as an indented outline: direction,
+                                  size, minimized/magnified flags, block ids —
+                                  plus the layout doctor's verdict on each
+                                  tree. Answers "what does the layout actually
+                                  look like right now" without reading
+                                  db_layout out of SQLite by hand. Note it
+                                  reports what is PERSISTED, which can lag
+                                  what the frontend is currently rendering.
+                                  Exits non-zero if any tree has violations.
   muxspect help                   this message
 
 Requires $AGENTMUX_LOCAL_URL and $AGENTMUX_AUTH_KEY in the environment.
@@ -486,6 +497,58 @@ function renderDock(data) {
 }
 
 /**
+ * Render `muxspect layout` — the persisted pane tree per tab as an indented
+ * outline, plus the layout doctor's verdict.
+ *
+ * Exported (pure apart from console output) for muxspect.test.mjs, so the
+ * failure paths are testable rather than asserted.
+ */
+export function renderLayout(data) {
+    // A whole-request failure (the store couldn't be read at all) comes back
+    // as 200 + {error} with NO `layouts` key — see handle_muxspect_layout for
+    // why it isn't a 4xx. Without this branch it fell through to "no layouts
+    // found" and exit 0, reporting success for exactly the on-disk failure
+    // this command exists to surface (reagent P1 on PR #2856).
+    if (data.error) {
+        console.error(`layout: ${data.error}`);
+        return;
+    }
+    const layouts = data.layouts ?? [];
+    if (!layouts.length) {
+        console.log("no layouts found");
+        return;
+    }
+    for (const l of layouts) {
+        if (l.error) {
+            console.log(`tab ${l.tab_name ?? l.tab_id}  \u2716 ${l.error}`);
+            continue;
+        }
+        const verdict = l.healthy ? "healthy" : `${l.violations.length} violation(s)`;
+        console.log(
+            `tab ${l.tab_name ?? l.tab_id}  (${l.leaf_count} pane(s), ` +
+                `${l.minimized_leaf_count} minimized)  ${verdict}`
+        );
+        for (const v of l.violations ?? []) console.log(`  ! ${v}`);
+        for (const n of l.nodes ?? []) {
+            const indent = "  ".repeat(n.depth + 1);
+            const flags = [];
+            if (n.locked) flags.push("minimized");
+            // Only meaningful on a branch — a leaf's own locked flag already
+            // says it, and repeating it there would be noise.
+            if (n.kind === "branch" && n.effectively_minimized) flags.push("all-minimized");
+            if (n.id === l.magnified_node_id) flags.push("magnified");
+            const tail = flags.length ? `  [${flags.join(", ")}]` : "";
+            const label =
+                n.kind === "leaf"
+                    ? `leaf ${n.block_id ? n.block_id.slice(0, 8) : "(no block)"}`
+                    : `${n.flex_direction} (${n.child_count})`;
+            console.log(`${indent}${label}  size=${n.size}${tail}`);
+        }
+        console.log("");
+    }
+}
+
+/**
  * Split argv into `{ cmd, sub, blockId, nodeId, json, help }`,
  * flags-and-positionals separated regardless of ordering. Flags can
  * legally appear before OR after the positional args (both 'muxspect
@@ -600,6 +663,23 @@ async function main() {
         const data = await apiGet(url, authKey, `/api/v1/muxspect/dock?block_id=${encodeURIComponent(blockId)}`);
         if (json) console.log(JSON.stringify(data, null, 2));
         else renderDock(data);
+        return;
+    }
+
+    if (cmd === "layout") {
+        // `blockId` is muxspect's generic first positional; for this command
+        // it is an optional tab id.
+        const qs = blockId ? `?tab_id=${encodeURIComponent(blockId)}` : "";
+        const data = await apiGet(url, authKey, `/api/v1/muxspect/layout${qs}`);
+        if (json) console.log(JSON.stringify(data, null, 2));
+        else renderLayout(data);
+        // A tree with violations is a real finding — exit non-zero so a
+        // scripted caller notices without parsing stdout. `data.error` is the
+        // whole-request failure (no `layouts` key at all); without it the
+        // command exited 0 on a store-read failure.
+        if (data.error || (data.layouts ?? []).some((l) => l.violations?.length || l.error)) {
+            process.exitCode = 1;
+        }
         return;
     }
 
