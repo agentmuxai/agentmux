@@ -517,12 +517,44 @@ function updateTreeHelper(
         }
         const prevChild = node.children[beforeIdx];
         const prevRect = additionalPropsMap[prevChild.id].rect;
+        const afterRect = additionalPropsMap[child.id].rect;
+
+        // Perpendicular span = the INTERSECTION of both flanking panes' FINAL
+        // rects, not just the before-pane's.
+        //
+        // It matters whenever this handle spans a slipped chip. In the
+        // right-preferred `A | B(minimized) | C` case, Phase B docks B onto C
+        // and pushes C's top DOWN by a chip height while A keeps its full
+        // height — so A and C only share an edge over the shorter overlap.
+        // Deriving the span from A alone put the handle's upper segment
+        // alongside B's locked chip, where it intercepted pointer events and
+        // offered to resize A against C from an edge those two panes do not
+        // actually share (codex P2 on PR #2855).
+        //
+        // For two ordinary siblings the rects span the perpendicular axis
+        // identically, so the intersection is exactly the old value and
+        // nothing changes.
+        const perpStart = nodeIsRow
+            ? Math.max(prevRect.top, afterRect.top)
+            : Math.max(prevRect.left, afterRect.left);
+        const perpEnd = nodeIsRow
+            ? Math.min(prevRect.top + prevRect.height, afterRect.top + afterRect.height)
+            : Math.min(prevRect.left + prevRect.width, afterRect.left + afterRect.width);
+        const perpExtent = perpEnd - perpStart;
+        // No overlap at all — e.g. a saturated slip group consumed the whole
+        // host (see layoutModel.test.ts's zero-height-anchor case). There is no
+        // shared edge to drag, so emit nothing, but the after-pane still
+        // becomes the next pair's before-side.
+        if (perpExtent <= 0) {
+            beforeIdx = i;
+            continue;
+        }
         const halfResizeHandleSizePx = resizeHandleSizePx / 2;
         const resizeHandleDimensions: Dimensions = {
-            top: nodeIsRow ? prevRect.top : prevRect.top + prevRect.height - halfResizeHandleSizePx,
-            left: nodeIsRow ? prevRect.left + prevRect.width - halfResizeHandleSizePx : prevRect.left,
-            width: nodeIsRow ? resizeHandleSizePx : prevRect.width,
-            height: nodeIsRow ? prevRect.height : resizeHandleSizePx,
+            top: nodeIsRow ? perpStart : prevRect.top + prevRect.height - halfResizeHandleSizePx,
+            left: nodeIsRow ? prevRect.left + prevRect.width - halfResizeHandleSizePx : perpStart,
+            width: nodeIsRow ? resizeHandleSizePx : perpExtent,
+            height: nodeIsRow ? perpExtent : resizeHandleSizePx,
         };
         resizeHandles.push({
             // Keyed on the BEFORE index — still unique, since each pane is
