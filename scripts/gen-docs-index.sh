@@ -44,12 +44,18 @@ check_only=0
 # map, which is ~730 spawns and seconds.
 build() {
     declare -A ROWS
+    local total=0 shown=0
     for f in docs/specs/*.md; do
         b=$(basename "$f")
         case "$b" in INDEX.md|README.md) continue ;; esac
+        total=$((total + 1))
 
         # One read per file; pull the Status word and the H1 together.
-        head -40 "$f" > "$scratch" 2>/dev/null || continue
+        # Deliberately no `|| continue` here: an unreadable file must still get
+        # a row (it falls through to __none__ with the filename as its title)
+        # rather than vanishing. Every path out of this loop ends in a row, so
+        # the completeness assertion at the bottom of build() is meaningful.
+        head -40 "$f" > "$scratch" 2>/dev/null || :
         w=$(grep -m1 -i '^\*\*Status:\*\*' "$scratch" 2>/dev/null             | sed 's/^\*\*Status:\*\*[[:space:]]*//I'             | awk '{print tolower($1)}' | sed 's/[^a-z]//g')
         title=$(grep -m1 '^# ' "$scratch" 2>/dev/null | sed 's/^# *//' | tr -d '|')
         [ -z "$title" ] && title="$b"
@@ -76,6 +82,7 @@ build() {
         rows="${ROWS[$st]:-}"
         [ -z "$rows" ] && continue
         n=$(printf '%s' "$rows" | grep -c '^|')
+        shown=$((shown + n))
         printf '
 ### %s (%s)
 
@@ -91,6 +98,7 @@ build() {
     rows="${ROWS[__none__]:-}"
     if [ -n "$rows" ]; then
         n=$(printf '%s' "$rows" | grep -c '^|')
+        shown=$((shown + n))
         printf '
 ### no status line (%s)
 
@@ -106,6 +114,66 @@ build() {
 |---|---|
 '
         printf '%s' "$rows"
+    fi
+
+    # Status line present, but its first word is outside the closed enum.
+    #
+    # An earlier version of this script printed ONLY the seven canonical
+    # buckets, so every one of these landed in a ROWS key the print loop never
+    # iterated and vanished from the index with no trace — 189 specs (26% of
+    # the tree) silently absent, while the header above claimed to cover every
+    # file. That is the exact failure this batch exists to fix, reintroduced by
+    # the fix itself. --check could not catch it: it only diffs a re-run of the
+    # same logic, so a stable bug stays green forever.
+    noncanon=""
+    for st in $(printf '%s\n' "${!ROWS[@]}" | sort); do
+        case " implemented active proposed draft living historical superseded __none__ " in
+            *" $st "*) continue ;;
+        esac
+        noncanon="$noncanon $st"
+    done
+
+    if [ -n "$noncanon" ]; then
+        n=0
+        for st in $noncanon; do
+            n=$((n + $(printf '%s' "${ROWS[$st]}" | grep -c '^|')))
+        done
+        shown=$((shown + n))
+        printf '
+### non-canonical status (%s)
+' "$n"
+        printf '
+These carry a `**Status:**` line whose first word is not in the closed enum
+'
+        printf '(`docs/specs/README.md`). Grouped by the word actually found, so the
+'
+        printf 'real state is visible rather than guessed at. `check-doc-status.sh`
+'
+        printf 'requires a fix the next time one of these is edited; as with the
+'
+        printf 'section above, do not bulk-restamp them.
+'
+        for st in $noncanon; do
+            printf '
+**`%s`**
+
+' "$st"
+            printf '| Spec | Title |
+|---|---|
+'
+            printf '%s' "${ROWS[$st]}"
+        done
+    fi
+
+    # Completeness assertion — the check that would have caught the bug above,
+    # and the reason it cannot come back. Every candidate file must be
+    # accounted for by exactly one emitted row; if not, the index would be
+    # claiming a coverage it does not have, so refuse to produce it at all.
+    if [ "$shown" -ne "$total" ]; then
+        echo "gen-docs-index: FATAL — emitted $shown rows for $total specs;" >&2
+        echo "  $((total - shown)) unaccounted for. The index would be incomplete" >&2
+        echo "  while claiming to cover every file; refusing to write it." >&2
+        return 3
     fi
 
     printf '
@@ -126,7 +194,12 @@ else
     cat "$INDEX" > "$tmp"
     printf '\n---\n\n' >> "$tmp"
 fi
-build >> "$tmp"
+if ! build >> "$tmp"; then
+    # The completeness assertion tripped. Leave INDEX.md exactly as it was:
+    # a stale index is recoverable, a confidently-incomplete one is not.
+    rm -f "$tmp"
+    exit 3
+fi
 
 if [ "$check_only" -eq 1 ]; then
     if diff -q "$INDEX" "$tmp" >/dev/null 2>&1; then
