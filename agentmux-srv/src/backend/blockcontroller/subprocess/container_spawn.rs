@@ -16,7 +16,6 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use futures_util::StreamExt as _;
-use tokio::io::AsyncWriteExt;
 
 use crate::backend::blockcontroller::{
     core, publish_controller_status, session_stats, shell, STATUS_DONE, STATUS_RUNNING,
@@ -25,6 +24,95 @@ use crate::backend::wps;
 
 use super::{argv::build_turn_argv, SubprocessController, SubprocessControllerInner, SubprocessSpawnConfig, SUBPROCESS_OUTPUT_SUBJECT};
 
+/// Put the turn message into the argv, where a container turn's prompt has to go.
+///
+/// A container turn cannot use stdin at all: bollard's hijacked exec stream
+/// can't half-close the write side, and on Windows the Docker transport is a
+/// named pipe, which has no half-close — so the in-container process's stdin
+/// NEVER reaches EOF. Verified live 2026-09-01: both `drop(input)` and an
+/// explicit `input.shutdown().await` left `claude -p` hung with zero output,
+/// no error and no exit, which is exactly what a sandbox pane showed.
+///
+/// This was survivable while container agents carried
+/// `--input-format stream-json`: that protocol is newline-delimited and never
+/// waits for EOF — the same reason `container.rs`'s `exec (io)` test uses
+/// `read line` rather than `cat`. Correcting container agents to the one-shot
+/// `-p` argv (the persistent flags crashed them outright) is what made the EOF
+/// dependency load-bearing, turning a crash into a silent hang.
+///
+/// Docker takes argv as a JSON array, so there is no shell quoting to get
+/// wrong: a multi-line `# Session Context` body is a single token.
+fn turn_argv_with_message(mut cmd: Vec<String>, message: &str) -> Vec<String> {
+    // A trailing `-` is the "read the prompt from stdin" positional (codex).
+    // It designates the same slot, so replace it rather than append after it —
+    // appending would leave the CLI still trying to read a stdin that can never
+    // EOF, i.e. the exact hang this function exists to avoid.
+    if cmd.last().map(|a| a == "-").unwrap_or(false) {
+        cmd.pop();
+    }
+    cmd.push(message.to_string());
+    cmd
+}
+
+#[cfg(test)]
+mod turn_argv_tests {
+    use super::turn_argv_with_message;
+
+    fn v(xs: &[&str]) -> Vec<String> {
+        xs.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// The prompt must reach the CLI in argv — the whole point.
+    #[test]
+    fn appends_the_message_as_the_final_token() {
+        let got = turn_argv_with_message(v(&["claude", "-p", "--verbose"]), "say hi");
+        assert_eq!(got, v(&["claude", "-p", "--verbose", "say hi"]));
+    }
+
+    /// codex's trailing `-` MEANS "read the prompt from stdin". Appending after
+    /// it would leave the CLI waiting on a stdin that can never reach EOF.
+    #[test]
+    fn replaces_a_trailing_stdin_positional_rather_than_appending_after_it() {
+        let got = turn_argv_with_message(v(&["codex", "exec", "--json", "-"]), "say hi");
+        assert_eq!(got, v(&["codex", "exec", "--json", "say hi"]));
+        assert!(!got.iter().any(|a| a == "-"), "the stdin positional must be gone");
+    }
+
+    /// Only a TRAILING `-` is the stdin positional; one earlier in the argv is
+    /// some other flag's value and must survive untouched.
+    #[test]
+    fn leaves_a_non_trailing_dash_alone() {
+        let got = turn_argv_with_message(v(&["cli", "--file", "-", "--json"]), "hi");
+        assert_eq!(got, v(&["cli", "--file", "-", "--json", "hi"]));
+    }
+
+    /// Multi-line prompts (the `# Session Context` body) stay ONE argv token —
+    /// Docker takes argv as a JSON array, so there is no quoting to get wrong.
+    #[test]
+    fn keeps_a_multiline_message_as_a_single_token() {
+        let msg = "# Session Context\n\nline two\nline three";
+        let got = turn_argv_with_message(v(&["claude", "-p"]), msg);
+        assert_eq!(got.len(), 3, "exactly one token was added");
+        assert_eq!(got[2], msg);
+    }
+
+    /// Quotes, spaces and metacharacters are data here, never shell syntax.
+    #[test]
+    fn does_not_mangle_shell_metacharacters() {
+        let msg = "say \"hi\" & echo $HOME; rm -rf /tmp";
+        let got = turn_argv_with_message(v(&["claude", "-p"]), msg);
+        assert_eq!(got.last().unwrap(), msg);
+    }
+
+    /// An empty message is still its own token — dropping it would shift a
+    /// positional-taking CLI onto the wrong argument.
+    #[test]
+    fn an_empty_message_is_still_a_token() {
+        let got = turn_argv_with_message(v(&["claude", "-p"]), "");
+        assert_eq!(got, v(&["claude", "-p", ""]));
+    }
+}
+
 impl SubprocessController {
     /// Spawn a container agent turn via Docker socket (P1a: no secrets in argv).
     ///
@@ -32,10 +120,11 @@ impl SubprocessController {
     /// of running `docker exec -e KEY=VALUE ...` as a CLI subprocess (which exposes
     /// secrets in process argv / `/proc/<pid>/cmdline`, CWE-214), this method calls
     /// `ContainerManager::exec` directly, passing env vars through
-    /// `CreateExecOptions.env` (Docker socket). The exec I/O (stdin write + stdout
-    /// NDJSON stream) drives the same state machine as `spawn_turn`:
+    /// `CreateExecOptions.env` (Docker socket). The exec I/O (argv-carried prompt
+    /// + stdout NDJSON stream) drives the same state machine as `spawn_turn`:
     ///   • appends `--resume <sid>` if a prior session_id is known
-    ///   • writes the JSON message to exec stdin
+    ///   • passes the turn message as a trailing argv token (NOT stdin — see
+    ///     the comment on `cmd` below for why stdin cannot work here)
     ///   • reads NDJSON from the output stream, publishing WPS blockfile events
     ///   • captures session_id from the provider's init event
     ///   • transitions status running → done
@@ -82,6 +171,7 @@ impl SubprocessController {
                 return Err(error);
             }
         };
+        let cmd = turn_argv_with_message(cmd, &config.message);
         self.emit_message_accepted(&config);
 
         // Derive the exec env from THIS message's own env_vars (apply the
@@ -126,7 +216,8 @@ impl SubprocessController {
             // Start the exec via Docker socket — env vars travel through
             // CreateExecOptions.env (Docker API), never in process argv.
             let exec_result = cm
-                .exec(&container_name, &cmd, None, &container_env)
+                // attach_stdin: false — see `cmd` above and ContainerManager::exec.
+                .exec(&container_name, &cmd, None, &container_env, false)
                 .await;
             let exec_session = match exec_result {
                 Ok(s) => s,
@@ -219,25 +310,11 @@ impl SubprocessController {
             }
             health_monitor.set_active_turn(true);
 
-            let crate::backend::container::ExecSession { exec_id, mut input, output } = exec_session;
-
-            // Write the turn message to container stdin INLINE — not via a
-            // detached `tokio::spawn`, which may not be scheduled for seconds
-            // under runtime load and would trip the in-container CLI's "no
-            // stdin data received in 3s" abort (the host path uses a dedicated
-            // OS thread for the same reason — see spawn_turn). Awaiting here in
-            // the already-running exec task guarantees the bytes hit the Docker
-            // attach stream immediately. The CLI drains stdin to EOF before it
-            // emits output, so this write cannot deadlock the read loop below.
-            {
-                let payload = format!("{}\n", config.message);
-                if let Err(e) = input.write_all(payload.as_bytes()).await {
-                    tracing::warn!(block_id = %block_id, "container exec stdin write error: {}", e);
-                } else if let Err(e) = input.flush().await {
-                    tracing::warn!(block_id = %block_id, "container exec stdin flush error: {}", e);
-                }
-                drop(input); // EOF to the container process
-            }
+            // `input` is unused by design — the turn message is in argv (see
+            // above). Dropping it immediately keeps no handle on a write half
+            // that can never be closed anyway.
+            let crate::backend::container::ExecSession { exec_id, input, output } = exec_session;
+            drop(input);
 
             // Read stdout — accumulate bytes into lines.
             let mut line_buf = String::new();

@@ -142,6 +142,7 @@ pub fn register_shell_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         &["sh".to_string(), "-c".to_string(), cmd.command.clone()],
                         None, // container's own working directory (host path invalid inside)
                         &[],  // no extra env vars for !cmd
+                        false, // no stdin — `!cmd` output-only; see ContainerManager::exec
                     ).await.map_err(|e| format!("shellexec: container exec failed: {e}"))?;
 
                     let exec_id = session.exec_id.clone();

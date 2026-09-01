@@ -64,8 +64,10 @@ struct ContainerManagerInner {
 
 /// Exec session handle for a single turn.
 ///
-/// `input` is the stdin pipe into the container process (write JSON message here,
-/// then drop/flush to send EOF). `output` is a bollard `LogOutput` stream; with
+/// `input` is the stdin pipe into the container process. It is ONLY usable for a
+/// process that completes on a newline: the write half can never be closed, so
+/// stdin never reaches EOF (see [`ContainerManager::exec`]). Turn input belongs
+/// in argv. `output` is a bollard `LogOutput` stream; with
 /// `tty: false` Docker multiplexes stdout as `LogOutput::StdOut` frames and
 /// stderr as `LogOutput::StdErr` frames.
 ///
@@ -78,7 +80,8 @@ pub struct ExecSession {
     /// must inspect the exec (the in-container CLI can exit non-zero while still
     /// closing stdout cleanly).
     pub exec_id: String,
-    /// Stdin pipe to the container process. Write the JSON message then flush/drop.
+    /// Stdin pipe to the container process. Unusable for EOF-terminated readers
+    /// — see the type-level doc and [`ContainerManager::exec`]'s `attach_stdin`.
     pub input: Pin<Box<dyn AsyncWrite + Send>>,
     /// Multiplexed stdout/stderr stream (LogOutput::StdOut / LogOutput::StdErr).
     pub output: Pin<Box<dyn futures_util::Stream<Item = Result<bollard::container::LogOutput, bollard::errors::Error>> + Send>>,
@@ -213,12 +216,26 @@ impl ContainerManager {
     /// Uses `-i` (not `-t`) to avoid tty CR/LF corruption of NDJSON output.
     /// The caller receives `ExecSession` whose `output` stream carries
     /// multiplexed stdout/stderr for piping into the block.
+    ///
+    /// `attach_stdin` MUST be `false` unless the in-container process is a
+    /// reader that completes on a newline rather than on EOF. Attaching stdin
+    /// is a one-way door: bollard's hijacked exec stream cannot half-close the
+    /// write side (see the `exec (io)` integration test below), and on Windows
+    /// the Docker transport is a named pipe, which has no half-close at all —
+    /// so the process's stdin NEVER reaches EOF. Neither `drop(input)` nor an
+    /// explicit `input.shutdown().await` changes that; both were tried against
+    /// a live container on 2026-09-01 and the process hung indefinitely.
+    ///
+    /// Any command that reads stdin to EOF (`cat`, or `claude -p` taking its
+    /// prompt on stdin) will therefore hang forever, producing no output and
+    /// no exit. Pass its input in argv instead.
     pub async fn exec(
         &self,
         container_name: &str,
         cmd: &[String],
         working_dir: Option<&str>,
         env_vars: &[(String, String)],
+        attach_stdin: bool,
     ) -> Result<ExecSession, ContainerError> {
         let env: Vec<String> = env_vars.iter()
             .map(|(k, v)| format!("{k}={v}"))
@@ -226,7 +243,7 @@ impl ContainerManager {
 
         let exec = self.inner.docker
             .create_exec(container_name, CreateExecOptions {
-                attach_stdin: Some(true),
+                attach_stdin: Some(attach_stdin),
                 attach_stdout: Some(true),
                 attach_stderr: Some(true),
                 tty: Some(false), // NO tty — preserves NDJSON newlines
@@ -725,6 +742,7 @@ mod tests {
                 &["sh".into(), "-c".into(), "printf %s \"$ITEST_KEY\"".into()],
                 None,
                 &[("ITEST_KEY".into(), "val-42".into())],
+                false,
             )
             .await
             .expect("exec (env)");
@@ -744,6 +762,7 @@ mod tests {
                 &["sh".into(), "-c".into(), "read line; printf 'got:%s' \"$line\"".into()],
                 None,
                 &[],
+                true, // this test is specifically the stdin contract
             )
             .await
             .expect("exec (io)");
