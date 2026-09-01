@@ -2393,8 +2393,6 @@ const AgentPresentationView = ({
                 State (detailsOpen) is reducer-owned (PR #1068). */}
             <AgentComposerStrip
                 loading={showingLaunchActivity() || workingFromPhase(agentAtoms().turnPhaseAtom[0]())}
-                sessionTotals={agentAtoms().sessionTotalsAtom[0]()}
-                turnTokens={agentAtoms().turnTokensAtom[0]()}
                 processCount={processCount()}
                 onProcessBadgeClick={() => {
                     createBlock({ meta: { view: "swarm" } });
