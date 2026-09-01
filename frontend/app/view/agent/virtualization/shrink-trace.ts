@@ -16,102 +16,105 @@
  * 08-31 without a culprit for exactly this reason — no fixed-height component
  * of that size exists, so the number was almost certainly a sum.
  *
- * This module records each observed row's height as it changes and keeps a
- * bounded log of the SHRINKS only. When the pane-level diagnostic fires, it
- * asks for the shrinks seen in the immediately-preceding window and reports
- * them alongside the pane delta — turning "the pane lost 251px" into "tool node
- * tc-9 went 13400px -> 120px, and 222px is still unaccounted for".
+ * This module diffs a SNAPSHOT of the rendered rows' heights against the
+ * previous snapshot, and reports which rows shrank plus how much of the pane
+ * delta they fail to explain.
  *
- * The unattributed remainder is the point, not a rounding detail: it is what
- * tells you whether the observed rows explain the pane's shrink or whether
- * something not being observed (the virtualized region, the working-row
- * overlay, the panel's own padding/margin collapse) is responsible. A
- * conclusion drawn from attribution alone, without checking that remainder,
- * would repeat the exact error the 08-21/08-22 findings were corrected for.
+ * ## Why snapshot-diffing rather than a ResizeObserver
+ *
+ * The first version of this fed a `ResizeObserver` into a time-windowed ring
+ * buffer. That is broken for the primary case, and codex caught it on PR #2887:
+ * the pin effect defers `scrollToTrueBottom()` with `queueMicrotask`, and
+ * reading `scrollHeight` there forces a layout flush — so the PANE shrink is
+ * detected during the microtask checkpoint, while `ResizeObserver` callbacks
+ * are not delivered until later in the rendering steps. A tool going
+ * running->terminal would therefore log as wholly unattributed, and its row
+ * shrink would still be sitting in the ring afterwards to be miscredited to
+ * some unrelated later pane delta. Systematically wrong on the one case the
+ * instrumentation exists for, and wrong in the direction that invents
+ * false attributions.
+ *
+ * Sampling synchronously from the caller removes the ordering dependency
+ * instead of trying to schedule around it: both numbers are then read from the
+ * same layout-clean instant, and the row window is exactly the pane window
+ * (previous pin check -> this one) rather than a 250ms approximation of it.
+ * The caller reads `scrollHeight` immediately before sampling, so layout is
+ * already flushed and the per-row reads cost no extra reflow.
+ *
+ * Heights are `offsetHeight`, deliberately, to match the pane's `scrollHeight`:
+ * both are unzoomed under an ancestor CSS `zoom`, whereas
+ * `getBoundingClientRect().height` is scaled by it. Mixing the two would make
+ * every attribution wrong by the zoom factor at non-100% pane zoom.
  *
  * Deliberately NOT gated on `import.meta.env.DEV`, unlike `perf-probe.ts`: the
  * most useful data so far came from `task package` local builds, where a DEV
- * gate would compile this out entirely. Cost is bounded instead by only
- * recording numbers on resize and only formatting a string when a pane shrink
- * has already been detected.
+ * gate would compile this out entirely.
  */
 
-/** One observed row getting shorter. Growth is not recorded — the pane pin
- *  handles growth invisibly (it teleports to a bottom that is further away,
- *  which is what it already does every frame while streaming). */
+/** One row's height at sample time, as read by the caller from the DOM. */
+export interface RowSample {
+    id: string;
+    /** `DocumentNode["type"]` — "tool", "markdown", "thinking", … */
+    type: string;
+    px: number;
+}
+
+/** One observed row that got shorter since the previous sample. Growth is not
+ *  reported — the pin handles growth invisibly (it teleports to a bottom that
+ *  moved further away, which it already does every frame while streaming). */
 export interface RowShrink {
     nodeId: string;
-    /** `DocumentNode["type"]` — "tool", "markdown", "thinking", … */
     nodeType: string;
     fromPx: number;
     toPx: number;
-    atMs: number;
 }
-
-/** Bounded so a long streaming session can't grow this without limit. Sized to
- *  comfortably cover one pin-check interval's worth of resizes (the 08-21 data
- *  showed pin checks ~160ms apart under load; a burst of that length is a
- *  handful of rows, not dozens). */
-const RING_SIZE = 64;
-
-/** How far back `attribute()` looks for shrinks to blame a pane delta on.
- *  Pin checks in the 08-21 dataset were ~160ms apart at their closest; this
- *  covers that with margin without reaching back into a previous, unrelated
- *  turn's activity. */
-export const ATTRIBUTION_WINDOW_MS = 250;
 
 export interface Attribution {
     shrinks: RowShrink[];
-    /** Sum of the per-row shrinks in the window. */
+    /** Sum of the per-row shrinks. */
     attributedPx: number;
-    /** paneDeltaPx - attributedPx. Positive means observed rows do NOT fully
-     *  explain the pane shrink; negative means rows shrank more than the pane
-     *  did (something else grew at the same time). Either way, a non-zero
-     *  value means "do not stop here". */
+    /** paneDeltaPx - attributedPx. Positive means the observed rows do NOT
+     *  fully explain the pane shrink (something unobserved did — the
+     *  virtualized region, the working-row overlay, the panel's own
+     *  padding/margin collapse). Negative means rows shrank more than the pane
+     *  did, i.e. something grew at the same time. Either way a non-zero value
+     *  means "do not stop here" — reporting it is what keeps this diagnostic
+     *  from manufacturing the same over-confident conclusions the 08-21/08-22
+     *  findings had to be corrected for. */
     unattributedPx: number;
 }
 
 export class ShrinkTrace {
     private heights = new Map<string, number>();
-    private ring: RowShrink[] = [];
 
     /**
-     * Record a row's current height. The first observation for a node only
-     * establishes a baseline — it is never a shrink, because there is nothing
-     * to have shrunk from. (A row mounting at 0px and laying out at its real
-     * height would otherwise register as growth on the second call and noise
-     * on every subsequent remount.)
+     * Diff `samples` against the previous call and return the rows that got
+     * shorter. Ids absent from `samples` are dropped, so a row that unmounted
+     * (a streaming-buffer cap-advance retiring it) cannot later appear to have
+     * shrunk across the gap when the same node re-renders at a new height.
+     *
+     * The first sample of a node only establishes a baseline — it is never a
+     * shrink, because there is nothing to have shrunk from.
      */
-    record(nodeId: string, nodeType: string, px: number, atMs: number): void {
-        const prev = this.heights.get(nodeId);
-        this.heights.set(nodeId, px);
-        if (prev === undefined || px >= prev) return;
-        this.ring.push({ nodeId, nodeType, fromPx: prev, toPx: px, atMs });
-        if (this.ring.length > RING_SIZE) this.ring.shift();
+    sample(samples: RowSample[]): RowShrink[] {
+        const shrinks: RowShrink[] = [];
+        const next = new Map<string, number>();
+        for (const s of samples) {
+            const prev = this.heights.get(s.id);
+            next.set(s.id, s.px);
+            if (prev !== undefined && s.px < prev) {
+                shrinks.push({ nodeId: s.id, nodeType: s.type, fromPx: prev, toPx: s.px });
+            }
+        }
+        this.heights = next;
+        return shrinks;
     }
+}
 
-    /**
-     * Drop a node's baseline. Called when its row unmounts — without this, a
-     * node that leaves the streaming buffer tall and later re-renders short
-     * (history reload, cap-advance re-add) would report a fabricated shrink
-     * spanning the gap.
-     */
-    forget(nodeId: string): void {
-        this.heights.delete(nodeId);
-    }
-
-    /**
-     * Explain `paneDeltaPx` using shrinks recorded in the preceding
-     * `windowMs`. Consumed entries are removed so the next pane shrink can't
-     * be credited to the same rows twice.
-     */
-    attribute(paneDeltaPx: number, nowMs: number, windowMs: number = ATTRIBUTION_WINDOW_MS): Attribution {
-        const cutoff = nowMs - windowMs;
-        const shrinks = this.ring.filter((s) => s.atMs >= cutoff);
-        this.ring = [];
-        const attributedPx = shrinks.reduce((sum, s) => sum + (s.fromPx - s.toPx), 0);
-        return { shrinks, attributedPx, unattributedPx: paneDeltaPx - attributedPx };
-    }
+/** Stateless — the sample diff already scoped these to the right window. */
+export function attribute(paneDeltaPx: number, shrinks: RowShrink[]): Attribution {
+    const attributedPx = shrinks.reduce((sum, s) => sum + (s.fromPx - s.toPx), 0);
+    return { shrinks, attributedPx, unattributedPx: paneDeltaPx - attributedPx };
 }
 
 /**
