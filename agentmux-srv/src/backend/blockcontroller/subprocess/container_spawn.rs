@@ -16,7 +16,6 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use futures_util::StreamExt as _;
-use tokio::io::AsyncWriteExt;
 
 use crate::backend::blockcontroller::{
     core, publish_controller_status, session_stats, shell, STATUS_DONE, STATUS_RUNNING,
@@ -25,6 +24,114 @@ use crate::backend::wps;
 
 use super::{argv::build_turn_argv, SubprocessController, SubprocessControllerInner, SubprocessSpawnConfig, SUBPROCESS_OUTPUT_SUBJECT};
 
+/// Wrap the CLI argv so it reads the turn prompt from `prompt_path`, a file
+/// already written into the container by
+/// [`ContainerManager::upload_turn_prompt`].
+///
+/// Redirecting from a file is the only transport that satisfies all three
+/// constraints at once (see `upload_turn_prompt`'s doc for the measurements):
+/// the CLI gets a real stdin that really reaches EOF, the message never touches
+/// argv or env — so `docker top` / host `ps` / `/proc/<pid>/cmdline` can't see a
+/// secret pasted into a chat message — and there is no `MAX_ARG_STRLEN` ceiling.
+///
+/// The CLI argv is passed through as `"$@"` rather than interpolated into the
+/// script, so there is no shell quoting to get wrong, and it is passed
+/// UNCHANGED — including a trailing `-` (codex) or a `-p ""` placeholder
+/// (gemini/qwen/kimi/antigravity), both of which mean "read the prompt from
+/// stdin" and are correct again now that stdin genuinely works (codex P1,
+/// PR #2883).
+///
+/// The prompt file is removed after the CLI exits, and the CLI's own exit
+/// status is preserved for `inspect_exec` to classify the turn.
+fn container_turn_exec(prompt_path: &str, cmd: Vec<String>) -> Vec<String> {
+    let mut out = vec![
+        "sh".to_string(),
+        "-c".to_string(),
+        // $1 = prompt path, "$@" (after shift) = the CLI and its args.
+        r#"F="$1"; shift; "$@" < "$F"; rc=$?; rm -f "$F"; exit $rc"#.to_string(),
+        // $0 for the script -- a label only.
+        "agentmux-turn".to_string(),
+        prompt_path.to_string(),
+    ];
+    out.extend(cmd);
+    out
+}
+
+#[cfg(test)]
+mod turn_exec_tests {
+    use super::container_turn_exec;
+
+    fn v(xs: &[&str]) -> Vec<String> {
+        xs.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// The security property this shape exists for (reagent P1, PR #2883): the
+    /// message must never reach argv, where `docker top` / `ps` /
+    /// `/proc/<pid>/cmdline` would expose a pasted secret. It can't — the argv
+    /// is built from the prompt's PATH and never sees the message at all.
+    #[test]
+    fn the_argv_carries_only_a_path_never_the_message() {
+        let argv = container_turn_exec("/tmp/agentmux-turn-abc", v(&["claude", "-p"]));
+        assert!(argv.iter().any(|a| a == "/tmp/agentmux-turn-abc"), "the path is there");
+        assert!(
+            argv.iter().all(|a| !a.contains("ghp_") && !a.contains("secret")),
+            "nothing message-shaped is: {argv:?}",
+        );
+    }
+
+    /// The CLI must actually read the file — this redirect IS the fix.
+    #[test]
+    fn redirects_the_clis_stdin_from_the_prompt_file() {
+        let argv = container_turn_exec("/tmp/p", v(&["claude", "-p"]));
+        assert!(argv[2].contains(r#""$@" < "$F""#), "must redirect: {}", argv[2]);
+    }
+
+    /// The prompt file is transient state; leaving it behind would accumulate
+    /// one file per turn for the life of the container.
+    #[test]
+    fn removes_the_prompt_file_afterwards() {
+        let argv = container_turn_exec("/tmp/p", v(&["claude", "-p"]));
+        assert!(argv[2].contains(r#"rm -f "$F""#), "must clean up: {}", argv[2]);
+    }
+
+    /// `inspect_exec` classifies the turn from the exit code, so the CLI's own
+    /// status must survive the cleanup that runs after it.
+    #[test]
+    fn preserves_the_clis_exit_status_across_cleanup() {
+        let argv = container_turn_exec("/tmp/p", v(&["claude", "-p"]));
+        assert!(argv[2].contains("rc=$?"), "captures status before rm");
+        assert!(argv[2].contains("exit $rc"), "and re-raises it: {}", argv[2]);
+    }
+
+    /// Passed as "$@", so the CLI argv survives verbatim and in order.
+    #[test]
+    fn passes_the_cli_argv_through_unchanged() {
+        let argv = container_turn_exec("/tmp/p", v(&["claude", "-p", "--model", "opus"]));
+        assert_eq!(&argv[0], "sh");
+        assert_eq!(&argv[1], "-c");
+        // argv[3] is $0, argv[4] is the prompt path; the CLI argv follows.
+        assert_eq!(&argv[5..], &v(&["claude", "-p", "--model", "opus"])[..]);
+    }
+
+    /// codex's trailing `-` means "read the prompt from stdin" and must NOT be
+    /// stripped: stdin is a real, EOF-terminating file now. An earlier cut of
+    /// this fix removed it, which was only necessary while the message was
+    /// being smuggled through argv.
+    #[test]
+    fn keeps_codexs_trailing_stdin_positional() {
+        let argv = container_turn_exec("/tmp/p", v(&["codex", "exec", "--json", "-"]));
+        assert_eq!(argv.last().unwrap(), "-");
+    }
+
+    /// Same for the `-p ""` placeholder gemini/qwen/kimi/antigravity use to
+    /// mean "prompt comes from stdin" (codex P1, PR #2883).
+    #[test]
+    fn keeps_an_empty_prompt_placeholder() {
+        let argv = container_turn_exec("/tmp/p", v(&["gemini", "-p", "", "--json"]));
+        assert_eq!(&argv[5..], &v(&["gemini", "-p", "", "--json"])[..]);
+    }
+}
+
 impl SubprocessController {
     /// Spawn a container agent turn via Docker socket (P1a: no secrets in argv).
     ///
@@ -32,10 +139,12 @@ impl SubprocessController {
     /// of running `docker exec -e KEY=VALUE ...` as a CLI subprocess (which exposes
     /// secrets in process argv / `/proc/<pid>/cmdline`, CWE-214), this method calls
     /// `ContainerManager::exec` directly, passing env vars through
-    /// `CreateExecOptions.env` (Docker socket). The exec I/O (stdin write + stdout
-    /// NDJSON stream) drives the same state machine as `spawn_turn`:
+    /// `CreateExecOptions.env` (Docker socket). The exec I/O (file-backed prompt
+    /// + stdout NDJSON stream) drives the same state machine as `spawn_turn`:
     ///   • appends `--resume <sid>` if a prior session_id is known
-    ///   • writes the JSON message to exec stdin
+    ///   • uploads the turn message into the container as a file and redirects
+    ///     the CLI's stdin from it — see `container_turn_exec` for why the
+    ///     exec's own stdin, argv, and env are all unusable for this
     ///   • reads NDJSON from the output stream, publishing WPS blockfile events
     ///   • captures session_id from the provider's init event
     ///   • transitions status running → done
@@ -82,6 +191,7 @@ impl SubprocessController {
                 return Err(error);
             }
         };
+
         self.emit_message_accepted(&config);
 
         // Derive the exec env from THIS message's own env_vars (apply the
@@ -114,6 +224,12 @@ impl SubprocessController {
         let filestore = self.filestore.clone();
         let health_monitor = Arc::clone(&self.health_monitor);
         let block_id = self.block_id.clone();
+        // The prompt is written into the container as a file per turn (see
+        // `container_turn_exec`). A fresh id per turn keeps two turns — this
+        // block's next one, or another block sharing the container — from
+        // racing on the same path, including the `rm -f` that cleans it up.
+        let turn_id = uuid::Uuid::new_v4().to_string();
+        let turn_message = config.message.clone();
         let self_ref_done = self.self_ref.lock().unwrap().clone().unwrap_or_default();
 
         // Spawn all async work (exec + I/O) into a background task so this
@@ -123,11 +239,72 @@ impl SubprocessController {
         tokio::spawn(async move {
             use bollard::container::LogOutput;
 
+            // Install the kill channel BEFORE any await, so a stop issued
+            // while this turn is still starting is recorded rather than
+            // dropped.
+            //
+            // `stop_subprocess` reports success if `inner.kill_tx` is None,
+            // treating "nothing to interrupt" as "already stopped". While
+            // kill_tx was installed only after the exec had started, every
+            // await before that point was a hole: a stop landing in it was
+            // silently discarded and the turn then ran on, flipping the status
+            // back to running (codex P2, PR #2883). That hole always existed
+            // for the exec round-trip, and this change widened it materially —
+            // the identity probe plus a prompt upload that can be hundreds of
+            // KB now sit inside it.
+            //
+            // A stop that arrives during startup is not lost: `kill_rx` holds
+            // the value, and the reader loop below selects on it `biased`, so
+            // it is observed on the first poll and interrupted immediately —
+            // including the prompt-file cleanup. The failure paths above/below
+            // clear `kill_tx` again, so nothing is left dangling.
+            let (kill_tx, mut kill_rx) = tokio::sync::oneshot::channel::<bool>();
+            {
+                let mut inner = inner_arc.lock().unwrap();
+                inner.kill_tx = Some(kill_tx);
+                Self::set_status(&mut inner, STATUS_RUNNING);
+            }
+            if let Some(ref b) = broker {
+                let status = {
+                    let inner = inner_arc.lock().unwrap();
+                    SubprocessController::build_status_snapshot(&inner, &block_id, false)
+                };
+                publish_controller_status(b, &status);
+            }
+            health_monitor.set_active_turn(true);
+
             // Start the exec via Docker socket — env vars travel through
             // CreateExecOptions.env (Docker API), never in process argv.
-            let exec_result = cm
-                .exec(&container_name, &cmd, None, &container_env)
-                .await;
+            // Set once the upload succeeds; the interrupt path uses it to remove
+            // a prompt file whose wrapper was killed before it could.
+            let mut prompt_path_for_kill = String::new();
+            // Write the prompt into the container FIRST, then run the CLI with
+            // its stdin redirected from that file. See `container_turn_exec`
+            // and `ContainerManager::upload_turn_prompt` for why neither the
+            // exec's own stdin, nor argv, nor an env var can carry it.
+            let exec_result = match cm
+                .upload_turn_prompt(&container_name, &turn_id, &turn_message)
+                .await
+            {
+                Ok(prompt_path) => {
+                    // Retained for the interrupt path below, which has to do
+                    // the cleanup the killed wrapper can't.
+                    prompt_path_for_kill = prompt_path.clone();
+                    let wrapped = container_turn_exec(&prompt_path, cmd);
+                    // attach_stdin: false — the CLI's stdin is the prompt file.
+                    match cm.exec(&container_name, &wrapped, None, &container_env, false).await {
+                        Ok(session) => Ok(session),
+                        Err(e) => {
+                            // The wrapper never ran, so neither did its
+                            // `rm -f "$F"` — clean up here or the prompt is
+                            // orphaned in the container (reagent P2, PR #2883).
+                            cm.remove_turn_prompt(&container_name, &prompt_path).await;
+                            Err(e)
+                        }
+                    }
+                }
+                Err(e) => Err(e),
+            };
             let exec_session = match exec_result {
                 Ok(s) => s,
                 Err(e) => {
@@ -159,6 +336,9 @@ impl SubprocessController {
                         inner.current_pid = None;
                         inner.kill_tx = None;
                     }
+                    // Clears active_turn as well as recording the exit code —
+                    // which is why the earlier `set_active_turn(true)`, now
+                    // hoisted above the upload, needs no explicit undo here.
                     health_monitor.set_exited(1);
                     if let Some(ref b) = broker {
                         let status = {
@@ -195,49 +375,12 @@ impl SubprocessController {
                 }
             };
 
-            // Install a kill channel so stop_subprocess can interrupt this
-            // in-flight exec. docker exec has no kill API, so the reader below
-            // selects on kill_rx and pkills the in-container process. Stored only
-            // after a successful exec start (the early-return failure path above
-            // leaves kill_tx None — nothing to interrupt). Mirrors spawn_turn.
-            let (kill_tx, mut kill_rx) = tokio::sync::oneshot::channel::<bool>();
-
-            // Update status to running
-            {
-                let mut inner = inner_arc.lock().unwrap();
-                inner.kill_tx = Some(kill_tx);
-                Self::set_status(&mut inner, STATUS_RUNNING);
-            }
-            if let Some(ref b) = broker {
-                let status = {
-                    let inner = inner_arc.lock().unwrap();
-                    // Published just before set_active_turn(true) below —
-                    // accurate at the moment this snapshot is built.
-                    SubprocessController::build_status_snapshot(&inner, &block_id, false)
-                };
-                publish_controller_status(b, &status);
-            }
-            health_monitor.set_active_turn(true);
-
-            let crate::backend::container::ExecSession { exec_id, mut input, output } = exec_session;
-
-            // Write the turn message to container stdin INLINE — not via a
-            // detached `tokio::spawn`, which may not be scheduled for seconds
-            // under runtime load and would trip the in-container CLI's "no
-            // stdin data received in 3s" abort (the host path uses a dedicated
-            // OS thread for the same reason — see spawn_turn). Awaiting here in
-            // the already-running exec task guarantees the bytes hit the Docker
-            // attach stream immediately. The CLI drains stdin to EOF before it
-            // emits output, so this write cannot deadlock the read loop below.
-            {
-                let payload = format!("{}\n", config.message);
-                if let Err(e) = input.write_all(payload.as_bytes()).await {
-                    tracing::warn!(block_id = %block_id, "container exec stdin write error: {}", e);
-                } else if let Err(e) = input.flush().await {
-                    tracing::warn!(block_id = %block_id, "container exec stdin flush error: {}", e);
-                }
-                drop(input); // EOF to the container process
-            }
+            // `input` is unused by design — the CLI reads its prompt from the
+            // uploaded file, and only that file's PATH travels in argv (see
+            // `container_turn_exec`). Dropping it immediately keeps no handle
+            // on a write half that can never be closed anyway.
+            let crate::backend::container::ExecSession { exec_id, input, output } = exec_session;
+            drop(input);
 
             // Read stdout — accumulate bytes into lines.
             let mut line_buf = String::new();
@@ -290,6 +433,16 @@ impl SubprocessController {
                         if let Err(e) = cm.signal_exec_process(&container_name, &kill_pattern, force).await {
                             tracing::warn!(block_id = %block_id, error = %e, "container interrupt pkill failed");
                         }
+                        // The wrapper carries the `rm -f`, and `pkill -f
+                        // <cli>` matches the wrapper too -- its argv contains
+                        // the CLI name as an argument -- so the shell dies
+                        // alongside the CLI and its cleanup never runs. An
+                        // interrupted turn would otherwise leave a mode-0600
+                        // prompt, possibly holding a pasted secret, in a
+                        // container that outlives the turn (codex P2,
+                        // PR #2883). Clean up from out here, where nothing was
+                        // killed.
+                        cm.remove_turn_prompt(&container_name, &prompt_path_for_kill).await;
                         killed = true;
                         break;
                     }
