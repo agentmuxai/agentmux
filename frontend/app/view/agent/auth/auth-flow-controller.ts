@@ -519,16 +519,20 @@ export class AuthFlowController {
         this.dispatch({ type: "ConnectFailed", error: message });
     }
 
-    /** Seed-from-global accepted — the agent's isolated dir now holds the
-     *  user's valid global credential, so auth is satisfied WITHOUT running
-     *  a fresh OAuth — tier 2's fast path (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md
-     *  §3.1), offered alongside tier 1's in-app session rather than as its
-     *  replacement (it only WAS the replacement while in-app OAuth was a
-     *  dead end for Claude v2.1.183 — SPEC_HOST_CLI_LOGIN_CAPTURE §0).
-     *  The seed RPC itself is fired by the view (PreLaunchAuthPanel via the
-     *  seed-global-login flow); this records the success in the state machine
-     *  so the reducer transitions to `ready` and the Launch button enables.
-     *  Single-phase — no session, no poll. */
+    /** A login completed and its account is registered — record it in the
+     *  state machine so the reducer transitions to `ready` and the Launch
+     *  button enables. Fired by the view (`PreLaunchAuthPanel`) on a real
+     *  `inapp-success` or `terminal-success` outcome from `runProviderLogin`.
+     *
+     *  NAME IS HISTORICAL. Until 2026-08-31 this recorded a "seed from
+     *  global": tier 2 copied the user's already-valid personal `~/.claude`
+     *  credential into the agent's isolated dir, satisfying auth with no
+     *  OAuth at all. That tier was a per-channel-isolation bypass and was
+     *  removed (docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md
+     *  #3), so nothing is seeded from anywhere any more — the credential now
+     *  only ever arrives from a login the user actually completes in this
+     *  channel. The method/action names (`markSeeded`, `Seeded`) are kept to
+     *  avoid churning the reducer's action union and its tests for a rename. */
     markSeeded(bundleId: string): void {
         this.dispatch({ type: "Seeded", bundleId });
     }

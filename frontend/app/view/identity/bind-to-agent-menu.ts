@@ -127,8 +127,9 @@ function findTabIdForBlock(blockId: string): string | null {
 
 /**
  * Bind `account` to `candidate`'s agent (spec §2): link upsert, then — for
- * a running agent — the same live-apply pair
- * `useAgentControllerStatus.useGlobalLogin()` performs after linking:
+ * a running agent — the same live-apply pair the pane's own post-login
+ * recovery performs after linking (this used to name
+ * `useAgentControllerStatus.useGlobalLogin()`, removed 2026-08-31):
  * (1) refresh the block's `cmd:env` config-dir override (a stale static
  * override would otherwise shadow the new link at the next spawn), and
  * (2) `ControllerResyncCommand{forcerestart:true}` — a persistent

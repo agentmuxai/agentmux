@@ -220,10 +220,6 @@ declare global {
         ) => Promise<string | null>;
         cancelCliLogin: () => Promise<void>;
         getCliLoginStatus: () => Promise<{ active: boolean; credential_changed: boolean; generation: number }>;
-        seedProviderAuthFromGlobal: (
-            providerId: string,
-            configDir?: string
-        ) => Promise<{ seeded: boolean; status: string; expiresAt?: number | null }>;
         openLoginTerminal: (
             cliPath: string,
             loginArgs: string[],

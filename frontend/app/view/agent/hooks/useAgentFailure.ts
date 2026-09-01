@@ -93,17 +93,12 @@ export interface UseAgentFailureOptions {
     onRetry: () => void;
     /** Re-authenticate this agent's provider account (P2). */
     onLoginAgain: () => void;
-    /** Seed this agent from the user's existing global Claude login (§5.5). */
-    onUseExistingLogin: () => void;
     /** Open a real terminal window for browser-based OAuth (Claude v2.1.x). */
     onLoginViaTerminal: () => void;
     /** Open Armory → Accounts. */
     onOpenArmory: () => void;
     /** Start a fresh agent session (context-window overflow recovery). */
     onNewSession: () => void;
-    /** True when the provider supports seed-from-global (Claude). Promotes
-     *  "Use existing login" to primary in the auth failure banner. */
-    canSeed?: () => boolean;
 }
 
 export interface UseAgentFailureResult {
@@ -272,11 +267,10 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         const f = pf.data;
         return failureToRow(
             f,
-            { expanded: expanded(), autoRetryIn: autoRetryIn(), retrying: retrying(), canSeed: opts.canSeed?.() },
+            { expanded: expanded(), autoRetryIn: autoRetryIn(), retrying: retrying() },
             {
                 retry: doRetry,
                 loginAgain: opts.onLoginAgain,
-                useExistingLogin: opts.onUseExistingLogin,
                 loginViaTerminal: opts.onLoginViaTerminal,
                 openArmory: opts.onOpenArmory,
                 newSession: opts.onNewSession,

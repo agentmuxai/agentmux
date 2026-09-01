@@ -296,9 +296,10 @@ export const IdentityApi = {
 
     // command "identity.ensureaccountdir" — mints (or resolves, when
     // existingAccountId is set) a per-account isolated config dir without
-    // spawning a CLI or an OAuth handshake. Used by the seed-from-global
-    // recovery path so a seeded credential lands under a real account's own
-    // dir instead of the shared/global one — "single point, not global",
+    // spawning a CLI or an OAuth handshake. Used by the terminal-login tier,
+    // which must know where to point the login BEFORE opening a terminal, so
+    // the credential lands under a real account's own dir instead of the
+    // shared/global one — "single point, not global",
     // PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7.
     EnsureAccountDirCommand(
         client: RpcClient,

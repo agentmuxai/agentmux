@@ -1265,8 +1265,12 @@ fn shell_quote(s: &str) -> String {
 /// open a browser (the piped/PTY paths used by `run_cli_login` are headless
 /// and block the browser from launching — confirmed for Claude v2.1.x).
 ///
-/// Fire-and-forget: returns immediately; the frontend polls for credentials
-/// via `seed_provider_auth_from_global` and seeds them once they appear.
+/// Fire-and-forget: returns immediately; the frontend polls the CLI's own
+/// auth-check command (`pollForCliAuthReady`) against the isolated config dir
+/// the login was pointed at, and registers the account once it reports
+/// authenticated. It previously polled `seed_provider_auth_from_global`, which
+/// copied the credential in from the user's personal `~/.claude` — removed
+/// 2026-08-31 (per-channel auth enforcement).
 pub fn open_login_terminal(args: &serde_json::Value) -> Result<serde_json::Value, String> {
     let cli_path = args
         .get("cli_path")

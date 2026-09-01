@@ -414,9 +414,6 @@ async fn route_command(
         "get_cli_path" => commands::providers::get_cli_path(state, args),
         "check_nodejs_available" => commands::providers::check_nodejs_available().await,
         "ensure_auth_dir" => commands::platform::ensure_auth_dir(state, args),
-        "seed_provider_auth_from_global" => {
-            commands::providers::seed_provider_auth_from_global(state, args)
-        }
         "run_cli_login" => commands::cli_login::run_cli_login(state.clone(), args).await,
         "cancel_cli_login" => commands::cli_login::cancel_cli_login(state),
         "get_cli_login_status" => commands::cli_login::get_cli_login_status(state),

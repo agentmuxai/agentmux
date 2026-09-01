@@ -124,8 +124,8 @@ pub struct IdentityAccount {
     // frontend caller (persistSeededAccount, register-seeded-account.ts) omits
     // both fields entirely, expecting the server to fill them in — without
     // `default` here, deserialization rejects the payload before the handler's
-    // own timestamp logic ever runs, so every seed-from-global / terminal
-    // login's account-persist call failed 100% of the time with no visible
+    // own timestamp logic ever runs, so every login's account-persist call
+    // failed 100% of the time with no visible
     // error (report: REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md).
     #[serde(default)]
     pub created_at: i64,
@@ -703,8 +703,8 @@ mod tests {
     /// since the handler is documented to server-stamp them. Before
     /// `#[serde(default)]` was added to those two fields, this exact shape
     /// failed `serde_json::from_value` with "missing field `created_at`" on
-    /// every call, so every seed-from-global / terminal-fallback login
-    /// silently never persisted an account row (the credential landed on
+    /// every call, so every login silently never persisted an account row
+    /// (the credential landed on
     /// disk, but no `db_accounts` row or agent link ever existed — see
     /// REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md).
     #[test]

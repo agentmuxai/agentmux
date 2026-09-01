@@ -1202,7 +1202,7 @@ const AgentPresentationView = ({
         },
         onNotify: (text, style) => postSystemNotification(text, style),
         onReady: () => onReadyFn?.(),
-        // A successful recovery (seed-from-global / terminal login) refreshed
+        // A successful recovery (relogin / terminal login) refreshed
         // the credential — retry the failed turn so the agent recovers in one
         // click. Lazy arrow: retryLastTurn is defined below but only invoked at
         // runtime (post-click), by which point it's initialized.
@@ -1210,7 +1210,7 @@ const AgentPresentationView = ({
             // If a DIFFERENT, overlapping recovery flow is still running,
             // leave the failure banner and loginWaiting() both untouched
             // instead of clearing-and-retrying now. THIS flow's own
-            // credential is confirmed good, but relogin()/useGlobalLogin()/
+            // credential is confirmed good, but relogin()/
             // loginViaTerminal() never check whether a turn is active
             // before calling forceControllerRefresh (only /login's
             // slash-command path does) — clearing+retrying here used to let
@@ -1289,7 +1289,7 @@ const AgentPresentationView = ({
     });
 
     // status.isLoading() is `flowRunning() || !agentReady()` — it never
-    // becomes true during relogin()/loginViaTerminal()/useGlobalLogin(),
+    // becomes true during relogin()/loginViaTerminal(),
     // since the agent is already ready by the time those recovery flows
     // run. Without launchPhase() in this gate too, the working row (and
     // its phase label + Cancel button), the top progress bar, and the
@@ -1820,7 +1820,6 @@ const AgentPresentationView = ({
         failure: agentAtoms().failureAtom[0],
         onRetry: retryLastTurn,
         onOpenArmory: () => void openOrFocusPaneByView("armory"),
-        canSeed: () => provider()?.id === "claude",
         // context_exceeded recovery — drop the over-full session and return to
         // the picker for a clean relaunch (resuming would only re-fail).
         onNewSession: () => {
@@ -1840,15 +1839,6 @@ const AgentPresentationView = ({
         onLoginAgain: () => {
             log("auth", "Login Again — forcing a fresh provider login");
             void status.relogin();
-        },
-        // Seed-from-global recovery: copy the user's existing valid global
-        // Claude login into this agent instead of a fresh OAuth — the reliable
-        // path for Claude Code v2.1.x's un-scrapeable login TUI (§5.5). The
-        // agent re-reads its credential per request, so the next message clears
-        // this failure row with no restart.
-        onUseExistingLogin: () => {
-            log("auth", "Use existing login — seeding from your global Claude login");
-            void status.useGlobalLogin();
         },
         // Open a real console window (CREATE_NEW_CONSOLE) so the browser OAuth
         // can launch. Polls for new credentials and seeds when they appear.
@@ -2190,10 +2180,14 @@ const AgentPresentationView = ({
                         // Must match onLoginAgain above: the button is labeled "Login
                         // Again", so it has to force a fresh OAuth regardless of
                         // provider. A prior version special-cased Claude into
-                        // useGlobalLogin() instead — silently reusing the (possibly
-                        // equally-stale) global credential under a "Login Again"
-                        // label, which is exactly the kind of no-op this button
-                        // exists to avoid (retro-agent-auth-relogin-noop-2026-07-01).
+                        // a seed-from-global path instead — silently reusing the
+                        // (possibly equally-stale) personal credential under a
+                        // "Login Again" label, exactly the kind of no-op this
+                        // button exists to avoid
+                        // (retro-agent-auth-relogin-noop-2026-07-01). That path
+                        // was removed outright 2026-08-31 (per-channel auth
+                        // enforcement), so the trap is now structural, not just
+                        // a convention to uphold here.
                         log("auth", "Login Again (inline error node) — forcing a fresh provider login");
                         void status.relogin();
                     }}

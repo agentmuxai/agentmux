@@ -21,12 +21,11 @@ const mkView = (overrides: Partial<FailureViewState> = {}): FailureViewState => 
 });
 
 const mkActions = (): FailureActions & { _calls: Record<keyof FailureActions, number> } => {
-    const _calls = { retry: 0, loginAgain: 0, useExistingLogin: 0, loginViaTerminal: 0, openArmory: 0, newSession: 0, toggleDetails: 0, dismiss: 0 };
+    const _calls = { retry: 0, loginAgain: 0, loginViaTerminal: 0, openArmory: 0, newSession: 0, toggleDetails: 0, dismiss: 0 };
     return {
         _calls,
         retry: vi.fn(() => void _calls.retry++),
         loginAgain: vi.fn(() => void _calls.loginAgain++),
-        useExistingLogin: vi.fn(() => void _calls.useExistingLogin++),
         loginViaTerminal: vi.fn(() => void _calls.loginViaTerminal++),
         openArmory: vi.fn(() => void _calls.openArmory++),
         newSession: vi.fn(() => void _calls.newSession++),
@@ -64,7 +63,13 @@ describe("failureToRow", () => {
         expect(on._calls.dismiss).toBe(1);
     });
 
-    it("auth (non-Claude) → 🔐 sigil with Login Again primary + Use existing login secondary", () => {
+    // REWRITTEN 2026-08-31: "Use existing login" was removed (it copied the
+    // operator's personal ~/.claude credential into the agent, defeating
+    // per-channel isolation — see
+    // docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md #3).
+    // The auth row no longer branches on `canSeed`, so there is ONE auth
+    // action set for every provider, Claude included.
+    it("auth → 🔐 sigil, Login Again primary, terminal + Armory secondary, for every provider", () => {
         const on = mkActions();
         const row = failureToRow(mkFailure({ code: "auth", title: "Not authenticated" }), mkView(), on);
         expect(row.sigil).toBe("🔐");
@@ -75,11 +80,11 @@ describe("failureToRow", () => {
         login?.onClick();
         expect(on._calls.loginAgain).toBe(1);
 
-        const useExisting = action(row, "Use existing login");
-        expect(useExisting).toBeTruthy();
-        expect(useExisting?.primary).toBeFalsy();
-        useExisting?.onClick();
-        expect(on._calls.useExistingLogin).toBe(1);
+        const terminal = action(row, "Login via terminal");
+        expect(terminal).toBeTruthy();
+        expect(terminal?.primary).toBeFalsy();
+        terminal?.onClick();
+        expect(on._calls.loginViaTerminal).toBe(1);
 
         const trust = action(row, "Armory → Accounts");
         expect(trust).toBeTruthy();
@@ -87,24 +92,11 @@ describe("failureToRow", () => {
         expect(on._calls.openArmory).toBe(1);
     });
 
-    it("auth (Claude / canSeed) → Use existing login is primary, Login via terminal is secondary", () => {
-        const on = mkActions();
-        const row = failureToRow(mkFailure({ code: "auth", title: "Not authenticated" }), mkView({ canSeed: true }), on);
-        expect(row.sigil).toBe("🔐");
-
-        const useExisting = action(row, "Use existing login");
-        expect(useExisting?.primary).toBe(true);
-        useExisting?.onClick();
-        expect(on._calls.useExistingLogin).toBe(1);
-
-        const terminal = action(row, "Login via terminal");
-        expect(terminal).toBeTruthy();
-        expect(terminal?.primary).toBeFalsy();
-        terminal?.onClick();
-        expect(on._calls.loginViaTerminal).toBe(1);
-
-        // "Login Again" (PTY path) must NOT appear for Claude — it hangs headlessly.
-        expect(action(row, "Login Again")).toBeUndefined();
+    it("auth never offers a seed-from-personal-login action any more", () => {
+        const row = failureToRow(mkFailure({ code: "auth" }), mkView(), mkActions());
+        expect(action(row, "Use existing login")).toBeUndefined();
+        // The 🌐 glyph it used is likewise gone from the auth row.
+        expect(row.actions.some((a) => a.glyph === "🌐")).toBe(false);
     });
 
     it("usage_limit → Armory is the primary action", () => {

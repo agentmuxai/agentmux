@@ -105,7 +105,7 @@ describe("forceProviderLogin", () => {
         expect(log).toHaveBeenCalledWith("auth", expect.stringMatching(/system browser/i));
     });
 
-    it("reagent P2 on PR #2410: does not open a browser/pane for an attempt already cancelled by the time the URL is captured, but still resolves 'opened' (not 'no-url') so an awaited-session caller's own isCancelled check — not a tier-2/3 fallthrough — is what ends the attempt", async () => {
+    it("reagent P2 on PR #2410: does not open a browser/pane for an attempt already cancelled by the time the URL is captured, but still resolves 'opened' (not 'no-url') so an awaited-session caller's own isCancelled check — not a tier-3 fallthrough — is what ends the attempt", async () => {
         hub.runCliLogin.mockResolvedValue(URL);
         const setAuthUrl = vi.fn();
         const log = vi.fn();

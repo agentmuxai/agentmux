@@ -106,7 +106,6 @@ const mkUI = (onRetry: () => void) => {
         failure,
         onRetry,
         onLoginAgain() {},
-        onUseExistingLogin() {},
         onLoginViaTerminal() {},
         onOpenArmory() {},
         onNewSession() {},

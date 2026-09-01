@@ -138,7 +138,7 @@ export interface SlashCommandContext {
     notifyControllerHealthy: () => void;
     /**
      * Clear a live "auth"-classified failure row (state.failure), if any.
-     * relogin()/useGlobalLogin()/loginViaTerminal() all clear this via their
+     * relogin()/loginViaTerminal() all clear this via their
      * onRecovered callback before auto-retrying, but /login is a fully
      * separate path with no equivalent — without this, a stale pre-existing
      * failure survives a successful /login, and the caller's NEXT normal
@@ -151,7 +151,7 @@ export interface SlashCommandContext {
      * Restart an already-running persistent controller so a just-refreshed
      * credential actually takes effect — `send_message` only spawns a
      * fresh process when one isn't already running. relogin()/
-     * useGlobalLogin()/loginViaTerminal() all call the equivalent
+     * loginViaTerminal() all call the equivalent
      * (`useAgentControllerStatus.forceControllerRefresh`) before declaring
      * success; /login must do the same, or a pane whose controller was
      * already alive stays on the stale credential and the next message
@@ -205,7 +205,7 @@ export interface SlashCommandContext {
      * Register /login's own up-to-5-minute poll as an in-flight recovery
      * attempt, feeding the same shared counter behind
      * `useAgentControllerStatus`'s `loginWaiting()` that
-     * relogin()/useGlobalLogin()/loginViaTerminal() already use. Without
+     * relogin()/loginViaTerminal() already use. Without
      * this, `loginWaiting()` reads `false` for the whole duration of a
      * /login attempt — a second message sent while it's still polling gets
      * held with `authWasKnownBadAtQueueTime: false` (mid-turn "auth"
@@ -232,7 +232,7 @@ export interface SlashCommandContext {
     isCancelled: () => boolean;
     /**
      * Reset the flag `isCancelled()` reads, mirroring the reset every OTHER
-     * login-starting function (relogin()/useGlobalLogin()/
+     * login-starting function (relogin()/
      * loginViaTerminal()) already does at its own start —
      * `useAgentControllerStatus.resetCancelled`. Call this at the very
      * start of a fresh /login attempt: without it, a flag left `true` by a

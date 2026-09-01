@@ -357,7 +357,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
     it("still rejects a held message known-bad at queue time even if a later-FAILED recovery cleared loginWaiting() without setting canRetry() (codex P1 on PR #2338, sixteenth re-review)", async () => {
         // A prior version of this code re-checked LIVE canRetry()/
         // loginWaiting() at flush time to avoid over-rejecting a message
-        // that recovered — but relogin()/useGlobalLogin()/loginViaTerminal()'s
+        // that recovered — but relogin()/loginViaTerminal()'s
         // default retryAfterLogin:true failure path clears loginWaiting()
         // and never sets canRetry() back to true, so both signals read
         // false after a recovery attempt FAILS too, not just when it
@@ -543,7 +543,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
         // bypassed loginWaiting() here via a trustedAfterRecovery flag,
         // reasoning that a DIFFERENT overlapping recovery flow's own
         // uncertainty had no bearing on THIS flow's confirmed success. That
-        // missed that relogin()/useGlobalLogin()/loginViaTerminal() all
+        // missed that relogin()/loginViaTerminal() all
         // unconditionally force-restart the controller once THEY finish —
         // killing the very turn the bypass just let start. The flag was
         // removed; this send must block like any other while a sibling

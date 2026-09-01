@@ -23,8 +23,6 @@ export interface FailureActions {
     retry: () => void;
     /** Re-authenticate this agent's provider account (auth failures). */
     loginAgain: () => void;
-    /** Seed from the user's existing valid global Claude login (no fresh OAuth). */
-    useExistingLogin: () => void;
     /** Open a real terminal window so the browser OAuth can open, then poll for creds. */
     loginViaTerminal: () => void;
     /** Open Armory → Accounts. */
@@ -46,12 +44,6 @@ export interface FailureViewState {
     autoRetryIn: number | null;
     /** True while a retry is in flight (disables the button). */
     retrying: boolean;
-    /**
-     * True when the provider supports seed-from-global recovery (Claude only).
-     * Promotes "Use existing login" to primary and adds "Login via terminal"
-     * as the fresh-OAuth path instead of the broken spawned-PTY path.
-     */
-    canSeed?: boolean;
 }
 
 /** Per-class sigil. */
@@ -110,22 +102,19 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
     const actions: PaneRowAction[] = [];
     switch (f.code) {
         case "auth":
-            if (view.canSeed) {
-                // Claude provider: seed-from-global is the reliable path;
-                // "Login via terminal" opens a real console so the browser
-                // can launch (the spawned PTY path is headless and hangs).
-                actions.push(
-                    { glyph: "🌐", label: "Use existing login", title: "Copy your valid global Claude login into this agent (no re-OAuth)", primary: true, onClick: on.useExistingLogin },
-                    { glyph: "🖥", label: "Login via terminal", title: "Open a terminal window where the browser login can complete", onClick: on.loginViaTerminal },
-                    openArmory,
-                );
-            } else {
-                actions.push(
-                    { glyph: "🔑", label: "Login Again", title: "Re-authenticate this agent", primary: true, onClick: on.loginAgain },
-                    { glyph: "🌐", label: "Use existing login", title: "Copy your existing valid global Claude login into this agent (no re-OAuth)", onClick: on.useExistingLogin },
-                    openArmory,
-                );
-            }
+            // "Use existing login" REMOVED 2026-08-31. It copied the user's
+            // personal `~/.claude` credential into this agent, which defeated
+            // per-channel isolation — see
+            // `docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md`
+            // #3. Every provider now recovers the same way: a real login, in
+            // this channel. `canSeed` no longer branches the action list (it
+            // only ever meant "provider is Claude"), so both arms collapse into
+            // one.
+            actions.push(
+                { glyph: "🔑", label: "Login Again", title: "Re-authenticate this agent", primary: true, onClick: on.loginAgain },
+                { glyph: "🖥", label: "Login via terminal", title: "Open a terminal window where the browser login can complete", onClick: on.loginViaTerminal },
+                openArmory,
+            );
             break;
         case "usage_limit":
             actions.push({ ...openArmory, label: "Armory (switch / upgrade)", primary: true });
