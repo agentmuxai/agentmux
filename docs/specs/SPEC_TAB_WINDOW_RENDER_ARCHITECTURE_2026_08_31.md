@@ -55,6 +55,14 @@ predict its outcome, and (b) demonstrably tears. §3.4's causal-reveal work is
 the highest-value remaining item; §3.3 is a real seam awaiting its own
 evidence (it was **not** the tab-close cause — see the report's §0).
 
+**Strengthened 2026-09-01, after three review passes on §3.1.** Each pass found
+a new class of correctness hole in the epoch design (see §3.1's cost/risk table),
+with no sign of converging. §3.1/§3.2 should now be read as *"here is why this
+is harder than it looks,"* not as a plan of record. Treat §3.1 as **not
+implementable as specified** and requiring a dedicated replicated-state design
+with an explicit consistency model before anyone writes code against it. §3.3
+and §3.4 are unaffected by this and remain independently shippable.
+
 ## 1. Problem statement
 
 Roughly twenty separate flash/flicker defects have been fixed in this codebase
@@ -188,16 +196,49 @@ The apply contract is therefore:
 - A frame at `watermark + 1` applies as one `batch()`; the watermark advances.
 - A frame **older** than the watermark is dropped (today's version guard,
   generalized from per-object to per-transition).
-- A frame **newer** than `watermark + 1` means at least one epoch was lost. The
-  client must **not** apply it. It requests an authoritative resync (a snapshot
-  of the affected objects, or a full workspace re-read), adopts the snapshot's
-  epoch as its new watermark, and resumes. Loud telemetry on every resync — a
-  frequent resync means the transport is lossy and that is the bug to fix, not
-  the resync path.
+- A frame **newer** than `watermark + 1` may mean an epoch was lost — but
+  **not necessarily**, see "reordering is not loss" below. Once loss is
+  established, the client must **not** apply the frame; it resyncs.
 
 Without the resync arm, this design is strictly *worse* than today's
 per-object version guard under packet loss, because it would confidently apply
-a delta onto a base it never received.
+a delta onto a base it never received. But the resync arm is itself three
+non-obvious sub-problems, all of which must be solved before this is buildable.
+
+**(a) Reordering is not loss.** `dispatch_to_reducer` releases the reducer mutex
+before caller I/O and publication, so two concurrent requests can allocate `E`
+and `E+1` and publish `E+1` first while `E` is still persisting. Treating every
+`> watermark + 1` frame as loss would make ordinary concurrent RPCs trigger
+authoritative reloads — potentially in a loop. Either the producer **serializes
+envelope publication by epoch** (publication order must match allocation order,
+which is a real constraint on the dispatch path, not a client concern), or the
+client **holds complete out-of-order frames** in a small reorder window and only
+declares loss when a gap persists past it. The producer-side fix is preferable:
+it is a total order, not a heuristic timeout.
+
+**(b) The client cannot know what the missing epoch changed.** If `N` is
+dropped, the client sees only `N+1` — it has no record of which objects `N`
+touched. So a per-object or workspace-scoped resync can silently *omit* the
+stale object and then advance the watermark past `N`, permanently blessing a
+torn cache. Cross-workspace dispatches make a single-workspace reload
+insufficient too. Two admissible designs:
+  1. a **retained mutation manifest** keyed by epoch (server keeps "epoch N
+     touched these orefs" for a bounded window), so a resync can be scoped; or
+  2. a snapshot covering **all WOS state visible to that renderer**, which needs
+     no manifest but is the expensive option.
+  Anything narrower than one of these is unsound.
+
+**(c) A resync can race the live stream and roll the watermark backwards.**
+While a snapshot request is in flight, live frames keep arriving. The client can
+apply `E+1` and *then* receive a snapshot captured at `E`. Unconditionally
+adopting that snapshot rolls the cache back, and if no further frame arrives the
+renderer stays stale indefinitely. The resync contract must therefore either
+buffer/suspend stream application for the duration, or — simpler —
+**discard any snapshot whose epoch is behind the current watermark and retry**.
+Adopting a snapshot epoch must be a monotonic operation, never an assignment.
+
+Loud telemetry on every resync regardless: frequent resyncs mean the transport
+is lossy, and *that* is the bug to fix rather than the resync path.
 
 **Failure to assemble a frame is a resync, not a rollback.** An earlier draft
 said a producer that cannot assemble the full set "must fail the transition."
@@ -233,13 +274,33 @@ UI can render — provided the dispatch envelope, the watermark, and the resync
 arm all exist. Any one of the three missing and the guarantee is only
 probabilistic, which is what the four failed tab-flash fixes already were.
 
-**Cost / risk:** three distinct pieces of work, not one — a dispatch envelope
-through `publish_events` and the bridge, an epoch watermark in `wos.ts`, and an
-authoritative resync endpoint. That is substantially more than the earlier draft
-implied, and it reinforces §0: do not fund this on the strength of the tab
-flash, which was closed for ~150 lines by decoupling one surface instead.
-Ship behind a flag; assert in dev builds that a dispatch's emitted object set
-matches what the reducer declared, and alarm on resync frequency.
+**Cost / risk — and a warning the revision history itself provides.** The work
+is now, minimally: a dispatch envelope through `publish_events` and the bridge;
+serialized publication order on the dispatch path; an epoch watermark plus
+reorder window in `wos.ts`; a retained per-epoch mutation manifest (or a
+full-renderer snapshot); an authoritative resync endpoint; and monotonic
+snapshot adoption with discard-and-retry.
+
+**That list grew on every review pass, and each addition was a genuine
+correctness hole, not a nicety:**
+
+| Pass | What was found |
+|---|---|
+| 1 | partial epochs are undetectable without a count or terminator |
+| 2 | the unit is the dispatch, not the event; delta frames need gap detection; "fail the transition" is unimplementable post-commit |
+| 3 | reordering is indistinguishable from loss; the client can't know what a lost epoch touched; a stale resync rolls the watermark backwards |
+
+Three passes, three new classes of hole, no sign of convergence. That is the
+signature of a **distributed-systems problem being solved incidentally**, and it
+is the strongest argument in this document for §0's recommendation: *do not
+build this.* The tab flash — the symptom that motivated the whole design — was
+closed in ~150 lines by decoupling one surface from backend ordering entirely.
+
+If this is ever funded, it should be scoped and reviewed as a replicated-state
+protocol in its own right, with an explicit consistency model, not as a
+refactor of the WaveObject cache. Ship behind a flag; assert in dev builds that
+a dispatch's emitted object set matches what the reducer declared; alarm on
+resync frequency.
 
 ### 3.2 One authoritative transport (`P2` collapse)
 
@@ -272,8 +333,10 @@ behaviour under the current design.
 transports. It does not cover the resync path §3.1 requires, which is a fourth
 path by construction — a client-initiated authoritative read. That is
 acceptable because a resync delivers a *snapshot*, not a delta: it cannot tear
-against the stream, it can only be stale, and its adopted epoch re-anchors the
-watermark. Any resync design that returned deltas would reintroduce the problem.
+against the stream. It *can* be stale, which is why §3.1(c) requires adopting a
+snapshot epoch monotonically — discard-and-retry anything behind the current
+watermark — rather than assigning it. Any resync design that returned deltas
+would reintroduce the problem outright.
 
 ### 3.3 `PaneSurfaceSync` — a frame contract with the native compositor
 
