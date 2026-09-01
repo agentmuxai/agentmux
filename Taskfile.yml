@@ -183,6 +183,14 @@ tasks:
             rule #3 from SPEC_INPUT_RESPONSIVENESS_TERMINAL_AND_AGENT_2026_05_29.
         cmd: bash tools/lint/check-input-handler-layout-reads.sh
 
+    docs:index:
+        desc: >-
+            Regenerate the generated half of docs/specs/INDEX.md (grouped by
+            Status). The curated subsystem sections above the marker are
+            hand-written and untouched. See
+            docs/specs/PLAN_DOCS_CLEANUP_EXECUTION_2026_09_01.md batch D.
+        cmd: bash scripts/gen-docs-index.sh
+
     check:doc-status:
         desc: >-
             Gate — fails if a CHANGED doc's `**Status:**` line does not start
