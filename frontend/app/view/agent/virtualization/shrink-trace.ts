@@ -112,12 +112,6 @@ export class ShrinkTrace {
         const attributedPx = shrinks.reduce((sum, s) => sum + (s.fromPx - s.toPx), 0);
         return { shrinks, attributedPx, unattributedPx: paneDeltaPx - attributedPx };
     }
-
-    /** Test/teardown hook — drops all baselines and pending shrinks. */
-    reset(): void {
-        this.heights.clear();
-        this.ring = [];
-    }
 }
 
 /**
