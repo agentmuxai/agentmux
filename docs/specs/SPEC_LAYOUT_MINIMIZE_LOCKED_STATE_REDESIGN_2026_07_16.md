@@ -2,7 +2,18 @@
 
 **Date:** 2026-07-16
 **Type:** Investigation + redesign proposal
-**Status:** SUPERSEDED by the display-mode model, implemented 2026-07-16 (see §8).
+**Status:** implemented — §8's display-mode model shipped in PR #2197 (i3 pattern:
+one leaf-only `minimized` flag, geometry derived, slip/dissolve deleted),
+extended by #2211. §§1-7 record the *rejected* locked-state alternatives and
+are kept for that reasoning.
+
+*(Previously marked `SUPERSEDED` with no `Superseded-by:` pointer, which the
+status vocabulary requires. There is no successor document to point at: this
+spec was superseded by a later section of itself, so "superseded" was simply
+the wrong status — the doc describes shipped behaviour.)*
+
+---
+
 Option B (locks, §6) shipped in #2180, then was retired the same day after the layout
 doctor caught cascade arithmetic producing negative sizes live — Option B's locks
 faithfully preserved the garbage. External research

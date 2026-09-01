@@ -91,9 +91,19 @@ pointer:
 - `SPEC_COMPOSER_STRIP_LEFT_RIGHT_BALANCE_2026_08_24.md`
 - `SPEC_LAYOUT_MINIMIZE_LOCKED_STATE_REDESIGN_2026_07_16.md`
 
-Resolve each by finding the real successor from `git log`. If no successor
-exists, the status is wrong and becomes `historical`. **No judgement about
-content required** — only "what replaced this", answerable from history.
+Resolve each by finding the real successor from `git log`.
+
+If no successor document exists, the status is wrong — but **`historical` is not
+the automatic answer.** An earlier revision of this plan said it was, and
+executing Batch B immediately showed why that is a trap: the minimize spec has
+no successor file because §8 of the document *is* the final design, and it
+shipped (#2197, extended #2211) with backend layout code still citing it.
+Defaulting to `historical` would have replaced one inaccurate status with
+another and made a code-anchored, implemented spec look like a mere record.
+
+So: find what the document actually represents *now* — `implemented` if its
+design shipped, `historical` if it only records a past effort — and never
+invent a `Superseded-by:` pointer to satisfy the enum.
 
 ### Batch C — Phase 2, directory consolidation (agreed, never started)
 
@@ -121,8 +131,15 @@ which is the documented history of this exact problem, three times over.
 
 Minimum viable enforcement, as a check that runs in CI:
 
-1. Every **added or modified** `docs/**/*.md` in a PR must have a `Status:`
-   line whose first word is in the closed enum.
+1. Every **added or modified** `docs/**/*.md` **and `specs/**/*.md`** in a PR
+   must have a `Status:` line whose first word is in the closed enum.
+
+   Both trees, deliberately. Batch C (which would merge `specs/` into
+   `docs/specs/`) is deferrable and gated on an owner decision, so scoping the
+   check to `docs/` alone would leave that tree's 135 files unprotected
+   *indefinitely* — a new root spec could omit the enum entirely with CI green,
+   which contradicts this batch's whole claim of stopping the backlog growing.
+   The `specs/` glob is removed only once the move has actually landed.
 2. A `superseded` status must carry a `Superseded-by:` pointing at a path that
    exists.
 
