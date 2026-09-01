@@ -336,10 +336,9 @@ impl SubprocessController {
                         inner.current_pid = None;
                         inner.kill_tx = None;
                     }
-                    // set_active_turn(true) now happens before the upload, so
-                    // this early return has to undo it — previously the flag
-                    // was only ever set after a successful exec start.
-                    health_monitor.set_active_turn(false);
+                    // Clears active_turn as well as recording the exit code —
+                    // which is why the earlier `set_active_turn(true)`, now
+                    // hoisted above the upload, needs no explicit undo here.
                     health_monitor.set_exited(1);
                     if let Some(ref b) = broker {
                         let status = {
