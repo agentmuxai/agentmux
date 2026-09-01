@@ -10,16 +10,32 @@ separately as #2904.
 
 > **⚠ This spec's own v1 gate is not currently met.**
 >
-> §4 lists two non-negotiables for v1. The first (no silent grants) shipped
-> with the Phase 2c prompt. The second — *"Visible while live. An active
-> capture must be indicated on the pane itself, persistently, and must be
-> visible without focusing the pane"* — **has not shipped**, and §6 (Phasing)
-> states plainly: *if Phase 3 is not shipping, Phase 2 should not ship either.*
+> §4 lists **four** non-negotiables for v1. Two shipped, two did not:
 >
-> Phase 2 shipped anyway. So today a page can hold a live camera grant in a
-> browser pane with no persistent capture indicator and no user-facing revoke
-> (the grant store has a `revoke()` primitive, but `media_grants.rs:101` notes
-> that call alone is not a revoke). Tracked in #2904.
+> | # | Non-negotiable (§4) | Status |
+> |---|---|---|
+> | 1 | **No silent grants** — every first grant is an explicit user action | ✅ Phase 2c prompt |
+> | 2 | **Visible while live** — persistent capture indication on the pane, visible without focusing it | ❌ **not shipped** |
+> | 3 | **Revocable** — one click, which actually stops the stream | ❌ **not shipped** |
+> | 4 | **Deny is the default and the failure mode** | ✅ handler denies until a grant exists; unanswered prompts time out to deny |
+>
+> §6 (Phasing) states plainly: *if Phase 3 is not shipping, Phase 2 should not
+> ship either.* Phase 2 shipped anyway.
+>
+> So today a page can hold a live camera grant in a browser pane with no
+> persistent capture indicator and no user-facing revoke. The grant store does
+> have a `revoke()` primitive, but `media_grants.rs:101` notes that call alone
+> is not a revoke — the stream-teardown half required by #3 does not exist.
+> Tracked in #2904.
+
+> **📖 How to read the rest of this document.** Everything below this header is
+> the ORIGINAL PROPOSAL, written before any of it shipped, and it is preserved
+> as the design record rather than rewritten. Several sections therefore
+> describe the pre-implementation world in the present tense — §1 says a browser
+> pane can never grant camera access, §2 says no origin scoping or grant store
+> exists, §3.8 says both switch ingress paths are unfiltered, and §6 presents
+> Phases 1–2 as future work. **All four of those are now out of date**; the
+> status block above is authoritative for what actually ships today.
 
 **Shipped:** Phase 0 (#2885, #2888 — callback contract verified from CEF
 source), Phase 1 (#2893 — pane identity), Phase 2a (#2895 — per-pane,
