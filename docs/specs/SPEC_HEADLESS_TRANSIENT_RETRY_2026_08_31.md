@@ -5,6 +5,7 @@
 **Owner:** unassigned
 **Scope:** `agentmux-srv/src/backend/blockcontroller/persistent.rs`,
 `agentmux-srv/src/backend/blockcontroller/subprocess/host_spawn.rs`,
+`agentmux-srv/src/backend/blockcontroller/subprocess/container_spawn.rs`,
 `agentmux-srv/src/agents/failure.rs`,
 `frontend/app/view/agent/hooks/useAgentFailure.ts`,
 `frontend/app/view/agent/agent-view.tsx`
@@ -40,6 +41,23 @@ the intent plainly: the banner is surfaced *"just without auto-retry."* That was
 a correct scope decision for `SPEC_PERSISTENT_CONTROLLER_FAILURE_CLASSIFICATION`
 — which only meant to close the Claude/persistent classification gap — but it
 leaves the retry decision structurally unreachable for headless turns.
+
+**There are THREE independent classify/persist/publish sites, not two.** Any
+implementation must cover all of them or it will leave a whole execution mode
+silently un-retried:
+
+| Site | Used by |
+|---|---|
+| `persistent.rs` | Claude Code (`ControllerType::Persistent`) |
+| `subprocess/host_spawn.rs` | other host-run providers |
+| `subprocess/container_spawn.rs` | any agent with `agentMode=container` — forced onto the subprocess controller by `blockcontroller/mod.rs`, executing each turn through its own path (`container_spawn.rs:410` classify, `:446` persist, `:453` publish) |
+
+Container-backed turns are *especially* exposed, since running an agent in a
+container is a headless-by-default posture. This is the strongest argument for
+§2.1's recommendation to put retry ownership in **shared** controller-side
+machinery rather than bolting an equivalent onto each spawn path — three copies
+of a retry budget is three chances to diverge, and the divergence would be
+invisible until someone's container agent silently stopped retrying.
 
 ### 1.1 Turns genuinely run without a pane
 
