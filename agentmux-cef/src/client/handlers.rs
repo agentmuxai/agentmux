@@ -72,12 +72,22 @@ wrap_client! {
         }
 
         fn permission_handler(&self) -> Option<PermissionHandler> {
-            // Microphone (getUserMedia) access for voice input. ONLY the main app
-            // client gets a handler — browser panes load arbitrary web content, so
-            // auto-granting them media access would hand the mic to any site with no
-            // prompt. For panes we return None → CEF's default Alloy handling (deny).
+            // Two different policies, deliberately two different handlers.
+            //
+            // Main app client: AgentMux's own first-party UI. Unconditionally
+            // grants the audio bits for voice input (#1591/#1602). Unchanged.
+            //
+            // Browser pane: arbitrary web content, so the answer depends on
+            // what the user actually allowed for that pane and origin —
+            // consulted from the media grant store. Previously this returned
+            // None and let CEF's Alloy default deny; the pane handler denies
+            // identically until a grant exists, but gives the Phase 2c prompt
+            // somewhere to live and makes each decision explicit in the log.
+            //
+            // SPEC_BROWSER_PANE_CAMERA_ACCESS_2026_09_01.md §3.1-3.4.
             if self.is_browser_pane {
-                return None;
+                let state = self.inner.lock().state.clone();
+                return Some(AgentMuxPanePermissionHandler::new(state));
             }
             Some(AgentMuxPermissionHandler::new())
         }
@@ -716,6 +726,119 @@ wrap_permission_handler! {
                     0 // not handled — CEF default (deny under Alloy)
                 }
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Browser-pane permission handler — grant-store driven (camera Phase 2b)
+// ---------------------------------------------------------------------------
+//
+// Distinct from `AgentMuxPermissionHandler` above, which is the MAIN app
+// client's handler and unconditionally grants the audio bits for AgentMux's own
+// first-party voice input. That policy must not apply to browser panes: they
+// load arbitrary web content, so the answer depends on what the user has
+// actually allowed for *that pane and that origin*.
+//
+// Kept as a separate type rather than branching inside one handler, so the
+// shipped voice-input path is untouched by this work.
+//
+// Spec: docs/specs/SPEC_BROWSER_PANE_CAMERA_ACCESS_2026_09_01.md §3.1-3.4.
+//
+// CURRENT BEHAVIOUR IS UNCHANGED FROM NO-HANDLER-AT-ALL. Nothing creates a
+// grant yet (the prompt is Phase 2c), so `covers` is always false and every
+// request is denied — exactly what CEF's Alloy default did when
+// `permission_handler()` returned `None` for panes. The difference is that the
+// denial is now explicit, logged, and has somewhere for the prompt to go.
+
+wrap_permission_handler! {
+    struct AgentMuxPanePermissionHandler {
+        state: Arc<crate::state::AppState>,
+    }
+
+    impl PermissionHandler {
+        fn on_request_media_access_permission(
+            &self,
+            browser: Option<&mut Browser>,
+            _frame: Option<&mut Frame>,
+            requesting_origin: Option<&CefString>,
+            requested_permissions: u32,
+            callback: Option<&mut MediaAccessCallback>,
+        ) -> ::std::os::raw::c_int {
+            let origin = requesting_origin.map(|s| s.to_string()).unwrap_or_default();
+
+            // No callback to answer with: fall through to CEF's default, which
+            // denies under Alloy. Returning 1 here would leave the request
+            // dangling forever instead.
+            let Some(cb) = callback else {
+                tracing::warn!(
+                    target: "pane-media",
+                    %origin,
+                    "media-access request had no callback — deferring to default (deny)"
+                );
+                return 0;
+            };
+
+            // Which pane is asking? `None` covers the main client, an
+            // unpromoted pool pane, a pane mid-teardown, and any non-pane
+            // browser. Every one of those means "no pane-scoped grant applies",
+            // which is a denial — never an allow.
+            let block_id = browser.and_then(|b| self.state.block_id_for_browser(b));
+            let Some(block_id) = block_id else {
+                tracing::info!(
+                    target: "pane-media",
+                    %origin,
+                    requested = requested_permissions,
+                    "denying media access — request could not be attributed to a live pane"
+                );
+                cb.cont(0);
+                return 1;
+            };
+
+            // Re-check liveness at the point of use. `block_id_for_browser`
+            // snapshots under a lock and drops it before its FFI comparison, so
+            // its answer can go stale — its own doc comment requires callers to
+            // re-check rather than treat the id as proof the pane is alive.
+            if self.state.live_browser_pane_label(&block_id).is_none() {
+                tracing::info!(
+                    target: "pane-media",
+                    %origin, %block_id,
+                    "denying media access — pane stopped being live while resolving"
+                );
+                cb.cont(0);
+                return 1;
+            }
+
+            let covered = self
+                .state
+                .media_grants
+                .lock()
+                .covers(&block_id, &origin, requested_permissions);
+
+            if covered {
+                // Echo the request EXACTLY. Per the CEF contract,
+                // allowed_permissions must match required_permissions for a
+                // getUserMedia request — narrowing here would deny the whole
+                // request rather than grant a subset.
+                tracing::info!(
+                    target: "pane-media",
+                    %origin, %block_id,
+                    requested = requested_permissions,
+                    "allowing media access — covered by an existing grant"
+                );
+                cb.cont(requested_permissions);
+            } else {
+                // Phase 2c prompts here instead of denying outright. Until then
+                // this is the same answer the pane got with no handler at all.
+                tracing::info!(
+                    target: "pane-media",
+                    %origin, %block_id,
+                    requested = requested_permissions,
+                    "denying media access — no grant covers this request (no prompt yet)"
+                );
+                cb.cont(0);
+            }
+            1 // handled
         }
     }
 }
