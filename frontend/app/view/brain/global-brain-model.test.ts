@@ -70,12 +70,10 @@ describe("formatGlobalBrainBlock", () => {
 // frontend/app/view/memory/memory-model.test.ts.
 const listMemoriesMock = vi.fn().mockResolvedValue([]);
 const getClaudeGlobalConfigMock = vi.fn().mockResolvedValue({ path: "/home/user/.agentmux/shared/providers/claude/CLAUDE.md", content: null, exists: false });
-const getClaudeHostConfigMock = vi.fn().mockResolvedValue({ path: "/home/user/.claude/CLAUDE.md", content: null, exists: false });
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         ListMemoriesCommand: (...args: unknown[]) => listMemoriesMock(...args),
         GetClaudeGlobalConfigCommand: (...args: unknown[]) => getClaudeGlobalConfigMock(...args),
-        GetClaudeHostConfigCommand: (...args: unknown[]) => getClaudeHostConfigMock(...args),
     },
 }));
 
@@ -85,8 +83,6 @@ describe("GlobalBrainViewModel system/ordinary split", () => {
         listMemoriesMock.mockResolvedValue([]);
         getClaudeGlobalConfigMock.mockClear();
         getClaudeGlobalConfigMock.mockResolvedValue({ path: "/home/user/.agentmux/shared/providers/claude/CLAUDE.md", content: null, exists: false });
-        getClaudeHostConfigMock.mockClear();
-        getClaudeHostConfigMock.mockResolvedValue({ path: "/home/user/.claude/CLAUDE.md", content: null, exists: false });
     });
 
     test("systemSectionsAtom and ordinarySectionsAtom partition allAtom without overlap", async () => {
@@ -183,44 +179,19 @@ describe("GlobalBrainViewModel system/ordinary split", () => {
     // the host CLI config block is a SEPARATE atom/fetch from
     // claudeGlobalConfigAtom (renamed from "ambient" — that word already
     // means something else in this codebase, term:ambient_summary).
-    test("claudeHostConfigAtom starts null and populates from GetClaudeHostConfigCommand", async () => {
-        getClaudeHostConfigMock.mockResolvedValue({
-            path: "/home/user/.claude/CLAUDE.md",
-            content: "# Host CLI rules\n",
-            exists: true,
-        });
-        const { GlobalBrainViewModel } = await import("./global-brain-model");
-        const model = new GlobalBrainViewModel();
 
-        expect(model.claudeHostConfigAtom()).toBeNull();
-        await Promise.resolve();
-        await Promise.resolve();
 
-        expect(model.claudeHostConfigAtom()).toEqual({
-            path: "/home/user/.claude/CLAUDE.md",
-            content: "# Host CLI rules\n",
-            exists: true,
-        });
-    });
-
-    test("claudeHostConfigAtom stays null (not an error) when the fetch rejects", async () => {
-        getClaudeHostConfigMock.mockRejectedValue(new Error("boom"));
-        const { GlobalBrainViewModel } = await import("./global-brain-model");
-        const model = new GlobalBrainViewModel();
-        await Promise.resolve();
-        await Promise.resolve();
-
-        expect(model.claudeHostConfigAtom()).toBeNull();
-        expect(model.errorAtom()).toBeNull();
-    });
-
-    test("a rejected host-config fetch does not clear or block the shared-provider-config atom, and vice versa", async () => {
+    // The former sibling assertion here — that a rejected ~/.claude host-config
+    // fetch couldn't clear or block this atom — went away with the host block
+    // itself (SPEC_ARMORY_DROP_HOST_CLI_CONFIG_BLOCK_2026_09_01.md). Only the
+    // shared-provider config, the dir a spawned agent actually launches with,
+    // is surfaced now.
+    test("the shared-provider-config atom populates from GetClaudeGlobalConfigCommand", async () => {
         getClaudeGlobalConfigMock.mockResolvedValue({
             path: "/home/user/.agentmux/shared/providers/claude/CLAUDE.md",
             content: "# Shared rules\n",
             exists: true,
         });
-        getClaudeHostConfigMock.mockRejectedValue(new Error("boom"));
         const { GlobalBrainViewModel } = await import("./global-brain-model");
         const model = new GlobalBrainViewModel();
         await Promise.resolve();
@@ -231,7 +202,6 @@ describe("GlobalBrainViewModel system/ordinary split", () => {
             content: "# Shared rules\n",
             exists: true,
         });
-        expect(model.claudeHostConfigAtom()).toBeNull();
     });
 });
 

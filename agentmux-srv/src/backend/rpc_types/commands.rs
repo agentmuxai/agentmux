@@ -260,7 +260,6 @@ pub const COMMAND_GET_CLAUDE_GLOBAL_CONFIG: &str = "getclaudeglobalconfig";
 /// command/its UI badge dropped the word entirely rather than picking a
 /// second meaning for it. No parameters, no write counterpart. See
 /// docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6, §7.
-pub const COMMAND_GET_CLAUDE_HOST_CONFIG: &str = "getclaudehostconfig";
 
 // Agent instances
 pub const COMMAND_LIST_AGENT_INSTANCES: &str = "listagentinstances";

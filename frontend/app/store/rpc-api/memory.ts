@@ -86,23 +86,6 @@ export const MemoryApi = {
         return client.rpcCall("getclaudeglobalconfig", data, opts);
     },
 
-    // Read-only. Returns ~/.claude/CLAUDE.md — Claude Code's own global
-    // config, read by a host-level CLI outside AgentMux's
-    // CLAUDE_CONFIG_DIR isolation. A SEPARATE block from
-    // GetClaudeGlobalConfigCommand above, not a replacement — both are
-    // "External Claude Code files" reference displays, not part of
-    // AgentMux's own Global Memory composition. Renamed from
-    // GetClaudeAmbientConfigCommand — "ambient" already means something
-    // else in this codebase (term:ambient_summary, activitySummary.ts).
-    // See docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6, §7.
-    // No parameters, no write counterpart.
-    GetClaudeHostConfigCommand(
-        client: RpcClient,
-        data: Record<string, never> = {},
-        opts?: RpcOpts,
-    ): Promise<{ path: string; content: string | null; exists: boolean }> {
-        return client.rpcCall("getclaudehostconfig", data, opts);
-    },
 
     NativeMemoryListCommand(client: RpcClient, data: { agent_id: string }, opts?: RpcOpts): Promise<NativeMemoryListResult> {
         return client.rpcCall("agent:memory:list", data, opts);

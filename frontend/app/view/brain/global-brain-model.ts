@@ -174,21 +174,6 @@ export class GlobalBrainViewModel {
         this._claudeGlobalConfig[0];
     private setClaudeGlobalConfig = this._claudeGlobalConfig[1];
 
-    private _claudeHostConfig = createSignal<{ path: string; content: string | null; exists: boolean } | null>(null);
-    /** ~/.claude/CLAUDE.md — Claude Code's own global config, read by a
-     *  host-level Claude Code CLI running outside AgentMux's
-     *  CLAUDE_CONFIG_DIR isolation (e.g. an external coding-agent
-     *  harness). A spawned in-app Claude agent does NOT read this file —
-     *  see claudeGlobalConfigAtom above for what it actually reads.
-     *  Independent atom, independent fetch: neither block's success or
-     *  failure affects the other. Named claudeHostConfigAtom, not
-     *  "ambient" — that word already means something else in this
-     *  codebase (term:ambient_summary, activitySummary.ts). See
-     *  docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6, §7. */
-    claudeHostConfigAtom: Accessor<{ path: string; content: string | null; exists: boolean } | null> =
-        this._claudeHostConfig[0];
-    private setClaudeHostConfig = this._claudeHostConfig[1];
-
     constructor() {
         this.sectionsAtom = createMemo(() =>
             this.allAtom()
@@ -219,7 +204,6 @@ export class GlobalBrainViewModel {
         );
         void this.refresh();
         void this.fetchClaudeGlobalConfig();
-        void this.fetchClaudeHostConfig();
     }
 
     /** Fetches the shared Claude provider config's CLAUDE.md once. Failure
@@ -238,18 +222,6 @@ export class GlobalBrainViewModel {
         }
     }
 
-    /** Fetches ~/.claude/CLAUDE.md once. Same silent-failure and
-     *  read-once-at-mount reasoning as fetchClaudeGlobalConfig above —
-     *  independent of it, so a failure here doesn't touch
-     *  claudeGlobalConfigAtom or the ordinary Global Memory sections. */
-    private async fetchClaudeHostConfig(): Promise<void> {
-        try {
-            const cfg = await RpcApi.GetClaudeHostConfigCommand(TabRpcClient, {});
-            this.setClaudeHostConfig(cfg);
-        } catch {
-            // Silent — see doc comment above.
-        }
-    }
 
     async refresh(): Promise<void> {
         try {
