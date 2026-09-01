@@ -759,6 +759,34 @@ wrap_app! {
                         if tok.is_empty() {
                             continue;
                         }
+                        // Media-permission switches are never accepted from
+                        // this variable. `--enable-media-stream` makes CEF skip
+                        // `OnRequestMediaAccessPermission` entirely and grant
+                        // ALL media permissions — per its own header, "this
+                        // method will not be called if the
+                        // --enable-media-stream command-line switch is used."
+                        //
+                        // That bypasses the handler rather than passing through
+                        // it, so every guard built on the handler becomes
+                        // invisible: browser panes (which deliberately have NO
+                        // permission handler, so CEF's Alloy default denies)
+                        // would silently gain camera and microphone for every
+                        // origin, with no prompt. This variable exists to A/B
+                        // GPU flags; it is a diagnostics hatch, and must not
+                        // double as a way to disable a security boundary.
+                        //
+                        // Rejected loudly rather than silently: someone who set
+                        // it deliberately deserves to know it did not apply.
+                        // See docs/specs/SPEC_BROWSER_PANE_CAMERA_ACCESS_2026_09_01.md §3.8.
+                        if is_media_permission_switch(tok) {
+                            tracing::warn!(
+                                switch = %tok,
+                                "refusing media-permission switch from AGENTMUX_CEF_EXTRA_FLAGS — \
+                                 it would bypass the CEF permission handler and grant camera/mic \
+                                 to every browser pane with no prompt; ignoring"
+                            );
+                            continue;
+                        }
                         if let Some((k, v)) = tok.split_once('=') {
                             cmd.append_switch_with_value(
                                 Some(&CefString::from(k)),
@@ -1080,5 +1108,68 @@ wrap_browser_process_handler! {
         fn default_client(&self) -> Option<Client> {
             self.client.borrow().clone()
         }
+    }
+}
+
+/// True for any Chromium switch that would hand out media permissions without
+/// going through `CefPermissionHandler`.
+///
+/// `--enable-media-stream` is the documented one: CEF's own
+/// `cef_permission_handler.h` states `OnRequestMediaAccessPermission` "will not
+/// be called if the --enable-media-stream command-line switch is used". A
+/// browser pane installs no permission handler on purpose (so CEF's Alloy
+/// default denies); this switch turns that deliberate deny into a blanket
+/// grant for every origin, invisibly.
+///
+/// `use-fake-ui-for-media-stream` is included for the same reason — it
+/// auto-accepts media prompts, which is the identical outcome by a different
+/// route, and is the flag most likely to be reached for while testing.
+///
+/// Matching is on the switch NAME only, so `--enable-media-stream=1` and any
+/// `=value` spelling are caught too. Case-insensitive because Chromium switch
+/// parsing is, and an uppercase spelling should not be a bypass.
+fn is_media_permission_switch(token: &str) -> bool {
+    let name = token.split_once('=').map(|(k, _)| k).unwrap_or(token);
+    let name = name.trim().to_ascii_lowercase();
+    matches!(
+        name.as_str(),
+        "enable-media-stream" | "use-fake-ui-for-media-stream"
+    )
+}
+
+#[cfg(test)]
+mod media_switch_guard_tests {
+    use super::is_media_permission_switch;
+
+    #[test]
+    fn rejects_the_documented_bypass_and_its_value_spellings() {
+        assert!(is_media_permission_switch("enable-media-stream"));
+        assert!(is_media_permission_switch("enable-media-stream=1"));
+        assert!(is_media_permission_switch("use-fake-ui-for-media-stream"));
+    }
+
+    #[test]
+    fn matching_is_case_insensitive() {
+        // Chromium's own switch parsing is case-insensitive; an uppercase
+        // spelling must not be a way around the guard.
+        assert!(is_media_permission_switch("Enable-Media-Stream"));
+        assert!(is_media_permission_switch("ENABLE-MEDIA-STREAM=1"));
+    }
+
+    #[test]
+    fn leaves_the_gpu_diagnostics_flags_this_var_exists_for_alone() {
+        // AGENTMUX_CEF_EXTRA_FLAGS' actual purpose — these must still pass.
+        assert!(!is_media_permission_switch("use-angle=gl"));
+        assert!(!is_media_permission_switch("ignore-gpu-blocklist"));
+        assert!(!is_media_permission_switch("disable-gpu"));
+        assert!(!is_media_permission_switch("enable-features=Vulkan"));
+    }
+
+    #[test]
+    fn does_not_over_match_unrelated_switches_containing_media() {
+        // Guard against a substring-matching regression: these are not
+        // permission bypasses and must keep working.
+        assert!(!is_media_permission_switch("autoplay-policy=no-user-gesture-required"));
+        assert!(!is_media_permission_switch("enable-media-session-service"));
     }
 }
