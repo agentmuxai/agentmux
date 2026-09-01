@@ -336,6 +336,14 @@ pub struct AppState {
     /// `docs/specs/SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md`.
     pub host_state: Mutex<crate::reducer::HostState>,
 
+    /// Per-pane, per-origin media capture grants (camera/mic in browser panes).
+    ///
+    /// Session-only by design — see
+    /// `docs/specs/SPEC_BROWSER_PANE_CAMERA_ACCESS_2026_09_01.md` §3.2. Absence
+    /// of a grant is denial, so an empty store (the state at startup, and the
+    /// state until a user explicitly allows something) denies every request.
+    pub media_grants: Mutex<crate::browser_panes::media_grants::MediaGrantStore>,
+
     /// Phase F.7 host-bridge dedup. Keyed by `"{event_kind}|{label}|{hwnd}"`,
     /// value is the highest launcher-event version dispatched to renderers
     /// for that key. The bridge skips dispatch if the incoming event's
@@ -695,6 +703,9 @@ impl Default for AppState {
             // browsers field removed in H.2.e — see comment near struct decl.
             window_meta: Mutex::new(HashMap::new()),
             host_state: Mutex::new(crate::reducer::HostState::default()),
+            media_grants: Mutex::new(
+                crate::browser_panes::media_grants::MediaGrantStore::new(),
+            ),
             launcher_bridge_dedup: Mutex::new(crate::launcher_event_bridge::DedupCache::new()),
             #[cfg(not(target_os = "windows"))]
             windows: Mutex::new(HashMap::new()),
