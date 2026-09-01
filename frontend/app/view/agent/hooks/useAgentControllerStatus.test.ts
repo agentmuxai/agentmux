@@ -14,7 +14,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRoot } from "solid-js";
 
 const hub = vi.hoisted(() => ({
-    registerSeededAccount: vi.fn(),
     runProviderLogin: vi.fn(),
     // undefined by default (matches every existing test's assumption that
     // this agent has no definition id) — set per-test to exercise
@@ -51,9 +50,6 @@ vi.mock("../flows/launch-flow", () => ({ runLaunchFlow: vi.fn() }));
 vi.mock("../flows/run-provider-login", () => ({
     persistAndLinkAccount: vi.fn(),
     runProviderLogin: (...args: unknown[]) => hub.runProviderLogin(...args),
-}));
-vi.mock("../flows/register-seeded-account", () => ({
-    registerSeededAccount: (...args: unknown[]) => hub.registerSeededAccount(...args),
 }));
 
 import { useAgentControllerStatus } from "./useAgentControllerStatus";

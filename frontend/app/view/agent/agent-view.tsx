@@ -1210,7 +1210,7 @@ const AgentPresentationView = ({
             // If a DIFFERENT, overlapping recovery flow is still running,
             // leave the failure banner and loginWaiting() both untouched
             // instead of clearing-and-retrying now. THIS flow's own
-            // credential is confirmed good, but relogin()/useGlobalLogin()/
+            // credential is confirmed good, but relogin()/
             // loginViaTerminal() never check whether a turn is active
             // before calling forceControllerRefresh (only /login's
             // slash-command path does) — clearing+retrying here used to let
@@ -1289,7 +1289,7 @@ const AgentPresentationView = ({
     });
 
     // status.isLoading() is `flowRunning() || !agentReady()` — it never
-    // becomes true during relogin()/loginViaTerminal()/useGlobalLogin(),
+    // becomes true during relogin()/loginViaTerminal(),
     // since the agent is already ready by the time those recovery flows
     // run. Without launchPhase() in this gate too, the working row (and
     // its phase label + Cancel button), the top progress bar, and the
@@ -2180,10 +2180,14 @@ const AgentPresentationView = ({
                         // Must match onLoginAgain above: the button is labeled "Login
                         // Again", so it has to force a fresh OAuth regardless of
                         // provider. A prior version special-cased Claude into
-                        // useGlobalLogin() instead — silently reusing the (possibly
-                        // equally-stale) global credential under a "Login Again"
-                        // label, which is exactly the kind of no-op this button
-                        // exists to avoid (retro-agent-auth-relogin-noop-2026-07-01).
+                        // a seed-from-global path instead — silently reusing the
+                        // (possibly equally-stale) personal credential under a
+                        // "Login Again" label, exactly the kind of no-op this
+                        // button exists to avoid
+                        // (retro-agent-auth-relogin-noop-2026-07-01). That path
+                        // was removed outright 2026-08-31 (per-channel auth
+                        // enforcement), so the trap is now structural, not just
+                        // a convention to uphold here.
                         log("auth", "Login Again (inline error node) — forcing a fresh provider login");
                         void status.relogin();
                     }}

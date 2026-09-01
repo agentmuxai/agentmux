@@ -93,7 +93,7 @@ export const loginCommand: SlashCommand = {
         }
         // reagent P1 on PR #2413 (round 3, third pass): mirrors the
         // `loginCancelled = false` every OTHER login-starting function
-        // (relogin()/useGlobalLogin()/loginViaTerminal()) already does at
+        // (relogin()/loginViaTerminal()) already does at
         // its own start. /login never called any of those three, so a flag
         // left `true` by an EARLIER, unrelated cancelled attempt (e.g. the
         // shared AuthUrlBox's Cancel button during a prior relogin()) stayed
@@ -104,7 +104,7 @@ export const loginCommand: SlashCommand = {
         ctx.log("auth", "running /login via GUI flow...");
         // Registers this attempt (including the up-to-5-minute poll below)
         // as an in-flight recovery on the SAME shared counter behind
-        // loginWaiting() that relogin()/useGlobalLogin()/loginViaTerminal()
+        // loginWaiting() that relogin()/loginViaTerminal()
         // already use — without this, a second message sent while /login is
         // still polling gets held with authWasKnownBadAtQueueTime: false
         // (mid-turn "auth" failures never set canRetry either), so a /login

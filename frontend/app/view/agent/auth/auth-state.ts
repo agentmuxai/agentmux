@@ -618,7 +618,8 @@ export function update(state: AuthState, command: AuthCommand): ReducerResult {
             // requiresLoginTty path), which dispatch ConnectClicked (→
             // `waiting`) up front so the panel shows progress during tier 3's
             // up-to-5-minute terminal wait, then `Seeded` on success. The
-            // original single-phase "Use my existing login" caller never
+            // original single-phase "Use my existing login" caller (removed
+            // 2026-08-31) never
             // enters `waiting` at all, so this widening doesn't change its
             // behavior. Still guards against a stale dispatch clobbering a
             // newer `ready`/`saving`/`idle`.

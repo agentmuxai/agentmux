@@ -68,12 +68,12 @@ export interface UseAgentControllerStatusOptions {
     /** Called once when the launch flow completes successfully and the agent is ready to receive messages. */
     onReady?: () => void;
     /**
-     * Called when a recovery action (seed-from-global / terminal login) has
+     * Called when a recovery action (relogin / terminal login) has
      * successfully refreshed the credential. The pane wires this to retry the
-     * failed turn, so a single "Use existing login" click both fixes the
-     * credential AND drives the agent back to a working state — without it, the
-     * seed succeeds silently and the 401 failure row lingers (the "Login Again
-     * does nothing" symptom).
+     * failed turn, so a single recovery click both fixes the credential AND
+     * drives the agent back to a working state — without it, the login
+     * succeeds silently and the 401 failure row lingers (the "Login Again does
+     * nothing" symptom).
      */
     onRecovered?: () => void;
     /**
@@ -127,13 +127,6 @@ export interface UseAgentControllerStatus {
      * SPEC_REAUTH_FROM_AUTH_ERROR §11.
      */
     relogin: (opts?: { retryAfterLogin?: boolean }) => Promise<void>;
-    /**
-     * "Use my existing login" — seed this agent's isolated auth dir from the
-     * user's already-valid GLOBAL Claude login instead of a fresh OAuth, the
-     * reliable recovery for Claude Code v2.1.x's un-scrapeable login TUI
-     * (SPEC_HOST_CLI_LOGIN_CAPTURE §5.5). Like relogin, no restart is needed —
-     * the running agent re-reads its credential per request.
-     */
     /**
      * Open a real terminal window (CREATE_NEW_CONSOLE on Windows) running the
      * provider's login command so the OS can open the browser — the piped/PTY
@@ -854,13 +847,18 @@ export function useAgentControllerStatus(
                     // completed and point at the recovery path that's left.
                     setAuthNotice(
                         "Opened a terminal window for login, but no login was detected within 5 minutes. " +
-                        "Complete the login there, then click “Use existing login”.",
+                        "Complete the login in that terminal, then click “Login Again”.",
                     );
                     break;
                 case "terminal-unavailable":
                     setAuthNotice(
-                        "Couldn't start a browser login or open a terminal window on this platform." +
-                        (prov.id === "claude" ? " Try “Use existing login” if you're already signed in elsewhere." : ""),
+                        // No provider-specific hint any more: the Claude-only
+                        // "Use existing login" escape hatch is gone (it reused
+                        // the operator's personal credential), and a login in
+                        // another channel or another app can no longer satisfy
+                        // this one by design.
+                        "Couldn't start a browser login or open a terminal window on this platform. " +
+                        "Sign in to this provider from Armory → Accounts, then try again.",
                     );
                     break;
             }
@@ -1010,7 +1008,7 @@ export function useAgentControllerStatus(
                     break;
                 case "terminal-timeout":
                     if (!loginCancelled) {
-                        const msg = "No login detected after 5 minutes. Complete the login in the terminal, then click “Use existing login”.";
+                        const msg = "No login detected after 5 minutes. Complete the login in the terminal, then click “Login Again”.";
                         opts.log("auth", msg, "warn");
                         setAuthNotice(msg);
                     }

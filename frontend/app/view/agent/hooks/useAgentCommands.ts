@@ -219,7 +219,7 @@ export interface UseAgentCommands {
      *  can't re-derive it live; the caller must capture it before
      *  dispatching TurnStart. When present, the fast-fail guard rejects the
      *  send AND re-dispatches this same failure so the banner (and its
-     *  "Login Again"/"Use existing login" actions) reappears instead of
+     *  "Login Again"/"Login via terminal" actions) reappears instead of
      *  vanishing with no path back. Codex P1 on PR #2338 (third re-review).
      *  No longer takes a "trust this auto-retry" flag (removed — see
      *  deliverToBackend's checkAuthGuard doc comment, codex P1 on PR #2338,
@@ -356,7 +356,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
          * flushHeldMessages sees neither a live failure nor a true queue
          * flag and delivers straight to it. Restored via FailureObserved
          * when this item is rejected specifically because of it, so the
-         * recovery banner ("Login Again"/"Use existing login") returns
+         * recovery banner ("Login Again"/"Login via terminal") returns
          * instead of silently vanishing. codex P2 on PR #2338 (twenty-third
          * re-review).
          */
@@ -1242,7 +1242,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             }
             if (authFailureToPreserve) {
                 // Re-dispatch the SAME failure TurnStart just cleared — the
-                // failure banner (and its "Login Again"/"Use existing login"
+                // failure banner (and its "Login Again"/"Login via terminal"
                 // actions) is this pane's actual recovery path; a generic
                 // authNotice that mentions a "Log in" button not even shown
                 // here (canRetry() is false in this scenario) would leave
@@ -1541,7 +1541,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         if (item.initiatedTurnOptimistically) {
             opts.model.dispatchPane({ type: "TurnStartFailed" }, "system");
         }
-        // Restore the recovery UI ("Login Again"/"Use existing login") when
+        // Restore the recovery UI ("Login Again"/"Login via terminal") when
         // this item carries a live auth failure the caller captured before
         // its own TurnStart cleared it (the idle-send blocked-refresh
         // hold) — mirrors flushHeldMessages's own rejection path. Without

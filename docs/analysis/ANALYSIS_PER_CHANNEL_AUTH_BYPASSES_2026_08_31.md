@@ -1,8 +1,10 @@
-# Analysis — four paths let an agent reach Claude without a per-channel login
+# Analysis — five paths let an agent reach Claude without a per-channel login
 
 **Date:** 2026-08-31
 **Author:** AgentX
-**Status:** Investigation complete; fix in progress (this branch).
+**Status:** Investigation complete; fixed on this branch (PR #2878).
+**Revision:** #5 added 2026-08-31 after Codex's P1 review caught it — the
+original pass found only four.
 **Prompted by:** operator question — *"how are all my agents able to operate
 without any auth inside the armory?"*, then *"we want per-channel isolation. a
 user needs a login anytime in the channel. the problem is agents are able to
@@ -18,7 +20,7 @@ user's personal `~/.claude`, nor another channel's credential directory, may
 satisfy an agent's auth requirement in *C*.
 
 Per-channel isolation is a **wanted feature**, not an accident to be designed
-away — a fresh build is supposed to require its own login. The bug is that four
+away — a fresh build is supposed to require its own login. The bug is that five
 separate mechanisms currently defeat it.
 
 ## 1. Why the Armory looks empty while agents still work
@@ -40,7 +42,7 @@ Net: **links are global, accounts are per-channel.** A fresh channel therefore
 has a valid link pointing at an account row it cannot see — which is precisely
 the state bypass #1 was added to paper over.
 
-## 2. The four bypasses
+## 2. The five bypasses
 
 ### #1 — `resolve_account()` falls back to the global store (silent, spawn-time)
 
@@ -106,6 +108,35 @@ Justified by `retro-provider-auth-isolation-regression-2026-06-05.md`, which
 predates every piece of the ambient-blocking work. It was never revisited when
 the "agents never use `~/.claude`" requirement landed.
 
+### #5 — `checkcliauth`'s "self-heal from global" (silent, on any failed validation)
+
+**Found by Codex's P1 review on PR #2878 — missed in the original pass of this
+analysis.** Same file and same source as #4, different trigger, so removing #4
+alone would have left the bypass fully open.
+
+`agentmux-srv/src/server/cli_handlers.rs`, in the `!authenticated` branch of the
+Claude auth check: when validation FAILED and the user's global
+`~/.claude/.credentials.json` held an access token differing from the isolated
+dir's, `refresh_claude_dir_from_global_if_stale` copied global → isolated and
+re-ran the check ONCE. A channel could therefore acquire a credential
+authenticated outside it and then report `authenticated: true`, with no
+channel-local login at any point.
+
+Unlike #4 it was not gated by a first-run sentinel — it could fire on *any*
+failed validation, repeatedly.
+
+The condition it existed to recover from is real: the "Pozl 401", where a global
+re-login rotates the access token and invalidates the isolated copy's refresh
+token while the `.agentmux-cred-seeded` sentinel blocks re-import. That is now
+surfaced honestly (failed validation → auth card → log in for this channel)
+rather than silently patched from the operator's personal credential.
+
+`claude_access_token`, `refresh_claude_dir_from_global_if_stale`,
+`refresh_dir_from_global` and the `selfheal_tests` module were deleted outright
+rather than left unused — a helper whose whole job is copying the operator's
+personal credential into an isolated dir is precisely the thing that gets
+quietly rewired back in later.
+
 ## 3. Why Claude specifically
 
 Tier 3 of `run-provider-login.ts` (terminal login) already does the right thing
@@ -126,7 +157,9 @@ other provider already uses**, not inventing a new mechanism.
 
 1. Remove `resolve_account`'s global fallback (#1) — account must resolve in the
    current channel's store.
-2. Remove the `checkcliauth` first-run bootstrap (#4).
+2. Remove BOTH of `checkcliauth`'s global-import paths — the first-run bootstrap
+   (#4) and the self-heal-on-failed-validation (#5), plus the helper machinery
+   behind the latter.
 3. Remove `seed_provider_auth_from_global` (host), `seedGlobalLogin` /
    `pollForGlobalLoginSeed` (frontend), tier 2 of `run-provider-login.ts`, and
    the "Use existing login" UI action (#3).

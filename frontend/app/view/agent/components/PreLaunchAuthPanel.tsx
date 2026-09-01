@@ -46,7 +46,6 @@ import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { InAppLoginPanel, type InAppLoginPhase } from "./InAppLoginPanel";
 import { runProviderLogin } from "../flows/run-provider-login";
 import type { ProviderDefinition } from "../providers";
-import type { LogFn } from "../types";
 import "./PreLaunchAuthPanel.scss";
 
 export interface PreLaunchAuthPanelProps {
@@ -663,16 +662,6 @@ const ConnectCta = (p: {
      *  generic Connect CTA wording the user already knows). */
     hasAccount: boolean;
     onConnect: () => void;
-    /** True for providers that ALSO support seed-from-global (Claude only —
-     *  `seed_provider_auth_from_global` hard-rejects everything else). When
-     *  true the panel offers "Use my existing login" as a SECONDARY action
-     *  under the Connect CTA — the fast path when a valid global terminal
-     *  login already exists (spec §3.2 keeps tier-2 seeding for exactly
-     *  that). Until 2026-08-03 this REPLACED Connect entirely, because
-     *  in-app OAuth was a dead end for Claude v2.1.183
-     *  (SPEC_HOST_CLI_LOGIN_CAPTURE §0); that verdict is superseded —
-     *  SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §2 — so Connect (the
-     *  in-app login session) is primary again. */
     disabled: boolean;
 }): JSX.Element => {
     const catalog = () =>
