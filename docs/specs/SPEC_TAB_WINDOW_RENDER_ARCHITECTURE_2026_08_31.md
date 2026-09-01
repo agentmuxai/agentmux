@@ -148,16 +148,21 @@ question: *can this surface stop depending on the ordering altogether?* PR
 #2818 answered yes for the tab strip and needed none of the machinery below.
 The abstractions here are for surfaces where the answer is genuinely no.
 
-**Prior committed direction, not a fresh idea.** §3.1/§3.2 continue work the
-repo already scoped: `SPEC_REDUCER_SSOT_CONSOLIDATION_2026_06_22.md` generalizes
-"state reconstructed or duplicated outside a single reducer authority" as a
-systemic pattern, and `SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30.md` →
-`SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md` already commit to strong
-reducer authority over layout. Anyone picking this up should reconcile with
-those rather than starting from this document. Note also
-`SPEC_OBJ_UPDATE_BRIDGE_2026-05-14.md`'s open gap: `UpdateObjectMeta` for
-`OTYPE_WINDOW`/`OTYPE_LAYOUT`/`OTYPE_CLIENT` **bypasses the event bus entirely**
-— a fourth transport hole that §3.2's "one authoritative transport" must close.
+**A note on adjacent, still-valid work.** An earlier revision of this paragraph
+presented §3.1/§3.2 as continuing `SPEC_REDUCER_SSOT_CONSOLIDATION_2026_06_22.md`
+and `SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30.md` →
+`SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md`. **That framing is
+withdrawn along with the design.** Those specs' direction — single reducer
+authority, no state reconstructed outside it — remains sound and is unaffected
+by this rejection; §3.1/§3.2 are simply not a valid way to extend it to the
+client, and nobody should treat them as the sanctioned continuation of that
+work.
+
+One observation from that paragraph outlives the design and is worth keeping:
+`SPEC_OBJ_UPDATE_BRIDGE_2026-05-14.md`'s open gap — `UpdateObjectMeta` for
+`OTYPE_WINDOW`/`OTYPE_LAYOUT`/`OTYPE_CLIENT` **bypasses the event bus
+entirely**. That is a real hole in the *current* transport, independent of any
+epoch scheme, and it stays worth closing on its own merits.
 
 ### 3.1 `WorkspaceEpoch` — a transaction boundary over multi-object state
 
@@ -428,7 +433,10 @@ A design is only structural if it *removes* the suppressors. On completion:
 - `MAX_GATE_MS` / `SETTLE_MS` as behaviour → demoted to instrumented safety valve
 - `layoutModel.ts:443`'s zero-rect floor → unnecessary (§3.4 follow-on)
 - `droppable-tab.tsx:246`'s double-rAF re-measure → unnecessary (§3.4 follow-on)
-- §7's parent-before-child bridge ordering → subsumed by one-frame-per-epoch (§3.2)
+- ~~§7's parent-before-child bridge ordering → subsumed by one-frame-per-epoch~~
+  **No longer expected.** That deletion was contingent on §3.2, which is
+  rejected — so the §7 emission ordering and its tests are now **permanent**
+  behaviour, not a transitional workaround awaiting replacement.
 
 If a phase lands and deletes nothing, that phase did not do its job.
 
@@ -496,21 +504,18 @@ Phase 0's trace of whatever the next symptom turns out to be.
    with §3.3's documented precedent (`REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md`,
    `SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md` Cause 2) as
    prior art rather than as evidence.
-2. ~~**Can a partial epoch occur?**~~ **Resolved by fiat in §3.1** — the
-   completeness contract forbids it on the wire, and the staging buffer is
-   dropped. The residual questions are now scoped and concrete:
-   a. *Can `publish_events` carry a dispatch envelope without disturbing its
-      other subscribers* (the persist subscriber, the disk writer)? They
-      consume individual events today and would need to either flatten the
-      envelope or move to it.
-   b. *What is the authoritative resync?* A per-object snapshot read, a
-      workspace-scoped one, or a full reload. Cheapest correct option wins;
-      it only has to be a **snapshot**, never a delta (§3.2 scope note).
-3. **Do LAN/multi-window renderers need epoch coordination**, or is per-renderer
-   monotonicity enough? Suspect the latter — each renderer's watermark is its
-   own, and a resync is client-initiated — but unverified, and the answer
-   changes if two renderers ever have to agree on a *rendered* frame rather
-   than just on state.
+2. ~~**Can a partial epoch occur?**~~ **Moot** — there are no epochs. The
+   follow-ups this once carried (whether `publish_events` could take a dispatch
+   envelope without disturbing the persist subscriber and disk writer; what an
+   authoritative resync would read) died with the design. Recorded only because
+   the first of them is a genuine constraint on *any* future scheme that wants
+   to group reducer events: those two subscribers consume individual events
+   today.
+3. ~~**Do LAN/multi-window renderers need epoch coordination?**~~ **Moot** —
+   there are no epochs. Retained only to record the shape of the question, which
+   would return in any future design: does cross-renderer agreement have to hold
+   on *rendered frames*, or only on state? If only on state, per-renderer
+   monotonicity suffices and the problem stays local.
 4. ~~**Is the watermark's resync arm worth the complexity at all?**~~
    **Answered — no**, which is what drove §0's rejection. Per-object
    versioning (today's behaviour) is the right trade for a lossy local
