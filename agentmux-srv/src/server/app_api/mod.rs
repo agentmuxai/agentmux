@@ -675,7 +675,7 @@ pub(crate) async fn identity_self_accounts_impl(
                         account_id = %acct.id,
                         agent_id = %def_id,
                         provider = %acct.provider,
-                        "identity.self.accounts: listing an account resolved only                          via the global mirror — it will NOT satisfy a spawn in                          this channel (per-channel auth enforcement)"
+                        "identity.self.accounts: account resolved only via the global mirror; it will NOT satisfy a spawn in this channel (per-channel auth enforcement)"
                     );
                 }
                 let masked_tail = acct.context.get("masked_tail")
