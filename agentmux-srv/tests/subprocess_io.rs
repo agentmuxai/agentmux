@@ -15,6 +15,25 @@ use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::time::{timeout, Duration};
 
+/// Liveness bound for every wait/read in this file — **not** a performance
+/// assertion.
+///
+/// Every timeout here exists for one reason: if a pipe read or `child.wait()`
+/// never returns, fail the test instead of hanging the suite forever. None of
+/// them assert anything about how *fast* a child starts or exits, so the value
+/// only needs to be comfortably above the worst plausible scheduling delay.
+///
+/// It was 5s, which is a wall-clock budget covering `node` process startup on a
+/// shared GitHub runner already saturated by `cargo test --workspace`. That is
+/// tight enough to lose the race intermittently, and it did — twice, on
+/// **docs-only** PRs (#2861 and #2905), where the change under test could not
+/// possibly have caused it. See issue #2863.
+///
+/// 30s costs nothing on the happy path (these children exit in milliseconds)
+/// and removes the flake. If a test here ever actually takes 30s, something is
+/// genuinely wedged and the failure is real.
+const IO_TIMEOUT: Duration = Duration::from_secs(30);
+
 fn fixtures_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
 }
@@ -58,7 +77,7 @@ async fn stdin_stdout_roundtrip() {
 
     // Read stdout
     let mut reader = BufReader::new(stdout).lines();
-    let line = timeout(Duration::from_secs(10), reader.next_line())
+    let line = timeout(IO_TIMEOUT, reader.next_line())
         .await
         .expect("stdout read timed out")
         .expect("stdout read error")
@@ -85,7 +104,7 @@ async fn stdin_flush_required() {
     drop(stdin);
 
     let mut reader = BufReader::new(stdout).lines();
-    let result = timeout(Duration::from_secs(5), reader.next_line()).await;
+    let result = timeout(IO_TIMEOUT, reader.next_line()).await;
     assert!(result.is_ok(), "stdin data did not arrive — flush may be broken");
 
     let line = result.unwrap().unwrap().unwrap();
@@ -101,7 +120,7 @@ async fn stderr_captured() {
     let stderr = child.stderr.take().unwrap();
 
     let mut reader = BufReader::new(stderr).lines();
-    let line = timeout(Duration::from_secs(5), reader.next_line())
+    let line = timeout(IO_TIMEOUT, reader.next_line())
         .await
         .expect("stderr read timed out")
         .expect("stderr read error")
@@ -114,11 +133,15 @@ async fn stderr_captured() {
 #[tokio::test]
 async fn exit_code_nonzero() {
     let mut child = spawn_node("exit-code.js", &["42"]);
-    // Drain stderr so the pipe doesn't block
+    // Close our ends of the pipes we are not reading. Note this CLOSES them, it
+    // does not drain them — the previous comment here said "drain", which would
+    // matter if the fixture wrote enough to fill a pipe buffer. It does not:
+    // `exit-code.js` writes one short line to stderr and nothing to stdout, so
+    // there is no buffer to block on either way.
     drop(child.stderr.take());
     drop(child.stdin.take());
 
-    let status = timeout(Duration::from_secs(5), child.wait())
+    let status = timeout(IO_TIMEOUT, child.wait())
         .await
         .expect("wait timed out")
         .expect("wait error");
@@ -136,7 +159,7 @@ async fn stdout_eof_on_process_exit() {
     let mut reader = BufReader::new(stdout).lines();
 
     // Should get Ok(None) = EOF, not an error
-    let result = timeout(Duration::from_secs(5), reader.next_line())
+    let result = timeout(IO_TIMEOUT, reader.next_line())
         .await
         .expect("stdout read timed out")
         .expect("stdout read error");
@@ -159,7 +182,7 @@ async fn large_stdin_payload() {
     drop(stdin);
 
     let mut reader = BufReader::new(stdout).lines();
-    let line = timeout(Duration::from_secs(15), reader.next_line())
+    let line = timeout(IO_TIMEOUT, reader.next_line())
         .await
         .expect("stdout read timed out on large payload")
         .expect("stdout read error")
