@@ -106,18 +106,42 @@ for f in "${files[@]}"; do
         continue
     fi
 
-    # Accept either a markdown link target or a bare path.
-    target=$(printf '%s' "$ptr_line" | sed -n 's/.*](\([^)]*\)).*/\1/p' | head -1)
-    [ -z "$target" ] && target=$(printf '%s' "$ptr_line" \
-        | sed 's/^\*\*Superseded-by:\*\*[[:space:]]*//I' \
-        | tr -d '`' | awk '{print $1}')
+    # Extract every `*.md` path token on the line; pass if ANY of them resolves.
+    #
+    # One grep rather than a pipeline of sed/tr: the README mandates no
+    # particular form, so all of these must work —
+    #     **Superseded-by:** ./x.md
+    #     **Superseded-by:** [`x.md`](./x.md)
+    #     **Superseded-by:** See docs/specs/x.md for details.
+    # An earlier version took the first whitespace token and reported "See" as a
+    # missing file, false-failing a compliant doc — which is how a gate loses
+    # trust and gets switched off. A later attempt stitched two extractions
+    # together and silently concatenated them into one bogus path, breaking the
+    # markdown-link form that is the most common in this repo. Both bugs were
+    # the pipeline, not the rule; grep -o for the thing we actually want is
+    # simpler and has neither failure mode.
+    #
+    # Erring toward accepting is correct: the rule is "the pointer must go
+    # somewhere real", and one resolving path satisfies it.
+    candidates=$(printf '%s\n' "$ptr_line" | grep -oE '[A-Za-z0-9._/-]+\.md' | sort -u)
 
-    [ -z "$target" ] && continue          # prose-only pointer; nothing to resolve
-    case "$target" in http*) continue ;; esac
+    # A pointer line with no .md token at all: nothing to resolve. Rule 2 asks
+    # that the line exist, and it does.
+    [ -z "$candidates" ] && continue
 
-    if [ ! -e "$(dirname "$f")/$target" ] && [ ! -e "$target" ]; then
+    resolved=0
+    while IFS= read -r target; do
+        [ -z "$target" ] && continue
+        if [ -e "$(dirname "$f")/$target" ] || [ -e "$target" ]; then
+            resolved=1
+            break
+        fi
+    done <<< "$candidates"
+
+    if [ "$resolved" -eq 0 ]; then
         echo "FAIL $f"
-        echo "     Superseded-by points at '$target', which does not exist."
+        echo "     Superseded-by names no path that exists. Tried:"
+        printf '       %s\n' $candidates
         echo "     A broken pointer is worse than none (docs/specs/README.md)."
         fail=1
     fi
