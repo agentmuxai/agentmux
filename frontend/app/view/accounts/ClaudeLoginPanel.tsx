@@ -189,7 +189,6 @@ export function ClaudeLoginPanel(props: {
             if (cancelled) return;
             switch (outcome) {
                 case "inapp-success":
-                case "seeded":
                 case "terminal-success":
                     if (registeredAccountId) {
                         // codex P1 on PR #2414: finalizeAccount (run-provider-

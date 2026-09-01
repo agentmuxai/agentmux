@@ -48,35 +48,26 @@
  *          persists+links on success, and returns "inapp-success" /
  *          "inapp-timeout". For callers (PreLaunchAuthPanel) that want the
  *          whole session managed here instead of hand-rolling the poll.
- *   2. `seedGlobalLogin` + `persistSeededAccount` — Claude only: check
- *      whether the user already has a VALID login in their global
- *      `~/.claude` (common: the CLI installed outside AgentMux, or a prior
- *      AgentMux session). If so, mint a real per-account isolated dir, copy
- *      the credential into it, and persist an IdentityAccount row — not
- *      just a file in the shared default dir
- *      (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7, "single
- *      point, not global": `identity/resolver.rs`'s spawn gate now requires
- *      a real bound account, no ambient exception). No browser, no user
- *      action, completes in well under a second. Skipped for every other
- *      provider — the host command rejects them (`providers.rs`'s
- *      `seed_provider_auth_from_global`), and unlike tier 3 there's no
- *      substitute strategy for tier 2 specifically; they just fall through.
- *   3. `openLoginTerminal` — last resort, same real per-account dir minted
- *      up front for EVERY oauth-class provider (not just Claude). Two
- *      different completion strategies depending on the provider, since
- *      only Claude has a seed-from-global capability to fall back on:
- *        - **Claude**: the dir's env var is stripped so the login lands in
- *          the user's GLOBAL `~/.claude` instead, then polled via
- *          `pollForGlobalLoginSeed` until it copies into the isolated dir.
- *        - **Every other oauth-class provider** (codex, openclaw, gemini,
- *          copilot): the env var is left pointed AT the isolated dir, so
- *          the login writes there directly, then polled via
- *          `pollForCliAuthReady` (asks the CLI's own auth-check command
- *          whether it's authenticated in that dir) since there's no
- *          global-login file to watch for. Persisted on success either way
- *          — same "single point" account. Needs the user to actually
- *          finish the OAuth flow in their browser, so this tier polls for
- *          up to 5 minutes instead of returning immediately.
+ *   2. **(removed 2026-08-31)** — was `seedGlobalLogin` + `persistSeededAccount`,
+ *      Claude only: if the user already had a valid login in their personal
+ *      `~/.claude`, copy it into the isolated dir and register an account from
+ *      it, with no browser and no user action. That defeated per-channel
+ *      isolation by construction (a fresh channel silently inherited the
+ *      operator's personal credential and reported a "login" that never
+ *      happened in that channel) — see
+ *      `docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md` #3.
+ *      Tier numbering is left as 1/3 rather than renumbering, so existing
+ *      references to "tier 3" in specs, tests, and review threads stay valid.
+ *   3. `openLoginTerminal` — last resort, a real per-account dir minted up
+ *      front for EVERY oauth-class provider. **One completion strategy for
+ *      all of them** (unified 2026-08-31): the config-dir env var is left
+ *      pointed AT the isolated dir so the login writes there directly, then
+ *      polled via `pollForCliAuthReady` (asks the CLI's own auth-check
+ *      command whether it's authenticated in that dir). Claude previously had
+ *      its env var stripped so the login landed in the global `~/.claude` and
+ *      was copied back — the removed bypass above. Needs the user to actually
+ *      finish the OAuth flow in their browser, so this tier polls for up to 5
+ *      minutes instead of returning immediately.
  *
  * Before this existed, tier 1 failing meant `/login` and "Login Again" both
  * dead-ended on an error message telling the user to go click a *different*
@@ -91,7 +82,6 @@ import { sleep } from "@/util/util";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as WOS from "@/app/store/wos";
 import { forceProviderLogin, type ForceLoginParams } from "./force-login";
-import { pollForGlobalLoginSeed, seedGlobalLogin } from "./seed-global-login";
 import { ensureAccountDir, persistSeededAccount } from "./register-seeded-account";
 
 export interface RunProviderLoginParams extends ForceLoginParams {
@@ -102,7 +92,7 @@ export interface RunProviderLoginParams extends ForceLoginParams {
     };
     /** Polled during the tier-3 wait; return true to abort early (e.g. the user hit Cancel). */
     isCancelled?: () => boolean;
-    /** When set, a newly-registered account (tier 2 or 3, or the awaited
+    /** When set, a newly-registered account (tier 3, or the awaited
      *  tier-1 session) is linked to this agent definition. Omit for a
      *  pre-launch flow with no agent yet; that flow's own launch-time
      *  reconcile links the account once one is created.
@@ -115,7 +105,7 @@ export interface RunProviderLoginParams extends ForceLoginParams {
      *  account linked; the next spawn resolves the dir fresh regardless. */
     linkTarget?: { blockId?: string; agentDefinitionId: string };
     /** Reconnect (not fresh-connect) into this account id, if set — threaded
-     *  through to tier 2/3's account-dir minting so the SAME account's
+     *  through to tier 3's account-dir minting so the SAME account's
      *  isolated dir is reused/refreshed instead of a new one being minted.
      *  Omit for a genuinely fresh connect. Callers that already know this
      *  agent has a bound account for this provider (e.g. a retry after a
@@ -123,7 +113,7 @@ export interface RunProviderLoginParams extends ForceLoginParams {
      *  and orphans a brand-new account instead of refreshing the one
      *  already in use. */
     existingAccountId?: string;
-    /** Fired as soon as tier 2 or 3 registers a real IdentityAccount row —
+    /** Fired as soon as tier 3 registers a real IdentityAccount row —
      *  before `linkTarget`'s own linking (if any). Callers that need to know
      *  the resulting account id/dir for their own purposes (e.g. rebuilding
      *  a local `authEnv` copy to recheck auth status against the NEW
@@ -135,7 +125,7 @@ export interface RunProviderLoginParams extends ForceLoginParams {
      *  `linkTarget`-driven pane callers that don't need the value don't
      *  have to care it exists. */
     onAccountRegistered?: (accountId: string, dir: string) => void;
-    /** Skip tier 1 (headless URL-capture) entirely and go straight to tier 2.
+    /** Skip tier 1 (headless URL-capture) entirely and go straight to tier 3.
      *  For providers where tier 1 is a documented, unconditional dead end —
      *  e.g. `requiresLoginTty` providers, whose CLI opens its own browser
      *  in-process and needs a real console no piped/PTY spawn has — skipping
@@ -166,11 +156,11 @@ export interface RunProviderLoginParams extends ForceLoginParams {
      *  instead of freezing on whatever it guessed before this call started.
      *  Without this, a caller that sets e.g. "waiting for login link, up to
      *  15s" before calling this function has no way to know when tier 1
-     *  actually gives up and tier 2/3 (which can run for up to 5 more
+     *  actually gives up and tier 3 (which can run for up to 5 more
      *  minutes) takes over — the displayed countdown hits 0 and just sits
      *  there for the rest of the wait. reagent P1 on PR #2300. */
     onTierChange?: (event:
-        | { tier: "fallback" } // tier 1 conclusively failed; trying tier 2 (fast) or heading to tier 3
+        | { tier: "fallback" } // tier 1 conclusively failed; heading to tier 3
         | { tier: "polling"; deadlineMs: number } // a terminal opened; now polling for completion
         | { tier: "inapp-waiting"; deadlineMs: number } // awaitTier1Completion only: URL captured; now waiting for the in-app login to complete
     ) => void;
@@ -179,8 +169,7 @@ export interface RunProviderLoginParams extends ForceLoginParams {
 export type ProviderLoginOutcome =
     | "opened" // tier 1: browser/pane opened with a captured URL (caller polls for completion itself)
     | "inapp-success" // tier 1 + awaitTier1Completion: in-app login completed (child done, credential landed) and the account was persisted/linked here
-    | "inapp-timeout" // tier 1 + awaitTier1Completion: URL captured, but no completion within the window (or cancelled) — no automatic tier 2/3 fallback; the user already has the URL in hand
-    | "seeded" // tier 2: valid global login copied into a real account, automatically
+    | "inapp-timeout" // tier 1 + awaitTier1Completion: URL captured, but no completion within the window (or cancelled) — no automatic tier 3 fallback; the user already has the URL in hand
     | "terminal-success" // tier 3: terminal login completed and was detected
     | "terminal-timeout" // tier 3: terminal opened, but no login within 5 min (or cancelled)
     | "terminal-unavailable"; // tier 3 itself couldn't open (e.g. unsupported platform)
@@ -252,13 +241,18 @@ export async function persistAndLinkAccount(
 
 /** Poll `CheckCliAuthCommand` against a login that was told to write
  *  DIRECTLY into `authEnv`'s isolated dir, until it reports authenticated,
- *  the deadline passes, or `isCancelled` reports true. The provider-agnostic
- *  sibling of `pollForGlobalLoginSeed` (seed-global-login.ts) — used for
- *  every oauth-class provider OTHER than Claude, which has no seed-from-
- *  global capability at all (`seed_provider_auth_from_global` hard-rejects
- *  every provider but claude — providers.rs) and so must detect completion
- *  by asking the CLI itself whether it's authenticated in the dir the login
- *  was pointed at directly, rather than by watching a global dir get copied. */
+ *  the deadline passes, or `isCancelled` reports true.
+ *
+ *  Used by EVERY oauth-class provider as of 2026-08-31 — Claude included. It
+ *  was previously non-Claude only, because Claude's terminal login was pointed
+ *  at the user's global `~/.claude` and detected via a copy-back
+ *  (`pollForGlobalLoginSeed`); that path was a per-channel-isolation bypass and
+ *  is gone. See docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md.
+ *
+ *  Checks BEFORE the first sleep: the credential can already be present the
+ *  moment the terminal closes (or the user may have completed the login while
+ *  the previous tier was still unwinding), and sleeping first added a
+ *  guaranteed `pollMs` of dead latency to the common fast path. */
 async function pollForCliAuthReady(
     cliPath: string,
     authCheckArgs: string[],
@@ -269,10 +263,15 @@ async function pollForCliAuthReady(
     const pollMs = opts.pollMs ?? 5_000;
     const timeoutMs = opts.timeoutMs ?? 5 * 60 * 1_000;
     const deadline = performance.now() + timeoutMs;
+    let first = true;
     while (performance.now() < deadline) {
         if (isCancelled()) return false;
-        await sleep(pollMs);
-        if (isCancelled()) return false;
+        // Check-then-sleep (not sleep-then-check) — see the doc comment.
+        if (!first) {
+            await sleep(pollMs);
+            if (isCancelled()) return false;
+        }
+        first = false;
         try {
             const result = await RpcApi.CheckCliAuthCommand(
                 TabRpcClient,
@@ -528,64 +527,46 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
 
     // Tier 1's login CLI child (piped/PTY, spawned by forceProviderLogin's
     // getApi().runCliLogin) is left running/abandoned when it doesn't
-    // produce a URL within its own timeout — cancel it before tier 2/3
+    // produce a URL within its own timeout — cancel it before tier 3
     // potentially spawn a second, concurrent login CLI process against the
     // same config dir. cancelCliLogin is idempotent and host-side (safe to
     // call even if nothing is running — see useAgentControllerStatus.ts's
     // and launch-flow.ts's existing best-effort uses of the same call).
     await getApi().cancelCliLogin().catch(() => {});
     // Whatever the caller displayed for tier 1 (a URL-capture countdown, or
-    // nothing if skipTier1) is stale now — tier 2/3 from here can run for
+    // nothing if skipTier1) is stale now — tier 3 from here can run for
     // up to 5 more minutes with zero further signal otherwise.
     p.onTierChange?.({ tier: "fallback" });
 
-    // Claude-only: seed-from-global. seed_provider_auth_from_global
-    // hard-rejects every other provider server-side, so this tier is
-    // structurally Claude-specific — not a coverage gap for the others,
-    // just a different tier-3 completion strategy for them, below.
-    if (minted && p.provider.id === "claude") {
-        p.log("auth", "no login URL captured — checking for an existing global Claude login…");
-        if (await seedGlobalLogin(p.provider.id, p.log, minted.dir)) {
-            // The credential is now valid and sitting in minted.dir — a
-            // persist failure here is a bookkeeping problem, not an auth
-            // one, and is usually transient (a momentary RPC hiccup). One
-            // retry (reagent P2) avoids silently falling through to
-            // "opening a terminal window for a fresh login…" for a login
-            // that already succeeded, which just confuses the user into
-            // thinking they still need to do something.
-            let persisted = await persistSeededAccount(p.provider.id, minted.accountId, minted.dir, p.log);
-            if (!persisted) {
-                p.log("auth", "account registration failed — retrying once…", "warn");
-                persisted = await persistSeededAccount(p.provider.id, minted.accountId, minted.dir, p.log);
-            }
-            if (persisted) {
-                p.onAccountRegistered?.(minted.accountId, minted.dir);
-                await finalizeAccount(p, minted.accountId, minted.dir);
-                return "seeded";
-            }
-            p.log(
-                "auth",
-                "your login succeeded, but AgentMux couldn't save the account record — try again in a moment",
-                "error",
-            );
-        }
-    }
+    // TIER 2 REMOVED 2026-08-31 — this was the Claude-only "seed from global"
+    // step: if the user already had a valid login in their personal
+    // `~/.claude`, copy it into the minted isolated dir and register an account
+    // from it, with no browser and no user action.
+    //
+    // It defeated per-channel isolation by construction — a fresh channel
+    // silently acquired the operator's personal credential and reported a
+    // successful "login" that never happened in that channel. See
+    // `docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md` #3.
+    // Tier 1 (in-app) → tier 3 (terminal) is now the whole ladder, and tier 3
+    // treats Claude exactly like every other oauth provider.
 
     p.log("auth", "opening a terminal window for a fresh login…");
 
     const terminalEnv: Record<string, string> = { ...p.authEnv };
-    const isClaude = p.provider.id === "claude";
-    if (isClaude) {
-        // Claude: strip the isolated dir's env var so the login lands in
-        // the user's GLOBAL ~/.claude instead — seed_provider_auth_from_
-        // global then copies it into the isolated dir once it lands there
-        // (poll below). This is the ONLY provider with that copy-back path.
-        delete terminalEnv[p.provider.authConfigDirEnvVar];
-    } else if (minted) {
-        // Every other oauth-class provider has no seed-from-global
-        // capability to fall back on — instead, let the login write
-        // DIRECTLY into the isolated dir by keeping the env var pointed at
-        // it, and detect completion by asking the CLI itself (below).
+    if (minted) {
+        // UNIFIED 2026-08-31 — every oauth-class provider, Claude included,
+        // logs in DIRECTLY into its isolated dir by keeping the config-dir env
+        // var pointed at it, and detects completion by asking the CLI itself.
+        //
+        // Claude used to be the sole exception: its env var was STRIPPED so the
+        // login landed in the user's global `~/.claude`, then
+        // `seed_provider_auth_from_global` copied it inward. That copy-back was
+        // one of the per-channel-isolation bypasses (
+        // `docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md` #3)
+        // and is gone. The only stated reason for the special case was that
+        // "only Claude has a seed-from-global capability to fall back on" — a
+        // convenience, not a constraint: the `claude` CLI honours
+        // `CLAUDE_CONFIG_DIR` exactly like every other provider honours its own.
         terminalEnv[p.provider.authConfigDirEnvVar] = minted.dir;
     }
 
@@ -596,17 +577,17 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
         return "terminal-unavailable";
     }
     p.log("auth", "a terminal window opened — complete the login there");
-    // Matches pollForGlobalLoginSeed/pollForCliAuthReady's own default
-    // timeoutMs below (neither call passes a custom one) — if either
-    // default ever changes, this display value must move with it.
+    // Matches pollForCliAuthReady's own default timeoutMs below (the call
+    // passes no custom one) — if that default ever changes, this display value
+    // must move with it. It used to name a second sibling,
+    // pollForGlobalLoginSeed, which was deleted with the seed-from-global path
+    // 2026-08-31; there is one poll here now, not two.
     p.onTierChange?.({ tier: "polling", deadlineMs: Date.now() + 5 * 60 * 1_000 });
 
     const isCancelled = p.isCancelled ?? (() => false);
-    if (isClaude) {
-        const configDir = minted?.dir ?? p.authEnv[p.provider.authConfigDirEnvVar];
-        const seeded = await pollForGlobalLoginSeed(p.provider.id, configDir, isCancelled);
-        if (!seeded) return "terminal-timeout";
-    } else if (minted) {
+    if (minted) {
+        // One completion strategy for every provider now (see terminalEnv
+        // above): ask the CLI whether it's authenticated IN THE ISOLATED DIR.
         const ready = await pollForCliAuthReady(p.cliPath, p.provider.authCheckCommand, terminalEnv, isCancelled);
         if (!ready) return "terminal-timeout";
     } else {
@@ -617,7 +598,7 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
     }
 
     if (minted) {
-        // Same one-retry safety net as tier 2 above (reagent P2) — a
+        // One-retry safety net (reagent P2) — a
         // transient persist hiccup shouldn't report a false "Login
         // successful" for a credential that's genuinely sitting on disk and
         // valid. Without EITHER the retry or the loud error below, a persist

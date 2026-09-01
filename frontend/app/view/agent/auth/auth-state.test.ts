@@ -152,7 +152,7 @@ describe("auth-state reducer", () => {
         });
     });
 
-    describe("Seeded (seed-from-global → ready)", () => {
+    describe("Seeded (a registered login → ready)", () => {
         it("transitions unauthenticated → ready single-phase", () => {
             const r = update(
                 seed({ kind: "unauthenticated", providerId: "claude", bundleId: "b1" }),

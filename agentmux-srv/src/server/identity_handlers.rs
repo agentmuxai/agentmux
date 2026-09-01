@@ -46,8 +46,10 @@ pub const COMMAND_AUTH_CANCEL: &str = "auth.cancel";
 pub const COMMAND_AUTH_SUBMIT_API_KEY: &str = "auth.submitapikey";
 /// Mints (or reuses) a per-account isolated config dir without spawning any
 /// CLI — a standalone entry point onto `compute_and_ensure_account_dir` for
-/// callers that seed a credential file directly (`seed_provider_auth_from_global`)
-/// instead of driving a fresh OAuth handshake through `auth.start`. See
+/// callers that need the dir BEFORE a credential exists in it — today the
+/// terminal-login tier, which must know where to point the login before it
+/// opens a terminal. (It previously also served `seed_provider_auth_from_global`,
+/// the copy-from-personal-`~/.claude` path removed 2026-08-31.) See
 /// `docs/specs/PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md` §7 —
 /// "single point, not global": every credential-bearing dir a running agent
 /// reads from must belong to a real `IdentityAccount` row, never the shared

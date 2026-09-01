@@ -194,10 +194,16 @@ export type AuthCommand =
      */
     | { type: "ApiKeyAccepted"; bundleId: string }
     /**
-     * Seed-from-global accepted (SPEC_HOST_CLI_LOGIN_CAPTURE §0 / §5.5):
-     * the user's valid GLOBAL Claude login was copied into the agent's
-     * isolated dir, so auth is satisfied WITHOUT running a fresh OAuth —
-     * the fast path when one's already available, offered as tier 2
+     * A completed login's account is registered, so auth is satisfied and the
+     * reducer may transition to `ready`.
+     *
+     * NAME IS HISTORICAL: until 2026-08-31 this meant "seed from global" —
+     * the user's personal `~/.claude` credential copied into the agent's
+     * isolated dir with no OAuth at all. That tier was a per-channel-isolation
+     * bypass and was removed
+     * (docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md #3);
+     * the action name is kept to avoid churning this union and its tests.
+     * Formerly offered as tier 2
      * alongside the in-app session (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md
      * §3.1) that's since become tier 1's primary path for Claude v2.1.198+.
      * Single-phase, like `ApiKeyAccepted`: the credential file IS the
@@ -618,7 +624,8 @@ export function update(state: AuthState, command: AuthCommand): ReducerResult {
             // requiresLoginTty path), which dispatch ConnectClicked (→
             // `waiting`) up front so the panel shows progress during tier 3's
             // up-to-5-minute terminal wait, then `Seeded` on success. The
-            // original single-phase "Use my existing login" caller never
+            // original single-phase "Use my existing login" caller (removed
+            // 2026-08-31) never
             // enters `waiting` at all, so this widening doesn't change its
             // behavior. Still guards against a stale dispatch clobbering a
             // newer `ready`/`saving`/`idle`.

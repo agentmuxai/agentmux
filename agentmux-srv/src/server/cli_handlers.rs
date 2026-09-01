@@ -301,39 +301,32 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         .or_else(|_| std::env::var("USERPROFILE"))
                         .unwrap_or_default();
 
-                    // First-run bootstrap of the SHARED provider auth dir
-                    // (~/.agentmux/shared/providers/claude). It is account-wide, so the
-                    // user's existing global ~/.claude login is imported into it ONCE,
-                    // gated on a sentinel so a later `claude auth logout` in this provider
-                    // space sticks. This is a one-time bootstrap of the single shared
-                    // auth, NOT per-instance reseeding. Retro:
-                    // docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md
-                    if let Some(config_dir) = cmd.auth_env.get("CLAUDE_CONFIG_DIR") {
-                        let iso = format!("{}/.credentials.json", config_dir);
-                        let seeded = format!("{}/.agentmux-cred-seeded", config_dir);
-                        let global = format!("{}/.claude/.credentials.json", home);
-                        if !std::path::Path::new(&iso).exists()
-                            && !std::path::Path::new(&seeded).exists()
-                            && std::path::Path::new(&global).exists()
-                        {
-                            match std::fs::create_dir_all(config_dir)
-                                .and_then(|_| std::fs::copy(&global, &iso))
-                            {
-                                Ok(_) => {
-                                    let _ = std::fs::write(
-                                        &seeded,
-                                        b"imported from global ~/.claude on first run\n",
-                                    );
-                                    tracing::info!(
-                                        "claude auth: imported global ~/.claude into shared provider dir (first run)"
-                                    );
-                                }
-                                Err(e) => tracing::warn!(
-                                    "claude auth: failed to import global creds into shared provider dir: {e}"
-                                ),
-                            }
-                        }
-                    }
+                    // REMOVED 2026-08-31 — the first-run bootstrap that copied
+                    // the user's global `~/.claude/.credentials.json` into the
+                    // isolated CLAUDE_CONFIG_DIR (gated on a
+                    // `.agentmux-cred-seeded` sentinel).
+                    //
+                    // It ran during a routine AUTH CHECK — no login, no user
+                    // action, no Armory account — so an agent in a fresh
+                    // channel silently acquired the operator's personal
+                    // credential. That is the most direct of the four
+                    // per-channel-isolation bypasses catalogued in
+                    // `docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md`
+                    // (#4), and the most likely answer to the reported "agents
+                    // operate with an empty Armory" (it also explains why the
+                    // symptom varied by machine — it depended on whether
+                    // `~/.claude` happened to hold a valid credential).
+                    //
+                    // Its original justification
+                    // (`docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md`)
+                    // predates the "agents never use ~/.claude" requirement
+                    // (`SPEC_BLOCK_AMBIENT_HOME_DIR_IDENTITY_BINDING_2026_08_25.md`)
+                    // and was never revisited against it.
+                    //
+                    // An unauthenticated isolated dir must now simply report
+                    // `authenticated: false` and let the user log in FOR THIS
+                    // CHANNEL. Do not reintroduce an import here: a check must
+                    // report state, never mint credentials as a side effect.
 
                     // §4 INVARIANT (provider-auth-isolation.md): validate the SAME dir
                     // the agent runs in — the isolated CLAUDE_CONFIG_DIR if set, else
@@ -420,55 +413,30 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 }
 
-                let (mut authenticated, mut email, mut auth_method, mut raw_output) =
+                let (authenticated, email, auth_method, raw_output) =
                     run_auth_check(&cmd.cli_path, &cmd.auth_check_args, &cmd.auth_env).await?;
 
-                // Self-heal a stale isolated/shared Claude credential (the Pozl
-                // 401). Validation failed, but if the user has a valid global
-                // ~/.claude login whose access token differs from the checked
-                // dir's, the isolated copy went stale (a global re-login rotated
-                // the token and killed the isolated refresh token) and the
-                // one-time import sentinel blocks auto-reimport. Refresh from
-                // global and re-validate ONCE, so the agent recovers without the
-                // user hunting for the right button. "auth.credstate:" /
-                // "identity.spawn" are `muxlog auth` vocabulary.
-                if !authenticated && cmd.cli_path.to_lowercase().contains("claude") {
-                    if let Some(config_dir) = cmd.auth_env.get("CLAUDE_CONFIG_DIR") {
-                        match refresh_claude_dir_from_global_if_stale(config_dir) {
-                            Ok(true) => {
-                                tracing::info!(
-                                    config_dir = %config_dir,
-                                    "auth.credstate: isolated dir failed validation but a newer global login exists — refreshed, re-validating"
-                                );
-                                match run_auth_check(
-                                    &cmd.cli_path,
-                                    &cmd.auth_check_args,
-                                    &cmd.auth_env,
-                                )
-                                .await
-                                {
-                                    Ok((a, e, m, r)) => {
-                                        authenticated = a;
-                                        email = e;
-                                        auth_method = m;
-                                        raw_output = r;
-                                        tracing::info!(
-                                            authenticated,
-                                            "auth.credstate: self-heal from global login complete"
-                                        );
-                                    }
-                                    Err(e) => tracing::warn!(
-                                        "auth.credstate: self-heal re-validation failed: {e}"
-                                    ),
-                                }
-                            }
-                            Ok(false) => {}
-                            Err(e) => tracing::warn!(
-                                "auth.credstate: self-heal refresh from global failed: {e}"
-                            ),
-                        }
-                    }
-                }
+                // REMOVED 2026-08-31 (Codex P1 on PR #2878) — the "self-heal a
+                // stale isolated Claude credential" step. When validation
+                // failed, it copied the user's personal
+                // `~/.claude/.credentials.json` into the isolated dir (via
+                // `refresh_claude_dir_from_global_if_stale`) whenever the global
+                // access token differed, then re-validated ONCE so the agent
+                // "recovered" — meaning a channel silently acquired a credential
+                // authenticated OUTSIDE it and could then report authenticated
+                // with no channel-local login at all.
+                //
+                // Same source and same end state as the first-run bootstrap
+                // removed above, just a different trigger, so removing only that
+                // one would have left this per-channel-isolation bypass wide
+                // open. See
+                // `docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md`
+                // (#5).
+                //
+                // The real failure it was papering over (a global re-login
+                // rotating the token and killing the isolated refresh token —
+                // the "Pozl 401") is now surfaced honestly: validation fails, the
+                // auth card appears, and the user logs in FOR THIS CHANNEL.
 
                 let result = CheckCliAuthResult {
                     authenticated,
@@ -757,55 +725,21 @@ async fn run_auth_check(
     Ok((authenticated, email, auth_method, raw_output))
 }
 
-/// Read the non-empty Claude access token from a credentials file, if any.
-fn claude_access_token(creds_path: &str) -> Option<String> {
-    let content = std::fs::read_to_string(creds_path).ok()?;
-    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
-    json.get("claudeAiOauth")
-        .and_then(|o| o.get("accessToken"))
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-}
-
-/// Refresh a stale Claude isolated/shared config dir from the user's GLOBAL
-/// `~/.claude` login. Copies global → dir ONLY when the global credentials file
-/// has a non-empty access token that DIFFERS from the dir's current one.
-/// Returns `Ok(true)` if it wrote a refreshed credential.
-///
-/// This is the recovery for the Pozl 401: a global re-login rotates the access
-/// token and invalidates the isolated copy's refresh token, but the one-time
-/// import sentinel (`.agentmux-cred-seeded`) blocks any auto-reimport — so the
-/// isolated dir stays stale and 401s with no self-recovery. Called ONLY after a
-/// validation failure, so at worst it copies a global that is itself expired
-/// (harmless — the re-validation just fails again).
-fn refresh_claude_dir_from_global_if_stale(config_dir: &str) -> std::io::Result<bool> {
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_default();
-    if home.is_empty() {
-        return Ok(false);
-    }
-    let global = format!("{home}/.claude/.credentials.json");
-    refresh_dir_from_global(&global, config_dir)
-}
-
-/// Path-explicit core of the refresh (see `refresh_claude_dir_from_global_if_stale`).
-/// Copies `global_creds` → `<config_dir>/.credentials.json` only when the global
-/// file has a non-empty access token that differs from the dir's current one.
-fn refresh_dir_from_global(global_creds: &str, config_dir: &str) -> std::io::Result<bool> {
-    let iso = format!("{config_dir}/.credentials.json");
-    let global_tok = match claude_access_token(global_creds) {
-        Some(t) => t,
-        None => return Ok(false), // no global login to refresh from
-    };
-    if claude_access_token(&iso).as_deref() == Some(global_tok.as_str()) {
-        return Ok(false); // already identical — nothing to refresh
-    }
-    std::fs::create_dir_all(config_dir)?;
-    std::fs::copy(global_creds, &iso)?;
-    Ok(true)
-}
+// REMOVED 2026-08-31 (Codex P1 on PR #2878): `claude_access_token`,
+// `refresh_claude_dir_from_global_if_stale`, and `refresh_dir_from_global` —
+// the machinery behind the auth check's "self-heal from the user's global
+// ~/.claude" step, together with its `selfheal_tests` module.
+//
+// Deleted rather than left unused on purpose: a helper whose entire job is
+// copying the operator's personal credential into an isolated dir is exactly
+// the thing that gets quietly rewired back in later. There is now nothing to
+// call. See `docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md`
+// (#5) for the full reasoning.
+//
+// The real condition it recovered from (the "Pozl 401" — a global re-login
+// rotating the access token and invalidating the isolated copy's refresh
+// token) now surfaces honestly as a failed validation plus an actionable auth
+// card, and is fixed by logging in for THIS channel.
 
 /// Resolve a CLI command on the system PATH.
 ///
@@ -879,75 +813,3 @@ async fn get_cli_version(cli_path: &str) -> String {
     }
 }
 
-#[cfg(test)]
-mod selfheal_tests {
-    use super::{claude_access_token, refresh_dir_from_global};
-
-    fn write(p: &std::path::Path, tok: &str) {
-        std::fs::write(
-            p,
-            format!(r#"{{"claudeAiOauth":{{"accessToken":"{tok}","refreshToken":"rt"}}}}"#),
-        )
-        .unwrap();
-    }
-
-    #[test]
-    fn access_token_parsing() {
-        let dir = std::env::temp_dir().join(format!("amx-sh-tok-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let f = dir.join("c.json");
-        write(&f, "sk-ant-AAA");
-        assert_eq!(claude_access_token(f.to_str().unwrap()).as_deref(), Some("sk-ant-AAA"));
-        assert_eq!(claude_access_token("/no/such/file").as_deref(), None);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn refreshes_when_global_token_differs() {
-        let base = std::env::temp_dir().join(format!("amx-sh-diff-{}", std::process::id()));
-        let gdir = base.join("global");
-        let iso = base.join("iso");
-        std::fs::create_dir_all(&gdir).unwrap();
-        std::fs::create_dir_all(&iso).unwrap();
-        let global = gdir.join(".credentials.json");
-        write(&global, "sk-ant-NEW");
-        write(&iso.join(".credentials.json"), "sk-ant-OLD");
-
-        let did = refresh_dir_from_global(global.to_str().unwrap(), iso.to_str().unwrap()).unwrap();
-        assert!(did, "should refresh when tokens differ");
-        assert_eq!(
-            claude_access_token(iso.join(".credentials.json").to_str().unwrap()).as_deref(),
-            Some("sk-ant-NEW"),
-            "iso dir should now hold the global token"
-        );
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    #[test]
-    fn no_op_when_tokens_identical() {
-        let base = std::env::temp_dir().join(format!("amx-sh-same-{}", std::process::id()));
-        let gdir = base.join("global");
-        let iso = base.join("iso");
-        std::fs::create_dir_all(&gdir).unwrap();
-        std::fs::create_dir_all(&iso).unwrap();
-        let global = gdir.join(".credentials.json");
-        write(&global, "sk-ant-SAME");
-        write(&iso.join(".credentials.json"), "sk-ant-SAME");
-        assert!(!refresh_dir_from_global(global.to_str().unwrap(), iso.to_str().unwrap()).unwrap());
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    #[test]
-    fn no_op_when_no_global_login() {
-        let base = std::env::temp_dir().join(format!("amx-sh-noglobal-{}", std::process::id()));
-        let iso = base.join("iso");
-        std::fs::create_dir_all(&iso).unwrap();
-        // Global path does not exist → nothing to refresh from, iso untouched.
-        assert!(!refresh_dir_from_global(
-            base.join("global/.credentials.json").to_str().unwrap(),
-            iso.to_str().unwrap()
-        )
-        .unwrap());
-        let _ = std::fs::remove_dir_all(&base);
-    }
-}

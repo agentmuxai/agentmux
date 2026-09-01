@@ -377,147 +377,27 @@ pub async fn set_provider_auth(state: &Arc<AppState>, args: &serde_json::Value) 
     Ok(serde_json::Value::Null)
 }
 
-/// Seed an agent's ISOLATED provider auth dir from the user's GLOBAL CLI login.
-///
-/// The reliable recovery when the host can't drive a provider's OAuth TUI
-/// (Claude Code v2.1.x opens its own browser + localhost callback and never
-/// prints a scrapeable URL — see `SPEC_HOST_CLI_LOGIN_CAPTURE` §5.5): if the
-/// user already has a valid GLOBAL Claude login, copy it verbatim into the
-/// agent's isolated dir, which the spawned CLI reads via `CLAUDE_CONFIG_DIR`.
-/// The copy keeps its `refreshToken`, so the isolated session keeps refreshing.
-///
-/// - GLOBAL source: `$CLAUDE_CONFIG_DIR/.credentials.json` when the user set
-///   that in their own shell env (the host inherits it), else
-///   `~/.claude/.credentials.json` (Anthropic's documented default). This is the
-///   user's real login — NOT the agent's isolated dir, which is the destination.
-/// - ISOLATED destination: `~/.agentmux/shared/providers/<provider>/.credentials.json`
-///   (`state.user_home_dir` + `shared/providers/<provider>`), matching
-///   `ensure_auth_dir`.
-///
-/// Validity is gated HERE (the frontend can't read the global dir): we only
-/// seed when `claudeAiOauth.expiresAt` is in the future — mirrors
-/// `agentmux-srv` `identity::resolver::probe_oauth_status`. Returns
-/// `{ seeded, status, expiresAt }` so the UI can explain a no-op without ever
-/// seeing token material — `status`: `seeded` | `missing` | `expired`.
-pub fn seed_provider_auth_from_global(
-    state: &Arc<AppState>,
-    args: &serde_json::Value,
-) -> Result<serde_json::Value, String> {
-    let provider = args
-        .get("provider")
-        .or_else(|| args.get("provider_id"))
-        .or_else(|| args.get("providerId"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("claude");
-
-    // Only Claude has both a documented global location and a credential shape
-    // we can validate. Reject others explicitly rather than copy blind.
-    if provider != "claude" {
-        return Err(format!(
-            "seed-from-global is only supported for 'claude' (got '{provider}')"
-        ));
-    }
-
-    // GLOBAL source — the user's own login. Honour a user-level
-    // CLAUDE_CONFIG_DIR (the host inherits it) else the documented `~/.claude`.
-    let global_dir = std::env::var("CLAUDE_CONFIG_DIR")
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-        .map(std::path::PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|h| h.join(".claude")))
-        .ok_or_else(|| "Could not resolve the global Claude config dir".to_string())?;
-    let global_cred = global_dir.join(".credentials.json");
-
-    let contents = match std::fs::read_to_string(&global_cred) {
-        Ok(s) => s,
-        Err(_) => {
-            tracing::info!(
-                target: "login_pty",
-                path = %global_cred.to_string_lossy(),
-                "seed_provider_auth_from_global: no global credential to seed"
-            );
-            return Ok(serde_json::json!({ "seeded": false, "status": "missing" }));
-        }
-    };
-
-    // Validate non-expired before seeding (claude shape: claudeAiOauth.expiresAt, ms).
-    let json: serde_json::Value = serde_json::from_str(&contents)
-        .map_err(|_| "Global Claude credential is not valid JSON".to_string())?;
-    let expires_at_ms = json
-        .get("claudeAiOauth")
-        .and_then(|o| o.get("expiresAt"))
-        .and_then(|v| v.as_i64())
-        .or_else(|| json.get("expiresAt").and_then(|v| v.as_i64()));
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0);
-    if let Some(exp) = expires_at_ms {
-        if exp <= now_ms {
-            tracing::info!(
-                target: "login_pty",
-                expires_at = exp,
-                "seed_provider_auth_from_global: global credential expired — not seeding"
-            );
-            return Ok(
-                serde_json::json!({ "seeded": false, "status": "expired", "expiresAt": exp }),
-            );
-        }
-    }
-
-    // ISOLATED destination (SPEC_PROVIDER_ISOLATION §4.5). Prefer the agent's
-    // RESOLVED config dir (passed as `config_dir` from its `cmd:env`), so a
-    // per-identity/bundle agent is seeded into the dir it actually reads — but
-    // ONLY when that dir is under the AgentMux home (`~/.agentmux`). A stale
-    // frozen dir pointing at the user's own `~/.claude` is REJECTED → fall back
-    // to the shared default, so the seed can NEVER write into the user's
-    // personal env (INV-R). Default agents resolve to the shared dir, which
-    // matches their post-migration binding.
-    let home = state
-        .user_home_dir
-        .lock()
-        .clone()
-        .ok_or_else(|| "User home dir not initialized yet".to_string())?;
-    let home_path = std::path::PathBuf::from(&home);
-    let shared_default = home_path.join("shared").join("providers").join(provider);
-    let requested = args
-        .get("config_dir")
-        .or_else(|| args.get("configDir"))
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.trim().is_empty())
-        .map(std::path::PathBuf::from);
-    let dest_dir = match requested {
-        // Accept the agent's resolved dir only if it's inside `~/.agentmux`
-        // (covers `shared/providers/*` and `shared/identities/*` bundle dirs).
-        Some(d) if d.starts_with(&home_path) => d,
-        // Anything else (incl. the user's `~/.claude`) → shared default.
-        _ => shared_default,
-    };
-    std::fs::create_dir_all(&dest_dir)
-        .map_err(|e| format!("Failed to create isolated auth dir: {e}"))?;
-    let dest_cred = dest_dir.join(".credentials.json");
-
-    // Write verbatim via temp + rename so a concurrent reader (the agent's CLI)
-    // never sees a half-written credential.
-    let tmp = dest_dir.join(".credentials.json.seed-tmp");
-    std::fs::write(&tmp, contents.as_bytes())
-        .map_err(|e| format!("Failed to write seeded credential: {e}"))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
-    }
-    std::fs::rename(&tmp, &dest_cred)
-        .map_err(|e| format!("Failed to finalize seeded credential: {e}"))?;
-
-    tracing::info!(
-        target: "login_pty",
-        provider,
-        dest = %dest_cred.to_string_lossy(),
-        "seed_provider_auth_from_global: seeded isolated dir from valid global login"
-    );
-    Ok(serde_json::json!({ "seeded": true, "status": "seeded", "expiresAt": expires_at_ms }))
-}
+// `seed_provider_auth_from_global` REMOVED 2026-08-31.
+//
+// It read the user's PERSONAL `~/.claude/.credentials.json` (or
+// `$CLAUDE_CONFIG_DIR`) and copied it verbatim — refresh token included — into
+// an agent's isolated auth dir. The `INV-R` containment guard it carried only
+// ever constrained the DESTINATION (a dir pointing at `~/.claude` was rejected
+// so the seed could never WRITE into the user's own env); nothing constrained
+// the SOURCE, which was unconditionally the user's personal login.
+//
+// That made it a per-channel-isolation bypass, and in direct tension with
+// `SPEC_BLOCK_AMBIENT_HOME_DIR_IDENTITY_BINDING_2026_08_25.md` ("agents never
+// use ~/.claude"): that spec blocks BINDING an account whose dir *is*
+// `~/.claude`, while this copied the credential OUT of `~/.claude` into a
+// compliant dir — same end state, passing the check, because the check tested a
+// path rather than the credential's provenance. See
+// `docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md` #3.
+//
+// Terminal login now points every provider's config-dir env var AT its isolated
+// dir (as codex/gemini/openclaw/copilot already did), so the login writes there
+// directly and no copy-back is needed. Do not reintroduce a source-side global
+// read here.
 
 /// Clear auth token for a provider.
 pub fn clear_provider_auth(state: &Arc<AppState>, args: &serde_json::Value) -> Result<serde_json::Value, String> {

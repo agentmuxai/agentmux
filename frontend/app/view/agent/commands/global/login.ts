@@ -25,8 +25,8 @@ import { persistAndLinkAccount, runProviderLogin } from "../../flows/run-provide
 import type { SlashCommand, SlashCommandContext, SlashResult } from "../types";
 
 /**
- * Shared by both success branches below (tier-1 "opened" and tier-2/3
- * "seeded"/"terminal-success"): restart an already-running controller onto
+ * Shared by both success branches below (tier-1 "opened" and tier-3
+ * "terminal-success"): restart an already-running controller onto
  * the refreshed credential — unless a turn is actively streaming on it.
  * `agentmux-srv`'s `resync_controller` with `force: true` unconditionally
  * stops the existing controller process before respawning it (see
@@ -93,7 +93,7 @@ export const loginCommand: SlashCommand = {
         }
         // reagent P1 on PR #2413 (round 3, third pass): mirrors the
         // `loginCancelled = false` every OTHER login-starting function
-        // (relogin()/useGlobalLogin()/loginViaTerminal()) already does at
+        // (relogin()/loginViaTerminal()) already does at
         // its own start. /login never called any of those three, so a flag
         // left `true` by an EARLIER, unrelated cancelled attempt (e.g. the
         // shared AuthUrlBox's Cancel button during a prior relogin()) stayed
@@ -104,7 +104,7 @@ export const loginCommand: SlashCommand = {
         ctx.log("auth", "running /login via GUI flow...");
         // Registers this attempt (including the up-to-5-minute poll below)
         // as an in-flight recovery on the SAME shared counter behind
-        // loginWaiting() that relogin()/useGlobalLogin()/loginViaTerminal()
+        // loginWaiting() that relogin()/loginViaTerminal()
         // already use — without this, a second message sent while /login is
         // still polling gets held with authWasKnownBadAtQueueTime: false
         // (mid-turn "auth" failures never set canRetry either), so a /login
@@ -126,7 +126,7 @@ export const loginCommand: SlashCommand = {
             // (useAgentControllerStatus.relogin) — opens the OAuth in an in-app
             // browser pane, or falls through to the global-login copy / real-terminal
             // tiers when the CLI produces no scrapeable URL. See run-provider-login.ts.
-            // linkTarget lets a tier-2/3 success register a real Armory account
+            // linkTarget lets a tier-3 success register a real Armory account
             // bound to this agent (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7).
             const agentDefinitionId = ctx.block()?.meta?.["agentId"] as string | undefined;
             const linkTarget = agentDefinitionId
@@ -240,7 +240,6 @@ export const loginCommand: SlashCommand = {
                             "Complete the login there, then run /login again.",
                     };
                 }
-                case "seeded":
                 case "terminal-success":
                     // openedAccountId/openedAccountDir are only set once
                     // onAccountRegistered fires — run-provider-login.ts only

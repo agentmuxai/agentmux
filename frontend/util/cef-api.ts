@@ -783,12 +783,6 @@ export function buildCefApi(): AppApi {
                 "get_cli_login_status",
             );
         },
-        seedProviderAuthFromGlobal: async (providerId: string, configDir?: string) => {
-            return await invokeCommand<{ seeded: boolean; status: string; expiresAt?: number | null }>(
-                "seed_provider_auth_from_global",
-                { providerId, configDir: configDir ?? null },
-            );
-        },
         openLoginTerminal: async (cliPath: string, loginArgs: string[], authEnv: Record<string, string>) => {
             return await invokeCommand<{ opened: boolean }>("open_login_terminal", { cliPath, loginArgs, authEnv });
         },
