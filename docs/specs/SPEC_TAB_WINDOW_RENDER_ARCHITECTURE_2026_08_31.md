@@ -147,45 +147,99 @@ those rather than starting from this document. Note also
 The reducer already produces every multi-object change as one atomic
 transition. Give that transition an identity and carry it to the client.
 
-- Backend: every reducer dispatch stamps a monotonic `epoch: u64` on **all**
-  `WaveObjUpdate`s it produces. Same transition → same epoch.
+- Backend: every reducer **dispatch** stamps a monotonic `epoch: u64` on **all**
+  `WaveObjUpdate`s it produces. Same dispatch → same epoch.
 - Wire: updates travel as `{ epoch, updates: [...] }`, never as bare objects.
 
-**Completeness contract (normative — an earlier draft left this undefined):**
+**The unit is the DISPATCH, not the event.** This is the subtlety an earlier
+draft got wrong. `dispatch_to_reducer` returns a `Vec<Event>`; `publish_events`
+sends each element independently; the bridge consumes one event at a time. One
+*command* routinely produces several *events* — `DeleteWorkspace` emits
+`WorkspaceDeleted` plus one `SrvWindowClosed` per affected window. Stamping and
+emitting per-event therefore splits a single logical transition across several
+frames and reopens exactly the intermediate paint the epoch exists to prevent.
+
+So the producer change is not "stamp each event" but **publish a dispatch
+envelope**: `publish_events` must carry the whole `Vec<Event>` from one dispatch
+as a unit, and the bridge must project that envelope into one frame. Any design
+that keeps the bridge subscribed to individual events cannot satisfy the
+contract below, however the stamping is done.
+
+**Completeness contract (normative):**
 
 > **One epoch is delivered in exactly one frame, and that frame is always
-> complete.** A frame carries every `WaveObjUpdate` the reducer transition
-> produced. There is no such thing as a partial epoch on the wire, so the
-> client never has to decide whether more is coming.
+> complete.** A frame carries every `WaveObjUpdate` produced by one reducer
+> dispatch. There is no partial epoch on the wire, so the client never has to
+> decide whether more is coming.
 
-This is a *requirement on the producer*, and §3.2 is what makes it satisfiable:
-the bridge must resolve every object it needs (`emit_fetched`'s async SQLite
-reads) **before** emitting, then emit once. A producer that cannot assemble the
-whole set must not emit a partial epoch — it must fail the transition.
+**Gaps, not just order — the client needs a watermark.** Dropping a frame whose
+epoch is *older* than current state is safe; a **missing** frame is not. These
+frames are deltas, not snapshots: `EventBus::try_send_lane` drops priority
+events when a lane is full, and `run_wave_obj_bridge` continues past a
+`Lagged` without resyncing. If epoch N changed object A and the client next
+receives N+1 changing B, applying N+1 paints old A beside new B — a state that
+was never committed, which is an F1 violation by the same definition the tab
+flash was.
 
-Consequently the frontend apply is trivial, with **no staging buffer**:
+The apply contract is therefore:
 
-- `wos.ts` applies each received epoch frame as one `batch()`.
-- A frame whose epoch is **older** than the cell's current epoch is dropped
-  (today's version guard, generalized from per-object to per-transition).
+- `wos.ts` tracks a **contiguous epoch watermark** — the highest epoch `E` such
+  that every epoch up to `E` has been applied.
+- A frame at `watermark + 1` applies as one `batch()`; the watermark advances.
+- A frame **older** than the watermark is dropped (today's version guard,
+  generalized from per-object to per-transition).
+- A frame **newer** than `watermark + 1` means at least one epoch was lost. The
+  client must **not** apply it. It requests an authoritative resync (a snapshot
+  of the affected objects, or a full workspace re-read), adopts the snapshot's
+  epoch as its new watermark, and resumes. Loud telemetry on every resync — a
+  frequent resync means the transport is lossy and that is the bug to fix, not
+  the resync path.
 
-An earlier draft proposed staging partial epochs behind a bounded timeout.
-That is now explicitly rejected: it cannot work without either an expected
-update count or an end-of-epoch marker, and adding either buys nothing over
-just requiring complete frames — while introducing a stall risk and a
-timeout-tuning problem. **If a future transition genuinely cannot fit in one
-frame**, this contract must be reopened deliberately and given an explicit
-`{ epoch, part, final }` marker; it must not be papered over with a timeout.
+Without the resync arm, this design is strictly *worse* than today's
+per-object version guard under packet loss, because it would confidently apply
+a delta onto a base it never received.
+
+**Failure to assemble a frame is a resync, not a rollback.** An earlier draft
+said a producer that cannot assemble the full set "must fail the transition."
+That is unimplementable where it was written: service handlers apply reducer
+events to SQLite and publish them *before* the asynchronous bridge performs its
+reads, so by the time an `emit_fetched` read fails the mutation is already
+committed and acknowledged. Fetching-before-emitting prevents a *partial* frame
+but converts that failure into a *missing* epoch sitting behind a committed
+mutation. Two admissible resolutions, and a design must pick one explicitly:
+
+1. **Assemble before commit** — the frame is built and validated as part of the
+   dispatch, so a failure can genuinely abort the transition. Strongest, and the
+   most invasive: it puts object reads on the commit path.
+2. **Assemble after commit, heal by watermark** — accept that a producer failure
+   yields a gap, and let the client's watermark detect it and resync (above).
+   Cheaper, and it reuses machinery the lossy-transport case already requires.
+
+(2) is recommended: it needs no change to the commit path, and the resync arm
+is non-optional anyway because `try_send_lane` can drop frames regardless of
+producer behaviour.
+
+**Staging buffers remain rejected.** An even earlier draft proposed staging
+*partial* epochs behind a bounded timeout. That cannot work without an expected
+count or an end-of-epoch marker, and buys nothing over requiring complete
+frames — while adding a stall risk and a timeout to tune. Note this is a
+different mechanism from the watermark above: the watermark tracks *whole
+epochs*, never fragments of one. If a future transition genuinely cannot fit in
+one frame, reopen the contract deliberately with an explicit
+`{ epoch, part, final }` marker rather than a timeout.
 
 **Result:** "tab deleted but workspace not yet updated" stops being a state the
-UI can render. It isn't merely unlikely — it is unrepresentable.
+UI can render — provided the dispatch envelope, the watermark, and the resync
+arm all exist. Any one of the three missing and the guarantee is only
+probabilistic, which is what the four failed tab-flash fixes already were.
 
-**Cost / risk:** touches every `WaveObjUpdate` producer — that is the whole
-cost, and it is the reason §0 says not to fund this on the strength of the tab
-flash. With the staging buffer gone the client side is nearly trivial; the risk
-sits entirely in auditing producers for the completeness contract above. Ship
-behind a flag and assert the contract in dev builds (warn on an epoch whose
-object set doesn't match what the reducer transition declared).
+**Cost / risk:** three distinct pieces of work, not one — a dispatch envelope
+through `publish_events` and the bridge, an epoch watermark in `wos.ts`, and an
+authoritative resync endpoint. That is substantially more than the earlier draft
+implied, and it reinforces §0: do not fund this on the strength of the tab
+flash, which was closed for ~150 lines by decoupling one surface instead.
+Ship behind a flag; assert in dev builds that a dispatch's emitted object set
+matches what the reducer declared, and alarm on resync frequency.
 
 ### 3.2 One authoritative transport (`P2` collapse)
 
@@ -198,16 +252,28 @@ Exactly one path may drive a paint:
   `epoch`).
 - **Demoted:** the HTTP response body's `updates` become a *cache warm* only —
   applied only if their epoch is **newer** than what the WS stream has already
-  delivered (i.e. normally a no-op, as it already is in practice).
+  delivered (i.e. normally a no-op, as it already is in practice). Note it can
+  never *fill a gap*: a body arriving at `watermark + 2` is as unapplicable as
+  the WS frame was, and must fall through to the same resync.
 - **Removed:** the per-update fan-out in the bridge. The bridge emits **one
-  epoch frame** per reducer event, never N frames. Where it genuinely needs an
-  async fetch to build the frame (`emit_fetched`), it fetches *first*, then
-  emits once.
+  epoch frame per reducer DISPATCH** — not per event (§3.1: one command can
+  emit several events). This is the change that requires `publish_events` to
+  carry a dispatch envelope and the bridge to subscribe to envelopes rather
+  than to individual events; without it, the rest of §3.1 cannot hold. Where
+  building the frame needs async fetches (`emit_fetched`), it resolves them all
+  *first*, then emits once.
 
 This subsumes §7's parent-before-child emission ordering: with one frame per
-epoch there is no intra-transition order left to get wrong. Keep the §7
+dispatch there is no intra-transition order left to get wrong. Keep the §7
 ordering and its tests until the epoch frame ships — they are the correct
 behaviour under the current design.
+
+**Scope note.** "Exactly one path may drive a paint" is about the *update*
+transports. It does not cover the resync path §3.1 requires, which is a fourth
+path by construction — a client-initiated authoritative read. That is
+acceptable because a resync delivers a *snapshot*, not a delta: it cannot tear
+against the stream, it can only be stale, and its adopted epoch re-anchors the
+watermark. Any resync design that returned deltas would reintroduce the problem.
 
 ### 3.3 `PaneSurfaceSync` — a frame contract with the native compositor
 
@@ -332,12 +398,26 @@ Phase 0's trace of whatever the next symptom turns out to be.
    prior art rather than as evidence.
 2. ~~**Can a partial epoch occur?**~~ **Resolved by fiat in §3.1** — the
    completeness contract forbids it on the wire, and the staging buffer is
-   dropped. The residual question is an audit, not a design one: *does every
-   `WaveObjUpdate` producer already assemble its full set before emitting?*
-   The bridge's `emit_fetched` path is the one known to need restructuring.
+   dropped. The residual questions are now scoped and concrete:
+   a. *Can `publish_events` carry a dispatch envelope without disturbing its
+      other subscribers* (the persist subscriber, the disk writer)? They
+      consume individual events today and would need to either flatten the
+      envelope or move to it.
+   b. *What is the authoritative resync?* A per-object snapshot read, a
+      workspace-scoped one, or a full reload. Cheapest correct option wins;
+      it only has to be a **snapshot**, never a delta (§3.2 scope note).
 3. **Do LAN/multi-window renderers need epoch coordination**, or is per-renderer
-   monotonicity enough? Suspect the latter; unverified.
-4. **Does the confirm modal need to exist on this path at all?** The gesture is
+   monotonicity enough? Suspect the latter — each renderer's watermark is its
+   own, and a resync is client-initiated — but unverified, and the answer
+   changes if two renderers ever have to agree on a *rendered* frame rather
+   than just on state.
+4. **Is the watermark's resync arm worth the complexity at all**, or is the
+   honest conclusion that per-object versioning (today's behaviour) is the
+   right trade for a lossy local transport? A gap-tolerant delta protocol is a
+   real distributed-systems problem; §0 already argues the tab flash did not
+   justify paying for one. This question should be answered *before* §3.1 is
+   funded, not during.
+5. **Does the confirm modal need to exist on this path at all?** The gesture is
    reversible (tabs are restorable). Removing the modal would sidestep the P4
    seam for *this* gesture — though not for menus, dropdowns or any other
    overlay, so it is a mitigation, not a fix.
