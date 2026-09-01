@@ -91,6 +91,20 @@ Usage:
                                   reports what is PERSISTED, which can lag
                                   what the frontend is currently rendering.
                                   Exits non-zero if any tree has violations.
+  muxspect work [state] [--json]  the Muxqueue backlog — the shared work queue
+                                  any agent can add to and any agent can claim
+                                  (REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md).
+                                  Optional state filter: open | claimed | done |
+                                  failed | cancelled. Shows who holds what, how
+                                  many attempts each item has burned, and the
+                                  result/reason recorded on it. Answers "what is
+                                  outstanding, and is anything stuck" without
+                                  claiming anything yourself — this command is
+                                  strictly read-only. Shows the 500
+                                  most-recently-updated items and says so
+                                  explicitly when there may be more, rather
+                                  than presenting a truncated view as the
+                                  whole backlog.
   muxspect help                   this message
 
 Requires $AGENTMUX_LOCAL_URL and $AGENTMUX_AUTH_KEY in the environment.
@@ -108,6 +122,12 @@ itself documents for tool-spawned subshells):
   node ~/.agentmux/shell/muxspect.mjs list
 See docs/specs/SPEC_MUXSPECT_LIVE_INTROSPECTION_TOOL_2026_08_01.md for the
 full story and the planned fix.`;
+
+/// How many queue items `muxspect work` asks for. The server clamps to 500, so
+/// this is the practical ceiling. Threaded into renderWork rather than being
+/// compared against a second hardcoded literal there — that duplication is how
+/// a truncation warning silently stops matching the request that caused it.
+const WORK_LIST_LIMIT = 500;
 
 function fail(msg) {
     console.error(`muxspect: ${msg}`);
@@ -497,6 +517,105 @@ function renderDock(data) {
 }
 
 /**
+ * Render `muxspect work` — the Muxqueue backlog.
+ *
+ * Exported (pure apart from console output) for muxspect.test.mjs, same as
+ * renderLayout below, so the failure paths are tested rather than asserted.
+ */
+// NOTE on error handling, and a pattern that does NOT apply here (reagent P2 on
+// PR #2903): `renderLayout` below carries an explicit `if (data.error)` branch
+// because ITS handler deliberately returns 200-with-{error} for a store
+// failure. `/agentmux/work` does not — `handle_work_list` returns HTTP 500 with
+// {"error": ...}, which `apiGet` already turns into
+// `fail("request failed (500): {...}")` and a non-zero exit, printing the
+// server's own message.
+//
+// An earlier revision of this function copied that branch anyway. It was
+// unreachable via the real endpoint, and it had a unit test asserting a
+// response shape production never produces — which is worse than having no
+// branch at all, because it looks like the failure mode is covered. Removed
+// rather than made reachable: the 500 path is already correct and informative.
+export function renderWork(data, stateFilter, limit) {
+    const items = data.items ?? [];
+    if (!items.length) {
+        // Distinguish "nothing at all" from "nothing MATCHING", so a filtered
+        // query never reads as an empty queue.
+        console.log(stateFilter ? `no ${stateFilter} items` : "queue is empty");
+        return;
+    }
+
+    const now = Date.now();
+    const isExpired = (it) =>
+        it.state === "claimed" && it.claim_expires && it.claim_expires <= now;
+    // An expired lease does NOT always mean "returns to the pool". The reaper
+    // parks an item whose attempts are already spent as `failed` instead of
+    // reopening it, so promising a comeback for those is exactly the kind of
+    // false reassurance this command exists to prevent (Codex P2 on PR #2903 —
+    // the same over-promise made in WorkRelease's acknowledgement on #2902,
+    // repeated here in the renderer).
+    const isDoomed = (it) => isExpired(it) && (it.attempts ?? 0) >= (it.max_attempts ?? 0);
+
+    console.log(`${items.length} item(s)${stateFilter ? ` (state=${stateFilter})` : ""}\n`);
+    for (const it of items) {
+        const holder = it.claimed_by ? ` held-by=${it.claimed_by}` : "";
+        const attempts = `${it.attempts ?? 0}/${it.max_attempts ?? 0}`;
+        // A claimed row whose lease is already in the past is the interesting
+        // pathology: nobody is working it, and it stays invisible to `list`
+        // until the next claim reaps it. Call that out rather than making the
+        // reader compare timestamps by eye.
+        let expired = "";
+        if (isDoomed(it)) {
+            expired = "  LEASE EXPIRED, ATTEMPTS SPENT (will be parked as failed, NOT reoffered)";
+        } else if (isExpired(it)) {
+            expired = "  LEASE EXPIRED (returns to the pool on the next claim)";
+        }
+        console.log(`${it.id}  ${it.state}${holder}  attempts=${attempts}${expired}`);
+        console.log(`  ${it.title}`);
+        if (it.kind) console.log(`  kind=${it.kind}`);
+        if (it.target_agent) console.log(`  target-agent=${it.target_agent}`);
+        if (it.target_group) console.log(`  target-group=${it.target_group}`);
+        if (it.not_before && it.not_before > now) {
+            console.log(`  deferred until ${new Date(it.not_before).toISOString()}`);
+        }
+        // The completion trace for a done item, the reason for a
+        // failed/released one — the field WorkComplete calls the only record
+        // that the work happened.
+        if (it.result) console.log(`  -> ${it.result}`);
+        console.log("");
+    }
+
+    const reclaimable = items.filter((it) => isExpired(it) && !isDoomed(it)).length;
+    const doomed = items.filter(isDoomed).length;
+    if (reclaimable) {
+        console.log(
+            `${reclaimable} item(s) hold an EXPIRED lease — their claimant is gone. ` +
+                `They return to the pool the next time any agent calls WorkClaim.`,
+        );
+    }
+    if (doomed) {
+        console.log(
+            `${doomed} item(s) hold an EXPIRED lease AND have spent every attempt — ` +
+                `the next reap parks them as failed. They will NOT be offered again; ` +
+                `re-enqueue if the work still matters.`,
+        );
+    }
+
+    // The caller asked for `limit` items and got exactly that many, so there
+    // are probably more (Codex P2 on PR #2903). Silence here would make a
+    // truncated view look like the complete backlog — the specific failure this
+    // command exists to avoid, since `work` is meant to answer "what is
+    // outstanding" and older open items sort last under `updated_at DESC`.
+    if (limit && items.length >= limit) {
+        console.log(
+            `\nShowing the ${items.length} most recently updated item(s) — there may be MORE. ` +
+                `Older open work and older expired claims sort last and are cut off here. ` +
+                `Narrow with a state filter (muxspect work open) or use --json against the ` +
+                `API directly for a full sweep.`,
+        );
+    }
+}
+
+/**
  * Render `muxspect layout` — the persisted pane tree per tab as an indented
  * outline, plus the layout doctor's verdict.
  *
@@ -615,6 +734,26 @@ async function main() {
         const data = await apiGet(url, authKey, "/api/v1/muxspect/list");
         if (json) console.log(JSON.stringify(data, null, 2));
         else renderList(data);
+        return;
+    }
+
+    if (cmd === "work") {
+        // The sole positional arg is an optional state filter. Validated here
+        // rather than passed through blindly: a typo like `muxspect work opne`
+        // would otherwise return an empty list that reads exactly like "the
+        // queue is empty", which is the wrong answer to a different question.
+        const stateFilter = blockId ?? "";
+        const VALID = ["open", "claimed", "done", "failed", "cancelled"];
+        if (stateFilter && !VALID.includes(stateFilter)) {
+            fail(`unknown state '${stateFilter}' — expected one of: ${VALID.join(", ")}`);
+        }
+        const data = await apiGet(
+            url,
+            authKey,
+            `/agentmux/work?state=${encodeURIComponent(stateFilter)}&limit=${WORK_LIST_LIMIT}`,
+        );
+        if (json) console.log(JSON.stringify(data, null, 2));
+        else renderWork(data, stateFilter, WORK_LIST_LIMIT);
         return;
     }
 
