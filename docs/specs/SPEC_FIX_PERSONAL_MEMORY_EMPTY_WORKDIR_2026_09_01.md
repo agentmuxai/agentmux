@@ -71,8 +71,51 @@ than empty.
 
 Treat a blank `working_directory` as "this row cannot answer" rather than
 "the answer is no": use the instance row only when it actually carries a
-working directory, and otherwise continue to the registry fallback that
-already exists directly below.
+working directory, and otherwise resolve the real directory another way.
+
+### Resolving the blank case (revised after review)
+
+The first cut simply fell through to the existing registry fallback. Review
+found two holes in that, both real:
+
+1. **The registry doesn't cover the target case** (Codex P1). `agent.open`
+   computes and uses `~/.agentmux/agents/<name-slug>` but does **not** create
+   a named-agent registry record, so a freshly defined blank-workdir agent —
+   exactly what this fix targets — still ended at `not found`.
+2. **The registry lookup can resolve the WRONG agent** (Codex P1).
+   `find_active_registry_record_by_slug` matches on
+   `derive_slug(instance_name)` alone, so two agents whose display names
+   slugify identically collide. Resolving another agent's memory dir would let
+   list/read/write operations touch that agent's files.
+
+So the blank case resolves in two bound stages
+(`memory_dir_for_blank_working_dir`):
+
+1. A registry record **whose `definition_id` matches this agent** — the
+   registry records the dir an agent was really launched with, which beats
+   re-deriving it, but identity must be verified.
+2. Otherwise the **derived default**, via a new shared
+   `default_agent_working_dir(name)` in `backend/storage/agents.rs` that
+   `agent.open` now also calls. Extracting it is the point: the resolver and
+   the spawn path previously disagreed about where a blank-workdir agent runs,
+   and that disagreement *was* the bug. They can no longer drift.
+
+Returns `None` when the agent has no name either — genuinely unresolvable,
+and the one case where callers' fail-fast guards still fire.
+
+### Knock-on: the import fail-fast guard narrows
+
+`bundle.rs`'s `import_for_agent` refuses to import when `memory_dir` is
+`None`, so a bundle's memory isn't silently dropped (reagent P2, PR #2527).
+A blank `working_directory` no longer reaches that guard — it now resolves.
+That **serves the guard's own stated purpose better than erroring did**: the
+memory gets written where the agent will actually read it, instead of the
+import being refused. The guard stays for the genuinely-unresolvable case
+(blank name), and its test was renamed and re-pointed at that case rather
+than deleted.
+
+The same applies to `export_for_agent`, which ReAgent flagged as silently
+exporting an empty memory list for these agents — it now finds the files.
 
 `agentmux-srv/src/server/native_memory_handlers.rs`:
 
