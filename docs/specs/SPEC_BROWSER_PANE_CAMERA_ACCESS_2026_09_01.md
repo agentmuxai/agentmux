@@ -158,6 +158,40 @@ denies, the *page* shows whatever it shows for a denied camera. The most
 AgentMux can do is detect the OS-level state proactively and warn before or
 alongside the prompt. Scope that as a nicety, not a requirement.
 
+### 3.7 Revoke must terminate an *active* capture — and only one mechanism can
+
+This is the sharpest constraint after §1's exact-match rule, and it is easy to
+miss: **the permission handler and the grant store only govern whether a
+capture may _start_.** Deleting a `(pane, origin, bits)` grant does nothing to
+`MediaStreamTrack`s CEF has already handed to the page. A "revoke" that only
+clears the grant would leave the camera live while the UI claims it is off —
+strictly worse than offering no revoke at all.
+
+CEF exposes no API to terminate an in-flight media capture. The options, and
+why only one is sound:
+
+| Mechanism | Verdict |
+|---|---|
+| Delete the grant | **Insufficient alone** — governs future requests only. |
+| Inject JS to call `track.stop()` | **Unsound.** Requires enumerating every track the page holds, which is not generally possible, and a hostile or merely complex page can retain references or immediately re-acquire. Never rely on page cooperation for a security control. |
+| CDP (`Browser.resetPermissions` et al.) | **Unverified, and unused here** — there are no `ExecuteDevToolsMethod` call sites in the codebase today. CDP permission reset conventionally affects *subsequent* requests, so it plausibly has the same gap. Worth measuring, not assuming. |
+| **Destroy the page context** — reload the pane | **The only guaranteed stop.** Navigation tears down the JS context and every stream it owns. |
+
+Revoke is therefore specified as: **drop the grant, then reload the pane** via
+the existing per-pane primitive (`browser_panes/navigation.rs:72`,
+`reload(block_id)`), with the grant dropped *first* so the reloaded page's
+re-request re-prompts instead of silently reacquiring.
+
+**This has a real user-visible cost and the UI must own it.** Reloading discards
+page state — a half-filled form, a call in progress, scroll position. The revoke
+affordance must say so before acting ("Stop camera and reload the page?"), and
+the §4 capture indicator must not imply a free, instant toggle.
+
+If Phase 0's investigation finds a genuine track-termination path, this becomes
+a softer default with reload as the fallback. Until then reload *is* the
+specification, not an implementation detail — the §4 revoke guarantee depends
+entirely on it, and Phase 3 cannot be built without this decision made.
+
 ## 4. Threat model — camera is not mic
 
 Two asymmetries argue for camera being strictly more conservative than the
