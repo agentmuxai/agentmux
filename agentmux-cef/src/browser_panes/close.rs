@@ -65,6 +65,18 @@ impl BrowserPaneManager {
             Some(l) => l,
             None => return,
         };
+
+        // Drop this pane's media grants. Placed after the Live→Closing
+        // transition fired (a None above means "missing or already closing" —
+        // another close is mid-teardown and owns the cleanup), so it runs
+        // exactly once per real close.
+        //
+        // Grants must not outlive their pane: they are pane-scoped precisely so
+        // that a decision made for one pane cannot apply to another, and block
+        // ids are not reused in practice — but if one ever were, a stale entry
+        // would silently hand a new pane the previous occupant's camera grant.
+        // SPEC_BROWSER_PANE_CAMERA_ACCESS_2026_09_01.md §3.2.
+        state.media_grants.lock().clear_pane(block_id);
         #[cfg(target_os = "windows")]
         {
             let ops = AppStateCloseOps(state);
