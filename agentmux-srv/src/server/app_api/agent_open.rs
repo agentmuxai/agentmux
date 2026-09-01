@@ -315,8 +315,13 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let agent_slug = agent.name.to_lowercase()
                     .chars().map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
                     .collect::<String>();
+                // Shared with native-memory resolution so the two can never
+                // disagree about where a blank-working_directory agent
+                // actually runs — they did, and Personal Memory broke for the
+                // common case as a result (ReAgent/Codex P1, PR #2901; see
+                // SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01.md).
                 let work_dir = if agent.working_directory.is_empty() {
-                    format!("~/.agentmux/agents/{}", agent_slug)
+                    crate::backend::storage::agents::default_agent_working_dir(&agent.name)
                 } else {
                     agent.working_directory.clone()
                 };

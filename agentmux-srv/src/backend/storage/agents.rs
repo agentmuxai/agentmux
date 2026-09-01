@@ -192,6 +192,34 @@ pub fn default_conversation_visibility() -> String {
     "private".to_string()
 }
 
+/// The working directory `agent.open` substitutes when an
+/// `AgentDefinition`'s own `working_directory` is blank —
+/// `~/.agentmux/agents/<name-derived-slug>`.
+///
+/// Blank is the DEFAULT for a newly defined agent, so this is the path most
+/// agents actually run in. Extracted so `agent.open` (which creates and uses
+/// it) and native-memory resolution (which must find the memories written
+/// inside it) share one definition and cannot drift — they previously
+/// disagreed, and the resolver simply gave up on a blank field, breaking
+/// Armory → Memory → Personal for the common case. See
+/// `docs/specs/SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01.md`.
+///
+/// NOTE: deliberately NOT `derive_slug` above. `agent.open`'s own inline
+/// derivation is `name.to_lowercase()` with a Unicode-aware
+/// `char::is_alphanumeric()` filter (keeping `-`/`_`), which differs from
+/// `derive_slug`'s ASCII-only rule, dash-collapsing, 64-char trim and
+/// `"agent"` fallback. Reusing `derive_slug` here would silently point at a
+/// DIFFERENT directory than the one the agent is really running in for any
+/// non-ASCII or dash-heavy name. This mirrors the real behaviour exactly.
+pub fn default_agent_working_dir(agent_name: &str) -> String {
+    let slug: String = agent_name
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect();
+    format!("~/.agentmux/agents/{slug}")
+}
+
 /// Derive a filesystem-safe slug from a display name. Lowercase,
 /// ASCII alphanumeric + dash/underscore, consecutive dashes collapsed,
 /// trimmed to 64 chars. Returns `"agent"` if the input has no valid

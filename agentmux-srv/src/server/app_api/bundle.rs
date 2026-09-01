@@ -2885,15 +2885,24 @@ mod export_import_for_agent_tests {
     }
 
     #[tokio::test]
-    async fn import_for_agent_fails_fast_when_agent_has_no_working_directory_but_bundle_has_memory() {
+    async fn import_for_agent_fails_fast_when_agent_has_no_resolvable_memory_dir_but_bundle_has_memory() {
         // reagent P2, PR #2527: must fail BEFORE creating any skill/bundle
         // rows, not silently succeed with memory_files_written: 0 -- this
         // RPC exists specifically to transfer memory.
+        //
+        // The trigger narrowed in PR #2901: a blank `working_directory` alone
+        // no longer reaches this guard, because it now resolves to the same
+        // default `agent.open` substitutes (~/.agentmux/agents/<name-slug>) --
+        // which serves this guard's OWN stated purpose better than erroring
+        // did, since the memory is written where the agent will actually read
+        // it instead of being refused. The guard remains for the genuinely
+        // unresolvable case, which needs a blank NAME too (no name => no
+        // derivable default), exercised here.
         let state = test_state();
         let mut def: crate::backend::storage::AgentDefinition = serde_json::from_value(serde_json::json!({
             "id": "agent-no-workdir",
             "slug": "agent-no-workdir",
-            "name": "agent-no-workdir",
+            "name": "",
             "icon": "robot",
             "provider": "claude",
             "description": "test agent",
