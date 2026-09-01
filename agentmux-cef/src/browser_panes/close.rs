@@ -77,6 +77,7 @@ impl BrowserPaneManager {
         // would silently hand a new pane the previous occupant's camera grant.
         // SPEC_BROWSER_PANE_CAMERA_ACCESS_2026_09_01.md §3.2.
         state.media_grants.lock().clear_pane(block_id);
+        crate::browser_panes::media_prompt::cancel_pane_any_thread(block_id);
         #[cfg(target_os = "windows")]
         {
             let ops = AppStateCloseOps(state);
@@ -191,6 +192,20 @@ impl BrowserPaneManager {
         );
         if let Some(block_id) = out.drained_browser_pane_block_id {
             tracing::info!(label, block_id = %block_id, "browser pane drained via on_before_close");
+
+            // Drop media grants and pending prompts on THIS path too.
+            //
+            // This is the CEF-initiated teardown (crash, or the page/pane
+            // closing itself), and it removes the reducer entry without going
+            // through `close()` — so `close()`'s cleanup never runs for it, and
+            // a later `close()` returns early because the entry is already
+            // gone. Missing it would leave the grant behind, and
+            // `replay_pending_create` below can immediately recreate a pane for
+            // the SAME block id — handing the new pane the previous occupant's
+            // camera/mic access with no prompt. Hence: before the replay, not
+            // after (codex P2 on PR #2897).
+            state.media_grants.lock().clear_pane(&block_id);
+            crate::browser_panes::media_prompt::cancel_pane_any_thread(&block_id);
             // Same keyboard-focus orphaning fix as close() — the async
             // on_before_close drain also destroys the pane HWND.
             #[cfg(target_os = "windows")]
