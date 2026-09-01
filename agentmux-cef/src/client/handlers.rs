@@ -443,6 +443,48 @@ wrap_display_handler! {
     }
 
     impl DisplayHandler {
+        /// Live capture state for this browser — CEF's own signal, not an
+        /// inference from what we granted.
+        ///
+        /// A grant means "may capture"; this means "IS capturing right now",
+        /// which is what the §4 indicator has to show. Deriving the indicator
+        /// from grants instead would leave it lit after a page stopped using
+        /// the camera, training users to ignore it — the opposite of the point.
+        ///
+        /// Routed to the window that owns the pane, for the same reason the
+        /// prompt is (a torn-off pane's window, not unconditionally "main").
+        fn on_media_access_change(
+            &self,
+            browser: Option<&mut Browser>,
+            has_video_access: ::std::os::raw::c_int,
+            has_audio_access: ::std::os::raw::c_int,
+        ) {
+            let has_video_access = has_video_access != 0;
+            let has_audio_access = has_audio_access != 0;
+            let state = self.inner.lock().state.clone();
+            let Some(block_id) = browser.and_then(|b| state.block_id_for_browser(b)) else {
+                return; // main client or a browser that isn't a live pane
+            };
+            let window_label = state
+                .browser_pane_window_label(&block_id)
+                .unwrap_or_else(|| "main".to_string());
+            tracing::info!(
+                target: "pane-media",
+                %block_id, has_video_access, has_audio_access,
+                "pane media capture state changed"
+            );
+            crate::events::emit_event_to_window(
+                &state,
+                &window_label,
+                "pane-media-capture-changed",
+                &serde_json::json!({
+                    "blockId": block_id,
+                    "hasVideo": has_video_access,
+                    "hasAudio": has_audio_access,
+                }),
+            );
+        }
+
         fn on_title_change(&self, browser: Option<&mut Browser>, title: Option<&CefString>) {
             let mut inner = self.inner.lock();
             inner.on_title_change(browser, title);
@@ -828,15 +870,69 @@ wrap_permission_handler! {
                 );
                 cb.cont(requested_permissions);
             } else {
-                // Phase 2c prompts here instead of denying outright. Until then
-                // this is the same answer the pane got with no handler at all.
+                // No grant covers this — ask the user.
+                //
+                // The callback is retained rather than answered now. CEF
+                // permits exactly this: "call CefMediaAccessCallback methods
+                // either in this method or at a later time"
+                // (cef_permission_handler.h). Returning 1 without continuing
+                // means the page's getUserMedia stays pending until we answer.
+                //
+                // `park` takes ownership; `arm_timeout` guarantees an answer
+                // even if the prompt never renders or the user never responds,
+                // so the page cannot hang indefinitely.
+                let request_id = crate::browser_panes::media_prompt::park(
+                    cb.clone(),
+                    &block_id,
+                    &origin,
+                    requested_permissions,
+                );
                 tracing::info!(
                     target: "pane-media",
-                    %origin, %block_id,
+                    %origin, %block_id, request_id,
                     requested = requested_permissions,
-                    "denying media access — no grant covers this request (no prompt yet)"
+                    "prompting for media access — no grant covers this request"
                 );
-                cb.cont(0);
+                // Route to the DOM of the window that actually OWNS this pane
+                // — not the pane's own page, and not unconditionally "main".
+                //
+                // Not the pane's page: the prompt must not be renderable or
+                // clickable by the content asking for permission (spec §3.5).
+                //
+                // Not "main": a pane torn off into a floating window lives in
+                // that window, so emitting to main (or to
+                // emit_event_from_state's unfiltered first_browser() fallback)
+                // would show the prompt in the wrong window — or nowhere — and
+                // the request would silently time out to denial. Same defect
+                // already fixed twice for other pane events (#2548, #2597).
+                let window_label = self
+                    .state
+                    .browser_pane_window_label(&block_id)
+                    .unwrap_or_else(|| "main".to_string());
+                let payload = serde_json::json!({
+                    "requestId": request_id,
+                    "blockId": block_id,
+                    "origin": origin,
+                    "requested": requested_permissions,
+                });
+                let delivered = crate::events::emit_event_to_window(
+                    &self.state,
+                    &window_label,
+                    "pane-media-permission-request",
+                    &payload,
+                );
+                if !delivered {
+                    // Nothing can answer, so don't make the page wait out the
+                    // timeout for a prompt that was never shown.
+                    tracing::warn!(
+                        target: "pane-media",
+                        %origin, %block_id, %window_label, request_id,
+                        "no window to show the media prompt — denying immediately"
+                    );
+                    crate::browser_panes::media_prompt::resolve(request_id, false);
+                    return 1;
+                }
+                crate::browser_panes::media_prompt::arm_timeout(request_id);
             }
             1 // handled
         }
