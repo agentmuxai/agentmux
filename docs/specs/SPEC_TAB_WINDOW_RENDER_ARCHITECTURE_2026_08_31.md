@@ -42,18 +42,20 @@ Three consequences for this document:
    system (§3.1) to make torn state impossible *everywhere*. PR #2818 got the
    same guarantee *for one surface* by decoupling it from backend ordering
    entirely — no protocol change, ~150 lines, one file. **Prefer the local
-   decoupling every time it applies.** §3.1 is only justified for surfaces that
-   genuinely cannot predict their own outcome.
+   decoupling every time it applies.** (Written when §3.1 was still a live
+   proposal; it has since been rejected outright — see the verdict below.)
 3. **§3.4's defect was real and is now partly fixed.** The reveal gate being
    keyed on "currently active" rather than "the destination" was the confirmed
    cause of the residual pane blank. §9 fixed the targeting. The *timer-based*
    reveal (80ms settle / 800ms cap) is untouched and remains a suppressor.
 
-**Revised recommendation:** do not fund §3.1/§3.2 on the strength of the tab
-flash — that case is closed. Fund them only if a surface appears that (a) can't
-predict its outcome, and (b) demonstrably tears. §3.4's causal-reveal work is
-the highest-value remaining item; §3.3 is a real seam awaiting its own
-evidence (it was **not** the tab-close cause — see the report's §0).
+**Recommendation:** §3.4's causal-reveal work is the highest-value remaining
+item; §3.3 is a real seam awaiting its own evidence (it was **not** the
+tab-close cause — see the report's §0). For §3.1/§3.2, see the verdict
+immediately below — an earlier revision of this paragraph said they could be
+funded if a surface *"can't predict its outcome and demonstrably tears."* That
+condition is now superseded: even where it holds, the design in §3.1 is not the
+thing to build.
 
 **§3.1/§3.2 are REJECTED as of 2026-09-01, after four review passes.** Each pass
 found a new class of unsoundness in the epoch design and each fix looked
@@ -135,6 +137,11 @@ double-rAF re-measure.
 
 Four new abstractions. They are independent — each is separately valuable and
 separately shippable — but together they make F1 structural.
+
+**Two of the four did not survive review.** §3.1 and §3.2 are **rejected**
+(§0): read them for their failure modes, not as proposals. §3.3 and §3.4 stand.
+The section is kept whole rather than deleted because the rejected half is the
+part a future proposal is most likely to reinvent.
 
 **Apply §0's lesson first.** Before reaching for any of these, ask the cheaper
 question: *can this surface stop depending on the ordering altogether?* PR
@@ -460,10 +467,10 @@ Phase 0's trace of whatever the next symptom turns out to be.
 
 - **`PaneSurfaceSync`** (§3.3) — a real unsynchronized seam with precedent
   elsewhere, but **not** the tab-close cause. Do it when a trace implicates it.
-- **`WorkspaceEpoch`** (§3.1) + **transport collapse** (§3.2) — the structural
-  core, and the most expensive. Per §0, justified only for a surface that
-  cannot predict its own outcome *and* demonstrably tears. Ship behind a flag;
-  assert the §3.1 completeness contract in dev builds.
+- **`WorkspaceEpoch`** (§3.1) + **transport collapse** (§3.2) — **REJECTED,
+  do not schedule** (§0). Retained in this document as an enumerated set of
+  failure modes, not as work. If the underlying need resurfaces, it needs a
+  fresh design starting from a consistency model, not this one.
 - **`LayoutReadiness`** (§3.4) and deletion of the suppressor layer (§4) — the
   highest-value remaining item per §0, since the timer-based reveal (80ms /
   800ms) survives untouched and still guesses at readiness.
@@ -504,12 +511,12 @@ Phase 0's trace of whatever the next symptom turns out to be.
    own, and a resync is client-initiated — but unverified, and the answer
    changes if two renderers ever have to agree on a *rendered* frame rather
    than just on state.
-4. **Is the watermark's resync arm worth the complexity at all**, or is the
-   honest conclusion that per-object versioning (today's behaviour) is the
-   right trade for a lossy local transport? A gap-tolerant delta protocol is a
-   real distributed-systems problem; §0 already argues the tab flash did not
-   justify paying for one. This question should be answered *before* §3.1 is
-   funded, not during.
+4. ~~**Is the watermark's resync arm worth the complexity at all?**~~
+   **Answered — no**, which is what drove §0's rejection. Per-object
+   versioning (today's behaviour) is the right trade for a lossy local
+   transport; a gap-tolerant delta protocol is a real distributed-systems
+   problem and four review passes failed to specify one soundly. Kept here
+   because the *question* is the reusable part: ask it first next time.
 5. **Does the confirm modal need to exist on this path at all?** The gesture is
    reversible (tabs are restorable). Removing the modal would sidestep the P4
    seam for *this* gesture — though not for menus, dropdowns or any other
