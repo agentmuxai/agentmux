@@ -9,6 +9,7 @@
 
 import { describe, expect, it } from "vitest";
 import { describeRequestedDevices, displayOrigin } from "./pane-media-permission-prompt";
+import { describeCapture } from "./pane-media-capture-indicator";
 
 const AUDIO = 1 << 0;
 const VIDEO = 1 << 1;
@@ -69,5 +70,23 @@ describe("displayOrigin", () => {
 
     it("has a non-empty fallback for an empty origin", () => {
         expect(displayOrigin("")).toBe("This page");
+    });
+});
+
+describe("describeCapture (indicator)", () => {
+    it("names both devices when both are live", () => {
+        expect(describeCapture(true, true)).toBe("Camera and microphone in use");
+    });
+
+    it("names whichever single device is live", () => {
+        expect(describeCapture(true, false)).toBe("Camera in use");
+        expect(describeCapture(false, true)).toBe("Microphone in use");
+    });
+
+    it("says nothing when nothing is live", () => {
+        // The indicator drops the row entirely in this case; an "off" label
+        // would be an indicator that is visible while nothing is captured,
+        // which is what teaches people to ignore it.
+        expect(describeCapture(false, false)).toBe("");
     });
 });

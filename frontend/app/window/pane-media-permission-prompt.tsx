@@ -11,9 +11,10 @@
  * The pane asking for permission is arbitrary web content on a native surface.
  * Rendering the prompt inside that pane would let the page draw something that
  * looks exactly like it — the classic permission-spoofing shape. The host emits
- * this event to the **main** browser only (`emit_event_from_state`), so the
- * prompt is AgentMux chrome the page cannot reach, draw over, or click for the
- * user.
+ * this event to the DOM of the window that *owns* the pane (not to the pane's
+ * page, and not unconditionally to "main" — a torn-off pane lives in its
+ * floating window), so the prompt is AgentMux chrome the page cannot reach,
+ * draw over, or click for the user.
  *
  * # Deny is the default everywhere
  *
@@ -131,7 +132,7 @@ export function PaneMediaPermissionPrompt(): JSX.Element {
                     // deciding about the page, and a prompt that reads like an
                     // app prompt trains people to accept them.
                     title={`${displayOrigin(req().origin)} wants to use your ${describeRequestedDevices(req().requested)}`}
-                    description="This page is running in a browser pane. You can revoke access later from the pane."
+                    description="This page is running in a browser pane. While it is capturing, an indicator appears with a Stop button."
                     confirmLabel="Allow"
                     cancelLabel="Don't allow"
                     destructive={true}

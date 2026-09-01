@@ -794,6 +794,39 @@ async fn route_command(
                 .set_pane_overlay_clip(state, &window_label, &rects);
             Ok(serde_json::json!(true))
         }
+        "pane_media_revoke" => {
+            // User-facing revoke. Two steps, and BOTH are required:
+            //
+            // 1. drop the grant, so the page cannot silently re-acquire; and
+            // 2. reload the pane, which is the ONLY guaranteed way to stop a
+            //    capture already in flight. CEF exposes no media-capture
+            //    termination API (verified against the headers), and asking the
+            //    page to stop its own tracks would make a security control
+            //    depend on the page's cooperation.
+            //
+            // Grant first, then reload — the reverse order lets the reloaded
+            // page re-request and be auto-allowed by the grant that is about to
+            // be removed.
+            //
+            // SPEC_BROWSER_PANE_CAMERA_ACCESS_2026_09_01.md §3.7.
+            let block_id = args
+                .get("blockId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if block_id.is_empty() {
+                return Ok(serde_json::json!(false));
+            }
+            state.media_grants.lock().clear_pane(&block_id);
+            crate::browser_panes::media_prompt::cancel_pane_any_thread(&block_id);
+            tracing::info!(
+                target: "pane-media",
+                %block_id,
+                "revoking media access — grants cleared, reloading pane to stop any live capture"
+            );
+            state.browser_panes.reload(&block_id, state);
+            Ok(serde_json::json!(true))
+        }
         "pane_media_permission_respond" => {
             // The user's answer to a prompt raised by the browser-pane media
             // permission handler. `allow` records a grant for
