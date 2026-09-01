@@ -229,9 +229,11 @@ pub(crate) fn persist_last_failure(
         }
     }
     // Every classified agent failure gets exactly one log line, here at the
-    // shared choke point rather than at the five call sites — `persistent.rs`
-    // (x3), `host_spawn.rs` and `container_spawn.rs` all funnel through this
-    // function, and a future controller path would too.
+    // shared choke point rather than at the call sites. Deliberately does not
+    // enumerate them: a draft of the accompanying spec said "three", review
+    // found five, and counting properly found nine across five files — the
+    // enumeration went stale before it merged. Every path funnels through this
+    // function, so this covers them all, including the next one added.
     //
     // Before this, a classified failure left NO trace in the srv log at all:
     // none of those sites logged, and the only logged classification was
