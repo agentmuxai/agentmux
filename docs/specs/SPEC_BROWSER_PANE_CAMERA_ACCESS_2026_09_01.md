@@ -1,10 +1,33 @@
 # Browser pane — camera (getUserMedia video) access
 
 **Date:** 2026-09-01
-**Status:** Proposal. Not implemented.
+**Status:** **Phases 0–2c implemented. Phase 3 NOT implemented** — see the
+warning below.
 **Owner:** unassigned
-**Issue:** #2871 (AgentX-asaf) — "Browser pane: camera (getUserMedia video)
-access is unconditionally denied"
+**Issue:** #2871 (AgentX-asaf, closed 2026-09-01) — "Browser pane:
+getUserMedia video access is unconditionally denied". Phase 3 tracked
+separately as #2904.
+
+> **⚠ This spec's own v1 gate is not currently met.**
+>
+> §4 lists two non-negotiables for v1. The first (no silent grants) shipped
+> with the Phase 2c prompt. The second — *"Visible while live. An active
+> capture must be indicated on the pane itself, persistently, and must be
+> visible without focusing the pane"* — **has not shipped**, and §6 (Phasing)
+> states plainly: *if Phase 3 is not shipping, Phase 2 should not ship either.*
+>
+> Phase 2 shipped anyway. So today a page can hold a live camera grant in a
+> browser pane with no persistent capture indicator and no user-facing revoke
+> (the grant store has a `revoke()` primitive, but `media_grants.rs:101` notes
+> that call alone is not a revoke). Tracked in #2904.
+
+**Shipped:** Phase 0 (#2885, #2888 — callback contract verified from CEF
+source), Phase 1 (#2893 — pane identity), Phase 2a (#2895 — per-pane,
+per-origin grant store), Phase 2b (#2897 — grant-store-driven handler),
+Phase 2c (#2899 — prompt). Also #2889, closing the `--enable-media-stream`
+ingress this spec's §5 required be shut before Phase 2.
+
+**Not shipped:** Phase 3 (§4 — capture indicator + user-facing revoke).
 **Scope:** `agentmux-cef/src/client/handlers.rs` (permission handler +
 `permission_handler()` getter), `agentmux-cef/src/client/mod.rs`
 (`new_with_browser_pane`), `agentmux-cef/src/browser_pane/creation.rs`,
