@@ -39,6 +39,26 @@ const baseProps = {
     providerId: "claude",
 };
 
+// SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31.md: the centered stats
+// zone (token/elapsed readout) duplicated AgentWorkingRow's "Worked" row
+// and was removed. Guards against the props/content being silently
+// reintroduced later.
+describe("AgentComposerStrip — no centered stats zone content (SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31.md)", () => {
+    it("never renders .agent-composer-strip-stats while loading", () => {
+        const { container } = render(() => (
+            <AgentComposerStrip {...baseProps} loading={true} />
+        ));
+        expect(container.querySelector(".agent-composer-strip-stats")).toBeNull();
+    });
+
+    it("never renders .agent-composer-strip-stats while idle", () => {
+        const { container } = render(() => (
+            <AgentComposerStrip {...baseProps} loading={false} />
+        ));
+        expect(container.querySelector(".agent-composer-strip-stats")).toBeNull();
+    });
+});
+
 describe("AgentComposerStrip — Tier 3 predictive countdown", () => {
     it("renders no countdown text when the window is unknown", () => {
         render(() => (
