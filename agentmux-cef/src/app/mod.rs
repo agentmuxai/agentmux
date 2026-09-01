@@ -514,6 +514,34 @@ wrap_app! {
             command_line: Option<&mut CommandLine>,
         ) {
             if let Some(cmd) = command_line {
+                // Strip media-permission switches that arrived on the process
+                // command line, before anything else looks at it.
+                //
+                // The AGENTMUX_CEF_EXTRA_FLAGS guard further down covers only
+                // that one ingress. This covers the other: the launcher
+                // collects its own argv verbatim
+                // (`agentmux-launcher/src/main.rs:309`) and passes it to the
+                // host via `.args(args)` (`host_spawn.rs:41`/`:138`), so
+                // `agentmux.exe --enable-media-stream` reaches CEF without ever
+                // touching the env-var path.
+                //
+                // Both must be closed for the guarantee to hold — see
+                // docs/specs/SPEC_BROWSER_PANE_CAMERA_ACCESS_2026_09_01.md §3.8
+                // for why this switch is a handler BYPASS rather than a grant,
+                // and therefore invisible to every handler-based guard.
+                for name in MEDIA_PERMISSION_SWITCHES {
+                    let sw = CefString::from(*name);
+                    if cmd.has_switch(Some(&sw)) != 0 {
+                        cmd.remove_switch(Some(&sw));
+                        tracing::warn!(
+                            switch = %name,
+                            "removed media-permission switch from the command line — \
+                             it would bypass the CEF permission handler and grant \
+                             camera/mic to every browser pane with no prompt"
+                        );
+                    }
+                }
+
                 // Proactive memory-pressure guard (SPEC_MEMORY_PRESSURE_
                 // SUPERVISION_2026_06_16 §5.H): if the system is already
                 // critically low on commit at launch, start in software
@@ -1131,11 +1159,16 @@ wrap_browser_process_handler! {
 fn is_media_permission_switch(token: &str) -> bool {
     let name = token.split_once('=').map(|(k, _)| k).unwrap_or(token);
     let name = name.trim().to_ascii_lowercase();
-    matches!(
-        name.as_str(),
-        "enable-media-stream" | "use-fake-ui-for-media-stream"
-    )
+    MEDIA_PERMISSION_SWITCHES.contains(&name.as_str())
 }
+
+/// The switch names rejected by both ingress guards. Single list so the
+/// env-var path (`is_media_permission_switch`) and the command-line path
+/// (`on_before_command_line_processing`'s `remove_switch` loop) can never
+/// drift apart — a switch blocked on one route and allowed on the other
+/// would be no guard at all.
+pub(crate) const MEDIA_PERMISSION_SWITCHES: &[&str] =
+    &["enable-media-stream", "use-fake-ui-for-media-stream"];
 
 #[cfg(test)]
 mod media_switch_guard_tests {
