@@ -55,13 +55,17 @@ predict its outcome, and (b) demonstrably tears. §3.4's causal-reveal work is
 the highest-value remaining item; §3.3 is a real seam awaiting its own
 evidence (it was **not** the tab-close cause — see the report's §0).
 
-**Strengthened 2026-09-01, after three review passes on §3.1.** Each pass found
-a new class of correctness hole in the epoch design (see §3.1's cost/risk table),
-with no sign of converging. §3.1/§3.2 should now be read as *"here is why this
-is harder than it looks,"* not as a plan of record. Treat §3.1 as **not
-implementable as specified** and requiring a dedicated replicated-state design
-with an explicit consistency model before anyone writes code against it. §3.3
-and §3.4 are unaffected by this and remain independently shippable.
+**§3.1/§3.2 are REJECTED as of 2026-09-01, after four review passes.** Each pass
+found a new class of unsoundness in the epoch design and each fix looked
+complete until the next pass (see §3.1's cost/risk table). The design is not
+"unfinished" — it is the wrong shape: it ships deltas over a lossy, reorderable
+channel and then tries to bolt exactly-once semantics on afterwards.
+
+Read §3.1/§3.2 as **an enumerated list of failure modes**, valuable for anyone
+who later proposes something similar, and not as a plan of record. If the
+underlying need becomes real, start from a consistency model and the
+transport's actual guarantees. §3.3 and §3.4 are unaffected by this and remain
+independently shippable — §3.4 is still the highest-value item in the document.
 
 ## 1. Problem statement
 
@@ -228,6 +232,23 @@ insufficient too. Two admissible designs:
      no manifest but is the expensive option.
   Anything narrower than one of these is unsound.
 
+  **And a scoped resync must cover the whole interval, not just the lost
+  epoch.** Scoping to "the objects `N` touched" is *still* unsound. Consider a
+  client at `N-1` that loses `N` (which changed A) and receives `N+1` (which
+  changed B). It resyncs A, but the read happens after `N+1` has committed, so
+  it returns A-at-`N+1` — and the snapshot's epoch is `N+1`. Adopting that
+  watermark marks `N+1` applied when **B was never applied at all**. The cache
+  is now permanently torn on B, with the watermark asserting it is clean.
+
+  So a scoped resync must read the **union of every object changed from the
+  missing epoch through the snapshot's own epoch** (requiring the manifest to
+  span the interval, not a single epoch), or read a **historical snapshot
+  exactly at `N`** and then replay `N+1` normally — which means the store must
+  be able to answer point-in-time reads it has no reason to support today.
+
+  This is the fourth consecutive review pass to find a fresh unsoundness in
+  this arm. See the cost/risk note below before treating any of it as a plan.
+
 **(c) A resync can race the live stream and roll the watermark backwards.**
 While a snapshot request is in flight, live frames keep arriving. The client can
 apply `E+1` and *then* receive a snapshot captured at `E`. Unconditionally
@@ -289,18 +310,27 @@ correctness hole, not a nicety:**
 | 1 | partial epochs are undetectable without a count or terminator |
 | 2 | the unit is the dispatch, not the event; delta frames need gap detection; "fail the transition" is unimplementable post-commit |
 | 3 | reordering is indistinguishable from loss; the client can't know what a lost epoch touched; a stale resync rolls the watermark backwards |
+| 4 | a manifest scoped to the lost epoch is *still* unsound — the resync must span the whole interval to the snapshot's epoch, or read point-in-time |
 
-Three passes, three new classes of hole, no sign of convergence. That is the
-signature of a **distributed-systems problem being solved incidentally**, and it
-is the strongest argument in this document for §0's recommendation: *do not
-build this.* The tab flash — the symptom that motivated the whole design — was
-closed in ~150 lines by decoupling one surface from backend ordering entirely.
+**Four passes, four new classes of unsoundness, no convergence — and each one
+was found by review, not by implementation.** Every round has produced a fix
+that looked complete and was not. That is the signature of a
+**distributed-systems problem being solved incidentally**, and it is now the
+strongest argument in this document for §0's recommendation: *do not build
+this.*
 
-If this is ever funded, it should be scoped and reviewed as a replicated-state
-protocol in its own right, with an explicit consistency model, not as a
-refactor of the WaveObject cache. Ship behind a flag; assert in dev builds that
-a dispatch's emitted object set matches what the reducer declared; alarm on
-resync frequency.
+Note what the failures have in common: they are all consequences of shipping
+**deltas** over a lossy, reorderable channel while trying to bolt exactly-once
+semantics on afterwards. A design that shipped **snapshots** — or that kept
+today's per-object versioning and simply accepted that multi-object coherence
+is not guaranteed — has none of these problems. The tab flash, the symptom that
+motivated the whole design, was closed in ~150 lines by decoupling one surface
+from backend ordering entirely.
+
+**Recommendation: treat §3.1/§3.2 as a rejected design, not a backlog item.**
+If the underlying need ever becomes real, start from the consistency model and
+the transport's actual guarantees — not from this document, whose value is now
+the enumerated failure modes rather than the proposal they attach to.
 
 ### 3.2 One authoritative transport (`P2` collapse)
 
