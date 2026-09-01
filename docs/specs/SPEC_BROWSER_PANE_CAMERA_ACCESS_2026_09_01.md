@@ -112,11 +112,34 @@ three places.
 permitting the `MediaAccessCallback` to be **retained and called later**, off
 the initial callback return.
 
-**This must be verified before implementation** (see §7 Q1). If CEF requires a
-synchronous decision, the whole design changes shape: the only options become a
-pre-granted allowlist configured *before* navigation, or an in-page interstitial
-that re-triggers `getUserMedia` after the user opts in. Do not begin building
-§3.5 until this is settled — it is the load-bearing assumption.
+**RESOLVED 2026-09-01 — yes, and the design is viable.** Verified against the
+CEF source on this machine (`cef/include/cef_permission_handler.h`), so this is
+no longer an assumption:
+
+> *"Return true and call `CefMediaAccessCallback` methods **either in this
+> method or at a later time** to continue or cancel the request. Return false
+> to proceed with default handling. […] With Alloy style, default handling will
+> deny the request."*
+
+`CefMediaAccessCallback` is `public virtual CefBaseRefCounted` and its own
+header describes it as *"used for asynchronous continuation of media access
+permission requests."* Retaining the `CefRefPtr` across the handler's return
+and continuing it after a prompt resolves is the API's intended usage, not a
+workaround. The fallback designs contemplated here (pre-navigation allowlist,
+in-page interstitial) are therefore **not needed**.
+
+Two things this same paragraph of the header settles for free:
+
+- **Returning `false` is the deny path under Alloy**, which is exactly what
+  browser panes get today by having no handler at all — so the current
+  behaviour is the header's documented default, not an accident.
+- **`--enable-media-stream` bypasses this handler entirely** and grants all
+  permissions: *"This method will not be called if the `--enable-media-stream`
+  command-line switch is used."* AgentMux does **not** pass it today (verified:
+  no occurrence in `agentmux-cef` or `agentmux-launcher`). This must become a
+  standing constraint — adding that switch for any reason would silently void
+  every guarantee in §4. Worth an assertion or a comment at the switch-assembly
+  site.
 
 Regardless, the handler must be robust to the pane closing while a prompt is
 open: dropping the callback without calling it must not leak, and the pane's
@@ -187,10 +210,13 @@ page state — a half-filled form, a call in progress, scroll position. The revo
 affordance must say so before acting ("Stop camera and reload the page?"), and
 the §4 capture indicator must not imply a free, instant toggle.
 
-If Phase 0's investigation finds a genuine track-termination path, this becomes
-a softer default with reload as the fallback. Until then reload *is* the
-specification, not an implementation detail — the §4 revoke guarantee depends
-entirely on it, and Phase 3 cannot be built without this decision made.
+**Checked 2026-09-01:** CEF's public headers expose no media-capture
+termination API — no `MediaStream`/`StopMediaCapture` surface in
+`cef_browser.h` or `cef_permission_handler.h`. So reload is not merely the
+recommended option, it is the only one CEF offers today. If a CDP path is ever
+shown to genuinely terminate live tracks (§7 Q6), this can become a softer
+default with reload as the fallback; until then reload *is* the specification,
+not an implementation detail — the §4 revoke guarantee depends entirely on it.
 
 ## 4. Threat model — camera is not mic
 
@@ -231,9 +257,10 @@ bitmask is adjacent.
 
 ## 6. Phasing
 
-**Phase 0 — verify the async callback contract** (§3.4). Blocking, and cheap: a
-throwaway build that retains the callback and calls it a second later against a
-test page settles the whole design's shape. **Do not proceed without this.**
+**~~Phase 0 — verify the async callback contract~~ — DONE (2026-09-01).**
+Answered from the CEF headers without needing a build; see §3.4 and §7 Q1/Q2.
+The async design is viable and the bitmask values are confirmed. Phase 1 is now
+the entry point.
 
 **Phase 1 — pane identity.** Thread `block_id` into the browser-pane client
 (§3.3). Mechanical, independently reviewable, no behaviour change.
@@ -251,13 +278,16 @@ revoking them, and any desktop-capture work.
 
 ## 7. Open questions
 
-1. **Can the `MediaAccessCallback` be retained across the handler's return?**
-   Load-bearing (§3.4); answered by Phase 0.
-2. **Is `DEVICE_VIDEO_CAPTURE` really `1 << 1`?** The existing code hardcodes
-   `1 << 0` and `1 << 2` for the audio bits with a comment that the values are
-   ABI-stable. The video bits are almost certainly `1 << 1` / `1 << 3`, but this
-   spec deliberately does **not** assert them — confirm against the CEF headers
-   rather than inferring from the pattern.
+1. ~~**Can the `MediaAccessCallback` be retained across the handler's return?**~~
+   **Answered — yes.** See §3.4; the header states the callback may be invoked
+   *"either in this method or at a later time."* This was the design's
+   load-bearing assumption and it holds.
+2. ~~**Is `DEVICE_VIDEO_CAPTURE` really `1 << 1`?**~~ **Answered — yes**,
+   confirmed against `cef/include/internal/cef_types.h`:
+   `DEVICE_AUDIO_CAPTURE = 1 << 0`, `DEVICE_VIDEO_CAPTURE = 1 << 1`,
+   `DESKTOP_AUDIO_CAPTURE = 1 << 2`, `DESKTOP_VIDEO_CAPTURE = 1 << 3`.
+   The inferred pattern was right, but it is now checked rather than assumed —
+   which is the standard a permission bitmask deserves.
 3. **What happens to an in-flight grant on navigation?** A same-origin
    navigation plausibly keeps it; a cross-origin navigation must drop it.
    Confirm which navigation callback is authoritative here.
@@ -268,4 +298,14 @@ revoking them, and any desktop-capture work.
 5. **Is there demand?** #2871 motivates this generically (video conferencing,
    QR/barcode scanners) rather than from a specific blocked workflow. Given §4's
    cost, one concrete user-facing use case should be identified before Phase 2
-   is funded. Phases 0 and 1 are cheap enough to do regardless.
+   is funded. Phase 1 (threading pane identity) is cheap enough to do regardless,
+   and Phase 0 is already done.
+
+6. **Can CDP terminate a live capture?** §3.7 rules out everything except
+   reloading the pane, on the basis that CEF exposes no termination API
+   (confirmed) and that CDP permission resets conventionally affect only
+   subsequent requests (assumed). If a CDP method genuinely stops in-flight
+   tracks, revoke could stop being destructive. Worth one experiment, but note
+   the codebase has **no `ExecuteDevToolsMethod` call sites at all** today, so
+   this would introduce a new dependency surface for one feature — weigh that
+   against simply accepting the reload.
