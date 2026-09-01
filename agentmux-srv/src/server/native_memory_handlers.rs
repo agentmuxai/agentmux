@@ -95,8 +95,10 @@ fn parse_claude_config_dir(env_blob: &str) -> String {
 }
 
 /// Resolve the memory directory for `agent_id`. Reads the agent definition and
-/// its stored env blob to find `CLAUDE_CONFIG_DIR`. Returns an error if the
-/// agent is not found or has no working directory.
+/// its stored env blob to find `CLAUDE_CONFIG_DIR`. Returns an error only if
+/// the agent cannot be resolved at all — an instance row with a blank
+/// `working_directory` falls through to the registry rather than failing (see
+/// the inline note below; that short-circuit was a real bug).
 ///
 /// Shared by `native_memory_handlers` and the `memory.*` App API handlers.
 pub(crate) fn memory_dir_for_agent(
@@ -112,16 +114,28 @@ pub(crate) fn memory_dir_for_agent(
         .instance_get_by_slug(agent_id)
         .map_err(|e| format!("memory: store: {e}"))?
     {
-        if instance.working_directory.is_empty() {
-            return Err(format!("memory: agent {agent_id} has no working directory"));
+        // Only trust the instance row when it actually carries a working
+        // directory. An empty one is NOT an error and must NOT short-circuit:
+        // `agent.open` substitutes a default (`~/.agentmux/agents/<slug>`)
+        // whenever `working_directory` is blank, so a blank row describes an
+        // agent that is nonetheless running — and writing memories — in a
+        // real directory. The registry fallback below is what knows that
+        // real directory (`source_agents_base` + `working_dir`).
+        //
+        // Returning Err here instead made Armory → Memory → Personal and the
+        // MemoryList MCP tool fail with "agent <x> has no working directory"
+        // for every such agent, while its memory files sat on disk perfectly
+        // intact — the common case, since `working_directory` is blank by
+        // default. See SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01.md.
+        if !instance.working_directory.is_empty() {
+            let config_dir = wstore
+                .agent_content_get(&instance.id, "env")
+                .ok()
+                .flatten()
+                .map(|c| parse_claude_config_dir(&c.content))
+                .unwrap_or_default();
+            return Ok(memory_dir_for_cwd(&config_dir, &instance.working_directory));
         }
-        let config_dir = wstore
-            .agent_content_get(&instance.id, "env")
-            .ok()
-            .flatten()
-            .map(|c| parse_claude_config_dir(&c.content))
-            .unwrap_or_default();
-        return Ok(memory_dir_for_cwd(&config_dir, &instance.working_directory));
     }
 
     // No persisted db_agents instance row. Running agents are tracked in the
@@ -2250,6 +2264,58 @@ mod tests {
             .map(|c| c.as_os_str().to_string_lossy().to_string())
             .collect();
         let want_tail = ["providers", "claude", "projects", "-work-proj", "memory"];
+        let tail = &comps[comps.len() - want_tail.len()..];
+        assert_eq!(tail, want_tail, "unexpected memory dir tail: {comps:?}");
+    }
+
+    /// Regression: an instance row with a BLANK `working_directory` must not
+    /// short-circuit `memory_dir_for_agent` with "has no working directory".
+    ///
+    /// `agent.open` substitutes a default working dir whenever the field is
+    /// blank, so a blank row still describes an agent that is running — and
+    /// writing memory files — in a real directory that only the registry
+    /// knows. The old early-`Err` made Armory → Memory → Personal and the
+    /// `MemoryList` MCP tool fail for every such agent (the common case,
+    /// since `working_directory` is blank by default) while its memories sat
+    /// on disk intact. Reproduced live before the fix:
+    ///   memory/list failed: HTTP 500 — "memory: agent manoz has no working directory"
+    ///
+    /// With no registry record present in this test, the correct outcome is
+    /// the registry's own "not found" — proving control reached the fallback
+    /// instead of stopping at the blank-workdir guard.
+    #[test]
+    fn blank_working_directory_falls_through_to_the_registry_rather_than_erroring() {
+        let wstore = Store::open_in_memory().unwrap();
+        let mut def = agent_def("blankwd-agent", "");
+        wstore.agent_def_insert(&mut def).unwrap();
+
+        let err = memory_dir_for_agent(&wstore, "blankwd-agent").unwrap_err();
+
+        assert!(
+            !err.contains("has no working directory"),
+            "must not short-circuit on a blank working_directory; got: {err}",
+        );
+        assert!(
+            err.contains("not found"),
+            "expected the registry fallback's own not-found error; got: {err}",
+        );
+    }
+
+    /// The non-blank path is unaffected: a real working_directory still
+    /// resolves straight from the instance row, without consulting the
+    /// registry at all.
+    #[test]
+    fn non_blank_working_directory_still_resolves_from_the_instance_row() {
+        let wstore = Store::open_in_memory().unwrap();
+        let mut def = agent_def("realwd-agent", "/work/proj");
+        wstore.agent_def_insert(&mut def).unwrap();
+
+        let dir = memory_dir_for_agent(&wstore, "realwd-agent").unwrap();
+        let comps: Vec<String> = dir
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().to_string())
+            .collect();
+        let want_tail = ["projects", "-work-proj", "memory"];
         let tail = &comps[comps.len() - want_tail.len()..];
         assert_eq!(tail, want_tail, "unexpected memory dir tail: {comps:?}");
     }
