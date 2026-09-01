@@ -152,12 +152,33 @@ to show. Options, in increasing intrusiveness:
 
 ## 4. Phasing
 
-**Phase 0 — quantify.** Before building: instrument how often a transient
-failure is classified for a block with no mounted pane. If that number is
-near-zero in practice, this whole spec is not worth building and the honest
-answer is to document the limitation instead. This is deliberately the same
-"measure before structural work" discipline
-`SPEC_TAB_WINDOW_RENDER_ARCHITECTURE_2026_08_31.md` §5 arrived at the hard way.
+**Phase 0 — quantify.** Before building: measure how often a transient failure
+is classified for a block with no mounted pane. If that number is near-zero in
+practice, this whole spec is not worth building and the honest answer is to
+document the limitation instead. Same "measure before structural work"
+discipline `SPEC_TAB_WINDOW_RENDER_ARCHITECTURE_2026_08_31.md` §5 arrived at
+the hard way.
+
+> **Phase 0 requires adding instrumentation first — the data does not exist
+> today** (checked 2026-09-01). None of the three classify/persist/publish
+> sites emits a log line: there is no `tracing::` call adjacent to any
+> `persist_last_failure` in `persistent.rs` (`:1672`, `:3042`, `:3136`),
+> `host_spawn.rs` (`:653`) or `container_spawn.rs` (`:446`). The only
+> classification that *is* logged is `agents/runner.rs:328`
+> (`"agent run failed"`, with `code` and `retryable`), which is a different
+> path and not one a controller-driven turn takes.
+>
+> Log archaeology confirms it: searching the retained srv logs for
+> `rate_limited` / `overloaded_error` / `agent_failure` returns nothing —
+> which says the events are *unlogged*, not that they are rare. Do not read
+> that silence as evidence of low frequency; it is evidence of no telemetry.
+>
+> So Phase 0 is two steps, not one: **(a)** add a log line (or counter) at each
+> of the three sites recording the failure class and whether a renderer is
+> currently subscribed for that block; **(b)** let it run, then read it. Step
+> (a) is small and independently useful — a classified agent failure being
+> invisible in the logs is a diagnosability gap regardless of what this spec
+> decides.
 
 **Phase 1 — move the budget server-side**, with the pane rendering server state
 (§2.1). Behaviour-neutral when a pane *is* open; that equivalence is the
