@@ -1,7 +1,13 @@
 # Browser pane — camera (getUserMedia video) access
 
 **Date:** 2026-09-01
-**Status:** Proposal. Not implemented.
+**Status:** implemented — shipped 2026-09-01 across PRs #2893 (pane identity),
+#2896 (identity TOCTOU fix), #2895 (grant store), #2897 (permission handler),
+#2899 (prompt, live capture indicator, revoke). Phase 0 was answered from the
+CEF headers in #2885. Out of scope and NOT shipped: persisted grants (§3.2 —
+session-only by design) and desktop capture (§5). The prompt round-trip is
+unit-tested and reasoned-about but has **not** been observed end-to-end — see
+#2899's merge comment.
 **Owner:** unassigned
 **Issue:** #2871 (AgentX-asaf) — "Browser pane: camera (getUserMedia video)
 access is unconditionally denied"
@@ -312,19 +318,33 @@ Answered from the CEF headers without needing a build; see §3.4 and §7 Q1/Q2.
 The async design is viable and the bitmask values are confirmed. Phase 1 is now
 the entry point.
 
-**Phase 1 — pane identity.** Thread `block_id` into the browser-pane client
-(§3.3). Mechanical, independently reviewable, no behaviour change.
+**~~Phase 1 — pane identity~~ — DONE (#2893, TOCTOU fix #2896).** Shipped
+*differently from §3.3's design*: threading `block_id` into the client at
+construction would have silently reclassified prewarmed pool panes, which are
+created with no identity and only become a specific block's pane at promote. It
+resolves identity at request time instead (`AppState::block_id_for_browser`),
+which needs no construction-site changes and works the moment a pane registers.
+§3.3 is kept as written for the reasoning; the implementation note here is the
+correction.
 
-**Phase 2 — handler + in-memory grants + prompt.** The v1 feature: session-only,
-pane-scoped, origin-scoped, explicit-prompt grants (§3.1–3.5), with the §4
-guarantees.
+**~~Phase 2 — handler + in-memory grants + prompt~~ — DONE.** Split for review:
+the grant store (#2895), the handler wired to it (#2897, behaviour-neutral —
+nothing could create a grant yet), then the prompt (#2899).
 
-**Phase 3 — capture indicator + revoke** (§4). Deliberately *not* deferred past
-v1 in spirit — if Phase 3 is not shipping, Phase 2 should not ship either. Split
-only for review size.
+**~~Phase 3 — capture indicator + revoke~~ — DONE (#2899), shipped with Phase 2**
+as this section required. The indicator is driven by CEF's own
+`OnMediaAccessChange` rather than by grants, so it means "is capturing now"
+rather than "may capture".
 
-**Later, separately:** persisted grants, a Settings surface for reviewing and
-revoking them, and any desktop-capture work.
+**Still not built, deliberately:** persisted grants (§3.2 — a materially
+different threat model), a Settings surface for reviewing and revoking grants
+across panes, and any desktop-capture work (§5).
+
+**Not verified end-to-end.** The prompt round-trip — prompt appears, user
+allows, capture starts, indicator lights, Stop reloads — is unit-tested and
+reasoned-about but has never been observed in a running build; that needs a
+person driving a `getUserMedia` page in a pane. The `pane-media` log target
+traces every decision step if it misbehaves.
 
 ## 7. Open questions
 

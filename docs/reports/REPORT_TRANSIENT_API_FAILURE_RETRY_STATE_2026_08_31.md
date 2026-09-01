@@ -2,7 +2,8 @@
 
 **Date:** 2026-08-31
 **Author:** AgentY
-**Status:** Assessment. One gap fixed in the same PR (§4.1); the rest recorded,
+**Status:** historical — records the state of transient-failure retry as of
+2026-08-31 and the ladder fix that shipped in PR #2870. One gap fixed in the same PR (§4.1); the rest recorded,
 not fixed.
 **Scope:** `agentmux-srv/src/agents/failure.rs`,
 `frontend/app/view/agent/hooks/useAgentFailure.ts`,

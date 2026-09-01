@@ -1,7 +1,9 @@
 # Tab / window render architecture — coherent-frame design
 
 **Date:** 2026-08-31
-**Status:** Proposal. Not implemented. Revised after PR #2818 fixed the
+**Status:** active — §3.1/§3.2 are **rejected** (see §0; four review passes each
+found a fresh unsoundness). §3.3 and §3.4 remain open proposals, §3.4 being the
+highest-value item. Nothing here has been implemented. Revised after PR #2818 fixed the
 tab-close flash by *optimistic removal* (§§8-9 of the 08-25 spec) — see §0.
 That resolution validates this spec's thesis and **shrinks its urgency**: the
 cheap structural move beat the expensive one. Read §0 before funding any phase
