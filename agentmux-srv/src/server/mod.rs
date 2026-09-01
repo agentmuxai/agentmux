@@ -27,6 +27,7 @@ pub(crate) mod wave_obj_bridge;
 mod websocket;
 mod drone_handlers;
 mod cron;
+mod work_queue;
 mod messaging_handlers;
 mod muxbus_handlers;
 mod muxspect_handlers;
@@ -554,6 +555,16 @@ pub fn build_router(state: AppState) -> Router {
         .route("/agentmux/cron", get(cron::handle_cron_list))
         .route("/agentmux/cron/:id", delete(cron::handle_cron_delete))
         .route("/agentmux/cron/:id", patch(cron::handle_cron_patch))
+        // Muxqueue — the universal agent work queue, cron's readiness-triggered
+        // sibling (docs/reports/REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md).
+        // Same auth gate as the cron routes above.
+        .route("/agentmux/work", post(work_queue::handle_work_enqueue))
+        .route("/agentmux/work", get(work_queue::handle_work_list))
+        .route("/agentmux/work/claim", post(work_queue::handle_work_claim))
+        .route("/agentmux/work/:id/heartbeat", post(work_queue::handle_work_heartbeat))
+        .route("/agentmux/work/:id/complete", post(work_queue::handle_work_complete))
+        .route("/agentmux/work/:id/release", post(work_queue::handle_work_release))
+        .route("/agentmux/work/:id", delete(work_queue::handle_work_cancel))
         .merge(bus_routes)
         .merge(reactive_routes)
         .route_layer(middleware::from_fn_with_state(

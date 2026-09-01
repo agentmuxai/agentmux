@@ -464,6 +464,99 @@ const LOOP_LIST_TOOL: &str = r#"{
   }
 }"#;
 
+// ── Muxqueue — the universal agent work queue ───────────────────────────────
+// docs/reports/REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md
+//
+// The pull/unaddressed/deferred counterpart to SendMessage's push/addressed/
+// immediate delivery: work goes in without naming a recipient, and whichever
+// agent asks next takes it. Deliberately NOT modelled on Cron (time-triggered)
+// or Loop (repeating) — the trigger here is an agent being ready.
+
+const WORK_ENQUEUE_TOOL: &str = r#"{
+  "name": "WorkEnqueue",
+  "description": "Put a unit of work on the shared Muxqueue for ANY agent to pick up later. Use this instead of SendMessage when you do NOT need a specific agent, or need it done eventually rather than now — 'someone should repro this', 'this PR needs review when a reviewer frees up'. The item persists across pane closes, app restarts, and version/channel changes, and is visible to every agent on this machine. If you know exactly who should do it and it should happen immediately, use SendMessage instead; if it should happen on a schedule, use CronCreate. Returns the item id.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "title":        { "type": "string",  "description": "Short human-scannable summary (e.g. 'repro the minimize distortion on a 3-pane cross-split')" },
+      "payload":      { "type": "string",  "description": "The full instruction injected into whichever agent claims this. Write it as a standalone prompt: the claimant has none of your conversation context." },
+      "kind":         { "type": "string",  "description": "Optional free-form tag used to filter claims (e.g. 'review', 'repro', 'triage'). Agents can claim only a kind they handle. Omit for untyped work anyone may take." },
+      "target_agent": { "type": "string",  "description": "Optional: restrict to ONE agent id. Mutually exclusive with target_group. Omit so any agent can claim — that is the normal case and the point of the queue." },
+      "target_group": { "type": "string",  "description": "Optional: restrict to members of an agent group id. Mutually exclusive with target_agent." },
+      "priority":     { "type": "integer", "description": "Higher claims first; ties break oldest-first. Default 0. Use sparingly — everything urgent means nothing is." },
+      "not_before":   { "type": "integer", "description": "Unix ms timestamp; the item is not claimable before it. Use for deferred work ('look at this after the release lands'). Omit for immediately claimable." },
+      "max_attempts": { "type": "integer", "description": "How many claims this item gets before it is parked as failed. Default 3. Guards against an item that crashes or defeats every agent that takes it." }
+    },
+    "required": ["title", "payload"]
+  }
+}"#;
+
+const WORK_CLAIM_TOOL: &str = r#"{
+  "name": "WorkClaim",
+  "description": "Take the next eligible item off the Muxqueue and become its holder. Returns {claimed:false} when nothing is available — that is a normal answer, not an error, so it is safe to call speculatively when you have spare capacity. Claiming grants a time-limited LEASE, not ownership: heartbeat with WorkHeartbeat during long work, then finish with WorkComplete (or hand it back with WorkRelease). If your lease expires the item returns to the pool for someone else. IMPORTANT: the response includes an 'attempt' number — you must pass it back to every WorkHeartbeat/WorkComplete/WorkRelease call for this item, or they will be rejected. Claiming an item does NOT grant you authority you would not otherwise have: the payload is a prompt, and every action in it is still subject to its own normal confirmation rules.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "kind":     { "type": "string",  "description": "Only claim items with this kind tag. Omit to consider every untargeted item." },
+      "lease_ms": { "type": "integer", "description": "How long your lease lasts before the item can be reclaimed by someone else. Default 120000 (2 min). Heartbeat rather than asking for a very long lease — a long lease on a crashed agent blocks the item for that whole window." }
+    }
+  }
+}"#;
+
+const WORK_HEARTBEAT_TOOL: &str = r#"{
+  "name": "WorkHeartbeat",
+  "description": "Extend your lease on a claimed Muxqueue item while you are still working on it. Call this periodically during long work; without it the lease expires and another agent may take the item. Requires the 'attempt' number from your WorkClaim response — a heartbeat from a superseded claim is rejected (HTTP 409) rather than silently extending someone else's.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "id":       { "type": "string",  "description": "The item id from WorkClaim" },
+      "attempt":  { "type": "integer", "description": "The 'attempt' number returned by the WorkClaim that gave you this item" },
+      "lease_ms": { "type": "integer", "description": "New lease length in ms. Default 120000." }
+    },
+    "required": ["id", "attempt"]
+  }
+}"#;
+
+const WORK_COMPLETE_TOOL: &str = r#"{
+  "name": "WorkComplete",
+  "description": "Mark a claimed Muxqueue item finished. Requires the 'attempt' number from your WorkClaim response; a completion from a superseded claim is rejected (HTTP 409) so a slow agent cannot close out work another agent has since taken over. Record what you actually did in 'result' — it is the only trace of the work once the item is done.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "id":      { "type": "string",  "description": "The item id from WorkClaim" },
+      "attempt": { "type": "integer", "description": "The 'attempt' number returned by the WorkClaim that gave you this item" },
+      "result":  { "type": "string",  "description": "REQUIRED. What was done, or what the outcome was. Include links (PR, issue) where relevant. Once an item is done this is the only record that it happened — a completion with no result silently destroys the trace." }
+    },
+    "required": ["id", "attempt", "result"]
+  }
+}"#;
+
+const WORK_RELEASE_TOOL: &str = r#"{
+  "name": "WorkRelease",
+  "description": "Hand a claimed Muxqueue item back to the pool because you cannot do it — wrong capabilities, blocked on something, out of context budget. Prefer this over letting your lease silently expire: it frees the item immediately and records why. Note that a release still consumes one of the item's attempts, and releasing on its FINAL attempt parks it as failed rather than reopening it — an item nobody can do should stop circulating. Requires the 'attempt' number from your WorkClaim response.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "id":      { "type": "string",  "description": "The item id from WorkClaim" },
+      "attempt": { "type": "integer", "description": "The 'attempt' number returned by the WorkClaim that gave you this item" },
+      "reason":  { "type": "string",  "description": "Why you are handing it back. This is what the next claimant (or a human) sees." }
+    },
+    "required": ["id", "attempt"]
+  }
+}"#;
+
+const WORK_LIST_TOOL: &str = r#"{
+  "name": "WorkList",
+  "description": "List Muxqueue items — the shared backlog across every agent on this machine. Use it to see what is outstanding before enqueueing something (avoid duplicates), to check on work you enqueued, or to find out who is currently holding what. Read-only.",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "state": { "type": "string", "description": "Filter by state: open, claimed, done, failed, cancelled. Omit for all states." },
+      "limit": { "type": "integer", "description": "Max items to return (1-500). Default 50." }
+    }
+  }
+}"#;
+
 const CRON_CREATE_TOOL: &str = r#"{
   "name": "CronCreate",
   "description": "AgentMux's own cross-agent cron — NOT the same tool as the native (non-mcp__agentmux__-prefixed) CronCreate your harness may also expose, which schedules only your own session's future turn. Use this one specifically to target a DIFFERENT agent (or when you need AgentMux-persisted delivery independent of any single session). Creates a persistent scheduled cron job that survives agent pane restarts. Fires the prompt on a UTC cron schedule by injecting it into the target agent. Unlike Loop, cron jobs persist as long as agentmux-srv is running. Returns a job id and the next scheduled fire time. If you're scheduling your OWN future turn instead, prefer the native CronCreate/ScheduleWakeup tools — no cross-agent envelope overhead.",
@@ -767,6 +860,12 @@ async fn main() {
                 let loop_tool: Value = serde_json::from_str(LOOP_TOOL).expect("static json");
                 let loop_stop: Value = serde_json::from_str(LOOP_STOP_TOOL).expect("static json");
                 let loop_list: Value = serde_json::from_str(LOOP_LIST_TOOL).expect("static json");
+                let work_enqueue: Value = serde_json::from_str(WORK_ENQUEUE_TOOL).expect("static json");
+                let work_claim: Value = serde_json::from_str(WORK_CLAIM_TOOL).expect("static json");
+                let work_heartbeat: Value = serde_json::from_str(WORK_HEARTBEAT_TOOL).expect("static json");
+                let work_complete: Value = serde_json::from_str(WORK_COMPLETE_TOOL).expect("static json");
+                let work_release: Value = serde_json::from_str(WORK_RELEASE_TOOL).expect("static json");
+                let work_list: Value = serde_json::from_str(WORK_LIST_TOOL).expect("static json");
                 let cron_create: Value = serde_json::from_str(CRON_CREATE_TOOL).expect("static json");
                 let cron_delete: Value = serde_json::from_str(CRON_DELETE_TOOL).expect("static json");
                 let cron_list: Value = serde_json::from_str(CRON_LIST_TOOL).expect("static json");
@@ -787,7 +886,7 @@ async fn main() {
                 json!({
                     "jsonrpc": "2.0",
                     "id": id,
-                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, open_media, send_message, discover_agents, get_agent_transcript, list_conversations, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
+                    "result": { "tools": [shell, shell_stop, shell_input, shell_status, open_editor, open_media, send_message, discover_agents, get_agent_transcript, list_conversations, supervisor_nudge, whoami, layout, set_name, set_active_tab, new_tab, focus_window, ui_screenshot, ui_click, ui_query, capture_window, discover_windows, fleet_list, fleet_broadcast, fleet_bulk_stop, loop_tool, loop_stop, loop_list, cron_create, cron_delete, cron_list, cron_pause, cron_resume, work_enqueue, work_claim, work_heartbeat, work_complete, work_release, work_list, memory_list, memory_read, memory_write, memory_history, memory_diff, memory_revert, preset_list, preset_get, identity_accounts, identity_validate] }
                 })
             }
             "tools/call" => {
@@ -3222,6 +3321,232 @@ async fn call_tool(
             }
             Ok(lines.join("\n"))
         }
+        // ── Muxqueue ────────────────────────────────────────────────────
+        // All six post/get to /agentmux/work* on the local srv, same auth
+        // header as the cron arms below.
+        "WorkEnqueue" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let title = arguments.get("title").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: title"))?;
+            let payload = arguments.get("payload").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: payload"))?;
+            let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty()).unwrap_or_default();
+
+            let url = format!("{}/agentmux/work", local_url.trim_end_matches('/'));
+            let body = serde_json::json!({
+                "title": title,
+                "payload": payload,
+                "kind": arguments.get("kind").and_then(|v| v.as_str()).unwrap_or(""),
+                "target_agent": arguments.get("target_agent").and_then(|v| v.as_str()).unwrap_or(""),
+                "target_group": arguments.get("target_group").and_then(|v| v.as_str()).unwrap_or(""),
+                "priority": arguments.get("priority").and_then(|v| v.as_i64()).unwrap_or(0),
+                "not_before": arguments.get("not_before").and_then(|v| v.as_i64()),
+                "max_attempts": arguments.get("max_attempts").and_then(|v| v.as_i64()).filter(|&n| n > 0),
+                "created_by": self_id,
+            });
+            let resp = client.post(&url).header("X-AuthKey", auth_key).json(&body).send().await
+                .map_err(|e| anyhow::anyhow!("work enqueue request failed: {e}"))?;
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            if !status.is_success() {
+                anyhow::bail!("WorkEnqueue failed: HTTP {status} — {text}");
+            }
+            let id = serde_json::from_str::<Value>(&text).ok()
+                .and_then(|v| v.get("id").and_then(|x| x.as_str()).map(|s| s.to_string()))
+                .unwrap_or_default();
+            Ok(format!("Enqueued work item {id}: {title}"))
+        }
+        "WorkClaim" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set — cannot claim work without an agent identity"))?;
+
+            let url = format!("{}/agentmux/work/claim", local_url.trim_end_matches('/'));
+            let body = serde_json::json!({
+                "agent_id": self_id,
+                "kind": arguments.get("kind").and_then(|v| v.as_str()),
+                "lease_ms": arguments.get("lease_ms").and_then(|v| v.as_i64()).filter(|&n| n > 0),
+                // Group membership is resolved server-side-of-this-call by the
+                // caller in the general design; the MCP path has no cheap way
+                // to know this agent's groups yet, so it claims only untargeted
+                // and self-targeted work. Group-targeted claiming arrives with
+                // the group lookup, not before — better to under-claim than to
+                // silently ignore a group restriction.
+                "groups": [],
+            });
+            let resp = client.post(&url).header("X-AuthKey", auth_key).json(&body).send().await
+                .map_err(|e| anyhow::anyhow!("work claim request failed: {e}"))?;
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            if !status.is_success() {
+                anyhow::bail!("WorkClaim failed: HTTP {status} — {text}");
+            }
+            let v: Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
+            if !v.get("claimed").and_then(|x| x.as_bool()).unwrap_or(false) {
+                return Ok("No work available on the queue right now.".to_string());
+            }
+            let attempt = v.get("attempt").and_then(|x| x.as_i64()).unwrap_or(0);
+            let item = v.get("item").cloned().unwrap_or(serde_json::json!({}));
+            let id = item.get("id").and_then(|x| x.as_str()).unwrap_or("");
+            let title = item.get("title").and_then(|x| x.as_str()).unwrap_or("");
+            let payload = item.get("payload").and_then(|x| x.as_str()).unwrap_or("");
+            // Carry forward why a PREVIOUS holder handed this back (Codex P2 on
+            // PR #2902). WorkRelease's description promises the next claimant
+            // sees the reason; dropping it here broke that promise and let
+            // agents re-hit a known blocker with no warning. `attempt > 1` is
+            // exactly "someone has held this before me".
+            let prior = item.get("result").and_then(|x| x.as_str()).unwrap_or("");
+            let handback = if attempt > 1 && !prior.is_empty() {
+                format!(
+                    "\n\nNOTE — a previous agent held this and handed it back \
+                     (attempt {} of this item). Their reason: {prior}\n\
+                     Read that before repeating their approach.",
+                    attempt - 1
+                )
+            } else {
+                String::new()
+            };
+            Ok(format!(
+                "Claimed work item {id} (attempt {attempt}) — pass attempt={attempt} to \
+                 WorkHeartbeat/WorkComplete/WorkRelease for this item.\n\n\
+                 Title: {title}\n\n{payload}{handback}"
+            ))
+        }
+        "WorkHeartbeat" | "WorkComplete" | "WorkRelease" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let self_id = std::env::var("AGENTMUX_AGENT_ID").ok().filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("AGENTMUX_AGENT_ID is not set"))?;
+            let id = arguments.get("id").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: id"))?;
+            let attempt = arguments.get("attempt").and_then(|v| v.as_i64())
+                .ok_or_else(|| anyhow::anyhow!("missing required parameter: attempt (from the WorkClaim response)"))?;
+
+            let (segment, result_text) = match name {
+                "WorkHeartbeat" => ("heartbeat", String::new()),
+                "WorkComplete" => (
+                    "complete",
+                    // Enforced at runtime as well as in the schema (Codex P2 on
+                    // PR #2902): completing with no result marks the item done
+                    // forever while destroying the only record that the work
+                    // happened. Better to reject the call than to accept a
+                    // silent hole in the audit trail.
+                    arguments
+                        .get("result")
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "WorkComplete requires a non-empty 'result' — it is the only \
+                                 record of what this item accomplished once it is marked done"
+                            )
+                        })?
+                        .to_string(),
+                ),
+                _ => (
+                    "release",
+                    arguments.get("reason").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                ),
+            };
+
+            let url = format!("{}/agentmux/work/{}/{}", local_url.trim_end_matches('/'), id, segment);
+            let body = serde_json::json!({
+                "agent_id": self_id,
+                "attempt": attempt,
+                "result": result_text,
+                "lease_ms": arguments.get("lease_ms").and_then(|v| v.as_i64()).filter(|&n| n > 0),
+            });
+            let resp = client.post(&url).header("X-AuthKey", auth_key).json(&body).send().await
+                .map_err(|e| anyhow::anyhow!("work {segment} request failed: {e}"))?;
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            if status == reqwest::StatusCode::CONFLICT {
+                // The fence rejected this call. Say so in the terms the agent
+                // can act on, rather than surfacing a raw 409 — the recovery is
+                // always the same: claim again.
+                anyhow::bail!(
+                    "This claim is no longer yours — the lease expired and the item was \
+                     reclaimed, or another agent holds it now. Call WorkClaim again if you \
+                     still want work; do NOT retry with the old attempt number."
+                );
+            }
+            if !status.is_success() {
+                anyhow::bail!("{name} failed: HTTP {status} — {text}");
+            }
+            Ok(match segment {
+                "heartbeat" => format!("Lease extended on {id}."),
+                "complete" => format!("Completed {id}."),
+                _ => {
+                    // A release on the FINAL allowed attempt parks the item as
+                    // `failed` rather than reopening it, so reporting "back to
+                    // the queue" unconditionally would tell the caller another
+                    // agent can pick it up when nobody ever will (Codex P2 on
+                    // PR #2902). The server reports the resulting state; trust
+                    // it rather than re-deriving the attempts rule here.
+                    let resulting = serde_json::from_str::<Value>(&text)
+                        .ok()
+                        .and_then(|v| v.get("state").and_then(|s| s.as_str()).map(str::to_string))
+                        .unwrap_or_default();
+                    if resulting == "failed" {
+                        format!(
+                            "Released {id}, and it has now used its final attempt — the item is \
+                             parked as FAILED and will not be offered to any agent again. If it \
+                             still needs doing, enqueue a fresh item (ideally with what you \
+                             learned about why it kept failing)."
+                        )
+                    } else {
+                        format!("Released {id} back to the queue for another agent.")
+                    }
+                }
+            })
+        }
+        "WorkList" => {
+            require_agent_env(local_url, auth_key, block_id)?;
+            let url = format!("{}/agentmux/work", local_url.trim_end_matches('/'));
+            let state = arguments.get("state").and_then(|v| v.as_str()).unwrap_or("");
+            let limit = arguments.get("limit").and_then(|v| v.as_i64()).unwrap_or(50);
+            // Built via reqwest's own query serializer, NOT string
+            // concatenation (reagent P2 on PR #2902): `state` is a free-form
+            // string in this tool's schema, not a validated enum, so a value
+            // containing `&`, `#`, or `%` would otherwise corrupt the query
+            // rather than being sent as the literal the caller intended.
+            let resp = client
+                .get(&url)
+                .query(&[("state", state), ("limit", &limit.to_string())])
+                .header("X-AuthKey", auth_key)
+                .send()
+                .await
+                .map_err(|e| anyhow::anyhow!("work list request failed: {e}"))?;
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            if !status.is_success() {
+                anyhow::bail!("WorkList failed: HTTP {status} — {text}");
+            }
+            let v: Value = serde_json::from_str(&text).unwrap_or(serde_json::json!({}));
+            let items = v.get("items").and_then(|x| x.as_array()).cloned().unwrap_or_default();
+            if items.is_empty() {
+                return Ok("Queue is empty.".to_string());
+            }
+            let mut out = format!("{} work item(s):\n", items.len());
+            for it in &items {
+                let id = it.get("id").and_then(|x| x.as_str()).unwrap_or("");
+                let st = it.get("state").and_then(|x| x.as_str()).unwrap_or("");
+                let title = it.get("title").and_then(|x| x.as_str()).unwrap_or("");
+                let holder = it.get("claimed_by").and_then(|x| x.as_str()).unwrap_or("");
+                let who = if holder.is_empty() { String::new() } else { format!(" [{holder}]") };
+                out.push_str(&format!("  {id}  {st}{who}  {title}\n"));
+                // `result` is the completion trace for a done item, and the
+                // reason for a failed/released one — the very thing
+                // WorkComplete calls "the only record". Omitting it here left
+                // that record unreachable through the only agent-facing read
+                // tool (Codex P2 on PR #2902).
+                let result = it.get("result").and_then(|x| x.as_str()).unwrap_or("");
+                if !result.is_empty() {
+                    out.push_str(&format!("      -> {result}\n"));
+                }
+            }
+            Ok(out)
+        }
         "CronCreate" => {
             require_agent_env(local_url, auth_key, block_id)?;
             let name = arguments.get("name").and_then(|v| v.as_str()).filter(|s| !s.is_empty())
@@ -4143,6 +4468,12 @@ mod tests {
             LOOP_TOOL,
             LOOP_STOP_TOOL,
             LOOP_LIST_TOOL,
+            WORK_ENQUEUE_TOOL,
+            WORK_CLAIM_TOOL,
+            WORK_HEARTBEAT_TOOL,
+            WORK_COMPLETE_TOOL,
+            WORK_RELEASE_TOOL,
+            WORK_LIST_TOOL,
             CRON_CREATE_TOOL,
             CRON_DELETE_TOOL,
             CRON_LIST_TOOL,
@@ -4181,7 +4512,11 @@ mod tests {
         // DISCOVER_WINDOWS_TOOL added here too
         // (SPEC_AGENT_APP_API_WINDOW_CONTROL_ROBUSTNESS_2026_08_24.md) — same
         // reasoning, not fixing the pre-existing drift.
-        assert_eq!(defs.len(), 36, "tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools + 1 CaptureWindow + 1 ListConversations + 1 DiscoverWindows");
+        // MUXQUEUE_TOOLS (6: WorkEnqueue/Claim/Heartbeat/Complete/Release/List)
+        // added here too (REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md
+        // slice 2) — same reasoning, not fixing the pre-existing drift between
+        // this running total and the prose breakdown below it.
+        assert_eq!(defs.len(), 42, "tools/list advertises 27 tools (11 original + 1 OpenMedia + 3 Loop + 5 Cron + 7 agent-API) + 3 memory-version-history + 3 fleet-control tools + 1 CaptureWindow + 1 ListConversations + 1 DiscoverWindows + 6 Muxqueue");
         for d in defs {
             let v: Value = serde_json::from_str(d).expect("tool def must be valid JSON");
             assert!(
