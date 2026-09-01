@@ -231,10 +231,18 @@ Verified ingress paths, both unfiltered today:
    Chromium switch. It exists to A/B GPU flags without a recompile, and has no
    allowlist, denylist, or validation of any kind. `AGENTMUX_CEF_EXTRA_FLAGS=--enable-media-stream`
    is sufficient.
-2. **Launcher → host argument forwarding** — the launcher passes Chromium
-   switches through to the host (`--disable-gpu` is forwarded exactly this way,
-   `agentmux-launcher/src/host_spawn.rs:79`), with no filtering on what may
-   pass.
+2. **Launcher → host argument forwarding** — `agentmux-launcher/src/main.rs:309`
+   collects the launcher's own CLI arguments verbatim
+   (`std::env::args().skip(1).collect()`) and they reach the host process
+   through `.args(args)` in `host_spawn.rs` (`:41` supervised, `:138` unix),
+   with no filtering on what may pass. So anything on the launcher's command
+   line arrives at CEF.
+
+   (An earlier revision cited `host_spawn.rs:79` here. That is wrong and worth
+   correcting explicitly, since a reader auditing this would have gone to the
+   wrong place and concluded the claim was unfounded: `:79` is a *conditional,
+   internally-controlled* `--disable-gpu` added from retry state, not arbitrary
+   pass-through.)
 
 So an environment variable — settable by a user, a shell profile, a CI config,
 or **an agent with shell access** — silently grants camera and microphone to
