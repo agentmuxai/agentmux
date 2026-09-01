@@ -1198,6 +1198,22 @@ mod media_switch_guard_tests {
         assert!(!is_media_permission_switch("enable-features=Vulkan"));
     }
 
+    // NOT TESTED HERE, and the reason is worth recording so nobody spends
+    // the afternoon I just did: the command-line removal path
+    // (`on_before_command_line_processing`'s `remove_switch` loop) cannot be
+    // unit-tested in this crate. `cef::command_line_create()` returns an
+    // `Option`, which looks safe, but calling it without the CEF library
+    // loaded aborts the test process outright (exit 0x80000003) rather than
+    // yielding `None` — verified by trying it. A test that kills the suite is
+    // worse than an acknowledged gap.
+    //
+    // What IS covered below is the shared switch list and the name predicate.
+    // The removal loop's correctness rests on both guards reading the same
+    // `MEDIA_PERMISSION_SWITCHES` constant, which is why that constant exists
+    // rather than two literal lists. End-to-end coverage would need a running
+    // host launched with the switch — worth doing as a manual check when
+    // touching this code.
+
     #[test]
     fn does_not_over_match_unrelated_switches_containing_media() {
         // Guard against a substring-matching regression: these are not
