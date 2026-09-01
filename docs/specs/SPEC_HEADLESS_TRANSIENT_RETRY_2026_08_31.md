@@ -177,12 +177,14 @@ the hard way.
 > through. It records `block_id`, `code` and `retryable`, and fires only for
 > `Some` (the same function is called with `None` after every clean turn).
 >
-> Enumerating call sites here would have been a mistake, and nearly was: a
-> draft of this note listed "the three sites". There are **nine**, across five
-> files — `persistent.rs` (six calls), `container_spawn.rs`, `host_spawn.rs`,
-> `agent_handlers/input.rs` and `app_api/agent_io.rs` — and a reviewer found
-> two of the misses before a second pass found the rest. Instrumenting the
-> choke point is immune to that, and to whatever the tenth site turns out to be.
+> Enumerating call sites here would have been a mistake, and nearly was. A
+> draft of this note said "three". Review found more. A recount said "nine".
+> Review caught that the recount was wrong too. The list spans `persistent.rs`,
+> `container_spawn.rs`, `host_spawn.rs`, `agent_handlers/input.rs` and
+> `app_api/agent_io.rs` — and this note deliberately gives **no number**, having
+> now been wrong twice. Instrumenting the choke point is immune to the whole
+> question, which is the point: if the correct count is load-bearing, the design
+> is wrong.
 >
 > **(b)** remains: let a build run, then read the `agent-failure` target. Note
 > it answers only half the original question — *how often a transient failure

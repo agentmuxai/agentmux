@@ -230,10 +230,11 @@ pub(crate) fn persist_last_failure(
     }
     // Every classified agent failure gets exactly one log line, here at the
     // shared choke point rather than at the call sites. Deliberately does not
-    // enumerate them: a draft of the accompanying spec said "three", review
-    // found five, and counting properly found nine across five files — the
-    // enumeration went stale before it merged. Every path funnels through this
-    // function, so this covers them all, including the next one added.
+    // enumerate or count them: a draft of the accompanying spec said "three",
+    // review found more, a recount said "nine", and review caught that the
+    // recount was wrong too. Every path funnels through this function, so this
+    // covers them all — including the ones nobody counted correctly, and the
+    // next one added.
     //
     // Before this, a classified failure left NO trace in the srv log at all:
     // none of those sites logged, and the only logged classification was
