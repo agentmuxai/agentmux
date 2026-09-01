@@ -1202,7 +1202,7 @@ const AgentPresentationView = ({
         },
         onNotify: (text, style) => postSystemNotification(text, style),
         onReady: () => onReadyFn?.(),
-        // A successful recovery (seed-from-global / terminal login) refreshed
+        // A successful recovery (relogin / terminal login) refreshed
         // the credential — retry the failed turn so the agent recovers in one
         // click. Lazy arrow: retryLastTurn is defined below but only invoked at
         // runtime (post-click), by which point it's initialized.

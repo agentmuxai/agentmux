@@ -25,7 +25,7 @@ import { persistAndLinkAccount, runProviderLogin } from "../../flows/run-provide
 import type { SlashCommand, SlashCommandContext, SlashResult } from "../types";
 
 /**
- * Shared by both success branches below (tier-1 "opened" and tier-2/3
+ * Shared by both success branches below (tier-1 "opened" and tier-3
  * "terminal-success"): restart an already-running controller onto
  * the refreshed credential — unless a turn is actively streaming on it.
  * `agentmux-srv`'s `resync_controller` with `force: true` unconditionally
@@ -126,7 +126,7 @@ export const loginCommand: SlashCommand = {
             // (useAgentControllerStatus.relogin) — opens the OAuth in an in-app
             // browser pane, or falls through to the global-login copy / real-terminal
             // tiers when the CLI produces no scrapeable URL. See run-provider-login.ts.
-            // linkTarget lets a tier-2/3 success register a real Armory account
+            // linkTarget lets a tier-3 success register a real Armory account
             // bound to this agent (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7).
             const agentDefinitionId = ctx.block()?.meta?.["agentId"] as string | undefined;
             const linkTarget = agentDefinitionId

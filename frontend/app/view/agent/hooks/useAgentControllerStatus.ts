@@ -562,7 +562,7 @@ export function useAgentControllerStatus(
             // real-terminal-with-poll before giving up (retro-headless-login-
             // browser-open-2026-07-20) — "Login Again" used to dead-end the
             // instant the CLI produced no URL, which is every time for Claude
-            // Code v2.1.x. linkTarget lets a tier-2/3 success register a real
+            // Code v2.1.x. linkTarget lets a tier-3 success register a real
             // Armory account and bind it to THIS agent (single-point
             // enforcement, PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md
             // §7) instead of just seeding a file nothing tracks.
@@ -633,7 +633,7 @@ export function useAgentControllerStatus(
                 awaitTier1Completion: true,
                 // See launch-flow.ts's identical wiring — without this the
                 // phase set just above never updates again for the rest of
-                // this call, even though tier 2/3 inside it can run for up
+                // this call, even though tier 3 inside it can run for up
                 // to 5 more minutes. reagent P1 on PR #2300.
                 onTierChange: (event) => {
                     if (event.tier === "fallback") {
@@ -896,7 +896,7 @@ export function useAgentControllerStatus(
     // Open a real visible terminal window so the browser OAuth flow works,
     // then poll for credentials landing (or for the CLI itself to report
     // authenticated, for non-Claude providers). Shares runProviderLogin's
-    // tier 2/3 logic (skipTier1 — the user explicitly asked for a terminal
+    // tier-3 logic (skipTier1 — the user explicitly asked for a terminal
     // login, no point trying headless first) instead of reimplementing it.
     // This used to be a separate, hand-rolled copy of the same logic —
     // reagent caught it reproducing a bug (codex/openclaw could never

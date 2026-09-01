@@ -7,11 +7,12 @@
  *
  * Pins the three-tier fallback that replaced the old "no URL captured ->
  * dead end, go click a different button" behavior of /login and
- * "Login Again": URL-capture, then (Claude only) mint-a-real-account +
- * copy-from-global-login, then a real terminal window polled for the
- * resulting credential — with the same real-account registration on
- * success. "Single point, not global": a seeded credential must land in a
- * real IdentityAccount's own dir, not the shared default one.
+ * "Login Again": URL-capture, then a real terminal window polled for the
+ * resulting credential — with real-account registration on success.
+ * "Single point, not global": the credential must land in a real
+ * IdentityAccount's own dir, not the shared default one. (A middle tier that
+ * copied the user's personal ~/.claude was removed 2026-08-31 — see
+ * docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md #3.)
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -206,7 +207,7 @@ describe("runProviderLogin", () => {
 
         expect(outcome).toBe("terminal-success");
         // Exactly one mint for the whole call, not one per tier — the same
-        // MINTED.accountId/dir is what both tier 2's seed attempt and tier
+        // MINTED.accountId/dir is what both the tier-1 attempt and tier
         // 3's terminal poll operate against.
         expect(hub.ensureAccountDir).toHaveBeenCalledTimes(1);
         expect(hub.upsertIdentityAccount).toHaveBeenCalledTimes(1);
@@ -261,7 +262,7 @@ describe("runProviderLogin", () => {
         expect(hub.setMeta).not.toHaveBeenCalled();
     });
 
-    it("skips tier 2 for non-claude providers (host rejects seed-from-global for them) but STILL mints an account dir and points the terminal at it directly (not stripped — codex has no seed-from-global to copy back from)", async () => {
+    it("mints an account dir for a non-claude provider and points the terminal at it directly, never stripping its config-dir env var", async () => {
         hub.runCliLogin.mockResolvedValue(null);
         hub.checkCliAuthCommand.mockResolvedValue({ authenticated: false });
 
@@ -532,7 +533,7 @@ describe("runProviderLogin", () => {
 
         onAccountRegistered.mockClear();
         // Rejects on BOTH attempts — tier 3 retries once (reagent P2,
-        // matching tier 2's identical safety net), so a single-rejection
+        // a safety net against a transient persist hiccup), so a single-rejection
         // mock would now succeed on the retry and fire onAccountRegistered.
         hub.upsertIdentityAccount.mockRejectedValue(new Error("db error"));
 
@@ -549,7 +550,7 @@ describe("runProviderLogin", () => {
         expect(onAccountRegistered).not.toHaveBeenCalled();
     });
 
-    it("retries persistSeededAccount once on tier 3 too, on a transient failure after terminal-success is detected (reagent P2, mirrors tier 2's identical retry)", async () => {
+    it("retries persistSeededAccount once on a transient failure after terminal-success is detected (reagent P2)", async () => {
         vi.useFakeTimers();
         hub.runCliLogin.mockResolvedValue(null);
         hub.upsertIdentityAccount
@@ -817,7 +818,7 @@ describe("runProviderLogin — awaited in-app session (awaitTier1Completion)", (
         expect(outcome).toBe("inapp-timeout");
         expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
         expect(hub.cancelCliLogin).toHaveBeenCalledTimes(1);
-        // No automatic tier 2/3 fallback — the user already has the URL.
+        // No automatic tier 3 fallback — the user already has the URL.
         expect(hub.openLoginTerminal).not.toHaveBeenCalled();
     });
 
