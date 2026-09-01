@@ -42,6 +42,7 @@ import {
     restoreScrollFromAnchor,
 } from "./anchor";
 import { DocumentRow } from "./DocumentRow";
+import { ShrinkTrace, formatAttribution } from "./shrink-trace";
 import { estimateNode, estimateNodeForState } from "./renderers";
 import { currentExpansion } from "./expansion-source";
 import type { AgentViewState } from "./state";
@@ -210,15 +211,27 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         }
     }
 
+    // Per-node shrink attribution for the `[wave-scroll-shrink]` line below.
+    // Fed by `shrinkRO` (streaming-buffer rows), drained when a pane shrink is
+    // detected. Step 1 of SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md.
+    const shrinkTrace = new ShrinkTrace();
+
     let lastKnownScrollHeight = 0;
     function scrollToTrueBottom(): void {
         if (!scrollRef) return;
         const h = scrollRef.scrollHeight;
         if (lastKnownScrollHeight > 0 && h < lastKnownScrollHeight - 1) {
+            const paneDelta = lastKnownScrollHeight - h;
             console.info(
                 "[wave-scroll-shrink]",
                 `pane=${props.blockId?.slice(0, 7) ?? "?"}`,
-                `scrollHeight ${lastKnownScrollHeight}px -> ${h}px (delta=${lastKnownScrollHeight - h}px)`,
+                `scrollHeight ${lastKnownScrollHeight}px -> ${h}px (delta=${paneDelta}px)`,
+                // Which row(s) actually got shorter, and how much of the pane
+                // delta they fail to explain — see shrink-trace.ts. Without
+                // this suffix the line above is a bare net number, which is
+                // precisely what limited every conclusion in the 08-21/08-22
+                // findings docs.
+                formatAttribution(shrinkTrace.attribute(paneDelta, performance.now())),
             );
         }
         lastKnownScrollHeight = h;
@@ -1001,6 +1014,53 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         })
         : undefined;
     onCleanup(() => measureRO?.disconnect());
+
+    // Diagnostic-only RO over STREAMING-BUFFER rows — deliberately separate
+    // from measureRO above rather than an extra branch inside it. measureRO
+    // dispatches `RowMeasured` into the agent-pane-layout slice, and the slice
+    // models the VIRTUALIZED partition only; feeding it streaming-buffer rows
+    // would be a real behavior change (rows it has no positions for), not
+    // instrumentation. The streaming buffer is also exactly where the
+    // interesting shrinks happen — a completing tool call is in the trailing
+    // N nodes by definition — and it is currently measured by nothing at all,
+    // which is the concrete reason the pane-level diagnostic could never name
+    // a culprit. Feeds `shrinkTrace`; nothing reads it except the
+    // `[wave-scroll-shrink]` log line.
+    const shrinkElNode = new WeakMap<Element, { id: string; type: string }>();
+    const shrinkRO = typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver((entries) => {
+            const zoom = props.zoomFactor?.() ?? 1;
+            const now = performance.now();
+            for (const entry of entries) {
+                const meta = shrinkElNode.get(entry.target);
+                if (!meta) continue;
+                // ÷zoom for the same reason measureRO does it: getBoundingClientRect
+                // is the one read that IS scaled by an ancestor CSS `zoom`, and
+                // mixing zoomed and unzoomed px would make every attribution
+                // wrong by the zoom factor at non-100% pane zoom.
+                shrinkTrace.record(
+                    meta.id,
+                    meta.type,
+                    entry.target.getBoundingClientRect().height / (zoom || 1),
+                    now,
+                );
+            }
+        })
+        : undefined;
+    onCleanup(() => shrinkRO?.disconnect());
+    const observeStreamingRow = (el: HTMLElement, node: DocumentNode): void => {
+        shrinkElNode.set(el, { id: node.id, type: node.type });
+        shrinkRO?.observe(el);
+    };
+    const unobserveStreamingRow = (el: HTMLElement, nodeId: string): void => {
+        shrinkRO?.unobserve(el);
+        shrinkElNode.delete(el);
+        // Drop the baseline too — a cap-advance can retire a tall row and
+        // later re-add the same node short, which would otherwise log as one
+        // fabricated shrink spanning the gap.
+        shrinkTrace.forget(nodeId);
+    };
+
     const observeRow = (el: HTMLElement, nodeId: string): void => {
         elNodeId.set(el, nodeId);
         measureRO?.observe(el);
@@ -1110,19 +1170,31 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
                         ref={(el) => { streamingBufferRef = el; }}
                     >
                         <Key each={p().streamingNodes as DocumentNode[]} by={(n) => n.id}>
-                            {(nodeAccessor) => (
-                                <DocumentRow
-                                    node={nodeAccessor}
-                                    documentState={props.documentState}
-                                    highlightNodeId={props.highlightNodeId}
-                                    onToggleCollapse={props.onToggleCollapse}
-                                    onTogglePin={props.onTogglePin}
-                                    onHoldToolOpen={props.onHoldToolOpen}
-                                    onAgentErrorLogin={props.onAgentErrorLogin}
-                                    onOpenHistory={props.onOpenHistory}
-                                    dispatchMatches={props.dispatchMatches}
-                                />
-                            )}
+                            {(nodeAccessor) => {
+                                // Diagnostic shrink-attribution only (see
+                                // shrinkRO above). The <Key> slot's own
+                                // onCleanup is what makes the unobserve
+                                // reliable across a cap-advance retiring this
+                                // slot — same lifecycle hook the virtualized
+                                // rows use for measureRO.
+                                let rowEl: HTMLElement | undefined;
+                                const nodeId = nodeAccessor().id;
+                                onCleanup(() => { if (rowEl) unobserveStreamingRow(rowEl, nodeId); });
+                                return (
+                                    <DocumentRow
+                                        node={nodeAccessor}
+                                        documentState={props.documentState}
+                                        highlightNodeId={props.highlightNodeId}
+                                        onToggleCollapse={props.onToggleCollapse}
+                                        onTogglePin={props.onTogglePin}
+                                        onHoldToolOpen={props.onHoldToolOpen}
+                                        onAgentErrorLogin={props.onAgentErrorLogin}
+                                        onOpenHistory={props.onOpenHistory}
+                                        dispatchMatches={props.dispatchMatches}
+                                        ref={(el) => { rowEl = el; observeStreamingRow(el, nodeAccessor()); }}
+                                    />
+                                );
+                            }}
                         </Key>
                     </div>
                 )}
