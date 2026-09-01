@@ -32,6 +32,7 @@ pub mod registry_mirror;
 pub mod skills;
 pub mod snapshot;
 pub mod store;
+pub mod work_queue;
 
 pub use agent_credentials::AgentCredential;
 pub use agent_native_memory::{NativeMemoryMirrorRow, NativeMemoryMirrorRowWithAgent};
