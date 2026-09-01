@@ -53,6 +53,13 @@
         "term:transparency": {
           "type": "number"
         },
+        "term:scrollsensitivity": {
+          "type": "number",
+          "minimum": 0.1,
+          "maximum": 10,
+          "default": 1,
+          "description": "Scroll wheel speed multiplier for terminal panes (xterm.js scrollSensitivity). Default 1 (unchanged from xterm.js's own default). Independent of the OS-level scroll-speed setting — AgentMux does not read or mirror it."
+        },
         "term:allowbracketedpaste": {
           "type": "boolean"
         },

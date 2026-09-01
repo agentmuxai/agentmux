@@ -11,6 +11,7 @@
     // "term:scrollback":          1000,
     // "term:copyonselect":        true,
     // "term:transparency":        0.5,
+    // "term:scrollsensitivity":   1,
     // "term:localshellpath":      "/bin/bash",
     // "term:localshellopts":      [],
     // "term:disablewebgl":        false,
