@@ -50,8 +50,18 @@ else
         exit 0
     fi
     mapfile -t files < <(
-        git diff --name-only --diff-filter=d "$ref"...HEAD -- 'docs/**/*.md' 'specs/**/*.md' 2>/dev/null
+        # Whole directories, not '**/*.md' globs: those require at least one
+        # directory level, so `specs/SPEC_X.md` at the root was never selected —
+        # silently skipping the very tree this gate was extended to cover. The
+        # .md filter happens in the loop instead.
+        git diff --name-only --diff-filter=d "$ref"...HEAD -- docs specs 2>/dev/null | grep -E '[.]md$' || true
     )
+fi
+
+# Which changed files are NEW, for the stricter new-doc rule below.
+added_files=""
+if [ "$explicit" -eq 0 ]; then
+    added_files=$(git diff --name-only --diff-filter=A "$ref"...HEAD -- docs specs 2>/dev/null | grep -E '[.]md$' || true)
 fi
 
 [ "${#files[@]}" -eq 0 ] && { echo "check-doc-status: no docs changed."; exit 0; }
@@ -74,8 +84,21 @@ for f in "${files[@]}"; do
 
     status_line=$(grep -m1 -i '^\*\*Status:\*\*' "$f" 2>/dev/null || true)
 
-    # No Status line — see the header note. Not a failure.
-    [ -z "$status_line" ] && continue
+    if [ -z "$status_line" ]; then
+        # A doc ADDED in this diff must carry a Status: you are writing it, so
+        # you know its state, and 126 status-less specs already exist because
+        # nothing ever asked. A doc that merely CHANGED and never had one is not
+        # blocked — demanding a status from someone fixing a typo in a
+        # four-month-old file is how a gate gets resented and then disabled.
+        if [ "$explicit" -eq 0 ] && printf '%s
+' "$added_files" | grep -qxF "$f"; then
+            echo "FAIL $f"
+            echo "     New doc has no **Status:** line."
+            echo "     One of: $VALID  (see docs/specs/README.md)"
+            fail=1
+        fi
+        continue
+    fi
 
     word=$(printf '%s' "$status_line" \
         | sed 's/^\*\*Status:\*\*[[:space:]]*//I' \
@@ -125,9 +148,18 @@ for f in "${files[@]}"; do
     # somewhere real", and one resolving path satisfies it.
     candidates=$(printf '%s\n' "$ptr_line" | grep -oE '[A-Za-z0-9._/-]+\.md' | sort -u)
 
-    # A pointer line with no .md token at all: nothing to resolve. Rule 2 asks
-    # that the line exist, and it does.
-    [ -z "$candidates" ] && continue
+    # A pointer naming no repo path at all (blank field, or prose with no path)
+    # does NOT satisfy the rule: the README requires it "pointing at a real path
+    # in this repo". Accepting it would let a bare `**Superseded-by:**` with
+    # nothing after it pass — the broken-pointer case wearing a different hat.
+    if [ -z "$candidates" ]; then
+        echo "FAIL $f"
+        echo "     Superseded-by names no repository path."
+        echo "     It must point at a real .md file in this repo (docs/specs/README.md)."
+        echo "     got: ${ptr_line:0:100}"
+        fail=1
+        continue
+    fi
 
     resolved=0
     while IFS= read -r target; do
