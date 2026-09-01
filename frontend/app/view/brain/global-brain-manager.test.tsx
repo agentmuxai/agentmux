@@ -55,9 +55,10 @@ describe("GlobalBrainManager shared-provider-config block", () => {
         expect(await screen.findByText("Claude Code — shared provider config")).toBeInTheDocument();
         expect(screen.getByText("/home/user/.agentmux/shared/providers/claude/CLAUDE.md")).toBeInTheDocument();
         expect(screen.getByText("# Global rules")).toBeInTheDocument();
-        // Scoped to this block — the sibling host-config block legitimately
-        // renders its own "No file..." empty state under the beforeEach
-        // default, which is not this block's concern.
+        // Scoped to this block rather than the whole pane. Kept scoped even
+        // though only one block renders now (the sibling host-config block it
+        // originally disambiguated from is gone) — a pane-wide assertion
+        // would silently start covering any block added later.
         const block = screen.getByText("Claude Code — shared provider config").closest(".global-brain-machine-config");
         expect(block?.querySelector(".global-brain-machine-config-empty")).toBeNull();
     });
