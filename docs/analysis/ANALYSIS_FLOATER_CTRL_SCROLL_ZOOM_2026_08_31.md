@@ -268,3 +268,77 @@ buffer scroll when you Ctrl+Scroll?**
 | nothing happens at all | **the wheel message itself** is consumed before the renderer |
 
 These need different fixes, so this should be answered before code is written.
+
+---
+
+## 7. ROOT CAUSE CONFIRMED (2026-08-31, second session)
+
+Measured with a `wheel` recorder installed over CDP in each window, driven by the
+repo owner's **real mouse** (not injected input — that was §6's blind spot):
+
+| window | input | wheel events reaching the DOM |
+|---|---|---|
+| main (docked terminal) | Ctrl+Scroll | **22 / 22, all `ctrl: true`** — zoom works |
+| floater (same terminal) | Ctrl+Scroll | **0** |
+| floater (same terminal) | plain scroll | **49, all `ctrl: false`** |
+
+The recorder was proven live in the floater by injecting one CDP wheel and
+watching it land, so the zero is a real absence, not a broken probe.
+
+**Therefore: the floater's renderer receives wheel input normally, and Ctrl+Wheel
+specifically is consumed before it.** Not a stripped modifier — a suppressed
+message. §2 (focus) and §4b (zoom pipeline) are both dead; §4a is confirmed.
+
+### 7.1 Why the floater differs from the main window
+
+Not runtime style — **both** are `RuntimeStyle::ALLOY`. The difference is how the
+browser is hosted:
+
+- **Main window** — CEF **Views** (`app/mod.rs:1057`, `AgentMuxBrowserViewDelegate`).
+- **Floater** — a **child HWND** (`floating_pane.rs:261`, `WindowInfo::set_as_child`).
+
+The corroborating precedent is already in the tree: **browser panes are also
+child-HWND browsers** (`browser_pane/creation.rs:184`) and they needed a manual
+`WM_MOUSEWHEEL`/`MK_CONTROL` subclass (`browser_pane/hwnd.rs:403`) for exactly
+this reason — its own comment describes working around "CEF's native,
+HostZoomMap-shared zoom". Child-HWND CEF browsers do not get Ctrl+Wheel
+dispatched to the DOM. Browser panes were given a workaround; **floaters never
+were.**
+
+### 7.2 Ruled out by measurement, not argument
+
+`browser_pane/hwnd.rs:403` swallows Ctrl+Wheel unconditionally — its `return 0`
+sits *outside* the `if let Some(ctx)`, so a subclassed HWND that cannot resolve a
+context eats the message and does nothing. That is a perfect fit for the symptom,
+and it is **not** what is happening here: the same hook logs
+`[pane-wndproc] mouse-wheel` for non-ctrl wheels (`hwnd.rs:424`), and the host log
+contains **zero** such entries across the 49 recorded plain scrolls. The subclass
+is not on the floater's wheel path.
+
+(The unconditional `return 0` is still a latent bug worth fixing on its own — it
+silently discards input whenever `find_context` misses.)
+
+## 8. The fix
+
+§5's shape, with its premise now confirmed by measurement rather than assumed:
+subclass the floater's browser HWND hierarchy, handle `WM_MOUSEWHEEL` with
+`wparam & MK_CONTROL`, and drive the zoom from there.
+
+Two constraints carry over from Codex's review of #2857 and remain mandatory:
+
+1. **Hook the CEF child hierarchy, not just `floating_pane_wndproc`.** The outer
+   popup's WndProc never sees a message handled by a Chromium descendant —
+   `install_browser_pane_focus_redirect` (`hwnd.rs:312`) subclasses the outer HWND
+   *and every descendant Chromium has created*, and that is why.
+2. **Re-apply after every navigation.** Chromium recreates
+   `Chrome_RenderWidgetHostHWND` per page load, which is why that hook is wired
+   from both `on_after_created_browser_pane` and `on_load_end_browser_pane`.
+
+A floater cannot reuse `browser_panes::zoom_in` (that applies a CSS zoom to a
+browser pane's own document). A floater wraps exactly one block of arbitrary
+type, so the host must signal the floater's frontend to run its normal
+`term:zoom` meta write — the path §6 already proved works end to end.
+
+**Platform gap, inherited and to be stated rather than hidden:** the browser-pane
+equivalent is `#![cfg(target_os = "windows")]`-gated with no macOS/Linux
+counterpart (`hwnd.rs:395`). A floater fix built this way carries the same gap.
