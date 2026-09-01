@@ -152,12 +152,46 @@ to show. Options, in increasing intrusiveness:
 
 ## 4. Phasing
 
-**Phase 0 — quantify.** Before building: instrument how often a transient
-failure is classified for a block with no mounted pane. If that number is
-near-zero in practice, this whole spec is not worth building and the honest
-answer is to document the limitation instead. This is deliberately the same
-"measure before structural work" discipline
-`SPEC_TAB_WINDOW_RENDER_ARCHITECTURE_2026_08_31.md` §5 arrived at the hard way.
+**Phase 0 — quantify.** Before building: measure how often a transient failure
+is classified for a block with no mounted pane. If that number is near-zero in
+practice, this whole spec is not worth building and the honest answer is to
+document the limitation instead. Same "measure before structural work"
+discipline `SPEC_TAB_WINDOW_RENDER_ARCHITECTURE_2026_08_31.md` §5 arrived at
+the hard way.
+
+> **Phase 0(a) is DONE (2026-09-01); Phase 0(b) still needs a running build.**
+>
+> The data did not exist: no classify/persist/publish site emitted a log line,
+> and the only logged classification was `agents/runner.rs:328`
+> (`"agent run failed"`), a different path that a controller-driven turn never
+> takes. Log archaeology confirmed it — searching the retained srv logs for
+> `rate_limited` / `overloaded_error` / `agent_failure` returns **nothing**.
+>
+> **Do not read that silence as evidence of low frequency; it was evidence of
+> no telemetry.** Closing this spec on an empty grep would have been the wrong
+> call for the right-looking reason.
+>
+> **(a)** is now implemented, and deliberately *not* as a line per call site:
+> one `tracing::warn!(target: "agent-failure", …)` inside
+> `core::persist_last_failure` — the single choke point every path funnels
+> through. It records `block_id`, `code` and `retryable`, and fires only for
+> `Some` (the same function is called with `None` after every clean turn).
+>
+> Enumerating call sites here would have been a mistake, and nearly was. A
+> draft of this note said "three". Review found more. A recount said "nine".
+> Review caught that the recount was wrong too. The list spans `persistent.rs`,
+> `container_spawn.rs`, `host_spawn.rs`, `agent_handlers/input.rs` and
+> `app_api/agent_io.rs` — and this note deliberately gives **no number**, having
+> now been wrong twice. Instrumenting the choke point is immune to the whole
+> question, which is the point: if the correct count is load-bearing, the design
+> is wrong.
+>
+> **(b)** remains: let a build run, then read the `agent-failure` target. Note
+> it answers only half the original question — *how often a transient failure
+> is classified* — because "was a renderer subscribed for that block" has no
+> query behind it today (`Broker` exposes no per-scope subscriber lookup;
+> `WaveEvent::has_scope` is a different thing). Adding one is a prerequisite
+> for the full measurement and is deliberately left out of a logging change.
 
 **Phase 1 — move the budget server-side**, with the pane rendering server state
 (§2.1). Behaviour-neutral when a pane *is* open; that equivalence is the
