@@ -82,6 +82,9 @@ pub struct SettingsType {
     #[serde(rename = "term:transparency", default, skip_serializing_if = "Option::is_none")]
     pub term_transparency: Option<f64>,
 
+    #[serde(rename = "term:scrollsensitivity", default, skip_serializing_if = "Option::is_none")]
+    pub term_scroll_sensitivity: Option<f64>,
+
     #[serde(rename = "term:allowbracketedpaste", default, skip_serializing_if = "Option::is_none")]
     pub term_allow_bracketed_paste: Option<bool>,
 
