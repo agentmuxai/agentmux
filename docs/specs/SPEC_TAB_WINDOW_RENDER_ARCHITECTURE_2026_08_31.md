@@ -166,6 +166,12 @@ epoch scheme, and it stays worth closing on its own merits.
 
 ### 3.1 `WorkspaceEpoch` — a transaction boundary over multi-object state
 
+> **REJECTED (2026-09-01) — see §0.** The body below is preserved **as
+> originally written**, in the voice of a live proposal, because its value is
+> now the failure modes it enumerates. Any forward-looking statement inside
+> this section ("ship", "keep X until Y ships", "this requires…") is
+> **historical, not operative**. Nothing here is scheduled work.
+
 **Problem solved:** §2.2 fragmentation; torn state is representable today.
 
 The reducer already produces every multi-object change as one atomic
@@ -346,6 +352,12 @@ the enumerated failure modes rather than the proposal they attach to.
 
 ### 3.2 One authoritative transport (`P2` collapse)
 
+> **REJECTED (2026-09-01) — see §0.** The body below is preserved **as
+> originally written**, in the voice of a live proposal, because its value is
+> now the failure modes it enumerates. Any forward-looking statement inside
+> this section ("ship", "keep X until Y ships", "this requires…") is
+> **historical, not operative**. Nothing here is scheduled work.
+
 **Problem solved:** §2.1's three racing transports — the direct cause of §7.
 
 Exactly one path may drive a paint:
@@ -367,9 +379,12 @@ Exactly one path may drive a paint:
   *first*, then emits once.
 
 This subsumes §7's parent-before-child emission ordering: with one frame per
-dispatch there is no intra-transition order left to get wrong. Keep the §7
-ordering and its tests until the epoch frame ships — they are the correct
-behaviour under the current design.
+dispatch there is no intra-transition order left to get wrong.
+
+**Superseded by the rejection.** This section originally said to keep the §7
+ordering and its tests *"until the epoch frame ships"*. No epoch frame is
+shipping, so that ordering and its tests are **permanent behaviour** — not a
+stopgap awaiting replacement. See §4.
 
 **Scope note.** "Exactly one path may drive a paint" is about the *update*
 transports. It does not cover the resync path §3.1 requires, which is a fourth
