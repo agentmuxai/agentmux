@@ -64,6 +64,33 @@ jobs:
       - name: cargo test --workspace
         run: cargo test --workspace -- --test-threads=1
 
+  docs:
+    name: doc status + grep gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The doc gate diffs against the PR base, so it needs history rather
+          # than a single-commit shallow clone.
+          fetch-depth: 0
+
+      - name: Doc Status vocabulary (changed docs only)
+        run: bash scripts/check-doc-status.sh
+
+      # The three gates below already existed as Taskfile `check:*` tasks but
+      # were wired into nothing — defined, documented, and never run. Each
+      # encodes a regression that already happened once (see the spec/retro in
+      # each script's own header). All three pass on main today, so running them
+      # costs nothing and turns three pieces of decoration into enforcement.
+      - name: Menu positioning gate
+        run: bash scripts/check-menu-positioning.sh
+
+      - name: Scrollbar cursor gate
+        run: bash scripts/check-scrollbar-cursor.sh
+
+      - name: Input-handler layout-read gate
+        run: bash tools/lint/check-input-handler-layout-reads.sh
+
   frontend:
     name: vitest
     runs-on: ubuntu-latest
