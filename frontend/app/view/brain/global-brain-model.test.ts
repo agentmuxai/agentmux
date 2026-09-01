@@ -175,12 +175,6 @@ describe("GlobalBrainViewModel system/ordinary split", () => {
         expect(model.errorAtom()).toBeNull();
     });
 
-    // docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6/§7 —
-    // the host CLI config block is a SEPARATE atom/fetch from
-    // claudeGlobalConfigAtom (renamed from "ambient" — that word already
-    // means something else in this codebase, term:ambient_summary).
-
-
     // The former sibling assertion here — that a rejected ~/.claude host-config
     // fetch couldn't clear or block this atom — went away with the host block
     // itself (SPEC_ARMORY_DROP_HOST_CLI_CONFIG_BLOCK_2026_09_01.md). Only the
