@@ -1820,7 +1820,6 @@ const AgentPresentationView = ({
         failure: agentAtoms().failureAtom[0],
         onRetry: retryLastTurn,
         onOpenArmory: () => void openOrFocusPaneByView("armory"),
-        canSeed: () => provider()?.id === "claude",
         // context_exceeded recovery — drop the over-full session and return to
         // the picker for a clean relaunch (resuming would only re-fail).
         onNewSession: () => {
@@ -1840,15 +1839,6 @@ const AgentPresentationView = ({
         onLoginAgain: () => {
             log("auth", "Login Again — forcing a fresh provider login");
             void status.relogin();
-        },
-        // Seed-from-global recovery: copy the user's existing valid global
-        // Claude login into this agent instead of a fresh OAuth — the reliable
-        // path for Claude Code v2.1.x's un-scrapeable login TUI (§5.5). The
-        // agent re-reads its credential per request, so the next message clears
-        // this failure row with no restart.
-        onUseExistingLogin: () => {
-            log("auth", "Use existing login — seeding from your global Claude login");
-            void status.useGlobalLogin();
         },
         // Open a real console window (CREATE_NEW_CONSOLE) so the browser OAuth
         // can launch. Polls for new credentials and seeds when they appear.

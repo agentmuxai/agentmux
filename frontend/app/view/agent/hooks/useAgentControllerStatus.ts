@@ -42,7 +42,6 @@ import * as WOS from "@/app/store/wos";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { runLaunchFlow } from "../flows/launch-flow";
 import { persistAndLinkAccount, runProviderLogin } from "../flows/run-provider-login";
-import { registerSeededAccount } from "../flows/register-seeded-account";
 import { LOGIN_LINK_CAPTURE_LABEL_MS, type LaunchPhase } from "../flows/launch-phase";
 import { lastLinkedAccountId } from "../providers/provider-id-aliases";
 import type { ProviderDefinition } from "../providers";
@@ -135,7 +134,6 @@ export interface UseAgentControllerStatus {
      * (SPEC_HOST_CLI_LOGIN_CAPTURE §5.5). Like relogin, no restart is needed —
      * the running agent re-reads its credential per request.
      */
-    useGlobalLogin: () => Promise<void>;
     /**
      * Open a real terminal window (CREATE_NEW_CONSOLE on Windows) running the
      * provider's login command so the OS can open the browser — the piped/PTY
@@ -156,7 +154,7 @@ export interface UseAgentControllerStatus {
     cancelLogin: () => void;
     /**
      * True once `cancelLogin()` has fired for the CURRENTLY in-flight login
-     * attempt (any of relogin()/useGlobalLogin()/loginViaTerminal(), OR
+     * attempt (any of relogin()/loginViaTerminal(), OR
      * /login via `resetCancelled()` below — reset false at the start of
      * each). Exposed so a caller with its own long-running poll against the
      * SAME shared AuthUrlBox UI — /login (commands/global/login.ts) is the
@@ -170,7 +168,7 @@ export interface UseAgentControllerStatus {
     /**
      * Reset the cancellation flag `isCancelled()` reads, mirroring the
      * `loginCancelled = false` every OTHER login-starting function
-     * (relogin()/useGlobalLogin()/loginViaTerminal()) already does at its
+     * (relogin()/loginViaTerminal()) already does at its
      * own start. /login (commands/global/login.ts) is the one login-
      * starting flow that lives outside this hook and never called any of
      * those three, so without this a PRIOR attempt's cancel (via the same
@@ -218,7 +216,7 @@ export interface UseAgentControllerStatus {
     /**
      * Mark a recovery attempt as in flight / resolved, feeding the same
      * shared counter behind `loginWaiting()` that `relogin()`/
-     * `useGlobalLogin()`/`loginViaTerminal()` already use internally.
+     * `loginViaTerminal()` already use internally.
      * Exposed so /login's slash-command handler (a fully separate code
      * path — see `forceControllerRefresh`'s doc comment) can register its
      * own up-to-5-minute poll as an in-flight recovery too. Without this,
@@ -276,10 +274,9 @@ export function useAgentControllerStatus(
     // Derived spinner state — caller wires this into the AgentFooter loading prop
     const isLoading = createMemo(() => flowRunning() || !agentReady());
 
-    // Shared counter behind loginWaiting: relogin()/useGlobalLogin()/
-    // loginViaTerminal() are guarded by TWO independent in-flight flags
-    // (reloginInFlight covers relogin+loginViaTerminal; seedInFlight covers
-    // useGlobalLogin only) — nothing disables the failure-row's OTHER
+    // Shared counter behind loginWaiting: relogin()/loginViaTerminal() are
+    // guarded by a single in-flight flag (reloginInFlight) — nothing
+    // disables the failure-row's OTHER
     // recovery buttons while one is running, so a user can genuinely start
     // both concurrently. A plain boolean loginWaiting, set/cleared
     // independently by each function, lets whichever one finishes first
@@ -413,7 +410,7 @@ export function useAgentControllerStatus(
      *  is a no-op when no controller exists yet (the first-ever-login case —
      *  this just performs the Phase-3-equivalent registration launch-flow.ts
      *  itself skipped when it bailed on auth_failed) and kills+recreates one
-     *  that does, so the new `cmd:env` (from `finalizeAccount`/`useGlobalLogin`'s
+     *  that does, so the new `cmd:env` (from `finalizeAccount`'s
      *  own SetMetaCommand) actually takes effect. Best-effort: a failure here
      *  just means the stale process persists until its own next natural
      *  respawn. See REPORT_LOGIN_PERSIST_FAILURE_AND_STUCK_WORKING_2026_07_27.md
@@ -437,7 +434,7 @@ export function useAgentControllerStatus(
      *  the refresh itself failed, or every fast-fail guard this PR added
      *  gets cleared while the controller is still on the stale credential.
      *  Codex P1 on PR #2338 (tenth re-review). The three original callers
-     *  (relogin/useGlobalLogin/loginViaTerminal) still ignore the return
+     *  (relogin/loginViaTerminal) still ignore the return
      *  value, unchanged — same best-effort contract they've always had. */
     const forceControllerRefresh = async (_context: "login" = "login"): Promise<boolean> => {
         try {
@@ -769,7 +766,6 @@ export function useAgentControllerStatus(
                     break;
                 }
                 case "inapp-success":
-                case "seeded":
                 case "terminal-success":
                     // openedAccountId/openedAccountDir are only set by
                     // onAccountRegistered, which run-provider-login.ts fires
@@ -786,12 +782,10 @@ export function useAgentControllerStatus(
                     // (see its doc comment) — so it's handled identically
                     // here, not given its own branch.
                     if (openedAccountId && openedAccountDir) {
-                        opts.log(
-                            "auth",
-                            outcome === "seeded"
-                                ? (retryAfterLogin ? "Signed in from your global login — retrying…" : "Signed in from your global login")
-                                : (retryAfterLogin ? "Login successful — retrying…" : "Login successful"),
-                        );
+                        // The "Signed in from your global login" wording was
+                        // the tier-2 seed-from-personal-~/.claude case, removed
+                        // 2026-08-31 — every success is now a real login.
+                        opts.log("auth", retryAfterLogin ? "Login successful — retrying…" : "Login successful");
                         setAuthNotice(null);
                         // codex P2 on PR #2413: "inapp-success" follows a
                         // setAuthUrl(url) call from tier 1 — without clearing
@@ -894,113 +888,12 @@ export function useAgentControllerStatus(
         }
     };
 
-    // "Use my existing login" — seed the isolated dir from the global Claude
-    // login instead of a fresh OAuth (SPEC_HOST_CLI_LOGIN_CAPTURE §5.5). Guarded
-    // against double-fire like relogin; the running agent re-reads its
-    // credential per request, so a successful seed needs no restart.
-    let seedInFlight = false;
-    const useGlobalLogin = async () => {
-        if (seedInFlight) return;
-        const prov = opts.provider();
-        if (!prov) {
-            opts.log("auth", "use existing login: no active provider", "warn");
-            return;
-        }
-        setAuthNotice(null);
-        seedInFlight = true;
-        // Unlike relogin()/loginViaTerminal(), this credential-seed work was
-        // never reflected in loginWaiting — useAgentCommands.ts's fast-fail
-        // guard checks canRetry() || loginWaiting() before letting a send
-        // through, so without this a message typed while this async work is
-        // still resolving bypassed that guard entirely and reached
-        // AgentInputCommand on the same stale, already-known-bad credential
-        // the failure banner is showing for. reagent P1 on PR #2338.
-        //
-        // beginRecoveryFlow/endRecoveryFlow (a shared counter, not a bare
-        // boolean): nothing disables the failure row's OTHER recovery
-        // buttons while this one is in flight, so a user can genuinely
-        // start relogin()/loginViaTerminal() concurrently with this — a
-        // bare setLoginWaiting(false) here would clear the flag out from
-        // under that still-running flow. Codex P2 on PR #2338 (fourth
-        // re-review).
-        let recoveryEnded = false;
-        const endThisRecoveryFlow = () => {
-            if (recoveryEnded) return;
-            recoveryEnded = true;
-            endRecoveryFlow();
-        };
-        beginRecoveryFlow();
-        try {
-            // Mint a REAL per-account isolated dir and persist an
-            // IdentityAccount row — not just a seed into whatever dir was
-            // already resolved. The resolver's spawn gate now requires a
-            // real bound account for oauth-class providers, no ambient
-            // exception (PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md
-            // §7), so a bare file-copy into the old shared/resolved dir
-            // would leave this agent blocked on its next turn regardless of
-            // how valid the credential file itself is.
-            const reg = await registerSeededAccount(prov.id, opts.log, await existingAccountIdFor(prov.id));
-            if (reg.ok && reg.accountId && reg.dir) {
-                const agentDefinitionId = getBlockMetaKeyAtom(opts.blockId, "agentId")() as string | undefined;
-                if (agentDefinitionId) {
-                    try {
-                        await RpcApi.LinkAgentIdentityCommand(TabRpcClient, {
-                            agent_id: agentDefinitionId,
-                            account_id: reg.accountId,
-                            provider: prov.id,
-                        });
-                        if (prov.authConfigDirEnvVar) {
-                            const envMeta = getBlockMetaKeyAtom(opts.blockId, "cmd:env")();
-                            const prevEnv: Record<string, string> = {};
-                            if (envMeta && typeof envMeta === "object") {
-                                for (const [k, v] of Object.entries(envMeta as Record<string, unknown>)) {
-                                    if (typeof v === "string") prevEnv[k] = v;
-                                }
-                            }
-                            const oref = WOS.makeORef("block", opts.blockId);
-                            await RpcApi.SetMetaCommand(TabRpcClient, {
-                                oref,
-                                meta: { "cmd:env": { ...prevEnv, [prov.authConfigDirEnvVar]: reg.dir } },
-                            });
-                        }
-                    } catch (e: any) {
-                        opts.log(
-                            "auth",
-                            `account created but couldn't be linked to this agent: ${e?.message ?? String(e)}`,
-                            "warn",
-                        );
-                    }
-                }
-                // Credential is now valid on disk, but a persistent-mode
-                // agent whose CLI is already alive won't pick it up on its
-                // own — send_message only respawns a controller that isn't
-                // already running. Force one before retrying so the resend
-                // doesn't just hit the same stale process again (see
-                // forceControllerRefresh's doc comment).
-                opts.log("auth", "Signed in from your global login — retrying…");
-                setAuthStatus("authenticated");
-                await forceControllerRefresh();
-                opts.onLoginSuccess?.(null);
-                // See relogin()'s identical comment — must clear before
-                // onRecovered, which can synchronously resend the failed
-                // turn straight into useAgentCommands.ts's loginWaiting()
-                // guard. reagent P0 on PR #2338.
-                endThisRecoveryFlow();
-                opts.onRecovered?.();
-            } else {
-                const msg = "Couldn't use your global login — no valid global Claude credential was found. Try “Login via terminal”.";
-                opts.log("auth", msg, "warn");
-                setAuthNotice(msg);
-            }
-        } catch (err: any) {
-            const msg = `Use existing login failed: ${err?.message ?? String(err)}`;
-            opts.log("auth", msg, "error");
-            setAuthNotice(msg);
-        } finally {
-            seedInFlight = false;
-            endThisRecoveryFlow();
-        }
-    };
+    // "Use my existing login" REMOVED 2026-08-31 — it seeded this agent's
+    // isolated dir from the operator's personal ~/.claude, defeating
+    // per-channel isolation. See
+    // docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md #3.
+    // relogin() and loginViaTerminal() are the remaining recovery paths,
+    // both of which perform a real login in THIS channel.
 
     // Open a real visible terminal window so the browser OAuth flow works,
     // then poll for credentials landing (or for the CLI itself to report
@@ -1031,9 +924,10 @@ export function useAgentControllerStatus(
         // first, reset in finally.
         reloginInFlight = true;
         // Shared counter, not a bare boolean — see beginRecoveryFlow's own
-        // doc comment: useGlobalLogin() is guarded by an independent
-        // in-flight flag and can genuinely run concurrently with this.
-        // Codex P2 on PR #2338 (fourth re-review).
+        // doc comment. (The concurrent peer this originally guarded against,
+        // useGlobalLogin(), was removed 2026-08-31; the counter is kept — it
+        // is still correct, and Codex P2 on PR #2338 established that the
+        // bare-boolean form is the fragile shape here.)
         let recoveryEnded = false;
         const endThisRecoveryFlow = () => {
             if (recoveryEnded) return;
@@ -1096,7 +990,6 @@ export function useAgentControllerStatus(
             switch (outcome) {
                 case "opened":
                     break;
-                case "seeded":
                 case "terminal-success":
                     if (registeredAccountId && registeredAccountDir) {
                         opts.log("auth", "Login successful — retrying…");
@@ -1239,7 +1132,6 @@ export function useAgentControllerStatus(
         authStatus,
         startLaunchFlow,
         relogin,
-        useGlobalLogin,
         loginViaTerminal,
         useTerminalInstead,
         notifyControllerHealthy,

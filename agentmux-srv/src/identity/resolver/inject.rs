@@ -252,6 +252,43 @@ pub fn resolve_account(
     Ok(None)
 }
 
+/// SPAWN-PATH account lookup — **current channel's `id_store` only, never the
+/// global mirror.**
+///
+/// Deliberately NOT [`resolve_account`]: that function's global fallback is
+/// correct for read-only/display callers (the Armory account list, link
+/// summaries — they should still describe an account that exists elsewhere),
+/// but using it to satisfy a *spawn* lets an agent in a fresh channel launch
+/// against a credential authenticated in a DIFFERENT channel. That is exactly
+/// the per-channel-isolation bypass the operator asked to close:
+///
+/// > "we want per-channel isolation. a user needs a login anytime in the
+/// > channel. the problem is agents are able to login in a channel without a
+/// > claude auth."
+///
+/// **This intentionally reverses part of reagentx's P0 on PR #2632.** That
+/// review added the fallback to preserve binding continuity across a
+/// version/channel switch, which was the right call under the then-current
+/// requirement. The requirement has since changed: per-channel isolation is a
+/// wanted feature, and re-login-per-channel is the accepted cost. The fallback
+/// is retained for display paths precisely so that continuity fix isn't lost
+/// where it was actually about *describing* an account rather than *launching*
+/// with one. See
+/// `docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md` §2 (#1).
+///
+/// No dangling-link deadlock results from the stricter lookup:
+/// `db_agent_identity_links` is `PRIMARY KEY (agent_id, provider)`, so a
+/// re-login in the new channel REPLACES the link rather than leaving a stale
+/// one that would block every future spawn.
+pub fn resolve_account_for_spawn(
+    id_store: &Arc<Store>,
+    account_id: &str,
+) -> Result<Option<(IdentityAccount, Arc<Store>)>, StoreError> {
+    Ok(id_store
+        .identity_get(account_id)?
+        .map(|a| (a, id_store.clone())))
+}
+
 /// Read-only lookup of a block's identity-bound OAuth config dir — the same
 /// directory `inject_identity_env_with_broker`'s OAuth branch would inject,
 /// without any of that function's side effects (no token-expiry probe, no
@@ -290,7 +327,11 @@ pub fn resolve_bound_oauth_config_dir(
     let binding = bindings
         .iter()
         .find(|b| resolve_provider_alias(&b.provider) == canonical_provider)?;
-    let (account, _store) = resolve_account(id_store, identity_store, &binding.account_id).ok().flatten()?;
+    // Per-channel only, matching the spawn gate exactly: this function's whole
+    // contract is "where WOULD the spawn inject," so resolving an account the
+    // spawn itself would now refuse would point a watcher at a directory no
+    // agent can actually launch against.
+    let (account, _store) = resolve_account_for_spawn(id_store, &binding.account_id).ok().flatten()?;
     match account.secret_ref {
         SecretRef::OAuthConfigDir { dir } => Some(PathBuf::from(dir)),
         _ => None,
@@ -476,7 +517,9 @@ pub fn inject_identity_env_with_broker(
         };
         let is_oauth_class = matches!(class, ProviderClass::OAuth { .. });
 
-        let (account, account_store) = match resolve_account(&id_store, &identity_store, &binding.account_id) {
+        // Per-channel ONLY (see `resolve_account_for_spawn`) — a credential
+        // authenticated in another channel must not satisfy this spawn.
+        let (account, account_store) = match resolve_account_for_spawn(&id_store, &binding.account_id) {
             Ok(Some(pair)) => pair,
             Ok(None) => {
                 // The post-delete case (analysis §2.3): the link survived
@@ -1103,18 +1146,28 @@ mod tests {
         assert!(env.get("CLAUDE_CONFIG_DIR").is_none());
     }
 
-    /// The exact end-to-end scenario reagentx's P0 review on PR #2632
-    /// caught: after a version/channel switch, the LINK resolves via
-    /// `identity_store` (always global), but if the ACCOUNT row the link
-    /// points at only lives in `identity_store`'s fallback mirror — not
-    /// `id_store`, which is a fresh, empty, per-channel-isolated store on
-    /// the new channel — the spawn must still succeed by falling back to
-    /// the mirror. Before `resolve_account`'s fallback, this reproduced the
-    /// exact reported bug (spawn refused with "account row not found") even
-    /// though the link itself was already fixed.
+    /// **Behavior deliberately REVERSED 2026-08-31 (operator instruction).**
+    ///
+    /// This test previously asserted the opposite: that a spawn MUST succeed
+    /// by falling back to the global mirror when the per-channel `id_store`
+    /// lacks the account (reagentx P0 on PR #2632, protecting binding
+    /// continuity across a version/channel switch).
+    ///
+    /// Per-channel isolation is a wanted feature, and that fallback is exactly
+    /// what let an agent in a fresh channel launch against another channel's
+    /// credential with an empty Armory. The operator's requirement:
+    ///
+    /// > "we want per-channel isolation. a user needs a login anytime in the
+    /// > channel."
+    ///
+    /// So the same scenario must now BLOCK, surfacing the ordinary
+    /// `MissingCredentials` auth card, and the user logs in for this channel.
+    /// The old continuity guarantee is intentionally given up here; the
+    /// fallback survives only for read-only/display callers.
+    /// See `docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md`.
     #[cfg(debug_assertions)]
     #[test]
-    fn inject_resolves_account_via_identity_store_fallback_when_id_store_lacks_it() {
+    fn inject_refuses_an_account_that_only_exists_in_the_global_mirror() {
         let wstore = make_store();
         // Deliberately EMPTY of the account and link — simulates a fresh,
         // isolated per-channel id_store on a new channel/version.
@@ -1183,30 +1236,34 @@ mod tests {
         let res = inject_identity_env(wstore, id_store, identity_store, "block-continuing", &mut env);
 
         assert!(
-            res.is_ok(),
-            "spawn must succeed via the identity_store fallback mirror, not fail with \
-             'account row not found' — this is the exact reported continuity bug: {res:?}"
+            matches!(res, Err(SpawnGateError::MissingCredentials { .. })),
+            "an account that exists ONLY in the global mirror must NOT satisfy a spawn in \
+             this channel — that is the per-channel-isolation bypass; expected \
+             MissingCredentials, got {res:?}"
         );
-        assert_eq!(
-            env.get("CLAUDE_CONFIG_DIR").cloned(),
-            Some(test_config_dir("id-migrated")),
+        assert!(
+            env.get("CLAUDE_CONFIG_DIR").is_none(),
+            "nothing may be injected from a refused cross-channel account"
         );
     }
 
-    /// Reagentx round-3 P0 on PR #2632: the fallback mirror above only
-    /// gets populated by the one-time migration backfill unless every live
-    /// account-write path also dual-writes via `identity_upsert_with_mirror`
-    /// — otherwise an account created (or updated) AFTER this PR shipped
-    /// would still dead-end on its own next channel switch, same as before
-    /// the fix. This test writes the account through
-    /// `identity_upsert_with_mirror` (the same call every live write path —
-    /// `identity.account.upsert`, OAuth persist, etc. — now uses) instead of
-    /// seeding `identity_store` directly, then simulates a channel switch
-    /// with a brand-new, empty `id_store` and confirms resolution still
-    /// succeeds via the mirror `identity_upsert_with_mirror` wrote.
+    /// **Behavior deliberately REVERSED 2026-08-31 (operator instruction)** —
+    /// companion to the test above, closing the same bypass from the other
+    /// direction.
+    ///
+    /// Originally reagentx round-3 P0 on PR #2632: it proved that an account
+    /// written through `identity_upsert_with_mirror` (every live write path —
+    /// `identity.account.upsert`, OAuth persist) still resolved after a
+    /// channel switch, not just migration-backfilled ones.
+    ///
+    /// That is now precisely the wrong outcome: it made the bypass apply to
+    /// *newly created* accounts too, so every fresh channel silently inherited
+    /// the last one's credential. The dual-write itself is retained (display
+    /// callers still use `resolve_account`'s fallback to describe an account);
+    /// what changed is that a mirror row can no longer authorize a SPAWN.
     #[cfg(debug_assertions)]
     #[test]
-    fn inject_resolves_a_freshly_created_account_after_a_channel_switch_when_written_via_the_mirror_helper() {
+    fn inject_refuses_a_mirror_written_account_after_a_channel_switch() {
         let wstore = make_store();
         let id_store = make_store();
         let identity_store_tmp = tempfile::NamedTempFile::new().unwrap();
@@ -1277,14 +1334,12 @@ mod tests {
         let res = inject_identity_env(wstore, id_store_after_switch, identity_store, "block-fresh", &mut env);
 
         assert!(
-            res.is_ok(),
-            "a freshly-created account (written via identity_upsert_with_mirror, not migration \
-             backfill) must still resolve after a channel switch: {res:?}"
+            matches!(res, Err(SpawnGateError::MissingCredentials { .. })),
+            "REVERSED 2026-08-31: a mirror row must no longer carry a spawn across a channel \
+             switch, however it was written — dual-writing the mirror is not a substitute for \
+             logging in on this channel; expected MissingCredentials, got {res:?}"
         );
-        assert_eq!(
-            env.get("CLAUDE_CONFIG_DIR").cloned(),
-            Some(test_config_dir("id-fresh")),
-        );
+        assert!(env.get("CLAUDE_CONFIG_DIR").is_none());
     }
 
     // reagentx P1 on PR #2605: this is the ordinary spawn path (not

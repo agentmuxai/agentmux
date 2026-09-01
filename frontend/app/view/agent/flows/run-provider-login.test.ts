@@ -22,7 +22,6 @@ const hub = vi.hoisted(() => ({
     cancelCliLogin: vi.fn(),
     getCliLoginStatus: vi.fn(),
     openPane: vi.fn(),
-    seedProviderAuthFromGlobal: vi.fn(),
     openLoginTerminal: vi.fn(),
     ensureAccountDir: vi.fn(),
     upsertIdentityAccount: vi.fn(),
@@ -37,7 +36,6 @@ vi.mock("@/app/store/global", () => ({
         checkCliAuth: hub.checkCliAuth,
         cancelCliLogin: hub.cancelCliLogin,
         getCliLoginStatus: hub.getCliLoginStatus,
-        seedProviderAuthFromGlobal: hub.seedProviderAuthFromGlobal,
         openLoginTerminal: hub.openLoginTerminal,
     }),
 }));
@@ -79,13 +77,15 @@ beforeEach(() => {
     hub.cancelCliLogin.mockReset().mockResolvedValue(undefined);
     hub.getCliLoginStatus.mockReset().mockResolvedValue({ active: false, credential_changed: true });
     hub.openPane.mockReset().mockResolvedValue("pane");
-    hub.seedProviderAuthFromGlobal.mockReset();
     hub.openLoginTerminal.mockReset().mockResolvedValue({ opened: true });
     hub.ensureAccountDir.mockReset().mockResolvedValue(MINTED);
     hub.upsertIdentityAccount.mockReset().mockResolvedValue({});
     hub.linkAgentIdentity.mockReset().mockResolvedValue(undefined);
     hub.setMeta.mockReset().mockResolvedValue(undefined);
-    hub.checkCliAuthCommand.mockReset();
+    // Default: the login completes and the CLI reports authenticated on the
+    // first poll. Tests that exercise the not-yet / never-authenticates paths
+    // override this explicitly.
+    hub.checkCliAuthCommand.mockReset().mockResolvedValue({ authenticated: true });
 });
 afterEach(() => {
     vi.clearAllMocks();
@@ -113,7 +113,6 @@ describe("runProviderLogin", () => {
         // reports the minted (not-yet-persisted) account to the caller.
         expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
         expect(onAccountRegistered).toHaveBeenCalledWith(MINTED.accountId, MINTED.dir);
-        expect(hub.seedProviderAuthFromGlobal).not.toHaveBeenCalled();
         expect(hub.openLoginTerminal).not.toHaveBeenCalled();
         // Tier 1 succeeded — nothing to cancel, and no fallback tier ran
         // that could race against a still-live tier-1 child.
@@ -143,9 +142,8 @@ describe("runProviderLogin", () => {
         );
     });
 
-    it("falls through to tier 2 — mints a real account dir, seeds it, and registers the account — when tier 1 captures no URL, for claude", async () => {
+    it("falls through to tier 3 — mints a real account dir and registers the account — when tier 1 captures no URL, for claude", async () => {
         hub.runCliLogin.mockResolvedValue(null);
-        hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: true });
 
         const outcome = await runProviderLogin({
             provider: claude,
@@ -155,66 +153,31 @@ describe("runProviderLogin", () => {
             log: vi.fn(),
         });
 
-        expect(outcome).toBe("seeded");
+        expect(outcome).toBe("terminal-success");
         expect(hub.ensureAccountDir).toHaveBeenCalledWith({}, { providerId: "claude", existingAccountId: undefined });
-        expect(hub.seedProviderAuthFromGlobal).toHaveBeenCalledWith("claude", MINTED.dir);
         expect(hub.upsertIdentityAccount).toHaveBeenCalledWith(
             {},
             expect.objectContaining({ id: MINTED.accountId, provider: "claude", kind: "oauth" }),
         );
-        expect(hub.openLoginTerminal).not.toHaveBeenCalled();
+        // Claude now falls straight to tier 3 like every other provider —
+        // the tier-2 seed-from-personal-~/.claude shortcut is gone.
+        expect(hub.openLoginTerminal).toHaveBeenCalledTimes(1);
         // Tier 1 timed out with no URL — its abandoned CLI child must be
-        // cancelled before tier 2 mints/seeds an account.
+        // cancelled before tier 3 opens a terminal against the same dir.
         expect(hub.cancelCliLogin).toHaveBeenCalledTimes(1);
     });
 
-    it("retries persistSeededAccount once on a transient failure after a successful seed, instead of silently falling through to tier 3 for a login that already succeeded (reagent P2)", async () => {
+    // REMOVED 2026-08-31 — two tier-2-only tests:
+    //   - "retries persistSeededAccount once on a transient failure after a
+    //     successful seed" (reagent P2)
+    //   - "falls through to terminal ... if persistSeededAccount fails on both
+    //     attempts"
+    // Both drove the removed seed-from-global tier. The SAME one-retry
+    // behaviour on tier 3 is still covered by "retries persistSeededAccount
+    // once on tier 3 too" further down, which is where it now matters.
+
+    it("mints the account dir exactly once (ensureAccountDir called once, not once per tier)", async () => {
         hub.runCliLogin.mockResolvedValue(null);
-        hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: true });
-        hub.upsertIdentityAccount
-            .mockRejectedValueOnce(new Error("transient RPC error"))
-            .mockResolvedValueOnce({});
-
-        const outcome = await runProviderLogin({
-            provider: claude,
-            cliPath: "x",
-            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
-            setAuthUrl: vi.fn(),
-            log: vi.fn(),
-        });
-
-        expect(outcome).toBe("seeded");
-        expect(hub.upsertIdentityAccount).toHaveBeenCalledTimes(2);
-        expect(hub.openLoginTerminal).not.toHaveBeenCalled();
-    });
-
-    it("falls through to terminal (with a clear error logged) if persistSeededAccount fails on both attempts", async () => {
-        hub.runCliLogin.mockResolvedValue(null);
-        hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: true });
-        hub.upsertIdentityAccount.mockRejectedValue(new Error("persistent RPC error"));
-        const log = vi.fn();
-
-        const outcome = await runProviderLogin({
-            provider: claude,
-            cliPath: "x",
-            authEnv: { CLAUDE_CONFIG_DIR: "C:/auth" },
-            setAuthUrl: vi.fn(),
-            log,
-            isCancelled: () => true,
-        });
-
-        expect(hub.upsertIdentityAccount).toHaveBeenCalledTimes(2);
-        expect(outcome).toBe("terminal-timeout");
-        expect(log).toHaveBeenCalledWith(
-            "auth",
-            expect.stringMatching(/login succeeded, but AgentMux couldn't save the account record/i),
-            "error",
-        );
-    });
-
-    it("tier 2 mints the account dir exactly once (ensureAccountDir called once, not once per tier)", async () => {
-        hub.runCliLogin.mockResolvedValue(null);
-        hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: true });
 
         await runProviderLogin({
             provider: claude,
@@ -227,12 +190,9 @@ describe("runProviderLogin", () => {
         expect(hub.ensureAccountDir).toHaveBeenCalledTimes(1);
     });
 
-    it("when tier 2's seed fails partway (dir minted but not seeded), tier 3 reuses the SAME minted account instead of minting a second one", async () => {
+    it("tier 3 reuses the SAME minted account instead of minting a second one after tier 1 fails", async () => {
         vi.useFakeTimers();
         hub.runCliLogin.mockResolvedValue(null);
-        hub.seedProviderAuthFromGlobal
-            .mockResolvedValueOnce({ seeded: false, status: "missing" }) // tier 2: no global login to copy
-            .mockResolvedValueOnce({ seeded: true }); // tier 3's first poll: user finished the browser login
 
         const promise = runProviderLogin({
             provider: claude,
@@ -258,7 +218,6 @@ describe("runProviderLogin", () => {
 
     it("links the new account and updates block meta when a linkTarget is given", async () => {
         hub.runCliLogin.mockResolvedValue(null);
-        hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: true });
 
         const outcome = await runProviderLogin({
             provider: claude,
@@ -269,7 +228,7 @@ describe("runProviderLogin", () => {
             linkTarget: { blockId: "block-1", agentDefinitionId: "def-1" },
         });
 
-        expect(outcome).toBe("seeded");
+        expect(outcome).toBe("terminal-success");
         expect(hub.linkAgentIdentity).toHaveBeenCalledWith({}, {
             agent_id: "def-1",
             account_id: MINTED.accountId,
@@ -283,7 +242,6 @@ describe("runProviderLogin", () => {
 
     it("links the account but skips the block-meta update when linkTarget has no blockId (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 3: Armory/Stash callers with no live pane)", async () => {
         hub.runCliLogin.mockResolvedValue(null);
-        hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: true });
 
         const outcome = await runProviderLogin({
             provider: claude,
@@ -294,7 +252,7 @@ describe("runProviderLogin", () => {
             linkTarget: { agentDefinitionId: "def-1" },
         });
 
-        expect(outcome).toBe("seeded");
+        expect(outcome).toBe("terminal-success");
         expect(hub.linkAgentIdentity).toHaveBeenCalledWith({}, {
             agent_id: "def-1",
             account_id: MINTED.accountId,
@@ -317,7 +275,6 @@ describe("runProviderLogin", () => {
         });
 
         expect(hub.ensureAccountDir).toHaveBeenCalledTimes(1); // reagent P0: used to skip minting for non-claude entirely
-        expect(hub.seedProviderAuthFromGlobal).not.toHaveBeenCalled();
         // The env var is KEPT and points at the minted isolated dir — not
         // stripped the way Claude's tier 3 strips it (codex has no global
         // login to copy back from, so the login must land directly here).
@@ -343,7 +300,6 @@ describe("runProviderLogin", () => {
         const outcome = await promise;
 
         expect(outcome).toBe("terminal-success");
-        expect(hub.seedProviderAuthFromGlobal).not.toHaveBeenCalled();
         expect(hub.checkCliAuthCommand).toHaveBeenCalledWith(
             {},
             { cli_path: "x", auth_check_args: ["auth", "status"], auth_env: { CODEX_HOME: MINTED.dir } },
@@ -369,16 +325,12 @@ describe("runProviderLogin", () => {
         });
 
         expect(outcome).toBe("terminal-timeout");
-        expect(hub.seedProviderAuthFromGlobal).not.toHaveBeenCalled();
         expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
     });
 
     it("falls through to tier 3 (real terminal), mints an account dir up front, and registers it once the login lands on disk", async () => {
         vi.useFakeTimers();
         hub.runCliLogin.mockResolvedValue(null);
-        hub.seedProviderAuthFromGlobal
-            .mockResolvedValueOnce({ seeded: false, status: "missing" }) // tier 2: no global login yet
-            .mockResolvedValueOnce({ seeded: true }); // first tier-3 poll: user finished the browser login
 
         const promise = runProviderLogin({
             provider: claude,
@@ -391,10 +343,16 @@ describe("runProviderLogin", () => {
         const outcome = await promise;
 
         expect(outcome).toBe("terminal-success");
-        // Tier 3's terminal env is stripped of the config-dir var so the
-        // fresh login lands in the user's global dir, not the minted one.
-        expect(hub.openLoginTerminal).toHaveBeenCalledWith("x", ["auth", "login"], {});
-        expect(hub.seedProviderAuthFromGlobal).toHaveBeenLastCalledWith("claude", MINTED.dir);
+        // INVERTED 2026-08-31 — this used to assert the config-dir var was
+        // STRIPPED, so Claude's terminal login landed in the user's global
+        // ~/.claude and was copied back. That copy-back was a per-channel
+        // isolation bypass (ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md
+        // #3). Claude now behaves like every other provider: the var is KEPT,
+        // pointed at the minted isolated dir, so the login writes there
+        // directly and nothing is ever read from the user's personal dir.
+        expect(hub.openLoginTerminal).toHaveBeenCalledWith("x", ["auth", "login"], {
+            CLAUDE_CONFIG_DIR: MINTED.dir,
+        });
         expect(hub.upsertIdentityAccount).toHaveBeenCalledWith(
             {},
             expect.objectContaining({ id: MINTED.accountId, provider: "claude" }),
@@ -403,7 +361,6 @@ describe("runProviderLogin", () => {
 
     it("returns 'terminal-timeout' without a full 5-minute wait when cancelled", async () => {
         hub.runCliLogin.mockResolvedValue(null);
-        hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: false, status: "missing" });
 
         const outcome = await runProviderLogin({
             provider: claude,
@@ -420,7 +377,6 @@ describe("runProviderLogin", () => {
 
     it("returns 'terminal-unavailable' when the terminal itself can't be opened (e.g. unsupported platform)", async () => {
         hub.runCliLogin.mockResolvedValue(null);
-        hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: false, status: "missing" });
         hub.openLoginTerminal.mockRejectedValue(new Error("open_login_terminal: not yet implemented on this platform"));
 
         const log = vi.fn();
@@ -436,8 +392,7 @@ describe("runProviderLogin", () => {
         expect(log).toHaveBeenCalledWith("auth", expect.stringMatching(/couldn't open a terminal/i), "error");
     });
 
-    it("skipTier1 skips the headless URL-capture attempt entirely and goes straight to tier 2", async () => {
-        hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: true });
+    it("skipTier1 skips the headless URL-capture attempt entirely and goes straight to tier 3", async () => {
 
         const outcome = await runProviderLogin({
             provider: claude,
@@ -448,14 +403,13 @@ describe("runProviderLogin", () => {
             skipTier1: true,
         });
 
-        expect(outcome).toBe("seeded");
+        expect(outcome).toBe("terminal-success");
         expect(hub.runCliLogin).not.toHaveBeenCalled();
         expect(hub.openPane).not.toHaveBeenCalled();
     });
 
-    it("reagent P1: fires onTierChange({tier: 'fallback'}) once tier 1 fails, so a caller's stale URL-capture countdown doesn't freeze while tier 2/3 (up to 5 more minutes) take over", async () => {
+    it("reagent P1: fires onTierChange({tier: 'fallback'}) once tier 1 fails, so a caller's stale URL-capture countdown doesn't freeze while tier 3 (up to 5 more minutes) takes over", async () => {
         hub.runCliLogin.mockResolvedValue(null); // tier 1: no URL captured
-        hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: true }); // tier 2 succeeds fast
         const onTierChange = vi.fn();
 
         const outcome = await runProviderLogin({
@@ -467,19 +421,18 @@ describe("runProviderLogin", () => {
             onTierChange,
         });
 
-        expect(outcome).toBe("seeded");
+        expect(outcome).toBe("terminal-success");
         expect(onTierChange).toHaveBeenCalledWith({ tier: "fallback" });
-        // Tier 2 resolved before any terminal opened — no "polling" event yet.
-        expect(onTierChange).not.toHaveBeenCalledWith(expect.objectContaining({ tier: "polling" }));
+        // Tier 3 opened a terminal, so a "polling" event MUST follow the
+        // fallback one (tier 2, which used to resolve before any terminal
+        // opened, no longer exists).
+        expect(onTierChange).toHaveBeenCalledWith(expect.objectContaining({ tier: "polling" }));
     });
 
     it("reagent P1: fires onTierChange({tier: 'polling', deadlineMs}) once the terminal actually opens, with a live ~5-minute deadline matching the real poll timeout", async () => {
         vi.useFakeTimers();
         const before = Date.now();
         hub.runCliLogin.mockResolvedValue(null);
-        hub.seedProviderAuthFromGlobal
-            .mockResolvedValueOnce({ seeded: false, status: "missing" }) // tier 2: no global login yet
-            .mockResolvedValueOnce({ seeded: true }); // first tier-3 poll succeeds
         const onTierChange = vi.fn();
 
         const promise = runProviderLogin({
@@ -503,9 +456,8 @@ describe("runProviderLogin", () => {
         expect(deadlineMs).toBeLessThanOrEqual(before + 5 * 60 * 1000 + 1000);
     });
 
-    it("existingAccountId is threaded through to tier 2's account minting — reconnects the SAME account instead of minting a new one (reagent P1: retries were orphaning a new account every time)", async () => {
+    it("existingAccountId is threaded through to tier 3's account minting — reconnects the SAME account instead of minting a new one (reagent P1: retries were orphaning a new account every time)", async () => {
         hub.runCliLogin.mockResolvedValue(null);
-        hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: true });
 
         await runProviderLogin({
             provider: claude,
@@ -525,9 +477,6 @@ describe("runProviderLogin", () => {
     it("existingAccountId is threaded through to tier 3's account minting too", async () => {
         vi.useFakeTimers();
         hub.runCliLogin.mockResolvedValue(null);
-        hub.seedProviderAuthFromGlobal
-            .mockResolvedValueOnce({ seeded: false, status: "missing" })
-            .mockResolvedValueOnce({ seeded: true });
 
         const promise = runProviderLogin({
             provider: claude,
@@ -546,9 +495,8 @@ describe("runProviderLogin", () => {
         );
     });
 
-    it("onAccountRegistered fires with the account id + dir on tier 2 success — before finalizeAccount, so a caller can rebuild its own authEnv to recheck the NEW dir (reagent P0: a caller's stale authEnv otherwise reports authenticated:false right after a successful login)", async () => {
+    it("onAccountRegistered fires with the account id + dir on tier 3 success — before finalizeAccount, so a caller can rebuild its own authEnv to recheck the NEW dir (reagent P0: a caller's stale authEnv otherwise reports authenticated:false right after a successful login)", async () => {
         hub.runCliLogin.mockResolvedValue(null);
-        hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: true });
         const onAccountRegistered = vi.fn();
 
         const outcome = await runProviderLogin({
@@ -560,16 +508,13 @@ describe("runProviderLogin", () => {
             onAccountRegistered,
         });
 
-        expect(outcome).toBe("seeded");
+        expect(outcome).toBe("terminal-success");
         expect(onAccountRegistered).toHaveBeenCalledWith(MINTED.accountId, MINTED.dir);
     });
 
     it("onAccountRegistered fires on tier 3 success too, and NOT at all if persistSeededAccount fails", async () => {
         vi.useFakeTimers();
         hub.runCliLogin.mockResolvedValue(null);
-        hub.seedProviderAuthFromGlobal
-            .mockResolvedValueOnce({ seeded: false, status: "missing" })
-            .mockResolvedValueOnce({ seeded: true });
         const onAccountRegistered = vi.fn();
 
         const promise = runProviderLogin({
@@ -590,10 +535,6 @@ describe("runProviderLogin", () => {
         // matching tier 2's identical safety net), so a single-rejection
         // mock would now succeed on the retry and fire onAccountRegistered.
         hub.upsertIdentityAccount.mockRejectedValue(new Error("db error"));
-        hub.seedProviderAuthFromGlobal
-            .mockReset()
-            .mockResolvedValueOnce({ seeded: false, status: "missing" })
-            .mockResolvedValueOnce({ seeded: true });
 
         const promise2 = runProviderLogin({
             provider: claude,
@@ -611,9 +552,6 @@ describe("runProviderLogin", () => {
     it("retries persistSeededAccount once on tier 3 too, on a transient failure after terminal-success is detected (reagent P2, mirrors tier 2's identical retry)", async () => {
         vi.useFakeTimers();
         hub.runCliLogin.mockResolvedValue(null);
-        hub.seedProviderAuthFromGlobal
-            .mockResolvedValueOnce({ seeded: false, status: "missing" })
-            .mockResolvedValueOnce({ seeded: true });
         hub.upsertIdentityAccount
             .mockRejectedValueOnce(new Error("transient RPC error"))
             .mockResolvedValueOnce({});
@@ -715,7 +653,6 @@ describe("runProviderLogin — awaited in-app session (awaitTier1Completion)", (
         // Child reaped on the way out (idempotent host call), and no
         // fallback tier ever ran.
         expect(hub.cancelCliLogin).toHaveBeenCalledTimes(1);
-        expect(hub.seedProviderAuthFromGlobal).not.toHaveBeenCalled();
         expect(hub.openLoginTerminal).not.toHaveBeenCalled();
     });
 
@@ -881,7 +818,6 @@ describe("runProviderLogin — awaited in-app session (awaitTier1Completion)", (
         expect(hub.upsertIdentityAccount).not.toHaveBeenCalled();
         expect(hub.cancelCliLogin).toHaveBeenCalledTimes(1);
         // No automatic tier 2/3 fallback — the user already has the URL.
-        expect(hub.seedProviderAuthFromGlobal).not.toHaveBeenCalled();
         expect(hub.openLoginTerminal).not.toHaveBeenCalled();
     });
 
@@ -903,9 +839,8 @@ describe("runProviderLogin — awaited in-app session (awaitTier1Completion)", (
         expect(hub.cancelCliLogin).toHaveBeenCalledTimes(1);
     });
 
-    it("feature-gate: when NO URL is captured within the window (older CLI, ≤2.1.183 behavior), falls through to tier 2/3 exactly as without the flag — the in-app wait never starts", async () => {
+    it("feature-gate: when NO URL is captured within the window (older CLI, ≤2.1.183 behavior), falls through to tier 3 exactly as without the flag — the in-app wait never starts", async () => {
         hub.runCliLogin.mockResolvedValue(null);
-        hub.seedProviderAuthFromGlobal.mockResolvedValue({ seeded: true });
 
         const outcome = await runProviderLogin({
             provider: claude,
@@ -916,9 +851,8 @@ describe("runProviderLogin — awaited in-app session (awaitTier1Completion)", (
             awaitTier1Completion: true,
         });
 
-        expect(outcome).toBe("seeded");
+        expect(outcome).toBe("terminal-success");
         expect(hub.getCliLoginStatus).not.toHaveBeenCalled();
-        expect(hub.seedProviderAuthFromGlobal).toHaveBeenCalledWith("claude", MINTED.dir);
     });
 
     it("fires onTierChange({tier:'inapp-waiting', deadlineMs}) when the awaited session starts, so a caller's phase line can show a live deadline", async () => {

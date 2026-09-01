@@ -26,7 +26,7 @@ import type { SlashCommand, SlashCommandContext, SlashResult } from "../types";
 
 /**
  * Shared by both success branches below (tier-1 "opened" and tier-2/3
- * "seeded"/"terminal-success"): restart an already-running controller onto
+ * "terminal-success"): restart an already-running controller onto
  * the refreshed credential — unless a turn is actively streaming on it.
  * `agentmux-srv`'s `resync_controller` with `force: true` unconditionally
  * stops the existing controller process before respawning it (see
@@ -240,7 +240,6 @@ export const loginCommand: SlashCommand = {
                             "Complete the login there, then run /login again.",
                     };
                 }
-                case "seeded":
                 case "terminal-success":
                     // openedAccountId/openedAccountDir are only set once
                     // onAccountRegistered fires — run-provider-login.ts only

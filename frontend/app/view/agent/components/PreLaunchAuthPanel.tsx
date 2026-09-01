@@ -44,7 +44,6 @@ import {
 } from "../auth";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { InAppLoginPanel, type InAppLoginPhase } from "./InAppLoginPanel";
-import { registerSeededAccount } from "../flows/register-seeded-account";
 import { runProviderLogin } from "../flows/run-provider-login";
 import type { ProviderDefinition } from "../providers";
 import type { LogFn } from "../types";
@@ -205,40 +204,12 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
         void startConnect(controller, prov, props.accountId(), inAppUi);
     };
 
-    // "Use my existing login" — a fast SECONDARY path when a valid global
-    // terminal login already exists (spec §3.2). Until 2026-08-03 this
-    // REPLACED Connect entirely, because in-app OAuth was a dead end for
-    // Claude v2.1.183 (SPEC_HOST_CLI_LOGIN_CAPTURE §0, live browser spawn
-    // couldn't open when WE spawned it); that verdict is superseded —
-    // SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §2 — so Connect (the
-    // in-app login session) is primary again, same as the `canSeed` doc
-    // comment below this component. Mints a real per-account isolated dir,
-    // copies the user's valid GLOBAL login into it, and persists a real
-    // IdentityAccount row (not just a file in the shared dir — this used to
-    // call `seedGlobalLogin` directly against `ensureAuthDir`'s SHARED
-    // default dir and only fake local "ready" state via `markSeeded`,
-    // leaving Armory with no record the account ever existed. See
-    // PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7 — the resolver's
-    // spawn gate now requires a real bound account, so a fake-ready panel
-    // would have let Launch enable and then had the agent immediately fail
-    // its first turn). No in-app browser, no OAuth. `props.accountId()` is
-    // passed through as `existingAccountId` so a Reconnect (not a fresh
-    // Connect) refreshes the SAME account's dir in place.
-    const seedLog: LogFn = (_cat, msg) => console.log(`[auth-diag] seed: ${msg}`);
-    const handleUseExistingLogin = async (): Promise<void> => {
-        const prov = props.provider;
-        if (!prov) return;
-        const reg = await registerSeededAccount(prov.id, seedLog, props.accountId() || undefined);
-        if (reg.ok && reg.accountId) {
-            controller.markSeeded(reg.accountId);
-        } else {
-            controller.failConnect(
-                new Error(
-                    "No valid global Claude login to copy. Run `claude setup-token` in a real terminal (it opens a browser), complete it, then click “Use my existing login” again.",
-                ),
-            );
-        }
-    };
+    // "Use my existing login" REMOVED 2026-08-31 — it copied the operator's
+    // personal ~/.claude credential into a minted account dir, which defeated
+    // per-channel isolation (an agent could reach Claude in a channel that was
+    // never logged into). See
+    // docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md #3.
+    // Connect (the in-app OAuth session) is the single pre-launch path now.
 
     // No onCleanup here — controller lifetime is owned by the parent
     // (AgentLaunchModal). Disposing on panel unmount would destroy
@@ -275,8 +246,6 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
                         accountStatus={props.accountStatus?.() ?? null}
                         hasAccount={props.accountSuppliesProvider()}
                         onConnect={() => handleConnect()}
-                        canSeed={props.provider?.id === "claude"}
-                        onUseExistingLogin={() => void handleUseExistingLogin()}
                         disabled={props.disabled ?? false}
                     />
                 </Match>
@@ -351,8 +320,6 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
                         accountStatus={props.accountStatus?.() ?? null}
                         hasAccount={props.accountSuppliesProvider()}
                         onConnect={() => handleConnect()}
-                        canSeed={props.provider?.id === "claude"}
-                        onUseExistingLogin={() => void handleUseExistingLogin()}
                         disabled={props.disabled ?? false}
                     />
                 </Match>
@@ -602,16 +569,14 @@ async function startConnect(
             }
             switch (outcome) {
                 case "inapp-success":
-                case "seeded":
                 case "terminal-success":
                     if (registeredAccountId) {
                         controller.markSeeded(registeredAccountId);
                     } else {
                         // The credential landed but the Armory account row
                         // couldn't be persisted — don't show fake-ready state
-                        // (same reasoning as handleUseExistingLogin's failure
-                        // path above: the resolver's spawn gate requires a real
-                        // bound account, so a fake-ready panel would let Launch
+                        // (the resolver's spawn gate requires a real bound
+                        // account, so a fake-ready panel would let Launch
                         // enable and then have the agent immediately fail).
                         controller.failConnect(
                             new Error("Login completed but the account couldn't be registered. Try again."),
@@ -708,8 +673,6 @@ const ConnectCta = (p: {
      *  (SPEC_HOST_CLI_LOGIN_CAPTURE §0); that verdict is superseded —
      *  SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §2 — so Connect (the
      *  in-app login session) is primary again. */
-    canSeed: boolean;
-    onUseExistingLogin: () => void;
     disabled: boolean;
 }): JSX.Element => {
     const catalog = () =>
@@ -757,27 +720,6 @@ const ConnectCta = (p: {
                     Tokens get saved as a new account so the next agent doesn't
                     have to re-authenticate.`}
             </div>
-            <Show when={p.canSeed}>
-                {/* Claude only: seed-from-global as the SECONDARY fast path —
-                    copies an already-valid global terminal login, no browser
-                    round-trip. Was the PRIMARY (and only) path while in-app
-                    OAuth was a dead end for Claude v2.1.183
-                    (SPEC_HOST_CLI_LOGIN_CAPTURE §0); demoted when the Connect
-                    CTA above became the revived in-app login session
-                    (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.2). */}
-                <Button
-                    onClick={() => p.onUseExistingLogin()}
-                    disabled={p.disabled}
-                    className="pre-launch-auth-panel-connect grey"
-                >
-                    <span class="pre-launch-auth-panel-connect-icon" aria-hidden="true">🌐</span>
-                    <span class="pre-launch-auth-panel-connect-label">Use my existing login</span>
-                </Button>
-                <div class="pre-launch-auth-panel-hint">
-                    Already signed in to {providerLabel()} in a terminal? This copies
-                    that login into this agent — no browser needed.
-                </div>
-            </Show>
         </div>
     );
 };

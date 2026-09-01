@@ -67,137 +67,25 @@ afterEach(() => {
     hub.agentDefinitionId = undefined;
 });
 
-describe("useAgentControllerStatus — useGlobalLogin sets loginWaiting while in flight (reagent P1 on PR #2338)", () => {
-    it("loginWaiting() is true while registerSeededAccount is unresolved, and false after it resolves", async () => {
-        let resolveSeed!: (v: { ok: boolean; accountId?: string; dir?: string }) => void;
-        hub.registerSeededAccount.mockImplementation(
-            () => new Promise((resolve) => { resolveSeed = resolve; }),
-        );
-
-        await createRoot(async (dispose) => {
-            const status = useAgentControllerStatus({
-                blockId: "block-1",
-                provider: () => claude,
-                log: () => {},
-            });
-
-            expect(status.loginWaiting()).toBe(false);
-
-            const p = status.useGlobalLogin();
-            // Yield a microtask so the async function body runs up to the
-            // unresolved registerSeededAccount await.
-            await Promise.resolve();
-            await Promise.resolve();
-
-            expect(status.loginWaiting()).toBe(true);
-
-            resolveSeed({ ok: true, accountId: "acct-1", dir: "/tmp/acct-1" });
-            await p;
-
-            expect(status.loginWaiting()).toBe(false);
-            dispose();
-        });
-    });
-
-    it("clears loginWaiting even when registerSeededAccount fails", async () => {
-        hub.registerSeededAccount.mockRejectedValue(new Error("boom"));
-
-        await createRoot(async (dispose) => {
-            const status = useAgentControllerStatus({
-                blockId: "block-1",
-                provider: () => claude,
-                log: () => {},
-            });
-
-            await status.useGlobalLogin();
-
-            expect(status.loginWaiting()).toBe(false);
-            dispose();
-        });
-    });
-});
-
-describe("useAgentControllerStatus — loginWaiting clears BEFORE onRecovered fires (reagent P0 on PR #2338)", () => {
-    it("useGlobalLogin: loginWaiting() is already false inside the onRecovered callback", async () => {
-        // onRecovered (agent-view.tsx's retryLastTurn) synchronously resends
-        // the failed turn straight into useAgentCommands.ts's
-        // canRetry() || loginWaiting() guard. Clearing loginWaiting only in
-        // this function's trailing `finally` (which runs AFTER onRecovered
-        // returns) let that resend get spuriously rejected as "not logged in
-        // yet" even though recovery just succeeded — breaking the
-        // auto-retry-after-relogin flow entirely.
-        hub.registerSeededAccount.mockResolvedValue({ ok: true, accountId: "acct-1", dir: "/tmp/acct-1" });
-        let loginWaitingInsideCallback: boolean | undefined;
-
-        await createRoot(async (dispose) => {
-            const status = useAgentControllerStatus({
-                blockId: "block-1",
-                provider: () => claude,
-                log: () => {},
-                onRecovered: () => {
-                    loginWaitingInsideCallback = status.loginWaiting();
-                },
-            });
-
-            await status.useGlobalLogin();
-
-            expect(loginWaitingInsideCallback).toBe(false);
-            dispose();
-        });
-    });
-});
-
-describe("useAgentControllerStatus — overlapping recovery flows share one counter, not independent booleans (codex P2 on PR #2338, fourth re-review)", () => {
-    it("loginWaiting() stays true while loginViaTerminal is still in flight, even after a concurrent useGlobalLogin() finishes", async () => {
-        // Nothing disables the failure row's other recovery buttons while one
-        // is running (verified against failure-accessory.ts: only the
-        // generic "Retry now" action has a disabled binding), so a user can
-        // genuinely start both flows concurrently. useGlobalLogin() and
-        // loginViaTerminal() each manage their own in-flight guard
-        // (seedInFlight vs. reloginInFlight) — a bare shared boolean would
-        // let whichever finishes first clear loginWaiting for both.
-        hub.registerSeededAccount.mockResolvedValue({ ok: true, accountId: "acct-1", dir: "/tmp/acct-1" });
-        let resolveTerminalLogin!: (outcome: string) => void;
-        hub.runProviderLogin.mockImplementation(
-            (opts: any) =>
-                new Promise((resolve) => {
-                    resolveTerminalLogin = (outcome: string) => {
-                        opts.onAccountRegistered?.("acct-2", "/tmp/acct-2");
-                        resolve(outcome);
-                    };
-                }),
-        );
-
-        await createRoot(async (dispose) => {
-            const status = useAgentControllerStatus({
-                blockId: "block-1",
-                provider: () => claude,
-                log: () => {},
-            });
-
-            const terminalPromise = status.loginViaTerminal();
-            await Promise.resolve();
-            await Promise.resolve();
-            expect(status.loginWaiting()).toBe(true);
-
-            // A second, independent recovery flow starts and fully completes
-            // WHILE the first is still unresolved.
-            await status.useGlobalLogin();
-
-            // The bug: useGlobalLogin() finishing first would clear the
-            // shared boolean even though loginViaTerminal is still polling
-            // for credentials — reopening the exact "send during an
-            // unconfirmed recovery" window this signal exists to close.
-            expect(status.loginWaiting()).toBe(true);
-
-            resolveTerminalLogin("seeded");
-            await terminalPromise;
-
-            expect(status.loginWaiting()).toBe(false);
-            dispose();
-        });
-    });
-});
+// REMOVED 2026-08-31 — three describes that exercised `useGlobalLogin()`:
+//   - "useGlobalLogin sets loginWaiting while in flight" (reagent P1, PR #2338)
+//   - "loginWaiting clears BEFORE onRecovered fires" (reagent P0, PR #2338)
+//   - "overlapping recovery flows share one counter" (codex P2, PR #2338 r4)
+//
+// `useGlobalLogin()` itself is gone: it seeded this agent from the operator's
+// personal ~/.claude, defeating per-channel isolation (see
+// docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md #3). These
+// tests could not be retargeted verbatim — the third one's whole premise was
+// TWO independent in-flight guards (seedInFlight vs. reloginInFlight), and only
+// reloginInFlight now remains.
+//
+// The invariants they protected are NOT left uncovered. `loginWaiting()`'s
+// shared-counter semantics are still exercised below by the relogin /
+// useTerminalInstead / in-app-session suites — in particular "reagent P1 on PR
+// #2413 (round 3)", which covers the surviving cross-flow overlap case
+// (a /login-driven session never touches reloginInFlight, only the shared
+// counter). Anyone reintroducing a second concurrent recovery flow must
+// restore an equivalent of the third test with it.
 
 describe("useAgentControllerStatus — existingAccountIdFor canonicalizes provider IDs (codex P1 on PR #2377, second round)", () => {
     it("relogin() passes the alias-linked account_id as existingAccountId, not undefined", async () => {

@@ -301,39 +301,32 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         .or_else(|_| std::env::var("USERPROFILE"))
                         .unwrap_or_default();
 
-                    // First-run bootstrap of the SHARED provider auth dir
-                    // (~/.agentmux/shared/providers/claude). It is account-wide, so the
-                    // user's existing global ~/.claude login is imported into it ONCE,
-                    // gated on a sentinel so a later `claude auth logout` in this provider
-                    // space sticks. This is a one-time bootstrap of the single shared
-                    // auth, NOT per-instance reseeding. Retro:
-                    // docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md
-                    if let Some(config_dir) = cmd.auth_env.get("CLAUDE_CONFIG_DIR") {
-                        let iso = format!("{}/.credentials.json", config_dir);
-                        let seeded = format!("{}/.agentmux-cred-seeded", config_dir);
-                        let global = format!("{}/.claude/.credentials.json", home);
-                        if !std::path::Path::new(&iso).exists()
-                            && !std::path::Path::new(&seeded).exists()
-                            && std::path::Path::new(&global).exists()
-                        {
-                            match std::fs::create_dir_all(config_dir)
-                                .and_then(|_| std::fs::copy(&global, &iso))
-                            {
-                                Ok(_) => {
-                                    let _ = std::fs::write(
-                                        &seeded,
-                                        b"imported from global ~/.claude on first run\n",
-                                    );
-                                    tracing::info!(
-                                        "claude auth: imported global ~/.claude into shared provider dir (first run)"
-                                    );
-                                }
-                                Err(e) => tracing::warn!(
-                                    "claude auth: failed to import global creds into shared provider dir: {e}"
-                                ),
-                            }
-                        }
-                    }
+                    // REMOVED 2026-08-31 — the first-run bootstrap that copied
+                    // the user's global `~/.claude/.credentials.json` into the
+                    // isolated CLAUDE_CONFIG_DIR (gated on a
+                    // `.agentmux-cred-seeded` sentinel).
+                    //
+                    // It ran during a routine AUTH CHECK — no login, no user
+                    // action, no Armory account — so an agent in a fresh
+                    // channel silently acquired the operator's personal
+                    // credential. That is the most direct of the four
+                    // per-channel-isolation bypasses catalogued in
+                    // `docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md`
+                    // (#4), and the most likely answer to the reported "agents
+                    // operate with an empty Armory" (it also explains why the
+                    // symptom varied by machine — it depended on whether
+                    // `~/.claude` happened to hold a valid credential).
+                    //
+                    // Its original justification
+                    // (`docs/retro/retro-provider-auth-isolation-regression-2026-06-05.md`)
+                    // predates the "agents never use ~/.claude" requirement
+                    // (`SPEC_BLOCK_AMBIENT_HOME_DIR_IDENTITY_BINDING_2026_08_25.md`)
+                    // and was never revisited against it.
+                    //
+                    // An unauthenticated isolated dir must now simply report
+                    // `authenticated: false` and let the user log in FOR THIS
+                    // CHANNEL. Do not reintroduce an import here: a check must
+                    // report state, never mint credentials as a side effect.
 
                     // §4 INVARIANT (provider-auth-isolation.md): validate the SAME dir
                     // the agent runs in — the isolated CLAUDE_CONFIG_DIR if set, else

@@ -41,7 +41,6 @@
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
-import { seedGlobalLogin } from "./seed-global-login";
 import type { LogFn } from "../types";
 
 export interface MintedAccountDir {
@@ -102,29 +101,12 @@ export async function persistSeededAccount(
     }
 }
 
-export interface RegisterSeededAccountResult {
-    ok: boolean;
-    accountId?: string;
-    dir?: string;
-}
-
-/** Steps 1+2+3 composed — the common case (tier 2: seed from an
- *  already-valid global login, synchronous, no user action needed). */
-export async function registerSeededAccount(
-    providerId: string,
-    log: LogFn,
-    existingAccountId?: string,
-): Promise<RegisterSeededAccountResult> {
-    const minted = await ensureAccountDir(providerId, log, existingAccountId);
-    if (!minted) return { ok: false };
-
-    if (!(await seedGlobalLogin(providerId, log, minted.dir))) {
-        return { ok: false };
-    }
-
-    if (!(await persistSeededAccount(providerId, minted.accountId, minted.dir, log))) {
-        return { ok: false };
-    }
-
-    return { ok: true, accountId: minted.accountId, dir: minted.dir };
-}
+// `registerSeededAccount` (steps 1+2+3 composed) REMOVED 2026-08-31 along with
+// the tier-2 "seed from global" flow it existed to serve — it copied the
+// operator's personal ~/.claude credential into a minted account dir, which
+// defeated per-channel isolation. See
+// docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md #3.
+//
+// `ensureAccountDir` and `persistSeededAccount` above are UNCHANGED and still
+// load-bearing: the terminal-login tier mints a dir before opening the terminal
+// and persists the account after the user completes a real OAuth in it.
