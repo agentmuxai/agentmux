@@ -577,9 +577,11 @@ export async function runProviderLogin(p: RunProviderLoginParams): Promise<Provi
         return "terminal-unavailable";
     }
     p.log("auth", "a terminal window opened — complete the login there");
-    // Matches pollForGlobalLoginSeed/pollForCliAuthReady's own default
-    // timeoutMs below (neither call passes a custom one) — if either
-    // default ever changes, this display value must move with it.
+    // Matches pollForCliAuthReady's own default timeoutMs below (the call
+    // passes no custom one) — if that default ever changes, this display value
+    // must move with it. It used to name a second sibling,
+    // pollForGlobalLoginSeed, which was deleted with the seed-from-global path
+    // 2026-08-31; there is one poll here now, not two.
     p.onTierChange?.({ tier: "polling", deadlineMs: Date.now() + 5 * 60 * 1_000 });
 
     const isCancelled = p.isCancelled ?? (() => false);

@@ -282,7 +282,7 @@ describe("runProviderLogin", () => {
         expect(outcome).toBe("terminal-timeout");
     });
 
-    it("non-claude tier 3 success: polls CheckCliAuthCommand against the isolated dir (not seedGlobalLogin) and persists the account once authenticated", async () => {
+    it("non-claude tier 3 success: polls CheckCliAuthCommand against the isolated dir and persists the account once authenticated", async () => {
         vi.useFakeTimers();
         hub.runCliLogin.mockResolvedValue(null);
         hub.checkCliAuthCommand
@@ -311,7 +311,7 @@ describe("runProviderLogin", () => {
         );
     });
 
-    it("a non-claude tier-3 login that never authenticates times out cleanly instead of crashing (reagent P0: seedGlobalLogin used to be called unconditionally and threw for non-claude providers)", async () => {
+    it("a non-claude tier-3 login that never authenticates times out cleanly instead of crashing (reagent P0: the removed seed-from-global step used to be called unconditionally and threw for non-claude providers)", async () => {
         hub.runCliLogin.mockResolvedValue(null);
         hub.checkCliAuthCommand.mockResolvedValue({ authenticated: false });
 
@@ -450,8 +450,8 @@ describe("runProviderLogin", () => {
         const pollingCall = onTierChange.mock.calls.find((c) => c[0].tier === "polling");
         expect(pollingCall).toBeDefined();
         const { deadlineMs } = pollingCall![0];
-        // Matches pollForGlobalLoginSeed's own default timeoutMs (5 min) —
-        // if that default ever changes, this assertion should move with it.
+        // Matches pollForCliAuthReady's own default timeoutMs (5 min) — if
+        // that default ever changes, this assertion should move with it.
         expect(deadlineMs).toBeGreaterThanOrEqual(before + 5 * 60 * 1000 - 1000);
         expect(deadlineMs).toBeLessThanOrEqual(before + 5 * 60 * 1000 + 1000);
     });

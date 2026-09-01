@@ -413,7 +413,7 @@ pub fn register_cli_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }
                 }
 
-                let (mut authenticated, mut email, mut auth_method, mut raw_output) =
+                let (authenticated, email, auth_method, raw_output) =
                     run_auth_check(&cmd.cli_path, &cmd.auth_check_args, &cmd.auth_env).await?;
 
                 // REMOVED 2026-08-31 (Codex P1 on PR #2878) — the "self-heal a
