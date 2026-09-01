@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use parking_lot::Mutex;
 
-use cef::{Browser, Frame};
+use cef::{Browser, Frame, ImplBrowser};
 
 mod drag;
 mod window_meta;
@@ -776,6 +776,50 @@ impl AppState {
             .browsers
             .get(label)
             .map(|h| h.browser.clone())
+    }
+
+    /// Which browser pane does this CEF `Browser` belong to, if any?
+    ///
+    /// The reverse of the usual `block_id → label → Browser` chain
+    /// (`live_browser_pane_label` then `get_browser`). CEF callbacks hand us a
+    /// `Browser` and nothing else, so any per-pane policy — notably the media
+    /// permission handler, which must decide *which pane* is asking before it
+    /// can consult that pane's grants — needs to walk back to the block id.
+    ///
+    /// Resolving identity at request time, rather than storing it on the
+    /// client at construction, is deliberate: a **prewarmed pool pane**
+    /// (`CreatePanePoolWindowWin32Task`) is created with no identity at all and
+    /// only becomes a specific block's pane later, at promote. A field captured
+    /// at construction would be permanently `None` for exactly those panes;
+    /// this lookup starts working the moment the pane is registered.
+    ///
+    /// Returns `None` for the main app client, a not-yet-promoted pool pane, a
+    /// pane mid-teardown, and any browser that isn't a pane — all of which
+    /// callers must treat as "no pane-scoped grant applies", never as "allow".
+    ///
+    /// Only `Live` panes match, via `live_browser_pane_label`: a `Closing` pane
+    /// must not resolve, or a permission decision could be attributed to a pane
+    /// that is going away.
+    pub fn block_id_for_browser(&self, browser: &mut Browser) -> Option<String> {
+        let block_ids: Vec<String> = self
+            .host_state
+            .lock()
+            .browser_panes
+            .keys()
+            .cloned()
+            .collect();
+        for block_id in block_ids {
+            let Some(label) = self.live_browser_pane_label(&block_id) else {
+                continue;
+            };
+            let Some(mut candidate) = self.get_browser(&label) else {
+                continue;
+            };
+            if candidate.is_same(Some(browser)) != 0 {
+                return Some(block_id);
+            }
+        }
+        None
     }
 
     /// Are there any registered browsers?
