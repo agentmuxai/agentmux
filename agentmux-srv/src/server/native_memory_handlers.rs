@@ -95,8 +95,10 @@ fn parse_claude_config_dir(env_blob: &str) -> String {
 }
 
 /// Resolve the memory directory for `agent_id`. Reads the agent definition and
-/// its stored env blob to find `CLAUDE_CONFIG_DIR`. Returns an error if the
-/// agent is not found or has no working directory.
+/// its stored env blob to find `CLAUDE_CONFIG_DIR`. Returns an error only if
+/// the agent cannot be resolved at all — an instance row with a blank
+/// `working_directory` falls through to the registry rather than failing (see
+/// the inline note below; that short-circuit was a real bug).
 ///
 /// Shared by `native_memory_handlers` and the `memory.*` App API handlers.
 pub(crate) fn memory_dir_for_agent(
@@ -112,16 +114,41 @@ pub(crate) fn memory_dir_for_agent(
         .instance_get_by_slug(agent_id)
         .map_err(|e| format!("memory: store: {e}"))?
     {
-        if instance.working_directory.is_empty() {
-            return Err(format!("memory: agent {agent_id} has no working directory"));
+        // Only trust the instance row when it actually carries a working
+        // directory. An empty one is NOT an error and must NOT short-circuit:
+        // `agent.open` substitutes a default (`~/.agentmux/agents/<slug>`)
+        // whenever `working_directory` is blank, so a blank row describes an
+        // agent that is nonetheless running — and writing memories — in a
+        // real directory. The registry fallback below is what knows that
+        // real directory (`source_agents_base` + `working_dir`).
+        //
+        // Returning Err here instead made Armory → Memory → Personal and the
+        // MemoryList MCP tool fail with "agent <x> has no working directory"
+        // for every such agent, while its memory files sat on disk perfectly
+        // intact — the common case, since `working_directory` is blank by
+        // default. See SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01.md.
+        if !instance.working_directory.is_empty() {
+            let config_dir = wstore
+                .agent_content_get(&instance.id, "env")
+                .ok()
+                .flatten()
+                .map(|c| parse_claude_config_dir(&c.content))
+                .unwrap_or_default();
+            return Ok(memory_dir_for_cwd(&config_dir, &instance.working_directory));
         }
-        let config_dir = wstore
-            .agent_content_get(&instance.id, "env")
-            .ok()
-            .flatten()
-            .map(|c| parse_claude_config_dir(&c.content))
-            .unwrap_or_default();
-        return Ok(memory_dir_for_cwd(&config_dir, &instance.working_directory));
+        // Resolve through the DEFINITION, not the instance row: `db_agents`
+        // stores `instance_name` as its own column, distinct from the
+        // definition's `name`, and it is empty for a definition-only row —
+        // so reading the name off `instance` here silently yielded "" and
+        // fell through to a not-found. `instance.id` IS the definition id in
+        // this consolidated table (see the note above).
+        if let Ok(Some(def)) = wstore.agent_def_get(&instance.id) {
+            if let Some(dir) =
+                memory_dir_for_blank_working_dir(wstore, &def.id, &def.name, &def.slug)
+            {
+                return Ok(dir);
+            }
+        }
     }
 
     // No persisted db_agents instance row. Running agents are tracked in the
@@ -207,6 +234,58 @@ pub(crate) fn find_active_registry_record_by_slug(
 fn memory_dir_from_registry(agent_id: &str) -> Option<std::path::PathBuf> {
     let rec = find_active_registry_record_by_slug(agent_id)?;
     memory_dir_for_registry_record(&rec)
+}
+
+/// Resolve the memory dir for an agent whose persisted `working_directory`
+/// is blank — the DEFAULT state, so this is the common path, not an edge.
+///
+/// Two stages, in this order:
+///
+/// 1. **A registry record bound to this exact definition.** The registry
+///    records the working dir an agent was really launched with, which beats
+///    re-deriving it. `definition_id` is required to match: the plain
+///    slug lookup keys off `derive_slug(instance_name)` alone, so two agents
+///    whose display names slugify identically collide — and resolving the
+///    WRONG agent's memory dir would let list/read/write operations touch
+///    another agent's files (Codex P1, PR #2901).
+/// 2. **The derived default**, `default_agent_working_dir(name)` — the same
+///    path `agent.open` itself substitutes for a blank field. Needed because
+///    `agent.open` does NOT create a registry record, so stage 1 misses
+///    entirely for a freshly defined agent, which is exactly the case this
+///    whole fix targets (Codex P1, PR #2901).
+/// Takes the three identity fields explicitly rather than a struct: the two
+/// callers hold different types (`AgentInstance` from `instance_get_by_slug`,
+/// `AgentDefinition` from the by-id path) which don't share these field
+/// names. `definition_id` is the id the registry's own `definition_id`
+/// records — for `db_agents`, the consolidated definition+instance table,
+/// the instance row's `id` already IS that id (see `memory_dir_for_agent`'s
+/// own note).
+fn memory_dir_for_blank_working_dir(
+    wstore: &crate::backend::storage::store::Store,
+    definition_id: &str,
+    agent_name: &str,
+    slug: &str,
+) -> Option<std::path::PathBuf> {
+    if !slug.is_empty() {
+        if let Some(rec) = find_active_registry_record_by_slug(slug)
+            .filter(|r| r.data.definition_id == definition_id)
+        {
+            if let Some(dir) = memory_dir_for_registry_record(&rec) {
+                return Some(dir);
+            }
+        }
+    }
+    if agent_name.is_empty() {
+        return None;
+    }
+    let config_dir = wstore
+        .agent_content_get(definition_id, "env")
+        .ok()
+        .flatten()
+        .map(|c| parse_claude_config_dir(&c.content))
+        .unwrap_or_default();
+    let work_dir = crate::backend::storage::agents::default_agent_working_dir(agent_name);
+    Some(memory_dir_for_cwd(&config_dir, &work_dir))
 }
 
 /// Reconstruct one registry record's absolute memory dir directly (no slug
@@ -550,16 +629,32 @@ pub(crate) fn memory_dir_for_agent_by_id(
     wstore: &crate::backend::storage::store::Store,
     agent: &crate::backend::storage::AgentDefinition,
 ) -> Option<std::path::PathBuf> {
-    if agent.working_directory.is_empty() {
-        return None;
+    // Same blank-working_directory fallthrough as `memory_dir_for_agent`
+    // (see its own note) — a blank field is "this row can't answer", not
+    // "there is no memory dir". `agent.open` substitutes a default whenever
+    // it's blank, so such an agent still has memories on disk in a directory
+    // only the registry knows.
+    //
+    // Short-circuiting to None here was worse than the sibling's early Err,
+    // because both callers read None as a benign "no memory dir" rather than
+    // a failure (ReAgent P1, PR #2901):
+    //   - `bundle.rs`'s export_for_agent silently exports an EMPTY memory
+    //     file list, losing the agent's memories from the bundle;
+    //   - `bundle.rs`'s import_for_agent silently skips the live-fs mirror
+    //     refresh that exists specifically to avoid overwriting unmirrored
+    //     memory (reagent P0, PR #2527) — i.e. the blank-workdir case
+    //     bypassed a data-loss guard.
+    // Both for the common case, since `working_directory` is blank by default.
+    if !agent.working_directory.is_empty() {
+        let config_dir = wstore
+            .agent_content_get(&agent.id, "env")
+            .ok()
+            .flatten()
+            .map(|c| parse_claude_config_dir(&c.content))
+            .unwrap_or_default();
+        return Some(memory_dir_for_cwd(&config_dir, &agent.working_directory));
     }
-    let config_dir = wstore
-        .agent_content_get(&agent.id, "env")
-        .ok()
-        .flatten()
-        .map(|c| parse_claude_config_dir(&c.content))
-        .unwrap_or_default();
-    Some(memory_dir_for_cwd(&config_dir, &agent.working_directory))
+    memory_dir_for_blank_working_dir(wstore, &agent.id, &agent.name, &agent.slug)
 }
 
 fn version_summary_to_meta(v: crate::backend::storage::NativeMemoryVersionSummary) -> NativeMemoryVersionMeta {
@@ -2252,5 +2347,138 @@ mod tests {
         let want_tail = ["providers", "claude", "projects", "-work-proj", "memory"];
         let tail = &comps[comps.len() - want_tail.len()..];
         assert_eq!(tail, want_tail, "unexpected memory dir tail: {comps:?}");
+    }
+
+
+    /// The non-blank path is unaffected: a real working_directory still
+    /// resolves straight from the instance row, without consulting the
+    /// registry at all.
+    #[test]
+    fn non_blank_working_directory_still_resolves_from_the_instance_row() {
+        let wstore = Store::open_in_memory().unwrap();
+        let mut def = agent_def("realwd-agent", "/work/proj");
+        wstore.agent_def_insert(&mut def).unwrap();
+
+        let dir = memory_dir_for_agent(&wstore, "realwd-agent").unwrap();
+        let comps: Vec<String> = dir
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().to_string())
+            .collect();
+        let want_tail = ["projects", "-work-proj", "memory"];
+        let tail = &comps[comps.len() - want_tail.len()..];
+        assert_eq!(tail, want_tail, "unexpected memory dir tail: {comps:?}");
+    }
+
+    /// A blank `working_directory` — the DEFAULT for a newly defined agent —
+    /// must resolve to the same path `agent.open` itself substitutes, not
+    /// fail. Before the fix `memory_dir_for_agent` returned
+    /// "agent <x> has no working directory" and Armory → Memory → Personal
+    /// (and the MemoryList MCP tool) were broken for the common case, while
+    /// the agent's memory files sat on disk intact. Reproduced live:
+    ///   memory/list failed: HTTP 500 — "memory: agent manoz has no working directory"
+    ///
+    /// With no registry record present, stage 2 (the derived default) is what
+    /// must answer — the case Codex P1 flagged, since `agent.open` does not
+    /// create a registry record.
+    #[test]
+    fn blank_working_directory_resolves_to_the_same_default_agent_open_substitutes() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let wstore = Store::open_in_memory().unwrap();
+        let mut def = agent_def("blankwd-agent", "");
+        def.name = "Blank WD Agent".to_string();
+        wstore.agent_def_insert(&mut def).unwrap();
+
+        let dir = memory_dir_for_agent(&wstore, "blankwd-agent")
+            .expect("a blank working_directory must resolve, not error");
+
+        // default_agent_working_dir("Blank WD Agent") -> ~/.agentmux/agents/blank-wd-agent,
+        // which memory_dir_for_cwd sanitizes to "---agentmux-agents-blank-wd-agent"
+        // (the leading `~`, `/` and `.` each become their own dash).
+        let comps: Vec<String> = dir
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().to_string())
+            .collect();
+        let want_tail = ["projects", "---agentmux-agents-blank-wd-agent", "memory"];
+        let tail = &comps[comps.len() - want_tail.len()..];
+        assert_eq!(tail, want_tail, "unexpected memory dir tail: {comps:?}");
+    }
+
+    /// The shared helper must stay byte-identical to `agent.open`'s own
+    /// substitution — they are the same path by contract, and drift between
+    /// them is precisely what broke Personal Memory.
+    #[test]
+    fn default_agent_working_dir_matches_agent_opens_inline_derivation() {
+        for name in ["Manoz", "Blank WD Agent", "Wei_Zhang-2", "Zurich Nome"] {
+            let inline: String = name
+                .to_lowercase()
+                .chars()
+                .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+                .collect();
+            assert_eq!(
+                crate::backend::storage::agents::default_agent_working_dir(name),
+                format!("~/.agentmux/agents/{inline}"),
+                "drifted from agent_open's derivation for {name:?}",
+            );
+        }
+    }
+
+    /// Codex P1: the registry stage must be bound to the agent's own
+    /// definition. `find_active_registry_record_by_slug` matches on
+    /// `derive_slug(instance_name)` alone, so two agents whose display names
+    /// slugify the same collide — resolving the WRONG agent's memory dir
+    /// would let list/read/write touch another agent's files. A record whose
+    /// `definition_id` doesn't match must be ignored, falling through to the
+    /// derived default instead.
+    #[test]
+    fn a_registry_record_for_a_different_definition_is_never_used() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var_os("AGENTMUX_SHARED_DIR");
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var("AGENTMUX_SHARED_DIR", tmp.path());
+
+        let registry =
+            crate::registry::Registry::open(tmp.path().join("agents").join("registry")).unwrap();
+        registry
+            .upsert(&crate::registry::NamedAgentRecord {
+                schema_version: 1,
+                data: crate::registry::NamedAgentRecordV1 {
+                    instance_id: "inst-other".to_string(),
+                    // Slugifies to the same slug as our agent below...
+                    instance_name: "Collide Agent".to_string(),
+                    // ...but belongs to a DIFFERENT definition.
+                    definition_id: "def-somebody-else".to_string(),
+                    identity_id: None,
+                    memory_id: None,
+                    session_id: None,
+                    working_dir: "somebody-elses-dir".to_string(),
+                    source_agents_base: Some(tmp.path().to_string_lossy().to_string()),
+                    created_at_ms: 1,
+                    last_launched_at_ms: 1,
+                    created_by_version: "test".to_string(),
+                    last_launched_by_version: "test".to_string(),
+                },
+            })
+            .unwrap();
+
+        let wstore = Store::open_in_memory().unwrap();
+        let mut def = agent_def("collide-agent", "");
+        def.name = "Collide Agent".to_string();
+        wstore.agent_def_insert(&mut def).unwrap();
+
+        let dir = memory_dir_for_agent(&wstore, "collide-agent").unwrap();
+        let as_str = dir.to_string_lossy().to_string();
+        assert!(
+            !as_str.contains("somebody-elses-dir"),
+            "must not resolve another definition's memory dir: {as_str}",
+        );
+        assert!(
+            as_str.contains("collide-agent"),
+            "expected the derived default for this agent: {as_str}",
+        );
+
+        match prev {
+            Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SHARED_DIR"),
+        }
     }
 }
