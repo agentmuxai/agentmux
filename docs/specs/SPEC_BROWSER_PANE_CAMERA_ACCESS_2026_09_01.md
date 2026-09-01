@@ -7,6 +7,23 @@ warning below.
 **Issue:** #2871 (AgentX-asaf, closed 2026-09-01) — "Browser pane:
 getUserMedia video access is unconditionally denied". Phase 3 tracked
 separately as #2904.
+**Shipped:** Phase 0 (#2885, #2888 — callback contract verified from CEF
+source), Phase 1 (#2893 — pane identity), Phase 2a (#2895 — per-pane,
+per-origin grant store), Phase 2b (#2897 — grant-store-driven handler),
+Phase 2c (#2899 — prompt). Also #2889, closing the `--enable-media-stream`
+ingress this spec's §5 required be shut before Phase 2.
+
+**Not shipped:** Phase 3 (§4 — capture indicator + user-facing revoke).
+**Scope:** `agentmux-cef/src/client/handlers.rs` (permission handler +
+`permission_handler()` getter), `agentmux-cef/src/client/mod.rs`
+(`new_with_browser_pane`), `agentmux-cef/src/browser_pane/creation.rs`,
+`agentmux-cef/src/browser_pane/creation_views.rs`, a new grant store in
+`agentmux-srv`, and a prompt surface in the frontend.
+**Related:** `SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md` §Phase 4 — specifically its
+`4a. CEF mic-permission handler` (the handler this extends) and
+`4b. OS-permission UX (frontend)` (the layer-B precedent in §3.6) — #1591/#1602, `SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md`,
+`SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md` (per-pane surface
+precedent)
 
 > **⚠ This spec's own v1 gate is not currently met.**
 >
@@ -37,27 +54,15 @@ separately as #2904.
 > Phases 1–2 as future work. **All four of those are now out of date**; the
 > status block above is authoritative for what actually ships today.
 
-**Shipped:** Phase 0 (#2885, #2888 — callback contract verified from CEF
-source), Phase 1 (#2893 — pane identity), Phase 2a (#2895 — per-pane,
-per-origin grant store), Phase 2b (#2897 — grant-store-driven handler),
-Phase 2c (#2899 — prompt). Also #2889, closing the `--enable-media-stream`
-ingress this spec's §5 required be shut before Phase 2.
-
-**Not shipped:** Phase 3 (§4 — capture indicator + user-facing revoke).
-**Scope:** `agentmux-cef/src/client/handlers.rs` (permission handler +
-`permission_handler()` getter), `agentmux-cef/src/client/mod.rs`
-(`new_with_browser_pane`), `agentmux-cef/src/browser_pane/creation.rs`,
-`agentmux-cef/src/browser_pane/creation_views.rs`, a new grant store in
-`agentmux-srv`, and a prompt surface in the frontend.
-**Related:** `SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md` §Phase 4 — specifically its
-`4a. CEF mic-permission handler` (the handler this extends) and
-`4b. OS-permission UX (frontend)` (the layer-B precedent in §3.6) — #1591/#1602, `SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md`,
-`SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md` (per-pane surface
-precedent)
-
 ---
 
-## 1. Current behaviour (verified)
+## 1. ~~Current behaviour~~ Behaviour BEFORE this spec shipped (verified at the time)
+
+> **⛔ SUPERSEDED as of 2026-09-01.** This section described the world before
+> Phases 1–2c. It is **no longer true**: `permission_handler()` now returns a
+> pane handler backed by the grant store (`handlers.rs:74-93`), and a user can
+> grant camera to a page in a browser pane. Kept because the reasoning below is
+> what the design had to overcome — do not cite it as current behaviour.
 
 A browser pane cannot grant camera access to any page, ever. Two independent
 reasons, both deliberate:
@@ -84,6 +89,12 @@ decide audio and video independently for one request.** Any permission model
 that presents them as separate toggles will produce a UI that lies.
 
 ## 2. Correcting the premise of #2871
+
+> **⛔ SUPERSEDED as of 2026-09-01.** The gap identified here has since been
+> filled: a per-pane, per-origin grant store now exists
+> (`browser_panes/media_grants.rs`, Phase 2a / #2895). The paragraph below was
+> accurate when written and is kept because it is the finding that motivated
+> building one.
 
 The issue says the mic work "already solved the harder half of this problem for
 audio: per-pane origin-scoped grants."
@@ -257,6 +268,10 @@ not an implementation detail — the §4 revoke guarantee depends entirely on it
 
 ### 3.8 `--enable-media-stream` must be rejected at every ingress
 
+> **✅ IMPLEMENTED as of 2026-09-01 (#2889).** Both ingress paths are now
+> filtered. The text below describes the unfiltered state that made this a
+> blocking requirement, not current behaviour.
+
 An earlier revision of this spec said AgentMux "does not pass
 `--enable-media-stream` today (verified: no occurrence in `agentmux-cef` or
 `agentmux-launcher`)" and treated it as a standing constraint on future edits.
@@ -345,6 +360,12 @@ host. Scope it separately or not at all; do not let it ride along because the
 bitmask is adjacent.
 
 ## 6. Phasing
+
+> **STATUS as of 2026-09-01.** Phases 0, 1, 2a, 2b and 2c are **shipped** —
+> see the status block at the top of this document for the per-phase PR list.
+> **Phase 3 is not**, which is the unmet gate this section itself defines
+> below. The phases are described as future work in the prose that follows;
+> read them as the original plan, not as outstanding work.
 
 **~~Phase 0 — verify the async callback contract~~ — DONE (2026-09-01).**
 Answered from the CEF headers without needing a build; see §3.4 and §7 Q1/Q2.
