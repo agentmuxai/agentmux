@@ -156,36 +156,39 @@ export const GlobalBrainManager = (): JSX.Element => {
                 proved by experiment that a spawned agent never reads the host
                 file, surfacing it here was noise that invited the misreading
                 that editing it would change agent behaviour. */}
+            {/* Single <Show>: this used to be nested, the outer gating the
+                whole section on `globalConfig || hostConfig` and the inner
+                picking out this one block. With the host block gone both
+                conditions collapsed to the same atom, leaving the inner one
+                unreachable-when-false (ReAgent P2, PR #2900). The callback
+                form supplies the non-null accessor the body needs. */}
             <Show when={model.claudeGlobalConfigAtom()}>
-                <div class="global-brain-external-files">
-                    <p class="global-brain-external-files-heading">
-                        Claude Code provider config — reference only, not part of Global Memory.
-                    </p>
+                {(cfg) => (
+                    <div class="global-brain-external-files">
+                        <p class="global-brain-external-files-heading">
+                            Claude Code provider config — reference only, not part of Global Memory.
+                        </p>
 
-                    <Show when={model.claudeGlobalConfigAtom()}>
-                        {(cfg) => (
-                            <div class="global-brain-machine-config">
-                                <div class="global-brain-machine-config-header">
-                                    <span
-                                        class="global-brain-machine-config-badge"
-                                        title="Hand-maintained on disk. Identity-bound agents use a separate dir, not shown here."
-                                    >
-                                        Claude Code — shared provider config
-                                    </span>
-                                    <code class="global-brain-machine-config-path">{cfg().path}</code>
-                                </div>
-                                <p class="global-brain-machine-config-caption">Used by default spawned agents.</p>
-                                <Show
-                                    when={cfg().exists}
-                                    fallback={<p class="global-brain-machine-config-empty">No file at this path yet.</p>}
+                        <div class="global-brain-machine-config">
+                            <div class="global-brain-machine-config-header">
+                                <span
+                                    class="global-brain-machine-config-badge"
+                                    title="Hand-maintained on disk. Identity-bound agents use a separate dir, not shown here."
                                 >
-                                    <pre class="global-brain-machine-config-content">{cfg().content}</pre>
-                                </Show>
+                                    Claude Code — shared provider config
+                                </span>
+                                <code class="global-brain-machine-config-path">{cfg().path}</code>
                             </div>
-                        )}
-                    </Show>
-
-                </div>
+                            <p class="global-brain-machine-config-caption">Used by default spawned agents.</p>
+                            <Show
+                                when={cfg().exists}
+                                fallback={<p class="global-brain-machine-config-empty">No file at this path yet.</p>}
+                            >
+                                <pre class="global-brain-machine-config-content">{cfg().content}</pre>
+                            </Show>
+                        </div>
+                    </div>
+                )}
             </Show>
 
             {/* System tier — pinned above ordinary sections, always injected
