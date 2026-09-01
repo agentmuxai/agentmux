@@ -1,11 +1,13 @@
 // Copyright 2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Covers the read-only "External Claude Code files" displays in
-// GlobalBrainManager (files Claude Code itself manages, NOT part of
-// AgentMux's own Global Memory composition — codex P1, PR #2794; renamed
-// from "ambient" in PR follow-up, see §7 for why).
-// See docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §4, §7.
+// Covers the read-only "Claude Code provider config" display in
+// GlobalBrainManager — the CLAUDE.md in the isolated config dir a spawned
+// agent actually launches with, NOT part of AgentMux's own Global Memory
+// composition (codex P1, PR #2794).
+// See docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §4, §7 and
+// docs/specs/SPEC_ARMORY_DROP_HOST_CLI_CONFIG_BLOCK_2026_09_01.md (which
+// removed the sibling ~/.claude host-CLI-config display).
 
 import { cleanup, render, screen } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -86,11 +88,6 @@ describe("GlobalBrainManager shared-provider-config block", () => {
         expect(block?.querySelector("button")).toBeNull();
     });
 });
-
-// docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6/§7 — a
-// SEPARATE block, independently fetched, rendered alongside the
-// shared-provider-config block above, under the same "External Claude
-// Code files" heading.
 
 // The former "GlobalBrainManager host-config block" describe (and the
 // "both blocks render under the shared heading" test) were removed with the

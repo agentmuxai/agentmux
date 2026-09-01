@@ -153,13 +153,18 @@ export class GlobalBrainViewModel {
      *  to" callout rather than silently omitted. */
     noFileProvidersAtom: Accessor<string[]>;
 
-    // Both signals below back the "External Claude Code files" section —
-    // read-only reference displays of files Claude Code itself manages,
-    // NOT the file AgentMux's own Global Memory actually composes into
-    // (that's <agent working_directory>/CLAUDE.md, a per-agent path
-    // neither of these covers — already previewed accurately via
+    // Backs the "Claude Code provider config" section — a read-only
+    // reference display of the CLAUDE.md in the isolated config dir a
+    // spawned agent actually launches with. NOT the file AgentMux's own
+    // Global Memory composes into (that's <agent working_directory>/CLAUDE.md,
+    // a per-agent path this doesn't cover — already previewed accurately via
     // previewAtom above). See
     // docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §7.
+    //
+    // Was a PAIR of signals until 2026-09-01: the sibling ~/.claude host-CLI
+    // config signal went away with its block
+    // (SPEC_ARMORY_DROP_HOST_CLI_CONFIG_BLOCK_2026_09_01.md), once a spawned
+    // agent was proven never to read that file.
 
     private _claudeGlobalConfig = createSignal<{ path: string; content: string | null; exists: boolean } | null>(null);
     /** The CLAUDE.md at AgentMux's shared Claude provider config dir — the
