@@ -12,7 +12,7 @@ use crate::backend::rpc_types::{
     COMMAND_LIST_MEMORIES, COMMAND_GET_MEMORY,
     COMMAND_UPSERT_MEMORY, COMMAND_DELETE_MEMORY, COMMAND_REORDER_GLOBAL_BRAIN,
     COMMAND_UPSERT_SYSTEM_MEMORY, COMMAND_DELETE_SYSTEM_MEMORY,
-    COMMAND_GET_CLAUDE_GLOBAL_CONFIG, COMMAND_GET_CLAUDE_HOST_CONFIG,
+    COMMAND_GET_CLAUDE_GLOBAL_CONFIG,
     CommandGetMemoryData, CommandDeleteMemoryData, CommandReorderGlobalBrainData,
 };
 use crate::backend::storage::store::Memory;
@@ -249,21 +249,6 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
         }),
     );
 
-    // ---- Read-only: ~/.claude/CLAUDE.md — Claude Code's own global
-    // config, read by a host-level CLI outside AgentMux's CLAUDE_CONFIG_DIR
-    // isolation. A SEPARATE block from the one above, not a replacement —
-    // see docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6, §7.
-    engine.register_handler(
-        COMMAND_GET_CLAUDE_HOST_CONFIG,
-        Box::new(move |_data, _ctx| {
-            Box::pin(async move {
-                let claude_dir = crate::backend::base::get_home_dir().join(".claude");
-                let result = read_claude_global_config(&claude_dir)
-                    .map_err(|e| format!("getclaudehostconfig: {e}"))?;
-                Ok(Some(serde_json::to_value(&result).unwrap_or_default()))
-            })
-        }),
-    );
 }
 
 /// The directory a spawned Claude agent's `CLAUDE_CONFIG_DIR` env var
@@ -315,11 +300,10 @@ fn read_claude_global_config(claude_dir: &std::path::Path) -> std::io::Result<Cl
     Ok(ClaudeGlobalConfig { path: path.to_string_lossy().into_owned(), content, exists })
 }
 
-// Covers both getclaudeglobalconfig (resolve_shared_claude_provider_dir)
-// and getclaudehostconfig (~/.claude) — both handlers call this same
-// generic function against different directories, so exists/missing/
-// empty-file coverage here applies to both call sites. See
-// docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §6, §7.
+// Covers getclaudeglobalconfig (resolve_shared_claude_provider_dir).
+// The sibling getclaudehostconfig (~/.claude) handler was removed
+// 2026-09-01 — SPEC_ARMORY_DROP_HOST_CLI_CONFIG_BLOCK_2026_09_01.md.
+// See docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §5.
 #[cfg(test)]
 mod claude_global_config_tests {
     use super::*;

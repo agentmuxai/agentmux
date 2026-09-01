@@ -45,11 +45,15 @@
     font-size: var(--text-sm);
 }
 
-// ── External Claude Code files (read-only — SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §7) ──
-// Files Claude Code itself manages, NOT part of AgentMux's own Global
-// Memory composition (that's <agent working_directory>/CLAUDE.md,
-// previewed above via the "Combined preview" — a per-agent path this
-// section does not represent).
+// ── Claude Code provider config (read-only — SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §7) ──
+// The CLAUDE.md in the isolated config dir a spawned agent actually
+// launches with. NOT part of AgentMux's own Global Memory composition
+// (that's <agent working_directory>/CLAUDE.md, previewed above via the
+// "Combined preview" — a per-agent path this section does not represent).
+// Class names keep the `-external-files` prefix: the sibling ~/.claude
+// block this section once also held was removed in
+// SPEC_ARMORY_DROP_HOST_CLI_CONFIG_BLOCK_2026_09_01.md, but renaming the
+// selectors would be churn for no behavioural gain.
 
 .global-brain-external-files {
     display: flex;
