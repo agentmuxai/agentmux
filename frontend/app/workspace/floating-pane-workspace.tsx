@@ -51,7 +51,6 @@ import * as WOS from "@/store/wos";
 import { Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from "solid-js";
 
 import { REDOCK_DWELL_MS, REDOCK_VELOCITY_PX_PER_S } from "./floating-pane-constants";
-import { initFloaterCtrlWheel } from "./floater-ctrl-wheel";
 import "./floating-pane-workspace.scss";
 
 /**
@@ -123,26 +122,6 @@ function FloatingPaneWorkspaceElem(): JSX.Element {
                     );
             }
         }
-    });
-
-    // Ctrl+Wheel recovery. CEF swallows Ctrl+Wheel in a child-HWND browser, so
-    // no wheel event with `ctrlKey` ever reaches this window's DOM and none of
-    // the per-view zoom handlers can fire. The host intercepts the Win32
-    // message and forwards it; this re-dispatches it as the DOM event that was
-    // swallowed. See floater-ctrl-wheel.ts and floater_wheel.rs.
-    onMount(() => {
-        let dispose: (() => void) | null = null;
-        let disposed = false;
-        void initFloaterCtrlWheel().then((fn) => {
-            // The listener resolves async; if this component unmounted first,
-            // tear it down immediately rather than leaking it.
-            if (disposed) fn();
-            else dispose = fn;
-        });
-        onCleanup(() => {
-            disposed = true;
-            dispose?.();
-        });
     });
 
     // Pane-header drag — Windows: Win32BeginMoveTask host-side loop (PR #1276).

@@ -34,8 +34,6 @@ mod srv_ipc;
 mod memory_heartbeat;
 mod memory_pressure;
 mod browser_pane;
-#[cfg(target_os = "windows")]
-mod floater_wheel;
 mod credential_broker;
 #[cfg(target_os = "windows")]
 mod floating_pane;

@@ -360,7 +360,7 @@ impl AgentMuxHandler {
 
     pub(crate) fn on_load_end(
         &mut self,
-        mut browser: Option<&mut Browser>,
+        browser: Option<&mut Browser>,
         frame: Option<&mut Frame>,
         _http_status_code: i32,
     ) {
@@ -370,58 +370,6 @@ impl AgentMuxHandler {
 
         if frame.is_main() != 1 {
             return;
-        }
-
-        // Ctrl+Wheel recovery for floating panes. Installed here rather than in
-        // `on_after_created` because Chromium recreates
-        // `Chrome_RenderWidgetHostHWND` on every page load, so a subclass
-        // installed once ends up stranded on a destroyed HWND — the same reason
-        // `install_browser_pane_focus_redirect` is wired from BOTH create and
-        // load-end. Main-frame load-end covers first paint and every subsequent
-        // navigation, including a pane-pool window being promoted to a real
-        // floater (which re-navigates and may change label). Idempotent:
-        // already-subclassed HWNDs are skipped. See floater_wheel.rs.
-        #[cfg(target_os = "windows")]
-        if let Some(b) = browser.as_mut() {
-            // Reborrow `&mut &mut Browser` down to `&mut Browser` for
-            // `window_label_for`; the outer Option must stay usable below, so it
-            // cannot be moved out of.
-            let b: &mut Browser = b;
-            if let Some(label) = self.window_label_for(b) {
-                if label.starts_with("floating-") {
-                    // Resolve via the cached outer HWND, NOT
-                    // `BrowserHost::window_handle()`. That returns null after
-                    // page load for `set_as_child`-embedded browsers — exactly
-                    // the embedding floaters use — which is already diagnosed in
-                    // SPEC_POOL_WINDOW_HWND_NULL_2026_05_06.md and worked around
-                    // the same way elsewhere in this codebase. Trusting it here
-                    // would make the hook silently fail to install on the very
-                    // path it exists for. (reagentx P1 on PR #2884.)
-                    let hwnd = unsafe {
-                        crate::commands::window::resolve_window_hwnd(
-                            &self.state,
-                            &label,
-                        )
-                    };
-                    if hwnd.is_null() {
-                        // Loud rather than silent: a missing hook presents as
-                        // "Ctrl+Wheel does nothing", indistinguishable from the
-                        // original bug.
-                        tracing::warn!(
-                            "[floater-wheel] no HWND for label={} — ctrl+wheel hook NOT installed",
-                            label
-                        );
-                    } else {
-                        unsafe {
-                            crate::floater_wheel::install_floater_ctrl_wheel_hook(
-                                &self.state,
-                                hwnd,
-                                &label,
-                            );
-                        }
-                    }
-                }
-            }
         }
 
         // Re-inject the host IPC creds on EVERY main-frame load of OUR OWN
