@@ -161,6 +161,40 @@ normally runs at reducer write-time, so violations here mean corruption that
 is already persisted — including in trees written by older builds that never
 ran the check. That is the case this command catches which nothing else does.
 
+## Inspecting the work queue (`work`)
+
+```bash
+muxspect work              # every item, any state
+muxspect work open         # just the claimable backlog
+muxspect work claimed      # what is being worked right now, and by whom
+muxspect work --json
+```
+
+Muxqueue is the shared backlog any agent can add to and any agent can claim —
+the pull counterpart to jekt's addressed push delivery. See
+`docs/reports/REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md`.
+
+Each item shows its state, current holder, attempts burned against its limit,
+any kind/target restriction, and the `result` field — which is the completion
+trace on a `done` item and the reason on a `failed` or handed-back one.
+
+**The thing to look for: `LEASE EXPIRED`.** A claimed item whose lease has
+lapsed has no one working it, but nothing surfaces that on its own — the row
+still says `claimed`, and it only returns to the pool the next time some agent
+calls `WorkClaim` (reaping happens on claim; there is no background sweeper).
+So a queue that looks busy can be entirely idle. This command flags those rows
+explicitly and totals them at the end, rather than making you compare epoch
+timestamps by eye.
+
+Read-only, like the rest of `muxspect` — it never claims, completes, or cancels
+anything. Use the `Work*` MCP tools for that.
+
+**Scope note:** unlike everything else here, the queue lives in the
+always-global identity store, so `muxspect work` shows items enqueued from
+*any* channel on this machine, not just the instance you are inside. That is
+deliberate — a per-channel queue would defeat the point — but it does mean this
+one command is not subject to the single-instance limitation described below.
+
 ## What it can and can't see
 
 `muxspect` is a thin, read-only client over the same `ProcessBroker`
