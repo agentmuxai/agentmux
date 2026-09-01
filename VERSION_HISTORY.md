@@ -18,7 +18,7 @@
 - fix(agent-pane): drop composer strip's duplicate centered token/elapsed stats
 - feat(term): add configurable scroll wheel sensitivity setting
 - docs(agent): spec retry for transient failures on turns with no rendered pane
-- fix(auth): enforce per-channel login — close four paths that let an agent reach Claude without one
+- fix(auth): enforce per-channel login — close five paths that let an agent reach Claude without one
 - docs(spec): codex round-3 corrections to the epoch resync design + container scope
 - docs(browser-pane): spec camera (getUserMedia video) access, per issue #2871
 - feat(agent-pane): per-node shrink attribution in the wave-scroll-shrink diagnostic
