@@ -338,24 +338,27 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 let auth_dir = agentmux_common::DataPaths::from_env()
                     .map(|p| p.provider_auth_dir(provider.auth_dir_name).to_string_lossy().into_owned())
                     .unwrap_or_else(|| format!("{}/.agentmux/shared/providers/{}", home, provider.auth_dir_name));
-                let _ = std::fs::create_dir_all(&auth_dir);
-                env_vars.insert(provider.auth_config_dir_env_var.to_string(), json!(auth_dir));
-                // Claude Code CLI's own user-level CLAUDE.md discovery falls
-                // through to the real $HOME/.claude/CLAUDE.md when this
-                // isolated dir has none of its own — CLAUDE_CONFIG_DIR only
-                // relocates credential/session/project storage, not this.
-                // Fail closed (block the spawn) rather than warn-and-continue
-                // on a seed failure: continuing would launch the agent with
-                // exactly the unprotected condition this fix exists to
-                // close (Codex P1 + ReAgent P1 on PR #2854). No-op (Ok) for
-                // non-claude providers, so this never blocks their spawns.
+                // Create the dir AND apply its isolation guarantees in one
+                // inseparable step. Claude Code CLI's own user-level CLAUDE.md
+                // discovery falls through to the real $HOME/.claude/CLAUDE.md
+                // when this isolated dir has none of its own — CLAUDE_CONFIG_DIR
+                // relocates credential/session/project storage but NOT that
+                // lookup (proven live, three-arm experiment:
+                // docs/reports/REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md).
+                //
+                // Fail closed (block the spawn) rather than warn-and-continue:
+                // continuing would launch the agent with exactly the
+                // unprotected condition this exists to close (Codex P1 +
+                // ReAgent P1, PR #2854). Non-claude providers get the dir
+                // created and nothing else, so this never blocks their spawns.
                 // See SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md.
-                providers::seed_claude_md_placeholder_if_missing(provider, &auth_dir).map_err(|e| {
+                providers::prepare_provider_auth_dir(provider, &auth_dir).map_err(|e| {
                     format!(
                         "failed to isolate this agent's Claude Code config ({auth_dir}): {e}. \
                          Refusing to launch with an unprotected config dir."
                     )
                 })?;
+                env_vars.insert(provider.auth_config_dir_env_var.to_string(), json!(auth_dir));
                 for (k, v) in provider.auth_extra_env {
                     env_vars.insert(k.to_string(), json!(v));
                 }

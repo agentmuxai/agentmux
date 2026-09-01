@@ -700,6 +700,35 @@ pub fn seed_claude_md_placeholder_if_missing(
     Ok(true)
 }
 
+/// Prepare an isolated provider auth/config directory for use as
+/// `CLAUDE_CONFIG_DIR` (or a provider's equivalent): create it, then apply
+/// every isolation guarantee that directory needs before a CLI is pointed
+/// at it.
+///
+/// Exists so callers cannot obtain a usable auth dir WITHOUT its isolation
+/// guarantees — the spawn paths call this instead of `create_dir_all` +
+/// a separately-skippable seed step. Deleting the isolation from a spawn
+/// path now means deleting the directory preparation too, which fails
+/// loudly instead of silently reopening the leak. See
+/// `docs/specs/SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md` and
+/// `docs/reports/REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md`
+/// (the live three-arm experiment proving the leak is real and this closes
+/// it).
+pub fn prepare_provider_auth_dir(
+    provider: &ProviderConfig,
+    auth_dir: &str,
+) -> std::io::Result<()> {
+    if auth_dir.trim().is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "auth_dir is empty",
+        ));
+    }
+    std::fs::create_dir_all(auth_dir)?;
+    seed_claude_md_placeholder_if_missing(provider, auth_dir)?;
+    Ok(())
+}
+
 /// The actual comparison, split out with the reference side pre-resolved
 /// (not calling `get_home_dir()` internally) so it's directly testable
 /// against a tempdir instead of the real `$HOME`/`%USERPROFILE%` — same
@@ -1118,6 +1147,59 @@ mod tests {
         fn rejects_a_whitespace_only_config_dir() {
             let claude = get_provider("claude").unwrap();
             let err = seed_claude_md_placeholder_if_missing(claude, "   ").unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        }
+    }
+
+    mod prepare_provider_auth_dir_tests {
+        use super::*;
+
+        // The default spawn path (agent_open.rs) previously did
+        // `create_dir_all` and the isolation seed as two separate,
+        // independently-deletable statements, with no test covering the
+        // seed call at all — removing that one line reopened the leak
+        // silently. Fusing them means a caller cannot get a usable auth
+        // dir without its isolation guarantees.
+        #[test]
+        fn creates_the_dir_and_seeds_the_claude_placeholder_together() {
+            let base = tempfile::tempdir().unwrap();
+            let dir = base.path().join("not").join("yet").join("there");
+            let claude = get_provider("claude").unwrap();
+            prepare_provider_auth_dir(claude, &dir.to_string_lossy()).unwrap();
+            assert!(dir.is_dir(), "auth dir must be created");
+            let content = std::fs::read_to_string(dir.join("CLAUDE.md")).unwrap();
+            assert!(content.contains("AgentMux: intentionally empty"));
+        }
+
+        #[test]
+        fn creates_the_dir_without_a_claude_md_for_a_non_claude_provider() {
+            let base = tempfile::tempdir().unwrap();
+            let dir = base.path().join("codexhome");
+            let codex = get_provider("codex").unwrap();
+            prepare_provider_auth_dir(codex, &dir.to_string_lossy()).unwrap();
+            assert!(dir.is_dir(), "auth dir must still be created");
+            assert!(!dir.join("CLAUDE.md").exists(), "must not seed a foreign provider's dir");
+        }
+
+        #[test]
+        fn is_idempotent_and_never_clobbers_existing_content() {
+            let base = tempfile::tempdir().unwrap();
+            let dir = base.path().join("iso");
+            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::write(dir.join("CLAUDE.md"), "real user content").unwrap();
+            let claude = get_provider("claude").unwrap();
+            prepare_provider_auth_dir(claude, &dir.to_string_lossy()).unwrap();
+            prepare_provider_auth_dir(claude, &dir.to_string_lossy()).unwrap();
+            assert_eq!(
+                std::fs::read_to_string(dir.join("CLAUDE.md")).unwrap(),
+                "real user content",
+            );
+        }
+
+        #[test]
+        fn rejects_an_empty_auth_dir_instead_of_touching_the_cwd() {
+            let claude = get_provider("claude").unwrap();
+            let err = prepare_provider_auth_dir(claude, "   ").unwrap_err();
             assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
         }
     }
