@@ -32,6 +32,18 @@ in-app agents — see the block above for what they use."* That claim is
 
 ### Root cause
 
+> **Verified 2026-09-01.** This section originally stated the mechanism as
+> an *inference* from circumstantial evidence. It has since been proven by
+> a controlled three-arm experiment — control (leaks the host file),
+> treatment (does not), sensitivity (instrument confirmed able to see this
+> surface). See
+> `docs/reports/REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md`,
+> which also measures the *other* `~/.claude` surfaces: `settings.json` and
+> `skills/` turn out to be **properly isolated** already, making `CLAUDE.md`
+> the only confirmed leak. That report additionally records a methodological
+> trap — a first pass with imprecise prompt phrasing returned a false "no
+> leak" from every arm — worth reading before re-testing any of this.
+
 `CLAUDE_CONFIG_DIR` relocates Claude Code CLI's credential/session/
 project storage (confirmed on-disk: `.credentials.json`, `.claude.json`,
 `projects/`, `sessions/`), but AgentMux never writes a `CLAUDE.md` into
