@@ -32,15 +32,40 @@
 
 import { listenEvent } from "@/app/platform/ipc";
 
-type CtrlWheelPayload = { deltaY?: number };
+type CtrlWheelPayload = {
+    deltaY?: number;
+    /** Physical (device) px, client-relative to the floater's top-level window. */
+    clientXPhysical?: number;
+    clientYPhysical?: number;
+};
 
-/** Element to aim the synthesised event at. */
-function resolveTarget(): Element | null {
-    // A floater wraps exactly one block, so its content is the only sensible
-    // target. Aim at the deepest element at the block's centre so the event
-    // propagates through the view root that owns the capture-phase handler,
-    // rather than being dispatched directly on the root (which would skip
-    // nothing, but would misreport `event.target` to anything inspecting it).
+/** Where the event happened, in CSS px, or null if the host couldn't supply it. */
+function resolvePoint(p: CtrlWheelPayload): { x: number; y: number } | null {
+    if (typeof p.clientXPhysical !== "number" || typeof p.clientYPhysical !== "number") {
+        return null;
+    }
+    const dpr = window.devicePixelRatio || 1;
+    return { x: Math.round(p.clientXPhysical / dpr), y: Math.round(p.clientYPhysical / dpr) };
+}
+
+/**
+ * Element to aim the synthesised event at.
+ *
+ * Uses the real cursor position when the host supplied it, because Ctrl+Wheel is
+ * NOT uniform across a pane: agent shell sub-blocks (`AgentShellSubblock.tsx`)
+ * and tool previews (`ToolBlock.tsx`) register their own independently scoped
+ * handlers, and the pane header takes a different zoom path. Aiming everything
+ * at the block centre would zoom the whole block no matter what was under the
+ * cursor.
+ *
+ * Falls back to the block centre only when the point is missing or lands outside
+ * the document — better a whole-block zoom than none.
+ */
+function resolveTarget(point: { x: number; y: number } | null): Element | null {
+    if (point) {
+        const hit = document.elementFromPoint(point.x, point.y);
+        if (hit) return hit;
+    }
     const block = document.querySelector("[data-blockid]");
     if (!block) return null;
     const r = block.getBoundingClientRect();
@@ -61,7 +86,8 @@ export async function initFloaterCtrlWheel(): Promise<() => void> {
         const deltaY = typeof payload?.deltaY === "number" ? payload.deltaY : 0;
         if (deltaY === 0) return;
 
-        const target = resolveTarget();
+        const point = resolvePoint(payload);
+        const target = resolveTarget(point);
         if (!target) return;
 
         target.dispatchEvent(
@@ -69,6 +95,11 @@ export async function initFloaterCtrlWheel(): Promise<() => void> {
                 ctrlKey: true,
                 deltaY,
                 deltaMode: 0, // DOM_DELTA_PIXEL, matching a real wheel event
+                // Carry the position through as well: handlers that inspect
+                // `clientX/Y` (or call `closest()` from `event.target`) then see
+                // the same geometry a real wheel would have produced.
+                clientX: point?.x ?? 0,
+                clientY: point?.y ?? 0,
                 bubbles: true,
                 cancelable: true,
                 composed: true,

@@ -76,6 +76,9 @@ static FLOATER_WHEEL_CONTEXT: std::sync::LazyLock<
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
 const WM_MOUSEWHEEL: u32 = 0x020A;
+/// Sent to a window as it is being destroyed, after its children are gone. Used
+/// to purge map entries so a reused HWND value can't inherit a stale hook.
+const WM_NCDESTROY: u32 = 0x0082;
 /// `MK_CONTROL`, low word of `wParam`.
 const MK_CONTROL: usize = 0x0008;
 
@@ -107,6 +110,30 @@ unsafe extern "system" fn wndproc_hook(
 ) -> isize {
     use windows_sys::Win32::UI::WindowsAndMessaging::CallWindowProcW;
 
+    // Purge before anything else. Chromium destroys and recreates
+    // `Chrome_RenderWidgetHostHWND` on every navigation; without this the dead
+    // descendant stays in FLOATER_WHEEL_WNDPROCS, and because Windows reuses
+    // numeric HWND values, a later widget landing on the same value would be
+    // seen as "already subclassed" and skipped — silently losing Ctrl+Wheel on
+    // the very window this hook exists to fix. Destruction has already restored
+    // the system WndProc, so only the bookkeeping needs clearing.
+    // (codex P2 on PR #2884.)
+    if msg == WM_NCDESTROY {
+        let original = FLOATER_WHEEL_WNDPROCS
+            .lock()
+            .ok()
+            .and_then(|mut m| m.remove(&(hwnd as usize)))
+            .unwrap_or(0);
+        if let Ok(mut m) = FLOATER_WHEEL_CONTEXT.lock() {
+            m.remove(&(hwnd as usize));
+        }
+        // Still chain, so the original WndProc sees its own destruction.
+        if original != 0 {
+            return CallWindowProcW(Some(std::mem::transmute(original)), hwnd, msg, wparam, lparam);
+        }
+        return windows_sys::Win32::UI::WindowsAndMessaging::DefWindowProcW(hwnd, msg, wparam, lparam);
+    }
+
     if msg == WM_MOUSEWHEEL && (wparam & MK_CONTROL) != 0 {
         // High word of wParam, signed: positive = wheel forward/away from the
         // user (zoom in), negative = toward the user (zoom out). Passed through
@@ -116,13 +143,47 @@ unsafe extern "system" fn wndproc_hook(
         let raw_delta = (wparam >> 16) as u16 as i16;
         let delta_y = -(raw_delta as f64);
 
+        // Forward WHERE the user scrolled, not just how much. `lParam` carries
+        // SCREEN coordinates for WM_MOUSEWHEEL (unlike most mouse messages,
+        // which are client-relative). Converted to client space here because
+        // only the host knows which HWND the point should be relative to.
+        //
+        // This matters because Ctrl+Wheel is not uniform across a pane: an
+        // agent shell sub-block (`AgentShellSubblock.tsx`) and a tool preview
+        // (`ToolBlock.tsx`) register their own independently scoped handlers,
+        // and the pane header follows a different zoom path entirely. Aiming
+        // every synthetic event at the block centre would zoom the whole block
+        // regardless of what the cursor was over. (codex P2 on PR #2884.)
+        let screen_x = (lparam & 0xFFFF) as i16 as i32;
+        let screen_y = ((lparam >> 16) & 0xFFFF) as i16 as i32;
+        let mut pt = windows_sys::Win32::Foundation::POINT { x: screen_x, y: screen_y };
+        // Client-relative to the top-level window, whose client area is the
+        // renderer viewport (floating_pane_wndproc returns 0 from
+        // WM_NCCALCSIZE, so client == whole window). Physical px; the frontend
+        // divides by devicePixelRatio to reach CSS px.
+        let root = windows_sys::Win32::UI::WindowsAndMessaging::GetAncestor(
+            hwnd,
+            windows_sys::Win32::UI::WindowsAndMessaging::GA_ROOT,
+        );
+        let anchor = if root.is_null() { hwnd } else { root };
+        let converted =
+            windows_sys::Win32::Graphics::Gdi::ScreenToClient(anchor, &mut pt) != 0;
+
         if let Some(ctx) = find_context(hwnd) {
             if let Some(state) = ctx.state.upgrade() {
+                let mut payload = serde_json::json!({ "deltaY": delta_y });
+                // Omit the point rather than sending a bogus one if the
+                // conversion failed; the frontend falls back to the block
+                // centre only when it is absent.
+                if converted {
+                    payload["clientXPhysical"] = serde_json::json!(pt.x);
+                    payload["clientYPhysical"] = serde_json::json!(pt.y);
+                }
                 crate::events::emit_event_to_window(
                     &state,
                     &ctx.label,
                     "floater:ctrl-wheel",
-                    &serde_json::json!({ "deltaY": delta_y }),
+                    &payload,
                 );
                 // Consume: do NOT call the original WndProc. Letting it run is
                 // what produces CEF's native shared page zoom.
@@ -227,6 +288,35 @@ pub unsafe fn install_floater_ctrl_wheel_hook(
         1 // continue enumeration
     }
     EnumChildWindows(hwnd, Some(enum_children), 0);
+}
+
+/// Re-point every context registered under `old_label` at `new_label`.
+///
+/// Needed by the pane-pool promotion path, which relabels the browser
+/// (`floating-pool-*` → `floating-*`) and bootstraps the renderer through
+/// `pool:pane-promote` + `history.replaceState` **without navigating**. Since
+/// the hook is installed from `on_load_end`, nothing else would ever refresh the
+/// label, and every forwarded wheel would be emitted to a label that no longer
+/// resolves to a browser — silently dropping Ctrl+Wheel on exactly the floaters
+/// that came from the pool. Close-time cleanup, keyed on the new label, would
+/// also fail to find the context. (codex P1 on PR #2884.)
+pub fn relabel_floater_ctrl_wheel_hook(old_label: &str, new_label: &str) {
+    let Ok(mut map) = FLOATER_WHEEL_CONTEXT.lock() else { return };
+    let mut n = 0usize;
+    for ctx in map.values_mut() {
+        if ctx.label == old_label {
+            ctx.label = new_label.to_string();
+            n += 1;
+        }
+    }
+    if n > 0 {
+        tracing::info!(
+            "[floater-wheel] relabelled {} ctrl+wheel context(s) {} -> {}",
+            n,
+            old_label,
+            new_label
+        );
+    }
 }
 
 /// Restore original WndProcs and drop bookkeeping for a closing floater.

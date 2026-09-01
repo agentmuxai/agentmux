@@ -384,21 +384,40 @@ impl AgentMuxHandler {
         #[cfg(target_os = "windows")]
         if let Some(b) = browser.as_mut() {
             // Reborrow `&mut &mut Browser` down to `&mut Browser` for
-            // `window_label_for`/`host`; the outer Option must stay usable
-            // below, so it cannot be moved out of.
+            // `window_label_for`; the outer Option must stay usable below, so it
+            // cannot be moved out of.
             let b: &mut Browser = b;
             if let Some(label) = self.window_label_for(b) {
                 if label.starts_with("floating-") {
-                    if let Some(host) = b.host() {
-                        let wh = host.window_handle();
-                        if !wh.0.is_null() {
-                            unsafe {
-                                crate::floater_wheel::install_floater_ctrl_wheel_hook(
-                                    &self.state,
-                                    wh.0 as *mut std::ffi::c_void,
-                                    &label,
-                                );
-                            }
+                    // Resolve via the cached outer HWND, NOT
+                    // `BrowserHost::window_handle()`. That returns null after
+                    // page load for `set_as_child`-embedded browsers — exactly
+                    // the embedding floaters use — which is already diagnosed in
+                    // SPEC_POOL_WINDOW_HWND_NULL_2026_05_06.md and worked around
+                    // the same way elsewhere in this codebase. Trusting it here
+                    // would make the hook silently fail to install on the very
+                    // path it exists for. (reagentx P1 on PR #2884.)
+                    let hwnd = unsafe {
+                        crate::commands::window::resolve_window_hwnd(
+                            &self.state,
+                            &label,
+                        )
+                    };
+                    if hwnd.is_null() {
+                        // Loud rather than silent: a missing hook presents as
+                        // "Ctrl+Wheel does nothing", indistinguishable from the
+                        // original bug.
+                        tracing::warn!(
+                            "[floater-wheel] no HWND for label={} — ctrl+wheel hook NOT installed",
+                            label
+                        );
+                    } else {
+                        unsafe {
+                            crate::floater_wheel::install_floater_ctrl_wheel_hook(
+                                &self.state,
+                                hwnd,
+                                &label,
+                            );
                         }
                     }
                 }
