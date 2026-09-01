@@ -228,6 +228,36 @@ pub(crate) fn persist_last_failure(
             return;
         }
     }
+    // Every classified agent failure gets exactly one log line, here at the
+    // shared choke point rather than at the call sites. Deliberately does not
+    // enumerate or count them: a draft of the accompanying spec said "three",
+    // review found more, a recount said "nine", and review caught that the
+    // recount was wrong too. Every path funnels through this function, so this
+    // covers them all — including the ones nobody counted correctly, and the
+    // next one added.
+    //
+    // Before this, a classified failure left NO trace in the srv log at all:
+    // none of those sites logged, and the only logged classification was
+    // `agents/runner.rs`'s "agent run failed", which is a different path that a
+    // controller-driven turn never takes. That made a whole class of question
+    // unanswerable from logs — "did my cron agent hit a 429 overnight?" had no
+    // answer, and an empty grep looked like "it never happens" rather than
+    // "it is never recorded". See
+    // docs/specs/SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31.md §Phase 0.
+    //
+    // Logged only for `Some` — this is also called with `None` after every
+    // clean turn, and that is not an event worth a line.
+    if let Some(f) = failure {
+        tracing::warn!(
+            target: "agent-failure",
+            block_id = %block_id,
+            code = ?f.code,
+            retryable = f.retryable,
+            "agent failure classified: {}",
+            f.title,
+        );
+    }
+
     let oref_str = format!("block:{}", block_id);
     let mut meta_update = crate::backend::obj::MetaMapType::new();
     let val = match failure {
