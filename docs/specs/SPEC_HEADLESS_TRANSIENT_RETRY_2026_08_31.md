@@ -1,7 +1,10 @@
 # Transient-failure retry for turns with no rendered pane
 
 **Date:** 2026-08-31
-**Status:** Proposal. Not implemented.
+**Status:** active — Phase 0(a) (instrumentation) shipped in PR #2886; the
+classification is now logged at `persist_last_failure`. Phase 0(b) (read the
+data and decide whether to build) and Phases 1-3 are not started, and per §4
+Phase 0(b) may well conclude this should not be built.
 **Owner:** unassigned
 **Scope:** `agentmux-srv/src/backend/blockcontroller/persistent.rs`,
 `agentmux-srv/src/backend/blockcontroller/subprocess/host_spawn.rs`,
