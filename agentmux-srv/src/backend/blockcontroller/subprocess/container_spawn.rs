@@ -139,11 +139,12 @@ impl SubprocessController {
     /// of running `docker exec -e KEY=VALUE ...` as a CLI subprocess (which exposes
     /// secrets in process argv / `/proc/<pid>/cmdline`, CWE-214), this method calls
     /// `ContainerManager::exec` directly, passing env vars through
-    /// `CreateExecOptions.env` (Docker socket). The exec I/O (argv-carried prompt
+    /// `CreateExecOptions.env` (Docker socket). The exec I/O (file-backed prompt
     /// + stdout NDJSON stream) drives the same state machine as `spawn_turn`:
     ///   • appends `--resume <sid>` if a prior session_id is known
-    ///   • passes the turn message as a trailing argv token (NOT stdin — see
-    ///     the comment on `cmd` below for why stdin cannot work here)
+    ///   • uploads the turn message into the container as a file and redirects
+    ///     the CLI's stdin from it — see `container_turn_exec` for why the
+    ///     exec's own stdin, argv, and env are all unusable for this
     ///   • reads NDJSON from the output stream, publishing WPS blockfile events
     ///   • captures session_id from the provider's init event
     ///   • transitions status running → done
@@ -251,7 +252,16 @@ impl SubprocessController {
                 Ok(prompt_path) => {
                     let wrapped = container_turn_exec(&prompt_path, cmd);
                     // attach_stdin: false — the CLI's stdin is the prompt file.
-                    cm.exec(&container_name, &wrapped, None, &container_env, false).await
+                    match cm.exec(&container_name, &wrapped, None, &container_env, false).await {
+                        Ok(session) => Ok(session),
+                        Err(e) => {
+                            // The wrapper never ran, so neither did its
+                            // `rm -f "$F"` — clean up here or the prompt is
+                            // orphaned in the container (reagent P2, PR #2883).
+                            cm.remove_turn_prompt(&container_name, &prompt_path).await;
+                            Err(e)
+                        }
+                    }
                 }
                 Err(e) => Err(e),
             };

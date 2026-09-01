@@ -90,6 +90,53 @@ pub struct ExecSession {
     pub output: Pin<Box<dyn futures_util::Stream<Item = Result<bollard::container::LogOutput, bollard::errors::Error>> + Send>>,
 }
 
+/// Parse `id -u; id -g` output into `(uid, gid)`.
+///
+/// Split out so the parse is testable without a Docker daemon, and so a
+/// malformed or empty probe result is `None` — never a silent `(0, 0)`, which
+/// would produce a prompt file the exec user can neither read nor delete.
+fn parse_id_output(out: &str) -> Option<(u64, u64)> {
+    let mut fields = out.split_whitespace();
+    let uid: u64 = fields.next()?.parse().ok()?;
+    let gid: u64 = fields.next()?.parse().ok()?;
+    Some((uid, gid))
+}
+
+#[cfg(test)]
+mod exec_identity_tests {
+    use super::parse_id_output;
+
+    #[test]
+    fn parses_the_ordinary_two_line_form() {
+        assert_eq!(parse_id_output("1000\n1000\n"), Some((1000, 1000)));
+    }
+
+    #[test]
+    fn parses_root_and_a_split_uid_gid() {
+        assert_eq!(parse_id_output("0\n0\n"), Some((0, 0)));
+        assert_eq!(parse_id_output("1000\n2000\n"), Some((1000, 2000)));
+    }
+
+    /// Docker multiplexes frames, so the two numbers may arrive however they
+    /// arrive — whitespace splitting must not care.
+    #[test]
+    fn tolerates_arbitrary_whitespace_and_framing() {
+        assert_eq!(parse_id_output("  1000 \r\n  1000  \r\n"), Some((1000, 1000)));
+        assert_eq!(parse_id_output("1000 1000"), Some((1000, 1000)));
+    }
+
+    /// The whole point of returning Option: a failed or truncated probe must
+    /// NOT silently become root (reagent P1, PR #2883).
+    #[test]
+    fn a_missing_or_malformed_probe_is_none_not_root() {
+        assert_eq!(parse_id_output(""), None);
+        assert_eq!(parse_id_output("1000"), None, "gid missing");
+        assert_eq!(parse_id_output("id: command not found"), None);
+        assert_eq!(parse_id_output("uid=1000(agent)"), None, "not the -u form");
+        assert_eq!(parse_id_output("-1\n-1\n"), None, "negative is not a uid");
+    }
+}
+
 /// Errors from container operations.
 #[derive(Debug, thiserror::Error)]
 pub enum ContainerError {
@@ -290,13 +337,19 @@ impl ContainerManager {
     /// hundred-KB ones, until a live check caught the files piling up.
     ///
     /// Resolved by asking the container rather than assuming a uid, so this
-    /// holds for any image regardless of which user it runs as. Cached per
-    /// container — the answer can't change while the container lives. Falls
-    /// back to `(0, 0)` if the probe fails, which is no worse than the tar
-    /// default.
-    async fn exec_identity(&self, container_name: &str) -> (u64, u64) {
+    /// holds for any image regardless of which user it runs as.
+    ///
+    /// **Only a successful probe is cached.** An earlier cut cached a `(0, 0)`
+    /// fallback on any failure, including a transient Docker hiccup — which
+    /// poisoned the cache for the container's whole life (reagent P1, PR
+    /// #2883). That is not a degraded mode but a permanent break: at mode
+    /// 0600 a root-owned prompt file is unreadable AND un-unlinkable by the
+    /// real exec user, so every later turn on that container would fail to
+    /// open its prompt and orphan another file. A failure now returns `None`
+    /// and is retried on the next turn.
+    async fn exec_identity(&self, container_name: &str) -> Option<(u64, u64)> {
         if let Some(hit) = self.inner.exec_identities.lock().await.get(container_name) {
-            return *hit;
+            return Some(*hit);
         }
 
         let probe = async {
@@ -315,26 +368,68 @@ impl ContainerManager {
             while let Some(Ok(frame)) = stream.next().await {
                 out.push_str(&frame.to_string());
             }
-            let mut lines = out.split_whitespace();
-            let uid: u64 = lines.next()?.trim().parse().ok()?;
-            let gid: u64 = lines.next()?.trim().parse().ok()?;
-            Some((uid, gid))
+            parse_id_output(&out)
         }
         .await;
 
-        let resolved = probe.unwrap_or((0, 0));
-        if probe.is_none() {
-            tracing::warn!(
-                container = container_name,
-                "could not resolve container exec uid/gid; prompt files may not be removable",
-            );
+        match probe {
+            Some(resolved) => {
+                self.inner
+                    .exec_identities
+                    .lock()
+                    .await
+                    .insert(container_name.to_string(), resolved);
+                Some(resolved)
+            }
+            None => {
+                // NOT cached — the next turn probes again.
+                tracing::warn!(
+                    container = container_name,
+                    "could not resolve container exec uid/gid; will retry next turn",
+                );
+                None
+            }
         }
-        self.inner
-            .exec_identities
-            .lock()
-            .await
-            .insert(container_name.to_string(), resolved);
-        resolved
+    }
+
+    /// Remove a prompt file uploaded by [`upload_turn_prompt`].
+    ///
+    /// The turn's own wrapper script removes the file after the CLI exits, so
+    /// this is only for the path where the wrapper never runs at all — the
+    /// upload succeeded but starting the exec failed, which would otherwise
+    /// orphan the file (reagent P2, PR #2883).
+    ///
+    /// Best-effort by design: it runs as the same user that owns the file, and
+    /// a failure here is not worth failing an already-failing turn over.
+    pub async fn remove_turn_prompt(&self, container_name: &str, prompt_path: &str) {
+        let removed = self
+            .exec(
+                container_name,
+                &[
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    r#"rm -f "$1""#.to_string(),
+                    "agentmux-cleanup".to_string(),
+                    prompt_path.to_string(),
+                ],
+                None,
+                &[],
+                false,
+            )
+            .await;
+        match removed {
+            Ok(session) => {
+                // Drive the stream to completion so the exec actually runs —
+                // Docker starts it lazily on the attached connection.
+                let mut stream = session.output;
+                while let Some(Ok(_)) = stream.next().await {}
+            }
+            Err(e) => tracing::warn!(
+                container = container_name,
+                path = prompt_path,
+                "could not remove orphaned prompt file: {e}",
+            ),
+        }
     }
 
     /// Write a turn's prompt into the container as a file, returning its
@@ -369,7 +464,16 @@ impl ContainerManager {
         turn_id: &str,
         message: &str,
     ) -> Result<String, ContainerError> {
-        let (uid, gid) = self.exec_identity(container_name).await;
+        // No usable uid means no usable file: at 0600 a root-owned prompt is
+        // unreadable by the exec user, and /tmp's sticky bit makes it
+        // un-unlinkable too. Failing here is a clear, retryable error; writing
+        // it anyway would be a permission-denied on open plus a leaked file.
+        let (uid, gid) = self.exec_identity(container_name).await.ok_or_else(|| {
+            ContainerError::NotAvailable(format!(
+                "could not resolve the exec user of container {container_name}; \
+                 cannot write a readable turn prompt"
+            ))
+        })?;
         let file_name = format!("agentmux-turn-{turn_id}");
         let bytes = message.as_bytes();
 
