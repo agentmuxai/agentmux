@@ -239,6 +239,40 @@ impl SubprocessController {
         tokio::spawn(async move {
             use bollard::container::LogOutput;
 
+            // Install the kill channel BEFORE any await, so a stop issued
+            // while this turn is still starting is recorded rather than
+            // dropped.
+            //
+            // `stop_subprocess` reports success if `inner.kill_tx` is None,
+            // treating "nothing to interrupt" as "already stopped". While
+            // kill_tx was installed only after the exec had started, every
+            // await before that point was a hole: a stop landing in it was
+            // silently discarded and the turn then ran on, flipping the status
+            // back to running (codex P2, PR #2883). That hole always existed
+            // for the exec round-trip, and this change widened it materially —
+            // the identity probe plus a prompt upload that can be hundreds of
+            // KB now sit inside it.
+            //
+            // A stop that arrives during startup is not lost: `kill_rx` holds
+            // the value, and the reader loop below selects on it `biased`, so
+            // it is observed on the first poll and interrupted immediately —
+            // including the prompt-file cleanup. The failure paths above/below
+            // clear `kill_tx` again, so nothing is left dangling.
+            let (kill_tx, mut kill_rx) = tokio::sync::oneshot::channel::<bool>();
+            {
+                let mut inner = inner_arc.lock().unwrap();
+                inner.kill_tx = Some(kill_tx);
+                Self::set_status(&mut inner, STATUS_RUNNING);
+            }
+            if let Some(ref b) = broker {
+                let status = {
+                    let inner = inner_arc.lock().unwrap();
+                    SubprocessController::build_status_snapshot(&inner, &block_id, false)
+                };
+                publish_controller_status(b, &status);
+            }
+            health_monitor.set_active_turn(true);
+
             // Start the exec via Docker socket — env vars travel through
             // CreateExecOptions.env (Docker API), never in process argv.
             // Set once the upload succeeds; the interrupt path uses it to remove
@@ -302,6 +336,10 @@ impl SubprocessController {
                         inner.current_pid = None;
                         inner.kill_tx = None;
                     }
+                    // set_active_turn(true) now happens before the upload, so
+                    // this early return has to undo it — previously the flag
+                    // was only ever set after a successful exec start.
+                    health_monitor.set_active_turn(false);
                     health_monitor.set_exited(1);
                     if let Some(ref b) = broker {
                         let status = {
@@ -337,30 +375,6 @@ impl SubprocessController {
                     return;
                 }
             };
-
-            // Install a kill channel so stop_subprocess can interrupt this
-            // in-flight exec. docker exec has no kill API, so the reader below
-            // selects on kill_rx and pkills the in-container process. Stored only
-            // after a successful exec start (the early-return failure path above
-            // leaves kill_tx None — nothing to interrupt). Mirrors spawn_turn.
-            let (kill_tx, mut kill_rx) = tokio::sync::oneshot::channel::<bool>();
-
-            // Update status to running
-            {
-                let mut inner = inner_arc.lock().unwrap();
-                inner.kill_tx = Some(kill_tx);
-                Self::set_status(&mut inner, STATUS_RUNNING);
-            }
-            if let Some(ref b) = broker {
-                let status = {
-                    let inner = inner_arc.lock().unwrap();
-                    // Published just before set_active_turn(true) below —
-                    // accurate at the moment this snapshot is built.
-                    SubprocessController::build_status_snapshot(&inner, &block_id, false)
-                };
-                publish_controller_status(b, &status);
-            }
-            health_monitor.set_active_turn(true);
 
             // `input` is unused by design — the turn message is in argv (see
             // above). Dropping it immediately keeps no handle on a write half
