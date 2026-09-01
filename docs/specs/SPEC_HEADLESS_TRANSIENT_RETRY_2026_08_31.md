@@ -159,26 +159,37 @@ document the limitation instead. Same "measure before structural work"
 discipline `SPEC_TAB_WINDOW_RENDER_ARCHITECTURE_2026_08_31.md` §5 arrived at
 the hard way.
 
-> **Phase 0 requires adding instrumentation first — the data does not exist
-> today** (checked 2026-09-01). None of the three classify/persist/publish
-> sites emits a log line: there is no `tracing::` call adjacent to any
-> `persist_last_failure` in `persistent.rs` (`:1672`, `:3042`, `:3136`),
-> `host_spawn.rs` (`:653`) or `container_spawn.rs` (`:446`). The only
-> classification that *is* logged is `agents/runner.rs:328`
-> (`"agent run failed"`, with `code` and `retryable`), which is a different
-> path and not one a controller-driven turn takes.
+> **Phase 0(a) is DONE (2026-09-01); Phase 0(b) still needs a running build.**
 >
-> Log archaeology confirms it: searching the retained srv logs for
-> `rate_limited` / `overloaded_error` / `agent_failure` returns nothing —
-> which says the events are *unlogged*, not that they are rare. Do not read
-> that silence as evidence of low frequency; it is evidence of no telemetry.
+> The data did not exist: no classify/persist/publish site emitted a log line,
+> and the only logged classification was `agents/runner.rs:328`
+> (`"agent run failed"`), a different path that a controller-driven turn never
+> takes. Log archaeology confirmed it — searching the retained srv logs for
+> `rate_limited` / `overloaded_error` / `agent_failure` returns **nothing**.
 >
-> So Phase 0 is two steps, not one: **(a)** add a log line (or counter) at each
-> of the three sites recording the failure class and whether a renderer is
-> currently subscribed for that block; **(b)** let it run, then read it. Step
-> (a) is small and independently useful — a classified agent failure being
-> invisible in the logs is a diagnosability gap regardless of what this spec
-> decides.
+> **Do not read that silence as evidence of low frequency; it was evidence of
+> no telemetry.** Closing this spec on an empty grep would have been the wrong
+> call for the right-looking reason.
+>
+> **(a)** is now implemented, and deliberately *not* as a line per call site:
+> one `tracing::warn!(target: "agent-failure", …)` inside
+> `core::persist_last_failure` — the single choke point every path funnels
+> through. It records `block_id`, `code` and `retryable`, and fires only for
+> `Some` (the same function is called with `None` after every clean turn).
+>
+> Enumerating call sites here would have been a mistake, and nearly was: a
+> draft of this note listed "the three sites". There are **nine**, across five
+> files — `persistent.rs` (six calls), `container_spawn.rs`, `host_spawn.rs`,
+> `agent_handlers/input.rs` and `app_api/agent_io.rs` — and a reviewer found
+> two of the misses before a second pass found the rest. Instrumenting the
+> choke point is immune to that, and to whatever the tenth site turns out to be.
+>
+> **(b)** remains: let a build run, then read the `agent-failure` target. Note
+> it answers only half the original question — *how often a transient failure
+> is classified* — because "was a renderer subscribed for that block" has no
+> query behind it today (`Broker` exposes no per-scope subscriber lookup;
+> `WaveEvent::has_scope` is a different thing). Adding one is a prerequisite
+> for the full measurement and is deliberately left out of a logging change.
 
 **Phase 1 — move the budget server-side**, with the pane rendering server state
 (§2.1). Behaviour-neutral when a pane *is* open; that equivalence is the
