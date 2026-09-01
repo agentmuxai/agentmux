@@ -60,12 +60,20 @@ struct ContainerManagerInner {
     /// attempting create_container (which would fail with a 409 name-conflict
     /// on the second caller).
     ensure_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    /// Per-container `(uid, gid)` of the user execs run as, resolved once and
+    /// cached — see [`ContainerManager::exec_identity`].
+    exec_identities: Mutex<HashMap<String, (u64, u64)>>,
 }
 
 /// Exec session handle for a single turn.
 ///
-/// `input` is the stdin pipe into the container process (write JSON message here,
-/// then drop/flush to send EOF). `output` is a bollard `LogOutput` stream; with
+/// `input` is the stdin pipe into the container process. It is ONLY usable for a
+/// process that completes on a newline: the write half can never be closed, so
+/// stdin never reaches EOF (see [`ContainerManager::exec`]). Turn input goes in
+/// a file instead — NOT argv, which would leak a pasted secret via `docker top`
+/// / host `ps` / `/proc/<pid>/cmdline`; see
+/// [`ContainerManager::upload_turn_prompt`]. `output` is a bollard `LogOutput`
+/// stream; with
 /// `tty: false` Docker multiplexes stdout as `LogOutput::StdOut` frames and
 /// stderr as `LogOutput::StdErr` frames.
 ///
@@ -78,10 +86,58 @@ pub struct ExecSession {
     /// must inspect the exec (the in-container CLI can exit non-zero while still
     /// closing stdout cleanly).
     pub exec_id: String,
-    /// Stdin pipe to the container process. Write the JSON message then flush/drop.
+    /// Stdin pipe to the container process. Unusable for EOF-terminated readers
+    /// — see the type-level doc and [`ContainerManager::exec`]'s `attach_stdin`.
     pub input: Pin<Box<dyn AsyncWrite + Send>>,
     /// Multiplexed stdout/stderr stream (LogOutput::StdOut / LogOutput::StdErr).
     pub output: Pin<Box<dyn futures_util::Stream<Item = Result<bollard::container::LogOutput, bollard::errors::Error>> + Send>>,
+}
+
+/// Parse `id -u; id -g` output into `(uid, gid)`.
+///
+/// Split out so the parse is testable without a Docker daemon, and so a
+/// malformed or empty probe result is `None` — never a silent `(0, 0)`, which
+/// would produce a prompt file the exec user can neither read nor delete.
+fn parse_id_output(out: &str) -> Option<(u64, u64)> {
+    let mut fields = out.split_whitespace();
+    let uid: u64 = fields.next()?.parse().ok()?;
+    let gid: u64 = fields.next()?.parse().ok()?;
+    Some((uid, gid))
+}
+
+#[cfg(test)]
+mod exec_identity_tests {
+    use super::parse_id_output;
+
+    #[test]
+    fn parses_the_ordinary_two_line_form() {
+        assert_eq!(parse_id_output("1000\n1000\n"), Some((1000, 1000)));
+    }
+
+    #[test]
+    fn parses_root_and_a_split_uid_gid() {
+        assert_eq!(parse_id_output("0\n0\n"), Some((0, 0)));
+        assert_eq!(parse_id_output("1000\n2000\n"), Some((1000, 2000)));
+    }
+
+    /// Docker multiplexes frames, so the two numbers may arrive however they
+    /// arrive — whitespace splitting must not care.
+    #[test]
+    fn tolerates_arbitrary_whitespace_and_framing() {
+        assert_eq!(parse_id_output("  1000 \r\n  1000  \r\n"), Some((1000, 1000)));
+        assert_eq!(parse_id_output("1000 1000"), Some((1000, 1000)));
+    }
+
+    /// The whole point of returning Option: a failed or truncated probe must
+    /// NOT silently become root (reagent P1, PR #2883).
+    #[test]
+    fn a_missing_or_malformed_probe_is_none_not_root() {
+        assert_eq!(parse_id_output(""), None);
+        assert_eq!(parse_id_output("1000"), None, "gid missing");
+        assert_eq!(parse_id_output("id: command not found"), None);
+        assert_eq!(parse_id_output("uid=1000(agent)"), None, "not the -u form");
+        assert_eq!(parse_id_output("-1\n-1\n"), None, "negative is not a uid");
+    }
 }
 
 /// Errors from container operations.
@@ -107,6 +163,7 @@ impl ContainerManager {
             inner: Arc::new(ContainerManagerInner {
                 docker,
                 ensure_locks: Mutex::new(HashMap::new()),
+                exec_identities: Mutex::new(HashMap::new()),
             }),
         })
     }
@@ -213,12 +270,28 @@ impl ContainerManager {
     /// Uses `-i` (not `-t`) to avoid tty CR/LF corruption of NDJSON output.
     /// The caller receives `ExecSession` whose `output` stream carries
     /// multiplexed stdout/stderr for piping into the block.
+    ///
+    /// `attach_stdin` MUST be `false` unless the in-container process is a
+    /// reader that completes on a newline rather than on EOF. Attaching stdin
+    /// is a one-way door: bollard's hijacked exec stream cannot half-close the
+    /// write side (see the `exec (io)` integration test below), and on Windows
+    /// the Docker transport is a named pipe, which has no half-close at all —
+    /// so the process's stdin NEVER reaches EOF. Neither `drop(input)` nor an
+    /// explicit `input.shutdown().await` changes that; both were tried against
+    /// a live container on 2026-09-01 and the process hung indefinitely.
+    ///
+    /// Any command that reads stdin to EOF (`cat`, or `claude -p` taking its
+    /// prompt on stdin) will therefore hang forever, producing no output and
+    /// no exit. Give it a file to read instead — see
+    /// [`ContainerManager::upload_turn_prompt`], which also covers why argv and
+    /// env are both the wrong place for that input.
     pub async fn exec(
         &self,
         container_name: &str,
         cmd: &[String],
         working_dir: Option<&str>,
         env_vars: &[(String, String)],
+        attach_stdin: bool,
     ) -> Result<ExecSession, ContainerError> {
         let env: Vec<String> = env_vars.iter()
             .map(|(k, v)| format!("{k}={v}"))
@@ -226,7 +299,7 @@ impl ContainerManager {
 
         let exec = self.inner.docker
             .create_exec(container_name, CreateExecOptions {
-                attach_stdin: Some(true),
+                attach_stdin: Some(attach_stdin),
                 attach_stdout: Some(true),
                 attach_stderr: Some(true),
                 tty: Some(false), // NO tty — preserves NDJSON newlines
@@ -257,6 +330,187 @@ impl ContainerManager {
                 ))
             }
         }
+    }
+
+    /// The `(uid, gid)` that `exec` runs as inside this container.
+    ///
+    /// Needed so an uploaded file can be OWNED by that user. A tar entry
+    /// defaults to uid 0, and `/tmp` is sticky (`1777`) in every standard
+    /// image — under which a non-root process cannot unlink a root-owned file
+    /// no matter what its mode is. That is not theoretical: it silently leaked
+    /// one prompt file per turn (`rm -f` fails quietly), including multi-
+    /// hundred-KB ones, until a live check caught the files piling up.
+    ///
+    /// Resolved by asking the container rather than assuming a uid, so this
+    /// holds for any image regardless of which user it runs as.
+    ///
+    /// **Only a successful probe is cached.** An earlier cut cached a `(0, 0)`
+    /// fallback on any failure, including a transient Docker hiccup — which
+    /// poisoned the cache for the container's whole life (reagent P1, PR
+    /// #2883). That is not a degraded mode but a permanent break: at mode
+    /// 0600 a root-owned prompt file is unreadable AND un-unlinkable by the
+    /// real exec user, so every later turn on that container would fail to
+    /// open its prompt and orphan another file. A failure now returns `None`
+    /// and is retried on the next turn.
+    async fn exec_identity(&self, container_name: &str) -> Option<(u64, u64)> {
+        if let Some(hit) = self.inner.exec_identities.lock().await.get(container_name) {
+            return Some(*hit);
+        }
+
+        let probe = async {
+            let session = self
+                .exec(
+                    container_name,
+                    &["sh".to_string(), "-c".to_string(), "id -u; id -g".to_string()],
+                    None,
+                    &[],
+                    false,
+                )
+                .await
+                .ok()?;
+            let mut out = String::new();
+            let mut stream = session.output;
+            while let Some(Ok(frame)) = stream.next().await {
+                out.push_str(&frame.to_string());
+            }
+            parse_id_output(&out)
+        }
+        .await;
+
+        match probe {
+            Some(resolved) => {
+                self.inner
+                    .exec_identities
+                    .lock()
+                    .await
+                    .insert(container_name.to_string(), resolved);
+                Some(resolved)
+            }
+            None => {
+                // NOT cached — the next turn probes again.
+                tracing::warn!(
+                    container = container_name,
+                    "could not resolve container exec uid/gid; will retry next turn",
+                );
+                None
+            }
+        }
+    }
+
+    /// Remove a prompt file uploaded by [`upload_turn_prompt`].
+    ///
+    /// The turn's own wrapper script removes the file after the CLI exits, so
+    /// this is only for the path where the wrapper never runs at all — the
+    /// upload succeeded but starting the exec failed, which would otherwise
+    /// orphan the file (reagent P2, PR #2883).
+    ///
+    /// Best-effort by design: it runs as the same user that owns the file, and
+    /// a failure here is not worth failing an already-failing turn over.
+    pub async fn remove_turn_prompt(&self, container_name: &str, prompt_path: &str) {
+        let removed = self
+            .exec(
+                container_name,
+                &[
+                    "sh".to_string(),
+                    "-c".to_string(),
+                    r#"rm -f "$1""#.to_string(),
+                    "agentmux-cleanup".to_string(),
+                    prompt_path.to_string(),
+                ],
+                None,
+                &[],
+                false,
+            )
+            .await;
+        match removed {
+            Ok(session) => {
+                // Drive the stream to completion so the exec actually runs —
+                // Docker starts it lazily on the attached connection.
+                let mut stream = session.output;
+                while let Some(Ok(_)) = stream.next().await {}
+            }
+            Err(e) => tracing::warn!(
+                container = container_name,
+                path = prompt_path,
+                "could not remove orphaned prompt file: {e}",
+            ),
+        }
+    }
+
+    /// Write a turn's prompt into the container as a file, returning its
+    /// absolute in-container path.
+    ///
+    /// This exists because a container turn has no other way to hand the CLI
+    /// its prompt:
+    ///
+    ///   * **exec stdin** can never reach EOF — bollard can't half-close the
+    ///     hijacked stream's write side, and on Windows the Docker transport is
+    ///     a named pipe, which has no half-close at all. A CLI that reads to
+    ///     EOF (`claude -p`) hangs forever with no output and no exit.
+    ///   * **argv** would expose any secret pasted into a chat message via
+    ///     `docker top` / host `ps` / `/proc/<pid>/cmdline`, breaking this
+    ///     module's own no-secrets-in-argv invariant (reagent P1, PR #2883).
+    ///   * **an env var** keeps it off those host surfaces, but shares argv's
+    ///     per-string `MAX_ARG_STRLEN` ceiling — measured in this very image at
+    ///     ~128 KiB (130,000 B passes, 200,000 B fails with "Argument list too
+    ///     long"). A long paste or a large `# Session Context` would break the
+    ///     turn (codex P2, PR #2883).
+    ///
+    /// A file has none of those limits: unbounded size, invisible to every
+    /// host-side process listing, and redirecting from it gives the CLI a real
+    /// stdin that reaches a real EOF.
+    ///
+    /// Ownership is the exec user's (see [`exec_identity`]) so the turn can
+    /// delete the file afterwards. Mode is 0600: only that user ever needs it,
+    /// and it is the same user the CLI already runs as.
+    pub async fn upload_turn_prompt(
+        &self,
+        container_name: &str,
+        turn_id: &str,
+        message: &str,
+    ) -> Result<String, ContainerError> {
+        // No usable uid means no usable file: at 0600 a root-owned prompt is
+        // unreadable by the exec user, and /tmp's sticky bit makes it
+        // un-unlinkable too. Failing here is a clear, retryable error; writing
+        // it anyway would be a permission-denied on open plus a leaked file.
+        let (uid, gid) = self.exec_identity(container_name).await.ok_or_else(|| {
+            ContainerError::NotAvailable(format!(
+                "could not resolve the exec user of container {container_name}; \
+                 cannot write a readable turn prompt"
+            ))
+        })?;
+        let file_name = format!("agentmux-turn-{turn_id}");
+        let bytes = message.as_bytes();
+
+        let mut header = tar::Header::new_gnu();
+        header.set_size(bytes.len() as u64);
+        header.set_mode(0o600);
+        header.set_uid(uid);
+        header.set_gid(gid);
+        header.set_mtime(0);
+        header.set_cksum();
+
+        let mut archive = tar::Builder::new(Vec::new());
+        archive
+            .append_data(&mut header, &file_name, bytes)
+            .map_err(|e| ContainerError::NotAvailable(format!("tar build failed: {e}")))?;
+        let tar_bytes = archive
+            .into_inner()
+            .map_err(|e| ContainerError::NotAvailable(format!("tar finish failed: {e}")))?;
+
+        self.inner
+            .docker
+            .upload_to_container(
+                container_name,
+                Some(bollard::container::UploadToContainerOptions {
+                    path: "/tmp",
+                    no_overwrite_dir_non_dir: "true",
+                }),
+                tar_bytes.into(),
+            )
+            .await?;
+
+        Ok(format!("/tmp/{file_name}"))
     }
 
     /// Retrieve the exit code of a finished exec via the Docker socket.
@@ -407,6 +661,16 @@ impl ContainerManager {
         volumes: &[String],
         env_vars: &[(String, String)],
     ) -> Result<(), ContainerError> {
+        // A container name can be reused: `ensure_running` detects an
+        // externally removed container and recreates it under the same name.
+        // The replacement may exec as a DIFFERENT user -- a changed custom
+        // image, or the same mutable tag repulled -- and a stale cached
+        // identity would then chown every prompt file to the wrong uid, making
+        // it unreadable (mode 0600) for the life of the process (codex P2,
+        // PR #2883). The cache is keyed by name, so evict here, at the one
+        // place a name starts pointing at a new container.
+        self.inner.exec_identities.lock().await.remove(container_name);
+
         let env: Vec<String> = env_vars.iter()
             .map(|(k, v)| format!("{k}={v}"))
             .collect();
@@ -725,6 +989,7 @@ mod tests {
                 &["sh".into(), "-c".into(), "printf %s \"$ITEST_KEY\"".into()],
                 None,
                 &[("ITEST_KEY".into(), "val-42".into())],
+                false,
             )
             .await
             .expect("exec (env)");
@@ -744,6 +1009,7 @@ mod tests {
                 &["sh".into(), "-c".into(), "read line; printf 'got:%s' \"$line\"".into()],
                 None,
                 &[],
+                true, // this test is specifically the stdin contract
             )
             .await
             .expect("exec (io)");
