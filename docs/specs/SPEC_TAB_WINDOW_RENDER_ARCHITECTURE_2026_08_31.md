@@ -42,26 +42,32 @@ Three consequences for this document:
    system (§3.1) to make torn state impossible *everywhere*. PR #2818 got the
    same guarantee *for one surface* by decoupling it from backend ordering
    entirely — no protocol change, ~150 lines, one file. **Prefer the local
-   decoupling every time it applies.** §3.1 is only justified for surfaces that
-   genuinely cannot predict their own outcome.
+   decoupling every time it applies.** (Written when §3.1 was still a live
+   proposal; it has since been rejected outright — see the verdict below.)
 3. **§3.4's defect was real and is now partly fixed.** The reveal gate being
    keyed on "currently active" rather than "the destination" was the confirmed
    cause of the residual pane blank. §9 fixed the targeting. The *timer-based*
    reveal (80ms settle / 800ms cap) is untouched and remains a suppressor.
 
-**Revised recommendation:** do not fund §3.1/§3.2 on the strength of the tab
-flash — that case is closed. Fund them only if a surface appears that (a) can't
-predict its outcome, and (b) demonstrably tears. §3.4's causal-reveal work is
-the highest-value remaining item; §3.3 is a real seam awaiting its own
-evidence (it was **not** the tab-close cause — see the report's §0).
+**Recommendation:** §3.4's causal-reveal work is the highest-value remaining
+item; §3.3 is a real seam awaiting its own evidence (it was **not** the
+tab-close cause — see the report's §0). For §3.1/§3.2, see the verdict
+immediately below — an earlier revision of this paragraph said they could be
+funded if a surface *"can't predict its outcome and demonstrably tears."* That
+condition is now superseded: even where it holds, the design in §3.1 is not the
+thing to build.
 
-**Strengthened 2026-09-01, after three review passes on §3.1.** Each pass found
-a new class of correctness hole in the epoch design (see §3.1's cost/risk table),
-with no sign of converging. §3.1/§3.2 should now be read as *"here is why this
-is harder than it looks,"* not as a plan of record. Treat §3.1 as **not
-implementable as specified** and requiring a dedicated replicated-state design
-with an explicit consistency model before anyone writes code against it. §3.3
-and §3.4 are unaffected by this and remain independently shippable.
+**§3.1/§3.2 are REJECTED as of 2026-09-01, after four review passes.** Each pass
+found a new class of unsoundness in the epoch design and each fix looked
+complete until the next pass (see §3.1's cost/risk table). The design is not
+"unfinished" — it is the wrong shape: it ships deltas over a lossy, reorderable
+channel and then tries to bolt exactly-once semantics on afterwards.
+
+Read §3.1/§3.2 as **an enumerated list of failure modes**, valuable for anyone
+who later proposes something similar, and not as a plan of record. If the
+underlying need becomes real, start from a consistency model and the
+transport's actual guarantees. §3.3 and §3.4 are unaffected by this and remain
+independently shippable — §3.4 is still the highest-value item in the document.
 
 ## 1. Problem statement
 
@@ -132,23 +138,39 @@ double-rAF re-measure.
 Four new abstractions. They are independent — each is separately valuable and
 separately shippable — but together they make F1 structural.
 
+**Two of the four did not survive review.** §3.1 and §3.2 are **rejected**
+(§0): read them for their failure modes, not as proposals. §3.3 and §3.4 stand.
+The section is kept whole rather than deleted because the rejected half is the
+part a future proposal is most likely to reinvent.
+
 **Apply §0's lesson first.** Before reaching for any of these, ask the cheaper
 question: *can this surface stop depending on the ordering altogether?* PR
 #2818 answered yes for the tab strip and needed none of the machinery below.
 The abstractions here are for surfaces where the answer is genuinely no.
 
-**Prior committed direction, not a fresh idea.** §3.1/§3.2 continue work the
-repo already scoped: `SPEC_REDUCER_SSOT_CONSOLIDATION_2026_06_22.md` generalizes
-"state reconstructed or duplicated outside a single reducer authority" as a
-systemic pattern, and `SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30.md` →
-`SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md` already commit to strong
-reducer authority over layout. Anyone picking this up should reconcile with
-those rather than starting from this document. Note also
-`SPEC_OBJ_UPDATE_BRIDGE_2026-05-14.md`'s open gap: `UpdateObjectMeta` for
-`OTYPE_WINDOW`/`OTYPE_LAYOUT`/`OTYPE_CLIENT` **bypasses the event bus entirely**
-— a fourth transport hole that §3.2's "one authoritative transport" must close.
+**A note on adjacent, still-valid work.** An earlier revision of this paragraph
+presented §3.1/§3.2 as continuing `SPEC_REDUCER_SSOT_CONSOLIDATION_2026_06_22.md`
+and `SPEC_864_LAYOUT_SINGLE_WRITER_2026_06_30.md` →
+`SPEC_STRONG_REDUCER_AUTHORITY_LAYOUT_2026_06_30.md`. **That framing is
+withdrawn along with the design.** Those specs' direction — single reducer
+authority, no state reconstructed outside it — remains sound and is unaffected
+by this rejection; §3.1/§3.2 are simply not a valid way to extend it to the
+client, and nobody should treat them as the sanctioned continuation of that
+work.
+
+One observation from that paragraph outlives the design and is worth keeping:
+`SPEC_OBJ_UPDATE_BRIDGE_2026-05-14.md`'s open gap — `UpdateObjectMeta` for
+`OTYPE_WINDOW`/`OTYPE_LAYOUT`/`OTYPE_CLIENT` **bypasses the event bus
+entirely**. That is a real hole in the *current* transport, independent of any
+epoch scheme, and it stays worth closing on its own merits.
 
 ### 3.1 `WorkspaceEpoch` — a transaction boundary over multi-object state
+
+> **REJECTED (2026-09-01) — see §0.** The body below is preserved **as
+> originally written**, in the voice of a live proposal, because its value is
+> now the failure modes it enumerates. Any forward-looking statement inside
+> this section ("ship", "keep X until Y ships", "this requires…") is
+> **historical, not operative**. Nothing here is scheduled work.
 
 **Problem solved:** §2.2 fragmentation; torn state is representable today.
 
@@ -228,6 +250,23 @@ insufficient too. Two admissible designs:
      no manifest but is the expensive option.
   Anything narrower than one of these is unsound.
 
+  **And a scoped resync must cover the whole interval, not just the lost
+  epoch.** Scoping to "the objects `N` touched" is *still* unsound. Consider a
+  client at `N-1` that loses `N` (which changed A) and receives `N+1` (which
+  changed B). It resyncs A, but the read happens after `N+1` has committed, so
+  it returns A-at-`N+1` — and the snapshot's epoch is `N+1`. Adopting that
+  watermark marks `N+1` applied when **B was never applied at all**. The cache
+  is now permanently torn on B, with the watermark asserting it is clean.
+
+  So a scoped resync must read the **union of every object changed from the
+  missing epoch through the snapshot's own epoch** (requiring the manifest to
+  span the interval, not a single epoch), or read a **historical snapshot
+  exactly at `N`** and then replay `N+1` normally — which means the store must
+  be able to answer point-in-time reads it has no reason to support today.
+
+  This is the fourth consecutive review pass to find a fresh unsoundness in
+  this arm. See the cost/risk note below before treating any of it as a plan.
+
 **(c) A resync can race the live stream and roll the watermark backwards.**
 While a snapshot request is in flight, live frames keep arriving. The client can
 apply `E+1` and *then* receive a snapshot captured at `E`. Unconditionally
@@ -289,20 +328,35 @@ correctness hole, not a nicety:**
 | 1 | partial epochs are undetectable without a count or terminator |
 | 2 | the unit is the dispatch, not the event; delta frames need gap detection; "fail the transition" is unimplementable post-commit |
 | 3 | reordering is indistinguishable from loss; the client can't know what a lost epoch touched; a stale resync rolls the watermark backwards |
+| 4 | a manifest scoped to the lost epoch is *still* unsound — the resync must span the whole interval to the snapshot's epoch, or read point-in-time |
 
-Three passes, three new classes of hole, no sign of convergence. That is the
-signature of a **distributed-systems problem being solved incidentally**, and it
-is the strongest argument in this document for §0's recommendation: *do not
-build this.* The tab flash — the symptom that motivated the whole design — was
-closed in ~150 lines by decoupling one surface from backend ordering entirely.
+**Four passes, four new classes of unsoundness, no convergence — and each one
+was found by review, not by implementation.** Every round has produced a fix
+that looked complete and was not. That is the signature of a
+**distributed-systems problem being solved incidentally**, and it is now the
+strongest argument in this document for §0's recommendation: *do not build
+this.*
 
-If this is ever funded, it should be scoped and reviewed as a replicated-state
-protocol in its own right, with an explicit consistency model, not as a
-refactor of the WaveObject cache. Ship behind a flag; assert in dev builds that
-a dispatch's emitted object set matches what the reducer declared; alarm on
-resync frequency.
+Note what the failures have in common: they are all consequences of shipping
+**deltas** over a lossy, reorderable channel while trying to bolt exactly-once
+semantics on afterwards. A design that shipped **snapshots** — or that kept
+today's per-object versioning and simply accepted that multi-object coherence
+is not guaranteed — has none of these problems. The tab flash, the symptom that
+motivated the whole design, was closed in ~150 lines by decoupling one surface
+from backend ordering entirely.
+
+**Recommendation: treat §3.1/§3.2 as a rejected design, not a backlog item.**
+If the underlying need ever becomes real, start from the consistency model and
+the transport's actual guarantees — not from this document, whose value is now
+the enumerated failure modes rather than the proposal they attach to.
 
 ### 3.2 One authoritative transport (`P2` collapse)
+
+> **REJECTED (2026-09-01) — see §0.** The body below is preserved **as
+> originally written**, in the voice of a live proposal, because its value is
+> now the failure modes it enumerates. Any forward-looking statement inside
+> this section ("ship", "keep X until Y ships", "this requires…") is
+> **historical, not operative**. Nothing here is scheduled work.
 
 **Problem solved:** §2.1's three racing transports — the direct cause of §7.
 
@@ -325,9 +379,12 @@ Exactly one path may drive a paint:
   *first*, then emits once.
 
 This subsumes §7's parent-before-child emission ordering: with one frame per
-dispatch there is no intra-transition order left to get wrong. Keep the §7
-ordering and its tests until the epoch frame ships — they are the correct
-behaviour under the current design.
+dispatch there is no intra-transition order left to get wrong.
+
+**Superseded by the rejection.** This section originally said to keep the §7
+ordering and its tests *"until the epoch frame ships"*. No epoch frame is
+shipping, so that ordering and its tests are **permanent behaviour** — not a
+stopgap awaiting replacement. See §4.
 
 **Scope note.** "Exactly one path may drive a paint" is about the *update*
 transports. It does not cover the resync path §3.1 requires, which is a fourth
@@ -391,7 +448,10 @@ A design is only structural if it *removes* the suppressors. On completion:
 - `MAX_GATE_MS` / `SETTLE_MS` as behaviour → demoted to instrumented safety valve
 - `layoutModel.ts:443`'s zero-rect floor → unnecessary (§3.4 follow-on)
 - `droppable-tab.tsx:246`'s double-rAF re-measure → unnecessary (§3.4 follow-on)
-- §7's parent-before-child bridge ordering → subsumed by one-frame-per-epoch (§3.2)
+- ~~§7's parent-before-child bridge ordering → subsumed by one-frame-per-epoch~~
+  **No longer expected.** That deletion was contingent on §3.2, which is
+  rejected — so the §7 emission ordering and its tests are now **permanent**
+  behaviour, not a transitional workaround awaiting replacement.
 
 If a phase lands and deletes nothing, that phase did not do its job.
 
@@ -430,10 +490,10 @@ Phase 0's trace of whatever the next symptom turns out to be.
 
 - **`PaneSurfaceSync`** (§3.3) — a real unsynchronized seam with precedent
   elsewhere, but **not** the tab-close cause. Do it when a trace implicates it.
-- **`WorkspaceEpoch`** (§3.1) + **transport collapse** (§3.2) — the structural
-  core, and the most expensive. Per §0, justified only for a surface that
-  cannot predict its own outcome *and* demonstrably tears. Ship behind a flag;
-  assert the §3.1 completeness contract in dev builds.
+- **`WorkspaceEpoch`** (§3.1) + **transport collapse** (§3.2) — **REJECTED,
+  do not schedule** (§0). Retained in this document as an enumerated set of
+  failure modes, not as work. If the underlying need resurfaces, it needs a
+  fresh design starting from a consistency model, not this one.
 - **`LayoutReadiness`** (§3.4) and deletion of the suppressor layer (§4) — the
   highest-value remaining item per §0, since the timer-based reveal (80ms /
   800ms) survives untouched and still guesses at readiness.
@@ -459,27 +519,24 @@ Phase 0's trace of whatever the next symptom turns out to be.
    with §3.3's documented precedent (`REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md`,
    `SPEC_BROWSER_PANE_LOADING_INDICATOR_FLICKER_2026_08_17.md` Cause 2) as
    prior art rather than as evidence.
-2. ~~**Can a partial epoch occur?**~~ **Resolved by fiat in §3.1** — the
-   completeness contract forbids it on the wire, and the staging buffer is
-   dropped. The residual questions are now scoped and concrete:
-   a. *Can `publish_events` carry a dispatch envelope without disturbing its
-      other subscribers* (the persist subscriber, the disk writer)? They
-      consume individual events today and would need to either flatten the
-      envelope or move to it.
-   b. *What is the authoritative resync?* A per-object snapshot read, a
-      workspace-scoped one, or a full reload. Cheapest correct option wins;
-      it only has to be a **snapshot**, never a delta (§3.2 scope note).
-3. **Do LAN/multi-window renderers need epoch coordination**, or is per-renderer
-   monotonicity enough? Suspect the latter — each renderer's watermark is its
-   own, and a resync is client-initiated — but unverified, and the answer
-   changes if two renderers ever have to agree on a *rendered* frame rather
-   than just on state.
-4. **Is the watermark's resync arm worth the complexity at all**, or is the
-   honest conclusion that per-object versioning (today's behaviour) is the
-   right trade for a lossy local transport? A gap-tolerant delta protocol is a
-   real distributed-systems problem; §0 already argues the tab flash did not
-   justify paying for one. This question should be answered *before* §3.1 is
-   funded, not during.
+2. ~~**Can a partial epoch occur?**~~ **Moot** — there are no epochs. The
+   follow-ups this once carried (whether `publish_events` could take a dispatch
+   envelope without disturbing the persist subscriber and disk writer; what an
+   authoritative resync would read) died with the design. Recorded only because
+   the first of them is a genuine constraint on *any* future scheme that wants
+   to group reducer events: those two subscribers consume individual events
+   today.
+3. ~~**Do LAN/multi-window renderers need epoch coordination?**~~ **Moot** —
+   there are no epochs. Retained only to record the shape of the question, which
+   would return in any future design: does cross-renderer agreement have to hold
+   on *rendered frames*, or only on state? If only on state, per-renderer
+   monotonicity suffices and the problem stays local.
+4. ~~**Is the watermark's resync arm worth the complexity at all?**~~
+   **Answered — no**, which is what drove §0's rejection. Per-object
+   versioning (today's behaviour) is the right trade for a lossy local
+   transport; a gap-tolerant delta protocol is a real distributed-systems
+   problem and four review passes failed to specify one soundly. Kept here
+   because the *question* is the reusable part: ask it first next time.
 5. **Does the confirm modal need to exist on this path at all?** The gesture is
    reversible (tabs are restorable). Removing the modal would sidestep the P4
    seam for *this* gesture — though not for menus, dropdowns or any other
