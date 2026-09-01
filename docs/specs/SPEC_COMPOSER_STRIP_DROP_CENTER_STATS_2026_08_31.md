@@ -97,6 +97,27 @@ larger cleanup is listed as an explicit non-goal below, not bundled in.
   still feeds `AgentWorkingRow`'s own `turnTokens` prop elsewhere in this
   file, which stays unchanged.
 
+### `frontend/app/view/agent/styles/_composer-strip.scss`
+
+Two follow-ups found by review (both applied, not deferred — small,
+low-risk, CSS-only):
+
+- **Dead CSS (ReAgent P2).** `.agent-composer-strip-stats` (the content
+  span's own rule block, including its now-doubly-dead `--compacting`/
+  `--reconnecting` modifiers — those were already orphaned by an earlier,
+  unrelated relocation to `AgentWorkingRow`, 2026-08-27) styled an
+  element that no longer renders anywhere. Removed the whole block.
+- **Phantom layout gap (Codex P2).** The wrapper span
+  (`.agent-composer-strip-stats-zone`) still mounts even with no
+  content, and an empty flex item still counts for `column-gap`/
+  `row-gap` purposes — `computeStatsInline()`'s fit check assumes a
+  `statsWidth === 0` zone contributes no extra gap, so the real DOM
+  could wrap where the layout decision said it wouldn't. Added
+  `.agent-composer-strip-stats-zone:empty { display: none; }`, which
+  removes it from flex layout entirely for as long as it stays empty
+  (unconditionally true after this change) and self-corrects if it ever
+  gains content again.
+
 ### Tests
 
 `AgentComposerStrip.test.tsx` has no test that constructs `sessionTotals`/
