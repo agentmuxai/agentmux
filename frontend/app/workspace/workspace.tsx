@@ -4,6 +4,7 @@
 import { ErrorBoundary } from "@/app/element/errorboundary";
 import { CenteredDiv } from "@/app/element/quickelems";
 import { ModalsRenderer } from "@/app/modals/modalsrenderer";
+import { PaneMediaPermissionPrompt } from "@/app/window/pane-media-permission-prompt";
 import { StatusBar } from "@/app/statusbar/StatusBar";
 import { WindowHeader } from "@/app/window/window-header";
 import { TabContent } from "@/app/tab/tabcontent";
@@ -92,6 +93,11 @@ function WorkspaceElem(): JSX.Element {
                         </For>
                     </Show>
                     <ModalsRenderer />
+                    {/* Camera/mic prompts for browser panes. Mounted in the
+                        main window's DOM so the requesting page cannot draw or
+                        click it — see the component's own doc comment and
+                        SPEC_BROWSER_PANE_CAMERA_ACCESS_2026_09_01.md §3.5. */}
+                    <PaneMediaPermissionPrompt />
                 </ErrorBoundary>
             </div>
             <StatusBar />

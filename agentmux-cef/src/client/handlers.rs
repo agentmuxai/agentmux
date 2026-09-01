@@ -828,15 +828,43 @@ wrap_permission_handler! {
                 );
                 cb.cont(requested_permissions);
             } else {
-                // Phase 2c prompts here instead of denying outright. Until then
-                // this is the same answer the pane got with no handler at all.
+                // No grant covers this — ask the user.
+                //
+                // The callback is retained rather than answered now. CEF
+                // permits exactly this: "call CefMediaAccessCallback methods
+                // either in this method or at a later time"
+                // (cef_permission_handler.h). Returning 1 without continuing
+                // means the page's getUserMedia stays pending until we answer.
+                //
+                // `park` takes ownership; `arm_timeout` guarantees an answer
+                // even if the prompt never renders or the user never responds,
+                // so the page cannot hang indefinitely.
+                let request_id = crate::browser_panes::media_prompt::park(
+                    cb.clone(),
+                    &block_id,
+                    &origin,
+                    requested_permissions,
+                );
                 tracing::info!(
                     target: "pane-media",
-                    %origin, %block_id,
+                    %origin, %block_id, request_id,
                     requested = requested_permissions,
-                    "denying media access — no grant covers this request (no prompt yet)"
+                    "prompting for media access — no grant covers this request"
                 );
-                cb.cont(0);
+                // Emit to the MAIN window's DOM, not the pane's page: the
+                // prompt must not be renderable or spoofable by the content
+                // asking for permission (spec §3.5).
+                crate::events::emit_event_from_state(
+                    &self.state,
+                    "pane-media-permission-request",
+                    &serde_json::json!({
+                        "requestId": request_id,
+                        "blockId": block_id,
+                        "origin": origin,
+                        "requested": requested_permissions,
+                    }),
+                );
+                crate::browser_panes::media_prompt::arm_timeout(request_id);
             }
             1 // handled
         }

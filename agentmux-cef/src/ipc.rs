@@ -794,6 +794,37 @@ async fn route_command(
                 .set_pane_overlay_clip(state, &window_label, &rects);
             Ok(serde_json::json!(true))
         }
+        "pane_media_permission_respond" => {
+            // The user's answer to a prompt raised by the browser-pane media
+            // permission handler. `allow` records a grant for
+            // (pane, origin, exactly the bits requested) and continues the
+            // page's getUserMedia; anything else denies.
+            //
+            // Hops to the CEF UI thread because the parked callback lives in a
+            // UI-thread-only registry (CefMediaAccessCallback is neither Send
+            // nor Sync). Unknown/duplicate ids resolve to a no-op there — an
+            // answer racing the timeout is ordinary, not an error.
+            //
+            // SPEC_BROWSER_PANE_CAMERA_ACCESS_2026_09_01.md §3.4.
+            let request_id = args
+                .get("requestId")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let allow = args
+                .get("allow")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if request_id == 0 {
+                return Ok(serde_json::json!(false));
+            }
+            let mut task = crate::browser_panes::media_prompt::RespondTask::new(
+                request_id,
+                allow,
+                state.clone(),
+            );
+            cef::post_task(cef::ThreadId::UI, Some(&mut task));
+            Ok(serde_json::json!(true))
+        }
         "main_window_focus" => {
             // Move keyboard focus back to the main browser when the user
             // clicks a main-DOM input (address bar, etc). Previously this
