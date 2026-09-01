@@ -24,92 +24,111 @@ use crate::backend::wps;
 
 use super::{argv::build_turn_argv, SubprocessController, SubprocessControllerInner, SubprocessSpawnConfig, SUBPROCESS_OUTPUT_SUBJECT};
 
-/// Put the turn message into the argv, where a container turn's prompt has to go.
+/// Wrap the CLI argv so it reads the turn prompt from `prompt_path`, a file
+/// already written into the container by
+/// [`ContainerManager::upload_turn_prompt`].
 ///
-/// A container turn cannot use stdin at all: bollard's hijacked exec stream
-/// can't half-close the write side, and on Windows the Docker transport is a
-/// named pipe, which has no half-close — so the in-container process's stdin
-/// NEVER reaches EOF. Verified live 2026-09-01: both `drop(input)` and an
-/// explicit `input.shutdown().await` left `claude -p` hung with zero output,
-/// no error and no exit, which is exactly what a sandbox pane showed.
+/// Redirecting from a file is the only transport that satisfies all three
+/// constraints at once (see `upload_turn_prompt`'s doc for the measurements):
+/// the CLI gets a real stdin that really reaches EOF, the message never touches
+/// argv or env — so `docker top` / host `ps` / `/proc/<pid>/cmdline` can't see a
+/// secret pasted into a chat message — and there is no `MAX_ARG_STRLEN` ceiling.
 ///
-/// This was survivable while container agents carried
-/// `--input-format stream-json`: that protocol is newline-delimited and never
-/// waits for EOF — the same reason `container.rs`'s `exec (io)` test uses
-/// `read line` rather than `cat`. Correcting container agents to the one-shot
-/// `-p` argv (the persistent flags crashed them outright) is what made the EOF
-/// dependency load-bearing, turning a crash into a silent hang.
+/// The CLI argv is passed through as `"$@"` rather than interpolated into the
+/// script, so there is no shell quoting to get wrong, and it is passed
+/// UNCHANGED — including a trailing `-` (codex) or a `-p ""` placeholder
+/// (gemini/qwen/kimi/antigravity), both of which mean "read the prompt from
+/// stdin" and are correct again now that stdin genuinely works (codex P1,
+/// PR #2883).
 ///
-/// Docker takes argv as a JSON array, so there is no shell quoting to get
-/// wrong: a multi-line `# Session Context` body is a single token.
-fn turn_argv_with_message(mut cmd: Vec<String>, message: &str) -> Vec<String> {
-    // A trailing `-` is the "read the prompt from stdin" positional (codex).
-    // It designates the same slot, so replace it rather than append after it —
-    // appending would leave the CLI still trying to read a stdin that can never
-    // EOF, i.e. the exact hang this function exists to avoid.
-    if cmd.last().map(|a| a == "-").unwrap_or(false) {
-        cmd.pop();
-    }
-    cmd.push(message.to_string());
-    cmd
+/// The prompt file is removed after the CLI exits, and the CLI's own exit
+/// status is preserved for `inspect_exec` to classify the turn.
+fn container_turn_exec(prompt_path: &str, cmd: Vec<String>) -> Vec<String> {
+    let mut out = vec![
+        "sh".to_string(),
+        "-c".to_string(),
+        // $1 = prompt path, "$@" (after shift) = the CLI and its args.
+        r#"F="$1"; shift; "$@" < "$F"; rc=$?; rm -f "$F"; exit $rc"#.to_string(),
+        // $0 for the script -- a label only.
+        "agentmux-turn".to_string(),
+        prompt_path.to_string(),
+    ];
+    out.extend(cmd);
+    out
 }
 
 #[cfg(test)]
-mod turn_argv_tests {
-    use super::turn_argv_with_message;
+mod turn_exec_tests {
+    use super::container_turn_exec;
 
     fn v(xs: &[&str]) -> Vec<String> {
         xs.iter().map(|s| s.to_string()).collect()
     }
 
-    /// The prompt must reach the CLI in argv — the whole point.
+    /// The security property this shape exists for (reagent P1, PR #2883): the
+    /// message must never reach argv, where `docker top` / `ps` /
+    /// `/proc/<pid>/cmdline` would expose a pasted secret. It can't — the argv
+    /// is built from the prompt's PATH and never sees the message at all.
     #[test]
-    fn appends_the_message_as_the_final_token() {
-        let got = turn_argv_with_message(v(&["claude", "-p", "--verbose"]), "say hi");
-        assert_eq!(got, v(&["claude", "-p", "--verbose", "say hi"]));
+    fn the_argv_carries_only_a_path_never_the_message() {
+        let argv = container_turn_exec("/tmp/agentmux-turn-abc", v(&["claude", "-p"]));
+        assert!(argv.iter().any(|a| a == "/tmp/agentmux-turn-abc"), "the path is there");
+        assert!(
+            argv.iter().all(|a| !a.contains("ghp_") && !a.contains("secret")),
+            "nothing message-shaped is: {argv:?}",
+        );
     }
 
-    /// codex's trailing `-` MEANS "read the prompt from stdin". Appending after
-    /// it would leave the CLI waiting on a stdin that can never reach EOF.
+    /// The CLI must actually read the file — this redirect IS the fix.
     #[test]
-    fn replaces_a_trailing_stdin_positional_rather_than_appending_after_it() {
-        let got = turn_argv_with_message(v(&["codex", "exec", "--json", "-"]), "say hi");
-        assert_eq!(got, v(&["codex", "exec", "--json", "say hi"]));
-        assert!(!got.iter().any(|a| a == "-"), "the stdin positional must be gone");
+    fn redirects_the_clis_stdin_from_the_prompt_file() {
+        let argv = container_turn_exec("/tmp/p", v(&["claude", "-p"]));
+        assert!(argv[2].contains(r#""$@" < "$F""#), "must redirect: {}", argv[2]);
     }
 
-    /// Only a TRAILING `-` is the stdin positional; one earlier in the argv is
-    /// some other flag's value and must survive untouched.
+    /// The prompt file is transient state; leaving it behind would accumulate
+    /// one file per turn for the life of the container.
     #[test]
-    fn leaves_a_non_trailing_dash_alone() {
-        let got = turn_argv_with_message(v(&["cli", "--file", "-", "--json"]), "hi");
-        assert_eq!(got, v(&["cli", "--file", "-", "--json", "hi"]));
+    fn removes_the_prompt_file_afterwards() {
+        let argv = container_turn_exec("/tmp/p", v(&["claude", "-p"]));
+        assert!(argv[2].contains(r#"rm -f "$F""#), "must clean up: {}", argv[2]);
     }
 
-    /// Multi-line prompts (the `# Session Context` body) stay ONE argv token —
-    /// Docker takes argv as a JSON array, so there is no quoting to get wrong.
+    /// `inspect_exec` classifies the turn from the exit code, so the CLI's own
+    /// status must survive the cleanup that runs after it.
     #[test]
-    fn keeps_a_multiline_message_as_a_single_token() {
-        let msg = "# Session Context\n\nline two\nline three";
-        let got = turn_argv_with_message(v(&["claude", "-p"]), msg);
-        assert_eq!(got.len(), 3, "exactly one token was added");
-        assert_eq!(got[2], msg);
+    fn preserves_the_clis_exit_status_across_cleanup() {
+        let argv = container_turn_exec("/tmp/p", v(&["claude", "-p"]));
+        assert!(argv[2].contains("rc=$?"), "captures status before rm");
+        assert!(argv[2].contains("exit $rc"), "and re-raises it: {}", argv[2]);
     }
 
-    /// Quotes, spaces and metacharacters are data here, never shell syntax.
+    /// Passed as "$@", so the CLI argv survives verbatim and in order.
     #[test]
-    fn does_not_mangle_shell_metacharacters() {
-        let msg = "say \"hi\" & echo $HOME; rm -rf /tmp";
-        let got = turn_argv_with_message(v(&["claude", "-p"]), msg);
-        assert_eq!(got.last().unwrap(), msg);
+    fn passes_the_cli_argv_through_unchanged() {
+        let argv = container_turn_exec("/tmp/p", v(&["claude", "-p", "--model", "opus"]));
+        assert_eq!(&argv[0], "sh");
+        assert_eq!(&argv[1], "-c");
+        // argv[3] is $0, argv[4] is the prompt path; the CLI argv follows.
+        assert_eq!(&argv[5..], &v(&["claude", "-p", "--model", "opus"])[..]);
     }
 
-    /// An empty message is still its own token — dropping it would shift a
-    /// positional-taking CLI onto the wrong argument.
+    /// codex's trailing `-` means "read the prompt from stdin" and must NOT be
+    /// stripped: stdin is a real, EOF-terminating file now. An earlier cut of
+    /// this fix removed it, which was only necessary while the message was
+    /// being smuggled through argv.
     #[test]
-    fn an_empty_message_is_still_a_token() {
-        let got = turn_argv_with_message(v(&["claude", "-p"]), "");
-        assert_eq!(got, v(&["claude", "-p", ""]));
+    fn keeps_codexs_trailing_stdin_positional() {
+        let argv = container_turn_exec("/tmp/p", v(&["codex", "exec", "--json", "-"]));
+        assert_eq!(argv.last().unwrap(), "-");
+    }
+
+    /// Same for the `-p ""` placeholder gemini/qwen/kimi/antigravity use to
+    /// mean "prompt comes from stdin" (codex P1, PR #2883).
+    #[test]
+    fn keeps_an_empty_prompt_placeholder() {
+        let argv = container_turn_exec("/tmp/p", v(&["gemini", "-p", "", "--json"]));
+        assert_eq!(&argv[5..], &v(&["gemini", "-p", "", "--json"])[..]);
     }
 }
 
@@ -171,7 +190,7 @@ impl SubprocessController {
                 return Err(error);
             }
         };
-        let cmd = turn_argv_with_message(cmd, &config.message);
+
         self.emit_message_accepted(&config);
 
         // Derive the exec env from THIS message's own env_vars (apply the
@@ -204,6 +223,12 @@ impl SubprocessController {
         let filestore = self.filestore.clone();
         let health_monitor = Arc::clone(&self.health_monitor);
         let block_id = self.block_id.clone();
+        // The prompt is written into the container as a file per turn (see
+        // `container_turn_exec`). A fresh id per turn keeps two turns — this
+        // block's next one, or another block sharing the container — from
+        // racing on the same path, including the `rm -f` that cleans it up.
+        let turn_id = uuid::Uuid::new_v4().to_string();
+        let turn_message = config.message.clone();
         let self_ref_done = self.self_ref.lock().unwrap().clone().unwrap_or_default();
 
         // Spawn all async work (exec + I/O) into a background task so this
@@ -215,10 +240,21 @@ impl SubprocessController {
 
             // Start the exec via Docker socket — env vars travel through
             // CreateExecOptions.env (Docker API), never in process argv.
-            let exec_result = cm
-                // attach_stdin: false — see `cmd` above and ContainerManager::exec.
-                .exec(&container_name, &cmd, None, &container_env, false)
-                .await;
+            // Write the prompt into the container FIRST, then run the CLI with
+            // its stdin redirected from that file. See `container_turn_exec`
+            // and `ContainerManager::upload_turn_prompt` for why neither the
+            // exec's own stdin, nor argv, nor an env var can carry it.
+            let exec_result = match cm
+                .upload_turn_prompt(&container_name, &turn_id, &turn_message)
+                .await
+            {
+                Ok(prompt_path) => {
+                    let wrapped = container_turn_exec(&prompt_path, cmd);
+                    // attach_stdin: false — the CLI's stdin is the prompt file.
+                    cm.exec(&container_name, &wrapped, None, &container_env, false).await
+                }
+                Err(e) => Err(e),
+            };
             let exec_session = match exec_result {
                 Ok(s) => s,
                 Err(e) => {

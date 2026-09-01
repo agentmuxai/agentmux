@@ -60,6 +60,9 @@ struct ContainerManagerInner {
     /// attempting create_container (which would fail with a 409 name-conflict
     /// on the second caller).
     ensure_locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    /// Per-container `(uid, gid)` of the user execs run as, resolved once and
+    /// cached — see [`ContainerManager::exec_identity`].
+    exec_identities: Mutex<HashMap<String, (u64, u64)>>,
 }
 
 /// Exec session handle for a single turn.
@@ -110,6 +113,7 @@ impl ContainerManager {
             inner: Arc::new(ContainerManagerInner {
                 docker,
                 ensure_locks: Mutex::new(HashMap::new()),
+                exec_identities: Mutex::new(HashMap::new()),
             }),
         })
     }
@@ -274,6 +278,130 @@ impl ContainerManager {
                 ))
             }
         }
+    }
+
+    /// The `(uid, gid)` that `exec` runs as inside this container.
+    ///
+    /// Needed so an uploaded file can be OWNED by that user. A tar entry
+    /// defaults to uid 0, and `/tmp` is sticky (`1777`) in every standard
+    /// image — under which a non-root process cannot unlink a root-owned file
+    /// no matter what its mode is. That is not theoretical: it silently leaked
+    /// one prompt file per turn (`rm -f` fails quietly), including multi-
+    /// hundred-KB ones, until a live check caught the files piling up.
+    ///
+    /// Resolved by asking the container rather than assuming a uid, so this
+    /// holds for any image regardless of which user it runs as. Cached per
+    /// container — the answer can't change while the container lives. Falls
+    /// back to `(0, 0)` if the probe fails, which is no worse than the tar
+    /// default.
+    async fn exec_identity(&self, container_name: &str) -> (u64, u64) {
+        if let Some(hit) = self.inner.exec_identities.lock().await.get(container_name) {
+            return *hit;
+        }
+
+        let probe = async {
+            let session = self
+                .exec(
+                    container_name,
+                    &["sh".to_string(), "-c".to_string(), "id -u; id -g".to_string()],
+                    None,
+                    &[],
+                    false,
+                )
+                .await
+                .ok()?;
+            let mut out = String::new();
+            let mut stream = session.output;
+            while let Some(Ok(frame)) = stream.next().await {
+                out.push_str(&frame.to_string());
+            }
+            let mut lines = out.split_whitespace();
+            let uid: u64 = lines.next()?.trim().parse().ok()?;
+            let gid: u64 = lines.next()?.trim().parse().ok()?;
+            Some((uid, gid))
+        }
+        .await;
+
+        let resolved = probe.unwrap_or((0, 0));
+        if probe.is_none() {
+            tracing::warn!(
+                container = container_name,
+                "could not resolve container exec uid/gid; prompt files may not be removable",
+            );
+        }
+        self.inner
+            .exec_identities
+            .lock()
+            .await
+            .insert(container_name.to_string(), resolved);
+        resolved
+    }
+
+    /// Write a turn's prompt into the container as a file, returning its
+    /// absolute in-container path.
+    ///
+    /// This exists because a container turn has no other way to hand the CLI
+    /// its prompt:
+    ///
+    ///   * **exec stdin** can never reach EOF — bollard can't half-close the
+    ///     hijacked stream's write side, and on Windows the Docker transport is
+    ///     a named pipe, which has no half-close at all. A CLI that reads to
+    ///     EOF (`claude -p`) hangs forever with no output and no exit.
+    ///   * **argv** would expose any secret pasted into a chat message via
+    ///     `docker top` / host `ps` / `/proc/<pid>/cmdline`, breaking this
+    ///     module's own no-secrets-in-argv invariant (reagent P1, PR #2883).
+    ///   * **an env var** keeps it off those host surfaces, but shares argv's
+    ///     per-string `MAX_ARG_STRLEN` ceiling — measured in this very image at
+    ///     ~128 KiB (130,000 B passes, 200,000 B fails with "Argument list too
+    ///     long"). A long paste or a large `# Session Context` would break the
+    ///     turn (codex P2, PR #2883).
+    ///
+    /// A file has none of those limits: unbounded size, invisible to every
+    /// host-side process listing, and redirecting from it gives the CLI a real
+    /// stdin that reaches a real EOF.
+    ///
+    /// Ownership is the exec user's (see [`exec_identity`]) so the turn can
+    /// delete the file afterwards. Mode is 0600: only that user ever needs it,
+    /// and it is the same user the CLI already runs as.
+    pub async fn upload_turn_prompt(
+        &self,
+        container_name: &str,
+        turn_id: &str,
+        message: &str,
+    ) -> Result<String, ContainerError> {
+        let (uid, gid) = self.exec_identity(container_name).await;
+        let file_name = format!("agentmux-turn-{turn_id}");
+        let bytes = message.as_bytes();
+
+        let mut header = tar::Header::new_gnu();
+        header.set_size(bytes.len() as u64);
+        header.set_mode(0o600);
+        header.set_uid(uid);
+        header.set_gid(gid);
+        header.set_mtime(0);
+        header.set_cksum();
+
+        let mut archive = tar::Builder::new(Vec::new());
+        archive
+            .append_data(&mut header, &file_name, bytes)
+            .map_err(|e| ContainerError::NotAvailable(format!("tar build failed: {e}")))?;
+        let tar_bytes = archive
+            .into_inner()
+            .map_err(|e| ContainerError::NotAvailable(format!("tar finish failed: {e}")))?;
+
+        self.inner
+            .docker
+            .upload_to_container(
+                container_name,
+                Some(bollard::container::UploadToContainerOptions {
+                    path: "/tmp",
+                    no_overwrite_dir_non_dir: "true",
+                }),
+                tar_bytes.into(),
+            )
+            .await?;
+
+        Ok(format!("/tmp/{file_name}"))
     }
 
     /// Retrieve the exit code of a finished exec via the Docker socket.
