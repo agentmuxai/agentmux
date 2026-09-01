@@ -125,13 +125,10 @@
  * — see docs/specs/SPEC_AGENT_RUNTIME_DROPUP_2026_07_09.md.
  */
 
-import { useTick } from "@/app/hook/useTick";
 import { compactionThreshold } from "@/app/store/agent-pane-state/context-window";
 import type { CompactionState } from "@/app/store/agent-pane-state/types";
 import { formatCompactNumber, formatExactNumber } from "@/util/format-count";
-import { formatElapsedCompact } from "@/util/format-time";
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type JSX } from "solid-js";
-import type { SessionStats, TurnTokens } from "../types";
 import { AgentRuntimeDropup } from "./AgentRuntimeDropup";
 import { RuntimeBadge } from "./RuntimeBadge";
 
@@ -444,10 +441,6 @@ export function computeStatsInline(
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function fmtTokens(t: TurnTokens): string {
-    return `↑${formatCompactNumber(t.input)} ↓${formatCompactNumber(t.output)}`;
-}
-
 type CtxBand = "low" | "mid" | "high" | "critical";
 
 function ctxBand(tokens: number, contextWindow: number): CtxBand {
@@ -495,14 +488,6 @@ function compactionCountdownText(tokens: number, window: number): string | null 
 interface AgentComposerStripProps {
     /** True while a turn is in flight. */
     loading?: boolean;
-    /**
-     * Cumulative cost/tokens/duration across every completed turn in this
-     * pane's lifetime; non-null after the first TurnEnd. Sums, rather than
-     * replaces, on each turn — see SPEC_AGENT_SESSION_COST_TOTALS_2026_07_02.md.
-     */
-    sessionTotals?: SessionStats | null;
-    /** Live tokens for the in-flight turn. */
-    turnTokens?: TurnTokens | null;
     /** Count of OS processes tracked for this agent block. */
     processCount?: number;
     /** Fires when the user clicks the ⚙N process badge. */
@@ -570,37 +555,6 @@ interface AgentComposerStripProps {
 // ── Component ──────────────────────────────────────────────────────────────
 
 export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element => {
-    const tick = useTick(1000);
-    const [loadStartMs, setLoadStartMs] = createSignal<number | null>(null);
-    createEffect(() => {
-        if (props.loading) {
-            setLoadStartMs((prev) => prev ?? Date.now());
-        } else {
-            setLoadStartMs(null);
-        }
-    });
-    const elapsedMs = createMemo(() => {
-        const s = loadStartMs();
-        return s != null ? (tick(), Date.now() - s) : 0;
-    });
-
-    const rightText = createMemo((): string => {
-        const parts: string[] = [];
-        if (props.loading) {
-            if (props.turnTokens) parts.push(fmtTokens(props.turnTokens));
-            parts.push(formatElapsedCompact(elapsedMs()));
-        } else if (props.sessionTotals) {
-            const s = props.sessionTotals;
-            if (s.input_tokens != null || s.output_tokens != null) {
-                parts.push(fmtTokens({ input: s.input_tokens ?? 0, output: s.output_tokens ?? 0 }));
-            }
-            if (s.duration_ms != null) {
-                parts.push(formatElapsedCompact(s.duration_ms));
-            }
-        }
-        return parts.join("  ·  ");
-    });
-
     // Show model/effort controls only for Claude agents (controls are claude-specific;
     // non-claude providers (codex/gemini/kimi) have different model enumerations and
     // buildRuntimeArgs silently drops effort for them — spec §1.3).
@@ -1040,9 +994,19 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // time gets the real on-screen footprint regardless of which
     // position is currently active.
     //
-    // Depends on `rightText()` (the stats zone's own content changing
-    // width) AND `stripWidth()`/`slotWidths()` (ReAgent P1, PR #2812,
-    // re-review) — NOT on `layout()` or `statsWidth()` itself, which
+    // 2026-08-31 (SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31.md):
+    // the stats zone's content was removed (duplicated AgentWorkingRow —
+    // see that spec), so `statsZone()` below never renders a content
+    // span anymore and this effect now always measures 0. Left in place
+    // rather than removed — see that spec's Non-goals — a permanently-0
+    // `statsWidth` is harmless input to `statsInline` (line ~1000-ish
+    // below), not wrong input, and this effect's own history (right
+    // below) is worth keeping intact for whoever eventually does remove
+    // this scaffolding for real.
+    //
+    // Previously depended on `rightText()` (the stats zone's own content
+    // changing width) AND `stripWidth()`/`slotWidths()` (ReAgent P1, PR
+    // #2812, re-review) — NOT on `layout()` or `statsWidth()` itself, which
     // would be circular (the `layout` memo's `statsInline` reads
     // `statsWidth()`). `stripWidth()`/`slotWidths()` are the actual root
     // inputs behind `statsInline`'s placement flip: without depending on
@@ -1073,7 +1037,6 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     let statsRefs: { single?: HTMLElement; multi?: HTMLElement } = {};
     const [statsWidth, setStatsWidth] = createSignal(0);
     createEffect(() => {
-        rightText();
         stripWidth();
         slotWidths();
         const zone = statsRefs.single?.isConnected ? statsRefs.single : statsRefs.multi?.isConnected ? statsRefs.multi : undefined;
@@ -1288,8 +1251,20 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
         );
     };
 
-    // Stats zone — token/elapsed stats. Always centered (this zone's
-    // identity at every tier). Rendered in ONE of two places, mutually
+    // Stats zone — no longer shows content (2026-08-31,
+    // SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31.md: this centered
+    // token/elapsed readout duplicated AgentWorkingRow's "Worked" row,
+    // confusingly — while loading, both showed the identical live
+    // turnTokens+elapsed; once idle, this zone showed CUMULATIVE
+    // session totals in the same visual shape AgentWorkingRow uses for
+    // PER-TURN stats, with no label distinguishing the two).
+    // AgentWorkingRow is now the sole surface for these stats. The
+    // wrapper span (and the row-layout accommodation below) stays —
+    // removing it would mean touching this file's most fragile,
+    // heavily-revised logic (module doc comment above) for a
+    // permanently-inert case, not a functional gain; see that spec's
+    // Non-goals. Was: always centered (this zone's identity at every
+    // tier). Rendered in ONE of two places, mutually
     // exclusive (`statsInline()` vs. not — since 2026-08-26 this is its
     // own decision, no longer synonymous with `rows().length === 1`: a
     // single slot row can have the stats evicted to their own line
@@ -1317,13 +1292,7 @@ export const AgentComposerStrip = (props: AgentComposerStripProps): JSX.Element 
     // mounting this instance, so the measurement effect above can tell
     // them apart (see that effect's own doc comment).
     const statsZone = (variant: "single" | "multi") => (
-        <span class="agent-composer-strip-stats-zone" ref={(el) => (statsRefs[variant] = el)}>
-            <Show when={rightText()}>
-                <span class="agent-composer-strip-stats">
-                    {rightText()}
-                </span>
-            </Show>
-        </span>
+        <span class="agent-composer-strip-stats-zone" ref={(el) => (statsRefs[variant] = el)} />
     );
 
     return (

@@ -88,6 +88,20 @@
     display: contents;
 }
 
+// Codex P2, PR #2874: since SPEC_COMPOSER_STRIP_DROP_CENTER_STATS_2026_08_31.md
+// removed the stats zone's content, `.agent-composer-strip-stats-zone`
+// (AgentComposerStrip.tsx's `statsZone()`) now ALWAYS renders empty — but an
+// empty flex item still counts for `column-gap`/`row-gap` purposes, while
+// `computeStatsInline()` assumes a `statsWidth === 0` zone contributes no
+// extra gap. That mismatch could make the layout decide "fits in one row"
+// while the real DOM still applies the phantom gap and wraps anyway. `:empty`
+// removes the zone from flex layout entirely whenever it has no content —
+// unconditionally true post-removal, and still correct if this zone ever
+// gains content again (it simply stops matching `:empty` at that point).
+.agent-composer-strip-stats-zone:empty {
+    display: none;
+}
+
 // ── Rows (Rev 7) ─────────────────────────────────────────────────────────
 // Replaces the pre-Rev-7 `-controls`/`-right` zones (see this file's own
 // header comment and docs/specs/SPEC_COMPOSER_STRIP_ROW_BASED_LAYOUT_2026_08_26.md)
@@ -360,52 +374,6 @@
     .agent-composer-strip-slot-measure
     > :is(.agent-runtime-dropup-trigger, .agent-composer-strip-compact-btn, .agent-composer-strip-process-badge, .agent-composer-strip-log-btn) {
     order: 1;
-}
-
-.agent-composer-strip-stats {
-    // This is a plain <span> (AgentComposerStrip.tsx), and its parent
-    // (.agent-composer-strip-stats-zone) is not a flex/grid container —
-    // unlike -controls/-right's children, nothing blockifies this element,
-    // so it stays genuinely `display: inline` unless overridden here.
-    // `min-width` has no effect on non-replaced inline elements per the
-    // CSS box model spec — without this, the min-width below silently did
-    // nothing (reagent P1, PR #2577). `inline-block` keeps it sitting
-    // inline with any siblings while making min-width actually apply.
-    display: inline-block;
-    font-family: var(--termfontfamily, monospace);
-    font-size: 11px;
-    color: var(--secondary-text-color);
-    letter-spacing: 0.01em;
-    white-space: nowrap;
-    // Reserves a stable footprint for this text so the strip doesn't
-    // reflow every second while a turn is in flight. The text ticks live
-    // (useTick(1000) in AgentComposerStrip.tsx) and its rendered length
-    // isn't fixed — e.g. "9s" → "10s" or "↑890 ↓340" → "↑1.2k ↓340" — so
-    // without a floor, a wrap decision sitting right at the boundary can
-    // flip every tick even though the pane itself never resized. 12ch
-    // comfortably covers the common in-flight range (per-turn tokens,
-    // elapsed up to several minutes); a genuinely long single turn can
-    // still exceed it and reflow, same as every other width in this file —
-    // that's an occasional, real width change, not tick-driven jitter.
-    min-width: 12ch;
-
-    // Live "Compacting… Ns" readout (Tier 1/2 —
-    // SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md). Reuses the
-    // same amber the ctx meter's "high" band uses so the state reads as
-    // "notable but not an error" at a glance.
-    &--compacting {
-        color: var(--warning-color, #d9a441);
-        font-weight: 500;
-    }
-
-    // Live "Reconnecting… Ns" readout (a stale-`--resume` recovery in
-    // progress — STATUS_STALE_RESUME_LIVE_REPRO_AND_FIX_PLAN_2026_08_23.md
-    // §6.2). Same treatment as `--compacting` — "notable but not an error,"
-    // not the failure-red used elsewhere for a genuine `AgentFailure`.
-    &--reconnecting {
-        color: var(--warning-color, #d9a441);
-        font-weight: 500;
-    }
 }
 
 .agent-composer-strip-process-badge {
