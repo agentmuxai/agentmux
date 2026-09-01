@@ -117,6 +117,21 @@ export function TerminalSection(): JSX.Element {
                 }
             />
             <SettingRow
+                label="Scroll sensitivity"
+                description="Scroll wheel speed multiplier for terminal panes (0.1–10, default 1). Independent of the OS scroll-speed setting."
+                control={
+                    <input
+                        class="setting-number setting-number--wide"
+                        type="number" min={0.1} max={10} step={0.1}
+                        value={(s()["term:scrollsensitivity"] as number) ?? 1}
+                        onBlur={(e) => {
+                            const v = parseFloat(e.currentTarget.value);
+                            if (!isNaN(v) && v >= 0.1 && v <= 10) set("term:scrollsensitivity", v);
+                        }}
+                    />
+                }
+            />
+            <SettingRow
                 label="Predictive echo"
                 description="Show local predictive echo of typed characters while waiting on a slow/remote shell"
                 control={

@@ -134,7 +134,22 @@ export class TermWrap {
         //   CoreAnimation observer firing continuously and driving sustained ~190% host CPU
         //   even when no PTY output is arriving. Focus/blur listeners re-enable blink only
         //   for the active pane.
-        this.terminal = new Terminal({ ...options, cursorBlink: false, scrollOnUserInput: false, smoothScrollDuration: 0 });
+        // term:scrollsensitivity overrides xterm.js's own wheel-scroll multiplier
+        // (default 1). This is the only scroll-speed knob in the app — AgentMux
+        // never reads the OS "lines per scroll" setting, so this is independent
+        // of it. See SPEC_TERMINAL_SCROLL_SENSITIVITY_SETTING_2026_08_31.md.
+        const scrollSensitivitySetting = getSettingsKeyAtom("term:scrollsensitivity")();
+        const scrollSensitivity =
+            typeof scrollSensitivitySetting === "number" && scrollSensitivitySetting > 0
+                ? scrollSensitivitySetting
+                : 1;
+        this.terminal = new Terminal({
+            ...options,
+            cursorBlink: false,
+            scrollOnUserInput: false,
+            smoothScrollDuration: 0,
+            scrollSensitivity,
+        });
         // Reverse-wraparound (DECSET ?45): Backspace at column 0 of a soft-wrapped
         // line moves to the END of the previous row, matching real terminals.
         // bash/readline emits a bare BS (0x08) for the cross-wrap delete and relies

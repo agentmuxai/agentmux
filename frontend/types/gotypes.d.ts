@@ -1711,6 +1711,7 @@ declare global {
         "term:scrollback"?: number;
         "term:copyonselect"?: boolean;
         "term:transparency"?: number;
+        "term:scrollsensitivity"?: number;
         "term:allowbracketedpaste"?: boolean;
         "term:shiftenternewline"?: boolean;
         "term:predictiveecho"?: boolean;
