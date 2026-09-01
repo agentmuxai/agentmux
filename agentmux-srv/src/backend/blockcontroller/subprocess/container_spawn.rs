@@ -375,9 +375,10 @@ impl SubprocessController {
                 }
             };
 
-            // `input` is unused by design — the turn message is in argv (see
-            // above). Dropping it immediately keeps no handle on a write half
-            // that can never be closed anyway.
+            // `input` is unused by design — the CLI reads its prompt from the
+            // uploaded file, and only that file's PATH travels in argv (see
+            // `container_turn_exec`). Dropping it immediately keeps no handle
+            // on a write half that can never be closed anyway.
             let crate::backend::container::ExecSession { exec_id, input, output } = exec_session;
             drop(input);
 

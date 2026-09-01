@@ -69,8 +69,11 @@ struct ContainerManagerInner {
 ///
 /// `input` is the stdin pipe into the container process. It is ONLY usable for a
 /// process that completes on a newline: the write half can never be closed, so
-/// stdin never reaches EOF (see [`ContainerManager::exec`]). Turn input belongs
-/// in argv. `output` is a bollard `LogOutput` stream; with
+/// stdin never reaches EOF (see [`ContainerManager::exec`]). Turn input goes in
+/// a file instead — NOT argv, which would leak a pasted secret via `docker top`
+/// / host `ps` / `/proc/<pid>/cmdline`; see
+/// [`ContainerManager::upload_turn_prompt`]. `output` is a bollard `LogOutput`
+/// stream; with
 /// `tty: false` Docker multiplexes stdout as `LogOutput::StdOut` frames and
 /// stderr as `LogOutput::StdErr` frames.
 ///
@@ -279,7 +282,9 @@ impl ContainerManager {
     ///
     /// Any command that reads stdin to EOF (`cat`, or `claude -p` taking its
     /// prompt on stdin) will therefore hang forever, producing no output and
-    /// no exit. Pass its input in argv instead.
+    /// no exit. Give it a file to read instead — see
+    /// [`ContainerManager::upload_turn_prompt`], which also covers why argv and
+    /// env are both the wrong place for that input.
     pub async fn exec(
         &self,
         container_name: &str,
