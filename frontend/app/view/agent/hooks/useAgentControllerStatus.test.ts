@@ -2,12 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * reagent P1 on PR #2338: unlike relogin()/loginViaTerminal(), useGlobalLogin()
- * never set loginWaiting while its async credential-seed work was in flight —
- * useAgentCommands.ts's fast-fail guard (canRetry() || loginWaiting()) had no
- * signal to check, so a message typed while "Use existing login" was still
- * resolving bypassed the guard entirely and reached AgentInputCommand on the
- * same stale credential the failure banner exists to warn about.
+ * Recovery-flow tests for `useAgentControllerStatus` — principally the
+ * `loginWaiting()` signal that `useAgentCommands.ts`'s fast-fail guard
+ * (`canRetry() || loginWaiting()`) reads, so a message typed mid-recovery
+ * can't reach `AgentInputCommand` on a credential the pane already distrusts.
+ *
+ * Historical origin (reagent P1 on PR #2338): a third recovery entry point,
+ * `useGlobalLogin()`, never set `loginWaiting` while its async credential-seed
+ * work was in flight, leaving that guard no signal to check. That function was
+ * removed outright 2026-08-31 (per-channel auth enforcement — see
+ * docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md), so the
+ * remaining flows here are `relogin()` and `loginViaTerminal()`.
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";

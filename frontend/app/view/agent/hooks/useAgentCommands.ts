@@ -75,16 +75,18 @@ export interface UseAgentCommandsOptions {
      */
     canRetry: Accessor<boolean>;
     /**
-     * True while `relogin()`/`loginViaTerminal()`/`useGlobalLogin()`'s own
+     * True while `relogin()`/`loginViaTerminal()`'s own
      * recovery attempt is in flight. `canRetry` is cleared the INSTANT the
      * mount-time "Log in" button is clicked (relogin()'s own first line),
      * well before that attempt actually succeeds or fails, so `canRetry`
      * alone leaves this whole window unguarded: a message sent mid-attempt
      * would reach `AgentInputCommand` on a credential the pane already has
      * reason to distrust, reproducing the exact doomed spawn this fast-fail
-     * exists to prevent. Codex P1 on PR #2338; useGlobalLogin() was missing
-     * this entirely (never touched `loginWaiting` at all) until reagent P1
-     * caught it on re-review.
+     * exists to prevent. Codex P1 on PR #2338. (A third recovery entry point,
+     * useGlobalLogin(), was missing this entirely until reagent P1 caught it
+     * on re-review; that function was removed outright 2026-08-31, so the
+     * gap it represented is now structurally impossible rather than a
+     * convention each new recovery path has to remember.)
      */
     loginWaiting: Accessor<boolean>;
     /** Same surface `useAgentControllerStatus`'s own recovery-failure
@@ -105,7 +107,7 @@ export interface UseAgentCommandsOptions {
      * `useAgentControllerStatus.forceControllerRefresh` — threaded into the
      * slash-command context so /login's handler can restart an already-
      * running persistent controller onto its newly-refreshed credential,
-     * matching relogin()/useGlobalLogin()/loginViaTerminal(). Without this,
+     * matching relogin()/loginViaTerminal(). Without this,
      * a successful /login on a pane whose controller was already alive
      * left it on the stale credential — the next message bypasses every
      * guard in this PR (canRetry/loginWaiting/authFailureToPreserve are
@@ -140,7 +142,7 @@ export interface UseAgentCommandsOptions {
     /**
      * `useAgentControllerStatus.resetCancelled` — threaded through so
      * /login can clear the shared cancellation flag at the start of its
-     * OWN attempt, mirroring what relogin()/useGlobalLogin()/
+     * OWN attempt, mirroring what relogin()/
      * loginViaTerminal() already do at theirs. Without this, a flag left
      * `true` by an EARLIER, unrelated cancelled attempt (e.g. clicking
      * Cancel on the AuthUrlBox during a prior relogin()) stayed `true`
@@ -1189,7 +1191,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // callback (an earlier version bypassed it via a since-removed
         // trustedAfterRecovery flag, reasoning that a DIFFERENT overlapping
         // flow's own uncertainty had no bearing on THIS flow's confirmed
-        // success). That reasoning missed that relogin()/useGlobalLogin()/
+        // success). That reasoning missed that relogin()/
         // loginViaTerminal() all unconditionally force-restart the
         // controller once THEY finish, regardless of any turn the bypassed
         // guard just let start — killing it. If a sibling flow really is
@@ -1430,7 +1432,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 // re-checked against live canRetry()/loginWaiting() at flush
                 // time — an EARLIER version of this code let a since-
                 // recovered item through by re-checking those two live
-                // signals, but a FAILED recovery (relogin()/useGlobalLogin()/
+                // signals, but a FAILED recovery (relogin()/
                 // loginViaTerminal()'s default retryAfterLogin:true path)
                 // clears loginWaiting() and never sets canRetry() back to
                 // true, so both signals read false after a failed attempt
