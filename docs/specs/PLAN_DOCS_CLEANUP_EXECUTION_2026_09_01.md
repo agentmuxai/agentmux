@@ -1,6 +1,7 @@
 # Docs cleanup — execution plan
 
-**Status:** proposed — plan only; nothing below has been executed yet.
+**Status:** active — A, B, D and E have shipped; C is held pending an owner
+decision (§6). See §7 for what actually happened.
 **Date:** 2026-09-01
 **Owner:** AgentY
 **Scope:** `docs/`, top-level `specs/`
@@ -192,3 +193,51 @@ recommended it and nobody has, across six weeks — which might mean nobody got
 to it, or might mean something outside this repo references those paths. Worth
 one check before moving 102 files; the other batches do not depend on the
 answer.
+
+## 7. Execution record
+
+Added after the fact, because a plan that still reads "nothing below has been
+executed yet" once four of its five batches have shipped is precisely the drift
+this document exists to stop — and it is worse here than elsewhere, since a
+reader checking whether the cleanup happened would conclude it did not.
+
+| Batch | PR | Outcome |
+|---|---|---|
+| Plan | #2906 | This document. |
+| A — my own stale docs | #2907 | 5 docs corrected, incl. the camera spec that said "Not implemented" the day it shipped. |
+| B — missing `Superseded-by:` | #2909 | 3 docs (one more than the 2 measured), each resolved differently — none defaulted to `historical`, per §3's warning. |
+| E — enforcement | #2912 | `scripts/check-doc-status.sh`, plus three `check:*` gates that existed in the Taskfile but had **never run in CI**. |
+| D — generated index | #2914 | `scripts/gen-docs-index.sh` + `--check`. |
+| C — directory consolidation | — | **Held.** §6 is still unanswered. |
+
+### What the measurements got wrong
+
+§2's table was taken before execution and two entries did not survive it:
+
+- **`superseded` without a pointer: 2 → 3.** The measuring glob was
+  `docs/specs/*.md specs/*.md`, which silently skipped `archive/` subdirectories
+  and `docs/analysis/` entirely. A verification that cannot see part of the tree
+  reports a clean result for the part it can see, which is how "clean" and
+  "unchecked" get confused. Later passes used `find docs specs -name "*.md"`.
+- **`INDEX.md` "10 days stale"** understated it. Nothing in the index was
+  *broken* — all 77 curated entries still resolved — but 165 specs added in the
+  previous 30 days were absent. The index was not rotting, it was being outrun,
+  which is a different problem and needs a generator rather than an update.
+
+### The failure worth recording
+
+Batch D's first implementation **silently dropped 189 of 728 specs** (26%): it
+bucketed each file under the literal first word of its `Status:` line but only
+printed the seven canonical buckets, so anything starting `shipped`, `proposal`,
+`ready`, `rootcaused`, … vanished with no trace — under a generated header
+claiming to cover every file. CI passed on it, and `--check` could not have
+caught it at any point, because it diffs against a re-run of the same logic: a
+*stable* bug stays green forever.
+
+Caught in review (#2914). The fix that matters is not the missing section but
+the completeness assertion added alongside it — emitted rows must equal
+candidate files or the script refuses to write. §1 says this plan must not be a
+fourth audit; the same logic applies to its tooling. A generator that can
+quietly under-report is a new instance of the problem, not a fix for it, and
+only an invariant it cannot pass while broken makes that structurally
+impossible.
