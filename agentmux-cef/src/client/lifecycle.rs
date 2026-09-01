@@ -1030,15 +1030,6 @@ impl AgentMuxHandler {
                         label: lbl.to_string(),
                     },
                 );
-
-                // Restore the WndProcs the Ctrl+Wheel hook subclassed and drop
-                // its bookkeeping. Windows reuses HWND values, so leaving stale
-                // entries behind would let a future window inherit a hook whose
-                // context points at a dead floater. See floater_wheel.rs.
-                #[cfg(target_os = "windows")]
-                unsafe {
-                    crate::floater_wheel::remove_floater_ctrl_wheel_hook(lbl);
-                }
             }
         }
 
