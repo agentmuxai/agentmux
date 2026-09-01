@@ -224,6 +224,30 @@ reader checking whether the cleanup happened would conclude it did not.
   previous 30 days were absent. The index was not rotting, it was being outrun,
   which is a different problem and needs a generator rather than an update.
 
+### Where the shipped work is narrower than the plan
+
+**Batch E's gate is narrower than §3 promised, deliberately.** §3 says every
+*added **or modified*** doc must carry a Status line. `check-doc-status.sh`
+enforces Rule 1 only on **added** docs; a doc that was merely modified and never
+had a Status is not blocked (`scripts/check-doc-status.sh`, the comment above
+the `-z "$status_line"` branch). Rule 2 — `superseded` needs a resolving
+`Superseded-by:` — is enforced on both, since that is a claim the author made in
+the diff.
+
+The narrowing is faithful to §3's *reasoning* while departing from its
+*wording*. §3 already scopes the gate to changed files so it cannot fail every
+PR on 318 pre-existing violations, "which is precisely how the previous three
+attempts at this died". A modified-but-status-less doc is a pre-existing
+violation too — it just happens to have been touched. Enforcing there would
+demand a status judgement from someone fixing a typo in a four-month-old file,
+reintroducing the same resentment-then-disabled failure at smaller scale.
+
+What that costs: the 125 status-less specs are **not** forced to shrink, only
+prevented from growing. §3's stated goal was "stops the backlog growing", and
+that is met — but anyone reading §3 expecting the backlog to drain as files get
+touched should read this instead. Closing that gap needs the per-doc judgement
+pass §4 rules out, not a stricter gate.
+
 ### The failure worth recording
 
 Batch D's first implementation **silently dropped 189 of 728 specs** (26%): it
