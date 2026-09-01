@@ -95,6 +95,27 @@ impl Store {
         Self::configure_and_migrate(conn)
     }
 
+    /// TEST-ONLY: additionally install the **identity-store** schema on this
+    /// store, on top of whatever schema it already carries.
+    ///
+    /// `server::tests::test_state` deliberately aliases `wstore`, `id_store`
+    /// and `identity_store` to ONE in-memory store so a test can seed data
+    /// through any of them — a lot of existing setup code depends on that.
+    /// The cost is that the single store carried only the object schema, so a
+    /// handler touching a table that exists ONLY in the global identity store
+    /// (`db_work_queue`) failed with a bare "no such table" 500 in tests while
+    /// being correct in production — the harness silently answered a different
+    /// question than the one under test.
+    ///
+    /// Every statement in that schema is `CREATE TABLE/INDEX IF NOT EXISTS`,
+    /// so tables already present from the object schema are left untouched;
+    /// this only fills in the ones that are missing.
+    #[cfg(test)]
+    pub fn apply_identity_schema_for_tests(&self) -> Result<(), StoreError> {
+        let conn = self.conn.lock().unwrap();
+        run_identity_store_schema(&conn)
+    }
+
     /// Open the GLOBAL shared store at `path` (`~/.agentmux/shared/store.db`).
     ///
     /// Uses the same WAL + busy-timeout config as `open()` but runs
