@@ -797,24 +797,44 @@ impl AppState {
     /// pane mid-teardown, and any browser that isn't a pane — all of which
     /// callers must treat as "no pane-scoped grant applies", never as "allow".
     ///
-    /// Only `Live` panes match, via `live_browser_pane_label`: a `Closing` pane
-    /// must not resolve, or a permission decision could be attributed to a pane
-    /// that is going away.
+    /// # Locking
+    ///
+    /// The `Live` filter and the browser-handle clone happen under **one** lock
+    /// acquisition, then the lock is dropped before any `is_same` FFI call —
+    /// satisfying both the module's snapshot-and-drop rule ("callers never hold
+    /// the lock across CEF FFI calls") and consistency between the two facts.
+    ///
+    /// An earlier version took three separate locks (collect ids, then
+    /// `live_browser_pane_label`, then `get_browser`). A close landing between
+    /// the second and third could flip an entry to `Closing` while its handle
+    /// was still registered, so the comparison would succeed and hand back a
+    /// block id for a closing pane — exactly the case this helper promises not
+    /// to return (codex P2 on PR #2893).
+    ///
+    /// **Residual, and callers must account for it:** the snapshot can still go
+    /// stale after the lock drops — a pane may begin closing while the FFI
+    /// comparison runs. This narrows the window rather than removing it, which
+    /// snapshot-and-drop cannot do. Anything acting on the result (granting
+    /// capture, say) must re-check liveness at the point of use rather than
+    /// treating a returned id as proof the pane is still alive.
     pub fn block_id_for_browser(&self, browser: &mut Browser) -> Option<String> {
-        let block_ids: Vec<String> = self
-            .host_state
-            .lock()
-            .browser_panes
-            .keys()
-            .cloned()
-            .collect();
-        for block_id in block_ids {
-            let Some(label) = self.live_browser_pane_label(&block_id) else {
-                continue;
-            };
-            let Some(mut candidate) = self.get_browser(&label) else {
-                continue;
-            };
+        // One lock: lifecycle and handle are read together, so they cannot
+        // disagree with each other.
+        let candidates: Vec<(String, Browser)> = {
+            let st = self.host_state.lock();
+            st.browser_panes
+                .iter()
+                .filter(|(_, e)| e.lifecycle == BrowserPaneLifecycle::Live)
+                .filter_map(|(block_id, e)| {
+                    st.browsers
+                        .get(&e.label)
+                        .map(|h| (block_id.clone(), h.browser.clone()))
+                })
+                .collect()
+        };
+
+        // FFI only after the lock is dropped.
+        for (block_id, mut candidate) in candidates {
             if candidate.is_same(Some(browser)) != 0 {
                 return Some(block_id);
             }
