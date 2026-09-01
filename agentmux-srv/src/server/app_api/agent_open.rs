@@ -230,12 +230,42 @@ fn register_agent_open(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     }).unwrap()));
                 }
 
-                // 5. Resolve CLI path
+                // 5. Resolve CLI path.
+                //
+                // Use the SAME canonical location as `resolvecli` /
+                // `install.start` / `install.check` and the frontend's
+                // `agent-model.ts::resolveCliDir`:
+                //   <agentmux_home>/instances/v<version>/cli/<provider>/
+                //
+                // This used to hand-roll `$HOME/.agentmux/<version>/cli/...`,
+                // which is wrong three ways: it omits `instances/`, omits the
+                // `v` prefix on the version, and reads `$HOME`/`$USERPROFILE`
+                // directly instead of `DataPaths`, so it ignored
+                // `AGENTMUX_HOME_OVERRIDE` and portable layouts entirely. The
+                // path it built has never existed, so `agent.open` failed with
+                // `CLI_NOT_AVAILABLE: ... Open an agent pane in the UI to
+                // trigger installation` for EVERY agent even when the CLI was
+                // installed — and because that message blames a missing
+                // install, it masked whatever the caller was actually doing.
+                // Verified live 2026-09-01: the binary was present at
+                // `instances/v0.55.29/cli/claude/...` while this reported it
+                // missing at `.agentmux/0.55.29/cli/claude/...`.
                 let version = env!("CARGO_PKG_VERSION");
+                // Still used below for the auth/config dirs, which have their
+                // own (separate, working) layout — left alone here.
                 let home = std::env::var("HOME")
                     .or_else(|_| std::env::var("USERPROFILE"))
                     .map_err(|_| "cannot determine home directory".to_string())?;
-                let provider_dir = format!("{}/.agentmux/{}/cli/{}", home, version, provider.id);
+                let paths = agentmux_common::DataPaths::from_env()
+                    .ok_or_else(|| "DataPaths::from_env() failed".to_string())?;
+                let provider_dir = paths
+                    .home_dir
+                    .join("instances")
+                    .join(format!("v{version}"))
+                    .join("cli")
+                    .join(&provider.id)
+                    .to_string_lossy()
+                    .to_string();
                 let npm_bin = if cfg!(windows) {
                     format!("{}/node_modules/.bin/{}.cmd", provider_dir, provider.cli_command)
                 } else {
