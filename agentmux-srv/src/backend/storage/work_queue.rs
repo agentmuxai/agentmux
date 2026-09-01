@@ -197,6 +197,13 @@ impl Store {
               WHERE id = (
                     SELECT id FROM db_work_queue
                      WHERE state = '{open}'
+                       -- Defence in depth (Codex P2 on PR #2898): an item that
+                       -- has burned its attempts must never be handed out
+                       -- again, however it came to be `open`. release/reap
+                       -- both park exhausted rows as `failed` themselves; this
+                       -- makes a missed path fail closed rather than becoming
+                       -- an infinite claim/release loop.
+                       AND attempts < max_attempts
                        AND (not_before IS NULL OR not_before <= ?3)
                        AND (target_agent = '' OR target_agent = ?1)
                        AND (target_group = ''{groups})
@@ -229,14 +236,21 @@ impl Store {
         Ok(item)
     }
 
-    /// Extend a live lease. Only the current holder may heartbeat, and only
-    /// while the row is still `claimed` — so a heartbeat arriving after the
-    /// reaper already reclaimed the row is a no-op (returns `false`) rather
-    /// than silently resurrecting a claim someone else may now hold.
+    /// Extend a live lease.
+    ///
+    /// `attempt` is the **fence token** — the `attempts` value returned by the
+    /// claim this call belongs to. Holder identity alone is NOT sufficient
+    /// (Codex P1 on PR #2898): `agent_id` is stable across claims, so after
+    /// `expire → reap → the SAME agent reclaims`, a delayed call left over
+    /// from the FIRST claim still satisfies a holder-and-state predicate and
+    /// would silently operate on the SECOND claim. That is a textbook ABA.
+    /// `attempts` increments on every claim, so comparing it fences each claim
+    /// instance apart with no extra column.
     pub fn work_queue_heartbeat(
         &self,
         id: &str,
         agent_id: &str,
+        attempt: i64,
         now_ms: i64,
         lease_ms: i64,
     ) -> Result<bool, StoreError> {
@@ -244,20 +258,24 @@ impl Store {
         let n = conn.execute(
             &format!(
                 "UPDATE db_work_queue
-                    SET claim_expires = ?3, updated_at = ?4
-                  WHERE id = ?1 AND claimed_by = ?2 AND state = '{c}'",
+                    SET claim_expires = ?4, updated_at = ?5
+                  WHERE id = ?1 AND claimed_by = ?2 AND attempts = ?3
+                    AND state = '{c}'",
                 c = work_state::CLAIMED
             ),
-            params![id, agent_id, now_ms + lease_ms, now_ms],
+            params![id, agent_id, attempt, now_ms + lease_ms, now_ms],
         )?;
         Ok(n > 0)
     }
 
-    /// Mark a claimed item finished. Same holder-and-state guard as heartbeat.
+    /// Mark a claimed item finished. Same holder + fence guard as heartbeat —
+    /// a stale completion from a previous claim must not close out a newer
+    /// one with an old result.
     pub fn work_queue_complete(
         &self,
         id: &str,
         agent_id: &str,
+        attempt: i64,
         result: &str,
         now_ms: i64,
     ) -> Result<bool, StoreError> {
@@ -265,23 +283,33 @@ impl Store {
         let n = conn.execute(
             &format!(
                 "UPDATE db_work_queue
-                    SET state = '{done}', result = ?3, claim_expires = NULL, updated_at = ?4
-                  WHERE id = ?1 AND claimed_by = ?2 AND state = '{c}'",
+                    SET state = '{done}', result = ?4, claim_expires = NULL, updated_at = ?5
+                  WHERE id = ?1 AND claimed_by = ?2 AND attempts = ?3
+                    AND state = '{c}'",
                 done = work_state::DONE,
                 c = work_state::CLAIMED
             ),
-            params![id, agent_id, result, now_ms],
+            params![id, agent_id, attempt, result, now_ms],
         )?;
         Ok(n > 0)
     }
 
-    /// Give a claim back voluntarily — the item returns to `open` for someone
-    /// else. `attempts` is NOT decremented: a release still consumed an
-    /// attempt, which is what stops a hot-potato item from cycling forever.
+    /// Give a claim back voluntarily.
+    ///
+    /// `attempts` is NOT decremented — a release still consumed an attempt.
+    /// And once those attempts are exhausted the item goes to `failed`, not
+    /// back to `open` (Codex P2 on PR #2898): reopening unconditionally let a
+    /// hot-potato item cycle claim→release→claim forever, because the reaper
+    /// only parks rows that are still `claimed` and a released row isn't. That
+    /// silently defeated the documented attempt bound for exactly the case the
+    /// bound exists for.
+    ///
+    /// Fenced by `attempt` for the same ABA reason as `work_queue_heartbeat`.
     pub fn work_queue_release(
         &self,
         id: &str,
         agent_id: &str,
+        attempt: i64,
         reason: &str,
         now_ms: i64,
     ) -> Result<bool, StoreError> {
@@ -289,13 +317,17 @@ impl Store {
         let n = conn.execute(
             &format!(
                 "UPDATE db_work_queue
-                    SET state = '{open}', claimed_by = '', claim_expires = NULL,
-                        result = ?3, updated_at = ?4
-                  WHERE id = ?1 AND claimed_by = ?2 AND state = '{c}'",
+                    SET state = CASE WHEN attempts >= max_attempts
+                                     THEN '{failed}' ELSE '{open}' END,
+                        claimed_by = '', claim_expires = NULL,
+                        result = ?4, updated_at = ?5
+                  WHERE id = ?1 AND claimed_by = ?2 AND attempts = ?3
+                    AND state = '{c}'",
+                failed = work_state::FAILED,
                 open = work_state::OPEN,
                 c = work_state::CLAIMED
             ),
-            params![id, agent_id, reason, now_ms],
+            params![id, agent_id, attempt, reason, now_ms],
         )?;
         Ok(n > 0)
     }
@@ -536,18 +568,59 @@ mod tests {
     fn heartbeat_and_complete_are_holder_only() {
         let (s, _d) = store();
         s.work_queue_enqueue(&item("w", "held")).unwrap();
-        s.work_queue_claim(&any("owner"), 2000, 60_000).unwrap().unwrap();
+        let c = s.work_queue_claim(&any("owner"), 2000, 60_000).unwrap().unwrap();
 
-        assert!(!s.work_queue_heartbeat("w", "impostor", 3000, 60_000).unwrap());
-        assert!(s.work_queue_heartbeat("w", "owner", 3000, 60_000).unwrap());
+        assert!(!s.work_queue_heartbeat("w", "impostor", c.attempts, 3000, 60_000).unwrap());
+        assert!(s.work_queue_heartbeat("w", "owner", c.attempts, 3000, 60_000).unwrap());
 
-        assert!(!s.work_queue_complete("w", "impostor", "nope", 4000).unwrap());
-        assert!(s.work_queue_complete("w", "owner", "shipped", 4000).unwrap());
+        assert!(!s.work_queue_complete("w", "impostor", c.attempts, "nope", 4000).unwrap());
+        assert!(s.work_queue_complete("w", "owner", c.attempts, "shipped", 4000).unwrap());
 
         let done = s.work_queue_get("w").unwrap().unwrap();
         assert_eq!(done.state, work_state::DONE);
         assert_eq!(done.result, "shipped");
         assert!(done.claim_expires.is_none());
+    }
+
+    /// Codex P1 on PR #2898 — the ABA case. `agent_id` is stable across
+    /// claims, so after expire → reap → *the same agent* reclaims, a delayed
+    /// call left over from the FIRST claim satisfies any holder-and-state
+    /// predicate and would operate on the SECOND claim. The `attempts` fence
+    /// is what separates the two claim instances.
+    #[test]
+    fn a_stale_call_from_a_previous_claim_cannot_touch_the_new_one() {
+        let (s, _d) = store();
+        s.work_queue_enqueue(&item("w", "reclaimed by the same agent")).unwrap();
+
+        let first = s.work_queue_claim(&any("a1"), 1_000, 1_000).unwrap().unwrap();
+        assert_eq!(first.attempts, 1);
+        assert_eq!(s.work_queue_reap(2_000).unwrap(), (1, 0));
+
+        // SAME agent id picks it up again — the whole point of the case.
+        let second = s.work_queue_claim(&any("a1"), 3_000, 60_000).unwrap().unwrap();
+        assert_eq!(second.attempts, 2, "the reclaim is a distinct claim instance");
+
+        // Everything below is the FIRST claim's fence arriving late.
+        assert!(
+            !s.work_queue_complete("w", "a1", first.attempts, "stale result", 4_000).unwrap(),
+            "a stale completion must not close out the newer claim"
+        );
+        assert!(
+            !s.work_queue_heartbeat("w", "a1", first.attempts, 4_000, 60_000).unwrap(),
+            "a stale heartbeat must not extend the newer claim"
+        );
+        assert!(
+            !s.work_queue_release("w", "a1", first.attempts, "stale release", 4_000).unwrap(),
+            "a stale release must not reopen the newer claim"
+        );
+
+        let live = s.work_queue_get("w").unwrap().unwrap();
+        assert_eq!(live.state, work_state::CLAIMED, "the second claim is untouched");
+        assert_eq!(live.result, "");
+
+        // And the CURRENT fence still works.
+        assert!(s.work_queue_complete("w", "a1", second.attempts, "real result", 5_000).unwrap());
+        assert_eq!(s.work_queue_get("w").unwrap().unwrap().result, "real result");
     }
 
     /// The issue-#2518 lesson: a claimant that dies must not hold the row
@@ -598,15 +671,71 @@ mod tests {
     fn release_returns_the_item_but_keeps_the_attempt() {
         let (s, _d) = store();
         s.work_queue_enqueue(&item("w", "hot potato")).unwrap();
-        s.work_queue_claim(&any("a1"), 1_000, 60_000).unwrap().unwrap();
+        let c = s.work_queue_claim(&any("a1"), 1_000, 60_000).unwrap().unwrap();
 
-        assert!(!s.work_queue_release("w", "impostor", "not mine", 2_000).unwrap());
-        assert!(s.work_queue_release("w", "a1", "cannot do this", 2_000).unwrap());
+        assert!(!s.work_queue_release("w", "impostor", c.attempts, "not mine", 2_000).unwrap());
+        assert!(s.work_queue_release("w", "a1", c.attempts, "cannot do this", 2_000).unwrap());
 
         let back = s.work_queue_get("w").unwrap().unwrap();
         assert_eq!(back.state, work_state::OPEN);
         assert_eq!(back.attempts, 1, "a voluntary release still consumed an attempt");
         assert_eq!(s.work_queue_claim(&any("a2"), 3_000, 60_000).unwrap().unwrap().id, "w");
+    }
+
+    /// Codex P2 on PR #2898: releasing on the FINAL allowed attempt used to
+    /// return the row to `open` unconditionally, so a hot-potato item could
+    /// cycle claim→release→claim forever — the reaper cannot park it, because
+    /// a released row is no longer `claimed`. That silently defeated the
+    /// attempt bound for precisely the case it exists to bound.
+    #[test]
+    fn releasing_on_the_final_attempt_fails_the_item_instead_of_reopening_it() {
+        let (s, _d) = store();
+        let mut hot = item("w", "nobody can do this");
+        hot.max_attempts = 2;
+        s.work_queue_enqueue(&hot).unwrap();
+
+        let c1 = s.work_queue_claim(&any("a1"), 1_000, 60_000).unwrap().unwrap();
+        assert!(s.work_queue_release("w", "a1", c1.attempts, "not for me", 1_500).unwrap());
+        assert_eq!(s.work_queue_get("w").unwrap().unwrap().state, work_state::OPEN,
+                   "attempt 1 of 2 — still has a life left");
+
+        let c2 = s.work_queue_claim(&any("a2"), 2_000, 60_000).unwrap().unwrap();
+        assert_eq!(c2.attempts, 2, "final allowed attempt");
+        assert!(s.work_queue_release("w", "a2", c2.attempts, "nor me", 2_500).unwrap());
+
+        let dead = s.work_queue_get("w").unwrap().unwrap();
+        assert_eq!(dead.state, work_state::FAILED, "exhausted release must park, not reopen");
+        assert!(
+            s.work_queue_claim(&any("a3"), 3_000, 60_000).unwrap().is_none(),
+            "the cycle must be broken, not merely slowed"
+        );
+    }
+
+    /// Defence in depth for the same finding: even if a row somehow reaches
+    /// `open` with its attempts already spent, the claim query itself must
+    /// refuse it rather than trusting release/reap to have parked it.
+    #[test]
+    fn an_open_row_with_exhausted_attempts_is_not_claimable() {
+        let (s, _d) = store();
+        let mut spent = item("w", "already spent");
+        spent.max_attempts = 1;
+        s.work_queue_enqueue(&spent).unwrap();
+
+        // Force the state release/reap would normally never leave behind.
+        s.work_queue_claim(&any("a1"), 1_000, 60_000).unwrap().unwrap();
+        {
+            let conn = s.conn().lock().unwrap();
+            conn.execute(
+                "UPDATE db_work_queue SET state = 'open', claimed_by = '' WHERE id = 'w'",
+                [],
+            )
+            .unwrap();
+        }
+
+        assert!(
+            s.work_queue_claim(&any("a2"), 2_000, 60_000).unwrap().is_none(),
+            "attempts >= max_attempts must fail closed at the claim query"
+        );
     }
 
     #[test]
@@ -629,8 +758,8 @@ mod tests {
     fn a_completed_item_is_never_reaped_or_reclaimed() {
         let (s, _d) = store();
         s.work_queue_enqueue(&item("w", "finished")).unwrap();
-        s.work_queue_claim(&any("a1"), 1_000, 1_000).unwrap().unwrap();
-        assert!(s.work_queue_complete("w", "a1", "ok", 1_500).unwrap());
+        let c = s.work_queue_claim(&any("a1"), 1_000, 1_000).unwrap().unwrap();
+        assert!(s.work_queue_complete("w", "a1", c.attempts, "ok", 1_500).unwrap());
 
         assert_eq!(s.work_queue_reap(9_999).unwrap(), (0, 0), "a done row has no live lease");
         assert!(s.work_queue_claim(&any("a2"), 9_999, 60_000).unwrap().is_none());

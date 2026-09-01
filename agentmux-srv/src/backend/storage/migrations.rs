@@ -1490,8 +1490,16 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
         -- in run_shared_store_schema. A per-channel queue would only ever mean
         -- any agent IN THIS CHANNEL can pick it up, which is close to useless
         -- when every local/dev/portable build is its own channel -- see the
-        -- report's section 6.2. (No apostrophes or quotes in this block: the
-        -- whole schema is one Rust string literal passed to execute_batch.)
+        -- report's section 6.2.
+        --
+        -- Editing note: this whole schema is ONE Rust string literal passed to
+        -- execute_batch, so an UNESCAPED double quote anywhere in it --
+        -- including inside an SQL comment like this one -- terminates that
+        -- literal and breaks the build with errors that point at prose rather
+        -- than at code. Escaped ones are fine and already appear above (see
+        -- db_drone_definitions default JSON). Apostrophes are fine too: they
+        -- are ordinary characters inside a Rust double-quoted string, and
+        -- SQLite does not lex quotes inside a comment.
         CREATE TABLE IF NOT EXISTS db_work_queue (
             id            TEXT PRIMARY KEY,
             title         TEXT NOT NULL,
