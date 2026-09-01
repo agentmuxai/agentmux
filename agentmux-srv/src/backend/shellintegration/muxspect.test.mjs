@@ -312,13 +312,13 @@ describe("muxspect renderWork", () => {
 
     const printed = () => logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
 
-    // Same failure shape, and same reason for handling it, as renderLayout
-    // above: a store-read failure must not read as an empty queue.
-    it("prints a whole-request error to stderr instead of 'queue is empty'", () => {
-        renderWork({ error: "identity store unavailable" }, "");
-        expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("identity store unavailable"));
-        expect(logSpy).not.toHaveBeenCalledWith("queue is empty");
-    });
+    // REMOVED (reagent P2 on PR #2903): a test asserting renderWork printed a
+    // top-level `data.error` to stderr. Unlike the layout endpoint, whose
+    // handler deliberately returns 200-with-{error}, `/agentmux/work` returns
+    // HTTP 500 — which apiGet turns into fail() + exit(1) before renderWork is
+    // ever called. The branch was unreachable and this test verified a
+    // response shape production never produces, which is worse than no test:
+    // it made an uncovered failure mode look covered.
 
     it("says 'queue is empty' for a genuinely empty but SUCCESSFUL response", () => {
         renderWork({ items: [] }, "");
@@ -404,5 +404,67 @@ describe("muxspect renderWork", () => {
             "",
         );
         expect(printed()).not.toContain("LEASE EXPIRED");
+    });
+
+    /// Codex P2 on PR #2903. An expired lease does NOT always mean the item
+    /// comes back: the reaper parks one whose attempts are already spent as
+    /// `failed` instead of reopening it. Promising a comeback for those is
+    /// exactly the false reassurance this command exists to prevent — and is
+    /// the same over-promise WorkRelease made on #2902, repeated in the
+    /// renderer.
+    it("distinguishes an expired lease that will be reoffered from one that is doomed", () => {
+        renderWork(
+            {
+                items: [
+                    {
+                        id: "back",
+                        title: "will be reoffered",
+                        state: "claimed",
+                        claimed_by: "ghost",
+                        attempts: 1,
+                        max_attempts: 3,
+                        claim_expires: Date.now() - 60_000,
+                    },
+                    {
+                        id: "doomed",
+                        title: "attempts spent",
+                        state: "claimed",
+                        claimed_by: "ghost",
+                        attempts: 3,
+                        max_attempts: 3,
+                        claim_expires: Date.now() - 60_000,
+                    },
+                ],
+            },
+            "",
+        );
+        const out = printed();
+        expect(out).toContain("ATTEMPTS SPENT");
+        expect(out).toContain("NOT reoffered");
+        // Both summary lines, each counting only its own case.
+        expect(out).toContain("1 item(s) hold an EXPIRED lease — their claimant is gone");
+        expect(out).toContain("1 item(s) hold an EXPIRED lease AND have spent every attempt");
+    });
+
+    /// Codex P2 on PR #2903: a full page must not be presented as the whole
+    /// backlog. `work_queue_list` orders by `updated_at DESC`, so it is
+    /// precisely the OLDEST open work and oldest expired claims — the things
+    /// this command exists to surface — that fall off the end.
+    it("warns that output may be truncated when a full page comes back", () => {
+        const items = Array.from({ length: 3 }, (_, i) => ({
+            id: `w${i}`,
+            title: `item ${i}`,
+            state: "open",
+            attempts: 0,
+            max_attempts: 3,
+        }));
+        renderWork({ items }, "", 3);
+        expect(printed()).toContain("there may be MORE");
+    });
+
+    it("does not warn about truncation for a partial page", () => {
+        const items = [{ id: "w0", title: "only one", state: "open", attempts: 0, max_attempts: 3 }];
+        renderWork({ items }, "", 500);
+        expect(printed()).not.toContain("there may be MORE");
     });
 });
