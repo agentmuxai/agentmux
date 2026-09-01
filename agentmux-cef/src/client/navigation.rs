@@ -360,7 +360,7 @@ impl AgentMuxHandler {
 
     pub(crate) fn on_load_end(
         &mut self,
-        browser: Option<&mut Browser>,
+        mut browser: Option<&mut Browser>,
         frame: Option<&mut Frame>,
         _http_status_code: i32,
     ) {
@@ -370,6 +370,39 @@ impl AgentMuxHandler {
 
         if frame.is_main() != 1 {
             return;
+        }
+
+        // Ctrl+Wheel recovery for floating panes. Installed here rather than in
+        // `on_after_created` because Chromium recreates
+        // `Chrome_RenderWidgetHostHWND` on every page load, so a subclass
+        // installed once ends up stranded on a destroyed HWND — the same reason
+        // `install_browser_pane_focus_redirect` is wired from BOTH create and
+        // load-end. Main-frame load-end covers first paint and every subsequent
+        // navigation, including a pane-pool window being promoted to a real
+        // floater (which re-navigates and may change label). Idempotent:
+        // already-subclassed HWNDs are skipped. See floater_wheel.rs.
+        #[cfg(target_os = "windows")]
+        if let Some(b) = browser.as_mut() {
+            // Reborrow `&mut &mut Browser` down to `&mut Browser` for
+            // `window_label_for`/`host`; the outer Option must stay usable
+            // below, so it cannot be moved out of.
+            let b: &mut Browser = b;
+            if let Some(label) = self.window_label_for(b) {
+                if label.starts_with("floating-") {
+                    if let Some(host) = b.host() {
+                        let wh = host.window_handle();
+                        if !wh.0.is_null() {
+                            unsafe {
+                                crate::floater_wheel::install_floater_ctrl_wheel_hook(
+                                    &self.state,
+                                    wh.0 as *mut std::ffi::c_void,
+                                    &label,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Re-inject the host IPC creds on EVERY main-frame load of OUR OWN
