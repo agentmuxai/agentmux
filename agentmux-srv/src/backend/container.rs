@@ -656,6 +656,16 @@ impl ContainerManager {
         volumes: &[String],
         env_vars: &[(String, String)],
     ) -> Result<(), ContainerError> {
+        // A container name can be reused: `ensure_running` detects an
+        // externally removed container and recreates it under the same name.
+        // The replacement may exec as a DIFFERENT user -- a changed custom
+        // image, or the same mutable tag repulled -- and a stale cached
+        // identity would then chown every prompt file to the wrong uid, making
+        // it unreadable (mode 0600) for the life of the process (codex P2,
+        // PR #2883). The cache is keyed by name, so evict here, at the one
+        // place a name starts pointing at a new container.
+        self.inner.exec_identities.lock().await.remove(container_name);
+
         let env: Vec<String> = env_vars.iter()
             .map(|(k, v)| format!("{k}={v}"))
             .collect();

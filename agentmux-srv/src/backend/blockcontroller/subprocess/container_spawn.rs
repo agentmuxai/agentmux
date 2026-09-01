@@ -241,6 +241,9 @@ impl SubprocessController {
 
             // Start the exec via Docker socket — env vars travel through
             // CreateExecOptions.env (Docker API), never in process argv.
+            // Set once the upload succeeds; the interrupt path uses it to remove
+            // a prompt file whose wrapper was killed before it could.
+            let mut prompt_path_for_kill = String::new();
             // Write the prompt into the container FIRST, then run the CLI with
             // its stdin redirected from that file. See `container_turn_exec`
             // and `ContainerManager::upload_turn_prompt` for why neither the
@@ -250,6 +253,9 @@ impl SubprocessController {
                 .await
             {
                 Ok(prompt_path) => {
+                    // Retained for the interrupt path below, which has to do
+                    // the cleanup the killed wrapper can't.
+                    prompt_path_for_kill = prompt_path.clone();
                     let wrapped = container_turn_exec(&prompt_path, cmd);
                     // attach_stdin: false — the CLI's stdin is the prompt file.
                     match cm.exec(&container_name, &wrapped, None, &container_env, false).await {
@@ -413,6 +419,16 @@ impl SubprocessController {
                         if let Err(e) = cm.signal_exec_process(&container_name, &kill_pattern, force).await {
                             tracing::warn!(block_id = %block_id, error = %e, "container interrupt pkill failed");
                         }
+                        // The wrapper carries the `rm -f`, and `pkill -f
+                        // <cli>` matches the wrapper too -- its argv contains
+                        // the CLI name as an argument -- so the shell dies
+                        // alongside the CLI and its cleanup never runs. An
+                        // interrupted turn would otherwise leave a mode-0600
+                        // prompt, possibly holding a pasted secret, in a
+                        // container that outlives the turn (codex P2,
+                        // PR #2883). Clean up from out here, where nothing was
+                        // killed.
+                        cm.remove_turn_prompt(&container_name, &prompt_path_for_kill).await;
                         killed = true;
                         break;
                     }
