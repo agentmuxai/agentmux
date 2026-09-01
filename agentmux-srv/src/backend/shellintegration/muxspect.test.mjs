@@ -13,7 +13,7 @@
 // parser silently misbehaved depending on which side they landed on.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { checkSpawnerTier, logSrvVersion, parseArgs, renderLayout } from "./muxspect.mjs";
+import { checkSpawnerTier, logSrvVersion, parseArgs, renderLayout, renderWork } from "./muxspect.mjs";
 
 describe("muxspect parseArgs", () => {
     it("'layout' with no tab id parses as a bare command", () => {
@@ -295,5 +295,114 @@ describe("muxspect renderLayout - whole-request failure", () => {
         const printed = logSpy.mock.calls.map((c) => c.join(" ")).join(" | ");
         expect(printed).toContain("layoutstate unreadable");
         expect(printed).toContain("healthy");
+    });
+});
+
+describe("muxspect renderWork", () => {
+    let errSpy;
+    let logSpy;
+    beforeEach(() => {
+        errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+        logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    });
+    afterEach(() => {
+        errSpy.mockRestore();
+        logSpy.mockRestore();
+    });
+
+    const printed = () => logSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+
+    // Same failure shape, and same reason for handling it, as renderLayout
+    // above: a store-read failure must not read as an empty queue.
+    it("prints a whole-request error to stderr instead of 'queue is empty'", () => {
+        renderWork({ error: "identity store unavailable" }, "");
+        expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("identity store unavailable"));
+        expect(logSpy).not.toHaveBeenCalledWith("queue is empty");
+    });
+
+    it("says 'queue is empty' for a genuinely empty but SUCCESSFUL response", () => {
+        renderWork({ items: [] }, "");
+        expect(logSpy).toHaveBeenCalledWith("queue is empty");
+        expect(errSpy).not.toHaveBeenCalled();
+    });
+
+    /// A filtered query that matches nothing is a DIFFERENT statement from an
+    /// empty queue — conflating them is the same error class as the
+    /// error-vs-empty one above, one level down.
+    it("distinguishes 'no matches for this filter' from an empty queue", () => {
+        renderWork({ items: [] }, "failed");
+        expect(logSpy).toHaveBeenCalledWith("no failed items");
+        expect(logSpy).not.toHaveBeenCalledWith("queue is empty");
+    });
+
+    it("shows state, holder, attempts, and the recorded result", () => {
+        renderWork(
+            {
+                items: [
+                    {
+                        id: "w1",
+                        title: "repro the thing",
+                        state: "done",
+                        claimed_by: "agentx",
+                        attempts: 2,
+                        max_attempts: 3,
+                        result: "fixed in PR #123",
+                    },
+                ],
+            },
+            "",
+        );
+        const out = printed();
+        expect(out).toContain("w1");
+        expect(out).toContain("done");
+        expect(out).toContain("held-by=agentx");
+        expect(out).toContain("attempts=2/3");
+        expect(out).toContain("fixed in PR #123");
+    });
+
+    /// The interesting pathology: a claimed row whose lease already lapsed.
+    /// Nobody is working it, and nothing surfaces that until the next claim
+    /// reaps it — so the reader must not have to compare epoch timestamps by
+    /// eye to notice.
+    it("flags a claimed item whose lease has already expired", () => {
+        renderWork(
+            {
+                items: [
+                    {
+                        id: "w2",
+                        title: "abandoned",
+                        state: "claimed",
+                        claimed_by: "ghost",
+                        attempts: 1,
+                        max_attempts: 3,
+                        claim_expires: Date.now() - 60_000,
+                    },
+                ],
+            },
+            "",
+        );
+        const out = printed();
+        expect(out).toContain("LEASE EXPIRED");
+        expect(out).toContain("1 item(s) hold an EXPIRED lease");
+    });
+
+    it("does not flag a claimed item whose lease is still live", () => {
+        renderWork(
+            {
+                items: [
+                    {
+                        id: "w3",
+                        title: "in progress",
+                        state: "claimed",
+                        claimed_by: "worker",
+                        attempts: 1,
+                        max_attempts: 3,
+                        claim_expires: Date.now() + 60_000,
+                    },
+                ],
+            },
+            "",
+        );
+        expect(printed()).not.toContain("LEASE EXPIRED");
     });
 });

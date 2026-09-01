@@ -91,6 +91,16 @@ Usage:
                                   reports what is PERSISTED, which can lag
                                   what the frontend is currently rendering.
                                   Exits non-zero if any tree has violations.
+  muxspect work [state] [--json]  the Muxqueue backlog — the shared work queue
+                                  any agent can add to and any agent can claim
+                                  (REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md).
+                                  Optional state filter: open | claimed | done |
+                                  failed | cancelled. Shows who holds what, how
+                                  many attempts each item has burned, and the
+                                  result/reason recorded on it. Answers "what is
+                                  outstanding, and is anything stuck" without
+                                  claiming anything yourself — this command is
+                                  strictly read-only.
   muxspect help                   this message
 
 Requires $AGENTMUX_LOCAL_URL and $AGENTMUX_AUTH_KEY in the environment.
@@ -497,6 +507,68 @@ function renderDock(data) {
 }
 
 /**
+ * Render `muxspect work` — the Muxqueue backlog.
+ *
+ * Exported (pure apart from console output) for muxspect.test.mjs, same as
+ * renderLayout below, so the failure paths are tested rather than asserted.
+ */
+export function renderWork(data, stateFilter) {
+    // Same 200-with-{error} shape the layout handler uses, and the same reason
+    // for handling it explicitly: falling through to "queue is empty" would
+    // report success for exactly the store failure this command exists to
+    // surface (reagent P1 on PR #2856, which this renderer is modelled on).
+    if (data.error) {
+        console.error(`work: ${data.error}`);
+        return;
+    }
+    const items = data.items ?? [];
+    if (!items.length) {
+        // Distinguish "nothing at all" from "nothing MATCHING", so a filtered
+        // query never reads as an empty queue.
+        console.log(stateFilter ? `no ${stateFilter} items` : "queue is empty");
+        return;
+    }
+
+    const now = Date.now();
+    console.log(`${items.length} item(s)${stateFilter ? ` (state=${stateFilter})` : ""}\n`);
+    for (const it of items) {
+        const holder = it.claimed_by ? ` held-by=${it.claimed_by}` : "";
+        const attempts = `${it.attempts ?? 0}/${it.max_attempts ?? 0}`;
+        // A claimed row whose lease is already in the past is the interesting
+        // pathology: nobody is working it, and it stays invisible to `list`
+        // until the next claim reaps it. Call that out rather than making the
+        // reader compare timestamps by eye.
+        const expired =
+            it.state === "claimed" && it.claim_expires && it.claim_expires <= now
+                ? "  LEASE EXPIRED (returns to the pool on the next claim)"
+                : "";
+        console.log(`${it.id}  ${it.state}${holder}  attempts=${attempts}${expired}`);
+        console.log(`  ${it.title}`);
+        if (it.kind) console.log(`  kind=${it.kind}`);
+        if (it.target_agent) console.log(`  target-agent=${it.target_agent}`);
+        if (it.target_group) console.log(`  target-group=${it.target_group}`);
+        if (it.not_before && it.not_before > now) {
+            console.log(`  deferred until ${new Date(it.not_before).toISOString()}`);
+        }
+        // The completion trace for a done item, the reason for a
+        // failed/released one — the field WorkComplete calls the only record
+        // that the work happened.
+        if (it.result) console.log(`  -> ${it.result}`);
+        console.log("");
+    }
+
+    const stuck = items.filter(
+        (it) => it.state === "claimed" && it.claim_expires && it.claim_expires <= now,
+    ).length;
+    if (stuck) {
+        console.log(
+            `${stuck} item(s) hold an EXPIRED lease — their claimant is gone. ` +
+                `They return to the pool the next time any agent calls WorkClaim.`,
+        );
+    }
+}
+
+/**
  * Render `muxspect layout` — the persisted pane tree per tab as an indented
  * outline, plus the layout doctor's verdict.
  *
@@ -615,6 +687,26 @@ async function main() {
         const data = await apiGet(url, authKey, "/api/v1/muxspect/list");
         if (json) console.log(JSON.stringify(data, null, 2));
         else renderList(data);
+        return;
+    }
+
+    if (cmd === "work") {
+        // The sole positional arg is an optional state filter. Validated here
+        // rather than passed through blindly: a typo like `muxspect work opne`
+        // would otherwise return an empty list that reads exactly like "the
+        // queue is empty", which is the wrong answer to a different question.
+        const stateFilter = blockId ?? "";
+        const VALID = ["open", "claimed", "done", "failed", "cancelled"];
+        if (stateFilter && !VALID.includes(stateFilter)) {
+            fail(`unknown state '${stateFilter}' — expected one of: ${VALID.join(", ")}`);
+        }
+        const data = await apiGet(
+            url,
+            authKey,
+            `/agentmux/work?state=${encodeURIComponent(stateFilter)}&limit=200`,
+        );
+        if (json) console.log(JSON.stringify(data, null, 2));
+        else renderWork(data, stateFilter);
         return;
     }
 
