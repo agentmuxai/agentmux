@@ -1,5 +1,35 @@
 # AgentMux Version History
 
+## 0.55.30 — 2026-08-31
+
+- fix(agent-pane): peek panel shrink-wraps, floats right, and shows 12-hour AM/PM time
+- fix(identity): stop isolated Claude Code config dirs leaking the host's ~/.claude/CLAUDE.md
+- fix(layout): restore the resize handle between two panes flanking a minimized one
+- feat(muxspect): `layout` command — inspect the persisted pane tree and run the layout doctor
+- fix(agent): defer a mid-turn model/effort change instead of killing the in-flight turn
+- fix(srv): run output.idx scans on the blocking pool
+- feat(swarm): show each agent's long-running tool calls as a row bucket
+- fix(layout): floating panes no longer show a padding border
+- fix(agent-picker): distinguish snapshot-check failures and cross-channel rows from a genuinely empty conversation
+- docs(flicker): systemic analysis of the flash class + render-architecture spec, fix stale statuses and dangling spec refs
+- fix(container): container agents never launch with --input-format stream-json
+- docs(agent-pane): spec a single content-resize contract; close three ruled-out fix leads
+- fix(agent): widen the transient-failure auto-retry ladder to ~4min with jitter
+- fix(agent-pane): drop composer strip's duplicate centered token/elapsed stats
+- feat(term): add configurable scroll wheel sensitivity setting
+- docs(agent): spec retry for transient failures on turns with no rendered pane
+- fix(auth): enforce per-channel login — close four paths that let an agent reach Claude without one
+- docs(spec): codex round-3 corrections to the epoch resync design + container scope
+- docs(browser-pane): spec camera (getUserMedia video) access, per issue #2871
+- feat(agent-pane): per-node shrink attribution in the wave-scroll-shrink diagnostic
+- docs(spec): reject the epoch design after a fourth unsoundness finding
+- fix(cef): restore ctrl+wheel zoom in floating panes
+- docs(browser-pane): resolve the camera spec's blocking Phase 0 from the CEF headers
+- docs(agent): headless-retry Phase 0 needs instrumentation added first
+- docs(browser-pane): --enable-media-stream is a live ingress, not hypothetical
+- fix(cef): reject media-permission switches from AGENTMUX_CEF_EXTRA_FLAGS
+
+
 ## 0.55.29 — 2026-08-30
 
 - feat(armory): merge Global Memory + Personal Memory into one Memory tab
