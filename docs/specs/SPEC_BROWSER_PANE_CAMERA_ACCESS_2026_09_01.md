@@ -135,11 +135,9 @@ Two things this same paragraph of the header settles for free:
   behaviour is the header's documented default, not an accident.
 - **`--enable-media-stream` bypasses this handler entirely** and grants all
   permissions: *"This method will not be called if the `--enable-media-stream`
-  command-line switch is used."* AgentMux does **not** pass it today (verified:
-  no occurrence in `agentmux-cef` or `agentmux-launcher`). This must become a
-  standing constraint — adding that switch for any reason would silently void
-  every guarantee in §4. Worth an assertion or a comment at the switch-assembly
-  site.
+  command-line switch is used."* See §3.8 — this is a **live ingress, not a
+  hypothetical**, and correcting that is a prerequisite for §4 meaning
+  anything.
 
 Regardless, the handler must be robust to the pane closing while a prompt is
 open: dropping the callback without calling it must not leak, and the pane's
@@ -217,6 +215,50 @@ recommended option, it is the only one CEF offers today. If a CDP path is ever
 shown to genuinely terminate live tracks (§7 Q6), this can become a softer
 default with reload as the fallback; until then reload *is* the specification,
 not an implementation detail — the §4 revoke guarantee depends entirely on it.
+
+### 3.8 `--enable-media-stream` must be rejected at every ingress
+
+An earlier revision of this spec said AgentMux "does not pass
+`--enable-media-stream` today (verified: no occurrence in `agentmux-cef` or
+`agentmux-launcher`)" and treated it as a standing constraint on future edits.
+**That was true about hardcoded occurrences and misleading about the actual
+risk.** The switch does not need to appear in our source to reach CEF.
+
+Verified ingress paths, both unfiltered today:
+
+1. **`AGENTMUX_CEF_EXTRA_FLAGS`** (`agentmux-cef/src/app/mod.rs:756-770`) —
+   splits an env var on whitespace and appends **every token verbatim** as a
+   Chromium switch. It exists to A/B GPU flags without a recompile, and has no
+   allowlist, denylist, or validation of any kind. `AGENTMUX_CEF_EXTRA_FLAGS=--enable-media-stream`
+   is sufficient.
+2. **Launcher → host argument forwarding** — the launcher passes Chromium
+   switches through to the host (`--disable-gpu` is forwarded exactly this way,
+   `agentmux-launcher/src/host_spawn.rs:79`), with no filtering on what may
+   pass.
+
+So an environment variable — settable by a user, a shell profile, a CI config,
+or **an agent with shell access** — silently grants camera and microphone to
+**every browser pane, for every origin, with no prompt**, and does so by
+disabling the handler rather than by going through it. Nothing in §3's design
+observes it, and nothing in §4 survives it.
+
+**Requirement:** before Phase 2 ships, `--enable-media-stream` (and its
+`enable-media-stream=…` spelling) must be **stripped at every ingress**, with a
+loud warning when rejected. The check belongs at the switch-assembly site in
+`app/mod.rs`, since that is where both paths converge into `CefCommandLine`.
+
+Two judgement calls for whoever implements it:
+
+- **Reject the exact switch, or allowlist `AGENTMUX_CEF_EXTRA_FLAGS` entirely?**
+  A denylist of one is easy to defeat by accident as Chromium adds aliases; an
+  allowlist is stricter but breaks the flag's diagnostic purpose. A denylist
+  covering the media switches specifically, with the warning, is the
+  proportionate answer — but note this is a **diagnostics escape hatch being
+  relied on as a security boundary**, which it was never designed to be.
+- **Is this a pre-existing bug, independent of camera?** Partly yes: the same
+  env var can already grant **microphone** to every browser pane today, without
+  any of this spec being implemented. That is arguably worth fixing on its own
+  schedule rather than waiting for Phase 2 — see §7 Q7.
 
 ## 4. Threat model — camera is not mic
 
@@ -309,3 +351,10 @@ revoking them, and any desktop-capture work.
    the codebase has **no `ExecuteDevToolsMethod` call sites at all** today, so
    this would introduce a new dependency surface for one feature — weigh that
    against simply accepting the reload.
+
+7. **Is the `--enable-media-stream` ingress (§3.8) a pre-existing bug?** It can
+   already grant microphone to every browser pane today, with no part of this
+   spec implemented — the existing main-client audio grant is not the only way
+   media reaches a pane. If so it should be fixed on its own schedule rather
+   than as Phase 2 scaffolding, and this spec should depend on that fix rather
+   than own it.
