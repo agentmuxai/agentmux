@@ -24,10 +24,17 @@ precedent)
 
 ---
 
-## 1. Current behaviour (verified)
+## 1. Behaviour BEFORE this spec shipped (verified at the time)
 
-A browser pane cannot grant camera access to any page, ever. Two independent
-reasons, both deliberate:
+> **This section describes the state this spec set out to change, not current
+> behaviour.** As of the PRs listed in the Status line, a browser pane installs
+> `AgentMuxPanePermissionHandler` and consults the grant store, and camera
+> access is obtainable with an explicit user grant. §§1-2 are kept as the
+> problem statement — rewriting them to describe the fix would erase why the
+> design is shaped the way it is.
+
+A browser pane could not grant camera access to any page, ever. Two independent
+reasons, both deliberate at the time:
 
 1. **No handler at all on browser panes.** `permission_handler()`
    (`handlers.rs:74`) returns `None` when `self.is_browser_pane`, so CEF's

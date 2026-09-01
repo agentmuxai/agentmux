@@ -2,10 +2,11 @@
 
 **Date:** 2026-07-13
 **Author:** Agent2
-**Status:** Superseded — the whole `active-tab-color-line` feature this
+**Status:** historical — the whole `active-tab-color-line` feature this
 spec narrows was removed outright on 2026-08-24 (repo-owner-confirmed
 request: "we want to eliminate those lines that span under the tab bar").
-`frontend/app/tab/tab-color-line.ts` deleted; `tabbar.tsx`'s
+`frontend/app/tab/tab-color-line.ts` deleted (PR #2792, verified absent);
+`tabbar.tsx`'s
 `<Portal>`-rendered `.active-tab-color-line` div removed. The per-tab
 `tab:color` feature itself (the whole tab's own background tint —
 `.tab-colored` in `tab.scss`) is unaffected; only this full-strip

@@ -12,7 +12,9 @@
 > corrected approach: **`docs/retro/retro-scrollbar-cursor-regression-2026-06-17.md`**.
 
 **Date:** 2026-06-15
-**Status:** Superseded in part — see the correction banner above (2026-06-17).
+**Status:** superseded — the core claim was wrong; see the correction banner
+above (2026-06-17) and `Superseded-by:` below.
+**Superseded-by:** [`docs/retro/retro-scrollbar-cursor-regression-2026-06-17.md`](../../retro/retro-scrollbar-cursor-regression-2026-06-17.md)
 ~~Analysis + refactor proposal (no code landed yet)~~
 **Scope:** `frontend/` CSS cursor styling, app-wide
 **Trigger:** Scrollbars (notably on agent panes) show the link **hand** (`cursor: pointer`)
