@@ -1325,7 +1325,20 @@ pub fn run_shared_store_schema(conn: &Connection) -> Result<(), StoreError> {
 ///        forever, silently defeating check_schema_compat/stamp_version's
 ///        forward-compat lock for this one store (reagent P1, PR #2782).
 ///        See docs/specs/SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md.
-pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 4;
+/// v5: `db_work_queue` — the Muxqueue backlog
+///        (`docs/reports/REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md`).
+///        A NEW table, so no ALTER is involved, but the counter still bumps:
+///        an identity-store.db stamped v4 that a v5 binary opens must be
+///        recognized as older, not "already current" (same reagent P1 on
+///        PR #2782 reasoning recorded for v4 above).
+///
+///        Deliberately in THIS store, not the per-channel one. A queue whose
+///        rows are per-channel means "any agent IN THIS CHANNEL can pick it
+///        up", which is close to useless given every local/dev/portable build
+///        is its own channel — see the report's §6.2, and
+///        `docs/analysis/ANALYSIS_PER_CHANNEL_AUTH_BYPASSES_2026_08_31.md`
+///        for what the per-channel/global seam has already cost once.
+pub const IDENTITY_STORE_SCHEMA_VERSION: i64 = 5;
 
 /// Initialize (or re-validate) the `~/.agentmux/shared/identity-store.db`
 /// schema — the permanently-global store introduced by
@@ -1463,6 +1476,50 @@ pub fn run_identity_store_schema(conn: &Connection) -> Result<(), StoreError> {
         );
         CREATE INDEX IF NOT EXISTS idx_ids_cron_jobs_enabled
             ON db_cron_jobs(enabled);
+
+        -- Muxqueue: the universal agent work queue. One row = one unit of work
+        -- that ANY agent may claim. See
+        -- docs/reports/REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md.
+        --
+        -- Deliberately placed directly after db_cron_jobs, because it is that
+        -- table's sibling: cron is this row with a TIME trigger, this is the
+        -- same row with a READINESS trigger. `not_before` makes the
+        -- relationship literal.
+        --
+        -- It belongs in THIS schema (the always-global identity store) and not
+        -- in run_shared_store_schema. A per-channel queue would only ever mean
+        -- any agent IN THIS CHANNEL can pick it up, which is close to useless
+        -- when every local/dev/portable build is its own channel -- see the
+        -- report's section 6.2. (No apostrophes or quotes in this block: the
+        -- whole schema is one Rust string literal passed to execute_batch.)
+        CREATE TABLE IF NOT EXISTS db_work_queue (
+            id            TEXT PRIMARY KEY,
+            title         TEXT NOT NULL,
+            payload       TEXT NOT NULL,
+            kind          TEXT NOT NULL DEFAULT '',
+            target_agent  TEXT NOT NULL DEFAULT '',
+            target_group  TEXT NOT NULL DEFAULT '',
+            priority      INTEGER NOT NULL DEFAULT 0,
+            state         TEXT NOT NULL DEFAULT 'open',
+            claimed_by    TEXT NOT NULL DEFAULT '',
+            claim_expires INTEGER,
+            attempts      INTEGER NOT NULL DEFAULT 0,
+            max_attempts  INTEGER NOT NULL DEFAULT 3,
+            created_by    TEXT NOT NULL DEFAULT '',
+            created_at    INTEGER NOT NULL DEFAULT 0,
+            updated_at    INTEGER NOT NULL DEFAULT 0,
+            not_before    INTEGER,
+            result        TEXT NOT NULL DEFAULT ''
+        );
+        -- The claim query's exact predicate: state + readiness, ordered by
+        -- priority then age. Without this the claim UPDATE degrades to a table
+        -- scan under contention, which is when it matters most.
+        CREATE INDEX IF NOT EXISTS idx_ids_work_queue_claimable
+            ON db_work_queue(state, not_before, priority DESC, created_at);
+        -- The reaper's predicate (expired leases).
+        CREATE INDEX IF NOT EXISTS idx_ids_work_queue_claim_expires
+            ON db_work_queue(claim_expires)
+            WHERE claim_expires IS NOT NULL;
 
         CREATE TABLE IF NOT EXISTS db_agent_credentials (
             agent_id       TEXT PRIMARY KEY,
