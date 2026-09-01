@@ -525,9 +525,9 @@ const WORK_COMPLETE_TOOL: &str = r#"{
     "properties": {
       "id":      { "type": "string",  "description": "The item id from WorkClaim" },
       "attempt": { "type": "integer", "description": "The 'attempt' number returned by the WorkClaim that gave you this item" },
-      "result":  { "type": "string",  "description": "What was done, or what the outcome was. Include links (PR, issue) where relevant." }
+      "result":  { "type": "string",  "description": "REQUIRED. What was done, or what the outcome was. Include links (PR, issue) where relevant. Once an item is done this is the only record that it happened — a completion with no result silently destroys the trace." }
     },
-    "required": ["id", "attempt"]
+    "required": ["id", "attempt", "result"]
   }
 }"#;
 
@@ -3390,10 +3390,26 @@ async fn call_tool(
             let id = item.get("id").and_then(|x| x.as_str()).unwrap_or("");
             let title = item.get("title").and_then(|x| x.as_str()).unwrap_or("");
             let payload = item.get("payload").and_then(|x| x.as_str()).unwrap_or("");
+            // Carry forward why a PREVIOUS holder handed this back (Codex P2 on
+            // PR #2902). WorkRelease's description promises the next claimant
+            // sees the reason; dropping it here broke that promise and let
+            // agents re-hit a known blocker with no warning. `attempt > 1` is
+            // exactly "someone has held this before me".
+            let prior = item.get("result").and_then(|x| x.as_str()).unwrap_or("");
+            let handback = if attempt > 1 && !prior.is_empty() {
+                format!(
+                    "\n\nNOTE — a previous agent held this and handed it back \
+                     (attempt {} of this item). Their reason: {prior}\n\
+                     Read that before repeating their approach.",
+                    attempt - 1
+                )
+            } else {
+                String::new()
+            };
             Ok(format!(
                 "Claimed work item {id} (attempt {attempt}) — pass attempt={attempt} to \
                  WorkHeartbeat/WorkComplete/WorkRelease for this item.\n\n\
-                 Title: {title}\n\n{payload}"
+                 Title: {title}\n\n{payload}{handback}"
             ))
         }
         "WorkHeartbeat" | "WorkComplete" | "WorkRelease" => {
@@ -3409,7 +3425,23 @@ async fn call_tool(
                 "WorkHeartbeat" => ("heartbeat", String::new()),
                 "WorkComplete" => (
                     "complete",
-                    arguments.get("result").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    // Enforced at runtime as well as in the schema (Codex P2 on
+                    // PR #2902): completing with no result marks the item done
+                    // forever while destroying the only record that the work
+                    // happened. Better to reject the call than to accept a
+                    // silent hole in the audit trail.
+                    arguments
+                        .get("result")
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "WorkComplete requires a non-empty 'result' — it is the only \
+                                 record of what this item accomplished once it is marked done"
+                            )
+                        })?
+                        .to_string(),
                 ),
                 _ => (
                     "release",
@@ -3444,16 +3476,46 @@ async fn call_tool(
             Ok(match segment {
                 "heartbeat" => format!("Lease extended on {id}."),
                 "complete" => format!("Completed {id}."),
-                _ => format!("Released {id} back to the queue."),
+                _ => {
+                    // A release on the FINAL allowed attempt parks the item as
+                    // `failed` rather than reopening it, so reporting "back to
+                    // the queue" unconditionally would tell the caller another
+                    // agent can pick it up when nobody ever will (Codex P2 on
+                    // PR #2902). The server reports the resulting state; trust
+                    // it rather than re-deriving the attempts rule here.
+                    let resulting = serde_json::from_str::<Value>(&text)
+                        .ok()
+                        .and_then(|v| v.get("state").and_then(|s| s.as_str()).map(str::to_string))
+                        .unwrap_or_default();
+                    if resulting == "failed" {
+                        format!(
+                            "Released {id}, and it has now used its final attempt — the item is \
+                             parked as FAILED and will not be offered to any agent again. If it \
+                             still needs doing, enqueue a fresh item (ideally with what you \
+                             learned about why it kept failing)."
+                        )
+                    } else {
+                        format!("Released {id} back to the queue for another agent.")
+                    }
+                }
             })
         }
         "WorkList" => {
             require_agent_env(local_url, auth_key, block_id)?;
-            let mut url = format!("{}/agentmux/work", local_url.trim_end_matches('/'));
+            let url = format!("{}/agentmux/work", local_url.trim_end_matches('/'));
             let state = arguments.get("state").and_then(|v| v.as_str()).unwrap_or("");
             let limit = arguments.get("limit").and_then(|v| v.as_i64()).unwrap_or(50);
-            url.push_str(&format!("?state={state}&limit={limit}"));
-            let resp = client.get(&url).header("X-AuthKey", auth_key).send().await
+            // Built via reqwest's own query serializer, NOT string
+            // concatenation (reagent P2 on PR #2902): `state` is a free-form
+            // string in this tool's schema, not a validated enum, so a value
+            // containing `&`, `#`, or `%` would otherwise corrupt the query
+            // rather than being sent as the literal the caller intended.
+            let resp = client
+                .get(&url)
+                .query(&[("state", state), ("limit", &limit.to_string())])
+                .header("X-AuthKey", auth_key)
+                .send()
+                .await
                 .map_err(|e| anyhow::anyhow!("work list request failed: {e}"))?;
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
@@ -3473,6 +3535,15 @@ async fn call_tool(
                 let holder = it.get("claimed_by").and_then(|x| x.as_str()).unwrap_or("");
                 let who = if holder.is_empty() { String::new() } else { format!(" [{holder}]") };
                 out.push_str(&format!("  {id}  {st}{who}  {title}\n"));
+                // `result` is the completion trace for a done item, and the
+                // reason for a failed/released one — the very thing
+                // WorkComplete calls "the only record". Omitting it here left
+                // that record unreachable through the only agent-facing read
+                // tool (Codex P2 on PR #2902).
+                let result = it.get("result").and_then(|x| x.as_str()).unwrap_or("");
+                if !result.is_empty() {
+                    out.push_str(&format!("      -> {result}\n"));
+                }
             }
             Ok(out)
         }

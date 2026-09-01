@@ -258,6 +258,10 @@ pub(super) async fn handle_work_complete(
     }
 }
 
+/// Returns the item's RESULTING state alongside `ok` (Codex P2 on PR #2902).
+/// A release on the item's final allowed attempt parks it as `failed` rather
+/// than reopening it, so a bare `{ok:true}` would let the caller report "handed
+/// back to the queue" for an item nobody can ever claim again.
 pub(super) async fn handle_work_release(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -267,7 +271,21 @@ pub(super) async fn handle_work_release(
         .identity_store
         .work_queue_release(&id, &req.agent_id, req.attempt, &req.result, now_ms())
     {
-        Ok(ok) => holder_result(ok, &state),
+        Ok(true) => {
+            publish_changed(&state);
+            // Read back rather than infer: the store owns the
+            // attempts-vs-max_attempts decision, and duplicating that rule
+            // here is exactly how the two drift.
+            let resulting = state
+                .identity_store
+                .work_queue_get(&id)
+                .ok()
+                .flatten()
+                .map(|i| i.state)
+                .unwrap_or_default();
+            (StatusCode::OK, Json(json!({ "ok": true, "state": resulting })))
+        }
+        Ok(false) => holder_result(false, &state),
         Err(e) => err(StatusCode::INTERNAL_SERVER_ERROR, format!("release failed: {e}")),
     }
 }
@@ -291,17 +309,25 @@ pub(super) async fn handle_work_list(
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub(super) struct CancelRequest {
     #[serde(default)]
     pub reason: String,
 }
 
+/// The body is OPTIONAL (reagent P1 on PR #2902). The sibling DELETE route in
+/// the same router — `DELETE /agentmux/cron/:id` — takes no body at all, so a
+/// caller following that adjacent, established convention would otherwise get
+/// a 400/415 from axum's `Json` extractor rather than the intended
+/// "cancel with an empty reason". `CancelRequest::reason` is already
+/// `#[serde(default)]`; making the whole body optional is what actually lets
+/// that default be reached.
 pub(super) async fn handle_work_cancel(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(req): Json<CancelRequest>,
+    body: Option<Json<CancelRequest>>,
 ) -> (StatusCode, Json<Value>) {
+    let req = body.map(|Json(r)| r).unwrap_or_default();
     match state.identity_store.work_queue_cancel(&id, &req.reason, now_ms()) {
         Ok(true) => {
             publish_changed(&state);

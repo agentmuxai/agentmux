@@ -12,6 +12,13 @@ use crate::backend::wcore;
 
 pub(crate) fn test_state() -> AppState {
     let wstore = Arc::new(Store::open_in_memory().unwrap());
+    // This one store backs wstore/id_store/identity_store below, so it has to
+    // carry BOTH schemas. Without the identity schema, any handler touching a
+    // table that lives only in the global identity store (`db_work_queue`)
+    // failed with a bare "no such table" 500 in tests while being perfectly
+    // correct in production. Additive and idempotent — every statement in that
+    // schema is CREATE ... IF NOT EXISTS.
+    wstore.apply_identity_schema_for_tests().unwrap();
     let filestore = Arc::new(FileStore::open_in_memory().unwrap());
     let event_bus = Arc::new(EventBus::new());
     let broker = Arc::new(Broker::new());
@@ -45,6 +52,10 @@ pub(crate) fn test_state() -> AppState {
         wstore: wstore.clone(),
         shared_store: None,
         id_store: wstore.clone(),
+        // Aliased to `wstore` on purpose — a lot of existing setup code seeds
+        // through one store and reads through another. See the
+        // `apply_identity_schema_for_tests` call above for why that single
+        // store now carries the identity schema too.
         identity_store: wstore.clone(),
         filestore,
         global_transcript_store: None,
@@ -2989,4 +3000,221 @@ fn agent_memory_write_provenance_req_defaults_a_missing_detail_to_an_empty_objec
     let req: AgentMemoryWriteProvenanceReq = serde_json::from_str(r#"{"source":"human"}"#).unwrap();
     assert_eq!(req.detail, serde_json::json!({}));
     assert_eq!(req.detail.to_string(), "{}");
+}
+
+// ── Muxqueue HTTP surface ───────────────────────────────────────────────────
+// docs/reports/REPORT_UNIVERSAL_AGENT_WORK_QUEUE_2026_09_01.md, slice 2.
+
+/// reagent P1 on PR #2902 — the blocking one. `DELETE /agentmux/cron/:id`, the
+/// sibling route registered a few lines away in the same router, takes NO body.
+/// A caller that follows that adjacent convention for `DELETE
+/// /agentmux/work/:id` must not be rejected by axum's `Json` extractor before
+/// the handler ever runs. Drives the real router, so it fails if the extractor
+/// is ever tightened back to a required body.
+#[tokio::test]
+async fn work_cancel_accepts_a_delete_with_no_body_like_its_cron_sibling() {
+    let app = test_router();
+    let req = Request::builder()
+        .uri("/agentmux/work/does-not-exist")
+        .method("DELETE")
+        .header("X-AuthKey", "test-secret-key")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    // CONFLICT = the handler ran and found no open/claimed item, which is the
+    // point: anything in the 400/415 family would mean the body extractor
+    // rejected the request before the handler was ever reached.
+    assert_eq!(
+        resp.status(),
+        StatusCode::CONFLICT,
+        "a bodyless DELETE must reach the handler, not be rejected by the Json extractor"
+    );
+}
+
+/// The body is optional, not ignored — a supplied reason must still parse.
+#[tokio::test]
+async fn work_cancel_still_accepts_a_json_body_when_one_is_sent() {
+    let app = test_router();
+    let req = Request::builder()
+        .uri("/agentmux/work/does-not-exist")
+        .method("DELETE")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(r#"{"reason":"superseded"}"#))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+}
+
+/// End-to-end through the router: enqueue, then claim it back out. Also pins
+/// that the claim response carries `attempt` at the TOP level, which every
+/// later holder call must echo as its fence.
+#[tokio::test]
+async fn work_enqueue_then_claim_round_trips_and_exposes_the_fence() {
+    let app = test_router();
+
+    let enq = Request::builder()
+        .uri("/agentmux/work")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            r#"{"title":"repro the thing","payload":"steps go here","created_by":"tester"}"#,
+        ))
+        .unwrap();
+    let resp = app.clone().oneshot(enq).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let claim = Request::builder()
+        .uri("/agentmux/work/claim")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(r#"{"agent_id":"a1"}"#))
+        .unwrap();
+    let resp = app.oneshot(claim).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["claimed"], true);
+    assert_eq!(
+        v["attempt"], 1,
+        "the fence must be at the top level of the claim response, not only nested in item"
+    );
+    assert_eq!(v["item"]["title"], "repro the thing");
+}
+
+/// An empty queue answers "nothing available" with 200, not an error — callers
+/// are expected to poll speculatively when they have spare capacity.
+#[tokio::test]
+async fn work_claim_on_an_empty_queue_is_a_success_not_an_error() {
+    let app = test_router();
+    let req = Request::builder()
+        .uri("/agentmux/work/claim")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(r#"{"agent_id":"a1"}"#))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["claimed"], false);
+}
+
+/// Targeting both an agent and a group is ambiguous; the handler rejects it
+/// rather than letting one silently win.
+#[tokio::test]
+async fn work_enqueue_rejects_both_target_agent_and_target_group() {
+    let app = test_router();
+    let req = Request::builder()
+        .uri("/agentmux/work")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            r#"{"title":"t","payload":"p","target_agent":"a1","target_group":"g1"}"#,
+        ))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+/// Codex P2 on PR #2902: a release must report the RESULTING state, because a
+/// release on the final allowed attempt parks the item as `failed` rather than
+/// reopening it. Without this the MCP layer tells the caller another agent can
+/// pick the item up when nobody ever will.
+#[tokio::test]
+async fn work_release_reports_the_resulting_state_not_just_ok() {
+    let app = test_router();
+
+    // max_attempts 1, so the very first release is also the final attempt.
+    let enq = Request::builder()
+        .uri("/agentmux/work")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(r#"{"title":"t","payload":"p","max_attempts":1}"#))
+        .unwrap();
+    let resp = app.clone().oneshot(enq).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let id = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let claim = Request::builder()
+        .uri("/agentmux/work/claim")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(r#"{"agent_id":"a1"}"#))
+        .unwrap();
+    let resp = app.clone().oneshot(claim).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let attempt = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["attempt"]
+        .as_i64()
+        .unwrap();
+
+    let rel = Request::builder()
+        .uri(format!("/agentmux/work/{id}/release"))
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(format!(
+            r#"{{"agent_id":"a1","attempt":{attempt},"result":"cannot do this"}}"#
+        )))
+        .unwrap();
+    let resp = app.oneshot(rel).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(v["ok"], true);
+    assert_eq!(
+        v["state"], "failed",
+        "a release on the final attempt parks the item; the response must say so"
+    );
+}
+
+/// A stale fence is 409 CONFLICT, not 404: the row still exists, it just moved
+/// on without this caller. The MCP layer depends on that distinction to tell an
+/// agent to re-claim rather than to treat the item as gone.
+#[tokio::test]
+async fn work_complete_with_a_wrong_fence_is_conflict_not_not_found() {
+    let app = test_router();
+
+    let enq = Request::builder()
+        .uri("/agentmux/work")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(r#"{"title":"t","payload":"p"}"#))
+        .unwrap();
+    let resp = app.clone().oneshot(enq).await.unwrap();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    let id = serde_json::from_slice::<serde_json::Value>(&body).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let claim = Request::builder()
+        .uri("/agentmux/work/claim")
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(r#"{"agent_id":"a1"}"#))
+        .unwrap();
+    app.clone().oneshot(claim).await.unwrap();
+
+    // attempt 99 was never issued by any claim.
+    let done = Request::builder()
+        .uri(format!("/agentmux/work/{id}/complete"))
+        .method("POST")
+        .header("X-AuthKey", "test-secret-key")
+        .header("Content-Type", "application/json")
+        .body(Body::from(r#"{"agent_id":"a1","attempt":99,"result":"nope"}"#))
+        .unwrap();
+    let resp = app.oneshot(done).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
 }
