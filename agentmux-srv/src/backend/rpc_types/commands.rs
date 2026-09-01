@@ -239,8 +239,8 @@ pub const COMMAND_DELETE_SYSTEM_MEMORY: &str = "deletesystemmemory";
 /// companion when foreign), written by `agent_config.rs`'s
 /// `write_claude_md_respecting_ownership`, a per-agent path this command
 /// does not cover. This command exists purely to surface a
-/// Claude-Code-managed reference file for operator visibility ("External
-/// Claude Code files" section — SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md
+/// Claude-Code-managed reference file for operator visibility ("Claude
+/// Code provider config" section — SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md
 /// §7 is the main feature this whole spec chain converged on). No
 /// parameters (the path is fixed, not caller-supplied — no
 /// path-traversal surface) and no write counterpart. See

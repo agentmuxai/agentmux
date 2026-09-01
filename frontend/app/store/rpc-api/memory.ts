@@ -75,7 +75,7 @@ export const MemoryApi = {
     // is Claude Code's own home-relocation path, NOT the file AgentMux's
     // Global Memory actually composes into (that's
     // <agent working_directory>/CLAUDE.md, a per-agent path this doesn't
-    // cover) — this is an "External Claude Code files" reference display
+    // cover) — this is a "Claude Code provider config" reference display
     // only. See docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md
     // §5, §7. No parameters, no write counterpart.
     GetClaudeGlobalConfigCommand(
