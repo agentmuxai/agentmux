@@ -122,6 +122,11 @@ export function DocumentRow(props: DocumentRowProps): JSX.Element {
                 "agent-node-search-match": isSearchMatch(),
             }}
             data-node-id={props.node().id}
+            // Read by AgentDocumentVirtualList's shrink-attribution sampler
+            // (shrink-trace.ts) so it can name the KIND of node that shrank
+            // straight from the DOM, without a reactive read from inside a
+            // microtask/ResizeObserver callback.
+            data-node-type={props.node().type}
             tabindex="0"
             onKeyDown={handleRowKey}
             style={props.style}

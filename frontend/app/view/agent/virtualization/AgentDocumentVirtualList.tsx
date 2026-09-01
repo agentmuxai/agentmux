@@ -42,6 +42,7 @@ import {
     restoreScrollFromAnchor,
 } from "./anchor";
 import { DocumentRow } from "./DocumentRow";
+import { ShrinkTrace, attribute, formatAttribution, type RowSample } from "./shrink-trace";
 import { estimateNode, estimateNodeForState } from "./renderers";
 import { currentExpansion } from "./expansion-source";
 import type { AgentViewState } from "./state";
@@ -210,15 +211,60 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
         }
     }
 
+    // Per-node shrink attribution for the `[wave-scroll-shrink]` line below.
+    // Step 1 of SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md.
+    const shrinkTrace = new ShrinkTrace();
+
+    /**
+     * Snapshot every streaming-buffer row's height. DOM reads only — no
+     * reactive reads, since this runs from `queueMicrotask` and
+     * ResizeObserver callbacks where establishing a tracked dependency would
+     * be surprising.
+     *
+     * `offsetHeight`, not `getBoundingClientRect().height`, to match the
+     * pane's `scrollHeight`: both are unzoomed under an ancestor CSS `zoom`,
+     * whereas the rect IS scaled by it (the same asymmetry the measure RO
+     * above compensates for with its ÷zoom). Mixing the two would make every
+     * attribution wrong by the zoom factor at non-100% pane zoom.
+     */
+    function sampleStreamingRows(): RowSample[] {
+        if (!streamingBufferRef) return [];
+        const out: RowSample[] = [];
+        for (const child of streamingBufferRef.children) {
+            const el = child as HTMLElement;
+            const id = el.dataset.nodeId;
+            if (!id) continue;
+            out.push({ id, type: el.dataset.nodeType ?? "?", px: el.offsetHeight });
+        }
+        return out;
+    }
+
     let lastKnownScrollHeight = 0;
     function scrollToTrueBottom(): void {
         if (!scrollRef) return;
         const h = scrollRef.scrollHeight;
+        // Sampled unconditionally (not just on a shrink) — every call has to
+        // update the baseline, or the next diff would span two intervals.
+        // Read in the SAME layout-clean instant as `h` above, so the row
+        // deltas cover exactly the window the pane delta does. Doing this via
+        // a ResizeObserver instead was the bug codex caught on PR #2887: RO
+        // callbacks are delivered later in the rendering steps than the
+        // `queueMicrotask` pin path that detects most shrinks, so the primary
+        // running->terminal case logged as unattributed and its row shrink
+        // was left to be miscredited to a later, unrelated pane delta.
+        const rowShrinks = shrinkTrace.sample(sampleStreamingRows());
         if (lastKnownScrollHeight > 0 && h < lastKnownScrollHeight - 1) {
+            const paneDelta = lastKnownScrollHeight - h;
             console.info(
                 "[wave-scroll-shrink]",
                 `pane=${props.blockId?.slice(0, 7) ?? "?"}`,
-                `scrollHeight ${lastKnownScrollHeight}px -> ${h}px (delta=${lastKnownScrollHeight - h}px)`,
+                `scrollHeight ${lastKnownScrollHeight}px -> ${h}px (delta=${paneDelta}px)`,
+                // Which row(s) actually got shorter, and how much of the pane
+                // delta they fail to explain — see shrink-trace.ts. Without
+                // this suffix the line above is a bare net number, which is
+                // precisely what limited every conclusion in the 08-21/08-22
+                // findings docs.
+                formatAttribution(attribute(paneDelta, rowShrinks)),
             );
         }
         lastKnownScrollHeight = h;
