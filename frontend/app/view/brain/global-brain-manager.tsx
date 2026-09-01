@@ -141,67 +141,54 @@ export const GlobalBrainManager = (): JSX.Element => {
                 <div class="global-brain-error">{model.errorAtom()}</div>
             </Show>
 
-            {/* "External Claude Code files" — read-only reference displays
-                of files Claude Code itself manages, NOT part of AgentMux's
-                own Global Memory composition (that's
-                <agent working_directory>/CLAUDE.md, a per-agent path
-                already previewed accurately above via the "Combined
-                preview"). This section is the main feature this spec chain
-                converged on — an operator explicitly asked to be able to
-                peruse these files here. See
-                docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §7. */}
-            <Show when={model.claudeGlobalConfigAtom() || model.claudeHostConfigAtom()}>
-                <div class="global-brain-external-files">
-                    <p class="global-brain-external-files-heading">
-                        External Claude Code files — reference only, not part of Global Memory.
-                    </p>
+            {/* Read-only reference display of the CLAUDE.md in the isolated
+                provider config dir a default spawned agent actually launches
+                with (CLAUDE_CONFIG_DIR). NOT part of AgentMux's own Global
+                Memory composition (that's <agent working_directory>/CLAUDE.md,
+                a per-agent path already previewed accurately above via the
+                "Combined preview"). See
+                docs/specs/SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md §7.
 
-                    <Show when={model.claudeGlobalConfigAtom()}>
-                        {(cfg) => (
-                            <div class="global-brain-machine-config">
-                                <div class="global-brain-machine-config-header">
-                                    <span
-                                        class="global-brain-machine-config-badge"
-                                        title="Hand-maintained on disk. Identity-bound agents use a separate dir, not shown here."
-                                    >
-                                        Claude Code — shared provider config
-                                    </span>
-                                    <code class="global-brain-machine-config-path">{cfg().path}</code>
-                                </div>
-                                <p class="global-brain-machine-config-caption">Used by default spawned agents.</p>
-                                <Show
-                                    when={cfg().exists}
-                                    fallback={<p class="global-brain-machine-config-empty">No file at this path yet.</p>}
-                                >
-                                    <pre class="global-brain-machine-config-content">{cfg().content}</pre>
-                                </Show>
-                            </div>
-                        )}
-                    </Show>
+                The sibling "Claude Code — host CLI config" block (~/.claude)
+                was removed 2026-09-01
+                (SPEC_ARMORY_DROP_HOST_CLI_CONFIG_BLOCK_2026_09_01.md): once
+                REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md
+                proved by experiment that a spawned agent never reads the host
+                file, surfacing it here was noise that invited the misreading
+                that editing it would change agent behaviour. */}
+            {/* Single <Show>: this used to be nested, the outer gating the
+                whole section on `globalConfig || hostConfig` and the inner
+                picking out this one block. With the host block gone both
+                conditions collapsed to the same atom, leaving the inner one
+                unreachable-when-false (ReAgent P2, PR #2900). The callback
+                form supplies the non-null accessor the body needs. */}
+            <Show when={model.claudeGlobalConfigAtom()}>
+                {(cfg) => (
+                    <div class="global-brain-external-files">
+                        <p class="global-brain-external-files-heading">
+                            Claude Code provider config — reference only, not part of Global Memory.
+                        </p>
 
-                    <Show when={model.claudeHostConfigAtom()}>
-                        {(cfg) => (
-                            <div class="global-brain-machine-config">
-                                <div class="global-brain-machine-config-header">
-                                    <span
-                                        class="global-brain-machine-config-badge"
-                                        title="Claude Code's own config on this machine. Not read by spawned in-app agents — see the block above for what they use."
-                                    >
-                                        Claude Code — host CLI config
-                                    </span>
-                                    <code class="global-brain-machine-config-path">{cfg().path}</code>
-                                </div>
-                                <p class="global-brain-machine-config-caption">Used outside AgentMux.</p>
-                                <Show
-                                    when={cfg().exists}
-                                    fallback={<p class="global-brain-machine-config-empty">No file at this path yet.</p>}
+                        <div class="global-brain-machine-config">
+                            <div class="global-brain-machine-config-header">
+                                <span
+                                    class="global-brain-machine-config-badge"
+                                    title="Hand-maintained on disk. Identity-bound agents use a separate dir, not shown here."
                                 >
-                                    <pre class="global-brain-machine-config-content">{cfg().content}</pre>
-                                </Show>
+                                    Claude Code — shared provider config
+                                </span>
+                                <code class="global-brain-machine-config-path">{cfg().path}</code>
                             </div>
-                        )}
-                    </Show>
-                </div>
+                            <p class="global-brain-machine-config-caption">Used by default spawned agents.</p>
+                            <Show
+                                when={cfg().exists}
+                                fallback={<p class="global-brain-machine-config-empty">No file at this path yet.</p>}
+                            >
+                                <pre class="global-brain-machine-config-content">{cfg().content}</pre>
+                            </Show>
+                        </div>
+                    </div>
+                )}
             </Show>
 
             {/* System tier — pinned above ordinary sections, always injected
