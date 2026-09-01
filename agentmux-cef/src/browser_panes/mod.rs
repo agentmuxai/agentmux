@@ -47,6 +47,7 @@ use crate::state::AppState;
 
 mod clip;
 mod close;
+pub(crate) mod media_grants;
 mod navigation;
 mod zoom;
 
