@@ -5,6 +5,9 @@
 **Superseded-by:** [`SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md`](./SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md)
 
 Why: this spec's static per-item zone assignment (badge+auth always left, everything else always right) looked balanced only when every item happened to be visible at once. In practice the controls zone's other occupant, `AgentRuntimeDropup`, is Claude-only, and badge/auth are each independently conditional — a non-Claude agent with no tracked processes and unknown auth status left the ENTIRE left zone empty while the right zone still held Shell (always rendered). Direct user feedback caught this the same day ("there are stages with empty slots... elements need to be equally distributed... there should never be an empty slot"). Kept here for history; see the superseding spec for the actual (dynamic-pooling) fix.
+
+---
+
 **Trigger:** User feedback on the current composer strip (`SPEC_COMPOSER_STRIP_CENTERED_SMART_SPLIT_2026_08_14.md`) — the strip already has a deliberate left/center/right zone system with a 3-line/2-line/1-line responsive tier split, but the misc elements aren't actually balanced across the two edge zones: the left (controls) zone holds only the `AgentRuntimeDropup` trigger, while the right zone stacks six items (process badge, context text, context countdown, Compact button, auth tag, HOST/SANDBOX+Shell). "Left and right zones, edge-split" was solved; "misc elements allocated evenly between them" was not.
 
 ## Change
