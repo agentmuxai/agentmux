@@ -180,3 +180,40 @@ channel **fails to spawn with an actionable auth card**, instead of silently
 inheriting the user's personal or another channel's credential. That is the
 requested behavior, and it will be visible on every new local/dev/portable
 build.
+
+## 6. Known residual gap — display paths still describe cross-channel accounts
+
+Raised by reagent P2 on PR #2878, and worth recording rather than leaving
+implicit, because it is a divergence this work *created*.
+
+The spawn path now uses `resolve_account_for_spawn` (per-channel only). Two
+read-only paths deliberately still use `resolve_account`, which keeps the
+global-mirror fallback:
+
+- `identity.self.accounts` (`app_api/mod.rs`) — the per-agent account listing.
+- `identity.account.validate` — validates a credential against the provider.
+
+So an oauth-class account that exists only in the global mirror is **listed**,
+and can **validate as `valid: true`**, while a real spawn in this channel
+refuses it with `MissingCredentials`. (An api-key-class account is silently
+skipped at spawn instead of blocking it.)
+
+**Why the fallback is kept anyway:** a listing should describe what exists.
+Dropping it would make the account disappear from Armory entirely, reproducing
+the "my account vanished after a version bump" confusion that reagentx P0 on
+PR #2632 was written to fix — replacing a misleading-but-informative row with
+no row at all is not obviously better. `validate`'s answer is also genuinely
+correct on its own terms: it reports whether the *credential* is live, not
+whether a spawn would accept it.
+
+**What is actually missing:** nothing in either payload tells the caller the
+account cannot satisfy a spawn in *this* channel. The honest fix is to surface
+that — e.g. a `usable_in_channel: bool` on the listing, rendered in Armory as a
+"needs login in this channel" state — rather than to hide the row or to widen
+the spawn gate back out.
+
+Not done here: it needs a payload field, an Armory affordance, and a decision
+about how it interacts with the unbuilt `disposable_test`/Store B split (§1),
+which is the same area. Interim mitigation: `identity.self.accounts` now emits
+a `tracing::warn!` whenever it lists an account resolved only via the mirror,
+so the divergence is at least observable in `muxlog auth` instead of invisible.
