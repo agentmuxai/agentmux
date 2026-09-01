@@ -10,8 +10,9 @@ access is unconditionally denied"
 (`new_with_browser_pane`), `agentmux-cef/src/browser_pane/creation.rs`,
 `agentmux-cef/src/browser_pane/creation_views.rs`, a new grant store in
 `agentmux-srv`, and a prompt surface in the frontend.
-**Related:** `SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md` §Phase 4a (the handler
-this extends — #1591/#1602), `SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md`,
+**Related:** `SPEC_VOICE_INPUT_PER_PANE_2026_05_19.md` §Phase 4 — specifically its
+`4a. CEF mic-permission handler` (the handler this extends) and
+`4b. OS-permission UX (frontend)` (the layer-B precedent in §3.6) — #1591/#1602, `SPEC_SETTINGS_RECORDING_INPUT_SECTION_2026_08_19.md`,
 `SPEC_BROWSER_PANE_UNIFIED_CONTEXT_MENU_2026_08_15.md` (per-pane surface
 precedent)
 
@@ -51,7 +52,7 @@ audio: per-pane origin-scoped grants."
 **It did not.** There is no origin scoping and no grant store anywhere in the
 codebase today. The handler captures `requesting_origin` **only to log it**
 (`tracing::info!(target: "voice", %origin, …)`) and then grants the audio bits
-unconditionally for any origin. What Phase 4a actually delivered is the
+unconditionally for any origin. What Phase 4's §4a actually delivered is the
 *handler plumbing* — a `wrap_permission_handler!` block wired to the main
 client — not a policy layer.
 
