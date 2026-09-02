@@ -5,7 +5,7 @@
  * Parse `/command arg1 arg2 ...` composer input into `[name, argString]`.
  *
  * Part of the slash command architecture —
- * specs/SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md.
+ * docs/specs/SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md.
  *
  * The dispatcher hands the full argument string to the command handler;
  * commands that want to tokenize further do so themselves. This keeps

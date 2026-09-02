@@ -207,7 +207,7 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
 
     let app_path_str = app_path.to_string_lossy().to_string();
 
-    // wsh has been retired — see specs/SPEC_RETIRE_WSH_2026_04_12.md.
+    // wsh has been retired — see docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md.
     // No binary to deploy anymore.
 
     // Spawn the process

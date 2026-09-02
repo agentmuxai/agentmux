@@ -6,7 +6,7 @@
  * agent pane: sending messages (including slash-command intercepts)
  * and returning to the agent picker.
  *
- * Step 12 of specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
+ * Step 12 of docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
  *
  * Extracted from agent-view.tsx so AgentPresentationView stays focused
  * on composition + JSX instead of owning several dozen lines of
@@ -312,7 +312,7 @@ export interface UseAgentCommands {
 // Runtime-config + auth slash commands (/model /effort /permission-mode
 // /bypass /plan /runtime /login /clear) are now data-driven via
 // `frontend/app/view/agent/commands/`. See
-// specs/SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md for the design.
+// docs/specs/SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md for the design.
 // sendMessage below dispatches through the registry; adding a new
 // command is one file create in `commands/global/` or
 // `commands/providers/`, not an edit here.

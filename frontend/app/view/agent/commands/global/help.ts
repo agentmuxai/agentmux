@@ -4,7 +4,7 @@
 /**
  * /help — open the slash command reference panel.
  *
- * Step 4 of specs/SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md.
+ * Step 4 of docs/specs/SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md.
  *
  * The handler doesn't render the panel itself — it calls ctx.openHelp(),
  * which flips a signal in useAgentCommands that AgentPresentationView

@@ -155,7 +155,7 @@ export const FileApi = {
         return client.rpcCall("unwatcheditorfile", data, opts);
     },
 
-    // Spec: specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
+    // Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
     ListEditorDirCommand(
         client: RpcClient,
         data: { path: string },
@@ -201,7 +201,7 @@ export const FileApi = {
         return client.rpcCall("geteditorroots", data, opts);
     },
 
-    // Spec: specs/SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14.md
+    // Spec: docs/specs/SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14.md
     OpenInShellCommand(
         client: RpcClient,
         data: { path: string },
@@ -243,7 +243,7 @@ export const FileApi = {
     },
 
     // Creates a scratch buffer file in ~/.agentmux/cache/scratch/. Returns the backing path + scratch_id.
-    // Spec: specs/SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md
+    // Spec: docs/specs/SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md
     CreateScratchFileCommand(
         client: RpcClient,
         data: { display_name?: string; exclude_scratch_ids?: string[] } = {},

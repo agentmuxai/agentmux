@@ -9,7 +9,7 @@
 // One LspClient per (editor pane, language) — created on first openFile,
 // disposed on pane close or file-language change.
 //
-// Spec: specs/SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md
+// Spec: docs/specs/SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";

@@ -22,7 +22,7 @@ import "@/app/view/accounts/oauth-connect.scss";
 // the Validate button so the user sees exactly where their key is sent before
 // they click. Mirrors the backend probes in key_validator.rs. Providers absent
 // here have no validator yet → the key can only be saved without validating.
-// See specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §5.1/§6.
+// See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §5.1/§6.
 const KEY_VALIDATION_ENDPOINT: Partial<Record<AccountProvider, string>> = {
     github: "api.github.com/user",
     openai: "api.openai.com/v1/models",

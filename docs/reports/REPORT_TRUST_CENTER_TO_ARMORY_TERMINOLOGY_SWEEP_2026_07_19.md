@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-19
 **Author:** Agent2
-**Status:** Scan complete; scoped cleanup (this report's §3) implemented alongside this report. Broader findings (§4) explicitly out of scope for this pass.
+**Status:** historical — scan complete; scoped cleanup (this report's §3) implemented alongside this report. Broader findings (§4) explicitly out of scope for this pass.
 **Trigger:** User: *"There is no trust center anymore, we have an armory pane .. lets first do a scan to clear out the old info."*
 **Related:** `docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md` (the original rename spec, shipped PR #1917); `docs/reports/REPORT_REPO_HEALTH_AUDIT_2026_07_05.md` §6 (already found most of this, unaddressed since); `agentmux-docs/specs/AUDIT_DOCS_VS_CODE_2026_07_07.md` P0#1 (same finding, docs-repo side, unaddressed since).
 
@@ -42,7 +42,7 @@ Practical effect: a jekt message discussing the Armory's credential UI (e.g. "go
 
 12 non-archived specs, all `Status: Draft/Planned/In progress/Proposal` (i.e. still-current reference docs, not historical narrative), had incidental stale `"Trust Center"` mentions corrected to `"Armory"`:
 
-`docs/specs/REPORT_AUTH_ARCHITECTURE_2026_06_25.md`, `SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20.md`, `SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md`, `SPEC_AGENT_PICKER_TILE_GRID_2026_06_17.md`, `SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md`, `SPEC_MUXBUS_GITHUB_REVIEW_NOTIFICATIONS_2026_06_20.md`, `SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`, `SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20.md`; `specs/PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md`, `specs/SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28.md`, `specs/SPEC_SETTINGS_PANE_2026_06_25.md`, `specs/SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md`.
+`docs/specs/REPORT_AUTH_ARCHITECTURE_2026_06_25.md`, `SPEC_AGENT_ERROR_FRAMEWORK_2026_06_20.md`, `SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md`, `SPEC_AGENT_PICKER_TILE_GRID_2026_06_17.md`, `SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md`, `SPEC_MUXBUS_GITHUB_REVIEW_NOTIFICATIONS_2026_06_20.md`, `SPEC_PRESET_TO_BUNDLE_REFACTOR_2026_07_02.md`, `SPEC_REAUTH_FROM_AUTH_ERROR_2026_06_20.md`; `docs/specs/PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md`, `docs/specs/SPEC_AGENT_APP_API_MCP_BINDINGS_2026_06_28.md`, `docs/specs/SPEC_SETTINGS_PANE_2026_06_25.md`, `docs/specs/SPEC_V1_MCP_SKILLS_PRIMITIVES_2026_06_30.md`.
 
 `PROPOSAL_COMPOSABLE_AGENT_MODEL_2026_06_30.md` needed the most judgment: its title and a whole section header ("Trust Center information architecture") are structurally built around the old name, updated to Armory — **except** a direct driver quote at line 6 (*"I'd like a cleaner model… break out skills and MCP into the Trust Center…"*), left verbatim since it's a historical quote, not descriptive prose.
 

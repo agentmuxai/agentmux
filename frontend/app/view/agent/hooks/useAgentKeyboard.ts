@@ -4,7 +4,7 @@
 /**
  * useAgentKeyboard — pane-scoped Ctrl+F listener.
  *
- * Step 10 of specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
+ * Step 10 of docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
  *
  * Installs a window-level keydown handler on mount and removes it
  * on cleanup. The handler early-exits via `focusedBlockId()` so only

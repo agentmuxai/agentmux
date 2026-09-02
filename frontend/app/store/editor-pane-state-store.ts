@@ -5,7 +5,7 @@
  * Editor pane state store — slice #10 of the frontend reducer roadmap.
  * Phase 1A: pure reducer + slot store + audit-ring integration. No view
  * wiring, no saga, no CodeMirror references — those land in Phase 1B/1C.
- * Spec: `specs/SPEC_EDITOR_TABS_2026-05-26.md` §"State management" and
+ * Spec: `docs/specs/SPEC_EDITOR_TABS_2026-05-26.md` §"State management" and
  * §"Phase 1A".
  *
  * The editor pane today owns one file at a time; this slice is the

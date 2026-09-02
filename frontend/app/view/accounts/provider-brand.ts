@@ -14,7 +14,7 @@
  * `brandForProvider` maps a CLI-OAuth provider id to its brand so accounts
  * group under the right tile. It's **display-only** — the account's stored
  * `provider` is unchanged (the resolver still injects env keyed by the real
- * CLI id at spawn). See specs/archive/SPEC_TRUST_CENTER_CLI_AUTH_BINDING_2026_06_17.md.
+ * CLI id at spawn). See docs/specs/archive/SPEC_TRUST_CENTER_CLI_AUTH_BINDING_2026_06_17.md.
  */
 
 import type { AccountProvider } from "@/app/view/identity/identity-model";

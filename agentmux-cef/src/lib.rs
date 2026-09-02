@@ -597,7 +597,7 @@ pub fn run(windows_sandbox_info: *mut std::ffi::c_void) -> i32 {
     // legacy forwarding UX users expect when double-clicking the
     // exe twice. The pipe-bind-first ordering closes the stale-state
     // defect (gap #8 in
-    // specs/ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md):
+    // docs/specs/ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md):
     // a stale ipc-port file from a hard crash is irrelevant on the
     // FIRST-instance path because pipe-bind succeeds and the file is
     // overwritten; on the SECOND-instance path the live first

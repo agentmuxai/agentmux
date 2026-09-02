@@ -130,7 +130,7 @@ Only one copy inside the ZIP. The `runtime/bin/wsh-*.exe` file I saw on the extr
 
 Real delta for 0.33.91 → 0.33.101 is zero MiB in the ZIP. The only real change was Vite asset-hash reshuffling.
 
-**Follow-up fix:** `deploy_wsh` now short-circuits when the bundled wsh is already inside `app_path`, so the `runtime/bin/` copy stops happening in portable builds. See `specs/SPEC_RETRO_FOLLOWUPS_2026_04_12.md` §4 and the `agenta/retro-followups-runtime` branch.
+**Follow-up fix:** `deploy_wsh` now short-circuits when the bundled wsh is already inside `app_path`, so the `runtime/bin/` copy stops happening in portable builds. See `docs/specs/SPEC_RETRO_FOLLOWUPS_2026_04_12.md` §4 and the `agenta/retro-followups-runtime` branch.
 
 ### 4.4 Frontend compressibility drift (~+3.8 MiB in the ZIP only)
 

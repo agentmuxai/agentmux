@@ -178,7 +178,7 @@
     .agent-tool-block {
         // position:relative anchors the `.agent-tool-content` absolute
         // overlay in `.overlay-mode` (hover / pinned). See
-        // specs/SPEC_TOOL_OVERLAY_AND_SCROLL_ON_TYPE_2026_04_13.md §2.
+        // docs/specs/SPEC_TOOL_OVERLAY_AND_SCROLL_ON_TYPE_2026_04_13.md §2.
         position: relative;
         border: none;
         border-left: 2px solid var(--border-color);

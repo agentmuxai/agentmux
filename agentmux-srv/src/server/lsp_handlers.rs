@@ -16,7 +16,7 @@ pub fn register_lsp_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     //   * lspstop  — refcount-decrement; server exits when count hits 0
     // Server-pushed notifications (publishDiagnostics, $/progress, …)
     // arrive via WS event `lsp:message` from the supervisor's reader task.
-    // Spec: specs/SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md
+    // Spec: docs/specs/SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md
 
     let lsp_supervisor_start = state.lsp_supervisor.clone();
     engine.register_handler(

@@ -3,7 +3,7 @@
 //
 // Phase B.3 — pure reducer.
 //
-// Per `specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md` §5.1:
+// Per `docs/specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md` §5.1:
 //
 //   pub fn update(state: &State, cmd: Command) -> (State, Vec<Event>);
 //

@@ -49,34 +49,92 @@ else
         echo "check-doc-status: cannot resolve base ref '$base' — skipping."
         exit 0
     fi
-    mapfile -t files < <(
-        # Whole directories, not '**/*.md' globs: those require at least one
-        # directory level, so `specs/SPEC_X.md` at the root was never selected —
-        # silently skipping the very tree this gate was extended to cover. The
-        # .md filter happens in the loop instead.
-        git diff --name-only --diff-filter=d "$ref"...HEAD -- docs specs 2>/dev/null | grep -E '[.]md$' || true
-    )
+    # PURE RENAMES ARE EXCLUDED (the `R100` rows). This gate enforces claims the
+    # author made in this diff, and relocating a file makes no claim about its
+    # state. Without this, batch C's 134-file move would have demanded a Status
+    # fix on ~100 untouched four-month-old specs at once — an unverified bulk
+    # restamp, which docs/specs/PLAN_DOCS_CLEANUP_EXECUTION_2026_09_01.md §4
+    # names as the failure to avoid: it replaces "unknown status" with
+    # "confidently wrong status". A rename WITH edits (R0xx) is still checked,
+    # because then the content did change.
+    #
+    # NO `-- docs` PATHSPEC HERE, and that is load-bearing. Rename detection
+    # needs to see both sides of the move; limiting the diff to `docs` hid the
+    # `specs/X.md` deletions, so git could not pair them and reported all 134
+    # relocations as plain adds — silently turning the exclusion above into a
+    # no-op. The docs/ filter therefore happens in awk, on the destination
+    # path, after pairing. Same class of bug as globbing `specs/**/*.md` and
+    # missing root-level files: the filter ran before the thing it filtered
+    # was fully known.
+    changes=$(git diff --name-status --find-renames --diff-filter=d "$ref"...HEAD 2>/dev/null || true)
+    mapfile -t files < <(printf '%s
+' "$changes" | awk '
+        $1 == "R100" { next }
+        $1 ~ /^R/    { p = $3 }
+        $1 !~ /^R/   { p = $2 }
+        p ~ /^docs\// && p ~ /[.]md$/ { print p }
+    ' || true)
 fi
 
 # Which changed files are NEW, for the stricter new-doc rule below.
 added_files=""
 if [ "$explicit" -eq 0 ]; then
-    added_files=$(git diff --name-only --diff-filter=A "$ref"...HEAD -- docs specs 2>/dev/null | grep -E '[.]md$' || true)
+    # Renames are deliberately absent: --diff-filter=A with rename detection on
+    # does not report them, and a relocated doc is not one you are writing.
+    added_files=$(git diff --name-only --find-renames --diff-filter=A "$ref"...HEAD 2>/dev/null         | grep -E '^docs/.*[.]md$' || true)
 fi
 
-[ "${#files[@]}" -eq 0 ] && { echo "check-doc-status: no docs changed."; exit 0; }
+# ── One spec tree, not two ──────────────────────────────────────────────────
+#
+# The top-level specs/ tree was merged into docs/specs/ (batch C). It is worth
+# a hard check rather than a convention, because the split did not persist by
+# anyone's decision — it persisted because nothing ever objected to it, through
+# two audits that recommended merging.
+#
+# What made it actively harmful: directory-as-lifecycle and the Status: field
+# answered the same question differently, and promoting a file between trees
+# silently broke every code comment citing it (32 of 165 citations were already
+# dangling when the trees were merged).
+if [ -d specs ]; then
+    echo "FAIL specs/"
+    echo "     A top-level specs/ tree exists. Every spec belongs in docs/specs/;"
+    echo "     a doc's lifecycle is its **Status:** line, not its directory."
+    echo "     See docs/specs/README.md."
+    fail=1
+fi
+
+if [ "${#files[@]}" -eq 0 ]; then
+    # Leave through the same failure check as every other path. The specs/
+    # guard above is filesystem-scoped, not diff-scoped, so a change that
+    # resurrects the tree without touching a single doc must still fail —
+    # a bad rebase doing exactly that is the case the guard exists for.
+    #
+    # An earlier revision exited 0 unconditionally here, which made the guard
+    # unreachable in precisely that scenario. Worth naming how that survived:
+    # the negative test passed an explicit filename, and the explicit-file
+    # branch never leaves `files` empty, so the test could not reach this line.
+    # "Verified in both directions" was true of the check and false of the path.
+    if [ "$fail" -ne 0 ]; then
+        echo ""
+        echo "check-doc-status: FAILED"
+        exit 1
+    fi
+    echo "check-doc-status: no docs changed."
+    exit 0
+fi
+
 
 # ── Check each ──────────────────────────────────────────────────────────────
 checked=0
 for f in "${files[@]}"; do
     [ -f "$f" ] || continue
-    # The docs/|specs/ filter applies only to the git-diff path — an explicit
-    # file list means the caller already chose, and silently skipping their
-    # files (as an earlier version did for absolute paths) is worse than
-    # checking something out of tree.
+    # The docs/ filter applies only to the git-diff path — an explicit file
+    # list means the caller already chose, and silently skipping their files
+    # (as an earlier version did for absolute paths) is worse than checking
+    # something out of tree.
     if [ "$explicit" -eq 0 ]; then
         case "$f" in
-            docs/*|specs/*) ;;
+            docs/*) ;;
             *) continue ;;
         esac
     fi

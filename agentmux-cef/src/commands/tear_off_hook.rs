@@ -35,7 +35,7 @@
 //
 // Spec: docs/specs/SPEC_TAB_TEAR_OFF_SIZE_PRESERVATION_2026_04_26 §4.3-§4.4
 //
-// Cross-window tab remount (specs/SPEC_CROSS_WINDOW_TAB_REMOUNT_2026_07_11):
+// Cross-window tab remount (docs/specs/SPEC_CROSS_WINDOW_TAB_REMOUNT_2026_07_11):
 // the same hook now also runs in `HookMode::TabDrag` for EVERY tab drag
 // (installed at drag start via `start_tab_drag_tracking`, before any
 // tear-off). In that mode the hover events are identical, but button-up
@@ -179,7 +179,7 @@ pub fn start_tear_off_tracking(
 }
 
 /// Install the hook for an ordinary in-strip tab drag (cross-window
-/// tab remount, specs/SPEC_CROSS_WINDOW_TAB_REMOUNT_2026_07_11 §4.1).
+/// tab remount, docs/specs/SPEC_CROSS_WINDOW_TAB_REMOUNT_2026_07_11 §4.1).
 /// No dragged/destination window exists — the tab is still mounted in
 /// its source workspace. Button-up over another AgentMux window emits
 /// `tabdrag:merge-direct` to it; all other outcomes emit nothing.

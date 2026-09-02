@@ -5,7 +5,7 @@
 // initialize/didOpen/didChange/didClose lifecycle. Expanded as later
 // phases pull in completion, hover, definition.
 //
-// Spec: specs/SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md
+// Spec: docs/specs/SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md
 
 export interface LspPosition {
     line: number; // 0-based

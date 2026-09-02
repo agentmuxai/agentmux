@@ -2,12 +2,15 @@
 
 > **READER NOTE (2026-04-28, post-decision):** This doc analyzed the migration wall and proposed the "scaffolding model" as the Phase B end state. Direction was subsequently refined: scaffolding is **intermediate**, not permanent. The long-term destination is **multi-reducer** (host gets its own reducer in Phase F). See `multi-reducer-proposal-2026-04-28.md` for the accepted plan, and `phase-b-roadmap.md` for current sequencing. This doc remains valid as an analysis of WHY the standard ratchet hit a wall on `browsers` and pool maps.
 
-**Status:** Analysis doc, partly superseded by multi-reducer-proposal-2026-04-28.md.
+**Status:** historical — analysis doc, partly superseded by
+`multi-reducer-proposal-2026-04-28.md`. Not `superseded`: that status requires a
+single successor that fully replaces this, and the READER NOTE above says the
+direction was refined rather than replaced.
 **Author:** AgentA.
 **Date:** 2026-04-28, after PRs #579-#592.
 **Companions:**
-* `specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md` — the driving spec
-* `specs/ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md` — pre-migration inventory
+* `docs/specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md` — the driving spec
+* `docs/specs/ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md` — pre-migration inventory
 * `docs/retro/migration-pattern.md` — the a→b→c→d→e ratchet
 * `docs/retro/phase-b-roadmap.md` — sub-PR sequencing
 

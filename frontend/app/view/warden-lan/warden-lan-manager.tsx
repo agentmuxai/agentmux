@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Warden — LAN section. Lifted out of the original monolithic warden.tsx
-// (specs/SPEC_WARDEN_WIDGET_2026-05-25.md) into its own rail-switchable
+// (docs/specs/SPEC_WARDEN_WIDGET_2026-05-25.md) into its own rail-switchable
 // manager. Behavior unchanged, including the known pre-existing bug noted
 // below (out of scope for this restructure).
 

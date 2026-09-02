@@ -18,7 +18,7 @@
  * reads the same controller (`useMuxBusStatus`) so connect/disconnect refresh
  * the tile, the row, and the panel together.
  *
- * See specs/archive/SPEC_TRUST_CENTER_2026_06_15.md and muxbus/pkce.rs.
+ * See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md and muxbus/pkce.rs.
  */
 
 import { createSignal, onMount, Show, type Accessor, type JSX } from "solid-js";
