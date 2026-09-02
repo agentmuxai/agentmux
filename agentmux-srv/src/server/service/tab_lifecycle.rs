@@ -27,7 +27,7 @@ pub(crate) async fn handle_create_tab(state: &AppState, call: &WebCallType) -> W
     let tab_name: String = service::get_arg(args, 1).unwrap_or_default();
     let activate: bool = service::get_arg(args, 2).unwrap_or(true);
     // args[3] (`pinned`) intentionally ignored.
-    // Auto-generate a `tab{N}` name when the caller passed
+    // Auto-generate a `Tab {N}` name when the caller passed
     // empty so behaviour matches the prior wcore path. Counts
     // both `tabids` and any leftover `pinnedtabids` from
     // legacy data so the numbering doesn't collide with
@@ -36,9 +36,9 @@ pub(crate) async fn handle_create_tab(state: &AppState, call: &WebCallType) -> W
     let resolved_name = if tab_name.is_empty() {
         match store.get::<Workspace>(&ws_id) {
             Ok(Some(ws)) => {
-                format!("tab{}", ws.tabids.len() + ws.pinnedtabids.len() + 1)
+                format!("Tab {}", ws.tabids.len() + ws.pinnedtabids.len() + 1)
             }
-            _ => "tab1".to_string(),
+            _ => "Tab 1".to_string(),
         }
     } else {
         tab_name.clone()

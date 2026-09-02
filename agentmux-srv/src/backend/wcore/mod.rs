@@ -347,10 +347,10 @@ mod tests {
 
         let tabs = store.get_all::<Tab>().unwrap();
         assert_eq!(tabs.len(), 1);
-        // Tab should be named "tab1" (per SPEC_TAB_GAPS_AND_NAMING_2026_04_25 —
-        // auto-generated tabs use the `tabN` convention, not the older
-        // `Untitled1` name. The test was asserting against stale-spec naming).
-        assert_eq!(tabs[0].name, "tab1");
+        // Tab should be named "Tab 1" (per SPEC_TAB_GAPS_AND_NAMING_2026_04_25 —
+        // auto-generated tabs use the `Tab N` convention, not the older
+        // `Untitled1` name; revised from plain `tabN` 2026-09-02).
+        assert_eq!(tabs[0].name, "Tab 1");
     }
 
     #[test]

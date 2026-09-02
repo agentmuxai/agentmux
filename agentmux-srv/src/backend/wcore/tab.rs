@@ -10,7 +10,7 @@ use crate::backend::storage::StoreError;
 use crate::backend::obj::*;
 
 /// Create a new tab in a workspace.
-/// If `tab_name` is empty, auto-generates "Untitled1", "Untitled2", etc.
+/// If `tab_name` is empty, auto-generates "Tab 1", "Tab 2", etc.
 /// If `pinned` is true, the tab goes into `pinnedtabids` instead of `tabids`.
 pub fn create_tab(store: &Store, ws_id: &str) -> Result<Tab, StoreError> {
     create_tab_with_opts(store, ws_id, "", false)
@@ -25,12 +25,13 @@ pub fn create_tab_with_opts(
 ) -> Result<Tab, StoreError> {
     let mut ws = store.must_get::<Workspace>(ws_id)?;
 
-    // Auto-generate tab name if not provided. Plain "tabN" (per
-    // SPEC_TAB_GAPS_AND_NAMING_2026_04_25). Existing tabs named
-    // "Untitled1" / "T1" from older sessions are not migrated; this
-    // only affects newly-created tabs from this build forward.
+    // Auto-generate tab name if not provided. "Tab N" (originally plain
+    // "tabN" per SPEC_TAB_GAPS_AND_NAMING_2026_04_25, revised to "Tab N"
+    // 2026-09-02). Existing tabs named "Untitled1" / "T1" / "tab1" from
+    // older sessions are not migrated; this only affects newly-created
+    // tabs from this build forward.
     let name = if tab_name.is_empty() {
-        format!("tab{}", ws.tabids.len() + ws.pinnedtabids.len() + 1)
+        format!("Tab {}", ws.tabids.len() + ws.pinnedtabids.len() + 1)
     } else {
         tab_name.to_string()
     };
