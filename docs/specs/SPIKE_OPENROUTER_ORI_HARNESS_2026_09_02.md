@@ -131,15 +131,40 @@ as authenticated. `ori auth` fails closed by design.
 
 ## 5. `ori code` maps almost 1:1 onto ProviderConfig
 
-| `ori code` flag | Our field |
-|---|---|
-| `-p, --prompt <string>` | prompt slot in `launchArgs` |
-| `--output jsonl` (runtime events + terminal result line) | `styledOutputFormat` |
-| `--model <openrouter-slug>` | model selection |
-| `--reasoning-effort max...none` | our effort generalization |
-| `--resume` / `--session <id>` | `resumeFlag` / `sessionIdField` |
-| `--approvals self-drive` | the `--yolo` / `--dangerously-skip-permissions` slot |
-| `--interactive, -i` | (TUI; not our path) |
+| `ori code` flag | Our field | Fits? |
+|---|---|---|
+| `--output jsonl` (runtime events + terminal result line) | `styledOutputFormat` | yes, pending schema |
+| `--model <openrouter-slug>` | model selection | yes |
+| `--reasoning-effort max...none` | our effort generalization | yes, but stacks — see below |
+| `--approvals self-drive` | the `--yolo` / `--dangerously-skip-permissions` slot | yes |
+| `-p, --prompt <string>` | — | **NO — see below** |
+| `--resume` / `--session <id>` | `resumeFlag` / `sessionIdField` | **not as written** |
+| `--interactive, -i` | (TUI; not our path) | n/a |
+
+**Two rows of an earlier revision of this table were wrong, and the corrections
+are the most useful part of it** (caught in review on PR #2936).
+
+**The prompt does not go in argv.** `launchArgs` is static, and
+`SubprocessController` writes the user's message to the child's **stdin** —
+`subprocess/mod.rs:75` ("The user's JSON message to write to stdin"), with
+`subprocess/argv.rs` maintaining an explicit "stdin marker" position that
+provider flags must not cross. Our `claude` entry exploits exactly that: it
+passes a bare `-p` with no value, and Claude Code reads the prompt from stdin.
+`ori code` documents `--prompt, -p string` as taking an argv value, so copying
+the claude pattern would leave `-p` without its required argument.
+
+**Open question, and the one that gates everything else here:** does
+`ori code -p` with no value read stdin? If it does not, the options are
+`--prompt-file` with a temp file per turn, or a controller change. No other row
+in this table matters until that is answered.
+
+**`sessionIdField` cannot express `--session <id>`.** It only names the JSON
+property to capture an id *from* (`agent_io.rs:244`, default `session_id`); the
+resume strategy then appends `resumeFlag` followed by that captured id. Pairing
+it with the boolean `--resume` would emit `--resume <id>`. The correct shape is
+`resumeFlag: "--session"` — and this spike has **not** established which JSON
+property Ori emits the session id on. `--output jsonl` against a live key would
+show it.
 
 `--reasoning-effort` overlaps `SPEC_PROVIDER_MODELS_EFFORT_GENERALIZATION_2026-06-14.md`:
 Ori also translates effort into "the harness's native mechanism". Two
@@ -154,10 +179,18 @@ biggest unknown before committing to option (b).
 
 Two independent options; (a) is cheap, (b) is the interesting one.
 
-**(a) Wrap existing providers.** `cliCommand: "ori"`, prefix `claude`/`codex`,
-translators unchanged since the same binaries produce the same output. Cheap,
-but only buys OpenRouter billing and guardrails for CLIs users can already run —
-and inherits the `--version` collision plus the tar/PATH bug.
+**(a) Wrap existing providers.** `cliCommand: "ori"`, prefixing the agent name.
+Cheap, but only buys OpenRouter billing and guardrails for CLIs users can
+already run, and inherits both the `--version` collision and the tar/PATH bug.
+
+"Translators unchanged" holds **for claude only**, and an earlier revision of
+this section overclaimed it for codex. Our codex provider feeds the
+`codex-json` translator from `exec --json`, and §3 records that `--json` is
+also an Ori global whose ownership the probe did not resolve. If Ori consumes
+it, codex emits human-readable output and **every wrapped turn silently
+bypasses the translator** — output would degrade rather than error, which is
+the worst failure shape. Wrapping codex is therefore gated on resolving that
+one flag; wrapping claude is not.
 
 **(b) Add `ori code` as a provider in its own right.** This is what the 2026-06
 spec could not have proposed. A real harness with headless prompt, JSONL
