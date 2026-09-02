@@ -358,10 +358,32 @@ export function NativeMemoryManager(): JSX.Element {
     // agent (e.g. a script issuing several MemoryWrite calls in a loop)
     // coalesces into one refetch instead of one RPC round-trip per write.
     // Keyed per agent id so a burst on one agent never delays another's.
+    //
+    // Declared outside the effect (component-instance lifetime, not
+    // per-effect-run) and pruned rather than blanket-cleared on each
+    // re-run — see the ReAgent P1 fix note below.
     const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
     createEffect(() => {
         agentIdsKey();
         const list = untrack(() => agents());
+        const present = new Set(list.map((a) => a.id));
+
+        // ReAgent P1 (PR #2932): only prune timers for agents that actually
+        // LEFT the set. The previous version's onCleanup cleared the ENTIRE
+        // map unconditionally on every re-run of this effect — which fires
+        // on any agentIdsKey() change, i.e. any agent create/edit/delete
+        // ANYWHERE in the app (same over-broad trigger the count-fetch
+        // effect above already had to guard against). A debounced refetch
+        // already scheduled for an agent that's still present got silently
+        // canceled and never fired if an unrelated agent changed elsewhere
+        // within the 250ms window — that agent's count/detail view then
+        // stayed stale until its own next unrelated event.
+        for (const [id, timer] of debounceTimers) {
+            if (!present.has(id)) {
+                clearTimeout(timer);
+                debounceTimers.delete(id);
+            }
+        }
 
         const unsub = waveEventSubscribe(
             ...list.map((agent) => ({
@@ -383,11 +405,19 @@ export function NativeMemoryManager(): JSX.Element {
             })),
         );
 
-        onCleanup(() => {
-            unsub();
-            for (const timer of debounceTimers.values()) clearTimeout(timer);
-            debounceTimers.clear();
-        });
+        // Per-run cleanup: only the subscriptions this run created. Pending
+        // debounce timers are this effect's OWN concern to prune above, not
+        // this callback's — they must survive an effect re-run so a
+        // still-present agent's scheduled refetch isn't lost.
+        onCleanup(unsub);
+    });
+
+    // True component unmount only (registered at the component body's own
+    // scope, not nested inside createEffect, so it does not re-fire on
+    // every effect re-run the way the per-run onCleanup above does).
+    onCleanup(() => {
+        for (const timer of debounceTimers.values()) clearTimeout(timer);
+        debounceTimers.clear();
     });
 
     return (

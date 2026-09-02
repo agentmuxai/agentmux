@@ -551,6 +551,40 @@ describe("NativeMemoryManager — reactive updates", () => {
         expect(screen.getByText("2 files")).toBeInTheDocument();
         expect(screen.getByText("Manoz").closest(".memory-agent-card")).toHaveTextContent("2 files");
     });
+
+    // ReAgent P1, PR #2932: an unrelated agent appearing/disappearing
+    // ANYWHERE in the app changes agentIdsKey() (it's derived from every
+    // agent definition, not just ones with memory) and re-runs this whole
+    // subscription effect. A pending debounced refetch for an agent that's
+    // still present must survive that re-run, not get silently canceled.
+    test("a pending debounced refetch survives an unrelated agent appearing elsewhere within the debounce window", async () => {
+        vi.useFakeTimers();
+        try {
+            render(() => <NativeMemoryManager />);
+            await vi.waitFor(() => expect(nativeMemoryListMock).toHaveBeenCalledTimes(2));
+            nativeMemoryListMock.mockClear();
+            nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md" }] });
+
+            // Schedule a1's debounced refetch (250ms), then — BEFORE it
+            // fires — an unrelated agent (a3) appears elsewhere in the app.
+            // useAgentDefinitions() itself subscribes to "agents:changed"
+            // (AgentPicker.tsx) via the same mocked waveEventSubscribe hub,
+            // so triggering that here re-fetches the agent list for real,
+            // exactly as it would from a genuine unrelated create/edit.
+            wpsHub.handlers.get("agent:memory:changed:a1")?.({});
+            listAgentDefinitionsMock.mockResolvedValue([agent("a1", "Manoz"), agent("a2", "AgentY"), agent("a3", "Nark")]);
+            wpsHub.handlers.get("agents:changed")?.({});
+            await vi.waitFor(() => expect(screen.queryByText("Nark")).not.toBeNull());
+
+            // a1's debounce timer must still fire, not have been silently
+            // canceled by the resubscribe the agent-list change triggered.
+            await vi.advanceTimersByTimeAsync(250);
+
+            expect(nativeMemoryListMock).toHaveBeenCalledWith(undefined, { agent_id: "a1" });
+        } finally {
+            vi.useRealTimers();
+        }
+    });
 });
 
 describe("NativeMemoryManager — drill-in", () => {
