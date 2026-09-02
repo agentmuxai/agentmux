@@ -116,15 +116,21 @@ fn read_memory_file_lossy(path: &Path) -> std::io::Result<String> {
 /// tests assert on it directly). Errors from an individual agent/file are
 /// logged and swallowed — one agent's bad state (e.g. a permissions issue)
 /// must not stop the sweep from covering every other agent.
-pub(crate) fn reconciliation_sweep_once(wstore: &Store, id_store: &Store) -> usize {
+pub(crate) fn reconciliation_sweep_once(wstore: &Store, id_store: &Store, broker: &crate::backend::wps::Broker) -> usize {
     let mut drifted = 0;
     for (agent_id, memory_dir) in list_all_memory_targets(wstore) {
-        drifted += sweep_one_agent_dir(id_store, &agent_id, &memory_dir, "reconciliation_sweep");
+        drifted += sweep_one_agent_dir(id_store, &agent_id, &memory_dir, "reconciliation_sweep", broker);
     }
     drifted
 }
 
-fn sweep_one_agent_dir(id_store: &Store, agent_id: &str, memory_dir: &Path, detected_via: &str) -> usize {
+fn sweep_one_agent_dir(
+    id_store: &Store,
+    agent_id: &str,
+    memory_dir: &Path,
+    detected_via: &str,
+    broker: &crate::backend::wps::Broker,
+) -> usize {
     let entries = match std::fs::read_dir(memory_dir) {
         Ok(e) => e,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return 0,
@@ -159,6 +165,18 @@ fn sweep_one_agent_dir(id_store: &Store, agent_id: &str, memory_dir: &Path, dete
             Ok(true) => {
                 drifted += 1;
                 tracing::info!(agent_id, filename = %name, detected_via, "native_memory_drift: recorded an out-of-band write");
+                // Reactive Armory updates (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md).
+                // Only on an actual recorded change (Ok(true)) — this branch
+                // runs once per sweep tick per watched agent, and firing on
+                // every no-op tick would mean an event for every agent every
+                // 30s regardless of whether anything happened.
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: format!("agent:memory:changed:{agent_id}"),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
             }
             Ok(false) => {}
             Err(e) => tracing::warn!(agent_id, filename = %name, error = %e, "native_memory_drift: check_and_record_drift failed"),
@@ -171,17 +189,22 @@ fn sweep_one_agent_dir(id_store: &Store, agent_id: &str, memory_dir: &Path, dete
 /// `AppState`'s `fs_watch_pool`/`wstore`/`id_store`. Returns immediately —
 /// both loops run as spawned background tasks for the lifetime of the
 /// process (no shutdown handle; srv itself owns the process lifetime).
-pub fn spawn(fs_watch_pool: Arc<FsWatchPool>, wstore: Arc<Store>, id_store: Arc<Store>) {
-    spawn_fast_path(fs_watch_pool, wstore.clone(), id_store.clone());
-    spawn_slow_path(wstore, id_store);
+pub fn spawn(
+    fs_watch_pool: Arc<FsWatchPool>,
+    wstore: Arc<Store>,
+    id_store: Arc<Store>,
+    broker: Arc<crate::backend::wps::Broker>,
+) {
+    spawn_fast_path(fs_watch_pool, wstore.clone(), id_store.clone(), broker.clone());
+    spawn_slow_path(wstore, id_store, broker);
 }
 
-fn spawn_slow_path(wstore: Arc<Store>, id_store: Arc<Store>) {
+fn spawn_slow_path(wstore: Arc<Store>, id_store: Arc<Store>, broker: Arc<crate::backend::wps::Broker>) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(SWEEP_INTERVAL);
         loop {
             tick.tick().await;
-            reconciliation_sweep_once(&wstore, &id_store);
+            reconciliation_sweep_once(&wstore, &id_store, &broker);
         }
     });
 }
@@ -197,7 +220,12 @@ fn spawn_slow_path(wstore: Arc<Store>, id_store: Arc<Store>) {
 /// so a dir is watched for the life of the process once first seen; we
 /// only need to track which dirs we've already called `subscribe_dir` on
 /// to avoid redundant re-subscription every tick.
-fn spawn_fast_path(fs_watch_pool: Arc<FsWatchPool>, wstore: Arc<Store>, id_store: Arc<Store>) {
+fn spawn_fast_path(
+    fs_watch_pool: Arc<FsWatchPool>,
+    wstore: Arc<Store>,
+    id_store: Arc<Store>,
+    broker: Arc<crate::backend::wps::Broker>,
+) {
     tokio::spawn(async move {
         let mut events = fs_watch_pool.events();
         let mut watched_dirs: HashSet<PathBuf> = HashSet::new();
@@ -242,10 +270,26 @@ fn spawn_fast_path(fs_watch_pool: Arc<FsWatchPool>, wstore: Arc<Store>, id_store
                         // sweep covers it if the write actually stuck.
                         Err(_) => continue,
                     };
-                    if let Err(e) = check_and_record_drift(&id_store, &agent_id, filename, &content, "fs_watch") {
-                        tracing::warn!(agent_id, filename, error = %e, "native_memory_drift: fast path: check_and_record_drift failed");
-                    } else {
-                        tracing::info!(agent_id, filename, "native_memory_drift: fast path recorded an out-of-band write");
+                    // Restructured from `if let Err(...) {} else {}` to a full
+                    // match while adding the publish below: the old `else`
+                    // branch fired on Ok(false) too (content already matched,
+                    // nothing recorded), logging "recorded an out-of-band
+                    // write" for a no-op — a pre-existing log inaccuracy
+                    // fixed as a side effect of needing this branch anyway.
+                    match check_and_record_drift(&id_store, &agent_id, filename, &content, "fs_watch") {
+                        Ok(true) => {
+                            tracing::info!(agent_id, filename, "native_memory_drift: fast path recorded an out-of-band write");
+                            // Reactive Armory updates (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md).
+                            broker.publish(crate::backend::wps::WaveEvent {
+                                event: format!("agent:memory:changed:{agent_id}"),
+                                scopes: vec![],
+                                sender: String::new(),
+                                persist: 0,
+                                data: None,
+                            });
+                        }
+                        Ok(false) => {}
+                        Err(e) => tracing::warn!(agent_id, filename, error = %e, "native_memory_drift: fast path: check_and_record_drift failed"),
                     }
                 }
             }
@@ -330,12 +374,57 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("MEMORY.md"), "written outside any RPC").unwrap();
 
-        let drifted = sweep_one_agent_dir(&store, "agent-1", tmp.path(), "reconciliation_sweep");
+        let broker = crate::backend::wps::Broker::new();
+        let drifted = sweep_one_agent_dir(&store, "agent-1", tmp.path(), "reconciliation_sweep", &broker);
         assert_eq!(drifted, 1);
 
         let history = store.agent_native_memory_version_list("agent-1", "MEMORY.md").unwrap();
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].source, "external_fs_write");
+    }
+
+    // SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md: an out-of-band write
+    // (bypassing both the WS RPC and App API surfaces entirely) must still
+    // make the Armory grid reactive — that's this whole module's reason to
+    // exist, so its own publish path needs the same regression guard the
+    // RPC handlers' publish calls get.
+    #[test]
+    fn sweep_publishes_agent_memory_changed_when_drift_is_recorded() {
+        let store = shared_store();
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("MEMORY.md"), "written outside any RPC").unwrap();
+
+        let (broker, client) = crate::test_support::broker_recording("agent:memory:changed:agent-drift-1");
+        sweep_one_agent_dir(&store, "agent-drift-1", tmp.path(), "reconciliation_sweep", &broker);
+
+        let events = client.received_events();
+        assert_eq!(events.len(), 1, "a real drift must publish exactly one event");
+        assert_eq!(events[0].1.event, "agent:memory:changed:agent-drift-1");
+    }
+
+    // The other half of the same guard: a sweep tick that finds NO drift
+    // (unchanged content) must NOT publish — the reconciliation sweep runs
+    // every 30s for every watched agent regardless of whether anything
+    // changed, so publishing unconditionally would fire an event storm with
+    // no corresponding real change, defeating the point of an event-driven
+    // refresh (see this module's own SPEC section on why insert_if_changed's
+    // no-op case is explicitly excluded).
+    #[test]
+    fn sweep_does_not_publish_when_content_is_unchanged() {
+        let store = shared_store();
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("MEMORY.md"), "same content").unwrap();
+
+        let (broker, client) = crate::test_support::broker_recording("agent:memory:changed:agent-drift-2");
+        // First sweep: genuinely new content, records a version (and would
+        // publish — unobserved here since this test is about the SECOND
+        // sweep finding nothing new).
+        sweep_one_agent_dir(&store, "agent-drift-2", tmp.path(), "reconciliation_sweep", &broker);
+        // Second sweep over the same, unchanged file — no drift to record.
+        sweep_one_agent_dir(&store, "agent-drift-2", tmp.path(), "reconciliation_sweep", &broker);
+
+        let events = client.received_events();
+        assert_eq!(events.len(), 1, "only the first sweep's real drift may publish; the second (no-op) must not");
     }
 
     // reagent P2 on PR #2675: read_memory_file_lossy previously truncated
@@ -350,7 +439,8 @@ mod tests {
         let oversized = "x".repeat((MAX_MEMORY_FILE_BYTES + 1) as usize);
         std::fs::write(tmp.path().join("MEMORY.md"), &oversized).unwrap();
 
-        let drifted = sweep_one_agent_dir(&store, "agent-1", tmp.path(), "reconciliation_sweep");
+        let broker = crate::backend::wps::Broker::new();
+        let drifted = sweep_one_agent_dir(&store, "agent-1", tmp.path(), "reconciliation_sweep", &broker);
         assert_eq!(drifted, 0, "an oversized file must not be recorded as drift");
 
         let history = store.agent_native_memory_version_list("agent-1", "MEMORY.md").unwrap();
@@ -385,9 +475,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("notes.txt"), "not a memory file").unwrap();
 
-        assert_eq!(sweep_one_agent_dir(&store, "agent-1", tmp.path(), "reconciliation_sweep"), 0);
+        let broker = crate::backend::wps::Broker::new();
+        assert_eq!(sweep_one_agent_dir(&store, "agent-1", tmp.path(), "reconciliation_sweep", &broker), 0);
         assert_eq!(
-            sweep_one_agent_dir(&store, "agent-1", &tmp.path().join("does-not-exist"), "reconciliation_sweep"),
+            sweep_one_agent_dir(&store, "agent-1", &tmp.path().join("does-not-exist"), "reconciliation_sweep", &broker),
             0
         );
     }
@@ -398,7 +489,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("MEMORY.md"), "content").unwrap();
 
-        sweep_one_agent_dir(&store, "agent-specific", tmp.path(), "reconciliation_sweep");
+        let broker = crate::backend::wps::Broker::new();
+        sweep_one_agent_dir(&store, "agent-specific", tmp.path(), "reconciliation_sweep", &broker);
 
         assert_eq!(store.agent_native_memory_version_list("agent-specific", "MEMORY.md").unwrap().len(), 1);
         assert_eq!(store.agent_native_memory_version_list("agent-other", "MEMORY.md").unwrap().len(), 0);
@@ -471,7 +563,8 @@ mod tests {
             std::fs::write(memory_dir.join("MEMORY.md"), format!("content for {id}")).unwrap();
         }
 
-        let drifted = reconciliation_sweep_once(&state.wstore, &id_store);
+        let broker = crate::backend::wps::Broker::new();
+        let drifted = reconciliation_sweep_once(&state.wstore, &id_store, &broker);
         assert_eq!(drifted, 2, "sweep must cover every agent with a working directory");
         assert_eq!(id_store.agent_native_memory_version_list("sweep-agent-a", "MEMORY.md").unwrap().len(), 1);
         assert_eq!(id_store.agent_native_memory_version_list("sweep-agent-b", "MEMORY.md").unwrap().len(), 1);

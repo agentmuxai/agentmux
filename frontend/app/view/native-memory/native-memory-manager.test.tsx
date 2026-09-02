@@ -25,6 +25,25 @@ function cardTitlesInOrder(container: HTMLElement): string[] {
 const listAgentDefinitionsMock = vi.fn();
 const nativeMemoryListMock = vi.fn();
 
+// SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md's own tests drive
+// `agent:memory:changed:{id}` events through this hub, same pattern as
+// bundle-mcp-model.test.ts's own waveEventSubscribe mock — extended here to
+// accept the VARIADIC multi-subscription call NativeMemoryManager makes
+// (one subscription per grid agent in a single waveEventSubscribe(...) call,
+// not bundle-mcp-model.ts's single-subscription shape).
+const wpsHub = vi.hoisted(() => ({
+    handlers: new Map<string, (e: unknown) => void>(),
+}));
+
+vi.mock("@/app/store/wps", () => ({
+    waveEventSubscribe: vi.fn((...subs: Array<{ eventType: string; handler: (e: unknown) => void }>) => {
+        for (const sub of subs) wpsHub.handlers.set(sub.eventType, sub.handler);
+        return () => {
+            for (const sub of subs) wpsHub.handlers.delete(sub.eventType);
+        };
+    }),
+}));
+
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         ListAgentDefinitionsCommand: (...args: unknown[]) => listAgentDefinitionsMock(...args),
@@ -56,6 +75,7 @@ beforeEach(() => {
     listAgentDefinitionsMock.mockResolvedValue([agent("a1", "Manoz"), agent("a2", "AgentY")]);
     nativeMemoryListMock.mockResolvedValue({ files: [] });
     localStorage.clear();
+    wpsHub.handlers.clear();
 });
 
 describe("NativeMemoryManager — agent grid", () => {
@@ -292,6 +312,137 @@ describe("NativeMemoryManager — filter and sort", () => {
 
         expect(await screen.findByText("← All agents")).toBeInTheDocument();
         expect(screen.queryByTestId("memory-agent-filter-bar")).toBeNull();
+    });
+});
+
+// docs/specs/SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md
+describe("NativeMemoryManager — reactive updates", () => {
+    test("an agent:memory:changed event refetches only that agent's count", async () => {
+        render(() => <NativeMemoryManager />);
+        await screen.findAllByText("No memories yet"); // initial fetch settled for both
+
+        nativeMemoryListMock.mockImplementation((_c: unknown, req: { agent_id: string }) =>
+            req.agent_id === "a1"
+                ? Promise.resolve({ files: [{ filename: "MEMORY.md" }] })
+                : Promise.resolve({ files: [] }),
+        );
+        wpsHub.handlers.get("agent:memory:changed:a1")?.({});
+
+        expect(await screen.findByText("1 file")).toBeInTheDocument();
+        // a2's card never re-fetched (still shows the original empty state).
+        expect(screen.getByText("AgentY").closest(".memory-agent-card")).toHaveTextContent("No memories yet");
+    });
+
+    test("an event refetches an agent even if its card previously errored", async () => {
+        nativeMemoryListMock.mockImplementation((_c: unknown, req: { agent_id: string }) =>
+            req.agent_id === "a1" ? Promise.reject(new Error("boom")) : Promise.resolve({ files: [] }),
+        );
+        render(() => <NativeMemoryManager />);
+        await screen.findByText("Couldn't read memories");
+
+        // Whatever broke is fixed now — the next event must get a fresh try,
+        // not stay permanently errored until a full remount.
+        nativeMemoryListMock.mockImplementation((_c: unknown, req: { agent_id: string }) =>
+            req.agent_id === "a1" ? Promise.resolve({ files: [{ filename: "MEMORY.md" }] }) : Promise.resolve({ files: [] }),
+        );
+        wpsHub.handlers.get("agent:memory:changed:a1")?.({});
+
+        expect(await screen.findByText("1 file")).toBeInTheDocument();
+        expect(screen.queryByText("Couldn't read memories")).toBeNull();
+    });
+
+    test("rapid repeated events for the same agent debounce into a single refetch", async () => {
+        vi.useFakeTimers();
+        try {
+            render(() => <NativeMemoryManager />);
+            await vi.waitFor(() => expect(nativeMemoryListMock).toHaveBeenCalledTimes(2));
+            nativeMemoryListMock.mockClear();
+
+            const handler = wpsHub.handlers.get("agent:memory:changed:a1");
+            handler?.({});
+            handler?.({});
+            handler?.({});
+            await vi.advanceTimersByTimeAsync(250);
+
+            expect(nativeMemoryListMock).toHaveBeenCalledTimes(1);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    test("an event for the open detail view's agent refreshes its file list in place", async () => {
+        nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md" }] });
+        render(() => <NativeMemoryManager />);
+        fireEvent.click(await screen.findByText("Manoz"));
+        const select = await screen.findByRole("combobox");
+        await waitFor(() => expect(select).not.toBeDisabled());
+        fireEvent.change(select, { target: { value: "MEMORY.md" } });
+        expect(await screen.findByTestId("history-panel")).toHaveTextContent("a1:MEMORY.md");
+
+        nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md" }, { filename: "NOTES.md" }] });
+        wpsHub.handlers.get("agent:memory:changed:a1")?.({});
+
+        await waitFor(() =>
+            expect(Array.from(select.querySelectorAll("option")).map((o) => o.value)).toContain("NOTES.md"),
+        );
+        // Still showing the same file's history — the event refreshed the
+        // list in place, it did not kick the user back to "pick a file".
+        expect(screen.getByTestId("history-panel")).toHaveTextContent("a1:MEMORY.md");
+    });
+
+    test("an event for a DIFFERENT agent than the one open in detail view is ignored there", async () => {
+        nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md" }] });
+        render(() => <NativeMemoryManager />);
+        fireEvent.click(await screen.findByText("Manoz")); // opens agent a1
+        await screen.findByRole("combobox");
+
+        nativeMemoryListMock.mockClear();
+        wpsHub.handlers.get("agent:memory:changed:a2")?.({});
+
+        // a2's own grid card legitimately refetches in the background (the
+        // grid stays reactive even while the detail view is open) — what
+        // must NOT happen is a refetch for a1, the agent the open detail
+        // view is actually showing.
+        await vi.waitFor(() => expect(nativeMemoryListMock).toHaveBeenCalledWith(undefined, { agent_id: "a2" }));
+        expect(nativeMemoryListMock).not.toHaveBeenCalledWith(undefined, { agent_id: "a1" });
+    });
+
+    test("clears the selected filename if the event's refresh shows it no longer exists", async () => {
+        nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md" }] });
+        render(() => <NativeMemoryManager />);
+        fireEvent.click(await screen.findByText("Manoz"));
+        const select = (await screen.findByRole("combobox")) as HTMLSelectElement;
+        await waitFor(() => expect(select).not.toBeDisabled());
+        fireEvent.change(select, { target: { value: "MEMORY.md" } });
+        expect(await screen.findByTestId("history-panel")).toHaveTextContent("a1:MEMORY.md");
+
+        // The file that was selected is gone in the refreshed list.
+        nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "OTHER.md" }] });
+        wpsHub.handlers.get("agent:memory:changed:a1")?.({});
+
+        await waitFor(() => expect(select.value).toBe(""));
+        expect(screen.queryByTestId("history-panel")).toBeNull();
+    });
+
+    test("subscriptions are re-registered when the agent set changes", async () => {
+        render(() => <NativeMemoryManager />);
+        await screen.findByText("Manoz");
+        expect(wpsHub.handlers.has("agent:memory:changed:a1")).toBe(true);
+        expect(wpsHub.handlers.has("agent:memory:changed:a2")).toBe(true);
+
+        listAgentDefinitionsMock.mockResolvedValue([agent("a3", "Nark")]);
+        // Simulate the agents:changed-driven refetch useAgentDefinitions does
+        // internally by re-invoking its own subscribe path is out of scope
+        // here (that's useAgentDefinitions' own test surface) — instead
+        // re-render to exercise the same agentIdsKey-change code path this
+        // effect depends on.
+        cleanup();
+        render(() => <NativeMemoryManager />);
+        await screen.findByText("Nark");
+
+        expect(wpsHub.handlers.has("agent:memory:changed:a1")).toBe(false);
+        expect(wpsHub.handlers.has("agent:memory:changed:a2")).toBe(false);
+        expect(wpsHub.handlers.has("agent:memory:changed:a3")).toBe(true);
     });
 });
 

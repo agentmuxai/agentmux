@@ -15,6 +15,7 @@
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { waveEventSubscribe } from "@/app/store/wps";
 import type { McpPreloadEntry } from "./mcp-preload-catalog";
 
 export interface McpDraft {
@@ -33,6 +34,12 @@ function draftFromServer(s: McpServer): McpDraft {
 }
 
 export class McpCatalogModel {
+    // Cross-window reactivity (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md) —
+    // a bind/unbind/add/edit made elsewhere (including from the per-bundle
+    // BundleMcpModel, which already subscribes to this same event) refreshes
+    // this standalone Armory "MCP Servers" tab without a manual reopen.
+    private unsubChanged: () => void;
+
     private _servers = createSignal<McpServerCatalogItem[]>([]);
     serversAtom: Accessor<McpServerCatalogItem[]> = this._servers[0];
     private setServers = this._servers[1];
@@ -78,6 +85,10 @@ export class McpCatalogModel {
         });
         void this.refresh();
         void this.loadAgents();
+        this.unsubChanged = waveEventSubscribe({
+            eventType: "mcp:changed",
+            handler: () => void this.refresh(),
+        });
     }
 
     async refresh(): Promise<void> {
@@ -207,6 +218,6 @@ export class McpCatalogModel {
     }
 
     dispose(): void {
-        // Solid signals are GC'd with the instance; nothing to unsubscribe.
+        this.unsubChanged();
     }
 }

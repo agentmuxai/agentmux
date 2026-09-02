@@ -1012,8 +1012,18 @@ pub(crate) fn memory_write_impl(
         tracing::warn!(agent_id, filename, error = %e, "memory.write: mirror upsert failed (non-fatal)");
     }
 
+    // Keyed by `version_agent_id` (the resolved canonical UUID), not the raw
+    // `agent_id` slug parameter — SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md:
+    // the WS RPC surface (native_memory_handlers.rs) publishes this same
+    // event keyed by `agent.id`, and a frontend subscriber only ever has
+    // that UUID (`AgentDefinition.id`), never the App-API-only slug
+    // namespace. Slug-keying here would silently split writes made through
+    // this surface (the MemoryWrite MCP tool) into a keyspace no UI
+    // subscriber can ever match — the exact class of bug this file's own
+    // `resolve_agent_uuid` doc comment already warns about for version
+    // storage; the same reasoning applies to this event.
     state.broker.publish(crate::backend::wps::WaveEvent {
-        event: format!("agent:memory:changed:{agent_id}"),
+        event: format!("agent:memory:changed:{version_agent_id}"),
         scopes: vec![], sender: String::new(), persist: 0, data: None,
     });
     Ok(())
@@ -1168,8 +1178,10 @@ pub(crate) fn memory_revert_impl(
         tracing::warn!(agent_id, filename, error = %e, "memory.revert: mirror upsert failed (non-fatal)");
     }
 
+    // See memory_write_impl's own comment on why this is version_agent_id
+    // (canonical UUID), not the raw agent_id slug parameter.
     state.broker.publish(crate::backend::wps::WaveEvent {
-        event: format!("agent:memory:changed:{agent_id}"),
+        event: format!("agent:memory:changed:{version_agent_id}"),
         scopes: vec![], sender: String::new(), persist: 0, data: None,
     });
 
@@ -1264,6 +1276,65 @@ mod memory_version_impl_tests {
         let versions = history.get("versions").and_then(|v| v.as_array()).unwrap();
         assert_eq!(versions.len(), 1);
         assert_eq!(versions[0].get("source").and_then(|v| v.as_str()), Some("agent_inferred"));
+    }
+
+    // SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md: this is the App API surface
+    // the `MemoryWrite` MCP tool actually calls — proves the publish keys by
+    // the resolved canonical UUID (`version_agent_id`), not the raw `agent_id`
+    // slug parameter this function otherwise takes throughout. In this
+    // fixture slug == id (agent_def's own convention), so this alone
+    // wouldn't catch a slug/UUID mixup; see the sibling test below for that.
+    #[tokio::test]
+    async fn write_publishes_agent_memory_changed_scoped_to_the_canonical_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut state = state_with_agent("agent-app-pub", tmp.path());
+        let (broker, client) = crate::test_support::broker_recording("agent:memory:changed:agent-app-pub");
+        state.broker = std::sync::Arc::new(broker);
+
+        memory_write_impl(&state, "agent-app-pub", "MEMORY.md", "hello", None).unwrap();
+
+        let events = client.received_events();
+        assert_eq!(events.len(), 1, "memory_write_impl must publish exactly one agent:memory:changed event");
+        assert_eq!(events[0].1.event, "agent:memory:changed:agent-app-pub");
+    }
+
+    // The mixup this test exists to catch: memory_write_impl's own doc
+    // comment establishes that App-API callers pass a SLUG, which can differ
+    // from the agent's canonical UUID id. If the publish were still keyed by
+    // the raw `agent_id` parameter (the bug this spec's own commit fixed),
+    // this test's event name assertion would read the slug instead of the
+    // UUID and fail here specifically — a fixture where they genuinely
+    // differ, unlike every other test in this module.
+    #[tokio::test]
+    async fn write_publishes_using_the_resolved_uuid_not_the_raw_slug() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut state = crate::server::tests::test_state();
+        let mut def = agent_def("agent-real-uuid-pub", &tmp.path().to_string_lossy());
+        def.slug = "agent-friendly-slug-pub".to_string();
+        state.wstore.agent_def_insert(&mut def).unwrap();
+        state
+            .wstore
+            .agent_content_set(&crate::backend::storage::AgentContent {
+                agent_id: def.id.clone(),
+                content_type: "env".to_string(),
+                content: format!("CLAUDE_CONFIG_DIR={}\n", tmp.path().display()),
+                updated_at: 0,
+            })
+            .unwrap();
+        let (broker, client) = crate::test_support::broker_recording("agent:memory:changed:agent-real-uuid-pub");
+        state.broker = std::sync::Arc::new(broker);
+
+        // Write via the slug (what the MemoryWrite MCP tool actually sends).
+        memory_write_impl(&state, "agent-friendly-slug-pub", "MEMORY.md", "hello", None).unwrap();
+
+        let events = client.received_events();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            events[0].1.event,
+            "agent:memory:changed:agent-real-uuid-pub",
+            "must publish under the resolved canonical UUID, not the raw slug -- \
+             a frontend subscriber only ever has AgentDefinition.id (the UUID)"
+        );
     }
 
     #[tokio::test]
@@ -1373,6 +1444,32 @@ mod memory_version_impl_tests {
         let history_after = memory_history_impl(&state, "agent-app-4", "MEMORY.md").unwrap();
         let versions_after = history_after.get("versions").and_then(|v| v.as_array()).unwrap();
         assert_eq!(versions_after.len(), 3, "revert must not delete or rewrite prior versions");
+    }
+
+    // SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md — same rationale as
+    // write_publishes_agent_memory_changed_scoped_to_the_canonical_id above.
+    #[tokio::test]
+    async fn revert_publishes_agent_memory_changed_scoped_to_the_canonical_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut state = state_with_agent("agent-app-revpub", tmp.path());
+
+        memory_write_impl(&state, "agent-app-revpub", "MEMORY.md", "good", None).unwrap();
+        memory_write_impl(&state, "agent-app-revpub", "MEMORY.md", "fabricated", None).unwrap();
+        let history = memory_history_impl(&state, "agent-app-revpub", "MEMORY.md").unwrap();
+        let versions = history.get("versions").and_then(|v| v.as_array()).unwrap();
+        let good_id = versions[1].get("id").and_then(|v| v.as_str()).unwrap().to_string();
+
+        // Only the revert publish is under test — swap in the observed
+        // broker after the setup writes above (each of which also
+        // published, on the previous default/unobserved broker).
+        let (broker, client) = crate::test_support::broker_recording("agent:memory:changed:agent-app-revpub");
+        state.broker = std::sync::Arc::new(broker);
+
+        memory_revert_impl(&state, "agent-app-revpub", "MEMORY.md", &good_id).unwrap();
+
+        let events = client.received_events();
+        assert_eq!(events.len(), 1, "memory_revert_impl must publish exactly one agent:memory:changed event");
+        assert_eq!(events[0].1.event, "agent:memory:changed:agent-app-revpub");
     }
 
     /// Regression for reagent P1 on PR #2674: memory_revert_impl (the

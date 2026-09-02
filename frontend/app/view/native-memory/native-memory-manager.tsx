@@ -27,9 +27,10 @@
  * This directory and component are about native memory only.
  */
 
-import { createEffect, createMemo, createSignal, For, Show, untrack, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { waveEventSubscribe } from "@/app/store/wps";
 import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
 import { NativeMemoryHistoryPanel } from "@/app/view/agent/components/NativeMemoryHistoryPanel";
 import { MemoryAgentCard, type MemoryCountState } from "./MemoryAgentCard";
@@ -154,6 +155,39 @@ export function NativeMemoryManager(): JSX.Element {
             .join(" "),
     );
 
+    // Shared by the id-set effect below (new agents) AND the reactive
+    // agent:memory:changed handler further down (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md)
+    // — one RPC-call-then-setCounts implementation, not two copies that could
+    // drift. Always overwrites, even for an agent not currently `undefined`
+    // in the map — the reactive path's whole point is refreshing an agent
+    // whose count was already resolved (or errored) before this call.
+    const fetchCountFor = (agent: AgentDefinition) => {
+        setCounts((prev) => ({ ...prev, [agent.id]: { kind: "loading" } as MemoryCountState }));
+        RpcApi.NativeMemoryListCommand(TabRpcClient, { agent_id: agent.id })
+            .then((res) => {
+                // Guarded per-agent rather than by a batch generation: a
+                // response is only stale if its agent is gone, and each
+                // fetch now settles into a shared, incrementally-built map
+                // (the old whole-batch reset is what caused the flicker).
+                setCounts((prev) =>
+                    prev[agent.id] === undefined
+                        ? prev
+                        : { ...prev, [agent.id]: { kind: "count", files: res.files.length } },
+                );
+            })
+            .catch((e: Error) => {
+                // NOT folded into `count: 0`. agent:memory:list fails with
+                // a hard 500 when the memory dir can't be resolved — the
+                // exact shape of the bug #2901 fixed — so an error must
+                // stay visually distinct from a genuinely empty agent.
+                setCounts((prev) =>
+                    prev[agent.id] === undefined
+                        ? prev
+                        : { ...prev, [agent.id]: { kind: "error", message: e.message ?? String(e) } },
+                );
+            });
+    };
+
     createEffect(() => {
         agentIdsKey();
         // Read the list itself untracked: the memo above is the only intended
@@ -166,38 +200,7 @@ export function NativeMemoryManager(): JSX.Element {
         setCounts((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => present.has(id))));
 
         const missing = list.filter((a) => untrack(() => counts())[a.id] === undefined);
-        if (missing.length === 0) return;
-
-        setCounts((prev) => ({
-            ...prev,
-            ...Object.fromEntries(missing.map((a) => [a.id, { kind: "loading" } as MemoryCountState])),
-        }));
-
-        for (const agent of missing) {
-            RpcApi.NativeMemoryListCommand(TabRpcClient, { agent_id: agent.id })
-                .then((res) => {
-                    // Guarded per-agent rather than by a batch generation: a
-                    // response is only stale if its agent is gone, and each
-                    // fetch now settles into a shared, incrementally-built map
-                    // (the old whole-batch reset is what caused the flicker).
-                    setCounts((prev) =>
-                        prev[agent.id] === undefined
-                            ? prev
-                            : { ...prev, [agent.id]: { kind: "count", files: res.files.length } },
-                    );
-                })
-                .catch((e: Error) => {
-                    // NOT folded into `count: 0`. agent:memory:list fails with
-                    // a hard 500 when the memory dir can't be resolved — the
-                    // exact shape of the bug #2901 fixed — so an error must
-                    // stay visually distinct from a genuinely empty agent.
-                    setCounts((prev) =>
-                        prev[agent.id] === undefined
-                            ? prev
-                            : { ...prev, [agent.id]: { kind: "error", message: e.message ?? String(e) } },
-                    );
-                });
-        }
+        for (const agent of missing) fetchCountFor(agent);
     });
 
     // Grid find/filter + sort (SPEC_ARMORY_PERSONAL_MEMORY_FILTER_AND_SORT_2026_09_02.md).
@@ -267,6 +270,76 @@ export function NativeMemoryManager(): JSX.Element {
                 if (requestId !== latestRequestId) return;
                 setFilesLoading(false);
             });
+    });
+
+    // Reactive re-fetch of the OPEN detail view's file list, triggered by
+    // agent:memory:changed for the currently-selected agent
+    // (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md). Deliberately does NOT
+    // clear `selectedFilename()` the way the selectedAgent()-keyed effect
+    // above does on an actual agent SWITCH — a live write to the file
+    // you're already looking at should update in place, not kick you back
+    // to "pick a file." Only clears it if the previously-selected filename
+    // genuinely no longer exists in the refreshed list (e.g. the file that
+    // changed was a delete).
+    const refetchSelectedAgentFiles = (agent: AgentDefinition) => {
+        const requestId = ++latestRequestId;
+        RpcApi.NativeMemoryListCommand(TabRpcClient, { agent_id: agent.id })
+            .then((res) => {
+                if (requestId !== latestRequestId) return;
+                setFiles(res.files);
+                setFilesError(null);
+                const current = selectedFilename();
+                if (current && !res.files.some((f) => f.filename === current)) {
+                    setSelectedFilename("");
+                }
+            })
+            .catch((e: Error) => {
+                if (requestId !== latestRequestId) return;
+                setFilesError(`Failed to list memory files: ${e.message ?? e}`);
+            });
+    };
+
+    // Reactive grid + detail updates: subscribe to agent:memory:changed for
+    // every agent currently in the grid, re-subscribing whenever the agent
+    // SET changes (same agentIdsKey dependency the count-fetch effect above
+    // uses, for the same reason — a brand-new-but-equivalent agents() array
+    // must not tear down and rebuild every subscription).
+    // SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md.
+    //
+    // Debounced per agent id (~250ms): a burst of rapid writes to the same
+    // agent (e.g. a script issuing several MemoryWrite calls in a loop)
+    // coalesces into one refetch instead of one RPC round-trip per write.
+    // Keyed per agent id so a burst on one agent never delays another's.
+    const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    createEffect(() => {
+        agentIdsKey();
+        const list = untrack(() => agents());
+
+        const unsub = waveEventSubscribe(
+            ...list.map((agent) => ({
+                eventType: `agent:memory:changed:${agent.id}`,
+                handler: () => {
+                    const existing = debounceTimers.get(agent.id);
+                    if (existing !== undefined) clearTimeout(existing);
+                    debounceTimers.set(
+                        agent.id,
+                        setTimeout(() => {
+                            debounceTimers.delete(agent.id);
+                            fetchCountFor(agent);
+                            if (untrack(selectedAgent)?.id === agent.id) {
+                                refetchSelectedAgentFiles(agent);
+                            }
+                        }, 250),
+                    );
+                },
+            })),
+        );
+
+        onCleanup(() => {
+            unsub();
+            for (const timer of debounceTimers.values()) clearTimeout(timer);
+            debounceTimers.clear();
+        });
     });
 
     return (
