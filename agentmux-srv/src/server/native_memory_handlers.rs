@@ -785,18 +785,22 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     .map_err(|e| format!("agent:memory:list: store: {e}"))?
                     .ok_or_else(|| format!("agent:memory:list: agent {} not found", cmd.agent_id))?;
 
-                // No working directory → no memory path (avoid mapping to the shared
-                // ~/.claude/projects/memory/ directory — reagent P1 on PR #1588).
-                if agent.working_directory.is_empty() {
-                    return Ok(Some(serde_json::to_value(NativeMemoryListResult { files: vec![] }).map_err(|e| e.to_string())?));
-                }
-
-                let config_dir = wstore
-                    .agent_content_get(&agent.id, "env")
-                    .ok().flatten()
-                    .map(|c| parse_claude_config_dir(&c.content))
-                    .unwrap_or_default();
-                let memory_dir = memory_dir_for_cwd(&config_dir, &agent.working_directory);
+                // A blank working_directory is the DEFAULT state, not a
+                // reason to short-circuit: `agent.open` substitutes a real
+                // directory whenever this field is blank, so a blank row
+                // still describes an agent with real memories on disk. The
+                // old inline "blank → Ok(files: [])" here was a duplicate,
+                // un-synced copy of the exact blank-workdir bug
+                // SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01.md
+                // (#2901) already fixed once in `memory_dir_for_agent_by_id`
+                // itself — that fix never propagated to this handler (or to
+                // read_file/write_file/revert below), so it silently kept
+                // reporting "no memories" for every agent #2901 was
+                // supposed to have fixed. See
+                // SPEC_MEMORY_RPC_HANDLERS_BLANK_WORKDIR_2026_09_02.md.
+                let memory_dir = memory_dir_for_agent_by_id(&wstore, &agent).ok_or_else(|| {
+                    format!("agent:memory:list: agent {} has no resolvable memory directory", cmd.agent_id)
+                })?;
 
                 // Existing mirror metadata (no content) for this agent, keyed by
                 // filename — lets the loop below skip the expensive full-content
@@ -988,16 +992,13 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     .map_err(|e| format!("agent:memory:read_file: store: {e}"))?
                     .ok_or_else(|| format!("agent:memory:read_file: agent {} not found", cmd.agent_id))?;
 
-                if agent.working_directory.is_empty() {
-                    return Err(format!("agent:memory:read_file: agent {} has no configured working directory", cmd.agent_id));
-                }
-
-                let config_dir = wstore
-                    .agent_content_get(&agent.id, "env")
-                    .ok().flatten()
-                    .map(|c| parse_claude_config_dir(&c.content))
-                    .unwrap_or_default();
-                let path = memory_dir_for_cwd(&config_dir, &agent.working_directory).join(&cmd.filename);
+                // See the identical comment on the list handler above — a
+                // blank working_directory is not "no memory dir".
+                let path = memory_dir_for_agent_by_id(&wstore, &agent)
+                    .ok_or_else(|| {
+                        format!("agent:memory:read_file: agent {} has no resolvable memory directory", cmd.agent_id)
+                    })?
+                    .join(&cmd.filename);
 
                 // Live FS is the freshest copy when present — Claude may have
                 // written moments ago, before this call's mirror upsert even
@@ -1098,16 +1099,11 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                     .map_err(|e| format!("agent:memory:write_file: store: {e}"))?
                     .ok_or_else(|| format!("agent:memory:write_file: agent {} not found", cmd.agent_id))?;
 
-                if agent.working_directory.is_empty() {
-                    return Err(format!("agent:memory:write_file: agent {} has no configured working directory", cmd.agent_id));
-                }
-
-                let config_dir = wstore
-                    .agent_content_get(&agent.id, "env")
-                    .ok().flatten()
-                    .map(|c| parse_claude_config_dir(&c.content))
-                    .unwrap_or_default();
-                let dir = memory_dir_for_cwd(&config_dir, &agent.working_directory);
+                // See the identical comment on the list handler above — a
+                // blank working_directory is not "no memory dir".
+                let dir = memory_dir_for_agent_by_id(&wstore, &agent).ok_or_else(|| {
+                    format!("agent:memory:write_file: agent {} has no resolvable memory directory", cmd.agent_id)
+                })?;
                 std::fs::create_dir_all(&dir)
                     .map_err(|e| format!("agent:memory:write_file: mkdir: {e}"))?;
 
@@ -1326,15 +1322,11 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 // path as agent:memory:write_file (live file + mirror +
                 // version), not a rewrite of history — this is the
                 // git-revert-not-git-reset guarantee from the spec's §4.3.
-                if agent.working_directory.is_empty() {
-                    return Err(format!("agent:memory:revert: agent {} has no configured working directory", cmd.agent_id));
-                }
-                let config_dir = wstore
-                    .agent_content_get(&agent.id, "env")
-                    .ok().flatten()
-                    .map(|c| parse_claude_config_dir(&c.content))
-                    .unwrap_or_default();
-                let dir = memory_dir_for_cwd(&config_dir, &agent.working_directory);
+                // See the identical comment on the list handler above — a
+                // blank working_directory is not "no memory dir".
+                let dir = memory_dir_for_agent_by_id(&wstore, &agent).ok_or_else(|| {
+                    format!("agent:memory:revert: agent {} has no resolvable memory directory", cmd.agent_id)
+                })?;
                 std::fs::create_dir_all(&dir)
                     .map_err(|e| format!("agent:memory:revert: mkdir: {e}"))?;
 
@@ -1957,6 +1949,143 @@ mod tests {
         .await;
         assert_eq!(history.versions[0].source, "jekt");
         assert!(history.versions[0].source_detail.contains("network-claimed"));
+    }
+
+    /// The actual bug behind `SPEC_MEMORY_RPC_HANDLERS_BLANK_WORKDIR_2026_09_02.md`:
+    /// SPEC_FIX_PERSONAL_MEMORY_EMPTY_WORKDIR_2026_09_01.md (#2901) fixed blank
+    /// `working_directory` resolution inside `memory_dir_for_agent`/
+    /// `memory_dir_for_agent_by_id` themselves, but these four RPC handlers had
+    /// their OWN separate, un-synced `agent.working_directory.is_empty()` check
+    /// that never called either resolver — so the fix never actually reached
+    /// `agent:memory:write_file`, the handler live traffic (the Armory Personal
+    /// Memory grid, and the `MemoryWrite` MCP tool going through a *different*
+    /// path that DOES use the fixed resolver) hits. Live-tested against a running
+    /// v0.55.31 build: a `MemoryWrite` MCP call succeeded (App API path, already
+    /// fixed) while `agent:memory:write_file` for the exact same blank-workdir
+    /// agent definition failed outright with "has no configured working
+    /// directory" — this is the regression guard for that exact split.
+    #[tokio::test]
+    async fn write_file_resolves_a_blank_working_directory_instead_of_erroring() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config = tempfile::tempdir().unwrap();
+        let (engine, mut rx) = build_channel_state("agent-blankwd-write", "", config.path(), shared_id_store);
+
+        // Before the fix this errored with "has no configured working
+        // directory" — call_rpc itself asserts resp.error.is_empty().
+        call_rpc::<Option<serde_json::Value>>(
+            &engine,
+            &mut rx,
+            COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-blankwd-write", "filename": "MEMORY.md", "content": "hello from a blank-workdir agent" }),
+        )
+        .await;
+
+        let listed: NativeMemoryListResult = call_rpc(
+            &engine,
+            &mut rx,
+            COMMAND_NATIVE_MEMORY_LIST,
+            serde_json::json!({ "agent_id": "agent-blankwd-write" }),
+        )
+        .await;
+        assert_eq!(listed.files.len(), 1, "the write must be visible to list, not silently stranded");
+        assert_eq!(listed.files[0].filename, "MEMORY.md");
+
+        let read: NativeMemoryReadFileResult = call_rpc(
+            &engine,
+            &mut rx,
+            COMMAND_NATIVE_MEMORY_READ_FILE,
+            serde_json::json!({ "agent_id": "agent-blankwd-write", "filename": "MEMORY.md" }),
+        )
+        .await;
+        assert_eq!(read.content, "hello from a blank-workdir agent");
+
+        // It must have actually landed on disk at the SAME derived-default
+        // directory `agent.open` substitutes for this agent ("Test Agent") —
+        // not merely round-tripped through some other consistent-with-itself
+        // location. The sibling test below plants a file directly at this
+        // path and proves `list` finds it independently of this write path.
+        let default_dir = crate::backend::storage::agents::default_agent_working_dir("Test Agent");
+        let expected_path = memory_dir_for_cwd(&config.path().display().to_string(), &default_dir).join("MEMORY.md");
+        assert!(expected_path.is_file(), "expected the write to land at {expected_path:?}");
+    }
+
+    /// list's OLD behavior for a blank working_directory was to silently
+    /// return an empty file list rather than error — indistinguishable in
+    /// the Armory grid from "this agent genuinely has no memories" (the
+    /// exact trap SPEC_ARMORY_PERSONAL_MEMORY_AGENT_BLOCKS_2026_09_01.md's
+    /// four-state card design exists to avoid). This proves list now finds
+    /// files that were written directly to the derived-default directory —
+    /// i.e. files that existed on disk all along, that list was previously
+    /// silently failing to find, not files this test manufactures via
+    /// write_file (which now shares the same fixed resolver and would trivially
+    /// "work" even if list's OWN resolution were still broken).
+    #[tokio::test]
+    async fn list_finds_files_already_on_disk_at_the_derived_default_dir_for_a_blank_workdir_agent() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config = tempfile::tempdir().unwrap();
+
+        let default_dir = crate::backend::storage::agents::default_agent_working_dir("Test Agent");
+        let memory_dir = memory_dir_for_cwd(&config.path().display().to_string(), &default_dir);
+        std::fs::create_dir_all(&memory_dir).unwrap();
+        std::fs::write(memory_dir.join("PRE_EXISTING.md"), "written directly to disk, not via this RPC").unwrap();
+
+        let (engine, mut rx) = build_channel_state("agent-blankwd-preexisting", "", config.path(), shared_id_store);
+        let listed: NativeMemoryListResult = call_rpc(
+            &engine,
+            &mut rx,
+            COMMAND_NATIVE_MEMORY_LIST,
+            serde_json::json!({ "agent_id": "agent-blankwd-preexisting" }),
+        )
+        .await;
+        assert_eq!(
+            listed.files.len(),
+            1,
+            "list must find a file that genuinely exists on disk at the derived-default dir, not report empty"
+        );
+        assert_eq!(listed.files[0].filename, "PRE_EXISTING.md");
+    }
+
+    #[tokio::test]
+    async fn revert_resolves_a_blank_working_directory_instead_of_erroring() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config = tempfile::tempdir().unwrap();
+        let (engine, mut rx) = build_channel_state("agent-blankwd-revert", "", config.path(), shared_id_store);
+
+        call_rpc::<Option<serde_json::Value>>(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-blankwd-revert", "filename": "MEMORY.md", "content": "v1" }),
+        ).await;
+        let history: NativeMemoryHistoryResult = call_rpc(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_HISTORY,
+            serde_json::json!({ "agent_id": "agent-blankwd-revert", "filename": "MEMORY.md" }),
+        ).await;
+        call_rpc::<Option<serde_json::Value>>(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-blankwd-revert", "filename": "MEMORY.md", "content": "v2" }),
+        ).await;
+
+        // Before the fix this errored with "has no configured working
+        // directory" — call_rpc itself asserts resp.error.is_empty().
+        call_rpc::<serde_json::Value>(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_REVERT,
+            serde_json::json!({
+                "agent_id": "agent-blankwd-revert",
+                "filename": "MEMORY.md",
+                "target_version_id": history.versions[0].id,
+            }),
+        ).await;
+
+        let read: NativeMemoryReadFileResult = call_rpc(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_READ_FILE,
+            serde_json::json!({ "agent_id": "agent-blankwd-revert", "filename": "MEMORY.md" }),
+        ).await;
+        assert_eq!(read.content, "v1", "revert must have restored v1's content on disk");
     }
 
     #[tokio::test]
