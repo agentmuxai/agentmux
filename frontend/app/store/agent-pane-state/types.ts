@@ -378,6 +378,22 @@ export interface AgentPaneState {
      * `docs/specs/SPEC_COMPACTION_DETECTION_AND_HANDLING_2026_07_31.md` §4.3.
      */
     lastCompactionBoundaryAt: number | null;
+    /**
+     * A `compaction_started` ping the reducer rejected because `turnPhase`
+     * wasn't (yet) working, but which arrived on a phase a LATER
+     * authoritative signal could still legitimately promote for THIS SAME
+     * turn — `ReconcileTurnActive(active: true)` or `StreamFlushObserved`'s
+     * own promotion arm, both of which retroactively apply it into
+     * `compacting` on promotion. Cleared whenever that promotion happens,
+     * whenever an authoritative signal proves the turn is genuinely NOT
+     * running (`ReconcileTurnActive(active: false)`, even when that's a
+     * same-ref no-op for `turnPhase` itself), by a fresh unrelated
+     * `TurnStart` (not the turn this ping was about), or by any of the
+     * other "whatever compaction was in flight is now moot" terminal
+     * transitions `compacting` itself already clears on. See
+     * `docs/specs/SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02.md`.
+     */
+    pendingCompactionPing: { trigger: "manual" | "auto"; startedAt: number } | null;
 }
 
 export const initialState = (agentId: string): AgentPaneState => ({
@@ -402,6 +418,7 @@ export const initialState = (agentId: string): AgentPaneState => ({
     reconnecting: null,
     registryAttachedTaskSince: null,
     lastCompactionBoundaryAt: null,
+    pendingCompactionPing: null,
 });
 
 /** Selector — `true` iff the pane has finished its initial history load. */
@@ -861,6 +878,12 @@ export type AgentPaneEvent =
       }
     /** `CompactionStarted` landed — compaction is in progress. */
     | { type: "compaction-started"; trigger: "manual" | "auto" }
+    /**
+     * `CompactionStarted` arrived before `turnPhase` was confirmed working
+     * — buffered onto `state.pendingCompactionPing` rather than dropped.
+     * See `SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02.md`.
+     */
+    | { type: "compaction-started-buffered"; trigger: "manual" | "auto" }
     | { type: "provider-waiting"; reason: "rate_limited" }
     /**
      * A failure was observed and recorded on `state.failure`. `turnWasEnded`

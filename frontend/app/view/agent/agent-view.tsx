@@ -1523,6 +1523,12 @@ const AgentPresentationView = ({
         // needs it to detect user-initiated stops and append the
         // "⏹ Interrupted by user" row when session_end lands.
         turnPhaseAtom: agentAtoms().turnPhaseAtom,
+        // See useAgentStream.ts's UseAgentStreamOpts doc comment: watched by
+        // useCompactionStream to push the "Compacting conversation…"
+        // transcript node whenever `compacting` transitions to set,
+        // regardless of which dispatch caused it (SPEC_COMPACTION_STARTED_
+        // RECONCILIATION_RACE_2026_09_02.md).
+        compactingAtom: agentAtoms().compactingAtom,
         pendingMessagesAtom,
         enabled: true,
         // Provider id (lowercase catalog key) attributes completed-turn

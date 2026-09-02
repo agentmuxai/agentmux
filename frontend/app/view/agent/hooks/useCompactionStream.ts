@@ -37,13 +37,44 @@
  * staleness check below is kept as defense-in-depth against a
  * malformed/delayed live delivery, not as the mechanism preventing
  * stale replays — that's `persist: 0`'s job.
+ *
+ * SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02.md: a ping can
+ * ALSO arrive too EARLY — before a freshly-mounted pane's `turnPhase` has
+ * been reconciled out of the mount-default `Idle` (`ReconcileTurnActive`
+ * is an async RPC round-trip). That case is buffered in the reducer
+ * itself (`state.pendingCompactionPing`) and retroactively promoted into
+ * `state.compacting` by `ReconcileTurnActive`/`StreamFlushObserved` — see
+ * those cases in `reducer.ts`. Two earlier fix attempts tried to handle
+ * this entirely inside THIS hook (a local retry keyed off observing
+ * `turnPhase`, then a time-bounded version) and were both structurally
+ * unsound (PR #2928 review, reagent P1 + codex P2, multiple rounds): a
+ * hook observing only the RESULTING value of a signal cannot reliably
+ * tell "this promotion is the same turn a buffered ping was about" from
+ * "this is a later, unrelated turn," the way the reducer can by reacting
+ * to the discrete command itself.
+ *
+ * That same lesson applies to pushing the "Compacting conversation…"
+ * transcript node: a promoted `pendingCompactionPing` is applied from
+ * `ReconcileTurnActive` (dispatched in `agent-view.tsx`) or
+ * `StreamFlushObserved` (dispatched in `stream-flush-queue.ts`) — neither
+ * call site has access to this hook's document-node queue or dedup
+ * cache, and inspecting their individual dispatch return values from here
+ * would mean duplicating this hook's own push logic at each of those
+ * sites (reagent P1, PR #2928, third round). Instead, this hook watches
+ * the reactive `compacting` signal itself (kept in sync with
+ * `state.compacting` by `registerAgentPane`'s generic projection,
+ * regardless of which dispatch changed it) and pushes the node whenever
+ * it transitions from `null` to set — one place, correct for every
+ * promotion path, present and future, without needing to know which
+ * dispatch caused it.
  */
 
-import { onCleanup } from "solid-js";
+import { createEffect, onCleanup } from "solid-js";
+import type { Accessor } from "solid-js";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
-import type { AgentPaneEvent } from "@/app/store/agent-pane-state/types";
+import type { CompactionState } from "@/app/store/agent-pane-state/types";
 import type { CompactionStartedNode } from "../types";
 import type { StreamFlushQueue } from "../stream-flush-queue";
 
@@ -54,6 +85,13 @@ export interface UseCompactionStreamOptions {
     /** In-batch dedup cache shared with the rest of useAgentStream's producers. */
     hasNodeId: (id: string) => boolean;
     addNodeId: (id: string) => void;
+    /**
+     * Reactive `state.compacting` for this pane — pushes the transcript
+     * node whenever it transitions from `null` to set. See the module doc
+     * comment for why this replaces inspecting individual dispatch return
+     * values. Threaded down from `useAgentStream.ts`'s own `compactingAtom`.
+     */
+    compacting: Accessor<CompactionState | null>;
 }
 
 /**
@@ -115,18 +153,13 @@ export function resolveCompactionStart(
 }
 
 /**
- * Whether the reducer actually accepted a dispatched `CompactionStarted`
- * command. The reducer's round-5 fix (`workingFromPhase` gate) makes it a
- * no-op — empty `events`, state unchanged — when this ping arrives after
- * the turn's own `TurnEnd` already fired on the separate NDJSON stream, a
- * real and expected race given `compaction_started`'s separate WPS
- * transport. Pure and exported for direct unit coverage (reagent P1, PR
- * #2378 round 6): without this check, a stray ping the reducer correctly
- * rejected would still get a permanent "Compacting conversation…"
- * transcript node pushed for a compaction that isn't actually happening.
+ * Build the transcript node id for a given compaction start time. Exported
+ * so other producers of a `compacting` transition (there are none today
+ * outside the reducer cases this hook's effect already covers) would key
+ * dedup identically if one were ever added.
  */
-export function wasCompactionStartedAccepted(paneEvents: AgentPaneEvent[]): boolean {
-    return paneEvents.some((ev) => ev.type === "compaction-started");
+export function compactionStartedNodeId(startedAt: number): string {
+    return `compaction-started-${startedAt}`;
 }
 
 export function useCompactionStream(opts: UseCompactionStreamOptions): void {
@@ -136,23 +169,36 @@ export function useCompactionStream(opts: UseCompactionStreamOptions): void {
         handler: (event: any) => {
             const resolved = resolveCompactionStart(event?.data, Date.now());
             if (!resolved) return;
-            const { trigger, startedAt } = resolved;
-
-            const paneEvents = opts.model.dispatchPane({ type: "CompactionStarted", trigger, at: startedAt });
-            if (!wasCompactionStartedAccepted(paneEvents)) return;
-
-            const node: CompactionStartedNode = {
-                type: "compaction_started",
-                id: `compaction-started-${startedAt}`,
-                trigger,
-                startedAt,
-            };
-            if (!opts.hasNodeId(node.id)) {
-                opts.addNodeId(node.id);
-                opts.queue.pushNewNode(node);
-                opts.queue.scheduleFlush();
-            }
+            // Dispatch only — the reducer decides accept / buffer / reject.
+            // The `compacting` effect below pushes the transcript node
+            // uniformly, whether this ping is accepted immediately or (if
+            // buffered) promoted later by a different dispatch entirely.
+            opts.model.dispatchPane({ type: "CompactionStarted", trigger: resolved.trigger, at: resolved.startedAt });
         },
+    });
+
+    // Pushes the "Compacting conversation…" transcript node exactly once
+    // per real compaction, the instant `state.compacting` is confirmed set
+    // — regardless of whether that happened via this hook's own live
+    // dispatch above, or a `pendingCompactionPing` promoted later by
+    // `ReconcileTurnActive` or `StreamFlushObserved` (dispatched from
+    // agent-view.tsx / stream-flush-queue.ts respectively — see the module
+    // doc comment for why observing the signal, not those call sites'
+    // return values, is what makes this correct for every promotion path).
+    createEffect(() => {
+        const compacting = opts.compacting();
+        if (!compacting) return;
+        const node: CompactionStartedNode = {
+            type: "compaction_started",
+            id: compactionStartedNodeId(compacting.startedAt),
+            trigger: compacting.trigger,
+            startedAt: compacting.startedAt,
+        };
+        if (!opts.hasNodeId(node.id)) {
+            opts.addNodeId(node.id);
+            opts.queue.pushNewNode(node);
+            opts.queue.scheduleFlush();
+        }
     });
 
     // Own the subscription at body scope so it is torn down even if the

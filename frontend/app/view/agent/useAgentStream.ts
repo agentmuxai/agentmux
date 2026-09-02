@@ -44,7 +44,7 @@ import { ClaudeCodeStreamParser } from "./stream-parser";
 import type { ContextCompactedNode, DocumentNode, SessionOutcomeNode } from "./types";
 import { parseCompactBoundaryFrame, contextCompactedNodeId, contextCompactedLiveTimestamp } from "./compact-boundary";
 import { parseSessionOutcomeFrame, sessionOutcomeNodeId, sessionOutcomeLiveTimestamp } from "./session-outcome";
-import type { AgentPaneEvent, TurnPhase } from "@/app/store/agent-pane-state/types";
+import type { AgentPaneEvent, CompactionState, TurnPhase } from "@/app/store/agent-pane-state/types";
 import { getNodeIdSet } from "@/app/store/agent-document-store";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
 import { createStreamFlushQueue, type StreamFlushQueue } from "./stream-flush-queue";
@@ -166,6 +166,21 @@ interface UseAgentStreamOpts {
      */
     turnPhaseAtom: SignalPair<TurnPhase>;
     /**
+     * The reducer's live "compaction in progress" signal — read by
+     * `useCompactionStream` to push the "Compacting conversation…"
+     * transcript node whenever `state.compacting` transitions from `null`
+     * to set, REGARDLESS of which dispatch caused it (a live-accepted
+     * `CompactionStarted`, or a buffered `pendingCompactionPing` promoted
+     * later by `ReconcileTurnActive`/`StreamFlushObserved` — see
+     * SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02.md). Reacting
+     * to this signal, rather than inspecting each dispatch call site's own
+     * returned events, is what lets the promotion paths (dispatched from
+     * `agent-view.tsx` and `stream-flush-queue.ts`, neither of which has
+     * access to this hook's document-node infrastructure) still get their
+     * transcript node pushed from one unified place.
+     */
+    compactingAtom: SignalPair<CompactionState | null>;
+    /**
      * Pending queue shared with the composer's `sendMessage` path. On
      * `agent-message-accepted` events, the hook removes the matching
      * entry and promotes it to a `user_message` document node — this is
@@ -208,6 +223,7 @@ export function useAgentStream({
     outputFormat,
     documentAtom,
     turnPhaseAtom,
+    compactingAtom,
     pendingMessagesAtom,
     enabled,
     provider,
@@ -241,7 +257,7 @@ export function useAgentStream({
     // rather than scheduling their own flush.
     useToolChunkStream({ blockId, queue });
     useShellNodeStream({ blockId, queue });
-    useCompactionStream({ blockId, model, queue, hasNodeId, addNodeId });
+    useCompactionStream({ blockId, model, queue, hasNodeId, addNodeId, compacting: compactingAtom[0] });
     // dock:clear doesn't push into `queue` — it's a rare, out-of-band
     // mutation of one existing node, not a streaming producer. Uses
     // model.dispatchDoc (disposal-safe), not the raw dispatch, since this
