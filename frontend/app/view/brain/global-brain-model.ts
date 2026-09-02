@@ -27,6 +27,7 @@
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { waveEventSubscribe } from "@/app/store/wps";
 import { PROVIDERS } from "@/app/view/agent/providers";
 
 /** Sentinel editingId for the unsaved "new section" draft. */
@@ -84,6 +85,12 @@ export function groupProvidersByStartupFilename(): { filename: string; providerN
 }
 
 export class GlobalBrainViewModel {
+    // Cross-window reactivity (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md) —
+    // a bundle create/edit/delete/reorder made elsewhere refreshes this view
+    // without a manual reopen, same pattern BundleMcpModel/BundleSkillModel
+    // already use for mcp:changed/skills:changed.
+    private unsubChanged: () => void;
+
     private _all = createSignal<Memory[]>([]);
     /** Every bundle (global + per-agent), used to derive sections + candidates. */
     allAtom: Accessor<Memory[]> = this._all[0];
@@ -209,6 +216,10 @@ export class GlobalBrainViewModel {
         );
         void this.refresh();
         void this.fetchClaudeGlobalConfig();
+        this.unsubChanged = waveEventSubscribe({
+            eventType: "memories:changed",
+            handler: () => void this.refresh(),
+        });
     }
 
     /** Fetches the shared Claude provider config's CLAUDE.md once. Failure
@@ -370,7 +381,7 @@ export class GlobalBrainViewModel {
     }
 
     dispose(): void {
-        // Solid signals are GC'd with the instance; nothing to unsubscribe.
+        this.unsubChanged();
     }
 
     // ---- System-tier — see

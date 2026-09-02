@@ -15,6 +15,7 @@
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { waveEventSubscribe } from "@/app/store/wps";
 
 export interface SkillDraft {
     id?: string;
@@ -41,6 +42,10 @@ function draftFromSkill(s: Skill): SkillDraft {
 }
 
 export class SkillCatalogModel {
+    // Cross-window reactivity (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md) —
+    // same rationale as McpCatalogModel's own unsubChanged.
+    private unsubChanged: () => void;
+
     private _skills = createSignal<SkillCatalogItem[]>([]);
     skillsAtom: Accessor<SkillCatalogItem[]> = this._skills[0];
     private setSkills = this._skills[1];
@@ -81,6 +86,10 @@ export class SkillCatalogModel {
         });
         void this.refresh();
         void this.loadAgents();
+        this.unsubChanged = waveEventSubscribe({
+            eventType: "skills:changed",
+            handler: () => void this.refresh(),
+        });
     }
 
     async refresh(): Promise<void> {
@@ -182,6 +191,6 @@ export class SkillCatalogModel {
     }
 
     dispose(): void {
-        // Solid signals are GC'd with the instance; nothing to unsubscribe.
+        this.unsubChanged();
     }
 }

@@ -127,10 +127,36 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 
+// SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md — same hub pattern
+// bundle-mcp-model.test.ts / global-brain-model.test.ts use.
+const wpsHub = vi.hoisted(() => ({ handlers: new Map<string, (e: unknown) => void>() }));
+vi.mock("@/app/store/wps", () => ({
+    waveEventSubscribe: vi.fn((sub: { eventType: string; handler: (e: unknown) => void }) => {
+        wpsHub.handlers.set(sub.eventType, sub.handler);
+        return () => wpsHub.handlers.delete(sub.eventType);
+    }),
+}));
+
 describe("validateDraft", () => {
     beforeEach(() => {
         listMemoriesMock.mockClear();
         validateBundleMock.mockClear();
+        wpsHub.handlers.clear();
+    });
+
+    // SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md
+    test("subscribes to memories:changed and refreshes on it; unsubscribes on dispose", async () => {
+        const { MemoryViewModel } = await import("./memory-model");
+        const model = new MemoryViewModel();
+        await Promise.resolve();
+        listMemoriesMock.mockClear();
+
+        wpsHub.handlers.get("memories:changed")?.({});
+        await Promise.resolve();
+        expect(listMemoriesMock).toHaveBeenCalledTimes(1);
+
+        model.dispose();
+        expect(wpsHub.handlers.has("memories:changed")).toBe(false);
     });
 
     test("populates validationAtom from the RPC response", async () => {

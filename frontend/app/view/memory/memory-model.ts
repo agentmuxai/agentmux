@@ -27,6 +27,7 @@ import { BlockNodeModel } from "@/app/block/blocktypes";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getWaveObjectAtom, makeORef } from "@/app/store/wos";
+import { waveEventSubscribe } from "@/app/store/wps";
 import { createMemo, createSignal, type Accessor } from "solid-js";
 
 /** What the form fields look like in flight. Maps 1:1 to the Memory
@@ -166,6 +167,13 @@ export class MemoryViewModel implements ViewModel {
     blockId: string;
     nodeModel: BlockNodeModel | null;
 
+    // Cross-window reactivity (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md) —
+    // a bundle create/edit/delete made elsewhere refreshes this list without
+    // a manual reopen. Same `memories:changed` event GlobalBrainViewModel
+    // now also subscribes to; see that model's own comment on why one
+    // umbrella event firing a refresh in both tabs is fine, not a bug.
+    private unsubChanged: () => void;
+
     // "layer-group" (not "brain") — matches the ABF tab icon in the Armory
     // rail (armory-view.tsx) so the standalone bundle pane and the Armory nav
     // stay visually consistent; the brain icon is reserved for native memory.
@@ -250,6 +258,10 @@ export class MemoryViewModel implements ViewModel {
 
         // Kick off initial load. Errors land in errorAtom for UI surfacing.
         void this.refresh();
+        this.unsubChanged = waveEventSubscribe({
+            eventType: "memories:changed",
+            handler: () => void this.refresh(),
+        });
     }
 
     /** Re-fetch the full list. Called on mount and after each mutation.
@@ -396,8 +408,6 @@ export class MemoryViewModel implements ViewModel {
 
     /** ViewModel teardown — Solid signals are GC'd with the instance. */
     dispose(): void {
-        // No-op for now. If we add a wave-event subscription later (to
-        // refresh on `memories:changed` from other clients), unsubscribe
-        // here.
+        this.unsubChanged();
     }
 }

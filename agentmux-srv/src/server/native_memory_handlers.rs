@@ -1073,11 +1073,13 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
 
     let wstore_write = state.wstore.clone();
     let id_store_write = state.id_store.clone();
+    let broker_write = state.broker.clone();
     engine.register_handler(
         COMMAND_NATIVE_MEMORY_WRITE_FILE,
         Box::new(move |data, _ctx| {
             let wstore = wstore_write.clone();
             let id_store = id_store_write.clone();
+            let broker = broker_write.clone();
             Box::pin(async move {
                 let cmd: CommandNativeMemoryWriteFileData = serde_json::from_value(data)
                     .map_err(|e| format!("agent:memory:write_file: {e}"))?;
@@ -1177,6 +1179,22 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 ) {
                     tracing::warn!(agent_id = %agent.id, filename = %cmd.filename, error = %e, "agent:memory:write_file: mirror upsert failed (non-fatal)");
                 }
+
+                // Reactive Armory updates (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md):
+                // same event, same `agent:memory:changed:{canonical_uuid}`
+                // naming convention `app_api::mod`'s write/revert already use
+                // for the MemoryWrite MCP tool's own path — keying by
+                // `agent.id` (the canonical UUID this whole file's other
+                // handlers already key by, per `resolve_agent_uuid`'s own
+                // doc comment on why a slug-keyed event here would silently
+                // miss frontend subscribers that only ever have the UUID).
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: format!("agent:memory:changed:{}", agent.id),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
 
                 tracing::info!(
                     agent_id = %cmd.agent_id,
@@ -1284,11 +1302,13 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
 
     let wstore_revert = state.wstore.clone();
     let id_store_revert = state.id_store.clone();
+    let broker_revert = state.broker.clone();
     engine.register_handler(
         COMMAND_NATIVE_MEMORY_REVERT,
         Box::new(move |data, _ctx| {
             let wstore = wstore_revert.clone();
             let id_store = id_store_revert.clone();
+            let broker = broker_revert.clone();
             Box::pin(async move {
                 let cmd: CommandNativeMemoryRevertData = serde_json::from_value(data)
                     .map_err(|e| format!("agent:memory:revert: {e}"))?;
@@ -1372,6 +1392,15 @@ pub fn register_native_memory_handlers(engine: &Arc<WshRpcEngine>, state: &AppSt
                 ) {
                     tracing::warn!(agent_id = %agent.id, filename = %cmd.filename, error = %e, "agent:memory:revert: mirror upsert failed (non-fatal)");
                 }
+
+                // See the identical comment on write_file's own handler above.
+                broker.publish(crate::backend::wps::WaveEvent {
+                    event: format!("agent:memory:changed:{}", agent.id),
+                    scopes: vec![],
+                    sender: String::new(),
+                    persist: 0,
+                    data: None,
+                });
 
                 tracing::info!(
                     agent_id = %cmd.agent_id,
@@ -1538,6 +1567,27 @@ mod tests {
         claude_config_dir: &std::path::Path,
         id_store: Arc<Store>,
     ) -> (Arc<WshRpcEngine>, tokio::sync::mpsc::UnboundedReceiver<RpcMessage>) {
+        build_channel_state_with_broker(
+            agent_id,
+            working_directory,
+            claude_config_dir,
+            id_store,
+            Arc::new(crate::backend::wps::Broker::new()),
+        )
+    }
+
+    /// Same as [`build_channel_state`], but lets the caller supply (and so
+    /// later inspect, via `RecordingWpsClient`) the `Broker` the registered
+    /// handlers publish `agent:memory:changed:*` events through — the
+    /// existing function's default broker has no observable client wired in,
+    /// so tests asserting on those publishes need this variant instead.
+    fn build_channel_state_with_broker(
+        agent_id: &str,
+        working_directory: &str,
+        claude_config_dir: &std::path::Path,
+        id_store: Arc<Store>,
+        broker: Arc<crate::backend::wps::Broker>,
+    ) -> (Arc<WshRpcEngine>, tokio::sync::mpsc::UnboundedReceiver<RpcMessage>) {
         let wstore = Arc::new(Store::open_in_memory().unwrap());
         let mut def = agent_def(agent_id, working_directory);
         wstore.agent_def_insert(&mut def).unwrap();
@@ -1553,6 +1603,7 @@ mod tests {
         let mut state = crate::server::tests::test_state();
         state.wstore = wstore.clone();
         state.id_store = id_store;
+        state.broker = broker;
 
         let (engine, rx) = WshRpcEngine::new();
         register_native_memory_handlers(&engine, &state);
@@ -1920,6 +1971,36 @@ mod tests {
         assert_eq!(history.versions[0].parent_version_id, None);
     }
 
+    // SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md: the Armory Personal Memory
+    // grid can only refresh a card the instant its agent's memory changes if
+    // this handler actually publishes when it succeeds.
+    #[tokio::test]
+    async fn write_file_publishes_agent_memory_changed_scoped_to_the_agent() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config = tempfile::tempdir().unwrap();
+        let (broker, client) = crate::test_support::broker_recording("agent:memory:changed:agent-ver-pub");
+        let (engine, mut rx) = build_channel_state_with_broker(
+            "agent-ver-pub",
+            "/work/channel-a",
+            config.path(),
+            shared_id_store,
+            Arc::new(broker),
+        );
+
+        call_rpc::<Option<serde_json::Value>>(
+            &engine,
+            &mut rx,
+            COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-ver-pub", "filename": "MEMORY.md", "content": "v1" }),
+        )
+        .await;
+
+        let events = client.received_events();
+        assert_eq!(events.len(), 1, "write_file must publish exactly one agent:memory:changed event");
+        assert_eq!(events[0].1.event, "agent:memory:changed:agent-ver-pub");
+    }
+
     #[tokio::test]
     async fn write_file_honors_caller_supplied_provenance() {
         let tmp = tempfile::NamedTempFile::new().unwrap();
@@ -2273,6 +2354,51 @@ mod tests {
             serde_json::json!({ "agent_id": "agent-ver-6", "filename": "MEMORY.md" }),
         ).await;
         assert_eq!(history_after.versions.len(), 3, "revert must never delete or rewrite prior versions");
+    }
+
+    // SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md — same rationale as
+    // write_file's own publish test above.
+    #[tokio::test]
+    async fn revert_publishes_agent_memory_changed_scoped_to_the_agent() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let shared_id_store = Arc::new(Store::open_shared(tmp.path()).unwrap());
+        let config = tempfile::tempdir().unwrap();
+        // Write with the default (unobserved) broker first — only the revert
+        // publish itself is under test here.
+        let (engine, mut rx) = build_channel_state("agent-ver-revpub", "/work/channel-a", config.path(), shared_id_store.clone());
+        call_rpc::<Option<serde_json::Value>>(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-ver-revpub", "filename": "MEMORY.md", "content": "v1" }),
+        ).await;
+        let history: NativeMemoryHistoryResult = call_rpc(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_HISTORY,
+            serde_json::json!({ "agent_id": "agent-ver-revpub", "filename": "MEMORY.md" }),
+        ).await;
+        let v1_id = history.versions[0].id.clone();
+        call_rpc::<Option<serde_json::Value>>(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_WRITE_FILE,
+            serde_json::json!({ "agent_id": "agent-ver-revpub", "filename": "MEMORY.md", "content": "v2" }),
+        ).await;
+
+        // Now rebuild the channel on an OBSERVED broker for the revert call
+        // itself, against the same shared id_store so the version/history
+        // above is still visible.
+        let (broker, client) = crate::test_support::broker_recording("agent:memory:changed:agent-ver-revpub");
+        let (engine, mut rx) = build_channel_state_with_broker(
+            "agent-ver-revpub",
+            "/work/channel-a",
+            config.path(),
+            shared_id_store,
+            Arc::new(broker),
+        );
+        call_rpc::<NativeMemoryRevertResult>(
+            &engine, &mut rx, COMMAND_NATIVE_MEMORY_REVERT,
+            serde_json::json!({ "agent_id": "agent-ver-revpub", "filename": "MEMORY.md", "target_version_id": v1_id }),
+        ).await;
+
+        let events = client.received_events();
+        assert_eq!(events.len(), 1, "revert must publish exactly one agent:memory:changed event");
+        assert_eq!(events[0].1.event, "agent:memory:changed:agent-ver-revpub");
     }
 
     #[tokio::test]
