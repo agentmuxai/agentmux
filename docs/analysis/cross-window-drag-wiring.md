@@ -1,7 +1,9 @@
 # Cross-Window Drag: Wiring Analysis
 
 **Date:** 2026-03-30
-**Status:** Backend complete, frontend needs 4 targeted fixes
+**Status:** historical — records the wiring analysis as of 2026-03-30 (backend
+complete, frontend needing 4 targeted fixes at that time). Not re-verified against
+current code; treat the body as a snapshot, not a claim about today.
 
 ---
 

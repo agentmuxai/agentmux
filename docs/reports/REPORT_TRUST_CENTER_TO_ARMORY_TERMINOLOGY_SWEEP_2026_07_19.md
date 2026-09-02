@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-19
 **Author:** Agent2
-**Status:** Scan complete; scoped cleanup (this report's §3) implemented alongside this report. Broader findings (§4) explicitly out of scope for this pass.
+**Status:** historical — scan complete; scoped cleanup (this report's §3) implemented alongside this report. Broader findings (§4) explicitly out of scope for this pass.
 **Trigger:** User: *"There is no trust center anymore, we have an armory pane .. lets first do a scan to clear out the old info."*
 **Related:** `docs/specs/archive/SPEC_RENAME_TRUST_CENTER_TO_ARMORY_2026_07_02.md` (the original rename spec, shipped PR #1917); `docs/reports/REPORT_REPO_HEALTH_AUDIT_2026_07_05.md` §6 (already found most of this, unaddressed since); `agentmux-docs/specs/AUDIT_DOCS_VS_CODE_2026_07_07.md` P0#1 (same finding, docs-repo side, unaddressed since).
 

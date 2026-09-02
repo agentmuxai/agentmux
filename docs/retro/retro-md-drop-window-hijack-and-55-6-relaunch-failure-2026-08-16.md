@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-16
 **Trigger:** User dragged a `.md` file onto a running AgentMux 0.55.6 window "just to see what it would do." All panes and the window's own chrome (including the close/minimize/maximize controls) were replaced by a single full-window plain-text view of the file's contents. The window would not close from within the app; the user killed it from the taskbar. Reopening 0.55.6 showed the splash screen for ~30s, then it disappeared with no window and no error.
-**Status:** Root-caused from source + live logs. Two independent bugs, not one.
+**Status:** historical — root-caused from source + live logs. Two independent bugs, not one. A retro: it records what happened, it is not a plan for anyone.
 
 ---
 

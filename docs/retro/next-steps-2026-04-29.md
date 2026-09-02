@@ -1,6 +1,7 @@
 # Next steps — toward the full launcher reducer
 
-**Status:** Planning doc. Captures what's done, what's left, and the order I'd ship it in.
+**Status:** historical — planning doc from 2026-04-29 (post-#600 / B.9). Captures
+what was done, what was left, and the intended order at that time.
 **Author:** AgentA.
 **Date:** 2026-04-29 (post-#600 / B.9 merge).
 

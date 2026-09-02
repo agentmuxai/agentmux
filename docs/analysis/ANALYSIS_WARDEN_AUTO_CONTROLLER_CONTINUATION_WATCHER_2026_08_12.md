@@ -1,6 +1,6 @@
 # Warden Auto-Controller: a continuation-nudging watcher for AgentMux agents
 
-**Status:** Research + design proposal, not yet built or committed to. Written
+**Status:** proposed — research + design proposal, not yet built or committed to. Written
 per request to (1) research external best practices, (2) propose terminology,
 (3) audit the current AgentMux architecture, (4) propose a design. Nothing in
 this document has been implemented.
