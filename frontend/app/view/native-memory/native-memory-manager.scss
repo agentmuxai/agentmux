@@ -315,3 +315,24 @@
         border-color: var(--accent-color);
     }
 }
+
+// ── Filter bar — narrow panes (Codex P2, PR #2929) ─────────────────────────
+// Panes go down to 128px in either dimension (MinNodeSizePx,
+// frontend/layout/lib/layoutResize.ts) — well below the app's existing
+// `armory` container breakpoints (767px/479px, armory-view.scss), and below
+// the combined intrinsic width of the input + non-shrinking toggle + sort
+// group. Wrapping onto a second row (rather than trying to compress three
+// controls onto one line) keeps every control fully usable at any supported
+// pane width, instead of the input getting crushed toward zero.
+@container armory (max-width: 359px) {
+    .memory-agent-filter-bar {
+        flex-wrap: wrap;
+    }
+
+    // Icon + input take the full first row; toggle and sort wrap to a
+    // second row together, still able to shrink/wrap further between
+    // themselves if the pane is narrower still.
+    .memory-agent-filter-input {
+        flex-basis: 100%;
+    }
+}
