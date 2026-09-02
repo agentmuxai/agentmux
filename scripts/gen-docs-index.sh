@@ -29,6 +29,13 @@
 
 set -uo pipefail
 
+# Byte-identical output on every machine, or --check is a coin flip: it compares
+# a committed file against a fresh run, so ANY environment-dependent ordering
+# makes CI disagree with the developer who just regenerated. Pathname expansion
+# and sort(1) both use LC_COLLATE, which differs between a bare Windows shell
+# (effectively C) and a CI runner (C.UTF-8/en_US.UTF-8).
+export LC_ALL=C
+
 INDEX="docs/specs/INDEX.md"
 BEGIN="<!-- BEGIN GENERATED INDEX — edit scripts/gen-docs-index.sh, not this section -->"
 END="<!-- END GENERATED INDEX -->"
@@ -219,6 +226,12 @@ if [ "$check_only" -eq 1 ]; then
     echo "gen-docs-index: INDEX.md is STALE."
     echo "  A spec was added, removed, or had its Status changed without"
     echo "  regenerating the index. Run: bash scripts/gen-docs-index.sh"
+    echo ""
+    # Show WHAT differs, not just that something does. A gate that only says
+    # "stale" makes the reader re-derive the diff by hand — and when it fails
+    # on CI but not locally, that guesswork is the whole cost of the failure.
+    echo "  Difference (committed < vs regenerated >), first 40 lines:"
+    diff "$INDEX" "$tmp" 2>&1 | head -40 | sed 's/^/    /'
     rm -f "$tmp"
     exit 1
 fi
