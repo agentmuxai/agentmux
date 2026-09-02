@@ -23,7 +23,7 @@
 ::
 :: If TITLE= isn't passed, it defaults to $AGENTMUX_AGENT_ID (the calling
 :: agent's own identity, injected at spawn) so the OS taskbar shows whose
-:: dev window is whose — see specs/SPEC_DEV_WINDOW_TITLE_ARG_2026_06_25.md.
+:: dev window is whose — see docs/specs/SPEC_DEV_WINDOW_TITLE_ARG_2026_06_25.md.
 ::
 :: On macOS / Linux `task dev` works directly — this script is Windows-only.
 

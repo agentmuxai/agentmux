@@ -4,7 +4,7 @@
 /**
  * Slash-command architecture — type definitions.
  *
- * Step 1 of specs/SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md.
+ * Step 1 of docs/specs/SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md.
  *
  * Commands are data. This file defines the shape. The dispatcher, picker,
  * autocomplete, and help panel all consume the same registry, so adding a

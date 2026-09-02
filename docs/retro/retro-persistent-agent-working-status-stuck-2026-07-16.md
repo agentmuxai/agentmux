@@ -126,7 +126,7 @@ disagreeing, which is itself the wiring seam to fix.
   the `publisher_handle` wait to 5s. Agent1's dev stack was a *backgrounded*
   task that returned its handle fine — the wrapper didn't hang, the process
   legitimately kept running.
-- **Not the liveness-recovery watchdog** (`specs/SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md`,
+- **Not the liveness-recovery watchdog** (`docs/specs/SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md`,
   shipped #1842). That watchdog force-recovers a *hung* `Streaming` turn to
   `Idle` after 180s. Here the turn wasn't hung — and if the watchdog *had*
   fired, it would have been **wrong**, flipping a legitimately-busy agent to
@@ -171,7 +171,7 @@ turn-phase label and reads as stuck.
 | `frontend/app/view/agent/useAgentStream.ts` | Background-task subscription + watchdog dispatch; watchdog must exempt panes with live background tasks |
 | `agentmux-srv/src/backend/blockcontroller/session_stats.rs` | `record_line()` → `session:last_activity_ms` — accurate CLI-idle ground truth; froze correctly here (the CLI *was* idle) |
 | `docs/retro/RETRO_BASHWRAP_PAGER_HANG_LEAK_2026_07_14.md` | Adjacent, genuinely-different bug (wrapper hang), already fixed by #2156 — ruled out here |
-| `specs/SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md` | Liveness watchdog — its "quiet = hung" premise breaks for long-running attached processes |
+| `docs/specs/SPEC_WORKING_STATE_LIVENESS_MODEL_2026_06_29.md` | Liveness watchdog — its "quiet = hung" premise breaks for long-running attached processes |
 
 ## Lessons
 

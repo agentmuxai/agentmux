@@ -1391,7 +1391,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                 // 3. Live-toggle LAN discovery if the key changed. `apply` is
                 //    idempotent so it's safe to call unconditionally — when the
                 //    daemon is already in the requested state, this is a no-op.
-                //    See specs/lan-discovery-toggle.md.
+                //    See docs/specs/lan-discovery-toggle.md.
                 lan.apply(lan_enabled);
 
                 // 4. Broadcast updated config now — no waiting for fs watcher

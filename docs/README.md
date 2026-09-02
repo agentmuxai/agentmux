@@ -23,7 +23,7 @@ Project documentation organized by type.
 | `specs/` | Specs, design explorations, and implementation plans, from draft through implemented |
 | `status/` | Point-in-time subsystem status snapshots |
 
-Spec `**Status:**` lines use a closed vocabulary (`draft | proposed | active | implemented | living | historical | superseded`) — the rule, and the reader guardrail that goes with it, live in [`docs/specs/README.md`](specs/README.md#status-field).
+Spec `**Status:**` lines use a closed vocabulary (`draft | proposed | active | implemented | living | historical | superseded`) — the rule, and the reader guardrail that goes with it, live in [`docs/specs/README.md`](docs/specs/README.md#status-field).
 
 In practice nearly all specs — draft and implemented alike — live under `docs/specs/`, not the
 top-level `specs/` directory; treat the latter as legacy/lower-traffic rather than "the approved
@@ -31,7 +31,7 @@ tier." There is no `docs-internal/` directory in this repo.
 
 **Note (2026-08-03):** this directory list and the specs-location claim above were themselves
 found stale during a docs-lifecycle audit — see
-[`docs/specs/SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md`](specs/SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md)
+[`docs/specs/SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md`](docs/specs/SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md)
 for the fuller audit and a plan to stop this file (and others like it) silently drifting out of
 date again. If you're reading this after that plan's Phase 1-3 shipped, some of the manual
 bookkeeping described here should have been superseded by an auto-generated index — check before

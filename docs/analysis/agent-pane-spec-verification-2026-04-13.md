@@ -7,9 +7,9 @@
 
 Scope: three specs that govern the current agent pane surface:
 
-1. `specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md` — 12-step decomposition of `agent-view.tsx`
-2. `specs/SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md` — 4-PR merge of Forge + Identity into the agent pane
-3. `specs/SPEC_AGENT_PANE_FOLLOWUPS_2026_04_13.md` — 9 follow-up items raised after the consolidation landed
+1. `docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md` — 12-step decomposition of `agent-view.tsx`
+2. `docs/specs/SPEC_CONSOLIDATE_FORGE_IDENTITY_INTO_AGENT_2026_04_13.md` — 4-PR merge of Forge + Identity into the agent pane
+3. `docs/specs/SPEC_AGENT_PANE_FOLLOWUPS_2026_04_13.md` — 9 follow-up items raised after the consolidation landed
 
 For each spec I walked its stated deliverables and checked the current code. Findings below are grouped by spec; each item is marked **✓ delivered**, **⚠ partial** (shipped but with a caveat), **⧗ pending** (work in progress), or **✗ missing**.
 

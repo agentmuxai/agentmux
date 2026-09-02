@@ -3,7 +3,7 @@
 //
 // Install hints per LSP-supported language. Backs the "Install <server>"
 // banner shown when the server binary isn't on PATH.
-// Spec: specs/SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md § Install hints per language
+// Spec: docs/specs/SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md § Install hints per language
 
 export interface InstallHint {
     /** Human label for the server, e.g. "TypeScript language server" */

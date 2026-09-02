@@ -6,8 +6,8 @@
 **Author:** AgentA.
 **Date:** 2026-04-28, after PRs #579-#592.
 **Companions:**
-* `specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md` — the driving spec
-* `specs/ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md` — pre-migration inventory
+* `docs/specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md` — the driving spec
+* `docs/specs/ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md` — pre-migration inventory
 * `docs/retro/migration-pattern.md` — the a→b→c→d→e ratchet
 * `docs/retro/phase-b-roadmap.md` — sub-PR sequencing
 

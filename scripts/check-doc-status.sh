@@ -50,33 +50,56 @@ else
         exit 0
     fi
     mapfile -t files < <(
-        # Whole directories, not '**/*.md' globs: those require at least one
-        # directory level, so `specs/SPEC_X.md` at the root was never selected —
-        # silently skipping the very tree this gate was extended to cover. The
-        # .md filter happens in the loop instead.
-        git diff --name-only --diff-filter=d "$ref"...HEAD -- docs specs 2>/dev/null | grep -E '[.]md$' || true
+        # A whole directory, not a '**/*.md' glob: that form requires at least
+        # one directory level, so a root-level file in the pathspec was never
+        # selected — silently skipping part of what the gate was meant to cover.
+        # The .md filter happens in the loop instead.
+        #
+        # `specs` was a second pathspec until the two spec trees were merged
+        # into docs/specs/ (batch C); there is no top-level specs/ anymore.
+        git diff --name-only --diff-filter=d "$ref"...HEAD -- docs 2>/dev/null | grep -E '[.]md$' || true
     )
 fi
 
 # Which changed files are NEW, for the stricter new-doc rule below.
 added_files=""
 if [ "$explicit" -eq 0 ]; then
-    added_files=$(git diff --name-only --diff-filter=A "$ref"...HEAD -- docs specs 2>/dev/null | grep -E '[.]md$' || true)
+    added_files=$(git diff --name-only --diff-filter=A "$ref"...HEAD -- docs 2>/dev/null | grep -E '[.]md$' || true)
+fi
+
+# ── One spec tree, not two ──────────────────────────────────────────────────
+#
+# The top-level specs/ tree was merged into docs/specs/ (batch C). It is worth
+# a hard check rather than a convention, because the split did not persist by
+# anyone's decision — it persisted because nothing ever objected to it, through
+# two audits that recommended merging.
+#
+# What made it actively harmful: directory-as-lifecycle and the Status: field
+# answered the same question differently, and promoting a file between trees
+# silently broke every code comment citing it (32 of 165 citations were already
+# dangling when the trees were merged).
+if [ -d specs ]; then
+    echo "FAIL specs/"
+    echo "     A top-level specs/ tree exists. Every spec belongs in docs/specs/;"
+    echo "     a doc's lifecycle is its **Status:** line, not its directory."
+    echo "     See docs/specs/README.md."
+    fail=1
 fi
 
 [ "${#files[@]}" -eq 0 ] && { echo "check-doc-status: no docs changed."; exit 0; }
+
 
 # ── Check each ──────────────────────────────────────────────────────────────
 checked=0
 for f in "${files[@]}"; do
     [ -f "$f" ] || continue
-    # The docs/|specs/ filter applies only to the git-diff path — an explicit
-    # file list means the caller already chose, and silently skipping their
-    # files (as an earlier version did for absolute paths) is worse than
-    # checking something out of tree.
+    # The docs/ filter applies only to the git-diff path — an explicit file
+    # list means the caller already chose, and silently skipping their files
+    # (as an earlier version did for absolute paths) is worse than checking
+    # something out of tree.
     if [ "$explicit" -eq 0 ]; then
         case "$f" in
-            docs/*|specs/*) ;;
+            docs/*) ;;
             *) continue ;;
         esac
     fi

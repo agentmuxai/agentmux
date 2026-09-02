@@ -3,7 +3,7 @@
 //
 // Editor view — file-tree column on the left + CodeMirror on the right.
 // Tree visibility toggled by the header chevron (model.treeExpandedAtom).
-// Spec: specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
+// Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
 
 import { createEffect, createSignal, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
 import { ContextMenu, type ContextMenuItem } from "@/app/components/context-menu";

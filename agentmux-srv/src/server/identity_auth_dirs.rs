@@ -99,7 +99,7 @@ pub(crate) fn link_history_if_isolated(
 /// must continue without per-bundle isolation (legacy ambient path,
 /// or skip the binding-persist step) — never abort the OAuth start.
 ///
-/// Per `specs/archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md` §4.5: the dir
+/// Per `docs/specs/archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md` §4.5: the dir
 /// (and the env-var key) come from the CLI provider registry
 /// (`backend::providers::get_provider(id)`) so the resolver / spawn
 /// path / OAuth-start handler never drift on which env var redirects

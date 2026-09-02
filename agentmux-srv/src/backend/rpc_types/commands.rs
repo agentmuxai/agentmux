@@ -138,7 +138,7 @@ pub const COMMAND_APP_INFO: &str = "waveinfo";
 // Connection commands
 // COMMAND_CONN_REINSTALL_WSH / COMMAND_CONN_UPDATE_WSH / COMMAND_DISMISS_WSH_FAIL
 // have been removed — wsh has been retired. See
-// specs/SPEC_RETIRE_WSH_2026_04_12.md.
+// docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md.
 
 // Workspace commands
 
@@ -194,10 +194,10 @@ pub const COMMAND_DELETE_IDENTITY_ACCOUNT: &str = "deleteidentityaccount";
 /// key. The plaintext goes to the OS keychain; the DB keeps only a
 /// `SecretRef::Keychain` pointer + masked tail + metadata. Used for both new
 /// accounts and replacing a key on an existing one (via `accountId`).
-/// See specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
+/// See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
 pub const COMMAND_ACCOUNT_KEY_VERIFY: &str = "account.key.verify";
 /// Armory service OAuth (scaffold — activates once client ids are
-/// provisioned or supplied as BYO). See specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §4.2.
+/// provisioned or supplied as BYO). See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §4.2.
 pub const COMMAND_ACCOUNT_OAUTH_START: &str = "account.oauth.start";
 pub const COMMAND_ACCOUNT_OAUTH_POLL: &str = "account.oauth.poll";
 pub const COMMAND_ACCOUNT_OAUTH_CANCEL: &str = "account.oauth.cancel";

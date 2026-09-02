@@ -617,7 +617,7 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
 AgentViewWrapper.displayName = "AgentViewWrapper";
 
 // Launch flow lives in `flows/launch-flow.ts` — Step 2 of
-// specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
+// docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
 
 const AgentPresentationView = ({
     model,

@@ -34,7 +34,7 @@ After this session's PRs (#594 + #595 + #596 + #597 + #598 + #599 + #600) the la
 
 ## What "full" means
 
-The golden vision (per `specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md` and `docs/retro/multi-reducer-proposal-2026-04-28.md`) is:
+The golden vision (per `docs/specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md` and `docs/retro/multi-reducer-proposal-2026-04-28.md`) is:
 
 ```
                         ┌────────────────────────┐
@@ -245,5 +245,5 @@ After E proves the multi-reducer pattern, retrofit the host. `state.browsers` be
 - B.5 architecture analysis: `docs/retro/b5-migration-architecture-2026-04-28.md`
 - Multi-reducer proposal: `docs/retro/multi-reducer-proposal-2026-04-28.md`
 - a→b→c→d→e migration ratchet: `docs/retro/migration-pattern.md`
-- Spec: `specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md`
-- Inventory + gaps: `specs/ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md`
+- Spec: `docs/specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md`
+- Inventory + gaps: `docs/specs/ANALYSIS_WINDOW_PROCESS_STATE_INVENTORY_2026_04_27.md`

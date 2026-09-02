@@ -5,7 +5,7 @@
  * useInSessionSearch — owns the Ctrl+F search state for the agent
  * pane: query results, current match index, navigation, highlight.
  *
- * Step 8 of specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
+ * Step 8 of docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
  *
  * Searches over the currently-loaded document slice only. Searching
  * the full persisted history would require a backend

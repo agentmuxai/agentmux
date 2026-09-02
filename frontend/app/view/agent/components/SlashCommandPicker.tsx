@@ -5,7 +5,7 @@
  * SlashCommandPicker — inline picker shown above the composer when the
  * user submits a bare `/cmd` whose arg is a required enum.
  *
- * Step 2 of specs/SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md.
+ * Step 2 of docs/specs/SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md.
  *
  * Lifecycle is owned by useAgentCommands: the dispatcher calls
  * `ctx.openPicker(spec)`, which sets the hook's pickerSpec signal and

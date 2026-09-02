@@ -575,7 +575,7 @@ impl Drop for LanDiscovery {
 /// `settings.json`) can start or stop the daemon without restarting the
 /// process.
 ///
-/// Spec: specs/lan-discovery-toggle.md
+/// Spec: docs/specs/lan-discovery-toggle.md
 pub struct LanDiscoveryController {
     slot: Arc<RwLock<Option<Arc<LanDiscovery>>>>,
     instance_id: String,

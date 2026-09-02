@@ -209,7 +209,7 @@ Broken: **11 dead `tsunami:*` tasks** (`Taskfile.yml:377-466`, Go leftovers), `s
 
 - Status fields written once, never re-stamped: ≥5 implemented specs still say "Draft"/"ready to implement" (`SPEC_MUXBUS_DELIVERY_HIERARCHY`, `SPEC_AGENT_CONTROL_PROTOCOL`, `SPEC_DRONE_CANVAS_NODE_EDITOR`, `SPEC_AGENT_FAILURE_DIAGNOSTICS`, `SPEC_LINUX_DOCS_UPDATE`).
 - `Supersedes:` header exists in only 12 of 913 files; zero sampled docs carry a supersession banner even with an explicit replacement.
-- Most misleading file found: **`specs/SPEC_BACKEND_LIFECYCLE.md`** — "Status: Draft", cites removed `src-tauri/` files; its replacement (`specs/process-lifecycle-v2.md`) names it, but the old file has no banner.
+- Most misleading file found: **`docs/specs/SPEC_BACKEND_LIFECYCLE.md`** — "Status: Draft", cites removed `src-tauri/` files; its replacement (`docs/specs/process-lifecycle-v2.md`) names it, but the old file has no banner.
 - Dangerous self-declared-canonical: `docs/architecture/ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL_2026_06_13.md` ("start here") describes pre-global-agent-promotion storage.
 
 ### 5.2 Indexes are stale
@@ -304,7 +304,7 @@ Frozen at ~2026-06-23 (prod deploy pinned at 0.1.4) while the product shipped v0
 | 14 | Rewrite BUILD.md wrong claims (WebView2, NSIS→Inno, React→SolidJS, Node 24, `--fresh`, log paths → point at muxlog) |
 | 15 | Regenerate widget tables in CLAUDE.md + README.md from `widgets.json` (17 widgets, 4 pinned); fix Settings, `AGENTMUX_DEV` bullet, `task test` |
 | 16 | Refresh `docs/README.md` (drop `docs-internal/` ghost, add 12 missing dirs, state the real specs policy: root `specs/` frozen, new specs → `docs/specs/`); regenerate `docs/specs/INDEX.md` (script it from filename dates + Status headers) |
-| 17 | Supersession banners: `SPEC_BACKEND_LIFECYCLE.md`, `specs/archive/SPEC_TRUST_CENTER_2026_06_15.md`, `ANALYSIS_AGENT_APP_API_OPEN_IN_EDITOR`, `openclaw-agent-runtime.md`, `single-instance-new-window.md`; as-of banner on `ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL` |
+| 17 | Supersession banners: `SPEC_BACKEND_LIFECYCLE.md`, `docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md`, `ANALYSIS_AGENT_APP_API_OPEN_IN_EDITOR`, `openclaw-agent-runtime.md`, `single-instance-new-window.md`; as-of banner on `ARCHITECTURE_AGENT_DATA_AND_CROSS_CHANNEL` |
 | 18 | Re-stamp the 5 implemented-but-"Draft" specs; adopt closed Status vocabulary (`draft/approved/implemented/living/historical/superseded`) + `Superseded-by:` convention for new docs |
 | 19 | VERSION_HISTORY.md tail cleanup (line 1817 stray, line 2443 bump-cli instructions); merge `docs/retros/`→`docs/retro/`, fold singleton dirs |
 

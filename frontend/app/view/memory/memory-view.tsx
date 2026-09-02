@@ -3,7 +3,7 @@
 //
 // Memory pane view — the agent-settings `view: "memory"` tab.
 //
-// PR 5 of specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md (§5 decision 3) DEMOTED
+// PR 5 of docs/specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md (§5 decision 3) DEMOTED
 // this tab from full CRUD to a read-only summary. Full Memory-bundle
 // management now lives in exactly one place: the hamburger "Identity &
 // Memory" manager (`BundleManagerModal`).

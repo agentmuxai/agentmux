@@ -197,5 +197,5 @@ Remove lines 423-433 (the first set of stub definitions). They're all overwritte
 ## Related Specs
 
 - `docs/specs/cef-drag-window-management.md` — full 5-system analysis
-- `specs/pane-popout-to-new-window.md` — pop-out button design (magnify → popout)
+- `docs/specs/pane-popout-to-new-window.md` — pop-out button design (magnify → popout)
 - `docs/retro/2026-03-20-secondary-window-dnd-regression.md` — WebView2 DnD fix history and Pragmatic DnD migration

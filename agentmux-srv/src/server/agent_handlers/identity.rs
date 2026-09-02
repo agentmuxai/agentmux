@@ -226,7 +226,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // Armory: validate (optional) + securely store an API key.
     // The plaintext goes to the OS keychain; the DB row keeps only the
     // SecretRef::Keychain pointer + masked tail + non-secret metadata.
-    // See specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
+    // See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
     let wstore = state.id_store.clone();
     let identity_store = state.identity_store.clone();
     let broker = state.broker.clone();

@@ -37,4 +37,4 @@ The Windows installer moved from NSIS to **Inno Setup** (`packaging/windows/agen
 
 - On Windows, `agentmux-launcher` auto-spawns `agentmux-srv` as a sidecar process (owning its lifecycle directly, rather than `agentmux-cef` spawning it) and also spawns `agentmux-cef` itself. If the backend exits with code 1, the application will not function correctly.
 - Child processes running inside terminal panes (shells, commands) have their own exit codes which are tracked internally but do not affect the application's exit code.
-- `wsh` (the old shell-integration binary) has been retired — see `specs/archive/SPEC_RETIRE_WSH_2026_04_12.md`. There is no binary to deploy or document return codes for anymore.
+- `wsh` (the old shell-integration binary) has been retired — see `docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md`. There is no binary to deploy or document return codes for anymore.

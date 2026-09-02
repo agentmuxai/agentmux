@@ -17,7 +17,7 @@ File drag-and-drop is deliberately scoped to individual panes, never the window 
 - No other view type registers a drop handler.
 - There is **no window- or document-level `dragover`/`drop` listener anywhere** (checked `frontend/app-init.ts` and the whole `frontend/` tree — the only `window.addEventListener("dragover"/"drop", …)` call sites are tab-tearoff/pane-resize internals, none of which call `preventDefault()` on an arbitrary drop).
 
-`docs/specs/SPEC_PANE_FILE_DROP_2026_05_30.md` and `specs/drag-drop-files-into-panes.md` both describe this scoped-to-pane design intentionally — but neither spec (nor the code) has a fallback for a drop that lands **outside** any registered pane surface: the tab strip, the title bar, the splitters/gaps between panes, or any pane of a type that never registered a handler.
+`docs/specs/SPEC_PANE_FILE_DROP_2026_05_30.md` and `docs/specs/drag-drop-files-into-panes.md` both describe this scoped-to-pane design intentionally — but neither spec (nor the code) has a fallback for a drop that lands **outside** any registered pane surface: the tab strip, the title bar, the splitters/gaps between panes, or any pane of a type that never registered a handler.
 
 ### Why that's catastrophic here, not just a no-op
 
@@ -125,7 +125,7 @@ Surface `show_fatal_dialog` on the srv-spawn-timeout path too, ideally including
 ## 4. Sources
 
 - `frontend/app-init.ts`, `frontend/app/view/term/term.tsx:496-498`, `frontend/app/view/agent/hooks/useAgentDropAttach.ts:212-214`
-- `docs/specs/SPEC_PANE_FILE_DROP_2026_05_30.md`, `specs/drag-drop-files-into-panes.md`
+- `docs/specs/SPEC_PANE_FILE_DROP_2026_05_30.md`, `docs/specs/drag-drop-files-into-panes.md`
 - `agentmux-cef/src/client/lifecycle.rs:749-785` (`on_before_browse`)
 - `agentmux-cef/src/client/handlers.rs:113-176` (`DragHandler`)
 - `agentmux-launcher/src/supervisor/windows.rs` (splash spawn, `spawn_srv` timeout handling, `HOST_RESTART_BUDGET`/`SRV_RESTART_BUDGET`)

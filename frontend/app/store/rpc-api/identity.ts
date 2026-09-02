@@ -55,7 +55,7 @@ export const IdentityApi = {
     // Armory: optionally validate (validate=true → single user-initiated
     // outbound probe) then store an API key in the OS keychain. The plaintext
     // is never returned; on success the response carries only the masked tail +
-    // non-secret metadata. See specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
+    // non-secret metadata. See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §5/§6.
     AccountKeyVerifyCommand(
         client: RpcClient,
         data: {

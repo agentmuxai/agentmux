@@ -51,7 +51,7 @@ declare global {
         last_seen: number;
     };
 
-    // Editor file-tree row. Spec: specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
+    // Editor file-tree row. Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
     type DirEntry = {
         name: string;
         is_dir: boolean;

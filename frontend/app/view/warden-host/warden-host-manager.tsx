@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Warden — Host section. Lifted out of the original monolithic warden.tsx
-// (Phase 2 of specs/SPEC_WARDEN_WIDGET_2026-05-25.md) into its own
+// (Phase 2 of docs/specs/SPEC_WARDEN_WIDGET_2026-05-25.md) into its own
 // rail-switchable manager. Behavior unchanged: fetches the agent list from
 // /agentmux/reactive/agents on mount and refreshes every 5s. The audit feed
 // that used to render below this table now lives in its own "Audit" rail

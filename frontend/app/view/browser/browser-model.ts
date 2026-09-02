@@ -77,7 +77,7 @@ function installEventSinkOnce(): void {
  * Fallback URL for browser panes created without an explicit `meta.url`.
  * Keeps blank-spawned panes from landing on about:blank (no signposting,
  * no backlink). Callers that want a blank pane can pass `"about:blank"`
- * explicitly. See specs/SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md.
+ * explicitly. See docs/specs/SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md.
  */
 const DEFAULT_BROWSER_URL = "https://agentmux.ai";
 
@@ -404,7 +404,7 @@ export class BrowserViewModel implements ViewModel {
         // in-pane link clicks and popup-intercept redirects), and the
         // local fake history array we used before diverged the moment
         // the user clicked any link inside the pane. See
-        // specs/SPEC_BROWSER_PANE_Z_ORDER_2026_04_21.md (unrelated but
+        // docs/specs/SPEC_BROWSER_PANE_Z_ORDER_2026_04_21.md (unrelated but
         // adjacent) and the nav-state wiring added alongside this PR.
         void listenEvent<{
             block_id: string;

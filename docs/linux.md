@@ -64,7 +64,7 @@ sudo bash install-userns-apparmor-fix.sh <path-to-a-file-containing-the-profile>
 AGENTMUX_UNSAFE_NOSANDBOX=1 ./AgentMux_*.AppImage
 ```
 
-Full design: [`docs/specs/SPEC_LINUX_SANDBOX_APPARMOR_USERNS_2026_08_23.md`](specs/SPEC_LINUX_SANDBOX_APPARMOR_USERNS_2026_08_23.md).
+Full design: [`docs/specs/SPEC_LINUX_SANDBOX_APPARMOR_USERNS_2026_08_23.md`](docs/specs/SPEC_LINUX_SANDBOX_APPARMOR_USERNS_2026_08_23.md).
 
 ## Log access
 

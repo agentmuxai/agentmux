@@ -5,7 +5,7 @@
 // Phase 1 ships ONE: diagnostics (LSP publishDiagnostics → CM6 lint markers).
 // Completion/hover/definition land in Phase 2.
 //
-// Spec: specs/SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md
+// Spec: docs/specs/SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md
 
 import { Diagnostic, setDiagnostics } from "@codemirror/lint";
 import type { EditorView } from "@codemirror/view";

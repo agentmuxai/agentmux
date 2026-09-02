@@ -14,7 +14,7 @@
 // contentLoaded so it can reason about dirty-vs-disk without holding the
 // buffer.
 //
-// Spec: specs/SPEC_EDITOR_TABS_2026-05-26.md (Phase 1B).
+// Spec: docs/specs/SPEC_EDITOR_TABS_2026-05-26.md (Phase 1B).
 // Earlier specs: SPEC_EDITOR_FILE_TREE_2026-05-26.md, SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md.
 
 import { BlockNodeModel } from "@/app/block/blocktypes";
