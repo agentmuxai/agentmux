@@ -38,7 +38,7 @@ notify = "7"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "multipart"] }
 # OS-native secret storage (macOS Keychain / Windows Credential Manager /
 # Linux Secret Service) for Armory API keys. See
-# specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
+# docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
 keyring = "2"
 # Zero plaintext secret buffers on drop.
 zeroize = { version = "1", features = ["zeroize_derive"] }

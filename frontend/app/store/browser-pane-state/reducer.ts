@@ -4,7 +4,7 @@
 /**
  * Pure reducer for the browser-pane state slice.
  *
- * **Phase 1A** (`specs/SPEC_BROWSER_PANE_TABS_2026-05-27.md`) — extends
+ * **Phase 1A** (`docs/specs/SPEC_BROWSER_PANE_TABS_2026-05-27.md`) — extends
  * slice #9 to hold an ordered tab list. Per-page fields (`url`, `title`,
  * `loading`, `error`, `canGoBack`, `canGoForward`, `faviconUrl`) move
  * into `BrowserTab` records. Existing commands (`Navigate`, `LoadStarted`,

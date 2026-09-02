@@ -3,7 +3,7 @@
 //
 // AccountsManager — the context-free Accounts management UI, rendered as the
 // **Accounts** tab of the Armory (bundle-manager-modal). Phase 1 of
-// specs/archive/SPEC_TRUST_CENTER_2026_06_15.md: surface the existing IdentityAccount model
+// docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md: surface the existing IdentityAccount model
 // app-wide with no backend changes.
 //
 // It owns a block-free `IdentityViewModel` instance (the existing accounts

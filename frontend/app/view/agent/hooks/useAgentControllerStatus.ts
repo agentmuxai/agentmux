@@ -5,7 +5,7 @@
  * useAgentControllerStatus — owns all the agent-launch state and the
  * functions that drive it.
  *
- * Step 4 of specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
+ * Step 4 of docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
  *
  * State managed:
  *   - authUrl       — the OAuth URL to display when login is needed

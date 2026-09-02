@@ -350,7 +350,7 @@ impl Controller for ShellController {
             // AGENTMUX is a plain "1" sentinel — wsh has been retired.
             // Shell integrations check for the presence of AGENTMUX but no
             // longer prepend a path to $PATH based on its value.
-            // See specs/SPEC_RETIRE_WSH_2026_04_12.md.
+            // See docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md.
             c.env("AGENTMUX", "1");
 
             // Wire AgentMux-managed tool dirs into the agent's PATH.

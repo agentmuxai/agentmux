@@ -14,7 +14,7 @@
 //     broadcast as a `lsp:message` event on the EventBus.
 //   * Process is killed on supervisor drop (kill_on_drop=true).
 //
-// Spec: specs/SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md (Tier 1).
+// Spec: docs/specs/SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md (Tier 1).
 
 use std::collections::HashMap;
 use std::path::PathBuf;

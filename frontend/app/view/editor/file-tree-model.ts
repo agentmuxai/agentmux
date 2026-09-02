@@ -17,7 +17,7 @@
 // Hidden-file filtering is applied at render time, not at fetch — so toggling
 // the eye button is free, no RPC.
 //
-// Spec: specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
+// Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
 
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";

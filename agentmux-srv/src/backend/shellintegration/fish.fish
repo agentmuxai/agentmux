@@ -3,7 +3,7 @@
 # Loaded via: fish -C "source <this-file>"
 
 # wsh has been retired — AGENTMUX is now a plain "1" sentinel.
-# See specs/SPEC_RETIRE_WSH_2026_04_12.md.
+# See docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md.
 
 # ─── Shell Integration ────────────────────────────────────────────────────────
 

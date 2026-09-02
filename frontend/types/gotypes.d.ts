@@ -318,7 +318,7 @@ declare global {
         // Stable, filesystem-safe identifier. Drives working dir, env vars,
         // and cross-references. NEVER changes — distinct from `name` which
         // is the renameable display. See
-        // specs/SPEC_AGENT_IDENTITY_RESTRUCTURE_2026_04_14.md.
+        // docs/specs/SPEC_AGENT_IDENTITY_RESTRUCTURE_2026_04_14.md.
         slug: string;
         name: string;
         icon: string;
@@ -344,7 +344,7 @@ declare global {
         accounts?: string;
         /**
          * Forked-from definition id, or empty string for root definitions.
-         * Added in v6. See specs/archive/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md.
+         * Added in v6. See docs/specs/archive/SPEC_FORGE_IDENTITY_AGENT_INSTANCES_IMPL_2026_04_20.md.
          */
         parent_id?: string;
         /**
@@ -435,7 +435,7 @@ declare global {
         | { backend: "secrets_manager"; sm_path: string; sm_json_path?: string }
         | { backend: "plaintext_dev"; plaintext_dev: string }
         // Armory API keys: pointer into the OS keychain. Plaintext is
-        // never carried here. See specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
+        // never carried here. See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
         | { backend: "keychain"; service: string; account: string }
         // OAuth credentials as a filesystem pointer: the provider CLI reads
         // its tokens from this dir at spawn time; agentmux holds only the

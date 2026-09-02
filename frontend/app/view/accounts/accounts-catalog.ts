@@ -9,7 +9,7 @@
  *
  * `keyKind` is the account kind to preset for the "key" path (the form's
  * Kind dropdown still lets the user refine it). The "oauth" path always presets
- * kind = "oauth". See specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §3/§4/§12.3.
+ * kind = "oauth". See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §3/§4/§12.3.
  */
 
 import type { AccountKind, AccountProvider } from "@/app/view/identity/identity-model";

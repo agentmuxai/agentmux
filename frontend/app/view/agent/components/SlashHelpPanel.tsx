@@ -5,7 +5,7 @@
  * SlashHelpPanel — overlay listing every slash command currently
  * available in the pane, grouped by category.
  *
- * Step 4 of specs/SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md.
+ * Step 4 of docs/specs/SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md.
  *
  * Reads the command list from props (computed by useAgentCommands via
  * registry.list(ctx)) so the panel automatically reflects new

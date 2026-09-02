@@ -576,7 +576,7 @@ pub fn is_external_http_url(url: &str) -> bool {
 /// the auth handshake completes in the pane): ONLY genuine auth flows, never
 /// arbitrary `window.open` popups (ad windows, chat widgets, print dialogs),
 /// which would otherwise spawn rogue top-level windows
-/// (specs/SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md).
+/// (docs/specs/SPEC_BROWSER_PANE_DEFAULT_URL_AND_POPUP_2026_04_21.md).
 ///
 /// Heuristic (host-agnostic — no brittle provider allowlist): the path names a
 /// standard authorization endpoint, OR the query carries the OAuth

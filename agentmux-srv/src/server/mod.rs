@@ -164,12 +164,12 @@ pub struct AppState {
     /// Live controller for mDNS-based LAN/host peer discovery. The controller
     /// owns a swappable daemon slot so the `network:lan_discovery` setting can
     /// be toggled at runtime without restarting the process.
-    /// See `specs/lan-discovery-toggle.md`.
+    /// See `docs/specs/lan-discovery-toggle.md`.
     pub lan_discovery: Arc<LanDiscoveryController>,
     /// Language Server Protocol supervisor — owns the lifecycle of LSP
     /// server child processes (one per workspace/language) and proxies
     /// LSP messages between the editor pane and the server.
-    /// Spec: `specs/SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md`.
+    /// Spec: `docs/specs/SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md`.
     pub lsp_supervisor: Arc<LspSupervisor>,
     /// Local HTTP URL of this instance (e.g. "http://127.0.0.1:PORT").
     /// Used for cross-instance inject forwarding and file registry entries.

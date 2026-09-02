@@ -197,7 +197,7 @@ const HostPopoverPanel = (props: HostPopoverPanelProps): JSX.Element => {
                 </div>
 
                 {/* Network — LAN discovery toggle.
-                    Spec: specs/lan-discovery-toggle.md */}
+                    Spec: docs/specs/lan-discovery-toggle.md */}
                 <div class="status-bar-popover-divider" />
                 <div class="status-bar-popover-row">
                     <span class="status-bar-popover-label">LAN discovery</span>
@@ -380,7 +380,7 @@ const HostPopover = (): JSX.Element => {
     // live — no restart. On Windows, the first enable triggers the firewall
     // prompt; if the user clicks Block, a "laninstances:error" event flows back
     // and surfaces in the panel.
-    // Spec: specs/lan-discovery-toggle.md
+    // Spec: docs/specs/lan-discovery-toggle.md
     const handleLanToggle = async (enabled: boolean) => {
         // Optimistic clear of any prior error; backend will resend if it still
         // can't start the daemon.

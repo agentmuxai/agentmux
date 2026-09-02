@@ -11,7 +11,7 @@
 // This was previously a tiny sync wrapper that just SetDllDirectoryW'd
 // runtime/ then spawned the CEF host. Phase B grew it into the
 // privileged owner per
-// specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md.
+// docs/specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md.
 //
 // Process tree after B.1:
 //   launcher (J0)

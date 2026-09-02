@@ -12,7 +12,7 @@
  *   3. Shebang scan   — #!/usr/bin/env python3, #!/bin/bash, etc.
  *   4. Fallback       — "text"
  *
- * Spec: specs/SPEC_TOOL_OVERLAY_CODE_HIGHLIGHTING_2026_04_14.md §4.2
+ * Spec: docs/specs/SPEC_TOOL_OVERLAY_CODE_HIGHLIGHTING_2026_04_14.md §4.2
  */
 
 const EXT_MAP: Record<string, string> = {

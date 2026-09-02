@@ -96,7 +96,7 @@ export const [windowCountAtom, setWindowCountAtom] = createSignal(1);
 const [lanInstancesAtom, setLanInstancesAtom] = createSignal<LanInstance[]>([]);
 export { lanInstancesAtom };
 // Last error message from the LAN discovery daemon (e.g. firewall block).
-// Cleared on successful enable. See specs/lan-discovery-toggle.md.
+// Cleared on successful enable. See docs/specs/lan-discovery-toggle.md.
 export const [lanDiscoveryErrorAtom, setLanDiscoveryErrorAtom] = createSignal<string | null>(null);
 
 // List of all open AgentMux window labels in this process. Updated by

@@ -16,7 +16,7 @@
  *  - Sequence guard: stale async results are discarded if props changed.
  *  - Error fallback: Shiki failures silently degrade to plaintext.
  *
- * Spec: specs/SPEC_TOOL_OVERLAY_CODE_HIGHLIGHTING_2026_04_14.md §4.1
+ * Spec: docs/specs/SPEC_TOOL_OVERLAY_CODE_HIGHLIGHTING_2026_04_14.md §4.1
  */
 
 import { createEffect, createSignal, onCleanup, type JSX } from "solid-js";

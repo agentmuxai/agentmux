@@ -1311,7 +1311,7 @@ pub async fn bind_listeners_and_network(
     // The setting defaults to false; users opt in via the HostPopover toggle
     // (or by editing settings.json). The controller supports live start/stop
     // so flipping the setting does not require an app restart.
-    // See specs/lan-discovery-toggle.md.
+    // See docs/specs/lan-discovery-toggle.md.
     let hostname = whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
     let lan_discovery = Arc::new(backend::lan_discovery::LanDiscoveryController::new(
         config.instance_id.clone(),
@@ -1326,7 +1326,7 @@ pub async fn bind_listeners_and_network(
 
     // LSP supervisor — owns LSP server child processes. Nothing spawned
     // until the editor pane calls `lspstart`. Spec:
-    // specs/SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md
+    // docs/specs/SPEC_EDITOR_LSP_AND_THEMES_2026-05-26.md
     let lsp_supervisor = Arc::new(backend::lsp::LspSupervisor::new(event_bus.clone()));
 
     // Clean up stale cross-instance agent registry entries (entries older than 4h).

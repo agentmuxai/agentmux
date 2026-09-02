@@ -1,9 +1,36 @@
 # docs/specs/
 
-Draft specs, design explorations, and implementation plans. These are work-in-progress documents that haven't been formally approved yet.
+**Every spec lives here.** There is no second spec tree — a doc's lifecycle
+state is its `**Status:**` line (below), not the directory it sits in.
 
-Once a spec is approved and ready for implementation, move it to the top-level `specs/` directory.
-Once implementation is complete, move it to `specs/archive/`.
+`archive/` is the one subdirectory, and it means "not worth reading unless you
+are doing history", not a lifecycle stage. Status still applies inside it.
+
+### Why there is no `specs/` tree anymore
+
+There used to be a top-level `specs/` for "approved / being implemented", with
+`docs/specs/` as drafts and `specs/archive/` as done. That worked as a promotion
+workflow and then quietly inverted itself. Measured before the trees were
+merged (2026-09-01):
+
+| Tree | Documented as | Actually held |
+|---|---|---|
+| `specs/` | active and approved | 51 `draft`, 2 `implemented` |
+| `docs/specs/` | drafts, not approved | **126 `implemented`**, 14 `active` |
+| `specs/archive/` | completed or superseded | 7 `draft`, 3 `ready` |
+
+An agent trusting those descriptions looked in exactly the wrong tree. Worse,
+promoting a file between trees broke every code comment citing it, silently:
+**32 of 165 spec citations in source were already dangling**, 9 of them
+pointing at `specs/X` for a file that had already moved to `docs/specs/X`.
+
+Directory-as-status and the `Status:` field were two answers to the same
+question, and only one of them is enforced (`scripts/check-doc-status.sh`) or
+kept current. So the directories stopped being an answer.
+
+**Do not reintroduce a second tree** to mean approved, active, or done. Set the
+Status line instead. If you want to find every implemented spec, read
+[`INDEX.md`](./INDEX.md), which is generated from Status.
 
 ## Status field
 

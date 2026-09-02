@@ -5,7 +5,7 @@
  * SlashAutocomplete — dropdown that appears above the composer textarea
  * when the user types `/` followed by a partial command name.
  *
- * Step 3 of specs/SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md.
+ * Step 3 of docs/specs/SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md.
  *
  * Pure presentation: receives the completion list + current selection
  * index from AgentFooter, renders rows. AgentFooter owns the keyboard

@@ -3,7 +3,7 @@
 //
 // Phase B.2: launcher-owned named-pipe IPC server.
 //
-// Per `specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md` §3.2 and §5,
+// Per `docs/specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md` §3.2 and §5,
 // the launcher hosts the canonical state machine and exposes it over a
 // pipe per data-dir-scoped namespace. Each subscriber (host, eventually
 // frontend renderers, srv) connects, sends `Command` messages, and

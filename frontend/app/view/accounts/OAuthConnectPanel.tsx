@@ -10,7 +10,7 @@
  *
  * Built-in public client ids aren't provisioned yet, so the GitHub reference
  * provider uses the BYO path (user supplies their own OAuth app's client id).
- * specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §4.2/§12.1.
+ * docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §4.2/§12.1.
  */
 
 import { createSignal, onCleanup, Show, type JSX } from "solid-js";

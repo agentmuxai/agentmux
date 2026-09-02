@@ -22,7 +22,7 @@
 // subscribe to memories:changed (matching MemoryViewModel — the manager is
 // the only writer in practice).
 //
-// Spec: specs/archive/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md.
+// Spec: docs/specs/archive/SPEC_TRUST_CENTER_GLOBAL_BRAIN_2026_06_19.md.
 
 import { createMemo, createSignal, type Accessor } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";

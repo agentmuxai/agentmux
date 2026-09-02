@@ -5,7 +5,7 @@
  * Runtime-config slash commands: /model /effort /permission-mode /bypass
  * /plan /runtime.
  *
- * Step 2 of specs/SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md —
+ * Step 2 of docs/specs/SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md —
  * /model, /effort, and /permission-mode are now `enum` arg kind so a
  * bare `/model` opens the inline picker. Aliases (e.g.
  * `claude-sonnet` → `sonnet`) live on each SlashChoice for backwards

@@ -177,7 +177,7 @@ cp target/release/agentmux-bashwrap.exe "$PORTABLE/runtime/tools/bin/"
 # See docs/specs/SPEC_PERSISTENT_SHELL_NODE_2026_06_11.md §5.2.
 cp target/release/agentmux-mcp.exe "$PORTABLE/runtime/tools/bin/"
 
-# wsh has been retired — see specs/SPEC_RETIRE_WSH_2026_04_12.md. No binary
+# wsh has been retired — see docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md. No binary
 # to ship anymore; AGENTMUX env var is now a plain "1" sentinel.
 
 # Frontend

@@ -5,7 +5,7 @@
  * SlashCommandRegistry — map of name → command, plus a factory that builds
  * one for a given provider.
  *
- * Step 1 of specs/SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md.
+ * Step 1 of docs/specs/SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md.
  *
  * The dispatcher, picker, autocomplete, and /help panel all read from the
  * same registry, so adding a new command is a single file registration —

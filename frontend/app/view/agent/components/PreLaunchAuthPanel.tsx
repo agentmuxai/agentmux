@@ -193,7 +193,7 @@ export const PreLaunchAuthPanel = (props: PreLaunchAuthPanelProps): JSX.Element 
     // directly (`direct_account: true` in auth-flow-controller.ts's
     // `connect()`). This used to gate on `identityId() === ""` and
     // route through a "+ New identity bundle" interposition
-    // (specs/archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md §4.5's "OAuth never
+    // (docs/specs/archive/SPEC_OAUTH_IDENTITY_BUNDLES_2026_05_22.md §4.5's "OAuth never
     // starts without a bundle id" invariant) — that invariant no
     // longer applies; the per-account isolation dir is resolved
     // server-side regardless of whether an account was pre-selected.

@@ -9,7 +9,7 @@
 //! just the pointer plus non-secret metadata + a masked tail. Reads return
 //! a `Zeroizing<String>` so the plaintext is wiped from memory on drop.
 //!
-//! See specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7 (best practices) and §12.2.
+//! See docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7 (best practices) and §12.2.
 //!
 //! NOTE: an encrypted-file fallback for headless Linux without a Secret
 //! Service agent is a documented follow-up (spec §12.2); the desktop app

@@ -1,6 +1,6 @@
 # Warden Auto-Controller: a continuation-nudging watcher for AgentMux agents
 
-**Status:** Research + design proposal, not yet built or committed to. Written
+**Status:** proposed — research + design proposal, not yet built or committed to. Written
 per request to (1) research external best practices, (2) propose terminology,
 (3) audit the current AgentMux architecture, (4) propose a design. Nothing in
 this document has been implemented.
@@ -190,17 +190,17 @@ which is **not** limited to the structured `AskUserQuestion` case at all.
 ### 3.2 Swarm and Warden: two existing "watch other agents" surfaces
 
 - **Swarm is deliberately read-only, and a full orchestrator was already
-  proposed and rejected.** `specs/swarm-analysis.md` states outright:
+  proposed and rejected.** `docs/specs/swarm-analysis.md` states outright:
   *"AgentMux's swarm feature is not about orchestrating agents or managing
   task queues... AgentMux does not create, manage, or orchestrate these
   subagents. It only watches them."* An earlier, more ambitious proposal
-  (`specs/swarm-orchestration.md` — task queues, planner/executor/reviewer
+  (`docs/specs/swarm-orchestration.md` — task queues, planner/executor/reviewer
   roles, an auto-routing daemon) was explicitly superseded by this
   observability-only design. **This is a real architectural precedent this
   feature must not contradict** — hence scoping the new work under Warden,
   not Swarm, per your direction.
 - **Warden already has the right shape, half-built.** Its own spec
-  (`specs/SPEC_WARDEN_WIDGET_2026-05-25.md`, still Draft) envisions a
+  (`docs/specs/SPEC_WARDEN_WIDGET_2026-05-25.md`, still Draft) envisions a
   governance console: identity, capability policy, kill-switches, quotas,
   an **audit trail**, and **human-approval gates for sensitive jekts** —
   i.e. Warden was always meant to be the *active* governance surface, in

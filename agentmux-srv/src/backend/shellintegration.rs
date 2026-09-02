@@ -212,7 +212,7 @@ pub fn get_shell_startup(
     }
 }
 
-// wsh has been retired — see specs/SPEC_RETIRE_WSH_2026_04_12.md.
+// wsh has been retired — see docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md.
 // The `AGENTMUX` env var is now a plain "1" sentinel, not a path.
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

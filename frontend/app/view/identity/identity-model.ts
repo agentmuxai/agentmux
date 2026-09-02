@@ -30,7 +30,7 @@ export interface SecretRef {
     value?: string; // plaintext_dev only
     // keychain only — pointer into the OS secret store. The plaintext is
     // never carried here; resolved backend-side at spawn. See
-    // specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
+    // docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §7/§12.2.
     service?: string;
     account?: string;
     // oauth_config_dir only — the provider CLI's per-account config dir.
@@ -462,7 +462,7 @@ export class IdentityViewModel implements ViewModel {
     // provider "claude" — the Claude CLI's `~/.claude` login) surfaces under
     // its brand tile ("anthropic"). Display-only: the account's stored
     // `provider` is unchanged, so spawn-time env injection is unaffected.
-    // See specs/archive/SPEC_TRUST_CENTER_CLI_AUTH_BINDING_2026_06_17.md.
+    // See docs/specs/archive/SPEC_TRUST_CENTER_CLI_AUTH_BINDING_2026_06_17.md.
     accountsByProvider = (): Map<AccountProvider, Account[]> => {
         const map = new Map<AccountProvider, Account[]>();
         const order: AccountProvider[] = ["github", "google", "aws", "openai", "anthropic", "slack", "custom", "agentmux"];

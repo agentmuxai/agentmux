@@ -5,7 +5,7 @@
  * useHistoryPagination — owns the persisted-session history slice that
  * sits above the live stream in the agent document.
  *
- * Step 5 of specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
+ * Step 5 of docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
  *
  * On mount the hook fires an async initial load: read `session:line_count`
  * for the block, fetch the trailing 200 lines, dispatch a HistoryLoaded

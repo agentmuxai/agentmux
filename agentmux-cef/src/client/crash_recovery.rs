@@ -21,7 +21,7 @@ impl AgentMuxHandler {
     /// just turns white. We log the cause and replace the white page with
     /// a recovery HTML page that offers Reload / Quit buttons.
     ///
-    /// See specs/SPEC_GRACEFUL_CRASH_HANDLING_2026_04_13.md (PR 1).
+    /// See docs/specs/SPEC_GRACEFUL_CRASH_HANDLING_2026_04_13.md (PR 1).
     pub(crate) fn on_render_process_terminated(
         &mut self,
         browser: Option<&mut Browser>,

@@ -5,7 +5,7 @@
  * dispatchSlashCommand — the single entry point for handling `/cmd arg`
  * composer input.
  *
- * Step 1 of specs/SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md.
+ * Step 1 of docs/specs/SPEC_SLASH_COMMAND_ARCHITECTURE_2026_04_14.md.
  *
  * The caller (useAgentCommands.sendMessage) passes the raw composer input
  * and a context bundle. The dispatcher:

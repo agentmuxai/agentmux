@@ -475,7 +475,7 @@ export const AgentFooter = (props: AgentFooterProps): JSX.Element => {
     // `scrollRef.scrollTo({top: MAX_SAFE_INTEGER})` which lets the browser
     // clamp internally instead of us reading scrollHeight in JS. Target
     // per-keystroke cost: <2ms. See
-    // specs/SPEC_TOOL_OVERLAY_AND_SCROLL_ON_TYPE_2026_04_13.md §3.4.
+    // docs/specs/SPEC_TOOL_OVERLAY_AND_SCROLL_ON_TYPE_2026_04_13.md §3.4.
     let textareaRef: HTMLTextAreaElement | undefined;
 
     // Stable for this component instance's whole lifetime (component body

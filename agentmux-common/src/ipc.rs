@@ -6,7 +6,7 @@
 //! Command / Event shapes can't drift between binaries on a
 //! version-skew release.
 //!
-//! See `specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md` §5.
+//! See `docs/specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md` §5.
 //!
 //! Wire format: newline-delimited JSON. One message per line,
 //! parsed via serde_json. Format chosen for debuggability —

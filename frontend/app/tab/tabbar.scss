@@ -11,7 +11,7 @@
     // tab strip standard width, tab-measure.ts) so a short/default label
     // still reads as a normal-sized tab at rest; long labels can still grow
     // past it, up to 260px. All tabs shrink proportionally under pressure.
-    // Spec: specs/SPEC_TAB_CONTENT_AWARE_SIZING_2026-06-14.md.
+    // Spec: docs/specs/SPEC_TAB_CONTENT_AWARE_SIZING_2026-06-14.md.
     //
     // `--tab-natural-width` fallback (232px, matches TAB_STANDARD_WIDTH)
     // covers the initial paint before JS has run a measurement. Floor at

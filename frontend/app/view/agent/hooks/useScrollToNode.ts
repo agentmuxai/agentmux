@@ -5,7 +5,7 @@
  * useScrollToNode — signal-based jump command that AgentDocumentView
  * reacts to via createEffect.
  *
- * Step 9 of specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
+ * Step 9 of docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
  *
  * Replaces the mutable `let scrollToNodeFn: ((id: string) => void) | null`
  * pattern in agent-view.tsx. Callers (search) invoke `jumpTo`;

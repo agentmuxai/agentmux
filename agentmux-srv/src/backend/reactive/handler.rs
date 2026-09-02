@@ -318,7 +318,7 @@ impl Handler {
     ///
     /// Sends `message\r` as a single payload (required for text display),
     /// then spawns 3 delayed `\r` sends at 200ms intervals as separate
-    /// PTY writes to ensure submission. See `specs/jekt-inject-timing.md`.
+    /// PTY writes to ensure submission. See `docs/specs/jekt-inject-timing.md`.
     pub fn inject_message(&mut self, req: InjectionRequest) -> InjectionResponse {
         self.inject_message_inner(req, None, None, None)
     }
@@ -725,7 +725,7 @@ impl Handler {
             }
         };
 
-        // Jekt inject sequence (see specs/jekt-inject-timing.md):
+        // Jekt inject sequence (see docs/specs/jekt-inject-timing.md):
         // 1. \r to clear any partial input on the line
         // 2. message\r as single payload (proven to display text — v0.31.122/125)
         // 3. Three delayed \r at 200ms intervals as separate PTY writes to submit

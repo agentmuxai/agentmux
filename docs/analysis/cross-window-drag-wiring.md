@@ -1,7 +1,9 @@
 # Cross-Window Drag: Wiring Analysis
 
 **Date:** 2026-03-30
-**Status:** Backend complete, frontend needs 4 targeted fixes
+**Status:** historical — records the wiring analysis as of 2026-03-30 (backend
+complete, frontend needing 4 targeted fixes at that time). Not re-verified against
+current code; treat the body as a snapshot, not a claim about today.
 
 ---
 
@@ -197,5 +199,5 @@ Remove lines 423-433 (the first set of stub definitions). They're all overwritte
 ## Related Specs
 
 - `docs/specs/cef-drag-window-management.md` — full 5-system analysis
-- `specs/pane-popout-to-new-window.md` — pop-out button design (magnify → popout)
+- `docs/specs/pane-popout-to-new-window.md` — pop-out button design (magnify → popout)
 - `docs/retro/2026-03-20-secondary-window-dnd-regression.md` — WebView2 DnD fix history and Pragmatic DnD migration

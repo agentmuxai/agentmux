@@ -280,7 +280,7 @@ tasks:
 
     # agentmux-wsh build tasks removed — wsh has been retired.
     # agentmux-mcp is built as part of build:host (via -p agentmux-mcp in each platform task).
-    # See specs/SPEC_RETIRE_WSH_2026_04_12.md.
+    # See docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md.
 
     outdated:
         desc: Check for outdated packages using npm-check-updates.
@@ -346,7 +346,7 @@ tasks:
             wingetcreate update {{.WINGET_PACKAGE}} -s -v {{.UP_VERSION}} -u "https://{{.RELEASES_BUCKET}}/{{.APP_NAME}}-win32-x64-{{.UP_VERSION}}.msi" -t {{.GITHUB_TOKEN}}
 
     # dev:installwsh removed — wsh has been retired.
-    # See specs/SPEC_RETIRE_WSH_2026_04_12.md.
+    # See docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md.
 
     dev:clearconfig:
         desc: Clear the config directory for agentmux-dev

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 // Tests for the singleton-modal coordination layer (PR 3 of
-// specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md). The side-effecting deps
+// docs/specs/archive/SPEC_BUNDLE_MANAGEMENT_2026_05_22.md). The side-effecting deps
 // (HTTP publish, WPS subscribe, launcher events) are mocked so the
 // pure acquire/release/holder decision logic is verified in isolation.
 

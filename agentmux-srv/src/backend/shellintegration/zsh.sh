@@ -3,7 +3,7 @@
 # Loaded via: ZDOTDIR=~/.agentmux/shell/zsh (zsh picks up .zshrc automatically)
 
 # wsh has been retired — AGENTMUX is now a plain "1" sentinel.
-# See specs/SPEC_RETIRE_WSH_2026_04_12.md.
+# See docs/specs/archive/SPEC_RETIRE_WSH_2026_04_12.md.
 
 # Source login profile (Homebrew shellenv and other login-shell setup live here)
 if [ -f ~/.zprofile ]; then

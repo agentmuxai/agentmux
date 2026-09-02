@@ -28,7 +28,7 @@ fn scratch_session_token() -> &'static str {
 /// mounts aren't offered as starting points (root scoping for the tree, not a
 /// sandbox; see the note at the macOS arm). On Linux/Windows it exposes the
 /// filesystem root + mounts.
-/// Spec: specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md (multi-root follow-up).
+/// Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md (multi-root follow-up).
 #[cfg(target_os = "windows")]
 fn list_drives() -> Vec<serde_json::Value> {
     let mut drives = Vec::new();
@@ -518,7 +518,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // listeditordir → list directory contents for the editor's file-tree pane.
     // Symlinks are followed (matches VS Code semantics; the frontend marks
     // followed symlinks with a ↗ overlay).
-    // Spec: specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
+    // Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
     engine.register_handler(
         "listeditordir",
         Box::new(|data, _ctx| {
@@ -609,7 +609,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // geteditorroots → home + (Linux/Windows) the filesystem root and mounts,
     // rendered as sibling top-level roots. On macOS `list_drives` returns none,
     // so the editor file-tree is scoped to $HOME only.
-    // Spec: specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md (multi-root follow-up)
+    // Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md (multi-root follow-up)
     engine.register_handler(
         "geteditorroots",
         Box::new(|_data, _ctx| {
@@ -626,7 +626,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // ── Editor file-tree mutations ─────────────────────────────────────
-    // Spec: specs/SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14.md
+    // Spec: docs/specs/SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14.md
     // All handlers validate the target path is under the user's home directory
     // before performing any mutation — same policy as writeeditorfile.
 
@@ -805,7 +805,7 @@ pub fn register_editor_handlers(engine: &Arc<WshRpcEngine>, state: &AppState) {
     );
 
     // ── Scratch file service ────────────────────────────────────────────
-    // Spec: specs/SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md
+    // Spec: docs/specs/SPEC_EDITOR_WIDGET_DEFAULT_UX_2026_06_14.md
 
     // createscratchfile → create a scratch buffer file in ~/.agentmux/cache/scratch/
     engine.register_handler(

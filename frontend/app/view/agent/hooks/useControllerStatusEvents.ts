@@ -6,7 +6,7 @@
  * wave event (scoped to one block) and translates shellprocstatus /
  * shellprocexitcode into log lines.
  *
- * Step 12 of specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
+ * Step 12 of docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
  */
 
 import { onCleanup, onMount } from "solid-js";

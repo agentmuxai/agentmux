@@ -4,7 +4,7 @@
 /**
  * Browser pane state store — slice #9.
  *
- * **Phase 1A** (`specs/SPEC_BROWSER_PANE_TABS_2026-05-27.md`) — the cell
+ * **Phase 1A** (`docs/specs/SPEC_BROWSER_PANE_TABS_2026-05-27.md`) — the cell
  * now owns a tab list. Per-page projection setters (`url`, `loading`,
  * `error`, `canGoBack`, `canGoForward`, `title`, `faviconUrl`) project
  * the ACTIVE tab's values; the model code that consumes them via

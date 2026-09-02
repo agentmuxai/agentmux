@@ -23,7 +23,7 @@
 //! into the catalog or passed as BYO — `start` returns a clear
 //! "not configured" error and no flow runs. Dropping in the ids (and wiring
 //! the frontend Connect button) activates this end to end. See
-//! specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §4.2/§12.1.
+//! docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §4.2/§12.1.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};

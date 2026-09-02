@@ -8,7 +8,7 @@
 * `b5-migration-architecture-2026-04-28.md` — the analysis that prompted this proposal
 * `migration-pattern.md` — the a→b→c→d→e ratchet (single-reducer migration)
 * `phase-b-roadmap.md` — phase B sub-PR sequence
-* `specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md` — the driving spec
+* `docs/specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md` — the driving spec
 
 ---
 

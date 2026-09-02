@@ -4,7 +4,7 @@
 /**
  * launch-flow — the full agent launch sequence extracted from agent-view.tsx.
  *
- * Step 2 of specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
+ * Step 2 of docs/specs/SPEC_AGENT_VIEW_MODULARIZATION_2026_04_13.md.
  *
  * Phases:
  *   0. Container agents require a container runtime (docker/podman/…).

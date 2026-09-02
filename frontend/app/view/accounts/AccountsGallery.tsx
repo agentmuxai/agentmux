@@ -6,7 +6,7 @@
  * Renders a grid of service logos, each with a badge showing how many accounts
  * are connected for that brand. Clicking a tile opens a small chooser of the
  * brand's auth modes (OAuth / Key); picking one opens the Add-account form
- * preset to that provider + kind. specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §3.
+ * preset to that provider + kind. docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §3.
  */
 
 import { createSignal, For, Show, type JSX } from "solid-js";

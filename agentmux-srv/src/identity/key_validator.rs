@@ -7,7 +7,7 @@
 //! authenticated request and maps the response to non-secret metadata
 //! (account name, scopes, etc.). This is the only outbound call the key
 //! flow makes, and it fires only on the user's explicit Validate click
-//! (see specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §5.1, §6).
+//! (see docs/specs/archive/SPEC_TRUST_CENTER_2026_06_15.md §5.1, §6).
 //!
 //! The plaintext key is passed in by value, used to build one request, and
 //! never logged. Callers must keep it out of logs/transcripts.

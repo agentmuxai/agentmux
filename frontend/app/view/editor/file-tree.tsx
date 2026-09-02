@@ -8,8 +8,8 @@
 // JS, no delay). SCSS rules in editor-view.scss scope `[data-tip]:hover::after`
 // to the file-tree-toolbar so they don't leak to the rest of the editor.
 //
-// Spec: specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
-// Context menu: specs/SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14.md
+// Spec: docs/specs/SPEC_EDITOR_FILE_TREE_2026-05-26.md
+// Context menu: docs/specs/SPEC_FILE_TREE_CONTEXT_MENU_2026_06_14.md
 
 import { createEffect, createMemo, createSignal, For, Show, type JSX } from "solid-js";
 import { FileTreeModel, isHiddenName, joinPath, type Root } from "./file-tree-model";

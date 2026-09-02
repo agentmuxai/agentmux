@@ -43,7 +43,7 @@ pub struct AgentDefinition {
     /// env var keys (AGENTMUX_AGENT_ID), and cross-references.
     /// NEVER changes after creation — distinct from `name` which is
     /// the renameable display. See
-    /// specs/SPEC_AGENT_IDENTITY_RESTRUCTURE_2026_04_14.md.
+    /// docs/specs/SPEC_AGENT_IDENTITY_RESTRUCTURE_2026_04_14.md.
     #[serde(default)]
     pub slug: String,
     pub name: String,

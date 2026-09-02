@@ -14,7 +14,7 @@ path = "src/main.rs"
 # manage srv + host concurrently and (in later sub-PRs) host the
 # named-pipe IPC server. Prior to Phase B the launcher was a tiny
 # sync DLL-path-fixup + spawner; now it's the privileged owner per
-# specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md.
+# docs/specs/SPEC_WINDOW_PROCESS_STATE_MACHINE_2026_04_27.md.
 tokio = { version = "1", features = [
     "rt-multi-thread",
     "macros",
