@@ -722,7 +722,7 @@ pub fn tear_off_sc_move_handshake(
 
 /// Install the global mouse hook for an ordinary in-strip tab drag —
 /// the cross-window tab remount gesture
-/// (specs/SPEC_CROSS_WINDOW_TAB_REMOUNT_2026_07_11 §4.1). Called by the
+/// (docs/specs/SPEC_CROSS_WINDOW_TAB_REMOUNT_2026_07_11 §4.1). Called by the
 /// frontend at tab-drag start; the hook self-uninstalls on mouseup/ESC,
 /// with stop_tab_drag_tracking as the dragend belt-and-suspenders.
 /// No-op on non-Windows (the hook layer is win32-only until the

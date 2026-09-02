@@ -25,9 +25,10 @@ Project documentation organized by type.
 
 Spec `**Status:**` lines use a closed vocabulary (`draft | proposed | active | implemented | living | historical | superseded`) — the rule, and the reader guardrail that goes with it, live in [`docs/specs/README.md`](docs/specs/README.md#status-field).
 
-In practice nearly all specs — draft and implemented alike — live under `docs/specs/`, not the
-top-level `specs/` directory; treat the latter as legacy/lower-traffic rather than "the approved
-tier." There is no `docs-internal/` directory in this repo.
+All specs live under `docs/specs/`. The top-level `specs/` tree was merged into it
+(2026-09-01) — a doc's lifecycle is its `**Status:**` line, not the directory it sits in,
+and the two had come to contradict each other. See [`docs/specs/README.md`](specs/README.md)
+for why. There is no `docs-internal/` directory in this repo.
 
 **Note (2026-08-03):** this directory list and the specs-location claim above were themselves
 found stale during a docs-lifecycle audit — see
