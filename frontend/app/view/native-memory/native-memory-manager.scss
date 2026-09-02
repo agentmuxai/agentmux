@@ -210,6 +210,18 @@
     border: 1px solid var(--border-color);
 }
 
+// Icon + input + clear button grouped as one flex child of the bar — see
+// MemoryAgentFilterBar.tsx's own comment on why (a narrow-pane
+// flex-basis:100% rule needs to apply to this trio atomically, not race
+// the icon for a spot on the same line).
+.memory-agent-filter-search {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    flex: 1;
+    min-width: 0;
+}
+
 .memory-agent-filter-icon {
     flex-shrink: 0;
     font-size: 11px;
@@ -276,6 +288,19 @@
     }
 }
 
+// Compact label ("Mem") shown only at narrow pane widths, in place of — not
+// instead of — the full "Has memories" text (Codex P2, PR #2929: hiding the
+// label entirely left sighted, non-screen-reader users with an unmarked
+// checkbox; `aria-hidden` here since the checkbox's own `aria-label`
+// already covers assistive tech regardless of which span is visible).
+.memory-agent-filter-toggle-label-compact {
+    display: none;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+
 // Sort control — far right, after the input/clear button/toggle
 // (`margin-left: auto` keeps it pinned right regardless of which of those
 // are currently rendered). Same layout convention as .agent-picker-sort.
@@ -316,39 +341,46 @@
     }
 }
 
-// ── Filter bar — narrow panes (Codex P2×2, PR #2929) ─────────────────────────
+// ── Filter bar — narrow panes (Codex/ReAgent, PR #2929 — three rounds) ──────
 // Panes go down to 128px in either dimension (MinNodeSizePx,
 // frontend/layout/lib/layoutResize.ts) — well below the app's existing
 // `armory` container breakpoints (767px/479px, armory-view.scss). At a 128px
 // pane the grid-view's own padding + this bar's padding leaves roughly 86px
-// of content width (empirically confirmed via a live Chromium harness, not
-// just arithmetic — see the PR discussion). Wrapping alone (the first pass
-// at this fix) was NOT enough: the toggle row still measured ~108px and the
-// sort row ~130px, both still wider than the 86px they'd wrap onto — a
-// second Codex pass caught that the first fix only moved the overflow onto
-// its own line rather than eliminating it. This version additionally drops
-// the toggle's and sort's TEXT labels (checkbox/select stay, now the only
-// content on their row) and lets the select itself shrink to the row's
-// full width instead of sizing to its longest option's text.
+// of content width — verified with a live Chromium harness at every round
+// below, not just arithmetic (see the PR discussion for each measurement).
+//
+// Round 1 (wrap only) still overflowed: the toggle row measured ~108px and
+// the sort row ~130px, both wider than the 86px they'd wrap onto.
+// Round 2 (this block, minus the .memory-agent-filter-search wrapper below)
+// fixed the width but broke row grouping: `flex-basis: 100%` on the INPUT
+// alone let the icon claim an empty first line by itself, pushing the input
+// to its own second line — two flex items can't both claim the full row.
+// Round 3 groups icon+input+clear-button into one `.memory-agent-filter-search`
+// flex child (see the .tsx and its base-rule comment above) so the
+// narrow-width `flex-basis: 100%` below applies to that trio atomically, and
+// swaps the toggle's hidden text for the compact "Mem" label above instead
+// of leaving the checkbox with no visible indicator at all.
 @container armory (max-width: 359px) {
     .memory-agent-filter-bar {
         flex-wrap: wrap;
     }
 
-    // Icon + input take the full first row.
-    .memory-agent-filter-input {
+    // Icon + input + clear button (as one flex child) take the full first row.
+    .memory-agent-filter-search {
         flex-basis: 100%;
     }
 
-    // Second row: just the checkbox — see MemoryAgentFilterBar.tsx's own
-    // comment on why the checkbox carries an explicit aria-label rather
-    // than relying on this now-hidden span for accessible labeling.
+    // Second row: checkbox + compact "Mem" label.
     .memory-agent-filter-toggle {
         border-left: none;
         padding-left: 0;
 
-        span {
+        .memory-agent-filter-toggle-label-full {
             display: none;
+        }
+
+        .memory-agent-filter-toggle-label-compact {
+            display: inline;
         }
     }
 
