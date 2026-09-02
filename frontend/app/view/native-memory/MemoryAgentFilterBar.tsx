@@ -70,6 +70,13 @@ export const MemoryAgentFilterBar = (props: MemoryAgentFilterBarProps): JSX.Elem
                     type="checkbox"
                     checked={props.onlyWithMemories()}
                     onChange={(e) => props.onOnlyWithMemoriesChange(e.currentTarget.checked)}
+                    // The text label hides at narrow pane widths (Codex P2,
+                    // PR #2929 — the toggle+sort row overflows a 128px pane
+                    // otherwise); this keeps the checkbox labeled for a11y
+                    // independent of the sibling <span>'s visibility, since
+                    // `display: none` on that span also removes it from the
+                    // accessibility tree, not just the visual layout.
+                    aria-label="Has memories"
                 />
                 <span>Has memories</span>
             </label>
