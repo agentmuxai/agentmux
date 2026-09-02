@@ -1,5 +1,22 @@
 # AgentMux Version History
 
+## 0.55.32 — 2026-09-02
+
+- docs: merge the top-level specs/ tree into docs/specs/ (cleanup batch C)
+- fix(agent): hide Working row once a tool is promoted to the dock; move it above the composer
+- docs: close out the docs cleanup plan with batch C
+- ci: gate that a cited docs/specs path actually resolves
+- test(bashwrap): retry any nonzero exit in the a1 e2e test, not just idle-kill
+- test(frontend): give the tool-renderer parity test a liveness timeout (#2919)
+- fix(memory): agent:memory RPC handlers never adopted #2901's blank-workdir fix
+- feat(tabs): default tab names are "Tab 1", "Tab 2", not "tab1", "tab2"
+- fix(agent): retry a compaction_started ping missed before turn-phase reconciliation
+- feat(armory): find/filter and sort for Personal Memory, mirroring My Agents
+- fix(reactive): deliver inter-agent messages to subprocess/container agents instead of dropping them on a PTY fallback
+- feat(armory): reactive updates across the Armory (live-refreshing Personal Memory, Global Memory, ABF, MCP Servers, Skills)
+- fix(container): mount the bound account's credentials and the agent workspace into container agents
+
+
 ## 0.55.31 — 2026-09-01
 
 - fix(agent): agent.open looked for the CLI at a path that never existed
