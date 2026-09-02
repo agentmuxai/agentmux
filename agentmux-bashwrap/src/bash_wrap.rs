@@ -3585,7 +3585,29 @@ mod tests {
                 );
                 continue;
             }
-            assert_eq!(result, 0, "command should exit cleanly");
+            if result != 0 {
+                // Retried for the same reason 124 is, immediately above: on a
+                // loaded runner bash can fail to start cleanly, and from here
+                // that is indistinguishable from being idle-killed.
+                //
+                // This was `assert_eq!(result, 0, "command should exit cleanly")`,
+                // which failed the whole test on attempt 1 and bypassed
+                // MAX_ATTEMPTS entirely. The retry loop existed but covered only
+                // two of the three flaky outcomes, and the one it missed is the
+                // one that fired — exit 1, failing a docs-only PR that touched
+                // no Rust at all (issue #2916). A retry loop that does not cover
+                // the case that actually happens is decoration.
+                //
+                // A genuinely broken build still fails: every one of
+                // MAX_ATTEMPTS must exit nonzero, and the panic below reports
+                // the last outcome, which a bare assert_eq! never did.
+                last_outcome = format!(
+                    "attempt {attempt}/{MAX_ATTEMPTS}: command exited {result}, expected 0 \
+                     (likely a loaded CI runner failing to spawn bash cleanly)"
+                );
+                eprintln!("{last_outcome} — retrying");
+                continue;
+            }
 
             let blob = String::from_utf8_lossy(&buffered.lock().await).into_owned();
             let occurrences = blob.matches("Installing deps").count();
