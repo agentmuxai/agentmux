@@ -26,6 +26,28 @@
 # Usage:
 #   bash scripts/gen-docs-index.sh          # rewrite the generated section
 #   bash scripts/gen-docs-index.sh --check  # fail if it would change (CI)
+#
+# MERGE CONFLICT IN INDEX.md? Do not hand-resolve it.
+#
+#   git checkout --ours docs/specs/INDEX.md && bash scripts/gen-docs-index.sh
+#
+# Either side is equally wrong once both branches have added specs, and the
+# generated content is a pure function of the tree — so regenerating after
+# taking either side is always correct, and hand-merging never is. This is a
+# committed generated file, so any two PRs that add a spec conflict here; the
+# conflict is expected and costs one command.
+#
+# Two failure modes worth knowing, both hit while building this:
+#
+#   - CI tests the PR MERGE commit, not your branch head. If --check passes
+#     locally and fails on CI, your branch is stale: git will happily merge a
+#     new spec's ROW in from main while keeping YOUR section header count, so
+#     the merged file is internally inconsistent in a way neither parent was.
+#     Merge main, regenerate. The "N specs" line printed on every run is the
+#     fastest way to spot it — a count differing from yours means exactly this.
+#   - Verifying with a `(?<!...)` lookbehind silently finds nothing: ripgrep's
+#     default engine rejects lookaround, and a redirected stderr turns that
+#     parse error into a confident "0 matches".
 
 set -uo pipefail
 
