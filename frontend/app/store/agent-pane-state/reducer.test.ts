@@ -676,6 +676,61 @@ describe("agent-pane-state reducer", () => {
                 // through the same transition rather than silently drifting.
                 expect(s1.state.pendingCompactionPing).toBeNull();
             });
+
+            it("StreamUnsubscribe from a non-working phase ALSO clears a buffered ping (reagent P1 on PR #2928, round 2)", () => {
+                // The gap reagent found in the early same-ref no-op branch:
+                // pendingCompactionPing CAN be set while Idle (that's exactly
+                // the buffering condition), so unsubscribing (e.g. tab
+                // backgrounded pre-reconciliation) must still discard it —
+                // otherwise a later resubscribe + resumed content could
+                // retroactively promote the stale ping onto an unrelated turn.
+                const s0 = update(ready(100), { type: "CompactionStarted", trigger: "manual", at: 150 }, 150).state;
+                expect(s0.turnPhase.kind).toBe("Idle");
+                expect(s0.pendingCompactionPing).not.toBeNull();
+                const r = update(s0, { type: "StreamUnsubscribe", at: 200 });
+                expect(r.state.turnPhase.kind).toBe("Idle"); // unchanged — still not "working"
+                expect(r.state.pendingCompactionPing).toBeNull();
+            });
+
+            it("StreamUnsubscribe from a non-working phase with NOTHING buffered is still a true same-ref no-op", () => {
+                const s0 = ready(100);
+                const r = update(s0, { type: "StreamUnsubscribe", at: 200 });
+                expect(r.state).toBe(s0);
+                expect(r.events).toEqual([]);
+            });
+
+            it("TurnEnd while Disconnected ALSO clears a buffered ping (reagent P1 on PR #2928, round 2)", () => {
+                // Same gap as StreamUnsubscribe's early branch: a late TurnEnd
+                // ack arriving while Disconnected (a promotable-later phase)
+                // is a same-ref no-op for turnPhase, but is still an
+                // authoritative "this turn genuinely ended" signal that must
+                // discard any buffered ping.
+                //
+                // NOTE: `pendingCompactionPing` can't actually get buffered
+                // via a live CompactionStarted dispatch while Disconnected
+                // in today's system — StreamUnsubscribe always pairs
+                // Disconnected with `lastEventMs: null`, and CompactionStarted
+                // gates on `lastEventMs != null` before it ever reaches the
+                // buffering branch, so real-world reachability goes through
+                // StreamUnsubscribe's OWN early-branch fix instead (see the
+                // tests above). This test pins the defense-in-depth guard
+                // directly (mirrors the "StreamFlushObserved while ALREADY
+                // Streaming" test's same construction technique below) in
+                // case that invariant ever changes.
+                const s0 = update(streaming(100), { type: "StreamUnsubscribe", at: 140 }).state;
+                expect(s0.turnPhase.kind).toBe("Disconnected");
+                const withPending: AgentPaneState = { ...s0, pendingCompactionPing: { trigger: "auto", startedAt: 150 } };
+                const r = update(withPending, { type: "TurnEnd", stats: null }, 200);
+                expect(r.state.turnPhase.kind).toBe("Disconnected"); // unchanged
+                expect(r.state.pendingCompactionPing).toBeNull();
+            });
+
+            it("TurnEnd while Disconnected with NOTHING buffered is still a true same-ref no-op", () => {
+                const s0 = update(streaming(100), { type: "StreamUnsubscribe", at: 140 }).state;
+                const r = update(s0, { type: "TurnEnd", stats: null }, 200);
+                expect(r.state).toBe(s0);
+                expect(r.events).toEqual([]);
+            });
         });
 
         describe("CompactionBoundary", () => {

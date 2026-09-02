@@ -122,19 +122,18 @@ instead of an unconditional no-op, checks whether the current phase is one a *la
 authoritative signal could still legitimately promote for this same turn —
 `Idle` / `Disconnected` / `Done.completed` (exactly the set `StreamFlushObserved`'s own
 promotion arm already treats as promotable). If so, buffer onto
-`pendingCompactionPing` and emit a distinct `compaction-started-buffered` event
-(so `wasCompactionStartedAccepted` — which only recognizes `compaction-started` —
-correctly does *not* push a transcript node for an unconfirmed ping). Any other
-not-working phase (`Done.errored`/`stopped`/`interrupted`, `Interrupting`) is still a
-true no-op exactly as before — round 5's orphan-state guard: nothing can ever promote
-those back into working, so buffering there would just strand the field.
+`pendingCompactionPing` and emit a distinct `compaction-started-buffered` event (a
+diagnostic/test signal, not consumed by the frontend — see the transcript-node design
+below). Any other not-working phase (`Done.errored`/`stopped`/`interrupted`,
+`Interrupting`) is still a true no-op exactly as before — round 5's orphan-state
+guard: nothing can ever promote those back into working, so buffering there would
+just strand the field.
 
 **Promotion — two sites, both authoritative "this same turn is genuinely active"
 signals, mirroring `StreamFlushObserved`'s own existing promotion standard:**
 - `ReconcileTurnActive(active: true)`, on its `Idle`/`Done.completed` → `Streaming`
   promotion: if `pendingCompactionPing` is set, apply it into `compacting` and emit
-  `compaction-started` (in addition to `turn-active-reconciled`) so the transcript
-  node still gets pushed, from this dispatch's own returned events.
+  `compaction-started` (in addition to `turn-active-reconciled`).
 - `StreamFlushObserved`'s existing `Idle`/`Disconnected`/`Submitting`/`Done.completed`
   → `Streaming` promotion arm: same treatment — resumed live content is proof the
   turn is genuinely active, exactly the standard that arm already uses for promoting
@@ -157,11 +156,37 @@ signals, mirroring `StreamFlushObserved`'s own existing promotion standard:**
   confirmed already finished — nothing left to promote); preserves it, mirroring
   `preservesNewerCompaction`'s existing pattern, when the boundary is for an older
   compaction than the one currently buffered.
-- Every other "whatever compaction was in flight is now moot" terminal transition
-  that already clears `compacting: null` (`StreamUnsubscribe`, `TurnEnd`, `TurnReset`,
-  `TurnStartFailed`, `InterruptTimeoutElapsed`, `SubmitTimeoutElapsed`, and
-  `FailureObserved`'s `turnWasEnded` branch) clears `pendingCompactionPing` the same
-  way, for the same reasoning.
+- Every "whatever compaction was in flight is now moot" terminal transition that
+  already clears `compacting: null` (`TurnReset`, `TurnStartFailed`,
+  `InterruptTimeoutElapsed`, `SubmitTimeoutElapsed`, and `FailureObserved`'s
+  `turnWasEnded` branch, plus the main/working-phase paths of `StreamUnsubscribe` and
+  `TurnEnd`) clears `pendingCompactionPing` the same way.
+- `StreamUnsubscribe`'s and `TurnEnd`'s *early same-ref no-op branches* — reached when
+  the phase is ALREADY non-working (`!wasWorking` / already `Disconnected`) — also
+  clear `pendingCompactionPing` when it's set (reagent P1, PR #2928, a second review
+  round after the main fix landed): these branches predate this field and previously
+  assumed "no in-flight turn ⇒ nothing to clear," which no longer holds now that a
+  ping can legitimately be buffered while `Idle`/`Disconnected`. Left unfixed, a pane
+  backgrounded (or a late TurnEnd ack landing) while a ping was buffered could carry
+  it forward to be wrongly promoted onto a later, unrelated turn on resubscribe —
+  the same failure class as the `TurnStart` gap above, reached via a different path.
+
+**Transcript node** — the "Compacting conversation…" node is pushed by
+`useCompactionStream.ts` watching the reactive `compacting` signal itself (kept in
+sync with `state.compacting` by `registerAgentPane`'s generic per-field projection,
+regardless of which dispatch changed it) and firing whenever it transitions from
+`null` to set — not by inspecting any one dispatch's returned events. This detail
+changed after review (reagent P1, PR #2928, a third round): the promotion sites live
+in `agent-view.tsx` (`ReconcileTurnActive`) and `stream-flush-queue.ts`
+(`StreamFlushObserved`), neither of which has access to this hook's document queue or
+dedup cache, and neither actually captured its dispatch's return value — so the
+transcript node was silently never pushed for a promoted (as opposed to live-accepted)
+ping, even though `state.compacting` was set correctly. Watching the signal instead of
+each call site closes this for every current AND future promotion path uniformly, with
+no per-call-site wiring needed. `wasCompactionStartedAccepted` (the old accept-check
+helper) is removed as part of this — the signal-driven push makes it structurally
+unreachable to push a node for a rejected-or-merely-buffered ping, so there's nothing
+left for it to guard against.
 
 No change to `isStaleVsLastBoundary`, `resolveCompactionStart`'s staleness window, or
 any of the 11 prior `CompactionStarted`/`CompactionBoundary` race-hardening rounds —

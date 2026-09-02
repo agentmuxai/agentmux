@@ -156,10 +156,26 @@ export function update(
             const wasWorking =
                 k === "Submitting" || k === "Streaming" || k === "Interrupting";
             if (!wasWorking) {
-                // Same-ref no-op for Idle / Done / Disconnected. There
-                // is no in-flight turn so per-turn sidecars are already
-                // cleared. No event either — the unsubscribe is non-news.
-                return { state, events: [] };
+                // reagent P1 on PR #2928: `pendingCompactionPing` CAN be set
+                // here — that's exactly the buffering condition
+                // CompactionStarted adds for Idle/Disconnected/Done.completed
+                // (see that case). The old "no in-flight turn so per-turn
+                // sidecars are already cleared" premise predates this field
+                // and no longer holds for it: an unsubscribe while a ping is
+                // buffered (e.g. tab backgrounded pre-reconciliation) must
+                // still discard it, or a later resubscribe + resumed content
+                // (StreamFlushObserved's Idle→Streaming promotion) would
+                // retroactively — and wrongly — promote a stale ping onto
+                // whatever unrelated turn comes next.
+                if (state.pendingCompactionPing == null) {
+                    // True same-ref no-op for Idle / Done / Disconnected
+                    // with nothing buffered — the unsubscribe is non-news.
+                    return { state, events: [] };
+                }
+                return {
+                    state: { ...state, pendingCompactionPing: null },
+                    events: [{ type: "stream-unsubscribed", at: command.at }],
+                };
             }
             const reason: DisconnectReason = "stream-unsubscribed";
             const lastKind = k as KindBeforeDisconnect;
@@ -629,7 +645,19 @@ export function update(
             // outcome; the late ack is informational. Same-ref no-op
             // preserves both the phase and the cleared legacy fields.
             if (state.turnPhase.kind === "Disconnected") {
-                return { state, events: [] };
+                // reagent P1 on PR #2928: same gap as StreamUnsubscribe's
+                // early-return branch above — `pendingCompactionPing` can be
+                // set while Disconnected (a promotable-later phase per
+                // CompactionStarted's buffering condition), and this late
+                // TurnEnd ack IS an authoritative "this turn genuinely
+                // ended" signal even though the phase itself stays
+                // Disconnected. Clear it so a later StreamSubscribe +
+                // resumed content can't retroactively promote a stale ping
+                // onto whatever unrelated turn comes next.
+                if (state.pendingCompactionPing == null) {
+                    return { state, events: [] };
+                }
+                return { state: { ...state, pendingCompactionPing: null }, events: [] };
             }
             // Dual-write outcome: stop-in-flight → "stopped"; otherwise
             // "completed". "interrupted" / "errored" are reserved for
