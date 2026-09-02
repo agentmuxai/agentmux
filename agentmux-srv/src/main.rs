@@ -86,6 +86,12 @@ async fn main() {
 
     let state = bootstrap::build_app_state(&config, version.clone(), stores, bg, &net, &reducer);
 
+    // Upgrade reactive message delivery now that AppState exists, so agents on a
+    // SubprocessController (every container agent, plus codex/gemini/qwen/kimi/
+    // muxcode/antigravity on the host) can actually receive inter-agent
+    // messages instead of having them dropped on a PTY fallback they reject.
+    bootstrap::install_agent_turn_delivery(&state);
+
     // Out-of-band native-memory write detection (fast fs-watch path + slow
     // reconciliation-sweep path) — see
     // docs/specs/SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md §4.5.

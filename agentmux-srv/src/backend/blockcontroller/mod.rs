@@ -359,6 +359,7 @@ pub fn send_input(block_id: &str, input: BlockInputUnion, seq: Option<u64>) -> R
 }
 
 /// How a controller-aware agent message was delivered.
+#[derive(Debug)]
 pub enum AgentDelivery {
     /// Delivered on the controller's structured input channel — a persistent
     /// stream-json stdin line or an ACP `session/prompt`. No PTY keystrokes are
@@ -1004,5 +1005,71 @@ mod tests {
             serde_json::from_value(history[0].data.clone().unwrap()).unwrap();
         assert_eq!(replayed.blockid, "block-persist-test");
         assert!(replayed.turn_active);
+    }
+
+    // ── Subprocess agents are unreachable via this primitive alone ──────────
+    // Regression lock for
+    // docs/reports/REPORT_JEKT_DELIVERY_DROPS_SUBPROCESS_AGENTS_2026_09_02.md.
+    // These two tests together are the whole bug: `deliver_agent_message` hands
+    // a SubprocessController to the PTY fallback, and a SubprocessController
+    // refuses PTY input — so every inter-agent message to one was dropped.
+    // `bootstrap::install_agent_turn_delivery` is what closes the gap, by
+    // running a real turn instead of falling through to keystrokes.
+
+    fn subprocess_controller(block_id: &str) -> Arc<subprocess::SubprocessController> {
+        Arc::new(subprocess::SubprocessController::new(
+            "tab-jekt".to_string(),
+            block_id.to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Arc::from("test-boot"),
+        ))
+    }
+
+    /// Half one: this primitive has no structured route to a subprocess agent.
+    /// If someone later teaches it one, this test should be updated together
+    /// with the bootstrap installer — not deleted on its own.
+    #[test]
+    fn deliver_agent_message_has_no_structured_route_to_a_subprocess_agent() {
+        let block_id = "block-jekt-subprocess-delivery";
+        register_controller(block_id, subprocess_controller(block_id));
+
+        let delivery = deliver_agent_message(block_id, "hello from another agent")
+            .expect("controller is registered, so lookup must succeed");
+
+        assert!(
+            matches!(delivery, AgentDelivery::Pty),
+            "a SubprocessController still falls back to PTY here; the turn-based              route lives in bootstrap::install_agent_turn_delivery",
+        );
+
+        remove_controller_entry_only(block_id);
+    }
+
+    /// Half two: and that fallback is not merely suboptimal — it is refused, so
+    /// the message reaches the agent not at all rather than late.
+    #[test]
+    fn and_the_pty_fallback_that_implies_is_refused_outright() {
+        let ctrl = subprocess_controller("block-jekt-subprocess-refusal");
+
+        let err = ctrl
+            .send_input(BlockInputUnion::data(b"hello from another agent".to_vec()), None)
+            .expect_err("subprocess controllers take turns, not keystrokes");
+
+        assert!(
+            err.contains("does not accept raw input"),
+            "expected the raw-input refusal, got {err:?}",
+        );
+    }
+
+    /// Controllers that DO have a structured channel must keep the behavior they
+    /// had — the fix adds a branch, it does not reroute persistent/ACP agents.
+    #[test]
+    fn a_missing_controller_is_still_an_error_not_a_silent_pty_fallback() {
+        let err = deliver_agent_message("block-that-was-never-registered", "hi")
+            .expect_err("an unregistered block has nowhere to deliver to");
+        assert!(err.contains("no controller for block"), "got {err:?}");
     }
 }

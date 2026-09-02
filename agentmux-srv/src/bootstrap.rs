@@ -1791,3 +1791,126 @@ pub fn spawn_wal_checkpoint_loop(
         }
     });
 }
+
+/// Give the reactive handler a delivery route to `SubprocessController` agents.
+///
+/// `spawn_background_subsystems` installs a message sender that can only reach
+/// the two controller kinds `deliver_agent_message` knows about — persistent
+/// (stream-json stdin) and ACP (`session/prompt`). Everything else it reports as
+/// [`AgentDelivery::Pty`], so the caller falls back to keystroke injection.
+///
+/// That fallback is wrong for a `SubprocessController`, which has no PTY and
+/// rejects raw input outright ("subprocess controller does not accept raw input;
+/// use AgentInputCommand"). The result was that EVERY inter-agent message to
+/// such an agent was dropped: 6 of 10 providers as host agents (codex, gemini,
+/// qwen, kimi, muxcode, antigravity) and every container agent of any provider,
+/// since `agent_open.rs` forces `controller_type = "subprocess"` for container
+/// mode. The swarm pane still listed them as present, because registration and
+/// delivery are separate paths. See
+/// `docs/reports/REPORT_JEKT_DELIVERY_DROPS_SUBPROCESS_AGENTS_2026_09_02.md`.
+///
+/// This re-installs the sender with the missing branch: a subprocess target gets
+/// a real turn via `run_agent_turn` — the same thing `AgentInputCommand` does
+/// when the operator types into the pane — instead of keystrokes it will refuse.
+///
+/// Must run AFTER `build_app_state`: unlike the early sender, the turn needs
+/// `AppState` (stores, identity, broker, container manager) and is async.
+pub fn install_agent_turn_delivery(state: &AppState) {
+    let deps = crate::server::agent_handlers::AgentTurnDeps::from_state(state);
+    state
+        .reactive_handler
+        .set_message_sender(Arc::new(move |block_id: &str, message: &str| {
+            // Persistent + ACP keep their existing structured delivery, and
+            // genuine PTY controllers (shell/term) keep falling back to
+            // keystrokes. Only the subprocess case changes.
+            let Some(ctrl) = backend::blockcontroller::get_controller(block_id) else {
+                return Err(format!("no controller for block {block_id}"));
+            };
+            let is_subprocess = ctrl
+                .as_any()
+                .downcast_ref::<backend::blockcontroller::subprocess::SubprocessController>()
+                .is_some();
+            if !is_subprocess {
+                return match backend::blockcontroller::deliver_agent_message(block_id, message) {
+                    Ok(backend::blockcontroller::AgentDelivery::Structured) => Ok(true),
+                    Ok(backend::blockcontroller::AgentDelivery::Pty) => Ok(false),
+                    Err(e) => Err(e),
+                };
+            }
+
+            // `MessageSender` is synchronous but starting a turn is not, so this
+            // waits for the turn to START and reports what actually happened.
+            //
+            // It must NOT spawn-and-return-`Ok(true)` optimistically (codex P1 on
+            // PR #2930). `success` is not advisory: `cloud_subscriber` treats a
+            // successful delivery as final and releases the claim back to pending
+            // for retry ONLY when `!delivery.success`
+            // (`muxbus/cloud_subscriber.rs`). Reporting success before the
+            // fallible work ran would therefore turn every transient failure —
+            // stale block meta, an oauth spawn-gate refusal, Docker down,
+            // `ensure_running` failing — into a WAN message that is marked
+            // delivered, never retried, and permanently lost. An honest `Err` here
+            // is what lets that message come back.
+            //
+            // `block_in_place` yields this worker thread back to the runtime for
+            // the duration, so other tasks keep running. The cost is real and
+            // worth naming: `inject_message_inner` calls this while holding the
+            // reactive `Handler` mutex, so a slow start (first-time container
+            // image pull is the pathological case — everything else is a block
+            // read plus an already-running `docker exec`) serializes other
+            // injections behind it. Bounded stalling beats silent loss.
+            //
+            // `run_agent_turn` returns once the turn has been STARTED, not once
+            // the agent has answered, so this is not waiting on model latency.
+            //
+            // `TurnRegistration::Skip` is LOAD-BEARING, not a tidy-up. We are
+            // running under that same non-reentrant `Mutex<Handler>`, so the
+            // registration tail's `get_global_handler().register_agent(...)`
+            // would try to re-lock a mutex this very thread already holds and
+            // wedge the reactive handler process-wide (reagent P0 on PR #2930).
+            // It is also simply redundant here: this block was resolved BY an
+            // `agent_to_block` lookup in that handler, so the agent is
+            // registered by construction. Do not "simplify" this to Register.
+            let Ok(handle) = tokio::runtime::Handle::try_current() else {
+                return Err(
+                    "no tokio runtime available to start a subprocess agent turn".to_string(),
+                );
+            };
+            // `block_in_place` panics on a current-thread runtime. Production is
+            // multi-thread (`#[tokio::main]`); refusing loudly on the other flavor
+            // is correct, since the alternative is the optimistic lie above.
+            if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::CurrentThread {
+                return Err(
+                    "cannot start a subprocess agent turn from a current-thread runtime"
+                        .to_string(),
+                );
+            }
+            let deps = deps.clone();
+            let block_id_owned = block_id.to_string();
+            let message = message.to_string();
+            tracing::info!(
+                block_id = %block_id_owned,
+                "reactive delivery: starting subprocess agent turn (no PTY fallback)"
+            );
+            let started = tokio::task::block_in_place(|| {
+                handle.block_on(crate::server::agent_handlers::run_agent_turn(
+                    &deps,
+                    block_id_owned.clone(),
+                    message,
+                    None,
+                    crate::server::agent_handlers::TurnRegistration::Skip,
+                ))
+            });
+            match started {
+                Ok(()) => Ok(true),
+                Err(e) => {
+                    tracing::error!(
+                        block_id = %block_id_owned,
+                        error = %e,
+                        "reactive delivery: subprocess agent turn failed to start"
+                    );
+                    Err(e)
+                }
+            }
+        }));
+}
