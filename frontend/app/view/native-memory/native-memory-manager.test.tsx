@@ -16,6 +16,12 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+function cardTitlesInOrder(container: HTMLElement): string[] {
+    return Array.from(container.querySelectorAll(".memory-agent-card-title")).map(
+        (el) => el.textContent ?? "",
+    );
+}
+
 const listAgentDefinitionsMock = vi.fn();
 const nativeMemoryListMock = vi.fn();
 
@@ -49,6 +55,7 @@ beforeEach(() => {
     nativeMemoryListMock.mockReset();
     listAgentDefinitionsMock.mockResolvedValue([agent("a1", "Manoz"), agent("a2", "AgentY")]);
     nativeMemoryListMock.mockResolvedValue({ files: [] });
+    localStorage.clear();
 });
 
 describe("NativeMemoryManager — agent grid", () => {
@@ -128,6 +135,163 @@ describe("NativeMemoryManager — agent grid", () => {
         render(() => <NativeMemoryManager />);
         expect(await screen.findByText("Couldn't read memories")).toBeInTheDocument();
         expect(await screen.findByText("1 file")).toBeInTheDocument();
+    });
+});
+
+// docs/specs/SPEC_ARMORY_PERSONAL_MEMORY_FILTER_AND_SORT_2026_09_02.md
+describe("NativeMemoryManager — filter and sort", () => {
+    test("filters the grid by name, case-insensitively", async () => {
+        listAgentDefinitionsMock.mockResolvedValue([
+            agent("a1", "Manoz"),
+            agent("a2", "AgentY"),
+            agent("a3", "Nark"),
+        ]);
+        render(() => <NativeMemoryManager />);
+        await screen.findByText("Manoz");
+
+        fireEvent.input(screen.getByTestId("memory-agent-filter-input"), { target: { value: "MAN" } });
+
+        // "Manoz" contains "MAN" case-insensitively; "AgentY" and "Nark" do not.
+        expect(await screen.findByText("Manoz")).toBeInTheDocument();
+        expect(screen.queryByText("AgentY")).toBeNull();
+        expect(screen.queryByText("Nark")).toBeNull();
+    });
+
+    test("clearing the filter (button) restores the full grid", async () => {
+        render(() => <NativeMemoryManager />);
+        await screen.findByText("Manoz");
+
+        const input = screen.getByTestId("memory-agent-filter-input") as HTMLInputElement;
+        fireEvent.input(input, { target: { value: "Manoz" } });
+        expect(screen.queryByText("AgentY")).toBeNull();
+
+        fireEvent.click(screen.getByTestId("memory-agent-filter-clear"));
+        expect(input.value).toBe("");
+        expect(await screen.findByText("AgentY")).toBeInTheDocument();
+    });
+
+    test("Escape clears the filter without hiding the bar", async () => {
+        render(() => <NativeMemoryManager />);
+        await screen.findByText("Manoz");
+
+        const input = screen.getByTestId("memory-agent-filter-input") as HTMLInputElement;
+        fireEvent.input(input, { target: { value: "Manoz" } });
+        fireEvent.keyDown(input, { key: "Escape" });
+
+        expect(input.value).toBe("");
+        expect(await screen.findByText("AgentY")).toBeInTheDocument();
+        expect(screen.getByTestId("memory-agent-filter-bar")).toBeInTheDocument();
+    });
+
+    test("filtering to zero matches shows a distinct 'no match' message", async () => {
+        render(() => <NativeMemoryManager />);
+        await screen.findByText("Manoz");
+
+        fireEvent.input(screen.getByTestId("memory-agent-filter-input"), {
+            target: { value: "nonexistent" },
+        });
+
+        expect(await screen.findByText('No agents match "nonexistent"')).toBeInTheDocument();
+        // Distinct from the zero-agents-total empty state.
+        expect(screen.queryByText("No agents defined yet.")).toBeNull();
+    });
+
+    test("name sort orders the grid alphabetically", async () => {
+        listAgentDefinitionsMock.mockResolvedValue([agent("a1", "Zed"), agent("a2", "Alpha")]);
+        const { container } = render(() => <NativeMemoryManager />);
+        await screen.findByText("Zed");
+
+        expect(cardTitlesInOrder(container)).toEqual(["Alpha", "Zed"]);
+    });
+
+    test("provider sort groups by provider, then name within each group", async () => {
+        listAgentDefinitionsMock.mockResolvedValue([
+            { id: "a1", name: "Zed", slug: "a1", provider: "claude" } as AgentDefinition,
+            { id: "a2", name: "Beta", slug: "a2", provider: "claude" } as AgentDefinition,
+            { id: "a3", name: "Alpha", slug: "a3", provider: "codex" } as AgentDefinition,
+        ]);
+        const { container } = render(() => <NativeMemoryManager />);
+        await screen.findByText("Zed");
+
+        fireEvent.change(screen.getByTestId("memory-agent-sort-select"), { target: { value: "provider" } });
+
+        expect(cardTitlesInOrder(container)).toEqual(["Beta", "Zed", "Alpha"]);
+    });
+
+    test("count sort ranks resolved counts first (descending), then loading, then error — never mixed", async () => {
+        nativeMemoryListMock.mockImplementation((_c: unknown, req: { agent_id: string }) => {
+            if (req.agent_id === "a1") return Promise.resolve({ files: [{ filename: "x" }] }); // 1 file
+            if (req.agent_id === "a2")
+                return Promise.resolve({ files: [{ filename: "x" }, { filename: "y" }] }); // 2 files
+            if (req.agent_id === "a3") return Promise.reject(new Error("boom")); // error
+            return new Promise(() => {}); // a4: never resolves — stays "loading"
+        });
+        listAgentDefinitionsMock.mockResolvedValue([
+            agent("a1", "OneFile"),
+            agent("a2", "TwoFiles"),
+            agent("a3", "Errored"),
+            agent("a4", "Stuck"),
+        ]);
+        const { container } = render(() => <NativeMemoryManager />);
+        await screen.findByText("2 files");
+        await screen.findByText("Couldn't read memories");
+
+        fireEvent.change(screen.getByTestId("memory-agent-sort-select"), { target: { value: "count" } });
+
+        expect(cardTitlesInOrder(container)).toEqual(["TwoFiles", "OneFile", "Stuck", "Errored"]);
+    });
+
+    test("'Has memories' hides zero-count cards but never loading or error ones", async () => {
+        nativeMemoryListMock.mockImplementation((_c: unknown, req: { agent_id: string }) => {
+            if (req.agent_id === "a1") return Promise.resolve({ files: [{ filename: "x" }] }); // has memories
+            if (req.agent_id === "a2") return Promise.resolve({ files: [] }); // zero — should hide
+            if (req.agent_id === "a3") return Promise.reject(new Error("boom")); // error — must stay visible
+            return new Promise(() => {}); // a4 — stuck loading, must stay visible
+        });
+        listAgentDefinitionsMock.mockResolvedValue([
+            agent("a1", "HasFiles"),
+            agent("a2", "Empty"),
+            agent("a3", "Errored"),
+            agent("a4", "Stuck"),
+        ]);
+        render(() => <NativeMemoryManager />);
+        await screen.findByText("HasFiles");
+        await screen.findByText("Couldn't read memories");
+
+        fireEvent.click(screen.getByTestId("memory-agent-filter-toggle").querySelector("input")!);
+
+        expect(screen.getByText("HasFiles")).toBeInTheDocument();
+        expect(screen.queryByText("Empty")).toBeNull();
+        expect(screen.getByText("Errored")).toBeInTheDocument();
+        expect(screen.getByText("Stuck")).toBeInTheDocument();
+    });
+
+    test("sort choice persists across a remount; filter text and the toggle do not", async () => {
+        const first = render(() => <NativeMemoryManager />);
+        await screen.findByText("Manoz");
+
+        fireEvent.change(screen.getByTestId("memory-agent-sort-select"), { target: { value: "provider" } });
+        fireEvent.input(screen.getByTestId("memory-agent-filter-input"), { target: { value: "Manoz" } });
+        fireEvent.click(screen.getByTestId("memory-agent-filter-toggle").querySelector("input")!);
+        first.unmount();
+
+        render(() => <NativeMemoryManager />);
+        await screen.findByText("Manoz");
+
+        expect((screen.getByTestId("memory-agent-sort-select") as HTMLSelectElement).value).toBe("provider");
+        expect((screen.getByTestId("memory-agent-filter-input") as HTMLInputElement).value).toBe("");
+        expect(
+            (screen.getByTestId("memory-agent-filter-toggle").querySelector("input") as HTMLInputElement).checked,
+        ).toBe(false);
+    });
+
+    test("the filter bar does not render in the per-agent detail view", async () => {
+        nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md" }] });
+        render(() => <NativeMemoryManager />);
+        fireEvent.click(await screen.findByText("Manoz"));
+
+        expect(await screen.findByText("← All agents")).toBeInTheDocument();
+        expect(screen.queryByTestId("memory-agent-filter-bar")).toBeNull();
     });
 });
 
