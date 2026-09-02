@@ -192,3 +192,214 @@
     font-weight: 600;
     color: var(--main-text-color);
 }
+
+// ── Filter bar (2026-09-02) ──────────────────────────────────────────────
+// Mirrors the Agent pane's .agent-picker-filter-bar metrics/tokens
+// (frontend/app/view/agent/styles/_picker.scss) without reusing that
+// component — see MemoryAgentFilterBar.tsx's own doc comment for why, and
+// docs/specs/SPEC_ARMORY_PERSONAL_MEMORY_FILTER_AND_SORT_2026_09_02.md.
+
+.memory-agent-filter-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    width: 100%;
+    padding: var(--space-1) var(--space-2);
+    margin-bottom: var(--space-2);
+    background: color-mix(in srgb, var(--accent-color) 6%, var(--main-bg-color));
+    border: 1px solid var(--border-color);
+}
+
+// Icon + input + clear button grouped as one flex child of the bar — see
+// MemoryAgentFilterBar.tsx's own comment on why (a narrow-pane
+// flex-basis:100% rule needs to apply to this trio atomically, not race
+// the icon for a spot on the same line).
+.memory-agent-filter-search {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    flex: 1;
+    min-width: 0;
+}
+
+.memory-agent-filter-icon {
+    flex-shrink: 0;
+    font-size: 11px;
+    color: var(--secondary-text-color);
+    opacity: 0.7;
+}
+
+.memory-agent-filter-input {
+    flex: 1;
+    min-width: 0;
+    background: var(--main-bg-color);
+    color: var(--main-text-color);
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    padding: 3px var(--space-1-5);
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.15s;
+
+    &:focus {
+        border-color: var(--accent-color);
+    }
+}
+
+.memory-agent-filter-clear {
+    flex-shrink: 0;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 0;
+    cursor: default;
+    color: var(--secondary-text-color);
+    font-size: 14px;
+    line-height: 1;
+    transition: background 0.1s, color 0.1s, border-color 0.1s;
+
+    &:hover {
+        background: color-mix(in srgb, var(--error-color) 15%, transparent);
+        border-color: color-mix(in srgb, var(--error-color) 40%, transparent);
+        color: var(--error-color);
+    }
+}
+
+.memory-agent-filter-toggle {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding-left: var(--space-2);
+    border-left: 1px solid var(--border-color);
+    font-size: 12px;
+    color: var(--secondary-text-color);
+    cursor: default;
+    white-space: nowrap;
+
+    input[type="checkbox"] {
+        cursor: default;
+    }
+}
+
+// Compact label ("Mem") shown only at narrow pane widths, in place of — not
+// instead of — the full "Has memories" text (Codex P2, PR #2929: hiding the
+// label entirely left sighted, non-screen-reader users with an unmarked
+// checkbox; `aria-hidden` here since the checkbox's own `aria-label`
+// already covers assistive tech regardless of which span is visible).
+.memory-agent-filter-toggle-label-compact {
+    display: none;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+
+// Sort control — far right, after the input/clear button/toggle
+// (`margin-left: auto` keeps it pinned right regardless of which of those
+// are currently rendered). Same layout convention as .agent-picker-sort.
+.memory-agent-sort {
+    flex-shrink: 0;
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding-left: var(--space-2);
+    border-left: 1px solid var(--border-color);
+}
+
+.memory-agent-sort-label {
+    flex-shrink: 0;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--secondary-text-color);
+    opacity: 0.75;
+}
+
+.memory-agent-sort-select {
+    background: var(--main-bg-color);
+    color: var(--main-text-color);
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    padding: 2px var(--space-1);
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+    cursor: default;
+    transition: border-color 0.15s;
+
+    &:focus {
+        border-color: var(--accent-color);
+    }
+}
+
+// ── Filter bar — narrow panes (Codex/ReAgent, PR #2929 — three rounds) ──────
+// Panes go down to 128px in either dimension (MinNodeSizePx,
+// frontend/layout/lib/layoutResize.ts) — well below the app's existing
+// `armory` container breakpoints (767px/479px, armory-view.scss). At a 128px
+// pane the grid-view's own padding + this bar's padding leaves roughly 86px
+// of content width — verified with a live Chromium harness at every round
+// below, not just arithmetic (see the PR discussion for each measurement).
+//
+// Round 1 (wrap only) still overflowed: the toggle row measured ~108px and
+// the sort row ~130px, both wider than the 86px they'd wrap onto.
+// Round 2 (this block, minus the .memory-agent-filter-search wrapper below)
+// fixed the width but broke row grouping: `flex-basis: 100%` on the INPUT
+// alone let the icon claim an empty first line by itself, pushing the input
+// to its own second line — two flex items can't both claim the full row.
+// Round 3 groups icon+input+clear-button into one `.memory-agent-filter-search`
+// flex child (see the .tsx and its base-rule comment above) so the
+// narrow-width `flex-basis: 100%` below applies to that trio atomically, and
+// swaps the toggle's hidden text for the compact "Mem" label above instead
+// of leaving the checkbox with no visible indicator at all.
+@container armory (max-width: 359px) {
+    .memory-agent-filter-bar {
+        flex-wrap: wrap;
+    }
+
+    // Icon + input + clear button (as one flex child) take the full first row.
+    .memory-agent-filter-search {
+        flex-basis: 100%;
+    }
+
+    // Second row: checkbox + compact "Mem" label.
+    .memory-agent-filter-toggle {
+        border-left: none;
+        padding-left: 0;
+
+        .memory-agent-filter-toggle-label-full {
+            display: none;
+        }
+
+        .memory-agent-filter-toggle-label-compact {
+            display: inline;
+        }
+    }
+
+    // Third row: just the select, full width — no "Sort" label, no
+    // left border/margin (nothing to visually separate from at this width).
+    .memory-agent-sort {
+        border-left: none;
+        padding-left: 0;
+        margin-left: 0;
+        width: 100%;
+    }
+
+    .memory-agent-sort-label {
+        display: none;
+    }
+
+    .memory-agent-sort-select {
+        flex: 1 1 auto;
+        min-width: 0;
+        width: 100%;
+    }
+}
