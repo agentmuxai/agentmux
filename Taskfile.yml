@@ -201,6 +201,15 @@ tasks:
             See docs/specs/PLAN_DOCS_CLEANUP_EXECUTION_2026_09_01.md batch E.
         cmd: bash scripts/check-doc-status.sh
 
+    check:spec-citations:
+        desc: >-
+            Gate — fails if a CHANGED file cites a `docs/specs/*.md` path that
+            does not exist. Scoped to the diff for the same reason as
+            check:doc-status: 89 files carry a dangling citation today, so a
+            repo-wide gate would fail every PR on somebody else's rot and be
+            switched off. See docs/specs/PLAN_DOCS_CLEANUP_EXECUTION_2026_09_01.md.
+        cmd: bash scripts/check-spec-citations.sh
+
     check:scrollbar-cursor:
         desc: >-
             Grep gate — fails if a scrollbar/os-scrollbar selector sets
