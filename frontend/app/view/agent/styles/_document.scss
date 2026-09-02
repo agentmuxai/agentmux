@@ -4,19 +4,27 @@
 // Document container + status log (terminal-style). Wrapped in .agent-view so the cascade chain matches
 // the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
 .agent-view {
-    // Matches .agent-document::-webkit-scrollbar's width (app.scss) — shared
-    // here so .agent-working-row-anchor (_control-bar.scss) can inset itself
-    // by exactly this much and never paint over the scrollbar gutter, instead
-    // of fighting it with z-index. See that selector's own comment for the
-    // z-index-obscures-scrollbar bug this closes.
+    // Drives .agent-document::-webkit-scrollbar's width/height (app.scss).
+    // It had a second consumer until 2026-09-01: .agent-working-row-anchor
+    // inset itself by exactly this much so the floating working row could
+    // never paint over the scrollbar gutter. The row is no longer inside
+    // this box (SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md), so
+    // nothing needs to dodge the gutter any more and this is now purely the
+    // scrollbar's own dimension.
     --agent-document-scrollbar-width: 14px;
 
-    // Wraps AgentDocumentView + the AgentWorkingRow anchor — takes over the
-    // flex-1 slot .agent-document used to occupy directly. .agent-document
-    // fills this box via position:absolute so AgentWorkingRow can float
-    // over its bottom edge instead of shrinking it as a normal-flow
-    // sibling — the scrollbar now reaches this box's true bottom edge.
-    // See docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md §3.2.
+    // Wraps AgentDocumentView — takes over the flex-1 slot .agent-document
+    // used to occupy directly. .agent-document fills this box via
+    // position:absolute.
+    //
+    // The absolute fill is a leftover requirement rather than a live one:
+    // it existed so AgentWorkingRow could float over this box's bottom edge
+    // without shrinking it, letting the scrollbar reach the true bottom
+    // (SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md §3.2).
+    // With the row moved out to normal flow above the composer, this box has
+    // exactly one child and nothing overlays it — the wrapper is kept because
+    // the padding/containment/stacking rules below hang off the inner element
+    // and unpicking that is a separate change with no user-visible payoff.
     .agent-document-scroll-region {
         position: relative;
         // Establishes a real stacking context (position + z-index together,

@@ -219,16 +219,25 @@
         &--worked {
             color: var(--secondary-text-color);
             justify-content: space-between;
-            // Opaque — this row floats over the scrollable message list now
+            // Opaque background, with the dimming applied to the text-bearing
+            // children below rather than to the whole row.
+            //
+            // History: opacity DID live on the whole row back when it was a
+            // normal-flow sibling with nothing behind it. When the row became
+            // an overlay floating over the message list
             // (SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md
-            // §3.2). Opacity used to live on the whole row when it was a
-            // normal-flow sibling with nothing behind it; now that scrolled
-            // history passes underneath, dimming the WHOLE row (background
-            // included) let that history bleed through and visually
-            // distort the "Worked · Ns" text. Background stays fully
-            // opaque; opacity moves onto the text-bearing children below so
-            // the same dimmed look is preserved without exposing what's
-            // scrolling past behind it. --block-bg-color is only 50% alpha
+            // §3.2), dimming the whole row let scrolled history bleed through
+            // and visually distort the "Worked · Ns" text, so the opacity was
+            // pushed down onto the children.
+            //
+            // The row is a normal-flow sibling again as of
+            // SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md, so that
+            // specific bleed-through can no longer happen — but this split is
+            // kept deliberately rather than reverted: it renders identically,
+            // and an opaque band directly above the composer is what makes the
+            // row read as its own zone instead of picking up whatever sits
+            // behind the pane at low --window-opacity.
+            // --block-bg-color is only 50% alpha
             // (confirmed via computed style) — not opaque enough. Reagent
             // P1 on a later round: --main-bg-color isn't opaque either — it's
             // `rgba(34, 34, 34, var(--window-opacity, 0.45))`, alpha-aware
