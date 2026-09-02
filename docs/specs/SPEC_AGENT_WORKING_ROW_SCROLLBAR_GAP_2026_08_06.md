@@ -1,7 +1,9 @@
 # Spec: Continuous AgentWorkingRow background through the scrollbar gutter
 
 **Date:** 2026-08-06
-**Status:** superseded — by `SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md` (2026-09-01).
+**Status:** superseded — 2026-09-01, see `Superseded-by:` below.
+**Superseded-by:** [`SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md`](./SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md)
+
 Was implemented in PR #2439 (backdrop-layer fix) and verified in code 2026-08-10.
 Superseded **in full**: every element this spec introduced — the
 `.agent-working-row-backdrop` layer, the anchor's scrollbar-width inset, and
