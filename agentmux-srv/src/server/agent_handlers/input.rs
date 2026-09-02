@@ -242,11 +242,35 @@ impl AgentTurnDeps {
 ///
 /// Extracted from the `agentinput` handler body with no behavior change so a
 /// second, non-RPC caller can reach it; see [`AgentTurnDeps`].
+/// Whether starting a turn should also (re-)register the agent for reactive
+/// delivery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnRegistration {
+    /// The RPC / UI path. Registers, exactly as `AgentInputCommand` always has.
+    Register,
+    /// The reactive-delivery path (`bootstrap::install_agent_turn_delivery`).
+    /// Skipping is required, for two independent reasons:
+    ///
+    /// 1. **Redundant.** That caller resolved this block *by looking the agent
+    ///    up in the reactive handler's own `agent_to_block` map*, so the agent
+    ///    is registered by construction. There is nothing to re-register.
+    /// 2. **Deadlock.** `ReactiveHandler::inject_message` holds the global
+    ///    `Mutex<Handler>` across the message-sender call, and that sender
+    ///    drives this function to completion on the same thread. The
+    ///    registration below calls `get_global_handler().register_agent(...)`,
+    ///    which locks that same `std::sync::Mutex` — which is NOT reentrant.
+    ///    Registering here would block the thread on a lock it already holds,
+    ///    wedging the reactive handler process-wide, on essentially every
+    ///    successful delivery to a subprocess agent (reagent P0 on PR #2930).
+    Skip,
+}
+
 pub async fn run_agent_turn(
     deps: &AgentTurnDeps,
     block_id: String,
     message: String,
     message_id: Option<String>,
+    registration: TurnRegistration,
 ) -> Result<(), String> {
     let AgentTurnDeps {
         wstore,
@@ -662,62 +686,67 @@ pub async fn run_agent_turn(
         return Err("controller is not a SubprocessController or PersistentSubprocessController".to_string());
     }
 
-    // Register with cloud subscriber + reactive handler so cloud-injected
-    // messages (e.g. GitHub PR review notifications) reach this agent.
-    // Uses agentName (the logical display name, e.g. "smike") as the key —
-    // matching the namespace used by reactive.rs:233 (`req.agent_id`) and the
-    // delivery path (`agent_to_block` keyed by lowercased logical agent_id).
-    // PR bodies embed $AGENTMUX_AGENT_ID (same value) so the cloud injection
-    // key and the poll key are always consistent.
-    // Both calls are idempotent: add_agent skips the WS send if already
-    // subscribed; register_agent replaces any stale mapping from a prior session.
-    let agent_name = crate::backend::obj::meta_get_string(
-        &block.meta, "agentName", "",
-    );
-    if !agent_name.is_empty() {
-        let registered = crate::backend::reactive::handler::get_global_handler()
-            .register_agent(&agent_name, &block_id, None);
-        if registered.is_ok() {
-            // Refresh the block's OWN captured identity too
-            // (reagentx P1, round 2 on #2697): this call runs on
-            // EVERY turn, using block.meta["agentName"] as the
-            // source of truth — which can diverge from whatever
-            // a PersistentSubprocessController captured at its
-            // original spawn_process call (rename, reconfigured
-            // cmd:env) without the block ever respawning. Without
-            // this, inject_message_inner's recipient-identity
-            // check (#2695) would compare the current (correct)
-            // target_agent against that stale spawn-time value
-            // and falsely reject the agent's own, correctly-
-            // addressed jekts as an identity mismatch. A no-op
-            // for controller types that don't override
-            // set_agent_id (e.g. SubprocessController).
-            if let Some(ctrl) = crate::backend::blockcontroller::get_controller(&block_id) {
-                ctrl.set_agent_id(Some(agent_name.clone()));
+    // Registration is skipped on the reactive-delivery path — see
+    // `TurnRegistration::Skip` for why that is both redundant AND a hard
+    // deadlock requirement, not an optimisation.
+    if matches!(registration, TurnRegistration::Register) {
+        // Register with cloud subscriber + reactive handler so cloud-injected
+        // messages (e.g. GitHub PR review notifications) reach this agent.
+        // Uses agentName (the logical display name, e.g. "smike") as the key —
+        // matching the namespace used by reactive.rs:233 (`req.agent_id`) and the
+        // delivery path (`agent_to_block` keyed by lowercased logical agent_id).
+        // PR bodies embed $AGENTMUX_AGENT_ID (same value) so the cloud injection
+        // key and the poll key are always consistent.
+        // Both calls are idempotent: add_agent skips the WS send if already
+        // subscribed; register_agent replaces any stale mapping from a prior session.
+        let agent_name = crate::backend::obj::meta_get_string(
+            &block.meta, "agentName", "",
+        );
+        if !agent_name.is_empty() {
+            let registered = crate::backend::reactive::handler::get_global_handler()
+                .register_agent(&agent_name, &block_id, None);
+            if registered.is_ok() {
+                // Refresh the block's OWN captured identity too
+                // (reagentx P1, round 2 on #2697): this call runs on
+                // EVERY turn, using block.meta["agentName"] as the
+                // source of truth — which can diverge from whatever
+                // a PersistentSubprocessController captured at its
+                // original spawn_process call (rename, reconfigured
+                // cmd:env) without the block ever respawning. Without
+                // this, inject_message_inner's recipient-identity
+                // check (#2695) would compare the current (correct)
+                // target_agent against that stale spawn-time value
+                // and falsely reject the agent's own, correctly-
+                // addressed jekts as an identity mismatch. A no-op
+                // for controller types that don't override
+                // set_agent_id (e.g. SubprocessController).
+                if let Some(ctrl) = crate::backend::blockcontroller::get_controller(&block_id) {
+                    ctrl.set_agent_id(Some(agent_name.clone()));
+                }
+                if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
+                    sub.add_agent(&agent_name);
+                }
+                // Also mirror into the per-channel + host-global
+                // shared file registries — this AgentInput/
+                // SubprocessController path (unlike ShellController/
+                // PersistentSubprocessController) previously only
+                // ever registered in the in-memory Tier-1 map,
+                // leaving it permanently unreachable via Tier 2/2b
+                // cross-instance/cross-channel delivery (reagent P1,
+                // third round on PR #2350).
+                let data_dir = crate::backend::base::get_wave_data_dir();
+                crate::backend::reactive::registry::write(
+                    &data_dir,
+                    &agent_name,
+                    &local_web_url,
+                    &block_id,
+                );
+                crate::backend::reactive::registry::write_shared_from_env(
+                    &agent_name,
+                    &local_web_url,
+                    &block_id,
+                );
             }
-            if let Some(sub) = crate::muxbus::cloud_subscriber::get_global_subscriber() {
-                sub.add_agent(&agent_name);
-            }
-            // Also mirror into the per-channel + host-global
-            // shared file registries — this AgentInput/
-            // SubprocessController path (unlike ShellController/
-            // PersistentSubprocessController) previously only
-            // ever registered in the in-memory Tier-1 map,
-            // leaving it permanently unreachable via Tier 2/2b
-            // cross-instance/cross-channel delivery (reagent P1,
-            // third round on PR #2350).
-            let data_dir = crate::backend::base::get_wave_data_dir();
-            crate::backend::reactive::registry::write(
-                &data_dir,
-                &agent_name,
-                &local_web_url,
-                &block_id,
-            );
-            crate::backend::reactive::registry::write_shared_from_env(
-                &agent_name,
-                &local_web_url,
-                &block_id,
-            );
         }
     }
 
@@ -816,7 +845,14 @@ pub fn register_agent_input_handlers(engine: &Arc<WshRpcEngine>, state: &AppStat
                 let cmd: CommandAgentInputData = serde_json::from_value(data)
                     .map_err(|e| format!("agentinput: {e}"))?;
                 tracing::info!(block_id = %cmd.blockid, "AgentInput");
-                run_agent_turn(&deps, cmd.blockid, cmd.message, cmd.message_id).await?;
+                run_agent_turn(
+                    &deps,
+                    cmd.blockid,
+                    cmd.message,
+                    cmd.message_id,
+                    TurnRegistration::Register,
+                )
+                .await?;
                 Ok(None)
             })
         }),

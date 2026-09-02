@@ -1862,6 +1862,15 @@ pub fn install_agent_turn_delivery(state: &AppState) {
             //
             // `run_agent_turn` returns once the turn has been STARTED, not once
             // the agent has answered, so this is not waiting on model latency.
+            //
+            // `TurnRegistration::Skip` is LOAD-BEARING, not a tidy-up. We are
+            // running under that same non-reentrant `Mutex<Handler>`, so the
+            // registration tail's `get_global_handler().register_agent(...)`
+            // would try to re-lock a mutex this very thread already holds and
+            // wedge the reactive handler process-wide (reagent P0 on PR #2930).
+            // It is also simply redundant here: this block was resolved BY an
+            // `agent_to_block` lookup in that handler, so the agent is
+            // registered by construction. Do not "simplify" this to Register.
             let Ok(handle) = tokio::runtime::Handle::try_current() else {
                 return Err(
                     "no tokio runtime available to start a subprocess agent turn".to_string(),
@@ -1889,6 +1898,7 @@ pub fn install_agent_turn_delivery(state: &AppState) {
                     block_id_owned.clone(),
                     message,
                     None,
+                    crate::server::agent_handlers::TurnRegistration::Skip,
                 ))
             });
             match started {

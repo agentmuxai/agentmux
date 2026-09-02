@@ -214,6 +214,46 @@ stalling is the right trade against silent, unretryable message loss.
 (`#[tokio::main]`), and the other flavor refuses loudly rather than falling back
 to the optimistic lie.
 
+### 4.2 Waiting on the same thread makes re-entrancy fatal
+
+Waiting for the turn creates a second hazard that spawning did not have, and it
+is a deadlock rather than a slowdown (reagent P0 on PR #2930).
+
+`ReactiveHandler::inject_message` holds the wrapper's `Mutex<Handler>` for the
+whole call, message sender included:
+
+```rust
+pub fn inject_message(&self, req: InjectionRequest) -> InjectionResponse {
+    self.inner.lock().unwrap().inject_message(req)
+}
+```
+
+Since the sender now drives `run_agent_turn` to completion **on that same
+thread**, anything that function touches re-enters under that held lock. Its
+tail does exactly that — `get_global_handler().register_agent(...)`, which locks
+the same `std::sync::Mutex`. That mutex is not reentrant, so the thread would
+block forever on a lock it already holds, wedging the reactive handler
+process-wide. It would fire on essentially every successful delivery to a
+subprocess agent (whenever `block.meta["agentName"]` is non-empty — the normal
+case): precisely the path this work exists to fix.
+
+The turn therefore takes a `TurnRegistration` argument. The RPC path passes
+`Register` and is byte-for-byte unchanged. The delivery path passes `Skip`,
+which is correct on two independent grounds — it avoids the re-entrancy, and it
+is redundant work anyway, since that caller resolved the block *by looking the
+agent up in the handler's own `agent_to_block` map* and so is delivering to an
+agent that is registered by construction.
+
+Only the registration tail touches the handler; the startup path itself (block
+read, identity injection, muxbus/bashwrap env, `ensure_running`, `spawn_turn` /
+`spawn_container_turn`) does not — verified by grep over `run_agent_turn`'s body
+and over `blockcontroller/subprocess/`, whose sibling `persistent.rs` and
+`shell/lifecycle.rs` *do* call the handler but are not on this path.
+
+`the_handler_lock_is_held_across_the_message_sender` pins the property that
+makes `Skip` mandatory, so that if delivery is ever moved outside the lock, the
+failing test is the signal that `Skip` can be revisited.
+
 ---
 
 ## 5. What this PR does not change

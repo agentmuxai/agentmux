@@ -2618,3 +2618,86 @@ fn test_marker_full_matrix_smoke() {
         }
     }
 }
+
+// ── The invariant behind TurnRegistration::Skip (reagent P0 on PR #2930) ─────
+//
+// `ReactiveHandler::inject_message` locks the wrapper's `Mutex<Handler>` for
+// the WHOLE call, message sender included. `bootstrap::install_agent_turn_
+// delivery`'s sender drives `run_agent_turn` to completion on that same
+// thread, and that function's tail would otherwise call
+// `get_global_handler().register_agent(...)` — re-locking a NON-reentrant
+// `std::sync::Mutex` the thread already holds, wedging the reactive handler
+// process-wide on every successful delivery to a subprocess agent.
+//
+// `TurnRegistration::Skip` is what prevents that, so this test pins the
+// property that makes it mandatory. If someone makes delivery happen outside
+// the lock, this test failing is the signal that `Skip` can be revisited.
+
+/// A second thread must NOT be able to acquire the handler while a message
+/// sender is running — i.e. the sender genuinely runs under the lock.
+#[test]
+fn the_handler_lock_is_held_across_the_message_sender() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let handler = std::sync::Arc::new(super::handler::ReactiveHandler::new());
+    handler.register_agent("agent1", "block1", None).unwrap();
+
+    // Signals the moment the sender is executing, and blocks it there so the
+    // probe below runs while the lock is definitely held.
+    let (in_sender_tx, in_sender_rx) = mpsc::channel::<()>();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let release_rx = std::sync::Mutex::new(release_rx);
+    handler.set_message_sender(std::sync::Arc::new(move |_block_id, _message| {
+        in_sender_tx.send(()).unwrap();
+        // Hold here until the probe has had its chance.
+        let _ = release_rx.lock().unwrap().recv_timeout(Duration::from_secs(5));
+        Ok(true)
+    }));
+
+    let injector_handler = handler.clone();
+    let injector = std::thread::spawn(move || {
+        injector_handler.inject_message(InjectionRequest {
+            target_agent: "agent1".to_string(),
+            message: "hello".to_string(),
+            source_agent: None,
+            request_id: None,
+            priority: None,
+            wait_for_idle: false,
+            ..Default::default()
+        })
+    });
+
+    // Only probe once the sender is demonstrably mid-flight. Spawning the probe
+    // any earlier races the injection for the lock and proves nothing — the
+    // first cut of this test did exactly that and self-reported a false
+    // "lock not held".
+    in_sender_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("message sender should have been invoked");
+
+    let probe_handler = handler.clone();
+    let (probe_done_tx, probe_done_rx) = mpsc::channel::<()>();
+    let probe = std::thread::spawn(move || {
+        // `list_agents` locks the same mutex, so this cannot return until the
+        // injection releases it.
+        let _ = probe_handler.list_agents();
+        let _ = probe_done_tx.send(());
+    });
+
+    // THE ASSERTION: with the sender mid-flight, another thread cannot get in.
+    // Only ever fails in the safe direction — if the lock were NOT held, the
+    // probe would return promptly regardless of machine speed.
+    assert!(
+        probe_done_rx.recv_timeout(Duration::from_millis(300)).is_err(),
+        "another thread acquired the handler while the message sender was          running — the lock is no longer held across delivery, so re-entrant          register_agent from run_agent_turn would no longer deadlock.          Re-evaluate TurnRegistration::Skip before relaxing it.",
+    );
+
+    // Let everything finish so the test doesn't leak threads.
+    let _ = release_tx.send(());
+    let _ = injector.join();
+    probe_done_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("probe must complete once the injection releases the lock");
+    let _ = probe.join();
+}
