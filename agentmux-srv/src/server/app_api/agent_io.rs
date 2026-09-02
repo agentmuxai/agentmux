@@ -326,8 +326,19 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         let volumes_json = obj::meta_get_string(&block.meta, "agent:container_volumes", "[]");
                         let volumes: Vec<String> = serde_json::from_str(&volumes_json).unwrap_or_default();
 
+                        // Same credential/workspace mounts the `agentinput` path
+                        // builds — see its comment. `CLAUDE_CONFIG_DIR` is a host
+                        // path stripped by CONTAINER_ENV_DENYLIST, so mounting it
+                        // is the only way the in-container CLI sees credentials.
+                        let mount_spec = crate::backend::container::ContainerMountSpec {
+                            claude_config_host_dir: env_vars
+                            .get("CLAUDE_CONFIG_DIR")
+                            .and_then(|d| crate::backend::container::credentials_dir_if_file_backed(d)),
+                            workspace_host_dir: Some(working_dir.clone()).filter(|d| !d.is_empty()),
+                        };
+
                         // Ensure container is alive (pull image if needed — P1b).
-                        cm.ensure_running(&container_name, &container_image, &volumes, &[]).await
+                        cm.ensure_running(&container_name, &container_image, &volumes, &[], &mount_spec).await
                             .map_err(|e| format!("container ensure_running failed: {e}"))?;
 
 

@@ -31,9 +31,173 @@ use bollard::exec::{CreateExecOptions, StartExecOptions, StartExecResults};
 use bollard::image::CreateImageOptions;
 use bollard::models::{HostConfig, Mount, MountTypeEnum};
 
+/// Where the agent CLI's config dir lives inside the image (`CLAUDE_CONFIG_DIR`).
+pub const CONTAINER_CLAUDE_DIR: &str = "/home/agent/.claude";
+/// Where the agent's working directory is bind-mounted inside the image.
+pub const CONTAINER_WORKSPACE_DIR: &str = "/workspace";
+
+/// Host directories a container agent needs mounted to be able to work.
+///
+/// Both were missing entirely before 2026-09-02, which is why container agents
+/// could never authenticate and always started with an empty `/workspace`. See
+/// `docs/reports/REPORT_CONTAINER_AGENT_CREDENTIALS_AND_WORKSPACE_2026_09_02.md`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ContainerMountSpec {
+    /// The bound Armory account's own resolved Claude config dir on the host —
+    /// i.e. whatever `CLAUDE_CONFIG_DIR` the identity resolver produced for this
+    /// agent. Its `.credentials.json` is bind-mounted into the container so the
+    /// CLI there reads the same token the Armory login wrote (see
+    /// [`agent_home_mounts`] for why it is that one file and not the whole dir).
+    ///
+    /// This is deliberately the ONE account's isolated dir, never the operator's
+    /// global `~/.claude` — reaching into that would be the credential leak the
+    /// named-volume design was avoiding.
+    ///
+    /// `None` keeps the old behavior (an empty per-agent named volume), which is
+    /// correct only for an agent with no bound oauth account.
+    pub claude_config_host_dir: Option<String>,
+    /// The agent's working directory on the host, bind-mounted at
+    /// [`CONTAINER_WORKSPACE_DIR`]. `None`/empty leaves `/workspace` empty, which
+    /// is what shipped before this existed.
+    pub workspace_host_dir: Option<String>,
+}
+
+/// Normalize a host path for Docker's mount API: backslashes are not accepted in
+/// a bind source, so `C:\Users\x` has to travel as `C:/Users/x`.
+fn normalize_host_path(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
+/// Canonical form of a mount source for comparison.
+///
+/// Case folding is Windows-only, deliberately (codex P2 on PR #2933). Docker on
+/// Windows can report a differently-cased drive letter than we asked for, so a
+/// case-sensitive compare there produces phantom drift and a needless recreate.
+/// Folding UNCONDITIONALLY is the opposite bug: on a case-sensitive host,
+/// switching an agent's workspace from `/work/Foo` to the genuinely different
+/// `/work/foo` would look like a match, `ensure_running` would skip the
+/// recreate, and `/workspace` would keep serving the old directory.
+fn fold_mount_source(source: &str) -> String {
+    let normalized = normalize_host_path(source);
+    if cfg!(windows) {
+        normalized.to_lowercase()
+    } else {
+        normalized
+    }
+}
+
+/// The credentials file inside the account's config dir, and inside the image.
+pub const CLAUDE_CREDENTIALS_FILE: &str = ".credentials.json";
+
+/// The account config dir to hand to [`ContainerMountSpec::claude_config_host_dir`],
+/// or `None` when this account has no file-backed credential to mount.
+///
+/// The existence check is load-bearing, not defensive tidiness (codex P1 on PR
+/// #2933). **On macOS Claude Code keeps OAuth credentials in the encrypted
+/// Keychain and never writes this file at all** — see
+/// `identity/resolver/oauth_probe.rs` and
+/// `docs/retro/retro-macos-keychain-credential-isolation-gap-2026-08-17.md`.
+/// Binding a source that does not exist makes Docker reject `create_container`
+/// outright, so an unguarded bind would turn "container agents cannot
+/// authenticate on macOS" into "container agents cannot START on macOS" — a
+/// strictly worse failure than the one this fix exists to remove.
+///
+/// Returning `None` degrades to exactly the previous behavior (an empty per-agent
+/// volume) instead, and logs why. Keychain-backed provisioning is a separate
+/// piece of work; this only guarantees we do not regress it.
+pub fn credentials_dir_if_file_backed(claude_config_host_dir: &str) -> Option<String> {
+    if claude_config_host_dir.is_empty() {
+        return None;
+    }
+    let creds = std::path::Path::new(claude_config_host_dir).join(CLAUDE_CREDENTIALS_FILE);
+    if creds.is_file() {
+        return Some(claude_config_host_dir.to_string());
+    }
+    tracing::warn!(
+        dir = %claude_config_host_dir,
+        "container agent: no {CLAUDE_CREDENTIALS_FILE} in the bound account's config dir — \
+         not mounting credentials (expected on macOS, where Claude Code stores them in the \
+         Keychain). The agent will start but will not be authenticated."
+    );
+    None
+}
+
+/// The mounts that make up the agent's home dir inside the container.
+///
+/// The per-agent named volume stays mounted at [`CONTAINER_CLAUDE_DIR`] exactly
+/// as before, and a bound account contributes ONE extra mount: its
+/// `.credentials.json`, bind-mounted as a single file on top of that volume.
+///
+/// Binding the account's whole config dir over `…/.claude` would be the more
+/// obvious shape, and it does NOT work — both failures verified live on
+/// 2026-09-02 against `ghcr.io/agentmuxai/agent-claude:latest`:
+///
+///  1. That dir's `projects` entry is a symlink into the shared identities tree,
+///     which does not resolve in-container (`ls` → "No such file or directory").
+///  2. Shadowing it with a nested volume at `…/.claude/projects` SILENTLY does
+///     not mount — Docker will not mount over a path that is a symlink inside a
+///     bind mount. `mount` shows only the parent 9p bind, and the CLI is left
+///     writing session state through the broken link. Chowning does not help;
+///     there is nothing there to chown.
+///
+/// Keeping the volume and binding just the credential file avoids both, and
+/// preserves the existing ownership story: the volume is initialised from the
+/// image, so `projects`/`sessions` stay writable by uid 1000. Verified end to
+/// end — a container agent using this shape completed a real turn against the
+/// bound account (`"result":"AUTH_OK"`, `is_error: false`).
+///
+/// Known limitation — HOST UID PARITY. A bind preserves the host file's owner
+/// and mode (`.credentials.json` is typically 0600), while the image always
+/// execs as `agent`, uid 1000. On a host whose AgentMux user is not uid 1000,
+/// the container cannot read the token and authentication stays broken there.
+///
+/// That is deliberately NOT worked around here. It is the container design's
+/// pre-existing, documented assumption — "`agent` non-root user (UID 1000) …
+/// Host filesystem UID parity" (SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md §
+/// "What claw's containers provide"; the Dockerfile renames node:22-slim's
+/// uid-1000 user for exactly this) — and the `/workspace` bind below has the
+/// identical problem: at uid != 1000 the agent cannot write its own workspace
+/// either. Special-casing credentials would fix one symptom of that assumption
+/// and leave the other, while adding a second provisioning path to maintain.
+/// The real fix is to exec as the host uid/gid, which is an architectural change
+/// affecting every mount, and belongs in its own PR.
+///
+/// Known limitation: a single-file bind follows the inode. If the CLI ever
+/// replaces `.credentials.json` by atomic rename rather than writing in place, a
+/// refreshed token would land on the host but not be seen by the running
+/// container until it is recreated. Reads — the case that was totally broken —
+/// are unaffected.
+fn agent_home_mounts(container_name: &str, spec: &ContainerMountSpec) -> Vec<Mount> {
+    let mut mounts = vec![Mount {
+        target: Some(CONTAINER_CLAUDE_DIR.to_string()),
+        source: Some(format!("agentmux-claude-{container_name}")),
+        typ: Some(MountTypeEnum::VOLUME),
+        read_only: Some(false),
+        ..Default::default()
+    }];
+
+    if let Some(host_dir) = spec.claude_config_host_dir.as_deref().filter(|d| !d.is_empty()) {
+        let host_dir = normalize_host_path(host_dir);
+        mounts.push(Mount {
+            target: Some(format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}")),
+            source: Some(format!("{}/{CLAUDE_CREDENTIALS_FILE}", host_dir.trim_end_matches('/'))),
+            typ: Some(MountTypeEnum::BIND),
+            // Writable: an in-place token refresh should reach the host copy
+            // rather than being silently confined to the container.
+            read_only: Some(false),
+            ..Default::default()
+        });
+    }
+    mounts
+}
+
 /// Env var names that reference host-filesystem paths and must NOT be forwarded
 /// into a container via `docker exec -e`. The container image supplies its own
 /// values for these (e.g. `CLAUDE_CONFIG_DIR=/home/agent/.claude` baked in).
+///
+/// `CLAUDE_CONFIG_DIR` being here is why a bound account's credentials cannot
+/// reach the container as an env var, and therefore why they are MOUNTED
+/// instead — see [`ContainerMountSpec::claude_config_host_dir`].
 pub const CONTAINER_ENV_DENYLIST: &[&str] = &[
     "CLAUDE_CONFIG_DIR",
     "GH_CONFIG_DIR",
@@ -190,6 +354,7 @@ impl ContainerManager {
         image: &str,
         volumes: &[String],
         env_vars: &[(String, String)],
+        spec: &ContainerMountSpec,
     ) -> Result<(), ContainerError> {
         // Acquire the per-container serialization lock before touching Docker.
         // Concurrent callers for the same container_name queue here; once the
@@ -203,7 +368,7 @@ impl ContainerManager {
         };
         let guard = container_lock.lock().await;
 
-        let result = self.ensure_running_locked(container_name, image, volumes, env_vars).await;
+        let result = self.ensure_running_locked(container_name, image, volumes, env_vars, spec).await;
 
         // Release the per-container lock, then evict its map entry when no other
         // caller is queued on it — otherwise `ensure_locks` grows unbounded (one
@@ -233,12 +398,32 @@ impl ContainerManager {
         image: &str,
         volumes: &[String],
         env_vars: &[(String, String)],
+        spec: &ContainerMountSpec,
     ) -> Result<(), ContainerError> {
         // Always query Docker — do not rely on an in-memory cache. The container
         // can be stopped or removed externally (e.g. `docker rm -f`), and a
         // stale cache entry would cause ensure_running to silently no-op while
         // a subsequent exec call fails.
         let existing = self.find_container(container_name).await?;
+
+        // A container created before this agent had credentials (or a workspace)
+        // keeps those mounts for its whole life — `docker` cannot add a mount to
+        // an existing container. Without this check the fix would silently never
+        // reach any agent whose container is already up, which is every agent
+        // that has ever run. Recreate on drift; the per-agent named volume
+        // carries session/project state across the swap.
+        let existing = match existing {
+            Some(_) if !self.mounts_match(container_name, spec).await => {
+                tracing::info!(
+                    container = container_name,
+                    "container mounts differ from the desired spec (credentials/workspace) — recreating"
+                );
+                let _ = self.stop(container_name, 10).await;
+                self.remove(container_name, true).await?;
+                None
+            }
+            other => other,
+        };
 
         match existing {
             Some(status) if status == "running" => {
@@ -258,7 +443,7 @@ impl ContainerManager {
                 // is absent. pull_image is a no-op when the image already exists.
                 self.pull_image(image).await?;
                 // Create and start.
-                self.create_and_start(container_name, image, volumes, env_vars).await?;
+                self.create_and_start(container_name, image, volumes, env_vars, spec).await?;
                 tracing::info!(container = container_name, image = image, "created and started container");
             }
         }
@@ -585,6 +770,79 @@ impl ContainerManager {
 
     // ---- private helpers ----
 
+    /// Every mount target this module owns. Anything NOT in here (the caller's
+    /// `agent:container_volumes`) is the user's business and is never a reason
+    /// to rebuild their container.
+    fn owned_mount_targets() -> [String; 3] {
+        [
+            CONTAINER_CLAUDE_DIR.to_string(),
+            format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}"),
+            CONTAINER_WORKSPACE_DIR.to_string(),
+        ]
+    }
+
+    /// The `(target -> source)` this module wants mounted for `spec`. A target
+    /// absent from the map is one that must NOT be mounted.
+    fn desired_owned_mounts(
+        container_name: &str,
+        spec: &ContainerMountSpec,
+    ) -> HashMap<String, String> {
+        let mut desired: HashMap<String, String> = agent_home_mounts(container_name, spec)
+            .into_iter()
+            .filter_map(|m| Some((m.target?, m.source?)))
+            .collect();
+        if let Some(dir) = spec.workspace_host_dir.as_deref().filter(|d| !d.is_empty()) {
+            desired.insert(CONTAINER_WORKSPACE_DIR.to_string(), normalize_host_path(dir));
+        }
+        desired
+    }
+
+    /// Does the existing container already carry exactly the mounts `spec` asks
+    /// for? Used to decide whether an agent that is already up has to be
+    /// recreated to pick up (or lose) credentials and a workspace.
+    ///
+    /// Compares the owned set in BOTH directions — a mount that should now be
+    /// ABSENT is drift too, not just a missing or changed one. That case is the
+    /// security-relevant one (reagent P1 on PR #2933): unbinding an agent's
+    /// Armory account is a normal transition that never reaches
+    /// `SpawnGateError::MissingCredentials` (that gate fires when credentials
+    /// are expected and missing, not when an agent legitimately has none). A
+    /// presence-only check would leave the old account's `.credentials.json`
+    /// bind-mounted and WRITABLE in the running container forever, so every
+    /// later turn would keep authenticating — and refreshing tokens — as the
+    /// account the operator just unbound.
+    ///
+    /// Only this module's own targets are considered; the caller's extra
+    /// `container_volumes` are ignored, so a user adding an unrelated mount is
+    /// never a reason to destroy and rebuild their container underneath them.
+    ///
+    /// Fails SAFE: any inspect error or missing data returns `true` ("matches"),
+    /// leaving the container alone. A spurious recreate kills a live agent and
+    /// loses its container-local state, which is worse than one more restart on
+    /// a stale mount.
+    async fn mounts_match(&self, container_name: &str, spec: &ContainerMountSpec) -> bool {
+        let Ok(details) = self.inner.docker.inspect_container(container_name, None).await else {
+            return true;
+        };
+        let Some(actual) = details.mounts else {
+            return true;
+        };
+
+        let source_at = |target: &str| -> Option<String> {
+            actual
+                .iter()
+                .find(|m| m.destination.as_deref() == Some(target))
+                .and_then(|m| m.name.clone().or_else(|| m.source.clone()))
+                .map(|s| fold_mount_source(&s))
+        };
+
+        let desired = Self::desired_owned_mounts(container_name, spec);
+        Self::owned_mount_targets().iter().all(|target| {
+            let want = desired.get(target).map(|s| fold_mount_source(s));
+            source_at(target) == want
+        })
+    }
+
     /// Returns the container status string ("running", "exited", …) or `None` if not found.
     async fn find_container(&self, name: &str) -> Result<Option<String>, ContainerError> {
         let mut filters = HashMap::new();
@@ -660,6 +918,7 @@ impl ContainerManager {
         image: &str,
         volumes: &[String],
         env_vars: &[(String, String)],
+        spec: &ContainerMountSpec,
     ) -> Result<(), ContainerError> {
         // A container name can be reused: `ensure_running` detects an
         // externally removed container and recreates it under the same name.
@@ -697,18 +956,16 @@ impl ContainerManager {
             })
         }).collect();
 
-        // claude-config named volume: ensure ~/.claude persists across container restarts.
-        // Using a named volume (not a host bind mount) avoids credential leakage from the
-        // host's .claude directory into the container.
-        let mut all_mounts = vec![
-            Mount {
-                target: Some("/home/agent/.claude".to_string()),
-                source: Some(format!("agentmux-claude-{container_name}")),
-                typ: Some(MountTypeEnum::VOLUME),
+        let mut all_mounts = agent_home_mounts(container_name, spec);
+        if let Some(workspace) = spec.workspace_host_dir.as_deref().filter(|d| !d.is_empty()) {
+            all_mounts.push(Mount {
+                target: Some(CONTAINER_WORKSPACE_DIR.to_string()),
+                source: Some(normalize_host_path(workspace)),
+                typ: Some(MountTypeEnum::BIND),
                 read_only: Some(false),
                 ..Default::default()
-            },
-        ];
+            });
+        }
         all_mounts.extend(mounts);
 
         let config: Config<String> = Config {
@@ -895,6 +1152,201 @@ mod tests {
         assert_eq!(container_name_for_slug("agent1"), "agentmux-agent1");
     }
 
+    // ── Credential + workspace mounts ───────────────────────────────────────
+    // See docs/reports/REPORT_CONTAINER_AGENT_CREDENTIALS_AND_WORKSPACE_2026_09_02.md
+
+    fn mount_at<'a>(mounts: &'a [Mount], target: &str) -> Option<&'a Mount> {
+        mounts.iter().find(|m| m.target.as_deref() == Some(target))
+    }
+
+    /// THE fix: the bound account's `.credentials.json` is bind-mounted into the
+    /// container, so the CLI there reads the same token the Armory login wrote.
+    /// Without it a container agent authenticates NEVER — `CLAUDE_CONFIG_DIR` is
+    /// a host path and is stripped by CONTAINER_ENV_DENYLIST before exec.
+    #[test]
+    fn a_bound_accounts_credentials_file_is_bind_mounted_into_the_container() {
+        let spec = ContainerMountSpec {
+            claude_config_host_dir: Some(r"C:\Users\me\.agentmux\identities\acct\claude".into()),
+            workspace_host_dir: None,
+        };
+        let mounts = agent_home_mounts("agentmux-x", &spec);
+
+        let creds = mount_at(&mounts, "/home/agent/.claude/.credentials.json")
+            .expect("credentials must be mounted");
+        assert_eq!(creds.typ, Some(MountTypeEnum::BIND));
+        assert_eq!(
+            creds.source.as_deref(),
+            Some("C:/Users/me/.agentmux/identities/acct/claude/.credentials.json"),
+            "backslashes are not accepted in a Docker bind source",
+        );
+        assert_eq!(creds.read_only, Some(false), "an in-place token refresh must reach the host");
+    }
+
+    /// The named volume must REMAIN at ~/.claude. Binding the account's whole
+    /// config dir there instead looks tidier and is broken: its `projects` entry
+    /// is a symlink that does not resolve in-container, and a nested volume to
+    /// shadow it silently fails to mount (both verified live, 2026-09-02).
+    /// Keeping the volume is what leaves projects/sessions writable by uid 1000.
+    #[test]
+    fn the_claude_dir_itself_stays_the_per_agent_named_volume() {
+        let spec = ContainerMountSpec {
+            claude_config_host_dir: Some("/host/acct/claude".into()),
+            workspace_host_dir: None,
+        };
+        let mounts = agent_home_mounts("agentmux-x", &spec);
+
+        let claude = mount_at(&mounts, CONTAINER_CLAUDE_DIR).expect("claude dir mounted");
+        assert_eq!(
+            claude.typ,
+            Some(MountTypeEnum::VOLUME),
+            "must NOT become a bind of the host config dir — see agent_home_mounts",
+        );
+        assert_eq!(claude.source.as_deref(), Some("agentmux-claude-agentmux-x"));
+        assert!(
+            mount_at(&mounts, "/home/agent/.claude/projects").is_none(),
+            "a nested projects mount does not work and must not be reintroduced",
+        );
+    }
+
+    /// An agent with no bound account keeps exactly the shape that shipped
+    /// before — this fix adds a mount, it does not rewrite the existing one.
+    #[test]
+    fn without_a_bound_account_the_named_volume_shape_is_unchanged() {
+        let mounts = agent_home_mounts("agentmux-x", &ContainerMountSpec::default());
+
+        assert_eq!(mounts.len(), 1, "no credential bind");
+        let claude = mount_at(&mounts, CONTAINER_CLAUDE_DIR).expect("claude dir mounted");
+        assert_eq!(claude.typ, Some(MountTypeEnum::VOLUME));
+        assert_eq!(claude.source.as_deref(), Some("agentmux-claude-agentmux-x"));
+    }
+
+    /// An empty config dir is "no account", not a bind of "/.credentials.json".
+    #[test]
+    fn an_empty_config_dir_is_treated_as_no_bound_account() {
+        let spec = ContainerMountSpec {
+            claude_config_host_dir: Some(String::new()),
+            workspace_host_dir: None,
+        };
+        assert_eq!(agent_home_mounts("agentmux-x", &spec).len(), 1);
+    }
+
+    // ── Drift detection must be bidirectional ───────────────────────────────
+    // reagent P1 on PR #2933. `mounts_match` compares against these, so the
+    // desired-set logic is what the tests pin; the Docker inspect half needs a
+    // live daemon and is covered by the ignored integration test.
+
+    /// Unbinding an agent's Armory account must show up as drift. It is a normal
+    /// transition that never trips SpawnGateError::MissingCredentials, so if the
+    /// desired set still claimed a credentials mount — or if a presence-only
+    /// check ignored the now-absent one — the OLD account's token would stay
+    /// bind-mounted and writable in the running container forever.
+    #[test]
+    fn unbinding_an_account_drops_the_credentials_mount_from_the_desired_set() {
+        let bound = ContainerMountSpec {
+            claude_config_host_dir: Some("/host/acct/claude".into()),
+            workspace_host_dir: None,
+        };
+        let unbound = ContainerMountSpec::default();
+        let creds_target = format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}");
+
+        let while_bound = ContainerManager::desired_owned_mounts("agentmux-x", &bound);
+        assert_eq!(
+            while_bound.get(&creds_target).map(String::as_str),
+            Some("/host/acct/claude/.credentials.json"),
+        );
+
+        let after_unbind = ContainerManager::desired_owned_mounts("agentmux-x", &unbound);
+        assert!(
+            !after_unbind.contains_key(&creds_target),
+            "an unbound agent must want NO credentials mount — otherwise the old \
+             account stays authenticated inside the running container",
+        );
+        assert!(
+            ContainerManager::owned_mount_targets().contains(&creds_target),
+            "and that target must be one we compare, or its absence is never noticed",
+        );
+    }
+
+    /// Clearing the working directory is the same shape of transition.
+    #[test]
+    fn clearing_the_working_directory_drops_the_workspace_from_the_desired_set() {
+        let with_ws = ContainerMountSpec {
+            claude_config_host_dir: None,
+            workspace_host_dir: Some(r"C:\repo".into()),
+        };
+        let desired = ContainerManager::desired_owned_mounts("agentmux-x", &with_ws);
+        assert_eq!(desired.get(CONTAINER_WORKSPACE_DIR).map(String::as_str), Some("C:/repo"));
+
+        let without = ContainerManager::desired_owned_mounts("agentmux-x", &ContainerMountSpec::default());
+        assert!(!without.contains_key(CONTAINER_WORKSPACE_DIR));
+    }
+
+    /// The comparison set must stay scoped to this module's own mounts, so a
+    /// user's `container_volumes` can never trigger a rebuild of their container.
+    #[test]
+    fn only_this_modules_own_mount_targets_are_compared() {
+        let owned = ContainerManager::owned_mount_targets();
+        assert!(owned.contains(&CONTAINER_CLAUDE_DIR.to_string()));
+        assert!(owned.contains(&CONTAINER_WORKSPACE_DIR.to_string()));
+        assert!(owned.contains(&format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}")));
+        assert_eq!(owned.len(), 3, "a user volume target must never appear here");
+    }
+
+    /// macOS keeps OAuth credentials in the Keychain and never writes this file
+    /// (oauth_probe.rs). Binding a nonexistent source makes Docker refuse to
+    /// create the container, so an unguarded bind would turn "cannot
+    /// authenticate on macOS" into "cannot START on macOS".
+    #[test]
+    fn a_config_dir_with_no_credentials_file_is_not_offered_for_mounting() {
+        let dir = std::env::temp_dir().join("agentmux-creds-guard-empty");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _ = std::fs::remove_file(dir.join(CLAUDE_CREDENTIALS_FILE));
+
+        assert_eq!(
+            credentials_dir_if_file_backed(&dir.to_string_lossy()),
+            None,
+            "no credentials file (the macOS Keychain case) must not produce a bind",
+        );
+        assert_eq!(credentials_dir_if_file_backed(""), None);
+    }
+
+    /// …and when the file IS there, it is offered, so the fix still applies on
+    /// every platform that writes it.
+    #[test]
+    fn a_config_dir_holding_a_credentials_file_is_offered_for_mounting() {
+        let dir = std::env::temp_dir().join("agentmux-creds-guard-present");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(CLAUDE_CREDENTIALS_FILE), b"{}").unwrap();
+
+        assert_eq!(
+            credentials_dir_if_file_backed(&dir.to_string_lossy()).as_deref(),
+            Some(dir.to_string_lossy().as_ref()),
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Case folding must be Windows-only: on a case-sensitive host `/work/Foo`
+    /// and `/work/foo` are different directories, and folding them together
+    /// would hide real drift and leave /workspace on the stale one.
+    #[test]
+    fn mount_source_case_is_folded_only_where_the_filesystem_is_case_insensitive() {
+        let a = fold_mount_source("/work/Foo");
+        let b = fold_mount_source("/work/foo");
+        if cfg!(windows) {
+            assert_eq!(a, b, "windows paths are case-insensitive");
+        } else {
+            assert_ne!(a, b, "a case-sensitive host must see these as different mounts");
+        }
+        // Slash normalization is unconditional either way.
+        assert_eq!(fold_mount_source(r"C:\a\b"), fold_mount_source("C:/a/b"));
+    }
+
+    #[test]
+    fn host_paths_are_normalized_for_the_docker_mount_api() {
+        assert_eq!(normalize_host_path(r"C:\Users\me\dir"), "C:/Users/me/dir");
+        assert_eq!(normalize_host_path("/already/posix"), "/already/posix");
+    }
+
     #[test]
     fn test_parse_volume_spec_unix_named() {
         let (src, tgt, ro) = parse_volume_spec("myvolume:/data").unwrap();
@@ -975,9 +1427,9 @@ mod tests {
         let _ = cm.remove(name, true).await; // clean slate; ignore if absent
 
         // create path: pull + create + start
-        cm.ensure_running(name, image, &[], &[]).await.expect("ensure_running (create)");
+        cm.ensure_running(name, image, &[], &[], &ContainerMountSpec::default()).await.expect("ensure_running (create)");
         // reuse path: already running → must no-op, not error or re-create
-        cm.ensure_running(name, image, &[], &[]).await.expect("ensure_running (reuse)");
+        cm.ensure_running(name, image, &[], &[], &ContainerMountSpec::default()).await.expect("ensure_running (reuse)");
 
         // env reaches the in-container process via the Docker socket, not argv.
         // Drop the (unused) stdin half first: bollard's exec output stream does
