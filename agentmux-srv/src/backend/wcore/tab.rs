@@ -10,7 +10,7 @@ use crate::backend::storage::StoreError;
 use crate::backend::obj::*;
 
 /// Create a new tab in a workspace.
-/// If `tab_name` is empty, auto-generates "Untitled1", "Untitled2", etc.
+/// If `tab_name` is empty, auto-generates "Tab 1", "Tab 2", etc.
 /// If `pinned` is true, the tab goes into `pinnedtabids` instead of `tabids`.
 pub fn create_tab(store: &Store, ws_id: &str) -> Result<Tab, StoreError> {
     create_tab_with_opts(store, ws_id, "", false)
