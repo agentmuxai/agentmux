@@ -584,8 +584,20 @@ pub async fn run_agent_turn(
             );
             let volumes: Vec<String> = serde_json::from_str(&volumes_json).unwrap_or_default();
 
+            // Mount the bound account's credentials and the agent's working
+            // directory. `CLAUDE_CONFIG_DIR` was resolved into `env_vars` by the
+            // identity injection above, but it is a HOST path and so is stripped
+            // by CONTAINER_ENV_DENYLIST before exec — mounting it is the only way
+            // the in-container CLI ever sees `.credentials.json`. Without this a
+            // container agent authenticates never, no matter how many times the
+            // operator logs in via Armory.
+            let mount_spec = crate::backend::container::ContainerMountSpec {
+                claude_config_host_dir: env_vars.get("CLAUDE_CONFIG_DIR").cloned(),
+                workspace_host_dir: Some(working_dir.clone()).filter(|d| !d.is_empty()),
+            };
+
             // Ensure container is alive (pull image if needed — P1b).
-            if let Err(e) = cm.ensure_running(&container_name, &container_image, &volumes, &[]).await {
+            if let Err(e) = cm.ensure_running(&container_name, &container_image, &volumes, &[], &mount_spec).await {
                 // Surface the error in the agent pane before returning, so the user
                 // sees why the container failed (image not found, Docker down, etc.).
                 let error_frame = serde_json::json!({
