@@ -27,14 +27,14 @@ pub(super) fn handle_create_tab(state: &mut State, workspace_id: String, name: S
             version: v,
         }];
     };
-    // codex P2 #622: auto-generate `tabN` when name is empty,
+    // codex P2 #622: auto-generate `Tab N` when name is empty,
     // matching `wcore::create_tab`'s default-naming behaviour. The
     // counter uses the reducer's tab_ids length + 1 (matching the
     // old SQLite-side count: tabids.len() + pinnedtabids.len() + 1
     // — pinnedtabids stays at zero in production since pinning
     // was removed in E.2c.3b, so reducer-only counting matches).
     let resolved_name = if name.is_empty() {
-        format!("tab{}", workspace_record.tab_ids.len() + 1)
+        format!("Tab {}", workspace_record.tab_ids.len() + 1)
     } else {
         name
     };
@@ -1091,12 +1091,12 @@ mod tests {
         }
     }
 
-    /// codex P2 #622: empty name auto-generates `tabN`, mirroring
+    /// codex P2 #622: empty name auto-generates `Tab N`, mirroring
     /// `wcore::create_tab`'s default-naming behaviour. Without this,
     /// CreateWindow's "fresh workspace" path + TearOffBlock's new tab
     /// would land with blank titles — a user-visible regression.
     #[test]
-    fn create_tab_auto_generates_tabN_when_name_empty() {
+    fn create_tab_auto_generates_tab_n_when_name_empty() {
         let mut state = State::default();
         let ws_id = create_workspace(&mut state, "w");
         let events = update(
@@ -1109,12 +1109,12 @@ mod tests {
         );
         match &events[0] {
             Event::TabCreated { name, tab_id, .. } => {
-                assert_eq!(name, "tab1", "first tab in fresh workspace");
-                assert_eq!(state.tabs[tab_id].name, "tab1");
+                assert_eq!(name, "Tab 1", "first tab in fresh workspace");
+                assert_eq!(state.tabs[tab_id].name, "Tab 1");
             }
             other => panic!("expected TabCreated, got {:?}", other),
         }
-        // Second empty-name CreateTab → "tab2".
+        // Second empty-name CreateTab → "Tab 2".
         let events = update(
             &mut state,
             Command::CreateTab {
@@ -1124,7 +1124,7 @@ mod tests {
             &ctx(3),
         );
         match &events[0] {
-            Event::TabCreated { name, .. } => assert_eq!(name, "tab2"),
+            Event::TabCreated { name, .. } => assert_eq!(name, "Tab 2"),
             other => panic!("expected TabCreated, got {:?}", other),
         }
         // Explicit non-empty name passes through verbatim.
