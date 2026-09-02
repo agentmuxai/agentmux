@@ -1,0 +1,196 @@
+# Spike: OpenRouter's Ori harness — does it change our integration story?
+
+**Status:** proposed — findings verified by running Ori 0.13.0 locally; the §6
+integration options have not been built.
+**Date:** 2026-09-02
+**Owner:** AgentY
+**Related:** [`SPEC_ADD_PROVIDERS_QWEN_AIDER_2026_06_02.md`](./SPEC_ADD_PROVIDERS_QWEN_AIDER_2026_06_02.md)
+(still `Status: Draft`) — its OpenRouter taxonomy is what this spike overturns,
+and [`SPEC_PROVIDER_MODELS_EFFORT_GENERALIZATION_2026-06-14.md`](./SPEC_PROVIDER_MODELS_EFFORT_GENERALIZATION_2026-06-14.md)
+(effort translation, §5).
+
+---
+
+## 0. Why this exists
+
+The 2026-06 spec drew this taxonomy:
+
+```
+harness (Qwen Code | aider | ...)  ->  LLM gateway (OpenRouter / LiteLLM)  ->  model
+```
+
+and concluded OpenRouter is *only* a gateway, so using it means per-provider
+env-var plumbing (`OPENAI_BASE_URL` + `OPENAI_API_KEY`). That is why the only
+OpenRouter path in the product today is Qwen Code carrying
+`supportedVendors: ["openrouter"]` (`catalog.ts:267`, `providers.rs:317`),
+configured by hand.
+
+**That premise no longer holds.** OpenRouter now ships harnesses of its own.
+Everything below was verified by running the binary, not read off a webpage.
+
+## 1. OpenRouter provides TWO kinds of harness
+
+From `ori harness list` (machine JSON):
+
+**(a) A first-party agent loop** — not a wrapper:
+
+```json
+{ "name": "ori", "origin": "builtIn", "default": true,
+  "featureId": "@ori-runloop/agent-loop",
+  "defaultModel": "anthropic/claude-fable-5.1" }
+```
+
+Invoked as `ori code` — "Run Ori as a local coding agent in the current
+directory". A direct peer of Claude Code / Codex, not a router.
+
+**(b) Launchers for 12 external CLIs.** `ori <agent>` runs the real binary from
+PATH with OpenRouter credentials injected. It does **not** reimplement them
+(DeepSeek Harness is the documented exception — Ori configures it instead).
+
+Detected on this machine:
+
+| Agent | installed | Already in our catalog? |
+|---|---|---|
+| claude, codex, opencode, hermes | yes | **claude, codex** |
+| grok, omp, prime-agent, kilo, cline, pi, muse, dsh | no | **pi** |
+
+Three overlap with providers we already ship.
+
+## 2. Windows: native, with one real bug
+
+`ori-windows-x64.exe` and `install.ps1` ship in every release (alongside
+darwin/linux, arm64/x64, musl). No WSL needed. Checksum verified against
+`SHA256SUMS` before running anything.
+
+**BUG — workspace bootstrap fails when GNU tar shadows bsdtar.** First run
+fetches a templates archive and extracts it with `tar`. With MSYS/Git-Bash tar
+first on PATH:
+
+```
+tar (child): Cannot connect to C: resolve failed
+ProjectInitError: Project initialization failed while fetching templates
+```
+
+GNU tar reads `C:\Users\...\.ori\global` as a remote `host:path`. Re-running
+with `PATH=C:\Windows\System32;C:\Windows` — so Windows' bsdtar 3.8.4 wins —
+bootstraps cleanly, creating `~/.ori/global` with `AGENTS.md`, `.agents/`,
+`.claude/`.
+
+This is **not** "Ori is broken on Windows". It is broken in a very common
+Windows dev environment, and specifically in ours: our own `CLAUDE.md` tells
+agents to put `Git\bin` on PATH for `task dev`. Any integration must sanitise
+PATH for the child process or pre-create the workspace.
+
+## 3. Flag passthrough: works, with a bounded exception
+
+**Passthrough is real.** `ori claude --zzz-not-a-real-flag` produced
+`error: unknown option '--zzz-not-a-real-flag'` — Claude Code's own
+Commander.js error, from the real binary. Likewise `ori codex exec --json
+--zzz-probe` produced codex's clap-style `unexpected argument '--zzz-probe'
+found / Usage: codex exec`.
+
+**What Ori consumes before the agent sees it:**
+
+- Global: `--help/-h`, `--version/-v`, `--wizard`, `--completions`,
+  `--log-level`, `--json/--agent`, `--human/--tty`
+- Per-agent: `--model`, `--reasoning-effort`
+
+**Demonstrated collision:** `ori claude --version` prints
+`ori v0.13.0+c7b5cda`, **not** Claude Code's `2.1.112`. Any health or auth probe
+built on `<cli> --version` silently reports Ori's version instead of the agent's.
+
+Checked against our actual args in `catalog.ts`:
+
+- **claude** — `-p --output-format stream-json --verbose
+  --include-partial-messages --dangerously-skip-permissions`: **no collisions.**
+- **codex** — `exec --json ...`: `--json` is also an Ori global. My probe did
+  **not** isolate it, because codex errored on the deliberate bad flag either
+  way. Treat this as **unverified risk**, not a confirmed break. It is the first
+  thing to test if we wrap codex.
+
+## 4. Auth: OAuth is not required
+
+The open question was whether OAuth PKCE would fight our identity/auth-dir
+model. It does not have to:
+
+- `OPENROUTER_API_KEY` in the environment is a first-class credential path.
+  Verified — Ori announces `Using the OpenRouter credential from the
+  OPENROUTER_API_KEY environment variable.` on **stderr**.
+- `ori login --with-key` accepts a piped key for fully non-interactive setup.
+- Browser OAuth is one option of three, not the only one.
+
+That maps onto our existing env-injected identity-bundle flow with no new
+concepts.
+
+**`ori auth` is a better auth check than what we use for Qwen.** It prints
+machine-readable JSON (`{"ok": false, ..., "authenticated": false}`) and **exits
+non-zero** when no credential resolves. Our Qwen entry uses the Gemini-inherited
+`auth status` convention precisely because `--version` fails *open* — the
+`catalog.ts` comment records that `checkcliauth` treats any non-JSON zero exit
+as authenticated. `ori auth` fails closed by design.
+
+## 5. `ori code` maps almost 1:1 onto ProviderConfig
+
+| `ori code` flag | Our field |
+|---|---|
+| `-p, --prompt <string>` | prompt slot in `launchArgs` |
+| `--output jsonl` (runtime events + terminal result line) | `styledOutputFormat` |
+| `--model <openrouter-slug>` | model selection |
+| `--reasoning-effort max...none` | our effort generalization |
+| `--resume` / `--session <id>` | `resumeFlag` / `sessionIdField` |
+| `--approvals self-drive` | the `--yolo` / `--dangerously-skip-permissions` slot |
+| `--interactive, -i` | (TUI; not our path) |
+
+`--reasoning-effort` overlaps `SPEC_PROVIDER_MODELS_EFFORT_GENERALIZATION_2026-06-14.md`:
+Ori also translates effort into "the harness's native mechanism". Two
+translation layers stacked is a decision to make deliberately, not to inherit.
+
+**Not verified: the `jsonl` event schema.** A dummy key gets far enough to prove
+the CLI surface but not to emit real turn events, so whether this needs a new
+translator alongside `claude-json` / `gemini-json` is open. This is the single
+biggest unknown before committing to option (b).
+
+## 6. Options
+
+Two independent options; (a) is cheap, (b) is the interesting one.
+
+**(a) Wrap existing providers.** `cliCommand: "ori"`, prefix `claude`/`codex`,
+translators unchanged since the same binaries produce the same output. Cheap,
+but only buys OpenRouter billing and guardrails for CLIs users can already run —
+and inherits the `--version` collision plus the tar/PATH bug.
+
+**(b) Add `ori code` as a provider in its own right.** This is what the 2026-06
+spec could not have proposed. A real harness with headless prompt, JSONL
+streaming, session resume, and any OpenRouter model behind one credential —
+much closer to "OpenRouter as a model option" than the gateway framing allows.
+
+Gate (b) on capturing the `--output jsonl` schema against a live key.
+
+## 7. Operational notes
+
+- **Pin the version.** `cli-0.13.0-c7b5cda` was published 2026-09-02, the same
+  day as this spike. Fast-moving; treat it like `CLAUDE_CODE_VERSION` is treated
+  in reagent's `Dockerfile.lambda`.
+- **Telemetry is on by default** ("anonymous... never records your prompts or
+  credentials"); `ORI_TELEMETRY=0` disables it. Decide explicitly rather than
+  shipping the default.
+- **stdout/stderr are cleanly separated.** `--version` puts only
+  `@ori-runtime/cli 0.13.0+c7b5cda` on stdout; credential notices go to stderr.
+  `--json` guarantees "stdout carries exactly one JSON document".
+- **Ori auto-installs missing agent CLIs on first use** — worth knowing before
+  it installs something into a user's environment unprompted.
+
+## 8. Reproduce
+
+```bash
+TAG=cli-0.13.0-c7b5cda
+BASE=https://github.com/OpenRouterLabs/ori-releases/releases/download/$TAG
+curl -fsSLO $BASE/ori-windows-x64.exe
+curl -fsSLO $BASE/SHA256SUMS
+sha256sum -c --ignore-missing SHA256SUMS
+
+./ori-windows-x64.exe harness list      # both harness kinds
+./ori-windows-x64.exe auth              # exits non-zero, machine JSON
+./ori-windows-x64.exe claude --version  # prints ORI's version - the collision
+OPENROUTER_API_KEY=dummy ./ori-windows-x64.exe claude --zzz  # claude's own error
+```

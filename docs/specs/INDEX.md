@@ -330,7 +330,7 @@ partial list.
 | [`SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29`](SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md) | Spec: multi-tier discovery + remote API invocation over muxbus |
 | [`SPEC_WINDOW_NAME_API_HARDENING_2026_08_08`](SPEC_WINDOW_NAME_API_HARDENING_2026_08_08.md) | SPEC: Window-name App API hardening (phantom-id success + status codes) |
 
-### proposed (87)
+### proposed (88)
 
 | Spec | Title |
 |---|---|
@@ -407,6 +407,7 @@ partial list.
 | [`SPEC_WIDGET_BAR_PARENT_SUBMENUS_2026_08_12`](SPEC_WIDGET_BAR_PARENT_SUBMENUS_2026_08_12.md) | SPEC: Widget bar parent widgets (grouped submenus) |
 | [`SPEC_WIDGET_PINBAR_DND_STATE_2026_06_15`](SPEC_WIDGET_PINBAR_DND_STATE_2026_06_15.md) | Spec: Widget Pin-Bar DnD State Machine — Robustness Rethink |
 | [`SPEC_XTERM_PASTE_TRUNCATION_2026_06_12`](SPEC_XTERM_PASTE_TRUNCATION_2026_06_12.md) | SPEC: xterm Terminal Paste Truncation Fix |
+| [`SPIKE_OPENROUTER_ORI_HARNESS_2026_09_02`](SPIKE_OPENROUTER_ORI_HARNESS_2026_09_02.md) | Spike: OpenRouter's Ori harness — does it change our integration story? |
 | [`agent-input-auto-grow`](agent-input-auto-grow.md) | Agent Input Auto-Grow Textarea |
 | [`agent-pane-cleanup-plan`](agent-pane-cleanup-plan.md) | Agent Pane Architecture & Cleanup Plan |
 | [`agent-pane-runtime-controls`](agent-pane-runtime-controls.md) | Agent Pane Runtime Controls |
