@@ -71,3 +71,124 @@
     font-size: var(--text-sm);
     font-style: italic;
 }
+
+// ── Agent grid (2026-09-01) ──────────────────────────────────────────────
+// Replaces the agent <select>. Mirrors the Agent pane's "My Agents" card
+// metrics (_picker.scss's .agent-card) without reusing that component — see
+// MemoryAgentCard.tsx's own doc comment for why, and
+// docs/specs/SPEC_ARMORY_PERSONAL_MEMORY_AGENT_BLOCKS_2026_09_01.md.
+
+.native-memory-manager-grid-view {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: var(--space-3);
+}
+
+.native-memory-manager-hint {
+    margin: 0 0 var(--space-3);
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+    line-height: 1.5;
+}
+
+.native-memory-manager-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: var(--space-2);
+}
+
+.memory-agent-card {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-height: 56px;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--border-color);
+    background: color-mix(in srgb, var(--main-text-color) 3%, transparent);
+    border-radius: 0;
+    color: var(--main-text-color);
+    text-align: left;
+    cursor: default;
+    transition: all 0.15s;
+    min-width: 0;
+
+    &:hover,
+    &:focus-visible {
+        border-color: var(--accent-color);
+        background: color-mix(in srgb, var(--accent-color) 8%, transparent);
+    }
+
+    // An errored card stays clickable (the detail view shows the real error),
+    // so this is a tint rather than a disabled state.
+    &--error {
+        border-color: color-mix(in srgb, var(--error-color) 40%, var(--border-color));
+    }
+}
+
+.memory-agent-card-icon {
+    flex-shrink: 0;
+}
+
+.memory-agent-card-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.memory-agent-card-title {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.memory-agent-card-count {
+    font-size: var(--text-xs);
+    color: var(--secondary-text-color);
+
+    // Distinct from the "No memories yet" empty state on purpose: a failed
+    // agent:memory:list is a hard error (see MemoryAgentCard.tsx), not an
+    // agent that simply hasn't remembered anything.
+    &--error {
+        color: var(--error-color);
+    }
+}
+
+// ── Detail view ──────────────────────────────────────────────────────────
+
+.native-memory-manager-detail {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+}
+
+.native-memory-manager-header {
+    align-items: center;
+}
+
+.native-memory-manager-back {
+    flex-shrink: 0;
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    background: transparent;
+    color: var(--main-text-color);
+    font-size: var(--text-xs);
+    cursor: default;
+
+    &:hover {
+        border-color: var(--accent-color);
+        background: color-mix(in srgb, var(--accent-color) 10%, transparent);
+    }
+}
+
+.native-memory-manager-agent-name {
+    flex-shrink: 0;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--main-text-color);
+}
