@@ -703,20 +703,56 @@ impl ContainerManager {
 
     // ---- private helpers ----
 
-    /// Returns the container status string ("running", "exited", …) or `None` if not found.
-    /// Does the existing container already carry the home-dir mounts `spec` asks
+    /// Every mount target this module owns. Anything NOT in here (the caller's
+    /// `agent:container_volumes`) is the user's business and is never a reason
+    /// to rebuild their container.
+    fn owned_mount_targets() -> [String; 3] {
+        [
+            CONTAINER_CLAUDE_DIR.to_string(),
+            format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}"),
+            CONTAINER_WORKSPACE_DIR.to_string(),
+        ]
+    }
+
+    /// The `(target -> source)` this module wants mounted for `spec`. A target
+    /// absent from the map is one that must NOT be mounted.
+    fn desired_owned_mounts(
+        container_name: &str,
+        spec: &ContainerMountSpec,
+    ) -> HashMap<String, String> {
+        let mut desired: HashMap<String, String> = agent_home_mounts(container_name, spec)
+            .into_iter()
+            .filter_map(|m| Some((m.target?, m.source?)))
+            .collect();
+        if let Some(dir) = spec.workspace_host_dir.as_deref().filter(|d| !d.is_empty()) {
+            desired.insert(CONTAINER_WORKSPACE_DIR.to_string(), normalize_host_path(dir));
+        }
+        desired
+    }
+
+    /// Does the existing container already carry exactly the mounts `spec` asks
     /// for? Used to decide whether an agent that is already up has to be
-    /// recreated to pick up credentials or a workspace.
+    /// recreated to pick up (or lose) credentials and a workspace.
     ///
-    /// Compares only the mounts this module owns ([`CONTAINER_CLAUDE_DIR`] and
-    /// [`CONTAINER_WORKSPACE_DIR`]), NOT the caller's extra `container_volumes` —
-    /// a user adding an unrelated mount should not be a reason to destroy and
-    /// rebuild their container underneath them.
+    /// Compares the owned set in BOTH directions — a mount that should now be
+    /// ABSENT is drift too, not just a missing or changed one. That case is the
+    /// security-relevant one (reagent P1 on PR #2933): unbinding an agent's
+    /// Armory account is a normal transition that never reaches
+    /// `SpawnGateError::MissingCredentials` (that gate fires when credentials
+    /// are expected and missing, not when an agent legitimately has none). A
+    /// presence-only check would leave the old account's `.credentials.json`
+    /// bind-mounted and WRITABLE in the running container forever, so every
+    /// later turn would keep authenticating — and refreshing tokens — as the
+    /// account the operator just unbound.
+    ///
+    /// Only this module's own targets are considered; the caller's extra
+    /// `container_volumes` are ignored, so a user adding an unrelated mount is
+    /// never a reason to destroy and rebuild their container underneath them.
     ///
     /// Fails SAFE: any inspect error or missing data returns `true` ("matches"),
-    /// leaving the container alone. A spurious recreate would kill a live agent
-    /// and lose its container-local state, which is worse than leaving a stale
-    /// mount in place for one more restart.
+    /// leaving the container alone. A spurious recreate kills a live agent and
+    /// loses its container-local state, which is worse than one more restart on
+    /// a stale mount.
     async fn mounts_match(&self, container_name: &str, spec: &ContainerMountSpec) -> bool {
         let Ok(details) = self.inner.docker.inspect_container(container_name, None).await else {
             return true;
@@ -733,28 +769,14 @@ impl ContainerManager {
                 .map(|s| normalize_host_path(&s).to_lowercase())
         };
 
-        for want in agent_home_mounts(container_name, spec) {
-            let (Some(target), Some(source)) = (want.target, want.source) else {
-                continue;
-            };
-            if source_at(&target).as_deref() != Some(normalize_host_path(&source).to_lowercase().as_str()) {
-                return false;
-            }
-        }
-
-        // The workspace bind is compared by presence-and-source too, so an agent
-        // whose working directory changed gets remounted rather than silently
-        // continuing to serve the old tree.
-        match spec.workspace_host_dir.as_deref().filter(|d| !d.is_empty()) {
-            Some(dir) => {
-                source_at(CONTAINER_WORKSPACE_DIR).as_deref()
-                    == Some(normalize_host_path(dir).to_lowercase().as_str())
-            }
-            // Nothing requested: an existing workspace mount is not drift.
-            None => true,
-        }
+        let desired = Self::desired_owned_mounts(container_name, spec);
+        Self::owned_mount_targets().iter().all(|target| {
+            let want = desired.get(target).map(|s| normalize_host_path(s).to_lowercase());
+            source_at(target) == want
+        })
     }
 
+    /// Returns the container status string ("running", "exited", …) or `None` if not found.
     async fn find_container(&self, name: &str) -> Result<Option<String>, ContainerError> {
         let mut filters = HashMap::new();
         filters.insert("name", vec![name]);
@@ -1139,6 +1161,68 @@ mod tests {
             workspace_host_dir: None,
         };
         assert_eq!(agent_home_mounts("agentmux-x", &spec).len(), 1);
+    }
+
+    // ── Drift detection must be bidirectional ───────────────────────────────
+    // reagent P1 on PR #2933. `mounts_match` compares against these, so the
+    // desired-set logic is what the tests pin; the Docker inspect half needs a
+    // live daemon and is covered by the ignored integration test.
+
+    /// Unbinding an agent's Armory account must show up as drift. It is a normal
+    /// transition that never trips SpawnGateError::MissingCredentials, so if the
+    /// desired set still claimed a credentials mount — or if a presence-only
+    /// check ignored the now-absent one — the OLD account's token would stay
+    /// bind-mounted and writable in the running container forever.
+    #[test]
+    fn unbinding_an_account_drops_the_credentials_mount_from_the_desired_set() {
+        let bound = ContainerMountSpec {
+            claude_config_host_dir: Some("/host/acct/claude".into()),
+            workspace_host_dir: None,
+        };
+        let unbound = ContainerMountSpec::default();
+        let creds_target = format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}");
+
+        let while_bound = ContainerManager::desired_owned_mounts("agentmux-x", &bound);
+        assert_eq!(
+            while_bound.get(&creds_target).map(String::as_str),
+            Some("/host/acct/claude/.credentials.json"),
+        );
+
+        let after_unbind = ContainerManager::desired_owned_mounts("agentmux-x", &unbound);
+        assert!(
+            !after_unbind.contains_key(&creds_target),
+            "an unbound agent must want NO credentials mount — otherwise the old \
+             account stays authenticated inside the running container",
+        );
+        assert!(
+            ContainerManager::owned_mount_targets().contains(&creds_target),
+            "and that target must be one we compare, or its absence is never noticed",
+        );
+    }
+
+    /// Clearing the working directory is the same shape of transition.
+    #[test]
+    fn clearing_the_working_directory_drops_the_workspace_from_the_desired_set() {
+        let with_ws = ContainerMountSpec {
+            claude_config_host_dir: None,
+            workspace_host_dir: Some(r"C:\repo".into()),
+        };
+        let desired = ContainerManager::desired_owned_mounts("agentmux-x", &with_ws);
+        assert_eq!(desired.get(CONTAINER_WORKSPACE_DIR).map(String::as_str), Some("C:/repo"));
+
+        let without = ContainerManager::desired_owned_mounts("agentmux-x", &ContainerMountSpec::default());
+        assert!(!without.contains_key(CONTAINER_WORKSPACE_DIR));
+    }
+
+    /// The comparison set must stay scoped to this module's own mounts, so a
+    /// user's `container_volumes` can never trigger a rebuild of their container.
+    #[test]
+    fn only_this_modules_own_mount_targets_are_compared() {
+        let owned = ContainerManager::owned_mount_targets();
+        assert!(owned.contains(&CONTAINER_CLAUDE_DIR.to_string()));
+        assert!(owned.contains(&CONTAINER_WORKSPACE_DIR.to_string()));
+        assert!(owned.contains(&format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}")));
+        assert_eq!(owned.len(), 3, "a user volume target must never appear here");
     }
 
     #[test]

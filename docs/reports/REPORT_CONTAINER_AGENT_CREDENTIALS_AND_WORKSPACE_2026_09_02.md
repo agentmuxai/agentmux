@@ -147,6 +147,19 @@ inspect error is treated as "matches", because a spurious recreate kills a live
 agent and loses its container-local state, which is worse than one more restart
 on a stale mount.
 
+That comparison must run in **both** directions — a mount that should now be
+ABSENT is drift too. The first cut checked only that the desired mounts were
+present, which left a security hole (reagent P1 on PR #2933): unbinding an
+agent's Armory account is a normal transition that never reaches
+`SpawnGateError::MissingCredentials` — that gate fires when credentials are
+expected and missing, not when an agent legitimately has none. With a
+presence-only check, `agent_home_mounts` would stop asking for a credentials
+mount while the running container kept the old account's `.credentials.json`
+bind-mounted and writable indefinitely, so every later turn would keep
+authenticating, and refreshing tokens, as the account the operator had just
+unbound. The owned target set is now compared exactly, so unbinding forces a
+recreate.
+
 ---
 
 ## 5. Known limitation
