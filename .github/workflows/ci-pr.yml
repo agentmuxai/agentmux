@@ -80,6 +80,9 @@ jobs:
       - name: Specs index is current
         run: bash scripts/gen-docs-index.sh --check
 
+      - name: Spec citations resolve (changed files only)
+        run: bash scripts/check-spec-citations.sh
+
       # The three gates below already existed as Taskfile `check:*` tasks but
       # were wired into nothing — defined, documented, and never run. Each
       # encodes a regression that already happened once (see the spec/retro in
