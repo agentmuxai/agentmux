@@ -36,9 +36,9 @@ pub(crate) async fn handle_create_tab(state: &AppState, call: &WebCallType) -> W
     let resolved_name = if tab_name.is_empty() {
         match store.get::<Workspace>(&ws_id) {
             Ok(Some(ws)) => {
-                format!("tab{}", ws.tabids.len() + ws.pinnedtabids.len() + 1)
+                format!("Tab {}", ws.tabids.len() + ws.pinnedtabids.len() + 1)
             }
-            _ => "tab1".to_string(),
+            _ => "Tab 1".to_string(),
         }
     } else {
         tab_name.clone()
