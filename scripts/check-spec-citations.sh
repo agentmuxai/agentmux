@@ -14,12 +14,19 @@
 # ever checked, so nobody knew, and each one sends the next reader hunting for a
 # document that is not there.
 #
-# SCOPED TO CHANGED FILES, for the same reason check-doc-status.sh is: 46
-# dangling citations exist today. A repo-wide gate would fail every PR on
-# somebody else's rot and be switched off within a day — the documented fate of
-# the three previous attempts at docs enforcement here. Applied to the diff it
-# is green for anyone who has not touched a citation, and it stops the count
-# growing.
+# SCOPED TO CHANGED FILES, for the same reason check-doc-status.sh is. Measured
+# 2026-09-01 with this script over every tracked .md/.rs/.ts/.tsx/.sh/.yml:
+#
+#     90 dangling citations, across 78 files, naming 49 distinct missing specs
+#
+# A repo-wide gate would fail every PR on somebody else's rot and be switched
+# off within a day — the documented fate of the three previous attempts at docs
+# enforcement here. Applied to the diff it is green for anyone who has not
+# touched a citation, and it stops 90 becoming 91.
+#
+# Those three numbers count different things and are easy to conflate: one file
+# can carry several dangling citations, and one missing spec can be cited from
+# many files. Quote the one you mean.
 #
 # Usage:
 #   bash scripts/check-spec-citations.sh          # changed vs origin/main
