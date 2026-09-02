@@ -2,7 +2,8 @@
 
 **Date:** 2026-08-31
 **Author:** AgentY
-**Status:** Analysis, written while the tab-close flash was still open and
+**Status:** historical — records the analysis and its outcome; not a plan for
+anyone. Written while the tab-close flash was still open and
 **revised after it was fixed** by PR #2818 (§§8-9 of
 `SPEC_TAB_CLOSE_BUTTON_SELECT_FLASH_2026_08_25.md`). The outcome is recorded in
 §0 below and is the single most useful thing in this document — it is a

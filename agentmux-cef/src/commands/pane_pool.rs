@@ -528,22 +528,6 @@ pub fn promote_pane_pool_window(
             }
         }
 
-        // Re-point the Ctrl+Wheel hook at the NEW label. Promotion relabels the
-        // browser and bootstraps the renderer via `pool:pane-promote` +
-        // `history.replaceState` — there is NO navigation, so `on_load_end`
-        // never fires again and the hook's context would keep emitting to the
-        // dead `floating-pool-*` label. Every Ctrl+Wheel in a pool-promoted
-        // floater would then be discarded, and close-time cleanup (keyed on the
-        // new label) would not find the context either.
-        //
-        // This REWRITES the existing context rather than installing a second
-        // one. Contexts are keyed by HWND and `find_context` walks UP from the
-        // deepest descendant, so a fresh entry on the outer popup would still
-        // lose to the stale entry on the browser HWND beneath it.
-        // (codex P1 on PR #2884.)
-        #[cfg(target_os = "windows")]
-        crate::floater_wheel::relabel_floater_ctrl_wheel_hook(&label, &new_label);
-
         // Bind this floater to the source window's cascade hook. Deferred from
         // spawn time because the parent HWND is only known at tear-off.
         crate::floating_pane::register_floater_hwnd(
