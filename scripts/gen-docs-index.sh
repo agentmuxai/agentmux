@@ -185,6 +185,12 @@ These carry a `**Status:**` line whose first word is not in the closed enum
     # and the reason it cannot come back. Every candidate file must be
     # accounted for by exactly one emitted row; if not, the index would be
     # claiming a coverage it does not have, so refuse to produce it at all.
+    # Always report the file count, not only on failure. A count that differs
+    # between two machines is the first thing worth knowing when --check
+    # disagrees with a local run, and inferring it from summed section headers
+    # is exactly the guesswork this line removes.
+    echo "gen-docs-index: $total specs under docs/specs/ (excluding archive/)" >&2
+
     if [ "$shown" -ne "$total" ]; then
         echo "gen-docs-index: FATAL — emitted $shown rows for $total specs;" >&2
         echo "  $((total - shown)) unaccounted for. The index would be incomplete" >&2
