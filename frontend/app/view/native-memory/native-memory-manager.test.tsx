@@ -341,6 +341,49 @@ describe("NativeMemoryManager — reactive updates", () => {
         expect(screen.getByText("AgentY").closest(".memory-agent-card")).toHaveTextContent("No memories yet");
     });
 
+    // ReAgent (PR #2932, non-blocking follow-up): fetchCountFor previously
+    // overwrote to {kind: "loading"} unconditionally, including on a
+    // reactive refresh of an ALREADY-resolved card -- a visible
+    // "Loading…" flash on every write, inconsistent with the feature's own
+    // "quiet in-place update" design intent and with
+    // refetchSelectedAgentFiles's own deliberate choice not to touch
+    // filesLoading for the identical reason.
+    test("a reactive count refresh does not flash 'Loading…' for an already-resolved card", async () => {
+        vi.useFakeTimers();
+        try {
+            nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md" }] });
+            render(() => <NativeMemoryManager />);
+            await vi.waitFor(() => expect(screen.getAllByText("1 file")).toHaveLength(2));
+
+            // Only `files.length` is ever read by the code under test here
+            // (fetchCountFor), so a minimal shape is honest about what this
+            // test actually needs — not the full NativeMemoryFileMeta.
+            let resolveRefresh: ((v: { files: { filename: string }[] }) => void) | undefined;
+            nativeMemoryListMock.mockImplementation(
+                () =>
+                    new Promise((resolve) => {
+                        resolveRefresh = resolve;
+                    }),
+            );
+            wpsHub.handlers.get("agent:memory:changed:a1")?.({});
+            // Past the 250ms debounce -- fetchCountFor has now actually been
+            // called and its RPC is in flight (held pending by resolveRefresh).
+            await vi.advanceTimersByTimeAsync(250);
+
+            // While the reactive refetch is still in flight, a1's card must
+            // still show its OLD resolved count, never "Loading…".
+            expect(screen.getByText("Manoz").closest(".memory-agent-card")).toHaveTextContent("1 file");
+            expect(screen.getByText("Manoz").closest(".memory-agent-card")).not.toHaveTextContent("Loading");
+
+            resolveRefresh?.({ files: [{ filename: "MEMORY.md" }, { filename: "NOTES.md" }] });
+            await vi.waitFor(() =>
+                expect(screen.getByText("Manoz").closest(".memory-agent-card")).toHaveTextContent("2 files"),
+            );
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     test("an event refetches an agent even if its card previously errored", async () => {
         nativeMemoryListMock.mockImplementation((_c: unknown, req: { agent_id: string }) =>
             req.agent_id === "a1" ? Promise.reject(new Error("boom")) : Promise.resolve({ files: [] }),

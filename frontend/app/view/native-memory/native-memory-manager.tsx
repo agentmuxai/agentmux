@@ -180,7 +180,18 @@ export function NativeMemoryManager(): JSX.Element {
     const fetchCountFor = (agent: AgentDefinition) => {
         const generation = (countRequestGeneration.get(agent.id) ?? 0) + 1;
         countRequestGeneration.set(agent.id, generation);
-        setCounts((prev) => ({ ...prev, [agent.id]: { kind: "loading" } as MemoryCountState }));
+        // Only flash to "loading" for a genuinely new agent — no resolved
+        // state yet to show in the meantime. ReAgent (PR #2932): the
+        // reactive agent:memory:changed handler also calls this function,
+        // and unconditionally overwriting to "loading" made an
+        // already-resolved card visibly flicker back to "Loading…" on
+        // every write, rather than updating quietly in place — inconsistent
+        // with refetchSelectedAgentFiles's own deliberate choice not to
+        // touch filesLoading for the identical reason, and with this
+        // feature's own stated design intent of a quiet per-card refresh.
+        setCounts((prev) =>
+            prev[agent.id] === undefined ? { ...prev, [agent.id]: { kind: "loading" } as MemoryCountState } : prev,
+        );
         RpcApi.NativeMemoryListCommand(TabRpcClient, { agent_id: agent.id })
             .then((res) => {
                 // Guarded by BOTH "agent still present" and "still the latest
