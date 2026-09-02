@@ -4,81 +4,66 @@
 // Document container + status log (terminal-style). Wrapped in .agent-view so the cascade chain matches
 // the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
 .agent-view {
-    // Matches .agent-document::-webkit-scrollbar's width (app.scss) — shared
-    // here so .agent-working-row-anchor (_control-bar.scss) can inset itself
-    // by exactly this much and never paint over the scrollbar gutter, instead
-    // of fighting it with z-index. See that selector's own comment for the
-    // z-index-obscures-scrollbar bug this closes.
+    // Drives .agent-document::-webkit-scrollbar's width/height (app.scss).
+    // It had a second consumer until 2026-09-01: .agent-working-row-anchor
+    // inset itself by exactly this much so the floating working row could
+    // never paint over the scrollbar gutter. The row is no longer inside
+    // this box (SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md), so
+    // nothing needs to dodge the gutter any more and this is now purely the
+    // scrollbar's own dimension.
     --agent-document-scrollbar-width: 14px;
 
-    // Wraps AgentDocumentView + the AgentWorkingRow anchor — takes over the
-    // flex-1 slot .agent-document used to occupy directly. .agent-document
-    // fills this box via position:absolute so AgentWorkingRow can float
-    // over its bottom edge instead of shrinking it as a normal-flow
-    // sibling — the scrollbar now reaches this box's true bottom edge.
-    // See docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md §3.2.
+    // Wraps AgentDocumentView — takes over the flex-1 slot .agent-document
+    // used to occupy directly. .agent-document fills this box via
+    // position:absolute.
+    //
+    // The absolute fill is a leftover requirement rather than a live one:
+    // it existed so AgentWorkingRow could float over this box's bottom edge
+    // without shrinking it, letting the scrollbar reach the true bottom
+    // (SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md §3.2).
+    // With the row moved out to normal flow above the composer, this box has
+    // exactly one child and nothing overlays it — the wrapper is kept because
+    // the padding/containment/stacking rules below hang off the inner element
+    // and unpicking that is a separate change with no user-visible payoff.
     .agent-document-scroll-region {
         position: relative;
         // Establishes a real stacking context (position + z-index together,
-        // per spec) for this box's three absolutely-positioned children —
-        // the .agent-working-row-backdrop, .agent-document, and
-        // .agent-working-row-anchor below. Without this, their relative
-        // paint order would depend on whatever stacking context happens to
-        // exist further up the ancestor tree, which isn't guaranteed to
-        // exist or behave predictably. With it, the three children's own
-        // z-index values (0/auto vs 2) are compared only against each
-        // other, isolated from anything outside this box — see
-        // docs/specs/SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md §5.
+        // per spec). This used to isolate three overlapping children — the
+        // working row's backdrop, .agent-document, and the working-row
+        // anchor — whose paint order relative to each other had to be
+        // predictable (SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md
+        // §5). Only .agent-document is left inside this box now that the
+        // working row moved out
+        // (SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md), so there is
+        // no longer an intra-box ordering question. Kept anyway: it also
+        // isolates the scroll region's own painting from the rest of the
+        // pane, which the `contain` rules below are already trading on, and
+        // dropping it would let an ancestor's stacking context reorder this
+        // box against its siblings for no gain.
         z-index: 0;
         flex: 1;
         min-height: 0;
         overflow: hidden; // .agent-document inside owns the real scrolling
     }
 
-    // When AgentWorkingRow is visible, its color reaches this box's true
-    // bottom edge (.agent-working-row-backdrop above). The normal-flow
-    // rows between here and the composer that carry their own margin for
-    // standalone breathing room — AgentAuthPanel's two states
-    // (.agent-auth-panel-card during an active OAuth login,
-    // .agent-auth-notice after a failed one; both can co-occur with the
-    // working row, since AgentWorkingRow's own loading condition already
-    // covers launch/auth activity via showingLaunchActivity()),
-    // AgentQuestionPanel, and the disconnected banner — should sit flush
-    // against that color instead of leaving a gap, matching how the row
-    // already sits flush above the composer. Scoped to
-    // .agent-view--working-row-visible (agent-view.tsx, driven by the same
-    // workingRowVisible() memo that gates the row itself) so a panel
-    // appearing on its own, with no active working row above it, keeps
-    // its normal margin. Every OTHER row that can appear in this stack —
-    // AgentDecisionPanel, the retry bar, PendingMessagesPanel,
-    // PaneRow-based rows (AgentCredentialsRevokedChip, the
-    // failure-recovery pin), ActivityDock, InAppLoginPanel's own root
-    // (.pre-launch-auth-panel-waiting) — needs no rule here: confirmed via
-    // their own CSS that they carry a border (or nothing) instead of a
-    // margin in this direction, so they're already flush against whatever
-    // ends up next to them.
-    //
-    // ~ (general sibling), not + (adjacent): any of those border-only rows
-    // can legitimately render between .agent-document-scroll-region and
-    // the target panel (e.g. a disconnected stream with a queued message),
-    // and + only matches when the target is the LITERAL next element —
-    // reagent caught this fragility on round 1 for the bottom-margin rule
-    // below and on round 2 for this one.
-    &.agent-view--working-row-visible {
-        .agent-document-scroll-region ~ .agent-auth-panel-card,
-        .agent-document-scroll-region ~ .agent-auth-notice,
-        .agent-document-scroll-region ~ .agent-question-panel,
-        .agent-document-scroll-region ~ .agent-question-panel-minimized,
-        .agent-document-scroll-region ~ .agent-disconnected-banner {
-            margin-top: 0;
-        }
-    }
+    // A `.agent-view--working-row-visible` rule used to live here, zeroing
+    // the top margin of AgentAuthPanel / AgentQuestionPanel / the
+    // disconnected banner while the working row was visible. It existed
+    // because the row's color reached the scroll region's true bottom edge
+    // (via the since-removed .agent-working-row-backdrop) and those panels
+    // rendered immediately below it, so their own margin left a visible gap
+    // between the two. The row now sits below those panels entirely — right
+    // above the composer, per
+    // SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md — so nothing
+    // renders flush beneath the row's color any more and the panels keep
+    // their ordinary standalone margin in every state. The class that gated
+    // it was removed from agent-view.tsx along with the rule; it had no
+    // other consumer.
 
-    // Same shape at the OTHER end: these panels' own bottom margin (the
-    // same shorthand that caused the top-edge gap above) leaves a gap
-    // before whatever comes next — unrelated to the working row, so
-    // unconditional (unlike the top-edge fix above): the composer strip is
-    // always there eventually, not something that only sometimes follows.
+    // Unrelated to the working row, and still needed: these panels' own
+    // bottom margin leaves a gap before whatever comes next. Unconditional —
+    // the composer strip is always there eventually, not something that only
+    // sometimes follows.
     // Uses :has() to target the panel's own margin from a "what comes
     // after me" condition, since CSS has no parent/previous-sibling
     // selector otherwise — already an accepted pattern in this codebase
@@ -146,13 +131,13 @@
         // for the agent pane specifically (both derive from the same
         // active block's term:zoom meta, §A.3), so they cancel exactly.
         padding-top: calc(var(--space-0-5) + var(--pane-tab-strip-height, 28px));
-        // Reserves exactly AgentWorkingRow's current rendered height (0 when
-        // hidden) so scrolling to true bottom leaves the last message above
-        // the floating row, not hidden underneath it. Set on
-        // .agent-document-scroll-region by agent-view.tsx's ResizeObserver;
-        // custom properties cascade through the DOM regardless of the
-        // AgentDocumentView/AgentDocumentVirtualList component boundary.
-        padding-bottom: calc(var(--space-0-5) + var(--agent-working-row-height, 0px));
+        // No working-row reservation here any more: this used to add
+        // AgentWorkingRow's measured height so scrolling to true bottom left
+        // the last message above the floating row rather than hidden under
+        // it. The row is a normal-flow sibling below the dock as of
+        // SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md, so it no
+        // longer overlaps this box at all and there is nothing to reserve.
+        padding-bottom: var(--space-0-5);
         display: flex;
         flex-direction: column;
         gap: 4px;

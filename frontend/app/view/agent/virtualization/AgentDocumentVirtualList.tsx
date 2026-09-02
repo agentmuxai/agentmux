@@ -116,20 +116,6 @@ export interface AgentDocumentVirtualListProps {
      * instead of TanStack's virtual items.
      */
     layoutView?: Accessor<LayoutView | null>;
-    /**
-     * AgentWorkingRow's current rendered height in px (0 when hidden) —
-     * agent-view.tsx measures it via ResizeObserver and uses the same value
-     * to size .agent-document's bottom padding (the row floats over this
-     * scroll container as an overlay; see
-     * docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md
-     * §3.2). Tracked by the stick-to-bottom effect below for the same
-     * reason nodes().length and layoutView().totalSize are: when this
-     * grows while pinned to bottom (a turn starts, tool-name text
-     * widens the row), .agent-document's effective content height grows
-     * too, and without re-pinning, the newly-taller overlay can end up
-     * covering the previously-visible tail of the message list.
-     */
-    workingRowHeight?: Accessor<number>;
     /** Ordinal-matched tool_use_id -> live dispatch, for this pane's
      *  Agent/Task/Workflow tool nodes. See `activity/dispatch-correlation.ts`. */
     dispatchMatches?: Accessor<Map<string, AgentDispatch>>;
@@ -555,20 +541,21 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // and stickToBottom itself never flips — the drop is invisible in state
     // inspection. See docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md §2.
     //
-    // Also tracks workingRowHeight (below) — reagent P1 on #2292: that same
-    // spec's §3.2 overlay (AgentWorkingRow floating over this scroll
-    // container's bottom edge, sized via .agent-document's padding-bottom)
-    // introduced an identical gap. When the row appears or grows while
-    // pinned to bottom (a turn starts, tool-name text widens it),
-    // .agent-document's effective content height changes without any
-    // node-count or layoutView change, so without this dependency the
-    // newly-taller overlay could end up covering the message that was
-    // previously visible at the bottom.
+    // This effect used to track a third dependency, workingRowHeight
+    // (reagent P1 on #2292), because that same spec's §3.2 overlay —
+    // AgentWorkingRow floating over this scroll container's bottom edge,
+    // sized via .agent-document's padding-bottom — changed the effective
+    // content height with no node-count or layoutView change, so a growing
+    // overlay could end up covering the message previously visible at the
+    // bottom. The row is a normal-flow sibling below this container as of
+    // SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md, so it changes
+    // this container's *clientHeight* instead of its content height — which
+    // the clientHeight ResizeObserver below already re-pins on, and was
+    // written for precisely this family of normal-flow siblings.
     createEffect(() => {
         // Track length changes — Solid will re-run when nodes() emits.
         const _len = props.viewState.nodes().length;
         const _totalSize = props.layoutView?.()?.totalSize;
-        const _workingRowHeight = props.workingRowHeight?.();
         // Unconditional — a node-count drop (e.g. /clear) can collapse this
         // pane to non-overflowing while scrolled away reading history; see
         // syncOverflowState's own doc comment.
@@ -601,7 +588,7 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // §3.3's own "deferred as rare/transient" admission) shrinks THIS
     // container's clientHeight via pure CSS reflow — no scroll event fires
     // (it's a resize, not a scroll), and neither of the pin effect's tracked
-    // deps (nodes().length, layoutView().totalSize, workingRowHeight) change
+    // deps (nodes().length, layoutView().totalSize) change
     // either, so `stickToBottom` stays silently true while the view falls
     // short of the new, smaller max scroll position. Rather than adding a
     // tracked height signal per interposing panel (the whack-a-mole pattern
@@ -634,8 +621,8 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     });
 
     // Content-resize-driven pin. The effect above only re-pins when one of
-    // three hand-picked signals changes (nodes().length, layoutView().totalSize,
-    // workingRowHeight) — any OTHER source of the content growing taller is
+    // two hand-picked signals changes (nodes().length,
+    // layoutView().totalSize) — any OTHER source of the content growing taller is
     // invisible to it, and the scrollbar visibly sits above true bottom until
     // some unrelated signal happens to change and the effect re-runs. The
     // clientHeight RO right above this one doesn't catch it either — it only
@@ -657,11 +644,6 @@ export function AgentDocumentVirtualList(props: AgentDocumentVirtualListProps): 
     // libraries like use-stick-to-bottom rely on), so writing scrollTop
     // synchronously here never produces a visible flash. See
     // docs/specs/REPORT_AGENT_PANE_SCROLL_PIN_FLICKER_AUDIT_2026_07_30.md.
-    //
-    // workingRowHeight is NOT covered by this observer — it drives
-    // `.agent-document`'s own padding-bottom (scrollRef's box, not a child's),
-    // which changes scrollHeight without resizing either observed element.
-    // It stays covered by the effect above.
     onMount(() => {
         if (typeof ResizeObserver === "undefined") return;
         const ro = new ResizeObserver(() => {

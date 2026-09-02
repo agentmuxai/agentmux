@@ -1,7 +1,17 @@
 # SPEC: Agent pane — fix silent auto-scroll-follow drops, extend the message-list scrollbar past the Working/Host status rows
 
 **Date:** 2026-07-24
-**Status:** Implemented
+**Status:** Implemented — except **§3.2**, superseded 2026-09-01 by
+`SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md`.
+
+> **§3.2 only.** The floating-overlay arrangement described there
+> (AgentWorkingRow absolutely positioned over `.agent-document-scroll-region`'s
+> bottom edge, with `.agent-document` reserving matching padding) is gone: the
+> row is now a normal-flow sibling between the ActivityDock and the composer.
+> **Everything else in this spec stands and is still load-bearing** — in
+> particular §2's scroll-follow analysis and both re-pin observers. The 09-01
+> change actually leans on §3.3's normal-flow-sibling handling (the working row
+> simply joined that family) rather than contradicting it.
 **Scope:** `frontend/app/view/agent/virtualization/AgentDocumentVirtualList.tsx`, `frontend/app/view/agent/agent-view.tsx`, `frontend/app/view/agent/components/AgentFooter.tsx`, `frontend/app/view/agent/components/AgentComposerStrip.tsx`, `frontend/app/view/agent/styles/_document.scss`, `frontend/app/view/agent/styles/_control-bar.scss`, `frontend/app/view/agent/styles/_composer-strip.scss`
 **Author:** Agent3
 

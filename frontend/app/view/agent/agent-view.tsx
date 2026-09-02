@@ -62,6 +62,7 @@ import { Portal } from "solid-js/web";
 import { earliestLiveAttachedStartMs } from "./activity/attached-task";
 import { allSubagentsAtom } from "./activity/subagent-source";
 import { hasRunningPromotedTool, nextToolPromotionAt } from "./activity/tool-adapter";
+import { workingRowSupersededByDock } from "./activity/working-row-supersession";
 import type { AgentViewModel } from "./agent-model";
 import "./agent-view.scss";
 import { ActivityDock } from "./components/ActivityDock";
@@ -1548,62 +1549,6 @@ const AgentPresentationView = ({
     // mounts via scrollToBottomRef.
     let scrollToBottomFn: (() => void) | null = null;
 
-    // Tracks AgentWorkingRow's rendered height (0 when hidden) so
-    // .agent-document can reserve exactly that much bottom padding — the
-    // row now floats over the scroll region instead of pushing it up as a
-    // normal-flow sibling (SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md
-    // §3.2), so without this, "scrolled to true bottom" would leave the
-    // last message hidden underneath the floating row instead of above it.
-    // Exposed to .agent-document (nested inside AgentDocumentView, several
-    // component boundaries away) via a CSS custom property set on the
-    // shared .agent-document-scroll-region ancestor — custom properties
-    // cascade through the DOM tree regardless of component boundaries.
-    const [workingRowHeight, setWorkingRowHeight] = createSignal(0);
-
-    // Shared by the anchor's <Show> and the backdrop's <Show>/color below
-    // (SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md §5) so the two
-    // can't drift out of sync — both need to agree on "is the row visible
-    // at all" and "is it the loading (vs. worked) variant" independent of
-    // the anchor's own inset-from-scrollbar geometry.
-    const workingRowLoading = createMemo(
-        () => showingLaunchActivity() || workingFromPhase(agentAtoms().turnPhaseAtom[0]())
-    );
-    const workingRowVisible = createMemo(
-        () =>
-            workingRowLoading() ||
-            agentAtoms().sessionStatsAtom[0]() != null ||
-            agentAtoms().compactingAtom[0]() != null ||
-            agentAtoms().reconnectingAtom[0]() != null,
-    );
-
-    // Ref CALLBACK, not a one-shot onMount(): originally fixed a bug where
-    // Agent History's now-removed `bodyMode` in-place swap (PR #2509)
-    // remounted this anchor div WITHIN one persistent AgentPresentationView
-    // instance, while a plain onMount (this component's own, firing once
-    // for the instance's whole lifetime) kept observing the stale, now-
-    // detached pre-swap node — `workingRowHeight` silently froze and the
-    // floating AgentWorkingRow visibly overlapped the last message. That
-    // specific in-place remount is gone now that Agent History is its own
-    // tab (SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md
-    // §3.1) — but a ref callback (re-observing on every mount of THIS
-    // element, not just the component's first) is still the more robust
-    // shape in general, so it stays: correct whether this component mounts
-    // once or many times over its host block's life (which, per §1 of that
-    // spec, it now does on every ordinary tab switch too).
-    let workingRowRO: ResizeObserver | undefined;
-    const attachWorkingRowAnchor = (el: HTMLDivElement) => {
-        workingRowRO?.disconnect();
-        workingRowRO = undefined;
-        if (typeof ResizeObserver === "undefined") return;
-        const ro = new ResizeObserver((entries) => {
-            const h = entries[0]?.contentRect.height ?? 0;
-            setWorkingRowHeight(h);
-        });
-        ro.observe(el);
-        workingRowRO = ro;
-    };
-    onCleanup(() => workingRowRO?.disconnect());
-
     // True once the pane's in-flight Bash tool call has been promoted to a
     // live ActivityDock row (tool-adapter.ts) — AgentWorkingRow suppresses
     // its own "tool · arg" text once this flips, so the dock and the working
@@ -1630,6 +1575,34 @@ const AgentPresentationView = ({
         const timer = setTimeout(() => setToolPromotionCheckNonce((n) => n + 1), Math.max(0, at - now) + 50);
         onCleanup(() => clearTimeout(timer));
     });
+
+    // True when the ONLY thing keeping this turn busy is a tool call that has
+    // already been promoted into the ActivityDock — i.e. auto-backgrounded, so
+    // the dock is already saying everything this row would. Rationale and the
+    // full list of states that deliberately KEEP the row live in
+    // activity/working-row-supersession.ts, which is separately tested.
+    const supersededByDock = createMemo(() =>
+        workingRowSupersededByDock({
+            hasPromotedTool: hasPromotedTool(),
+            showingLaunchActivity: showingLaunchActivity(),
+            turnPhase: agentAtoms().turnPhaseAtom[0](),
+            compacting: agentAtoms().compactingAtom[0](),
+            reconnecting: agentAtoms().reconnectingAtom[0](),
+        })
+    );
+
+    const workingRowLoading = createMemo(
+        () =>
+            !supersededByDock() &&
+            (showingLaunchActivity() || workingFromPhase(agentAtoms().turnPhaseAtom[0]()))
+    );
+    const workingRowVisible = createMemo(
+        () =>
+            workingRowLoading() ||
+            agentAtoms().sessionStatsAtom[0]() != null ||
+            agentAtoms().compactingAtom[0]() != null ||
+            agentAtoms().reconnectingAtom[0]() != null,
+    );
 
     // Attached-task axis dispatch — the deferred §6.1 call site of
     // SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md. Derives "≥1 live
@@ -2049,7 +2022,6 @@ const AgentPresentationView = ({
         <div
             ref={rootRef}
             class="agent-view agent-view--presentation"
-            classList={{ "agent-view--working-row-visible": workingRowVisible() }}
             style={{ zoom: zoomFactor(), "--agent-pane-zoom": String(zoomFactor()) }}
             onContextMenu={handleContextMenu}
             tabIndex={-1}
@@ -2127,51 +2099,24 @@ const AgentPresentationView = ({
                 scrolls with the transcript instead of staying fixed in
                 place. See SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.2. */}
             {/* Scroll region wrapper — .agent-document (inside AgentDocumentView)
-                is absolutely positioned to fill this box, and AgentWorkingRow
-                floats over its bottom edge instead of pushing it up as a
-                normal-flow sibling. Lets the message list's scrollbar reach
-                all the way to the bottom of this region instead of stopping
-                short by AgentWorkingRow's own height.
-                See docs/specs/SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md §3.2. */}
-            <div
-                class="agent-document-scroll-region"
-                style={{ "--agent-working-row-height": `${workingRowHeight()}px` }}
-            >
-                {/* Full-width decorative backdrop, stacked below
-                    .agent-document (and thus below its scrollbar) so the
-                    working row's color reaches the pane's true right edge
-                    without ever painting over the scrollbar — the anchor
-                    below stays inset from the scrollbar gutter for that
-                    reason, but nothing filled the gutter itself with a
-                    matching color until now (the scrollbar track is
-                    fully transparent). See
-                    docs/specs/SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md. */}
-                <Show when={workingRowVisible()}>
-                    <div
-                        class="agent-working-row-backdrop"
-                        classList={{
-                            // Must mirror AgentWorkingRow's OWN loading gate
-                            // (`props.loading || !!props.compacting ||
-                            // !!props.reconnecting`, AgentFooter.tsx), not
-                            // just `workingRowLoading()` — reagent P1 on
-                            // PR #2826: since `workingRowVisible()` above
-                            // already renders this backdrop for
-                            // compacting/reconnecting too, using only
-                            // `workingRowLoading()` here left the backdrop in
-                            // its `--worked` (non-loading) color while the
-                            // row itself rendered its loading/accent-tinted
-                            // variant during those two states — the exact
-                            // backdrop/row color-mismatch
-                            // SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md
-                            // fixed for the plain loading case.
-                            "agent-working-row-backdrop--loading":
-                                workingRowLoading() ||
-                                agentAtoms().compactingAtom[0]() != null ||
-                                agentAtoms().reconnectingAtom[0]() != null,
-                        }}
-                    />
-                </Show>
+                is absolutely positioned to fill this box.
 
+                AgentWorkingRow used to float over this box's bottom edge
+                (SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md
+                §3.2) so the message list's scrollbar could run the full height
+                of the region. As of
+                SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md the row is
+                a normal-flow sibling below the dock instead — which reaches
+                the same goal more simply, since a row that is no longer
+                *inside* this box cannot cover the scrollbar or the last
+                message in the first place. That removed the overlay's whole
+                support apparatus: the height-measuring ResizeObserver, the
+                --agent-working-row-height custom property, .agent-document's
+                matching padding-bottom reservation, and the full-width
+                backdrop that existed only to color the scrollbar gutter the
+                overlay had to stay inset from
+                (SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md). */}
+            <div class="agent-document-scroll-region">
                 <AgentDocumentView
                     documentAtom={displayDocumentAtom}
                     documentStateAtom={agentAtoms().documentStateAtom}
@@ -2204,43 +2149,7 @@ const AgentPresentationView = ({
                     zoomFactor={zoomFactor}
                     blockId={model.blockId}
                     layoutView={layoutView}
-                    workingRowHeight={workingRowHeight}
                 />
-
-                {/* Working indicator — floats over the bottom of the scroll
-                    region instead of occupying its own flex row. The ref'd
-                    wrapper collapses to 0 height when the Show is false, so
-                    the ResizeObserver above naturally reports 0 (no working
-                    row currently rendered) without extra branching.
-                    Shows spinner + elapsed while loading, "✓ Worked · Ns" on completion.
-                    Acts as a visual turn delimiter; stays until next message is sent.
-                    See SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md §2. */}
-                <div class="agent-working-row-anchor" ref={attachWorkingRowAnchor}>
-                    <Show when={workingRowVisible()}>
-                        <AgentWorkingRow
-                            loading={workingRowLoading()}
-                            stopping={agentAtoms().turnPhaseAtom[0]().kind === "Interrupting"}
-                            currentTool={agentAtoms().currentToolAtom[0]()}
-                            currentToolArg={agentAtoms().currentToolArgAtom[0]()}
-                            toolPromoted={hasPromotedTool()}
-                            sessionStats={agentAtoms().sessionStatsAtom[0]()}
-                            turnTokens={agentAtoms().turnTokensAtom[0]()}
-                            launchPhase={status.launchPhase()}
-                            onCancelLogin={status.cancelLogin}
-                            hasAuthUrl={!!status.authUrl()}
-                            waitingReason={(() => {
-                                const phase = agentAtoms().turnPhaseAtom[0]();
-                                return phase.kind === "Streaming" ? (phase.waitingReason ?? null) : null;
-                            })()}
-                            retryAfterMs={(() => {
-                                const phase = agentAtoms().turnPhaseAtom[0]();
-                                return phase.kind === "Streaming" ? (phase.retryAfterMs ?? null) : null;
-                            })()}
-                            compacting={agentAtoms().compactingAtom[0]()}
-                            reconnecting={agentAtoms().reconnectingAtom[0]()}
-                        />
-                    </Show>
-                </div>
             </div>
 
             {/* Login UI — bottom-docked like AgentDecisionPanel/
@@ -2381,6 +2290,54 @@ const AgentPresentationView = ({
                 blockId={model.blockId}
                 backgroundTasksAtom={backgroundTasksAtom}
             />
+
+            {/* Working indicator — the turn's own status, so it sits directly
+                above the composer, with the dock's long-running tasks stacked
+                above it. Reads bottom-up as narrowing scope: what's running in
+                the background (dock) → what this turn is doing right now
+                (here) → where you type.
+
+                Normal-flow row, not the overlay it used to be — see the
+                .agent-document-scroll-region comment above for what that
+                change removed. When it appears or disappears it changes the
+                scroll region's clientHeight, which
+                AgentDocumentVirtualList's clientHeight ResizeObserver already
+                re-pins on; that observer was written for exactly this family
+                of normal-flow siblings (the retry bar, decision/question
+                panels, PendingMessagesPanel), so the row simply joins them
+                rather than needing its own tracked height signal.
+
+                Shows spinner + elapsed while loading, "✓ Worked · Ns" on
+                completion. Acts as a visual turn delimiter; stays until the
+                next message is sent.
+                See SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md §2 and
+                SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md. */}
+            <div class="agent-working-row-anchor">
+                <Show when={workingRowVisible()}>
+                    <AgentWorkingRow
+                        loading={workingRowLoading()}
+                        stopping={agentAtoms().turnPhaseAtom[0]().kind === "Interrupting"}
+                        currentTool={agentAtoms().currentToolAtom[0]()}
+                        currentToolArg={agentAtoms().currentToolArgAtom[0]()}
+                        toolPromoted={hasPromotedTool()}
+                        sessionStats={agentAtoms().sessionStatsAtom[0]()}
+                        turnTokens={agentAtoms().turnTokensAtom[0]()}
+                        launchPhase={status.launchPhase()}
+                        onCancelLogin={status.cancelLogin}
+                        hasAuthUrl={!!status.authUrl()}
+                        waitingReason={(() => {
+                            const phase = agentAtoms().turnPhaseAtom[0]();
+                            return phase.kind === "Streaming" ? (phase.waitingReason ?? null) : null;
+                        })()}
+                        retryAfterMs={(() => {
+                            const phase = agentAtoms().turnPhaseAtom[0]();
+                            return phase.kind === "Streaming" ? (phase.retryAfterMs ?? null) : null;
+                        })()}
+                        compacting={agentAtoms().compactingAtom[0]()}
+                        reconnecting={agentAtoms().reconnectingAtom[0]()}
+                    />
+                </Show>
+            </div>
 
             {/* Composer status strip — single 28-32px row with live
                 activity ticker and Log button that toggles the log panel.
