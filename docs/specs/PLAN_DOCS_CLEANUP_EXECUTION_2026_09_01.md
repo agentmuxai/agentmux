@@ -1,7 +1,7 @@
 # Docs cleanup — execution plan
 
-**Status:** active — A, B, D and E have shipped; C is held pending an owner
-decision (§6). See §7 for what actually happened.
+**Status:** implemented — all five batches shipped (#2907, #2909, #2912, #2914,
+#2920). §7 records what actually happened, including where the plan was wrong.
 **Date:** 2026-09-01
 **Owner:** AgentY
 **Scope:** `docs/`, top-level `specs/`
@@ -208,7 +208,68 @@ reader checking whether the cleanup happened would conclude it did not.
 | B — missing `Superseded-by:` | #2909 | 3 docs (one more than the 2 measured), each resolved differently — none defaulted to `historical`, per §3's warning. |
 | E — enforcement | #2912 | `scripts/check-doc-status.sh`, plus three `check:*` gates that existed in the Taskfile but had **never run in CI**. |
 | D — generated index | #2914 | `scripts/gen-docs-index.sh` + `--check`. |
-| C — directory consolidation | — | **Held.** §6 is still unanswered. |
+| C — directory consolidation | #2920 | 134 files (not 102 — §2 missed `archive/`). Not the mechanical move this plan assumed; see below. |
+
+### Batch C was not the mechanical move §3 described
+
+§3 scoped C to "move, fix inbound references, leave no dangling links… The
+content is not reviewed or rewritten — only relocated." That framing treated the
+two trees as an accidental duplicate. They were not.
+
+The split was a deliberate promotion workflow — `docs/specs/` drafts,
+`specs/` approved and in-flight, `specs/archive/` done — that had inverted
+itself. Measured against the `Status:` field at the time of the merge:
+
+| Tree | Documented as | Actually held |
+|---|---|---|
+| `specs/` | active and approved | 51 `draft`, 2 `implemented` |
+| `docs/specs/` | drafts, not approved | **126 `implemented`**, 14 `active` |
+| `specs/archive/` | completed or superseded | 7 `draft`, 3 `ready` |
+
+An agent trusting those READMEs looked in exactly the wrong tree. And it was
+costing correctness, not only navigation: promoting a file between trees broke
+every code comment citing it, silently. **32 of 165 spec citations in source
+were already dangling**, 9 of them naming `specs/X` for a file that had long
+since moved to `docs/specs/X`.
+
+So §6's open question had a third answer neither option anticipated. It was not
+"nobody got to it" and not "something outside depends on it" — it was that
+directory-as-lifecycle and the `Status:` field are two answers to one question,
+and only the enforced one stayed current. That is why the merge came with a
+guard against the tree reappearing, and why both READMEs were rewritten: leaving
+the promotion instructions in place would have recreated the split from the very
+document that created it.
+
+**One consequence worth generalising.** Relocating 134 files made them "changed",
+so the diff-scoped gate from batch E demanded the `Status:` vocabulary from ~100
+untouched four-month-old specs at once — the bulk restamp §4 forbids, triggered
+by a batch that §5 sequenced *after* the gate specifically so the gate would make
+it safe. Pure renames (`R100`) are now exempt: the gate enforces claims the
+author made in a diff, and relocating a file makes no claim about its state.
+A cheap gate plus a mechanical change can still combine into a demand for
+unverifiable judgement, and the fix belongs in the gate.
+
+### Verification that was not verification
+
+Three claims in this cleanup were false when made, all the same shape — a check
+that reported success without checking anything:
+
+- **"No dangling links; every reference resolves."** The measuring glob was
+  `docs/specs/*.md specs/*.md`, which cannot see `archive/` subdirectories or
+  `docs/analysis/`. It reported clean for the part of the tree it could see.
+- **"0 surviving references to the old tree."** The search used a `(?<!…)`
+  lookbehind; ripgrep's default engine rejects lookaround, stderr was redirected
+  to `/dev/null`, and `wc -l` faithfully reported `0`. That zero was a silenced
+  parse error. It hid three real citations, found in review.
+- **"The `specs/` guard is verified in both directions."** The negative test
+  passed an explicit filename, and that branch cannot reach the line the guard
+  was bypassing. The claim was true of the check and false of the path.
+
+The batch-D generator failed the same way — it emitted 539 rows for 728 specs
+under a header claiming to cover every file. Its fix is the pattern worth
+copying: an assertion that the tool cannot pass while broken (emitted rows must
+equal candidate files, or it refuses to write), rather than a test that happens
+to exercise the working path.
 
 ### What the measurements got wrong
 
