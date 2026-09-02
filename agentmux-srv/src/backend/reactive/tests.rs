@@ -2651,7 +2651,7 @@ fn the_handler_lock_is_held_across_the_message_sender() {
     handler.set_message_sender(std::sync::Arc::new(move |_block_id, _message| {
         in_sender_tx.send(()).unwrap();
         // Hold here until the probe has had its chance.
-        let _ = release_rx.lock().unwrap().recv_timeout(Duration::from_secs(5));
+        let _ = release_rx.lock().unwrap().recv_timeout(Duration::from_secs(60));
         Ok(true)
     }));
 
@@ -2672,8 +2672,12 @@ fn the_handler_lock_is_held_across_the_message_sender() {
     // any earlier races the injection for the lock and proves nothing — the
     // first cut of this test did exactly that and self-reported a false
     // "lock not held".
+    // Liveness waits are deliberately generous: they are not the assertion,
+    // and a loaded CI box must not turn them into a false failure. The only
+    // timing-sensitive claim in this test is the 300ms one below, and that one
+    // can only fail in the safe direction.
     in_sender_rx
-        .recv_timeout(Duration::from_secs(5))
+        .recv_timeout(Duration::from_secs(60))
         .expect("message sender should have been invoked");
 
     let probe_handler = handler.clone();
@@ -2697,7 +2701,7 @@ fn the_handler_lock_is_held_across_the_message_sender() {
     let _ = release_tx.send(());
     let _ = injector.join();
     probe_done_rx
-        .recv_timeout(Duration::from_secs(5))
+        .recv_timeout(Duration::from_secs(60))
         .expect("probe must complete once the injection releases the lock");
     let _ = probe.join();
 }
