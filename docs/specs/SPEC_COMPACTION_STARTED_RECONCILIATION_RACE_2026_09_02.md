@@ -1,6 +1,7 @@
 # Spec: `compaction_started` Arriving Before Turn-Phase Reconciliation Drops the Ping Permanently
 
 **Date:** 2026-09-02
+**Status:** implemented — shipped in PR #2928.
 **Repo:** agentmuxai/agentmux
 **Trigger:** User report — after loading/resuming an agent, the "Working…" status
 row sometimes disappears just before a "Compact conversation" episode finishes,
