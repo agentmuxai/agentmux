@@ -1091,12 +1091,12 @@ mod tests {
         }
     }
 
-    /// codex P2 #622: empty name auto-generates `tabN`, mirroring
+    /// codex P2 #622: empty name auto-generates `Tab N`, mirroring
     /// `wcore::create_tab`'s default-naming behaviour. Without this,
     /// CreateWindow's "fresh workspace" path + TearOffBlock's new tab
     /// would land with blank titles — a user-visible regression.
     #[test]
-    fn create_tab_auto_generates_tabN_when_name_empty() {
+    fn create_tab_auto_generates_tab_n_when_name_empty() {
         let mut state = State::default();
         let ws_id = create_workspace(&mut state, "w");
         let events = update(
