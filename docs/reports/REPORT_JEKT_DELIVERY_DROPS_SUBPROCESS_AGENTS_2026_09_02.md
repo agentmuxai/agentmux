@@ -2,7 +2,8 @@
 
 **Date:** 2026-09-02
 **Author:** Agent5
-**Status:** Diagnosed on live v0.55.31 logs + `main` @ `01cd708e6`; fix in this PR
+**Status:** implemented — diagnosis and fix shipped in PR #2930. Diagnosed against
+live v0.55.31 logs and `main` @ `01cd708e6`.
 **Severity:** P1 — every jekt/muxbus message to an affected agent is dropped, and
 the sender is told it failed while the swarm pane still lists the agent as present.
 
@@ -173,22 +174,45 @@ Changes:
    pre-`AppState` sender installed in `spawn_background_subsystems` stays as the
    early-boot fallback.
 
-### 4.1 Honest reporting of an async delivery
+### 4.1 The delivery result must be truthful, not optimistic
 
 `MessageSender` is synchronous (`Fn(&str, &str) -> Result<bool, String>`) while
-`run_agent_turn` is async, so the turn is spawned onto the Tokio runtime and the
-sender returns before it completes. To keep the success signal meaningful, the
-closure performs the checks it *can* do synchronously — controller present,
-controller is a `SubprocessController`, Tokio handle available — and only then
-reports acceptance. Failures after that point (identity gate refusal, Docker
-unavailable, `ensure_running` failure) surface in the agent pane through the same
-persisted `error_during_execution` frame and `agent:last_failure` recovery card
-that a UI-initiated turn uses. This matches the semantics the PTY path already
-had: writing keystrokes never guaranteed the agent acted on them either.
+`run_agent_turn` is async. The obvious shape — spawn the turn, return `Ok(true)`
+immediately — is **wrong**, and this is worth recording because the first cut of
+this fix did exactly that (caught in review, codex P1 on PR #2930).
 
-The distinction that matters, and which this PR fixes, is between *"delivered to
-a controller that can act on it"* and *"handed to a controller that rejects it
-outright"*. Only the latter was happening before.
+`success` is not an advisory signal. `muxbus/cloud_subscriber.rs` releases a
+claimed WAN injection back to pending for retry *only* when `!delivery.success`:
+
+```rust
+if !delivery.success {
+    // We hold the claim but local delivery failed (e.g. agent not
+    // ready) — release it back to pending so it's retried, instead
+    // of silently dropping it now that claiming already marked it
+    // "delivered".
+```
+
+So an optimistic `Ok(true)` converts every transient startup failure — stale
+block meta, an oauth spawn-gate refusal, Docker down, `ensure_running` failing —
+into a message that is marked delivered, never retried, and permanently lost.
+That is a worse failure than the bug being fixed: the original at least errored
+loudly at the sender.
+
+The closure therefore *waits* for the turn to start and returns the real result,
+via `block_in_place` + `Handle::block_on`. Two properties make this bounded:
+`run_agent_turn` returns once the turn has been **started**, not once the agent
+has answered, so this never waits on model latency; and `block_in_place` yields
+the worker thread back to the runtime meanwhile.
+
+The cost, stated plainly: `inject_message_inner` calls the sender while holding
+the reactive `Handler` mutex, so a slow start serializes other injections behind
+it. The pathological case is a first-time container image pull; everything else
+is a block read plus an exec against an already-running container. Bounded
+stalling is the right trade against silent, unretryable message loss.
+
+`block_in_place` panics on a current-thread runtime. Production is multi-thread
+(`#[tokio::main]`), and the other flavor refuses loudly rather than falling back
+to the optimistic lie.
 
 ---
 

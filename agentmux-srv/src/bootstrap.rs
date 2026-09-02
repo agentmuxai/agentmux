@@ -1838,47 +1838,69 @@ pub fn install_agent_turn_delivery(state: &AppState) {
                 };
             }
 
-            // `MessageSender` is synchronous but a turn is not, so the turn runs
-            // on the runtime and this returns once it has been accepted. Report
-            // acceptance only after the checks that CAN be made synchronously —
-            // controller resolved, controller is a subprocess one, a runtime
-            // exists to spawn onto — so a `true` here is never a bare guess.
+            // `MessageSender` is synchronous but starting a turn is not, so this
+            // waits for the turn to START and reports what actually happened.
             //
-            // A failure after that point (identity spawn gate, Docker down,
-            // ensure_running) surfaces in the agent pane through the same
-            // persisted `error_during_execution` frame + `agent:last_failure`
-            // recovery card a UI-initiated turn uses. That is the same guarantee
-            // the PTY path gave: writing keystrokes never proved the agent acted
-            // on them either. What changes is that the message now reaches a
-            // controller that can act on it at all.
+            // It must NOT spawn-and-return-`Ok(true)` optimistically (codex P1 on
+            // PR #2930). `success` is not advisory: `cloud_subscriber` treats a
+            // successful delivery as final and releases the claim back to pending
+            // for retry ONLY when `!delivery.success`
+            // (`muxbus/cloud_subscriber.rs`). Reporting success before the
+            // fallible work ran would therefore turn every transient failure —
+            // stale block meta, an oauth spawn-gate refusal, Docker down,
+            // `ensure_running` failing — into a WAN message that is marked
+            // delivered, never retried, and permanently lost. An honest `Err` here
+            // is what lets that message come back.
+            //
+            // `block_in_place` yields this worker thread back to the runtime for
+            // the duration, so other tasks keep running. The cost is real and
+            // worth naming: `inject_message_inner` calls this while holding the
+            // reactive `Handler` mutex, so a slow start (first-time container
+            // image pull is the pathological case — everything else is a block
+            // read plus an already-running `docker exec`) serializes other
+            // injections behind it. Bounded stalling beats silent loss.
+            //
+            // `run_agent_turn` returns once the turn has been STARTED, not once
+            // the agent has answered, so this is not waiting on model latency.
             let Ok(handle) = tokio::runtime::Handle::try_current() else {
                 return Err(
                     "no tokio runtime available to start a subprocess agent turn".to_string(),
                 );
             };
+            // `block_in_place` panics on a current-thread runtime. Production is
+            // multi-thread (`#[tokio::main]`); refusing loudly on the other flavor
+            // is correct, since the alternative is the optimistic lie above.
+            if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::CurrentThread {
+                return Err(
+                    "cannot start a subprocess agent turn from a current-thread runtime"
+                        .to_string(),
+                );
+            }
             let deps = deps.clone();
-            let block_id = block_id.to_string();
+            let block_id_owned = block_id.to_string();
             let message = message.to_string();
             tracing::info!(
-                block_id = %block_id,
+                block_id = %block_id_owned,
                 "reactive delivery: starting subprocess agent turn (no PTY fallback)"
             );
-            handle.spawn(async move {
-                if let Err(e) = crate::server::agent_handlers::run_agent_turn(
+            let started = tokio::task::block_in_place(|| {
+                handle.block_on(crate::server::agent_handlers::run_agent_turn(
                     &deps,
-                    block_id.clone(),
+                    block_id_owned.clone(),
                     message,
                     None,
-                )
-                .await
-                {
+                ))
+            });
+            match started {
+                Ok(()) => Ok(true),
+                Err(e) => {
                     tracing::error!(
-                        block_id = %block_id,
+                        block_id = %block_id_owned,
                         error = %e,
                         "reactive delivery: subprocess agent turn failed to start"
                     );
+                    Err(e)
                 }
-            });
-            Ok(true)
+            }
         }));
 }
