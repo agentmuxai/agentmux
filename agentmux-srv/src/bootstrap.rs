@@ -1791,3 +1791,94 @@ pub fn spawn_wal_checkpoint_loop(
         }
     });
 }
+
+/// Give the reactive handler a delivery route to `SubprocessController` agents.
+///
+/// `spawn_background_subsystems` installs a message sender that can only reach
+/// the two controller kinds `deliver_agent_message` knows about — persistent
+/// (stream-json stdin) and ACP (`session/prompt`). Everything else it reports as
+/// [`AgentDelivery::Pty`], so the caller falls back to keystroke injection.
+///
+/// That fallback is wrong for a `SubprocessController`, which has no PTY and
+/// rejects raw input outright ("subprocess controller does not accept raw input;
+/// use AgentInputCommand"). The result was that EVERY inter-agent message to
+/// such an agent was dropped: 6 of 10 providers as host agents (codex, gemini,
+/// qwen, kimi, muxcode, antigravity) and every container agent of any provider,
+/// since `agent_open.rs` forces `controller_type = "subprocess"` for container
+/// mode. The swarm pane still listed them as present, because registration and
+/// delivery are separate paths. See
+/// `docs/reports/REPORT_JEKT_DELIVERY_DROPS_SUBPROCESS_AGENTS_2026_09_02.md`.
+///
+/// This re-installs the sender with the missing branch: a subprocess target gets
+/// a real turn via `run_agent_turn` — the same thing `AgentInputCommand` does
+/// when the operator types into the pane — instead of keystrokes it will refuse.
+///
+/// Must run AFTER `build_app_state`: unlike the early sender, the turn needs
+/// `AppState` (stores, identity, broker, container manager) and is async.
+pub fn install_agent_turn_delivery(state: &AppState) {
+    let deps = crate::server::agent_handlers::AgentTurnDeps::from_state(state);
+    state
+        .reactive_handler
+        .set_message_sender(Arc::new(move |block_id: &str, message: &str| {
+            // Persistent + ACP keep their existing structured delivery, and
+            // genuine PTY controllers (shell/term) keep falling back to
+            // keystrokes. Only the subprocess case changes.
+            let Some(ctrl) = backend::blockcontroller::get_controller(block_id) else {
+                return Err(format!("no controller for block {block_id}"));
+            };
+            let is_subprocess = ctrl
+                .as_any()
+                .downcast_ref::<backend::blockcontroller::subprocess::SubprocessController>()
+                .is_some();
+            if !is_subprocess {
+                return match backend::blockcontroller::deliver_agent_message(block_id, message) {
+                    Ok(backend::blockcontroller::AgentDelivery::Structured) => Ok(true),
+                    Ok(backend::blockcontroller::AgentDelivery::Pty) => Ok(false),
+                    Err(e) => Err(e),
+                };
+            }
+
+            // `MessageSender` is synchronous but a turn is not, so the turn runs
+            // on the runtime and this returns once it has been accepted. Report
+            // acceptance only after the checks that CAN be made synchronously —
+            // controller resolved, controller is a subprocess one, a runtime
+            // exists to spawn onto — so a `true` here is never a bare guess.
+            //
+            // A failure after that point (identity spawn gate, Docker down,
+            // ensure_running) surfaces in the agent pane through the same
+            // persisted `error_during_execution` frame + `agent:last_failure`
+            // recovery card a UI-initiated turn uses. That is the same guarantee
+            // the PTY path gave: writing keystrokes never proved the agent acted
+            // on them either. What changes is that the message now reaches a
+            // controller that can act on it at all.
+            let Ok(handle) = tokio::runtime::Handle::try_current() else {
+                return Err(
+                    "no tokio runtime available to start a subprocess agent turn".to_string(),
+                );
+            };
+            let deps = deps.clone();
+            let block_id = block_id.to_string();
+            let message = message.to_string();
+            tracing::info!(
+                block_id = %block_id,
+                "reactive delivery: starting subprocess agent turn (no PTY fallback)"
+            );
+            handle.spawn(async move {
+                if let Err(e) = crate::server::agent_handlers::run_agent_turn(
+                    &deps,
+                    block_id.clone(),
+                    message,
+                    None,
+                )
+                .await
+                {
+                    tracing::error!(
+                        block_id = %block_id,
+                        error = %e,
+                        "reactive delivery: subprocess agent turn failed to start"
+                    );
+                }
+            });
+            Ok(true)
+        }));
+}
