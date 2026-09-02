@@ -1,5 +1,31 @@
 # AgentMux Version History
 
+## 0.55.31 — 2026-09-01
+
+- fix(agent): agent.open looked for the CLI at a path that never existed
+- fix(container): container turns hung forever — stdin can never reach EOF
+- feat(cef): resolve which browser pane a CEF Browser belongs to (camera Phase 1)
+- fix(identity): make provider auth-dir isolation correct by construction
+- feat(cef): per-pane per-origin media grant store (camera Phase 2a)
+- fix(cef): close a TOCTOU in block_id_for_browser lifecycle check
+- feat(cef): grant-store-driven permission handler for browser panes (camera Phase 2b)
+- feat(muxqueue): universal agent work queue — store + claim protocol
+- feat(browser-pane): camera/mic access with a per-pane permission prompt (camera Phase 2c)
+- feat(armory): drop the host CLI config block from Global Memory
+- fix(memory): Personal Memory empty for agents with a blank working_directory
+- feat(muxqueue): HTTP routes + six MCP tools (slice 2)
+- feat(muxspect): work — inspect the Muxqueue backlog from the CLI
+- docs: execution plan for the docs cleanup (executes unshipped hardening phases)
+- docs: fix status on the docs I made stale this session (cleanup batch A)
+- docs: resolve superseded docs missing their required pointer (cleanup batch B)
+- revert(cef): remove non-functional floater ctrl+wheel hook
+- test(srv): raise subprocess_io liveness timeouts to fix a recurring CI flake
+- ci: enforce the docs Status vocabulary and run the orphaned grep gates (cleanup batch E)
+- docs: generate the specs index by status so it stops going stale (cleanup batch D)
+- docs: record what the cleanup plan actually executed
+- feat(armory): browse Personal Memory by agent block instead of a dropdown
+
+
 ## 0.55.30 — 2026-08-31
 
 - fix(agent-pane): peek panel shrink-wraps, floats right, and shows 12-hour AM/PM time
