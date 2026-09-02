@@ -52,11 +52,18 @@ vi.mock("@/app/store/rpc-api", () => ({
 }));
 
 // The history panel does its own RPC work on mount and is covered by its own
-// tests; this suite is about navigation and the grid.
+// tests; this suite is about navigation and the grid. `historyPanelMountCount`
+// increments once per MOUNT (a Solid component's own function body runs once
+// at creation, not per-render) — used by the Codex P1 regression test below
+// to prove the panel actually remounted (and so would re-fetch fresh
+// history) rather than just re-rendering with identical text content, which
+// a plain toHaveTextContent check can't distinguish.
+let historyPanelMountCount = 0;
 vi.mock("@/app/view/agent/components/NativeMemoryHistoryPanel", () => ({
-    NativeMemoryHistoryPanel: (props: { agentId: string; filename: string }) => (
-        <div data-testid="history-panel">{`${props.agentId}:${props.filename}`}</div>
-    ),
+    NativeMemoryHistoryPanel: (props: { agentId: string; filename: string }) => {
+        historyPanelMountCount++;
+        return <div data-testid="history-panel">{`${props.agentId}:${props.filename}`}</div>;
+    },
 }));
 
 import { NativeMemoryManager } from "./native-memory-manager";
@@ -76,6 +83,7 @@ beforeEach(() => {
     nativeMemoryListMock.mockResolvedValue({ files: [] });
     localStorage.clear();
     wpsHub.handlers.clear();
+    historyPanelMountCount = 0;
 });
 
 describe("NativeMemoryManager — agent grid", () => {
@@ -443,6 +451,105 @@ describe("NativeMemoryManager — reactive updates", () => {
         expect(wpsHub.handlers.has("agent:memory:changed:a1")).toBe(false);
         expect(wpsHub.handlers.has("agent:memory:changed:a2")).toBe(false);
         expect(wpsHub.handlers.has("agent:memory:changed:a3")).toBe(true);
+    });
+
+    // Codex P1, PR #2932: a live write to the file already open in the
+    // detail view is the scenario this whole feature exists for. The panel
+    // is keyed on agentId:filename, which don't change when only the SAME
+    // file's content changes — without a forced remount, the new content/
+    // history stayed invisible until the user switched away and back.
+    test("an event for the open file re-mounts the history panel, not just re-renders it", async () => {
+        nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md" }] });
+        render(() => <NativeMemoryManager />);
+        fireEvent.click(await screen.findByText("Manoz"));
+        const select = await screen.findByRole("combobox");
+        await waitFor(() => expect(select).not.toBeDisabled());
+        fireEvent.change(select, { target: { value: "MEMORY.md" } });
+        await screen.findByTestId("history-panel");
+        const mountsBefore = historyPanelMountCount;
+
+        // Same file list, same selected file — nothing about agentId or
+        // filename changes, only the file's own content on the backend.
+        wpsHub.handlers.get("agent:memory:changed:a1")?.({});
+
+        await waitFor(() => expect(historyPanelMountCount).toBeGreaterThan(mountsBefore));
+        // Still showing the same agent/file — a remount, not a navigation.
+        expect(screen.getByTestId("history-panel")).toHaveTextContent("a1:MEMORY.md");
+    });
+
+    // Codex P2, PR #2932: refetchSelectedAgentFiles shares latestRequestId
+    // with the selectedAgent()-keyed effect. If a change event's refetch
+    // completes and becomes the new latestRequestId before the ORIGINAL
+    // agent-switch fetch resolves, that original fetch's own .finally()
+    // skips setFilesLoading(false) (guarded by the same requestId check) --
+    // and if refetchSelectedAgentFiles itself never touched filesLoading,
+    // nothing else would ever clear it, leaving the selector permanently
+    // disabled/stuck on "Loading…".
+    test("does not get stuck loading when an event's refetch resolves before the initial agent-switch fetch", async () => {
+        let resolveInitial: ((v: { files: NativeMemoryFileMeta[] }) => void) | undefined;
+        nativeMemoryListMock.mockImplementation(
+            () =>
+                new Promise((resolve) => {
+                    resolveInitial = resolve;
+                }),
+        );
+        render(() => <NativeMemoryManager />);
+        fireEvent.click(await screen.findByText("Manoz")); // fires the initial (slow) fetch
+
+        const select = await screen.findByRole("combobox");
+        expect(select).toBeDisabled(); // still "Loading…" — initial fetch not resolved yet
+
+        // A change event's refetch fires and resolves BEFORE the initial
+        // fetch does — it becomes the new latestRequestId.
+        nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md" }] });
+        wpsHub.handlers.get("agent:memory:changed:a1")?.({});
+        await waitFor(() => expect(select).not.toBeDisabled());
+
+        // The original (now-superseded) initial fetch finally resolves.
+        resolveInitial?.({ files: [] });
+        await Promise.resolve();
+
+        // Must still reflect the newer, correct result -- not stuck loading,
+        // and not clobbered back to the stale initial (empty) result either.
+        expect(select).not.toBeDisabled();
+        expect(Array.from(select.querySelectorAll("option")).map((o) => o.value)).toContain("MEMORY.md");
+    });
+
+    // Codex P2, PR #2932: fetchCountFor previously guarded only "is this
+    // agent still present", not "is this the newest request for this
+    // agent". Two overlapping calls for the same agent (e.g. an unusually
+    // slow initial fetch, superseded by a fast event-triggered refetch)
+    // could let the OLDER response win if it resolves last.
+    test("an older, slower count response cannot overwrite a newer one for the same agent", async () => {
+        let resolveSlow: ((v: { files: NativeMemoryFileMeta[] }) => void) | undefined;
+        nativeMemoryListMock.mockImplementation((_c: unknown, req: { agent_id: string }) => {
+            if (req.agent_id !== "a1") return Promise.resolve({ files: [] });
+            return new Promise((resolve) => {
+                resolveSlow = resolve;
+            });
+        });
+        render(() => <NativeMemoryManager />);
+        await screen.findByText("Manoz"); // initial fetch for a1 now in flight (slow)
+
+        // A change event fires a second, faster request for the same agent,
+        // which resolves first with the "true" current count.
+        nativeMemoryListMock.mockImplementation((_c: unknown, req: { agent_id: string }) =>
+            req.agent_id === "a1"
+                ? Promise.resolve({ files: [{ filename: "MEMORY.md" }, { filename: "NOTES.md" }] })
+                : Promise.resolve({ files: [] }),
+        );
+        wpsHub.handlers.get("agent:memory:changed:a1")?.({});
+        await screen.findByText("2 files");
+
+        // The original slow request finally resolves with stale data.
+        resolveSlow?.({ files: [] });
+        await Promise.resolve();
+
+        // Must still show the newer, correct count on a1's own card
+        // specifically — a2's own (genuinely empty) card still legitimately
+        // reads "No memories yet" and is not what this assertion is about.
+        expect(screen.getByText("2 files")).toBeInTheDocument();
+        expect(screen.getByText("Manoz").closest(".memory-agent-card")).toHaveTextContent("2 files");
     });
 });
 

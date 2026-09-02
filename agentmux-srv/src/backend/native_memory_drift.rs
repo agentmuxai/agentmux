@@ -116,10 +116,68 @@ fn read_memory_file_lossy(path: &Path) -> std::io::Result<String> {
 /// tests assert on it directly). Errors from an individual agent/file are
 /// logged and swallowed — one agent's bad state (e.g. a permissions issue)
 /// must not stop the sweep from covering every other agent.
-pub(crate) fn reconciliation_sweep_once(wstore: &Store, id_store: &Store, broker: &crate::backend::wps::Broker) -> usize {
+///
+/// Also detects and publishes OUT-OF-BAND DELETIONS (Codex P2, PR #2932):
+/// content-drift detection alone only ever compares files that still exist
+/// against their last recorded version — a `.md` file removed directly (not
+/// through `agent:memory:write_file`/`revert`, neither of which delete
+/// files) never surfaces there, and the fast fs-watch path deliberately
+/// ignores `FsWatchEventKind::Removed` (it exists to catch content changes,
+/// not track deletions). Without this, the grid count and an open detail
+/// view for the deleted file would stay stale indefinitely — no event ever
+/// arrives to prompt the frontend's own "the selected file is now gone"
+/// handling to fire.
+///
+/// `deleted_notified` is this sweep's own persistent, cross-tick state
+/// (threaded in from `spawn_slow_path`'s loop, same pattern the fast path's
+/// `watched_dirs`/`dir_to_agent` already use) — without it, a file that
+/// STAYS deleted would republish an event every single 30s tick forever,
+/// since "missing from disk" is true on every subsequent sweep too, not
+/// just the first one. A filename is removed from this set again the
+/// moment it reappears on disk (recreated with new content), so a later
+/// re-deletion is detected fresh rather than staying permanently suppressed.
+pub(crate) fn reconciliation_sweep_once(
+    wstore: &Store,
+    id_store: &Store,
+    broker: &crate::backend::wps::Broker,
+    deleted_notified: &mut HashSet<(String, String)>,
+) -> usize {
     let mut drifted = 0;
-    for (agent_id, memory_dir) in list_all_memory_targets(wstore) {
-        drifted += sweep_one_agent_dir(id_store, &agent_id, &memory_dir, "reconciliation_sweep", broker);
+    let targets = list_all_memory_targets(wstore);
+    for (agent_id, memory_dir) in &targets {
+        drifted += sweep_one_agent_dir(id_store, agent_id, memory_dir, "reconciliation_sweep", broker);
+    }
+
+    // agent_native_memory_version_list_distinct_files() is unscoped (every
+    // agent's every file with recorded history) — the same primitive
+    // native_memory_retention.rs already uses as its own work list, not a
+    // new query pattern introduced here.
+    let Ok(distinct) = id_store.agent_native_memory_version_list_distinct_files() else {
+        return drifted;
+    };
+    for (agent_id, filename) in distinct {
+        let Some((_, memory_dir)) = targets.iter().find(|(id, _)| *id == agent_id) else {
+            // Not (or no longer) a tracked target this sweep — out of scope
+            // for this pass; list_all_memory_targets is the same
+            // authoritative source the content-drift loop above already
+            // trusts for "which agents/dirs are live right now."
+            continue;
+        };
+        let key = (agent_id.clone(), filename.clone());
+        if memory_dir.join(&filename).is_file() {
+            deleted_notified.remove(&key);
+            continue;
+        }
+        if deleted_notified.insert(key) {
+            tracing::info!(agent_id = %agent_id, filename = %filename, "native_memory_drift: detected an out-of-band deletion");
+            broker.publish(crate::backend::wps::WaveEvent {
+                event: format!("agent:memory:changed:{agent_id}"),
+                scopes: vec![],
+                sender: String::new(),
+                persist: 0,
+                data: None,
+            });
+        }
     }
     drifted
 }
@@ -202,9 +260,13 @@ pub fn spawn(
 fn spawn_slow_path(wstore: Arc<Store>, id_store: Arc<Store>, broker: Arc<crate::backend::wps::Broker>) {
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(SWEEP_INTERVAL);
+        // Persistent across ticks, same pattern as the fast path's own
+        // watched_dirs/dir_to_agent — see reconciliation_sweep_once's own
+        // doc comment on why this can't just be a fresh HashSet per call.
+        let mut deleted_notified: HashSet<(String, String)> = HashSet::new();
         loop {
             tick.tick().await;
-            reconciliation_sweep_once(&wstore, &id_store, &broker);
+            reconciliation_sweep_once(&wstore, &id_store, &broker, &mut deleted_notified);
         }
     });
 }
@@ -564,10 +626,116 @@ mod tests {
         }
 
         let broker = crate::backend::wps::Broker::new();
-        let drifted = reconciliation_sweep_once(&state.wstore, &id_store, &broker);
+        let mut deleted_notified = HashSet::new();
+        let drifted = reconciliation_sweep_once(&state.wstore, &id_store, &broker, &mut deleted_notified);
         assert_eq!(drifted, 2, "sweep must cover every agent with a working directory");
         assert_eq!(id_store.agent_native_memory_version_list("sweep-agent-a", "MEMORY.md").unwrap().len(), 1);
         assert_eq!(id_store.agent_native_memory_version_list("sweep-agent-b", "MEMORY.md").unwrap().len(), 1);
+
+        match prev_shared_dir {
+            Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),
+            None => std::env::remove_var("AGENTMUX_SHARED_DIR"),
+        }
+    }
+
+    // Codex P2, PR #2932: content-drift detection alone never notices a
+    // file that's gone (nothing to compare content against), and the fast
+    // path deliberately ignores FsWatchEventKind::Removed — without this,
+    // an out-of-band deletion of the file open in the Armory detail view
+    // stayed stale forever, since no event ever arrived to trigger the
+    // frontend's own "the selected file is gone" handling.
+    #[tokio::test]
+    async fn reconciliation_sweep_detects_an_out_of_band_deletion_once_then_suppresses_repeats_until_recreated() {
+        let _guard = crate::test_support::ISOLATED_AUTH_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev_shared_dir = std::env::var_os("AGENTMUX_SHARED_DIR");
+        let shared = tempfile::tempdir().unwrap();
+        std::env::set_var("AGENTMUX_SHARED_DIR", shared.path());
+
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let id_store = Store::open_shared(tmp.path()).unwrap();
+        let state = crate::server::tests::test_state();
+        let config = tempfile::tempdir().unwrap();
+
+        let mut def = crate::backend::storage::AgentDefinition {
+            conversation_visibility: crate::backend::storage::agents::default_conversation_visibility(),
+            id: "sweep-delete-agent".to_string(),
+            slug: "sweep-delete-agent".to_string(),
+            name: "Test".to_string(),
+            icon: String::new(),
+            provider: "claude".to_string(),
+            description: String::new(),
+            working_directory: "/work/sweep-delete-agent".to_string(),
+            shell: String::new(),
+            provider_flags: String::new(),
+            auto_start: 0,
+            restart_on_crash: 0,
+            idle_timeout_minutes: 0,
+            created_at: 0,
+            agent_type: "host".to_string(),
+            environment: String::new(),
+            agent_bus_id: String::new(),
+            is_seeded: 0,
+            accounts: String::new(),
+            parent_id: String::new(),
+            branch_label: String::new(),
+            updated_at: 0,
+            user_hidden: 0,
+            container_image: String::new(),
+            container_volumes: "[]".to_string(),
+            container_name: String::new(),
+            use_ambient_login: 0,
+            auto_continue_enabled: 0,
+            model_vendor_base_url: String::new(),
+            memory_id: String::new(),
+        };
+        state.wstore.agent_def_insert(&mut def).unwrap();
+        state
+            .wstore
+            .agent_content_set(&crate::backend::storage::AgentContent {
+                agent_id: def.id.clone(),
+                content_type: "env".to_string(),
+                content: format!("CLAUDE_CONFIG_DIR={}\n", config.path().display()),
+                updated_at: 0,
+            })
+            .unwrap();
+        let memory_dir = memory_dir_for_agent_by_id(&state.wstore, &def).unwrap();
+        std::fs::create_dir_all(&memory_dir).unwrap();
+        let file_path = memory_dir.join("MEMORY.md");
+        std::fs::write(&file_path, "content").unwrap();
+
+        let (broker, client) = crate::test_support::broker_recording("agent:memory:changed:sweep-delete-agent");
+        let mut deleted_notified = HashSet::new();
+
+        // Sweep 1: file present — establishes the recorded version (and
+        // publishes once, from ordinary content-drift, not deletion logic).
+        reconciliation_sweep_once(&state.wstore, &id_store, &broker, &mut deleted_notified);
+        assert_eq!(client.received_events().len(), 1);
+
+        // Delete the file out of band (not through write_file/revert).
+        std::fs::remove_file(&file_path).unwrap();
+
+        // Sweep 2: first sweep to observe the deletion — must publish.
+        reconciliation_sweep_once(&state.wstore, &id_store, &broker, &mut deleted_notified);
+        assert_eq!(client.received_events().len(), 2, "the sweep that first observes a deletion must publish");
+
+        // Sweep 3: file still gone — must NOT publish again (suppressed;
+        // otherwise a permanently-deleted file would fire an event every
+        // 30s tick forever).
+        reconciliation_sweep_once(&state.wstore, &id_store, &broker, &mut deleted_notified);
+        assert_eq!(client.received_events().len(), 2, "a repeat sweep over an already-reported deletion must not re-publish");
+
+        // Recreate the file — content-drift detects it as a new version
+        // (publish #3) and clears the deletion-suppression for this file.
+        std::fs::write(&file_path, "recreated content").unwrap();
+        reconciliation_sweep_once(&state.wstore, &id_store, &broker, &mut deleted_notified);
+        assert_eq!(client.received_events().len(), 3);
+
+        // Delete it again — must be detected as a FRESH deletion (publish
+        // #4), proving the suppression state was actually cleared on
+        // recreation, not permanently stuck once a file is ever deleted once.
+        std::fs::remove_file(&file_path).unwrap();
+        reconciliation_sweep_once(&state.wstore, &id_store, &broker, &mut deleted_notified);
+        assert_eq!(client.received_events().len(), 4, "a re-deletion after recreation must be detected as a fresh event");
 
         match prev_shared_dir {
             Some(v) => std::env::set_var("AGENTMUX_SHARED_DIR", v),

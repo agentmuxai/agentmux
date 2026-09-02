@@ -144,6 +144,33 @@ agent (e.g. an agent scripting several `MemoryWrite` calls in a loop) should
 coalesce into one refetch, not one RPC round-trip per write. Keyed per
 agent ID so a burst on agent A never delays agent B's own refresh.
 
+#### Out-of-band deletions
+
+Content-drift detection alone never notices a file that's simply *gone* —
+there's nothing left to hash and compare. The fast fs-watch path also
+deliberately ignores `FsWatchEventKind::Removed` (it exists to catch content
+changes, not track deletions). Caught during review (Codex P2, PR #2932):
+without handling this, a file deleted out of band (not through
+`agent:memory:write_file`/`revert`, neither of which delete files) would
+never publish anything, leaving the grid count and an open detail view for
+that exact file stale forever — not just delayed, since no event ever
+arrives to prompt the frontend's own "the selected file is now gone"
+handling (added in this same spec) to fire at all.
+
+Fixed in the reconciliation sweep (not the fast path — instant deletion
+detection isn't needed at fs-watch speed for this): after each sweep's
+content-drift pass, `agent_native_memory_version_list_distinct_files()`
+(the same primitive `native_memory_retention.rs` already uses as its own
+work list) gives every `(agent_id, filename)` pair with recorded history;
+any whose file is missing from its resolved directory on THIS sweep
+publishes — once. A `deleted_notified: HashSet<(agent_id, filename)>`,
+threaded as persistent per-tick state the same way the fast path's own
+`watched_dirs`/`dir_to_agent` already are, suppresses republishing on every
+subsequent 30s tick for a file that stays deleted; the entry clears the
+moment the filename reappears on disk (recreated with new content), so a
+later re-deletion is detected fresh, not permanently swallowed by the first
+one.
+
 #### Known gap — not solved by this design, and why it's acceptable
 
 The fs-watch fast path only watches **known** agents' memory directories
@@ -181,6 +208,26 @@ speculatively.
   was actually the one removed).
 - Rapid repeated events for the same agent within the debounce window
   produce exactly one refetch, not one per event.
+- An event for the file currently open in the detail view **remounts** the
+  history panel (proven via a mount-count check, not just matching text
+  content — a plain re-render with identical `agentId:filename` couldn't be
+  distinguished from a genuine remount otherwise), so its own constructor-
+  loaded history actually reflects the new content (Codex P1, PR #2932 —
+  the exact scenario this whole feature exists for was, before this test,
+  the one case that silently didn't work).
+- A change event's refetch resolving before an in-flight initial
+  agent-switch fetch does not leave the file selector permanently stuck on
+  "Loading…" (Codex P2, PR #2932 — both fetches share `latestRequestId`;
+  `refetchSelectedAgentFiles` must own `filesLoading` too, not just `files`).
+- An older, slower count response cannot overwrite a newer one that
+  resolved first for the same agent (Codex P2, PR #2932 — `fetchCountFor`
+  needed its own per-agent request generation, not just the "agent still
+  present" guard that sufficed before events could re-trigger it while a
+  prior call was still in flight).
+- Backend: a reconciliation sweep that first observes a file's out-of-band
+  deletion publishes once; a repeat sweep over the same still-missing file
+  does not re-publish; recreating the file clears the suppression, so a
+  later re-deletion is detected fresh (Codex P2, PR #2932).
 
 ### Non-goals (Personal Memory)
 
