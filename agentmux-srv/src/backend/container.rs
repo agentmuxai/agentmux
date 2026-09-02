@@ -68,8 +68,59 @@ fn normalize_host_path(path: &str) -> String {
     path.replace('\\', "/")
 }
 
+/// Canonical form of a mount source for comparison.
+///
+/// Case folding is Windows-only, deliberately (codex P2 on PR #2933). Docker on
+/// Windows can report a differently-cased drive letter than we asked for, so a
+/// case-sensitive compare there produces phantom drift and a needless recreate.
+/// Folding UNCONDITIONALLY is the opposite bug: on a case-sensitive host,
+/// switching an agent's workspace from `/work/Foo` to the genuinely different
+/// `/work/foo` would look like a match, `ensure_running` would skip the
+/// recreate, and `/workspace` would keep serving the old directory.
+fn fold_mount_source(source: &str) -> String {
+    let normalized = normalize_host_path(source);
+    if cfg!(windows) {
+        normalized.to_lowercase()
+    } else {
+        normalized
+    }
+}
+
 /// The credentials file inside the account's config dir, and inside the image.
 pub const CLAUDE_CREDENTIALS_FILE: &str = ".credentials.json";
+
+/// The account config dir to hand to [`ContainerMountSpec::claude_config_host_dir`],
+/// or `None` when this account has no file-backed credential to mount.
+///
+/// The existence check is load-bearing, not defensive tidiness (codex P1 on PR
+/// #2933). **On macOS Claude Code keeps OAuth credentials in the encrypted
+/// Keychain and never writes this file at all** — see
+/// `identity/resolver/oauth_probe.rs` and
+/// `docs/retro/retro-macos-keychain-credential-isolation-gap-2026-08-17.md`.
+/// Binding a source that does not exist makes Docker reject `create_container`
+/// outright, so an unguarded bind would turn "container agents cannot
+/// authenticate on macOS" into "container agents cannot START on macOS" — a
+/// strictly worse failure than the one this fix exists to remove.
+///
+/// Returning `None` degrades to exactly the previous behavior (an empty per-agent
+/// volume) instead, and logs why. Keychain-backed provisioning is a separate
+/// piece of work; this only guarantees we do not regress it.
+pub fn credentials_dir_if_file_backed(claude_config_host_dir: &str) -> Option<String> {
+    if claude_config_host_dir.is_empty() {
+        return None;
+    }
+    let creds = std::path::Path::new(claude_config_host_dir).join(CLAUDE_CREDENTIALS_FILE);
+    if creds.is_file() {
+        return Some(claude_config_host_dir.to_string());
+    }
+    tracing::warn!(
+        dir = %claude_config_host_dir,
+        "container agent: no {CLAUDE_CREDENTIALS_FILE} in the bound account's config dir — \
+         not mounting credentials (expected on macOS, where Claude Code stores them in the \
+         Keychain). The agent will start but will not be authenticated."
+    );
+    None
+}
 
 /// The mounts that make up the agent's home dir inside the container.
 ///
@@ -94,6 +145,22 @@ pub const CLAUDE_CREDENTIALS_FILE: &str = ".credentials.json";
 /// image, so `projects`/`sessions` stay writable by uid 1000. Verified end to
 /// end — a container agent using this shape completed a real turn against the
 /// bound account (`"result":"AUTH_OK"`, `is_error: false`).
+///
+/// Known limitation — HOST UID PARITY. A bind preserves the host file's owner
+/// and mode (`.credentials.json` is typically 0600), while the image always
+/// execs as `agent`, uid 1000. On a host whose AgentMux user is not uid 1000,
+/// the container cannot read the token and authentication stays broken there.
+///
+/// That is deliberately NOT worked around here. It is the container design's
+/// pre-existing, documented assumption — "`agent` non-root user (UID 1000) …
+/// Host filesystem UID parity" (SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md §
+/// "What claw's containers provide"; the Dockerfile renames node:22-slim's
+/// uid-1000 user for exactly this) — and the `/workspace` bind below has the
+/// identical problem: at uid != 1000 the agent cannot write its own workspace
+/// either. Special-casing credentials would fix one symptom of that assumption
+/// and leave the other, while adding a second provisioning path to maintain.
+/// The real fix is to exec as the host uid/gid, which is an architectural change
+/// affecting every mount, and belongs in its own PR.
 ///
 /// Known limitation: a single-file bind follows the inode. If the CLI ever
 /// replaces `.credentials.json` by atomic rename rather than writing in place, a
@@ -766,12 +833,12 @@ impl ContainerManager {
                 .iter()
                 .find(|m| m.destination.as_deref() == Some(target))
                 .and_then(|m| m.name.clone().or_else(|| m.source.clone()))
-                .map(|s| normalize_host_path(&s).to_lowercase())
+                .map(|s| fold_mount_source(&s))
         };
 
         let desired = Self::desired_owned_mounts(container_name, spec);
         Self::owned_mount_targets().iter().all(|target| {
-            let want = desired.get(target).map(|s| normalize_host_path(s).to_lowercase());
+            let want = desired.get(target).map(|s| fold_mount_source(s));
             source_at(target) == want
         })
     }
@@ -1223,6 +1290,55 @@ mod tests {
         assert!(owned.contains(&CONTAINER_WORKSPACE_DIR.to_string()));
         assert!(owned.contains(&format!("{CONTAINER_CLAUDE_DIR}/{CLAUDE_CREDENTIALS_FILE}")));
         assert_eq!(owned.len(), 3, "a user volume target must never appear here");
+    }
+
+    /// macOS keeps OAuth credentials in the Keychain and never writes this file
+    /// (oauth_probe.rs). Binding a nonexistent source makes Docker refuse to
+    /// create the container, so an unguarded bind would turn "cannot
+    /// authenticate on macOS" into "cannot START on macOS".
+    #[test]
+    fn a_config_dir_with_no_credentials_file_is_not_offered_for_mounting() {
+        let dir = std::env::temp_dir().join("agentmux-creds-guard-empty");
+        std::fs::create_dir_all(&dir).unwrap();
+        let _ = std::fs::remove_file(dir.join(CLAUDE_CREDENTIALS_FILE));
+
+        assert_eq!(
+            credentials_dir_if_file_backed(&dir.to_string_lossy()),
+            None,
+            "no credentials file (the macOS Keychain case) must not produce a bind",
+        );
+        assert_eq!(credentials_dir_if_file_backed(""), None);
+    }
+
+    /// …and when the file IS there, it is offered, so the fix still applies on
+    /// every platform that writes it.
+    #[test]
+    fn a_config_dir_holding_a_credentials_file_is_offered_for_mounting() {
+        let dir = std::env::temp_dir().join("agentmux-creds-guard-present");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(CLAUDE_CREDENTIALS_FILE), b"{}").unwrap();
+
+        assert_eq!(
+            credentials_dir_if_file_backed(&dir.to_string_lossy()).as_deref(),
+            Some(dir.to_string_lossy().as_ref()),
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Case folding must be Windows-only: on a case-sensitive host `/work/Foo`
+    /// and `/work/foo` are different directories, and folding them together
+    /// would hide real drift and leave /workspace on the stale one.
+    #[test]
+    fn mount_source_case_is_folded_only_where_the_filesystem_is_case_insensitive() {
+        let a = fold_mount_source("/work/Foo");
+        let b = fold_mount_source("/work/foo");
+        if cfg!(windows) {
+            assert_eq!(a, b, "windows paths are case-insensitive");
+        } else {
+            assert_ne!(a, b, "a case-sensitive host must see these as different mounts");
+        }
+        // Slash normalization is unconditional either way.
+        assert_eq!(fold_mount_source(r"C:\a\b"), fold_mount_source("C:/a/b"));
     }
 
     #[test]

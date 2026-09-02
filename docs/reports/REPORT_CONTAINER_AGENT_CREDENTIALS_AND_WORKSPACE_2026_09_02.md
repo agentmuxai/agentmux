@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-02
 **Author:** Agent5
-**Status:** implemented — fix shipped in PR #2931. Diagnosed live against
+**Status:** implemented — fix shipped in PR #2933. Diagnosed live against
 AgentMux v0.55.31 and `ghcr.io/agentmuxai/agent-claude:latest`.
 **Severity:** P0 for container agents — the feature has never worked end to end.
 No operator action (re-login, rebind, restart) could fix it.
@@ -162,7 +162,35 @@ recreate.
 
 ---
 
-## 5. Known limitation
+## 5. Platform scope — where this does and does not fix authentication
+
+Verified live on **Windows / Docker Desktop**. The other two platforms are
+narrower than the first draft of this report claimed, and both were caught in
+review rather than by me:
+
+**macOS — still cannot authenticate, but no longer breaks.** Claude Code on
+macOS keeps OAuth credentials in the encrypted Keychain and never writes
+`.credentials.json` at all (`identity/resolver/oauth_probe.rs` §77–121,
+`docs/retro/retro-macos-keychain-credential-isolation-gap-2026-08-17.md`). An
+unguarded bind of a nonexistent source makes Docker refuse `create_container`,
+which would have turned "container agents cannot authenticate on macOS" into
+"container agents cannot START on macOS" — strictly worse than the bug being
+fixed. `credentials_dir_if_file_backed` therefore only offers a bind when the
+file actually exists, and logs why when it does not. Keychain-backed
+provisioning is separate, unstarted work.
+
+**Linux at uid != 1000 — still cannot authenticate.** A bind preserves the host
+file's owner and mode (0600), while the image always execs as `agent`, uid 1000.
+This is deliberately not worked around here: it is the container design's
+existing, documented assumption — *"`agent` non-root user (UID 1000) … Host
+filesystem UID parity"* (`SPEC_CONTAINER_PANE_SUPPORT_2026_06_11.md`) — and the
+`/workspace` bind added by this same change has the identical property: at uid
+!= 1000 the agent cannot write its own workspace either. Special-casing
+credentials would fix one symptom of that assumption, leave the other, and add a
+second credential-provisioning path to maintain. The real fix is to exec as the
+host uid/gid, which touches every mount and belongs in its own change.
+
+## 6. Known limitation
 
 A single-file bind follows the inode. If the CLI ever replaces
 `.credentials.json` by atomic rename rather than writing in place, a refreshed
@@ -174,7 +202,7 @@ break in a long-running container, this is the first thing to suspect.
 
 ---
 
-## 6. What this does not change
+## 7. What this does not change
 
 - The credential spawn gate (`SpawnGateError::MissingCredentials`). It behaves
   exactly as `SPEC_ACCOUNT_DELETE_DEAUTH_LAYERS_2_4_2026_07_14.md` §2.2
@@ -187,7 +215,7 @@ break in a long-running container, this is the first thing to suspect.
 
 ---
 
-## 7. References
+## 8. References
 
 - `agentmux-srv/src/backend/container.rs` — `ContainerMountSpec`,
   `agent_home_mounts`, `mounts_match`, `CONTAINER_ENV_DENYLIST`

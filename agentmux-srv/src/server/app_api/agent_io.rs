@@ -331,7 +331,9 @@ fn register_agent_send(engine: &Arc<WshRpcEngine>, state: &AppState) {
                         // path stripped by CONTAINER_ENV_DENYLIST, so mounting it
                         // is the only way the in-container CLI sees credentials.
                         let mount_spec = crate::backend::container::ContainerMountSpec {
-                            claude_config_host_dir: env_vars.get("CLAUDE_CONFIG_DIR").cloned(),
+                            claude_config_host_dir: env_vars
+                            .get("CLAUDE_CONFIG_DIR")
+                            .and_then(|d| crate::backend::container::credentials_dir_if_file_backed(d)),
                             workspace_host_dir: Some(working_dir.clone()).filter(|d| !d.is_empty()),
                         };
 
