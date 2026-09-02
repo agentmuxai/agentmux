@@ -1,7 +1,18 @@
 # Spec: Continuous AgentWorkingRow background through the scrollbar gutter
 
 **Date:** 2026-08-06
-**Status:** implemented — PR #2439 (backdrop-layer fix); verified in code 2026-08-10.
+**Status:** superseded — 2026-09-01, see `Superseded-by:` below.
+**Superseded-by:** [`SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md`](./SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md)
+
+Was implemented in PR #2439 (backdrop-layer fix) and verified in code 2026-08-10.
+Superseded **in full**: every element this spec introduced — the
+`.agent-working-row-backdrop` layer, the anchor's scrollbar-width inset, and
+the stacking-context reasoning that ordered them — existed to serve the
+floating-overlay geometry of `SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md`
+§3.2. The working row is now a normal-flow sibling below the ActivityDock,
+outside `.agent-document-scroll-region` entirely, so it cannot paint over the
+message list's scrollbar and the gutter-color gap this spec fixed cannot
+occur. Retained for history, not as a description of current code.
 **Scope:** `frontend/app/view/agent/agent-view.tsx`, `frontend/app/view/agent/styles/_control-bar.scss`, `frontend/app/view/agent/styles/_document.scss`
 **Related:** `SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md` §3.2 (introduced the floating-overlay architecture this spec builds on), the `.agent-working-row-anchor` z-index-obscures-scrollbar comment in `_control-bar.scss` (the earlier bug this spec must not reintroduce)
 

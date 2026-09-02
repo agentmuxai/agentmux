@@ -85,9 +85,6 @@ interface AgentDocumentViewProps {
     /** Derived layout view from the agent-pane-layout slice (Phase 3) —
      *  forwarded to the list, which renders rows from its prefix-sum positions. */
     layoutView?: Accessor<LayoutView | null>;
-    /** AgentWorkingRow's current height — forwarded to the list's
-     *  stick-to-bottom effect. See AgentDocumentVirtualListProps.workingRowHeight. */
-    workingRowHeight?: Accessor<number>;
     /** Open/focus the Agent History tab — forwarded to the list so a
      *  `history_link` synthetic row can act on click. See
      *  SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md §3.2. */
@@ -201,7 +198,6 @@ export const AgentDocumentView = (props: AgentDocumentViewProps): JSX.Element =>
             zoomFactor={props.zoomFactor}
             blockId={props.blockId}
             layoutView={props.layoutView}
-            workingRowHeight={props.workingRowHeight}
             onOpenHistory={props.onOpenHistory}
             headerSlot={headerSlot()}
             dispatchMatches={dispatchMatches}
