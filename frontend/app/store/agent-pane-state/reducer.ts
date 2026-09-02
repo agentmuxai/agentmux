@@ -156,10 +156,26 @@ export function update(
             const wasWorking =
                 k === "Submitting" || k === "Streaming" || k === "Interrupting";
             if (!wasWorking) {
-                // Same-ref no-op for Idle / Done / Disconnected. There
-                // is no in-flight turn so per-turn sidecars are already
-                // cleared. No event either — the unsubscribe is non-news.
-                return { state, events: [] };
+                // reagent P1 on PR #2928: `pendingCompactionPing` CAN be set
+                // here — that's exactly the buffering condition
+                // CompactionStarted adds for Idle/Disconnected/Done.completed
+                // (see that case). The old "no in-flight turn so per-turn
+                // sidecars are already cleared" premise predates this field
+                // and no longer holds for it: an unsubscribe while a ping is
+                // buffered (e.g. tab backgrounded pre-reconciliation) must
+                // still discard it, or a later resubscribe + resumed content
+                // (StreamFlushObserved's Idle→Streaming promotion) would
+                // retroactively — and wrongly — promote a stale ping onto
+                // whatever unrelated turn comes next.
+                if (state.pendingCompactionPing == null) {
+                    // True same-ref no-op for Idle / Done / Disconnected
+                    // with nothing buffered — the unsubscribe is non-news.
+                    return { state, events: [] };
+                }
+                return {
+                    state: { ...state, pendingCompactionPing: null },
+                    events: [{ type: "stream-unsubscribed", at: command.at }],
+                };
             }
             const reason: DisconnectReason = "stream-unsubscribed";
             const lastKind = k as KindBeforeDisconnect;
@@ -190,6 +206,7 @@ export function update(
                     // stuck showing "Compacting… Ns" forever, surviving
                     // the reconnect and every subsequent turn.
                     compacting: null,
+                    pendingCompactionPing: null,
                 },
                 events: [
                     { type: "stream-unsubscribed", at: command.at },
@@ -262,6 +279,16 @@ export function update(
             const events: AgentPaneEvent[] = [
                 { type: "stream-flush-observed", addedCount: command.addedCount },
             ];
+            // SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02.md: the
+            // other authoritative promotion a `pendingCompactionPing` can be
+            // retroactively applied against — resumed live content is proof
+            // this same turn is genuinely active, the same standard the
+            // promotion ternary above already uses.
+            const promoted = nextPhase.kind === "Streaming" && state.turnPhase.kind !== "Streaming";
+            const pending = promoted ? state.pendingCompactionPing : null;
+            if (pending != null) {
+                events.push({ type: "compaction-started", trigger: pending.trigger });
+            }
             return {
                 state: {
                     ...state,
@@ -272,6 +299,9 @@ export function update(
                     },
                     lastEventMs: command.at,
                     turnPhase: nextPhase,
+                    compacting:
+                        pending != null ? { trigger: pending.trigger, startedAt: pending.startedAt } : state.compacting,
+                    pendingCompactionPing: promoted ? null : state.pendingCompactionPing,
                 },
                 events,
             };
@@ -396,6 +426,17 @@ export function update(
                 if (!canPromote) {
                     return { state, events: [] };
                 }
+                // SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02.md:
+                // this is one of the two authoritative promotions that a
+                // `pendingCompactionPing` (buffered by `CompactionStarted`
+                // above, because it arrived before THIS confirmation)
+                // retroactively applies against — this RPC response IS the
+                // signal the ping was waiting for.
+                const pending = state.pendingCompactionPing;
+                const events: AgentPaneEvent[] = [{ type: "turn-active-reconciled" }];
+                if (pending != null) {
+                    events.push({ type: "compaction-started", trigger: pending.trigger });
+                }
                 return {
                     state: {
                         ...state,
@@ -405,8 +446,13 @@ export function update(
                             toolsActive: 0,
                             lastEventMs: command.at,
                         },
+                        compacting:
+                            pending != null
+                                ? { trigger: pending.trigger, startedAt: pending.startedAt }
+                                : state.compacting,
+                        pendingCompactionPing: null,
                     },
-                    events: [{ type: "turn-active-reconciled" }],
+                    events,
                 };
             }
             // active === false: the backend's authoritative turn_active (flipped
@@ -423,8 +469,24 @@ export function update(
             // INTERRUPT_TIMEOUT, and Done/Idle/Disconnected are already correct.
             // Clears currentTool/turnTokens exactly like the liveness watchdog's
             // recovery, but on an authoritative signal rather than a timeout.
+            //
+            // `pendingCompactionPing` is cleared REGARDLESS of whether
+            // turnPhase itself changes below (reagent P1 + codex P2 on PR
+            // #2928, against the two prior hook-only fix attempts): this
+            // authoritative "no turn is active" confirmation proves any
+            // buffered ping was for a turn that's genuinely not running,
+            // whether or not the pane's phase happens to already be Idle
+            // (the common case — a same-ref no-op for `turnPhase`, but this
+            // command is still processed as a discrete event, unlike a
+            // hook that can only observe the resulting value).
             if (state.turnPhase.kind !== "Streaming") {
-                return { state, events: [] };
+                if (state.pendingCompactionPing == null) {
+                    return { state, events: [] };
+                }
+                return {
+                    state: { ...state, pendingCompactionPing: null },
+                    events: [{ type: "turn-inactive-reconciled", at: command.at }],
+                };
             }
             return {
                 state: {
@@ -438,6 +500,7 @@ export function update(
                     // there is no active turn, so whatever compaction the
                     // frontend still thought was in flight is stale.
                     compacting: null,
+                    pendingCompactionPing: null,
                 },
                 events: [{ type: "turn-inactive-reconciled", at: command.at }],
             };
@@ -539,6 +602,16 @@ export function update(
                     // interactive shell (AgentShellSubblock) whose whole point is
                     // surviving across turns, so force-closing it on every message
                     // would fight that — leave detailsOpen as the user set it.
+                    //
+                    // SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02.md
+                    // (reagent P1 + codex P2 on PR #2928): a fresh, genuinely
+                    // NEW user-initiated turn is NOT the turn any buffered
+                    // ping was about — discard rather than let it survive to
+                    // be wrongly consumed by StreamFlushObserved's own
+                    // Submitting→Streaming promotion moments later (which
+                    // fires for practically every TurnStart), which would
+                    // falsely set `compacting` on this unrelated turn.
+                    pendingCompactionPing: null,
                 },
                 events,
             };
@@ -572,7 +645,19 @@ export function update(
             // outcome; the late ack is informational. Same-ref no-op
             // preserves both the phase and the cleared legacy fields.
             if (state.turnPhase.kind === "Disconnected") {
-                return { state, events: [] };
+                // reagent P1 on PR #2928: same gap as StreamUnsubscribe's
+                // early-return branch above — `pendingCompactionPing` can be
+                // set while Disconnected (a promotable-later phase per
+                // CompactionStarted's buffering condition), and this late
+                // TurnEnd ack IS an authoritative "this turn genuinely
+                // ended" signal even though the phase itself stays
+                // Disconnected. Clear it so a later StreamSubscribe +
+                // resumed content can't retroactively promote a stale ping
+                // onto whatever unrelated turn comes next.
+                if (state.pendingCompactionPing == null) {
+                    return { state, events: [] };
+                }
+                return { state: { ...state, pendingCompactionPing: null }, events: [] };
             }
             // Dual-write outcome: stop-in-flight → "stopped"; otherwise
             // "completed". "interrupted" / "errored" are reserved for
@@ -611,6 +696,7 @@ export function update(
                     // arrives, would be stale. See the same note on
                     // StreamUnsubscribe above.
                     compacting: null,
+                    pendingCompactionPing: null,
                 },
                 events: [
                     {
@@ -641,6 +727,7 @@ export function update(
                     // reasoning extends to `compacting` — a reset must
                     // not leave a stale "Compacting…" readout behind.
                     compacting: null,
+                    pendingCompactionPing: null,
                 },
                 events: [{ type: "turn-reset" }],
             };
@@ -664,7 +751,7 @@ export function update(
             // (wrong) assumption that a synchronously-failed turn-start
             // could never race a live WPS ping.
             return {
-                state: { ...state, turnPhase: { kind: "Idle" }, compacting: null },
+                state: { ...state, turnPhase: { kind: "Idle" }, compacting: null, pendingCompactionPing: null },
                 events: [{ type: "turn-start-failed" }],
             };
 
@@ -905,6 +992,7 @@ export function update(
                     // turn, same as TurnEnd/TurnReset/StreamUnsubscribe/
                     // FailureObserved, and must clear it the same way.
                     compacting: null,
+                    pendingCompactionPing: null,
                 },
                 events: [{ type: "interrupt-timed-out", at: command.at }],
             };
@@ -950,6 +1038,7 @@ export function update(
                     // too for the same defensive completeness reagent/codex
                     // asked for on the other bounded-timeout arm.
                     compacting: null,
+                    pendingCompactionPing: null,
                 },
                 events: [{ type: "submit-timed-out", at: command.at }],
             };
@@ -1088,6 +1177,7 @@ export function update(
                     // partway through) reproduces the exact stuck-"Compacting…"
                     // bug this PR already fixed for the other four transitions.
                     compacting: turnWasEnded ? null : state.compacting,
+                    pendingCompactionPing: turnWasEnded ? null : state.pendingCompactionPing,
                 },
                 events: [
                     { type: "failure-observed", code: command.failure.code, turnWasEnded },
@@ -1140,13 +1230,63 @@ export function update(
             // the previous one's own completion.
             const isStaleVsLastBoundary =
                 state.lastCompactionBoundaryAt != null && command.at <= state.lastCompactionBoundaryAt;
-            if (state.lastEventMs == null || !workingFromPhase(state.turnPhase) || isStaleVsLastBoundary) {
+            if (state.lastEventMs == null || isStaleVsLastBoundary) {
                 return { state, events: [] };
+            }
+            // SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02.md: a
+            // ping can ALSO arrive too EARLY — before this pane's turnPhase
+            // has been reconciled out of the mount-default Idle
+            // (`ReconcileTurnActive` is an async RPC round-trip), or while
+            // it's Disconnected, or Done.completed (a multi-round
+            // tool-continuation's next round hasn't started yet). Every one
+            // of those is a phase a LATER authoritative signal for THIS SAME
+            // turn — `ReconcileTurnActive(active: true)` or
+            // `StreamFlushObserved`'s own Idle/Disconnected/Done.completed
+            // promotion arm — can still legitimately promote into Streaming.
+            // Buffer instead of dropping so that promotion can retroactively
+            // apply it (see those two cases below); this channel has no
+            // replay, so dropping here is permanent for this compaction.
+            // Two earlier attempts at this fix lived entirely in
+            // `useCompactionStream.ts` (a local retry keyed off observing
+            // `turnPhase`, then a time-bounded version of the same) — both
+            // were structurally unsound: a hook observing only the
+            // RESULTING `turnPhase` value cannot distinguish "nothing
+            // happened" from "an authoritative inactive confirmation just
+            // arrived and happened not to change the phase" (reviewer
+            // findings, reagent P1 + codex P2 on PR #2928). Only the reducer
+            // sees the discrete `ReconcileTurnActive(active: false)` command
+            // itself regardless of whether it changes `turnPhase` — see that
+            // case below, which clears this buffer explicitly on exactly
+            // that signal instead of inferring it from a value that may
+            // never change.
+            //
+            // Anything NOT in that promotable set (Done.errored/stopped/
+            // interrupted, Interrupting) can never legitimately become
+            // working again for this same turn — drop as before (round 5's
+            // orphan-state guard: setting `compacting`, or now buffering,
+            // against a phase nothing will ever promote out of just strands
+            // it).
+            if (!workingFromPhase(state.turnPhase)) {
+                const canBecomeWorkingLater =
+                    state.turnPhase.kind === "Idle" ||
+                    state.turnPhase.kind === "Disconnected" ||
+                    (state.turnPhase.kind === "Done" && state.turnPhase.outcome === "completed");
+                if (!canBecomeWorkingLater) {
+                    return { state, events: [] };
+                }
+                return {
+                    state: {
+                        ...state,
+                        pendingCompactionPing: { trigger: command.trigger, startedAt: command.at },
+                    },
+                    events: [{ type: "compaction-started-buffered", trigger: command.trigger }],
+                };
             }
             const next: AgentPaneState = {
                 ...state,
                 lastEventMs: command.at,
                 compacting: { trigger: command.trigger, startedAt: command.at },
+                pendingCompactionPing: null,
             };
             if (next.turnPhase.kind === "Streaming") {
                 next.turnPhase = { ...next.turnPhase, lastEventMs: command.at };
@@ -1176,9 +1316,23 @@ export function update(
             const boundaryAt = command.frameTimestamp != null ? Date.parse(command.frameTimestamp) : NaN;
             const preservesNewerCompaction =
                 state.compacting != null && !Number.isNaN(boundaryAt) && boundaryAt < state.compacting.startedAt;
+            // SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02.md:
+            // same "which one is this boundary actually for" reasoning as
+            // `preservesNewerCompaction`, applied to a still-buffered
+            // (never-promoted) ping. If this boundary is for that exact
+            // buffered ping's compaction (or an even older one), the ping
+            // is now moot — clear it, there's nothing left to retroactively
+            // promote. If a NEWER ping is already buffered, preserve it —
+            // this boundary can't be for a compaction that hasn't started
+            // by this pane's own record yet.
+            const preservesNewerPendingPing =
+                state.pendingCompactionPing != null &&
+                !Number.isNaN(boundaryAt) &&
+                boundaryAt < state.pendingCompactionPing.startedAt;
             const next: AgentPaneState = {
                 ...state,
                 compacting: preservesNewerCompaction ? state.compacting : null,
+                pendingCompactionPing: preservesNewerPendingPing ? state.pendingCompactionPing : null,
                 // Codex P2 on PR #2378 (round 10): use this boundary's own
                 // parsed completion time, not `command.at` (the frontend's
                 // receipt wall-clock). `CompactionStarted.at` is the WPS

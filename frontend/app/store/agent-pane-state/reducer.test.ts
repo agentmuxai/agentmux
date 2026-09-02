@@ -428,31 +428,59 @@ describe("agent-pane-state reducer", () => {
                 expect(r.events).toEqual([]);
             });
 
-            it("is a no-op when subscribed but Idle (reagent P1, round 5)", () => {
-                // The structural fix: `compaction_started` arrives over a
-                // SEPARATE transport (WPS) from the primary NDJSON stream
-                // carrying TurnEnd/compact_boundary, so it can race and
-                // land after that same turn's TurnEnd already fired,
-                // leaving the pane subscribed-but-Idle. Setting compacting
-                // here would orphan it — nothing clears an Idle pane's
-                // compacting until the NEXT full TurnEnd/TurnReset, since
-                // every "clear compacting" fix in this PR is itself gated
-                // on transitioning OUT of a working phase. Refuse to set
-                // stale-by-construction state instead.
+            it("buffers onto pendingCompactionPing when subscribed but Idle, instead of dropping (SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02)", () => {
+                // `compaction_started` arrives over a SEPARATE transport
+                // (WPS) from the primary NDJSON stream carrying TurnEnd /
+                // compact_boundary AND from the ReconcileTurnActive RPC, so
+                // it can race and land while the pane is Idle for either of
+                // two very different reasons: (a) a real turn already ended
+                // (round 5's original case — the ping is genuinely stale),
+                // or (b) this pane just mounted/resumed and hasn't been
+                // reconciled to Streaming YET even though a real turn IS
+                // in flight (the bug this buffering fixes). The reducer
+                // can't yet tell which — it buffers rather than setting
+                // `compacting` directly (still refusing that — round 5's
+                // orphan-state guard holds), and defers the decision to
+                // whichever authoritative signal resolves the ambiguity
+                // next: `ReconcileTurnActive` or `StreamFlushObserved`
+                // promoting this same buffered ping, or `ReconcileTurnActive
+                // (active: false)` / TurnStart discarding it. See the
+                // "pendingCompactionPing" describe block below for those.
                 const s0 = ready(100); // subscribed, but Idle — no TurnStart
                 const r = update(s0, { type: "CompactionStarted", trigger: "manual", at: 200 }, 200);
-                expect(r.state).toBe(s0);
-                expect(r.state.compacting).toBeNull();
-                expect(r.events).toEqual([]);
+                expect(r.state.compacting).toBeNull(); // still NOT set directly
+                expect(r.state.pendingCompactionPing).toEqual({ trigger: "manual", startedAt: 200 });
+                expect(r.events).toEqual([{ type: "compaction-started-buffered", trigger: "manual" }]);
             });
 
-            it("is a no-op once the turn has already ended (Done), even while still subscribed", () => {
+            it("buffers onto pendingCompactionPing once the turn has ended in Done.completed — a later round can still be the same turn", () => {
+                // Done.completed specifically (not just any Done): a
+                // multi-round tool-continuation fires session_end after
+                // EVERY round, so a ping landing here can legitimately be
+                // for the NEXT round of the same overall turn — the same
+                // standard StreamFlushObserved's own promotion arm already
+                // uses for Done.completed.
                 const s0 = update(streaming(100), { type: "TurnEnd", stats: null }, 150).state;
-                expect(s0.turnPhase.kind).toBe("Done");
-                expect(s0.lastEventMs).not.toBeNull();
+                expect(s0.turnPhase).toEqual({ kind: "Done", outcome: "completed", finishedAt: 150 });
+                const r = update(s0, { type: "CompactionStarted", trigger: "auto", at: 200 }, 200);
+                expect(r.state.compacting).toBeNull();
+                expect(r.state.pendingCompactionPing).toEqual({ trigger: "auto", startedAt: 200 });
+            });
+
+            it("is a true no-op for a genuinely terminal Done (errored/stopped/interrupted) — nothing can ever promote it again", () => {
+                // Unlike Done.completed, these outcomes are NOT in
+                // StreamFlushObserved's own promotion set either — buffering
+                // here would strand pendingCompactionPing exactly the way
+                // round 5 originally worried about for `compacting`.
+                const s0 = update(streaming(100), { type: "FailureObserved", failure: {
+                    code: "rate_limited", title: "t", detail: "d", retryable: true,
+                }, at: 150 }).state;
+                expect(s0.turnPhase).toEqual({ kind: "Done", outcome: "errored", finishedAt: 150 });
                 const r = update(s0, { type: "CompactionStarted", trigger: "auto", at: 200 }, 200);
                 expect(r.state).toBe(s0);
                 expect(r.state.compacting).toBeNull();
+                expect(r.state.pendingCompactionPing).toBeNull();
+                expect(r.events).toEqual([]);
             });
 
             it("refreshes a Streaming phase's own lastEventMs so the watchdog doesn't misfire", () => {
@@ -502,6 +530,206 @@ describe("agent-pane-state reducer", () => {
                 }, 150).state;
                 const r = update(s0, { type: "CompactionStarted", trigger: "auto", at: 200 }, 200);
                 expect(r.state.compacting).toEqual({ trigger: "auto", startedAt: 200 });
+            });
+        });
+
+        describe("pendingCompactionPing promotion/discard (SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02)", () => {
+            // Regression coverage for the "Working… disappears mid-compaction
+            // after a load/resume" bug and the two follow-up races reviewers
+            // found in earlier (hook-only) fix attempts on PR #2928: a retry
+            // heuristic that only observes the RESULTING turnPhase value
+            // cannot tell "this promotion is the SAME turn the buffered ping
+            // was about" from "this is a later, unrelated turn," and cannot
+            // react to an authoritative ReconcileTurnActive(active: false)
+            // confirmation that happens not to change turnPhase at all. Both
+            // gaps are closed here because the reducer sees the discrete
+            // command itself, not just its effect on the resulting state.
+
+            it("ReconcileTurnActive(active: true) promotes a buffered ping into compacting", () => {
+                const s0 = update(ready(100), { type: "CompactionStarted", trigger: "manual", at: 150 }, 150).state;
+                expect(s0.pendingCompactionPing).toEqual({ trigger: "manual", startedAt: 150 });
+                const r = update(s0, { type: "ReconcileTurnActive", at: 200, active: true });
+                expect(r.state.turnPhase.kind).toBe("Streaming");
+                expect(r.state.compacting).toEqual({ trigger: "manual", startedAt: 150 });
+                expect(r.state.pendingCompactionPing).toBeNull();
+                expect(r.events).toEqual([
+                    { type: "turn-active-reconciled" },
+                    { type: "compaction-started", trigger: "manual" },
+                ]);
+            });
+
+            it("ReconcileTurnActive(active: true) with no buffered ping behaves exactly as before", () => {
+                const start = mk();
+                const r = update(start, { type: "ReconcileTurnActive", at: 100, active: true });
+                expect(r.state.compacting).toBeNull();
+                expect(r.events).toEqual([{ type: "turn-active-reconciled" }]);
+            });
+
+            it("ReconcileTurnActive(active: false) clears a buffered ping even though turnPhase stays Idle — a same-ref no-op for the phase alone (reagent P1 + codex P2 on PR #2928)", () => {
+                // The exact gap in both prior hook-only attempts: this
+                // authoritative "no turn is active" confirmation must clear
+                // pendingCompactionPing REGARDLESS of whether turnPhase
+                // itself changes (it doesn't here — Idle stays Idle) so a
+                // later UNRELATED TurnStart can never inherit a stale ping.
+                const s0 = update(ready(100), { type: "CompactionStarted", trigger: "manual", at: 150 }, 150).state;
+                expect(s0.turnPhase.kind).toBe("Idle");
+                expect(s0.pendingCompactionPing).not.toBeNull();
+                const r = update(s0, { type: "ReconcileTurnActive", at: 200, active: false });
+                expect(r.state.turnPhase.kind).toBe("Idle"); // unchanged
+                expect(r.state.pendingCompactionPing).toBeNull(); // but explicitly cleared
+                expect(r.events).toEqual([{ type: "turn-inactive-reconciled", at: 200 }]);
+            });
+
+            it("ReconcileTurnActive(active: false) is still a true same-ref no-op when there was nothing buffered", () => {
+                const start = mk();
+                const r = update(start, { type: "ReconcileTurnActive", at: 100, active: false });
+                expect(r.state).toBe(start);
+                expect(r.events).toEqual([]);
+            });
+
+            it("StreamFlushObserved promotes a buffered ping into compacting (resumed live content proves the same turn is active)", () => {
+                const s0 = update(ready(100), { type: "CompactionStarted", trigger: "auto", at: 150 }, 150).state;
+                const r = update(s0, { type: "StreamFlushObserved", addedCount: 1, at: 200 });
+                expect(r.state.turnPhase.kind).toBe("Streaming");
+                expect(r.state.compacting).toEqual({ trigger: "auto", startedAt: 150 });
+                expect(r.state.pendingCompactionPing).toBeNull();
+                expect(r.events).toContainEqual({ type: "compaction-started", trigger: "auto" });
+            });
+
+            it("StreamFlushObserved while ALREADY Streaming does not consume a buffered ping that has nothing to do with a promotion", () => {
+                // Guard against a broader-than-intended condition: only an
+                // actual Idle/Disconnected/Done→Streaming PROMOTION consumes
+                // the buffer, never a same-phase refresh.
+                const s0 = streaming(100);
+                // Not reachable via CompactionStarted while genuinely
+                // Streaming (that path sets `compacting` directly) — force
+                // the field to prove the guard, mirroring how other tests in
+                // this file construct otherwise-unreachable intermediate
+                // states to pin an invariant.
+                const withPending: AgentPaneState = { ...s0, pendingCompactionPing: { trigger: "manual", startedAt: 50 } };
+                const r = update(withPending, { type: "StreamFlushObserved", addedCount: 1, at: 200 });
+                expect(r.state.pendingCompactionPing).toEqual({ trigger: "manual", startedAt: 50 });
+                expect(r.events).not.toContainEqual(expect.objectContaining({ type: "compaction-started" }));
+            });
+
+            it("TurnStart discards (does not promote) a buffered ping — a fresh turn is unrelated to whatever it was about (codex P2 on PR #2928)", () => {
+                // The exact scenario codex flagged against the earlier
+                // hook-only fix: without this, the VERY NEXT
+                // StreamFlushObserved (Submitting→Streaming, which fires for
+                // practically every TurnStart) would otherwise inherit and
+                // promote the stale ping onto this brand-new, unrelated turn.
+                const s0 = update(ready(100), { type: "CompactionStarted", trigger: "manual", at: 150 }, 150).state;
+                expect(s0.pendingCompactionPing).not.toBeNull();
+                const s1 = update(s0, { type: "TurnStart", at: 200 }).state;
+                expect(s1.turnPhase.kind).toBe("Submitting");
+                expect(s1.pendingCompactionPing).toBeNull();
+                // And the natural next event (Submitting → Streaming) confirms
+                // nothing was falsely inherited.
+                const r = update(s1, { type: "StreamFlushObserved", addedCount: 1, at: 210 });
+                expect(r.state.turnPhase.kind).toBe("Streaming");
+                expect(r.state.compacting).toBeNull();
+            });
+
+            it("CompactionBoundary clears a buffered ping once its own compaction is confirmed already finished", () => {
+                const s0 = update(ready(100), { type: "CompactionStarted", trigger: "manual", at: 150 }, 150).state;
+                const r = update(s0, {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 50_000,
+                    postTokens: 3_000,
+                    durationMs: 9_000,
+                    at: 300,
+                    frameTimestamp: new Date(200).toISOString(),
+                }, 300);
+                expect(r.state.pendingCompactionPing).toBeNull();
+            });
+
+            it("CompactionBoundary preserves a NEWER buffered ping against an out-of-order delayed boundary for an older compaction", () => {
+                const s0 = update(ready(100), { type: "CompactionStarted", trigger: "manual", at: 1_000 }, 1_000).state;
+                expect(s0.pendingCompactionPing).toEqual({ trigger: "manual", startedAt: 1_000 });
+                const r = update(s0, {
+                    type: "CompactionBoundary",
+                    trigger: "manual",
+                    preTokens: 50_000,
+                    postTokens: 3_000,
+                    durationMs: 9_000,
+                    at: 1_500,
+                    frameTimestamp: new Date(500).toISOString(), // predates the buffered ping's own start
+                }, 1_500);
+                expect(r.state.pendingCompactionPing).toEqual({ trigger: "manual", startedAt: 1_000 });
+            });
+
+            it("TurnEnd clears a buffered ping (whatever it was about is moot once the turn ends)", () => {
+                const s0 = update(streaming(100), { type: "TurnEnd", stats: null }, 150).state;
+                const s1 = update(s0, { type: "CompactionStarted", trigger: "auto", at: 160 }, 160).state;
+                expect(s1.pendingCompactionPing).not.toBeNull();
+                const r = update(s1, { type: "TurnEnd", stats: null }, 200);
+                expect(r.state.pendingCompactionPing).toBeNull();
+            });
+
+            it("StreamUnsubscribe clears a buffered ping along with a mid-compaction disconnect", () => {
+                const s0 = update(streaming(100), { type: "RequestStop", at: 150 }).state;
+                const s1 = update(s0, { type: "StreamUnsubscribe", at: 200 });
+                // wasWorking path (Interrupting → Disconnected) already
+                // clears compacting; pendingCompactionPing can't coexist with
+                // a working phase anyway, so this pins the field stays null
+                // through the same transition rather than silently drifting.
+                expect(s1.state.pendingCompactionPing).toBeNull();
+            });
+
+            it("StreamUnsubscribe from a non-working phase ALSO clears a buffered ping (reagent P1 on PR #2928, round 2)", () => {
+                // The gap reagent found in the early same-ref no-op branch:
+                // pendingCompactionPing CAN be set while Idle (that's exactly
+                // the buffering condition), so unsubscribing (e.g. tab
+                // backgrounded pre-reconciliation) must still discard it —
+                // otherwise a later resubscribe + resumed content could
+                // retroactively promote the stale ping onto an unrelated turn.
+                const s0 = update(ready(100), { type: "CompactionStarted", trigger: "manual", at: 150 }, 150).state;
+                expect(s0.turnPhase.kind).toBe("Idle");
+                expect(s0.pendingCompactionPing).not.toBeNull();
+                const r = update(s0, { type: "StreamUnsubscribe", at: 200 });
+                expect(r.state.turnPhase.kind).toBe("Idle"); // unchanged — still not "working"
+                expect(r.state.pendingCompactionPing).toBeNull();
+            });
+
+            it("StreamUnsubscribe from a non-working phase with NOTHING buffered is still a true same-ref no-op", () => {
+                const s0 = ready(100);
+                const r = update(s0, { type: "StreamUnsubscribe", at: 200 });
+                expect(r.state).toBe(s0);
+                expect(r.events).toEqual([]);
+            });
+
+            it("TurnEnd while Disconnected ALSO clears a buffered ping (reagent P1 on PR #2928, round 2)", () => {
+                // Same gap as StreamUnsubscribe's early branch: a late TurnEnd
+                // ack arriving while Disconnected (a promotable-later phase)
+                // is a same-ref no-op for turnPhase, but is still an
+                // authoritative "this turn genuinely ended" signal that must
+                // discard any buffered ping.
+                //
+                // NOTE: `pendingCompactionPing` can't actually get buffered
+                // via a live CompactionStarted dispatch while Disconnected
+                // in today's system — StreamUnsubscribe always pairs
+                // Disconnected with `lastEventMs: null`, and CompactionStarted
+                // gates on `lastEventMs != null` before it ever reaches the
+                // buffering branch, so real-world reachability goes through
+                // StreamUnsubscribe's OWN early-branch fix instead (see the
+                // tests above). This test pins the defense-in-depth guard
+                // directly (mirrors the "StreamFlushObserved while ALREADY
+                // Streaming" test's same construction technique below) in
+                // case that invariant ever changes.
+                const s0 = update(streaming(100), { type: "StreamUnsubscribe", at: 140 }).state;
+                expect(s0.turnPhase.kind).toBe("Disconnected");
+                const withPending: AgentPaneState = { ...s0, pendingCompactionPing: { trigger: "auto", startedAt: 150 } };
+                const r = update(withPending, { type: "TurnEnd", stats: null }, 200);
+                expect(r.state.turnPhase.kind).toBe("Disconnected"); // unchanged
+                expect(r.state.pendingCompactionPing).toBeNull();
+            });
+
+            it("TurnEnd while Disconnected with NOTHING buffered is still a true same-ref no-op", () => {
+                const s0 = update(streaming(100), { type: "StreamUnsubscribe", at: 140 }).state;
+                const r = update(s0, { type: "TurnEnd", stats: null }, 200);
+                expect(r.state).toBe(s0);
+                expect(r.events).toEqual([]);
             });
         });
 

@@ -178,7 +178,7 @@ are doing history". Everything else is here; the completeness
 assertion in the generator fails the build rather than emit a
 partial list.
 
-### implemented (129)
+### implemented (130)
 
 | Spec | Title |
 |---|---|
@@ -225,6 +225,7 @@ partial list.
 | [`SPEC_CI_COMPLETION_NOTIFICATIONS_2026_08_16`](SPEC_CI_COMPLETION_NOTIFICATIONS_2026_08_16.md) | SPEC: jekt notification when a PR's CI run completes (pass or fail) |
 | [`SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22`](SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md) | Spec: protect a pre-existing project `CLAUDE.md` from AgentMux's overwrite |
 | [`SPEC_CODEX_JSONL_CONTRACT_2026_08_08`](SPEC_CODEX_JSONL_CONTRACT_2026_08_08.md) | Codex CLI JSONL Adapter Contract |
+| [`SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02`](SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02.md) | Spec: `compaction_started` Arriving Before Turn-Phase Reconciliation Drops the Ping Permanently |
 | [`SPEC_COMPOSER_SHIFT_UP_SELECTION_VS_HISTORY_RACE_2026-08-11`](SPEC_COMPOSER_SHIFT_UP_SELECTION_VS_HISTORY_RACE_2026-08-11.md) | Composer: Shift+ArrowUp triggers history recall before the top line is fully selected |
 | [`SPEC_COMPOSER_STRIP_CENTERED_SMART_SPLIT_2026_08_14`](SPEC_COMPOSER_STRIP_CENTERED_SMART_SPLIT_2026_08_14.md) | SPEC — Composer strip: stable width + deliberate edge-split tiers |
 | [`SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24`](SPEC_COMPOSER_STRIP_DYNAMIC_BALANCE_2026_08_24.md) | SPEC: Composer strip — dynamic left/right slot pooling |
