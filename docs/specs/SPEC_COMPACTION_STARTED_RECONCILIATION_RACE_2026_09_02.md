@@ -75,72 +75,105 @@ turn that's real but hasn't been locally reconciled yet" — are indistinguishab
 from `state.turnPhase` alone at the moment the ping arrives. They only become
 distinguishable once reconciliation actually happens.
 
-## 3. Fix: buffer the ping locally, retry once the pane is confirmed working
+## 3. Two failed attempts before landing on the real fix
 
-Rather than touching the reducer's race-hardened `CompactionStarted` gate (11 rounds
-of prior, carefully-reasoned fixes — see §2), the fix stays entirely inside
-`useCompactionStream.ts`, the hook that already owns this WPS subscription and the
-one call site that dispatches `CompactionStarted`:
+The first two versions of this fix (both reviewed and rejected on PR #2928) tried to
+solve this entirely inside `useCompactionStream.ts`, the hook that owns the WPS
+subscription: buffer a rejected ping in a local `missedPing` variable, and retry the
+same dispatch once the pane's `turnPhaseAtom` accessor next reported a working phase.
+A second revision added a bounded retry window (`MISSED_PING_RETRY_WINDOW_MS`) after
+reagent (P1) caught the first version retrying forever on every subsequent stream
+chunk when a retry itself failed.
 
-1. On a `compaction_started` event, dispatch as today. If the reducer accepts it
-   (`wasCompactionStartedAccepted`), proceed as before (push the transcript node).
-2. If the reducer rejects it (empty events — could be either "genuinely stale" or
-   "too early"), remember it in a local `missedPing` slot (`{ trigger, startedAt }`,
-   overwritten by any newer ping) instead of discarding it outright.
-3. React to the pane's own `turnPhaseAtom` (already threaded into `useAgentStream.ts`
-   and now passed down to this hook): the instant `workingFromPhase(turnPhase())`
-   becomes `true`, if `missedPing` is still set, **re-dispatch the exact same
-   `CompactionStarted` command**.
+Both were structurally unsound, and a third review round (reagent P1 + codex P2,
+independently, on the *second* revision) pinned down exactly why: a hook observing
+only the **resulting** `turnPhase` value cannot tell "this promotion is the SAME turn
+the buffered ping was about" from "this is a later, unrelated turn." Concretely — a
+genuinely stale ping (its real turn already ended before the ping arrived) gets
+buffered; its confirming `ReconcileTurnActive(active: false)` is a same-ref no-op
+when `turnPhase` is already `Idle`, so there is no reactive signal the hook can
+observe to clear the buffer. The retry effect then fires on whatever working-phase
+transition comes *next* — which can be a completely unrelated `TurnStart` from the
+user's next message — and re-dispatch the stale ping against it. If no matching
+`compact_boundary` was ever recorded for that stale compaction, the reducer's
+`isStaleVsLastBoundary` guard has nothing to reject it against and falsely accepts
+it, setting `compacting` on a turn that was never compacting. A time window only
+narrows this (codex P2, second pass): too short and it doesn't cover a genuinely slow
+`ReconcileTurnActive` RPC (regressing to the original bug); too long and it doesn't
+prevent the false-positive replay. There is no time-based value that closes both
+sides — the retry has to be resolved by the actual reconciliation *result*, which a
+value-observing hook effect cannot access when that result doesn't change the value.
 
-This re-dispatch reuses every existing reducer guard unchanged — no new reducer
-logic, no new state shape:
-- If the pane's `turnPhase` promotion to `Streaming` means a real turn genuinely is
-  running and this compaction genuinely is (or still is) in flight, the retry now
-  passes `workingFromPhase` and `compacting` is set correctly — closing the gap.
-- If the compaction's own `compact_boundary` already arrived in the meantime (a
-  `CompactionBoundary` command sets `state.lastCompactionBoundaryAt`), the retry is
-  correctly rejected again by the existing `isStaleVsLastBoundary` check — no new
-  staleness logic needed, the round-6 guard already covers a delayed retry exactly
-  like it covers a delayed original delivery.
-- The retry fires at most once per missed ping — `missedPing` is cleared
-  unconditionally after the retry attempt (accepted or rejected), never re-armed by
-  a failed retry. (reagent P1: an earlier version of this fix re-buffered on ANY
-  rejection, including the retry's own, which meant a retry that failed again kept
-  re-firing on every subsequent `turnPhase` object change — near-constant while
-  `Streaming`, since most stream events replace the phase object — instead of
-  giving up after one attempt.)
-- The retry is only attempted within `MISSED_PING_RETRY_WINDOW_MS` (15s) of the
-  ORIGINAL rejection, not indefinitely. (codex P2: a genuinely stale ping — one
-  whose turn already ended before it arrived — can get buffered, then never have
-  `missedPing` cleared by its confirming `ReconcileTurnActive(active: false)` if
-  that confirmation is itself a same-ref no-op (phase already `Idle`, no reactive
-  signal to observe). Without a bound, the retry effect would only fire on
-  whatever working-phase transition comes NEXT — which could be an entirely
-  unrelated `TurnStart` from the user's next message — and re-dispatch the stale
-  ping against it; if no matching `compact_boundary` was ever recorded, the
-  reducer has nothing to reject it against and would falsely accept it. The
-  window is sized well above the `ReconcileTurnActive` RPC round-trip this fix
-  targets and well below "the user's next message" in the common case — a
-  defense-in-depth bound, not the primary correctness mechanism, same role
-  `CLOCK_SKEW_TOLERANCE_MS` plays in `resolveCompactionStart`.)
+## 4. Fix: buffer in the reducer, where the discrete event is visible
 
-Net effect: the reducer's `CompactionStarted` case is untouched. The fix is
-entirely "try again once we know more," using the hook's existing accept/reject
-signal as the oracle, not a new inference.
+The reducer, unlike the hook, processes every dispatched command as a discrete event
+regardless of whether it changes the resulting state — so it can react to
+`ReconcileTurnActive(active: false)` as a real signal ("this specific reconciliation
+attempt just confirmed inactive") even when `turnPhase` stays `Idle` either way. The
+fix moves entirely into `reducer.ts` and `types.ts`; `useCompactionStream.ts` reverts
+to its original plain dispatch-and-check form.
 
-## 4. Scope / non-goals
+**New state:** `state.pendingCompactionPing: { trigger, startedAt } | null`
+(`types.ts`).
 
-- Does not change `resolveCompactionStart`'s staleness window
-  (`MAX_PLAUSIBLE_COMPACTION_MS`) — that guards the *original* WPS payload's
-  `startedAt` against clock skew / implausible age, orthogonal to this retry.
-- Does not add persistence or replay to the `compaction_started` WPS channel
-  itself — the retry is a purely local, in-memory buffer scoped to one mounted
-  pane's hook instance; it does not survive a pane unmount/remount (a fresh mount
-  goes through the same mount-time `ReconcileTurnActive` path and would see a
-  fresh live ping if compaction is still ongoing by then, same as today).
-- Does not address a hypothetical *second* independent race after the retry fires
-  (e.g. a brand-new, different compaction starting and completing entirely within
-  the same reactive tick as the retry) — judged unreachable in practice since the
-  retry fires synchronously off the same `turnPhase` transition a subsequent ping's
-  acceptance would itself depend on; see the fix's implementation comment for the
-  detailed reasoning.
+**`CompactionStarted`** — when `!workingFromPhase(state.turnPhase)` (and not stale vs.
+the last known boundary, and the stream is subscribed — both unchanged from before):
+instead of an unconditional no-op, checks whether the current phase is one a *later*
+authoritative signal could still legitimately promote for this same turn —
+`Idle` / `Disconnected` / `Done.completed` (exactly the set `StreamFlushObserved`'s own
+promotion arm already treats as promotable). If so, buffer onto
+`pendingCompactionPing` and emit a distinct `compaction-started-buffered` event
+(so `wasCompactionStartedAccepted` — which only recognizes `compaction-started` —
+correctly does *not* push a transcript node for an unconfirmed ping). Any other
+not-working phase (`Done.errored`/`stopped`/`interrupted`, `Interrupting`) is still a
+true no-op exactly as before — round 5's orphan-state guard: nothing can ever promote
+those back into working, so buffering there would just strand the field.
+
+**Promotion — two sites, both authoritative "this same turn is genuinely active"
+signals, mirroring `StreamFlushObserved`'s own existing promotion standard:**
+- `ReconcileTurnActive(active: true)`, on its `Idle`/`Done.completed` → `Streaming`
+  promotion: if `pendingCompactionPing` is set, apply it into `compacting` and emit
+  `compaction-started` (in addition to `turn-active-reconciled`) so the transcript
+  node still gets pushed, from this dispatch's own returned events.
+- `StreamFlushObserved`'s existing `Idle`/`Disconnected`/`Submitting`/`Done.completed`
+  → `Streaming` promotion arm: same treatment — resumed live content is proof the
+  turn is genuinely active, exactly the standard that arm already uses for promoting
+  the phase itself.
+
+**Discard — the reducer's structural advantage over the hook:**
+- `ReconcileTurnActive(active: false)` clears `pendingCompactionPing` *unconditionally*,
+  independent of whether `turnPhase` itself changes (the common case: already `Idle`,
+  a same-ref no-op for the phase, but still a distinct event this command carries and
+  the reducer can still act on). This is the exact gap both hook-only attempts had no
+  way to close.
+- `TurnStart` clears it explicitly and does **not** promote it — a fresh
+  user-initiated turn is definitionally not the turn a buffered ping was about. This
+  matters concretely: without it, the very next `StreamFlushObserved`
+  (`Submitting` → `Streaming`, which fires for practically every `TurnStart`) would
+  otherwise inherit and falsely promote the stale ping onto the new turn — this is
+  the precise mechanism codex's finding described.
+- `CompactionBoundary` clears it once its own (parsed `frameTimestamp`) completion
+  time is at or after the buffered ping's `startedAt` (that ping's compaction is
+  confirmed already finished — nothing left to promote); preserves it, mirroring
+  `preservesNewerCompaction`'s existing pattern, when the boundary is for an older
+  compaction than the one currently buffered.
+- Every other "whatever compaction was in flight is now moot" terminal transition
+  that already clears `compacting: null` (`StreamUnsubscribe`, `TurnEnd`, `TurnReset`,
+  `TurnStartFailed`, `InterruptTimeoutElapsed`, `SubmitTimeoutElapsed`, and
+  `FailureObserved`'s `turnWasEnded` branch) clears `pendingCompactionPing` the same
+  way, for the same reasoning.
+
+No change to `isStaleVsLastBoundary`, `resolveCompactionStart`'s staleness window, or
+any of the 11 prior `CompactionStarted`/`CompactionBoundary` race-hardening rounds —
+this is a new, orthogonal field with its own narrow set of setters/clearers, not a
+relaxation of any existing guard.
+
+## 5. Scope / non-goals
+
+- Does not add persistence or replay to the `compaction_started` WPS channel itself —
+  `pendingCompactionPing` is ordinary reducer state, scoped to one pane's lifetime the
+  same as `compacting` already is (wiped on `TurnReset`, not carried across a fresh
+  `initialState()`).
+- Does not change what counts as "stale" for an already-*promoted* `compacting` value
+  (`CompactionBoundary`'s existing `preservesNewerCompaction` logic) — only adds the
+  analogous, independent gate for the *buffered-but-not-yet-promoted* case.
