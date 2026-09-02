@@ -234,8 +234,9 @@
 
                 let mut tab = Tab {
                     oid: "tab-tx".to_string(),
-                    // tabN naming convention per SPEC_TAB_GAPS_AND_NAMING_2026_04_25.
-                    name: "tab1".to_string(),
+                    // "Tab N" naming convention per SPEC_TAB_GAPS_AND_NAMING_2026_04_25
+                    // (revised from plain "tabN" 2026-09-02).
+                    name: "Tab 1".to_string(),
                     layoutstate: "ls-tx".to_string(),
                     meta: MetaMapType::new(),
                     ..Default::default()
@@ -257,7 +258,7 @@
         assert_eq!(ws.version, 2); // insert=v1, update=v2
 
         let tab = store.must_get::<Tab>("tab-tx").unwrap();
-        assert_eq!(tab.name, "tab1");
+        assert_eq!(tab.name, "Tab 1");
     }
 
     #[test]
