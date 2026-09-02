@@ -37,13 +37,27 @@
  * staleness check below is kept as defense-in-depth against a
  * malformed/delayed live delivery, not as the mechanism preventing
  * stale replays — that's `persist: 0`'s job.
+ *
+ * SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02.md: a ping can
+ * ALSO arrive too EARLY — before a freshly-mounted pane's `turnPhase` has
+ * been reconciled out of the mount-default `Idle` (`ReconcileTurnActive`
+ * is an async RPC round-trip). The reducer's `workingFromPhase` gate
+ * correctly rejects that first attempt (round 5's orphan-state guard —
+ * see reducer.ts), and since this channel has no replay, the ping would
+ * otherwise be lost forever, leaving `compacting` null for the rest of
+ * that compaction and eventually letting the liveness watchdog force the
+ * "Working…" row off mid-compaction. This hook buffers a rejected ping
+ * locally and retries the exact same dispatch once `turnPhase` is next
+ * confirmed working — reusing the reducer's own accept/reject gates
+ * unchanged rather than adding new staleness logic here.
  */
 
-import { onCleanup } from "solid-js";
+import { createEffect, onCleanup } from "solid-js";
+import type { Accessor } from "solid-js";
 import { waveEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import type { AgentPaneModel } from "@/app/store/agent-pane-model";
-import type { AgentPaneEvent } from "@/app/store/agent-pane-state/types";
+import { workingFromPhase, type AgentPaneEvent, type TurnPhase } from "@/app/store/agent-pane-state/types";
 import type { CompactionStartedNode } from "../types";
 import type { StreamFlushQueue } from "../stream-flush-queue";
 
@@ -54,6 +68,13 @@ export interface UseCompactionStreamOptions {
     /** In-batch dedup cache shared with the rest of useAgentStream's producers. */
     hasNodeId: (id: string) => boolean;
     addNodeId: (id: string) => void;
+    /**
+     * Reactive turn phase for this pane — used ONLY to know when to retry a
+     * ping the reducer rejected while not yet working (see the module doc
+     * comment's SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02
+     * note). Threaded down from `useAgentStream.ts`'s own `turnPhaseAtom`.
+     */
+    turnPhase: Accessor<TurnPhase>;
 }
 
 /**
@@ -130,29 +151,55 @@ export function wasCompactionStartedAccepted(paneEvents: AgentPaneEvent[]): bool
 }
 
 export function useCompactionStream(opts: UseCompactionStreamOptions): void {
+    // Set only when the reducer rejects a ping while `turnPhase` isn't
+    // (yet) working — see the module doc comment. Overwritten by any newer
+    // ping; cleared unconditionally after a retry attempt (accepted or
+    // not) so this never grows into a retry loop or a replay queue.
+    let missedPing: { trigger: CompactionTrigger; startedAt: number } | null = null;
+
+    const attemptStart = (trigger: CompactionTrigger, startedAt: number) => {
+        const paneEvents = opts.model.dispatchPane({ type: "CompactionStarted", trigger, at: startedAt });
+        if (!wasCompactionStartedAccepted(paneEvents)) {
+            missedPing = { trigger, startedAt };
+            return;
+        }
+        missedPing = null;
+
+        const node: CompactionStartedNode = {
+            type: "compaction_started",
+            id: `compaction-started-${startedAt}`,
+            trigger,
+            startedAt,
+        };
+        if (!opts.hasNodeId(node.id)) {
+            opts.addNodeId(node.id);
+            opts.queue.pushNewNode(node);
+            opts.queue.scheduleFlush();
+        }
+    };
+
     const unsub = waveEventSubscribe({
         eventType: WpsEvent.CompactionStarted,
         scope: `block:${opts.blockId}`,
         handler: (event: any) => {
             const resolved = resolveCompactionStart(event?.data, Date.now());
             if (!resolved) return;
-            const { trigger, startedAt } = resolved;
-
-            const paneEvents = opts.model.dispatchPane({ type: "CompactionStarted", trigger, at: startedAt });
-            if (!wasCompactionStartedAccepted(paneEvents)) return;
-
-            const node: CompactionStartedNode = {
-                type: "compaction_started",
-                id: `compaction-started-${startedAt}`,
-                trigger,
-                startedAt,
-            };
-            if (!opts.hasNodeId(node.id)) {
-                opts.addNodeId(node.id);
-                opts.queue.pushNewNode(node);
-                opts.queue.scheduleFlush();
-            }
+            attemptStart(resolved.trigger, resolved.startedAt);
         },
+    });
+
+    // Retry a buffered ping the instant this pane is next confirmed
+    // working — see SPEC_COMPACTION_STARTED_RECONCILIATION_RACE_2026_09_02.md
+    // §3. Re-dispatches the SAME command; the reducer's existing
+    // `workingFromPhase` / `isStaleVsLastBoundary` gates decide accept vs.
+    // reject exactly as they would for a live delivery, so a ping that's
+    // since gone genuinely stale (its own `compact_boundary` already
+    // arrived) is still correctly rejected here, not resurrected.
+    createEffect(() => {
+        if (workingFromPhase(opts.turnPhase()) && missedPing) {
+            const { trigger, startedAt } = missedPing;
+            attemptStart(trigger, startedAt);
+        }
     });
 
     // Own the subscription at body scope so it is torn down even if the

@@ -241,7 +241,7 @@ export function useAgentStream({
     // rather than scheduling their own flush.
     useToolChunkStream({ blockId, queue });
     useShellNodeStream({ blockId, queue });
-    useCompactionStream({ blockId, model, queue, hasNodeId, addNodeId });
+    useCompactionStream({ blockId, model, queue, hasNodeId, addNodeId, turnPhase: turnPhaseAtom[0] });
     // dock:clear doesn't push into `queue` — it's a rare, out-of-band
     // mutation of one existing node, not a streaming producer. Uses
     // model.dispatchDoc (disposal-safe), not the raw dispatch, since this
