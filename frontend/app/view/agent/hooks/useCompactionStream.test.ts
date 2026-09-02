@@ -16,7 +16,12 @@ vi.mock("@/app/store/wps", () => ({
     }),
 }));
 
-import { resolveCompactionStart, useCompactionStream, wasCompactionStartedAccepted } from "./useCompactionStream";
+import {
+    MISSED_PING_RETRY_WINDOW_MS,
+    resolveCompactionStart,
+    useCompactionStream,
+    wasCompactionStartedAccepted,
+} from "./useCompactionStream";
 
 // Codex P1 on PR #2378: `compaction_started` is a persisted WPS event
 // (persist: 1) with no completion tombstone — a late/reconnecting
@@ -286,6 +291,94 @@ describe("useCompactionStream — missed-ping retry (SPEC_COMPACTION_STARTED_REC
 
             // No further dispatch — turnPhase never transitions again.
             expect(model.dispatchPane).toHaveBeenCalledTimes(1);
+
+            dispose();
+        });
+    });
+
+    it("gives up after one failed retry — does not keep re-dispatching on every later turnPhase change (reagent P1)", async () => {
+        // A buffered ping's retry can itself be rejected (e.g. its own
+        // compact_boundary arrived while buffered — isStaleVsLastBoundary).
+        // The retry effect depends on `turnPhase()`, which the real reducer
+        // replaces on nearly every Streaming event (StreamFlushObserved
+        // returns a new phase object per flush) — so if a failed retry left
+        // `missedPing` set, the effect would re-fire and re-dispatch on
+        // every subsequent stream chunk for the rest of the working
+        // session, not just once. `missedPing` must be cleared after the
+        // retry attempt regardless of outcome.
+        await createRoot(async (dispose) => {
+            const [turnPhase, setTurnPhase] = createSignal<TurnPhase>(IDLE);
+            const alwaysReject = vi.fn(() => []);
+            const model = { blockId: "b", disposed: false, dispatchPane: alwaysReject, dispatchDoc: vi.fn(() => []) } as any;
+            const queue = makeFakeQueue();
+            useCompactionStream({
+                blockId: "b",
+                model,
+                queue,
+                hasNodeId: () => false,
+                addNodeId: () => {},
+                turnPhase,
+            } as any);
+            await Promise.resolve();
+
+            fireCompactionStarted(new Date().toISOString());
+            expect(model.dispatchPane).toHaveBeenCalledTimes(1); // live delivery: rejected, buffered
+
+            setTurnPhase({ ...STREAMING, lastEventMs: 1 }); // promotion → retry fires
+            await Promise.resolve();
+            expect(model.dispatchPane).toHaveBeenCalledTimes(2); // retry: rejected again, must NOT re-buffer
+
+            // Simulate ordinary stream churn: the reducer replaces the
+            // turnPhase object on nearly every event while Streaming, with
+            // no further compaction ping involved at all.
+            for (let i = 2; i < 6; i++) {
+                setTurnPhase({ ...STREAMING, lastEventMs: i });
+                await Promise.resolve();
+            }
+            expect(model.dispatchPane).toHaveBeenCalledTimes(2); // no growth — the buggy version kept climbing here
+
+            dispose();
+        });
+    });
+
+    it("drops an expired buffered ping instead of replaying it into a later, unrelated turn (codex P2)", async () => {
+        // The exact scenario codex flagged: a ping that was actually
+        // genuinely stale (its turn already ended before it arrived) gets
+        // buffered on live delivery. The confirming
+        // ReconcileTurnActive(active: false) never promotes the phase (it's
+        // already Idle — a same-ref no-op), so there is no reactive signal
+        // to clear `missedPing` at that point. Without a bound, the retry
+        // effect would only fire on whatever working-phase transition comes
+        // NEXT — which could be a completely unrelated TurnStart from the
+        // user's next message — and re-dispatch the stale ping against it.
+        await createRoot(async (dispose) => {
+            const [turnPhase, setTurnPhase] = createSignal<TurnPhase>(IDLE);
+            const model = makeFakeModel(turnPhase);
+            const queue = makeFakeQueue();
+            useCompactionStream({
+                blockId: "b",
+                model,
+                queue,
+                hasNodeId: () => false,
+                addNodeId: () => {},
+                turnPhase,
+            } as any);
+            await Promise.resolve();
+
+            fireCompactionStarted(new Date().toISOString());
+            expect(model.dispatchPane).toHaveBeenCalledTimes(1); // rejected (Idle), buffered
+
+            // Time passes with turnPhase never changing (the inactive
+            // confirmation was a same-ref no-op) — well past the retry window.
+            vi.advanceTimersByTime(MISSED_PING_RETRY_WINDOW_MS + 1000);
+
+            // An entirely unrelated new turn starts (e.g. the user's next message).
+            setTurnPhase({ kind: "Submitting", submittedAt: Date.now(), pendingContent: "hi" });
+            await Promise.resolve();
+
+            // The expired ping must be dropped, not replayed into this new turn.
+            expect(model.dispatchPane).toHaveBeenCalledTimes(1);
+            expect(queue.pushNewNode).not.toHaveBeenCalled();
 
             dispose();
         });

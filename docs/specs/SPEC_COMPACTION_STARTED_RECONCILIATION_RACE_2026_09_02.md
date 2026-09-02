@@ -101,8 +101,27 @@ logic, no new state shape:
   correctly rejected again by the existing `isStaleVsLastBoundary` check — no new
   staleness logic needed, the round-6 guard already covers a delayed retry exactly
   like it covers a delayed original delivery.
-- The retry fires at most once per missed ping (cleared unconditionally after the
-  retry attempt, success or reject) — no retry loop, no polling.
+- The retry fires at most once per missed ping — `missedPing` is cleared
+  unconditionally after the retry attempt (accepted or rejected), never re-armed by
+  a failed retry. (reagent P1: an earlier version of this fix re-buffered on ANY
+  rejection, including the retry's own, which meant a retry that failed again kept
+  re-firing on every subsequent `turnPhase` object change — near-constant while
+  `Streaming`, since most stream events replace the phase object — instead of
+  giving up after one attempt.)
+- The retry is only attempted within `MISSED_PING_RETRY_WINDOW_MS` (15s) of the
+  ORIGINAL rejection, not indefinitely. (codex P2: a genuinely stale ping — one
+  whose turn already ended before it arrived — can get buffered, then never have
+  `missedPing` cleared by its confirming `ReconcileTurnActive(active: false)` if
+  that confirmation is itself a same-ref no-op (phase already `Idle`, no reactive
+  signal to observe). Without a bound, the retry effect would only fire on
+  whatever working-phase transition comes NEXT — which could be an entirely
+  unrelated `TurnStart` from the user's next message — and re-dispatch the stale
+  ping against it; if no matching `compact_boundary` was ever recorded, the
+  reducer has nothing to reject it against and would falsely accept it. The
+  window is sized well above the `ReconcileTurnActive` RPC round-trip this fix
+  targets and well below "the user's next message" in the common case — a
+  defense-in-depth bound, not the primary correctness mechanism, same role
+  `CLOCK_SKEW_TOLERANCE_MS` plays in `resolveCompactionStart`.)
 
 Net effect: the reducer's `CompactionStarted` case is untouched. The fix is
 entirely "try again once we know more," using the hook's existing accept/reject

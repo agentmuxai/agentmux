@@ -101,6 +101,28 @@ const CLOCK_SKEW_TOLERANCE_MS = 60 * 1000;
 export type CompactionTrigger = "manual" | "auto";
 
 /**
+ * A buffered (rejected-while-not-working) ping is only retried within this
+ * long of ITS OWN rejection — not the compaction's own age. codex P2 on
+ * this PR: without a bound, a ping that was actually genuinely stale (its
+ * turn already ended before the ping arrived) can sit buffered
+ * indefinitely if the confirming `ReconcileTurnActive(active: false)`
+ * doesn't itself change `turnPhase` (already `Idle` ⇒ a same-ref no-op, no
+ * reactive signal this hook can observe) — the retry effect then only
+ * ever fires on the NEXT working-phase transition, which could be an
+ * entirely unrelated `TurnStart` from the user's next message, minutes
+ * later. Re-dispatching a stale ping against that unrelated turn can get
+ * falsely accepted (no matching `compact_boundary` was ever recorded to
+ * reject it against), setting `compacting` for a turn that was never
+ * actually compacting. Bounding the retry to shortly after the ORIGINAL
+ * rejection (comfortably longer than the `ReconcileTurnActive` RPC
+ * round-trip this fix targets, comfortably shorter than "the user's next
+ * message") keeps the fix scoped to the reconciliation race it exists
+ * for, without needing to distinguish "which kind of transition" caused
+ * the retry effect to re-fire.
+ */
+export const MISSED_PING_RETRY_WINDOW_MS = 15 * 1000;
+
+/**
  * Validate + resolve a raw `compaction_started` WPS payload into a
  * trigger + clamped `startedAt`, or `null` to reject it outright
  * (malformed shape, unparseable/missing timestamp, or stale replay —
@@ -155,12 +177,26 @@ export function useCompactionStream(opts: UseCompactionStreamOptions): void {
     // (yet) working — see the module doc comment. Overwritten by any newer
     // ping; cleared unconditionally after a retry attempt (accepted or
     // not) so this never grows into a retry loop or a replay queue.
-    let missedPing: { trigger: CompactionTrigger; startedAt: number } | null = null;
+    // `bufferedAtMs` is THIS process's local wall-clock at the moment of
+    // the original (rejected) live delivery — see `MISSED_PING_RETRY_WINDOW_MS`
+    // below for why it's tracked separately from the ping's own `startedAt`.
+    let missedPing: { trigger: CompactionTrigger; startedAt: number; bufferedAtMs: number } | null = null;
 
-    const attemptStart = (trigger: CompactionTrigger, startedAt: number) => {
+    // `bufferOnReject` distinguishes the two call sites: a LIVE delivery
+    // (fresh WPS ping) should buffer on rejection so the retry effect below
+    // gets a chance to re-dispatch once the pane is confirmed working. The
+    // RETRY itself must NOT re-buffer on a second rejection (e.g. the ping
+    // has since gone genuinely stale — its own `compact_boundary` already
+    // arrived) — reagent P1: without this, `missedPing` stayed truthy and
+    // the retry effect re-fires on every subsequent `turnPhase` object
+    // change (near-constant while Streaming, since most stream events
+    // replace the phase object), re-dispatching and re-rejecting forever
+    // for the rest of the working session instead of giving up after one
+    // retry as documented.
+    const attemptStart = (trigger: CompactionTrigger, startedAt: number, bufferOnReject: boolean) => {
         const paneEvents = opts.model.dispatchPane({ type: "CompactionStarted", trigger, at: startedAt });
         if (!wasCompactionStartedAccepted(paneEvents)) {
-            missedPing = { trigger, startedAt };
+            missedPing = bufferOnReject ? { trigger, startedAt, bufferedAtMs: Date.now() } : null;
             return;
         }
         missedPing = null;
@@ -184,7 +220,7 @@ export function useCompactionStream(opts: UseCompactionStreamOptions): void {
         handler: (event: any) => {
             const resolved = resolveCompactionStart(event?.data, Date.now());
             if (!resolved) return;
-            attemptStart(resolved.trigger, resolved.startedAt);
+            attemptStart(resolved.trigger, resolved.startedAt, /* bufferOnReject */ true);
         },
     });
 
@@ -194,12 +230,17 @@ export function useCompactionStream(opts: UseCompactionStreamOptions): void {
     // `workingFromPhase` / `isStaleVsLastBoundary` gates decide accept vs.
     // reject exactly as they would for a live delivery, so a ping that's
     // since gone genuinely stale (its own `compact_boundary` already
-    // arrived) is still correctly rejected here, not resurrected.
+    // arrived) is still correctly rejected here, not resurrected. Expired
+    // pings (see `MISSED_PING_RETRY_WINDOW_MS`) are dropped silently
+    // instead of retried, whichever working-phase transition this is.
     createEffect(() => {
-        if (workingFromPhase(opts.turnPhase()) && missedPing) {
-            const { trigger, startedAt } = missedPing;
-            attemptStart(trigger, startedAt);
+        if (!workingFromPhase(opts.turnPhase()) || !missedPing) return;
+        const { trigger, startedAt, bufferedAtMs } = missedPing;
+        if (Date.now() - bufferedAtMs > MISSED_PING_RETRY_WINDOW_MS) {
+            missedPing = null;
+            return;
         }
+        attemptStart(trigger, startedAt, /* bufferOnReject */ false);
     });
 
     // Own the subscription at body scope so it is torn down even if the
