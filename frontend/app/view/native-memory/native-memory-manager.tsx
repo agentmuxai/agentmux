@@ -27,9 +27,10 @@
  * This directory and component are about native memory only.
  */
 
-import { createEffect, createMemo, createSignal, For, Show, untrack, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, type JSX } from "solid-js";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { waveEventSubscribe } from "@/app/store/wps";
 import { useAgentDefinitions } from "@/app/view/agent/components/AgentPicker";
 import { NativeMemoryHistoryPanel } from "@/app/view/agent/components/NativeMemoryHistoryPanel";
 import { MemoryAgentCard, type MemoryCountState } from "./MemoryAgentCard";
@@ -133,6 +134,10 @@ export function NativeMemoryManager(): JSX.Element {
     const [selectedFilename, setSelectedFilename] = createSignal<string>("");
     const [filesLoading, setFilesLoading] = createSignal(false);
     const [filesError, setFilesError] = createSignal<string | null>(null);
+    // Forces NativeMemoryHistoryPanel to remount on a reactive refresh even
+    // when agentId:filename is unchanged — see refetchSelectedAgentFiles's
+    // own comment (Codex P1, PR #2932).
+    const [refreshNonce, setRefreshNonce] = createSignal(0);
     let latestRequestId = 0;
 
     // Per-agent memory counts for the grid, keyed by agent id. Fetched lazily
@@ -154,6 +159,66 @@ export function NativeMemoryManager(): JSX.Element {
             .join(" "),
     );
 
+    // Per-agent request generation for fetchCountFor below (Codex P2, PR
+    // #2932): before the reactive agent:memory:changed handler existed, an
+    // agent's count was only ever fetched ONCE per appearance in the grid —
+    // "is this agent still present" was the only staleness question that
+    // could arise. Now a change event can call fetchCountFor again while an
+    // earlier call for the SAME agent is still in flight (e.g. the initial
+    // fetch is unusually slow, or two events land close together), and
+    // without this, an older response resolving after a newer one would
+    // overwrite the fresher result and leave the card stale until another
+    // event or a remount.
+    const countRequestGeneration = new Map<string, number>();
+
+    // Shared by the id-set effect below (new agents) AND the reactive
+    // agent:memory:changed handler further down (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md)
+    // — one RPC-call-then-setCounts implementation, not two copies that could
+    // drift. Always overwrites, even for an agent not currently `undefined`
+    // in the map — the reactive path's whole point is refreshing an agent
+    // whose count was already resolved (or errored) before this call.
+    const fetchCountFor = (agent: AgentDefinition) => {
+        const generation = (countRequestGeneration.get(agent.id) ?? 0) + 1;
+        countRequestGeneration.set(agent.id, generation);
+        // Only flash to "loading" for a genuinely new agent — no resolved
+        // state yet to show in the meantime. ReAgent (PR #2932): the
+        // reactive agent:memory:changed handler also calls this function,
+        // and unconditionally overwriting to "loading" made an
+        // already-resolved card visibly flicker back to "Loading…" on
+        // every write, rather than updating quietly in place — inconsistent
+        // with refetchSelectedAgentFiles's own deliberate choice not to
+        // touch filesLoading for the identical reason, and with this
+        // feature's own stated design intent of a quiet per-card refresh.
+        setCounts((prev) =>
+            prev[agent.id] === undefined ? { ...prev, [agent.id]: { kind: "loading" } as MemoryCountState } : prev,
+        );
+        RpcApi.NativeMemoryListCommand(TabRpcClient, { agent_id: agent.id })
+            .then((res) => {
+                // Guarded by BOTH "agent still present" and "still the latest
+                // request for this agent" — a response is stale if either its
+                // agent is gone, or a newer fetchCountFor call for the same
+                // agent has since superseded it.
+                if (countRequestGeneration.get(agent.id) !== generation) return;
+                setCounts((prev) =>
+                    prev[agent.id] === undefined
+                        ? prev
+                        : { ...prev, [agent.id]: { kind: "count", files: res.files.length } },
+                );
+            })
+            .catch((e: Error) => {
+                if (countRequestGeneration.get(agent.id) !== generation) return;
+                // NOT folded into `count: 0`. agent:memory:list fails with
+                // a hard 500 when the memory dir can't be resolved — the
+                // exact shape of the bug #2901 fixed — so an error must
+                // stay visually distinct from a genuinely empty agent.
+                setCounts((prev) =>
+                    prev[agent.id] === undefined
+                        ? prev
+                        : { ...prev, [agent.id]: { kind: "error", message: e.message ?? String(e) } },
+                );
+            });
+    };
+
     createEffect(() => {
         agentIdsKey();
         // Read the list itself untracked: the memo above is the only intended
@@ -164,40 +229,12 @@ export function NativeMemoryManager(): JSX.Element {
         // Drop entries for agents that no longer exist, and keep every count
         // already resolved — only genuinely new agents are fetched below.
         setCounts((prev) => Object.fromEntries(Object.entries(prev).filter(([id]) => present.has(id))));
+        for (const id of countRequestGeneration.keys()) {
+            if (!present.has(id)) countRequestGeneration.delete(id);
+        }
 
         const missing = list.filter((a) => untrack(() => counts())[a.id] === undefined);
-        if (missing.length === 0) return;
-
-        setCounts((prev) => ({
-            ...prev,
-            ...Object.fromEntries(missing.map((a) => [a.id, { kind: "loading" } as MemoryCountState])),
-        }));
-
-        for (const agent of missing) {
-            RpcApi.NativeMemoryListCommand(TabRpcClient, { agent_id: agent.id })
-                .then((res) => {
-                    // Guarded per-agent rather than by a batch generation: a
-                    // response is only stale if its agent is gone, and each
-                    // fetch now settles into a shared, incrementally-built map
-                    // (the old whole-batch reset is what caused the flicker).
-                    setCounts((prev) =>
-                        prev[agent.id] === undefined
-                            ? prev
-                            : { ...prev, [agent.id]: { kind: "count", files: res.files.length } },
-                    );
-                })
-                .catch((e: Error) => {
-                    // NOT folded into `count: 0`. agent:memory:list fails with
-                    // a hard 500 when the memory dir can't be resolved — the
-                    // exact shape of the bug #2901 fixed — so an error must
-                    // stay visually distinct from a genuinely empty agent.
-                    setCounts((prev) =>
-                        prev[agent.id] === undefined
-                            ? prev
-                            : { ...prev, [agent.id]: { kind: "error", message: e.message ?? String(e) } },
-                    );
-                });
-        }
+        for (const agent of missing) fetchCountFor(agent);
     });
 
     // Grid find/filter + sort (SPEC_ARMORY_PERSONAL_MEMORY_FILTER_AND_SORT_2026_09_02.md).
@@ -267,6 +304,131 @@ export function NativeMemoryManager(): JSX.Element {
                 if (requestId !== latestRequestId) return;
                 setFilesLoading(false);
             });
+    });
+
+    // Reactive re-fetch of the OPEN detail view's file list, triggered by
+    // agent:memory:changed for the currently-selected agent
+    // (SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md). Deliberately does NOT
+    // clear `selectedFilename()` the way the selectedAgent()-keyed effect
+    // above does on an actual agent SWITCH — a live write to the file
+    // you're already looking at should update in place, not kick you back
+    // to "pick a file." Only clears it if the previously-selected filename
+    // genuinely no longer exists in the refreshed list (e.g. the file that
+    // changed was a delete).
+    //
+    // Codex P2 (PR #2932): this must also own `filesLoading`, not just
+    // `files`. It shares `latestRequestId` with the selectedAgent()-keyed
+    // effect above — if this call's requestId supersedes an initial fetch
+    // still in flight (a change event landing within the debounce window of
+    // an agent switch), that effect's own `.finally()` skips
+    // `setFilesLoading(false)` (guarded by the same requestId check), and
+    // this function previously never touched the flag either — leaving the
+    // selector permanently disabled/showing "Loading…" even after this
+    // fresher request succeeds.
+    const refetchSelectedAgentFiles = (agent: AgentDefinition) => {
+        const requestId = ++latestRequestId;
+        RpcApi.NativeMemoryListCommand(TabRpcClient, { agent_id: agent.id })
+            .then((res) => {
+                if (requestId !== latestRequestId) return;
+                setFiles(res.files);
+                setFilesError(null);
+                // Codex P1 (PR #2932): force the history panel to remount
+                // even when the selected FILENAME is unchanged — the panel
+                // is keyed on `agentId:filename`, and `NativeMemoryHistoryModel`
+                // only loads history in its own constructor (never reacts to
+                // prop changes after mount, per its own doc comment). Without
+                // this, the exact scenario the whole feature exists for — a
+                // live write to the file you're already looking at — was the
+                // one case that stayed invisible until you switched away and
+                // back. Bumped unconditionally on every successful refresh,
+                // not just when the file list itself changed.
+                setRefreshNonce((n) => n + 1);
+                const current = selectedFilename();
+                if (current && !res.files.some((f) => f.filename === current)) {
+                    setSelectedFilename("");
+                }
+            })
+            .catch((e: Error) => {
+                if (requestId !== latestRequestId) return;
+                setFilesError(`Failed to list memory files: ${e.message ?? e}`);
+            })
+            .finally(() => {
+                if (requestId !== latestRequestId) return;
+                setFilesLoading(false);
+            });
+    };
+
+    // Reactive grid + detail updates: subscribe to agent:memory:changed for
+    // every agent currently in the grid, re-subscribing whenever the agent
+    // SET changes (same agentIdsKey dependency the count-fetch effect above
+    // uses, for the same reason — a brand-new-but-equivalent agents() array
+    // must not tear down and rebuild every subscription).
+    // SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md.
+    //
+    // Debounced per agent id (~250ms): a burst of rapid writes to the same
+    // agent (e.g. a script issuing several MemoryWrite calls in a loop)
+    // coalesces into one refetch instead of one RPC round-trip per write.
+    // Keyed per agent id so a burst on one agent never delays another's.
+    //
+    // Declared outside the effect (component-instance lifetime, not
+    // per-effect-run) and pruned rather than blanket-cleared on each
+    // re-run — see the ReAgent P1 fix note below.
+    const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    createEffect(() => {
+        agentIdsKey();
+        const list = untrack(() => agents());
+        const present = new Set(list.map((a) => a.id));
+
+        // ReAgent P1 (PR #2932): only prune timers for agents that actually
+        // LEFT the set. The previous version's onCleanup cleared the ENTIRE
+        // map unconditionally on every re-run of this effect — which fires
+        // on any agentIdsKey() change, i.e. any agent create/edit/delete
+        // ANYWHERE in the app (same over-broad trigger the count-fetch
+        // effect above already had to guard against). A debounced refetch
+        // already scheduled for an agent that's still present got silently
+        // canceled and never fired if an unrelated agent changed elsewhere
+        // within the 250ms window — that agent's count/detail view then
+        // stayed stale until its own next unrelated event.
+        for (const [id, timer] of debounceTimers) {
+            if (!present.has(id)) {
+                clearTimeout(timer);
+                debounceTimers.delete(id);
+            }
+        }
+
+        const unsub = waveEventSubscribe(
+            ...list.map((agent) => ({
+                eventType: `agent:memory:changed:${agent.id}`,
+                handler: () => {
+                    const existing = debounceTimers.get(agent.id);
+                    if (existing !== undefined) clearTimeout(existing);
+                    debounceTimers.set(
+                        agent.id,
+                        setTimeout(() => {
+                            debounceTimers.delete(agent.id);
+                            fetchCountFor(agent);
+                            if (untrack(selectedAgent)?.id === agent.id) {
+                                refetchSelectedAgentFiles(agent);
+                            }
+                        }, 250),
+                    );
+                },
+            })),
+        );
+
+        // Per-run cleanup: only the subscriptions this run created. Pending
+        // debounce timers are this effect's OWN concern to prune above, not
+        // this callback's — they must survive an effect re-run so a
+        // still-present agent's scheduled refetch isn't lost.
+        onCleanup(unsub);
+    });
+
+    // True component unmount only (registered at the component body's own
+    // scope, not nested inside createEffect, so it does not re-fire on
+    // every effect re-run the way the per-run onCleanup above does).
+    onCleanup(() => {
+        for (const timer of debounceTimers.values()) clearTimeout(timer);
+        debounceTimers.clear();
     });
 
     return (
@@ -373,11 +535,16 @@ export function NativeMemoryManager(): JSX.Element {
                                     </div>
                                 }
                             >
-                                {/* Keyed on agentId:filename so switching either forces a
-                                    clean remount — NativeMemoryHistoryPanel's own doc
-                                    comment: it does not react to prop changes after
-                                    mount by design. */}
-                                <Show when={`${agent().id}:${selectedFilename()}`} keyed>
+                                {/* Keyed on agentId:filename:refreshNonce. The first two force
+                                    a clean remount when switching agent/file —
+                                    NativeMemoryHistoryPanel's own doc comment: it does not
+                                    react to prop changes after mount by design. refreshNonce
+                                    additionally forces a remount when a reactive
+                                    agent:memory:changed refresh lands for the SAME file
+                                    (Codex P1, PR #2932) — without it, a live write to the
+                                    file you're already looking at never showed up, since
+                                    neither agentId nor filename actually changed. */}
+                                <Show when={`${agent().id}:${selectedFilename()}:${refreshNonce()}`} keyed>
                                     {(_key) => (
                                         <NativeMemoryHistoryPanel
                                             agentId={agent().id}
