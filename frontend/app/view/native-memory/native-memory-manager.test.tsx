@@ -93,6 +93,32 @@ describe("NativeMemoryManager — agent grid", () => {
         expect(await screen.findByText("No memories yet")).toBeInTheDocument();
     });
 
+    // Codex P2, PR #2917: useAgentDefinitions returns [] both while the first
+    // ListAgentDefinitions is in flight AND when there genuinely are none.
+    // Without consuming its `loading` accessor the grid flashed "No agents
+    // defined yet" on every mount.
+    test("shows a loading state, not a false empty state, before agents resolve", async () => {
+        let resolveAgents!: (v: AgentDefinition[]) => void;
+        listAgentDefinitionsMock.mockReturnValue(
+            new Promise<AgentDefinition[]>((r) => {
+                resolveAgents = r;
+            }),
+        );
+        render(() => <NativeMemoryManager />);
+
+        expect(await screen.findByText("Loading agents…")).toBeInTheDocument();
+        expect(screen.queryByText("No agents defined yet.")).toBeNull();
+
+        resolveAgents([agent("a1", "Manoz")]);
+        expect(await screen.findByText("Manoz")).toBeInTheDocument();
+    });
+
+    test("still reports a genuinely empty agent list once loading settles", async () => {
+        listAgentDefinitionsMock.mockResolvedValue([]);
+        render(() => <NativeMemoryManager />);
+        expect(await screen.findByText("No agents defined yet.")).toBeInTheDocument();
+    });
+
     test("one failing agent does not blank its siblings", async () => {
         nativeMemoryListMock.mockImplementation((_c: unknown, req: { agent_id: string }) =>
             req.agent_id === "a1"

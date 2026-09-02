@@ -92,7 +92,29 @@ at a glance), but it needs one `agent:memory:list` call per agent. So:
 - Reuse the existing stale-response guard: today's `latestRequestId` pattern
   (reagent P2, PR #2678) exists because overlapping fetches can resolve out of
   order. N concurrent per-card fetches make that *more* likely, not less —
-  each card owns its own request generation.
+  a settling response is discarded if its agent is no longer in the map.
+
+- **Key the counts effect on the agent-ID *set*, not on `agents()` itself.**
+  `agents()` yields a brand-new array on every `agents:changed` event, which
+  fires for any agent create/update/delete/template op anywhere in the app —
+  not just ones that change this tab's agent set. Depending on the array
+  reference resets every card to "Loading…" and refetches counts that already
+  resolved, so an unrelated edit elsewhere makes this grid flicker (ReAgent
+  P2, PR #2917). A `createMemo` over the sorted ids is the dependency; the
+  list itself is read `untrack`ed. Counts are then built incrementally —
+  entries for removed agents are dropped, resolved counts are kept, and only
+  genuinely new agents are fetched.
+
+  Consequence, accepted: a count does **not** refresh when an agent's memory
+  files change while you sit on the grid. The drill-in fetches fresh on entry,
+  so the stale value is only ever the summary line. A manual refresh (or
+  invalidation on a memory-changed event) is a reasonable follow-up, but
+  refetching everything on unrelated agent edits is the wrong trade.
+
+- **Distinguish "agents still loading" from "no agents".** `useAgentDefinitions`
+  returns `[agents, loading]` precisely because `agents()` is `[]` in both
+  states; consuming only the first flashes "No agents defined yet" on every
+  mount (Codex P2, PR #2917).
 
 ### Files
 
