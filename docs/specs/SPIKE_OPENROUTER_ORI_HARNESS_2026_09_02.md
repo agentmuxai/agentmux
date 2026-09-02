@@ -129,11 +129,11 @@ non-zero** when no credential resolves. Our Qwen entry uses the Gemini-inherited
 `catalog.ts` comment records that `checkcliauth` treats any non-JSON zero exit
 as authenticated. `ori auth` fails closed by design.
 
-## 5. `ori code` maps almost 1:1 onto ProviderConfig
+## 5. `ori code` vs ProviderConfig — close, but not a drop-in
 
 | `ori code` flag | Our field | Fits? |
 |---|---|---|
-| `--output jsonl` (runtime events + terminal result line) | `styledOutputFormat` | yes, pending schema |
+| `--output jsonl` (runtime events + terminal result line) | `styledOutputFormat` | yes, but needs a NEW translator (§5.2) |
 | `--model <openrouter-slug>` | model selection | yes |
 | `--reasoning-effort max...none` | our effort generalization | yes, but stacks — see below |
 | `--approvals self-drive` | the `--yolo` / `--dangerously-skip-permissions` slot | yes |
@@ -153,27 +153,76 @@ passes a bare `-p` with no value, and Claude Code reads the prompt from stdin.
 `ori code` documents `--prompt, -p string` as taking an argv value, so copying
 the claude pattern would leave `-p` without its required argument.
 
-**Open question, and the one that gates everything else here:** does
-`ori code -p` with no value read stdin? If it does not, the options are
-`--prompt-file` with a temp file per turn, or a controller change. No other row
-in this table matters until that is answered.
+**Answered in §5.1: it does not.** `--prompt-file` is the way, which makes this
+a controller change rather than a catalog entry.
 
 **`sessionIdField` cannot express `--session <id>`.** It only names the JSON
 property to capture an id *from* (`agent_io.rs:244`, default `session_id`); the
 resume strategy then appends `resumeFlag` followed by that captured id. Pairing
 it with the boolean `--resume` would emit `--resume <id>`. The correct shape is
-`resumeFlag: "--session"` — and this spike has **not** established which JSON
-property Ori emits the session id on. `--output jsonl` against a live key would
-show it.
+`resumeFlag: "--session"`, and **§5.2 identifies the property: `runId`**, nested
+inside the `runtime.event` envelope rather than at the top level.
 
 `--reasoning-effort` overlaps `SPEC_PROVIDER_MODELS_EFFORT_GENERALIZATION_2026-06-14.md`:
 Ori also translates effort into "the harness's native mechanism". Two
 translation layers stacked is a decision to make deliberately, not to inherit.
 
-**Not verified: the `jsonl` event schema.** A dummy key gets far enough to prove
-the CLI surface but not to emit real turn events, so whether this needs a new
-translator alongside `claude-json` / `gemini-json` is open. This is the single
-biggest unknown before committing to option (b).
+### 5.1 The stdin question, answered: no
+
+`ori code -p` with **no value** does not read stdin — it prints help, because
+`-p` requires an argv value. So the claude pattern cannot be copied.
+
+`--prompt-file <path>` **does** work, verified end to end: argument parsing
+succeeds and a turn starts, with `"promptLength": 7` and
+`"prompt": "say hi\n"` in the emitted events. For option (b) that means a temp
+file per turn, written where `SubprocessController` currently writes stdin.
+Cheap, but it is a controller change rather than a catalog entry.
+
+### 5.2 The `--output jsonl` schema, captured
+
+Obtained by driving a real turn (it fails at the model call on a dummy key, but
+the framing is emitted first). Every line is a nested envelope:
+
+```json
+{"event": { ... , "type": "audit.event" | "runtime.event" }, "kind": "event"}
+```
+
+Two families:
+
+- **`audit.event`** — `.event.audit` with `auditId`, `commandId`, `createdAt`,
+  `level`, `message`, `name` (`command.received`, `command.failed`), and a
+  `detail` carrying `cwd`, `model`, `promptLength`, `type: agent.invoke`.
+- **`runtime.event`** — `.event.event` with `createdAt`, `eventId`, `harness`,
+  **`runId`**, **`turnId`**, `payload`, and `type`. Observed types:
+  `run.started`, `turn.started`, `runtime.error`. `eventId` is `<runId>:<seq>`.
+
+**This answers the `sessionIdField` question from §5:** the id to capture is
+`runId` (with `turnId` for per-turn correlation), carried on `runtime.event`
+lines — not a top-level `session_id`. Because it is nested two levels deep
+inside a discriminated envelope, **this needs a new translator**; neither
+`claude-json` nor `gemini-json` will read it.
+
+### 5.3 `ori code` needs `bun` on Windows — currently a blocker
+
+Past the tar issue, the same run surfaced more:
+
+```
+Installing dependencies in C:\Users\asafe\.ori\global...
+Could not refresh global workspace dependencies: NotFound: ChildProcess.spawn (bun install --silent)
+WARN: feature boot degraded; feature "dashboard" disabled ... Could not resolve: "react-dom/server"
+Runtime server error while swapping code skill wrapper: Unknown: FileSystem.rename (...)
+{"failure":{"code":"ORI_RUNTIME_INVOKE_FAILED", "kind":"internal", "stage":"runtime"}}
+```
+
+The global workspace installs its own dependencies with **`bun`**, which is not
+bundled and was absent here, so feature boot degrades and the invocation fails
+before reaching the model. `harness` also reports `"unknown"` in the events,
+consistent with the degraded boot.
+
+So option (b) on Windows currently requires `bun` on PATH **and** bsdtar ahead
+of GNU tar. Neither is exotic, but both are environment preconditions we would
+be taking on, and the failure mode when they are missing is an internal runtime
+error rather than a clear message.
 
 ## 6. Options
 
@@ -193,11 +242,26 @@ the worst failure shape. Wrapping codex is therefore gated on resolving that
 one flag; wrapping claude is not.
 
 **(b) Add `ori code` as a provider in its own right.** This is what the 2026-06
-spec could not have proposed. A real harness with headless prompt, JSONL
+spec could not have proposed: a real harness with headless prompt, JSONL
 streaming, session resume, and any OpenRouter model behind one credential —
 much closer to "OpenRouter as a model option" than the gateway framing allows.
 
-Gate (b) on capturing the `--output jsonl` schema against a live key.
+**Now costed rather than hoped at**, after §§5.1-5.3. It is not a catalog entry;
+it is three pieces of work:
+
+1. A **new translator** for the nested `runtime.event` envelope, capturing
+   `runId` as the session id (§5.2).
+2. A **controller change** to write the prompt to a temp file for
+   `--prompt-file`, since `-p` will not take stdin (§5.1).
+3. **Environment preconditions** — `bun` on PATH and bsdtar ahead of GNU tar —
+   or `ori code` fails with an internal runtime error (§5.3).
+
+None of that is large, and none of it is the "drop in a ProviderConfig" the
+first draft of this table implied. Worth doing if OpenRouter-as-a-model-option
+is a goal in itself; not worth doing incidentally.
+
+**Suggested order:** (a) for claude only — the cheapest real thing — then
+resolve codex's `--json` ownership, then (b) if the model-option goal stands.
 
 ## 7. Operational notes
 
