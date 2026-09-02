@@ -73,83 +73,36 @@
     }
 
     // === Working Row ===
-    // Floats over the bottom of .agent-document-scroll-region instead of
-    // occupying its own flex row (SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md
-    // §3.2) — the anchor wrapper is the positioning + ResizeObserver target;
-    // .agent-working-row-anchor scopes this selector so it can't collide
-    // with any .agent-working-row rendered elsewhere.
+    // A normal-flow row between the ActivityDock and the composer strip
+    // (SPEC_AGENT_WORKING_ROW_ABOVE_COMPOSER_2026_09_01.md): dock's
+    // long-running tasks on top, this turn's live status directly above
+    // where the user types.
+    //
+    // It previously floated over the bottom of
+    // .agent-document-scroll-region as an absolutely-positioned overlay
+    // (SPEC_AGENT_PANE_SCROLL_FOLLOW_AND_STATUS_OVERLAY_2026_07_24.md §3.2)
+    // so the message list's scrollbar could run that box's full height.
+    // Everything that arrangement needed to work is gone with it:
+    //   - the right: var(--agent-document-scrollbar-width) inset, which kept
+    //     the row's opaque background off .agent-document's native scrollbar
+    //   - .agent-working-row-backdrop, a decorative full-width layer that
+    //     existed only to fill the gutter that inset necessarily left
+    //     uncolored (SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md)
+    //   - z-index: 2 and the pointer-events: none / auto dance that stopped
+    //     the anchor's empty margin from swallowing clicks meant for the
+    //     message list underneath
+    // A row that isn't inside the scroll region can't overlap its scrollbar
+    // or its content, so none of those problems exist to solve.
+    //
+    // The wrapper stays (rather than putting these styles on
+    // .agent-working-row directly) for the reason it always had: it scopes
+    // the selector below so it can't collide with any .agent-working-row
+    // rendered elsewhere.
     // No idle placeholder — component returns null when neither loading nor
     // has completed stats.
     // SPEC_AGENT_PANE_STATUS_GRADIENT_2026_06_14.md §2.
-    //
-    // Purely decorative full-width layer, .agent-document-scroll-region's
-    // FIRST child in DOM order and left at z-index: auto (the implicit
-    // "0/auto" stacking group, ordered by DOM order within that group per
-    // spec — see .agent-document-scroll-region's own z-index:0 comment in
-    // _document.scss) — so it paints below .agent-document (also in that
-    // group, but later in DOM order) and thus below .agent-document's own
-    // scrollbar, while .agent-working-row-anchor's explicit z-index: 2
-    // keeps the real text-bearing row above both, unchanged. Closes the
-    // gap .agent-working-row-anchor's own scrollbar-width inset
-    // (below) necessarily leaves empty — that inset stops the row's
-    // opaque background from ever covering the scrollbar, but does
-    // nothing to fill that gutter with a matching color, and the
-    // scrollbar track itself is fully transparent
-    // (--scrollbar-background-color, theme.scss), so the gutter used to
-    // show the plain pane background instead of continuing this color.
-    // See docs/specs/SPEC_AGENT_WORKING_ROW_SCROLLBAR_GAP_2026_08_06.md.
-    .agent-working-row-backdrop {
-        position: absolute;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        // Same source of truth .agent-document's own padding-bottom uses
-        // (agent-view.tsx's ResizeObserver on the real row) — 0 whenever
-        // the row isn't rendered, so this never needs its own visibility
-        // logic beyond the <Show> that already gates it in agent-view.tsx.
-        height: var(--agent-working-row-height, 0px);
-        pointer-events: none;
-        // Default/fallback matches .agent-working-row--worked's own
-        // background exactly (below) — the common case once a turn
-        // completes, and a safe non-flashing color if this ever paints
-        // for a tick before the --loading class below applies.
-        background: var(--elevated-bg-color);
-
-        &--loading {
-            // Exact match to .agent-working-row--loading's own background
-            // (below), not an approximation — a visibly different tint in
-            // this 14px strip would look like a new, smaller version of
-            // the same bug this element exists to fix.
-            background: color-mix(in srgb, var(--accent-color) 4%, var(--elevated-bg-color));
-        }
-    }
-
     .agent-working-row-anchor {
-        position: absolute;
-        left: 0;
-        // Inset from the scrollbar gutter, not flush against it (right: 0)
-        // — .agent-working-row's opaque background (see --loading/--worked
-        // below) previously extended the full anchor width, painting over
-        // .agent-document's native scrollbar in that strip since this
-        // anchor's z-index: 2 sits above .agent-document's implicit
-        // z-index: auto. A right padding on the row used to compensate for
-        // the TEXT overlapping the scrollbar, but never stopped the row's
-        // own BACKGROUND from covering it — the scrollbar was still there,
-        // just invisible underneath. Insetting the anchor itself means
-        // nothing painted inside it can ever reach that strip, so the
-        // scrollbar stays visible and clickable without any z-index
-        // fight (which would also make .agent-document's own content
-        // paint over this row's text, defeating the overlay).
-        right: var(--agent-document-scrollbar-width, 14px);
-        bottom: 0;
-        z-index: 2;
-        // The anchor spans the full pane width (left:0/right:<scrollbar
-        // width>) but the row itself only fills its own content width —
-        // without this, the empty margin beside the row would still
-        // intercept clicks meant for the message list underneath.
-        // Re-enabled on .agent-working-row itself below so its own text
-        // stays selectable/clickable.
-        pointer-events: none;
+        flex-shrink: 0;
     }
 
     .agent-working-row-anchor .agent-working-row {
@@ -158,19 +111,21 @@
         display: flex;
         align-items: center;
         gap: 5px;
-        // Right padding now matches the other three sides — the anchor's
-        // own right inset (above) already clears the scrollbar gutter, so
-        // this no longer needs the extra buffer that used to compensate
-        // for the row extending flush against it.
+        // Symmetric padding on all four sides. There is no scrollbar gutter
+        // to clear any more (the row left the scroll region entirely — see
+        // the anchor above), so no side needs a compensating buffer.
         padding: var(--space-1) var(--space-3) var(--space-1-5) var(--space-3);
-        pointer-events: auto; // opt back in — the anchor wrapper disables it
 
         &--loading {
             color: var(--accent-color);
-            // Opaque — same reasoning as --worked (commit 6e4497b): this row
-            // floats over the scrollable message list now, so a user
-            // scrolling up mid-stream saw history bleed through the old
-            // color-mix(...4%, transparent) background. Reagent P1 on a
+            // Opaque, still — kept deliberately after the row moved out of
+            // the scroll region. It no longer overlaps the message list, so
+            // the original bleed-through this fixed (commit 6e4497b: history
+            // showing through a color-mix(...4%, transparent) background
+            // while scrolled up mid-stream) can't recur — but the row now
+            // sits directly against the composer, and a translucent status
+            // row there would pick up the pane background rather than
+            // reading as its own band. Reagent P1 on a
             // later round: --main-bg-color is itself
             // `rgba(34, 34, 34, var(--window-opacity, 0.45))` — alpha-aware
             // by design, for window transparency — so it is NOT actually
