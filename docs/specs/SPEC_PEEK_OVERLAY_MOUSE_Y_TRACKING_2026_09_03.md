@@ -99,15 +99,26 @@ positioning implementation.
 
 ### 4.3 Computing `top`
 
-**Revised twice from the original design during review (reagent + Codex,
-both P1, both correct) — see §4.3.1 for what was tried first and why it
-didn't work.** Final version, in `update()`, for `align === "end"`:
+**Revised three times from the original design during review (reagent +
+Codex, all P1, all correct) — see §4.3.1 for the full history.** Final
+version, in `update()`, for `align === "end"`:
 
 ```ts
 const overlayHeight = floatingEl?.getBoundingClientRect().height ?? 0;
 const minTop = container.top;
-const maxTop = Math.max(minTop, container.bottom - BOTTOM_MARGIN_PX - overlayHeight);
-const top = lastMouseY != null ? Math.min(Math.max(lastMouseY + CURSOR_GAP_PX, minTop), maxTop) : rect.top;
+const containerBottomLimit = container.bottom - BOTTOM_MARGIN_PX;
+let top: number;
+if (lastMouseY != null) {
+    const belowTop = lastMouseY + CURSOR_GAP_PX;
+    if (belowTop + overlayHeight <= containerBottomLimit) {
+        top = Math.max(belowTop, minTop);
+    } else {
+        // Not enough room below the cursor — flip above it instead.
+        top = Math.max(lastMouseY - CURSOR_GAP_PX - overlayHeight, minTop);
+    }
+} else {
+    top = rect.top;
+}
 const cap = Math.max(0, container.bottom - top - BOTTOM_MARGIN_PX);
 setFloatingStyle({
     position: "fixed",
@@ -122,20 +133,19 @@ setFloatingStyle({
 - `left`/`transform` (horizontal pinning) is **unchanged** — "pinned to
   the right" stays exactly as it behaves today.
 - `top` follows `lastMouseY` once available, offset by a fixed
-  `CURSOR_GAP_PX` (12px) below the raw cursor position — see §4.3.1 for
-  why this offset must be nonzero — clamped to the scroll container's own
-  vertical bounds (reusing `findScrollContainerRect`, already imported)
-  minus the overlay's own rendered height, rather than the row's bounds.
+  `CURSOR_GAP_PX` (12px) — below the cursor when there's room, flipped
+  above it otherwise — see §4.3.1 for why a plain clamp isn't enough.
 - Falls back to `rect.top` (today's behavior) if no mouse position is
   known yet (shouldn't normally happen per §4.2, but keeps the function
   total/safe).
 - `max-height` (`cap`) is recomputed relative to the new `top`, same
   formula as before just parameterized — otherwise a panel positioned
   further down the row would keep the old, too-generous height budget
-  and could overflow past the container's bottom edge. Combined with the
-  height-aware `maxTop` clamp above, `cap` should now stay generous
-  (>= `overlayHeight`) in the normal case rather than collapsing near the
-  container's bottom edge (see §4.3.1, second bug).
+  and could overflow past the container's bottom edge.
+- Invariant this whole computation exists to guarantee, in both branches:
+  the cursor's Y never falls inside `[top, top + overlayHeight]`. Covered
+  directly by `PeekOverlay.test.tsx`'s "mouse-Y tracking" describe block
+  (reagent explicitly flagged the 4th-round bug below as untested).
 
 #### 4.3.1 What was tried first, and why it changed
 
@@ -157,10 +167,10 @@ caught in review before merge:
   bottom edge pushed `cap` toward 0, clipping the timestamp/estimate/
   command content instead of just stopping the panel's downward travel.
 
-**Attempt 2 (first review-response push):** kept `top = clamp(lastMouseY,
-...)` unchanged, added `pointer-events: none` to the whole overlay to
-stop it from ever intercepting the mouse (fixing the loop) and fixed the
-`maxTop`/overlay-height issue as in the final version above.
+**Attempt 2:** kept `top = clamp(lastMouseY, ...)` unchanged, added
+`pointer-events: none` to the whole overlay to stop it from ever
+intercepting the mouse (fixing the loop) and fixed the `maxTop`/overlay-
+height issue by subtracting `overlayHeight` from the clamp's ceiling.
 
 - **reagent P1 (re-review):** `pointer-events: none` also disables the
   overlay's own `overflow-y: auto` (`.agent-node-peek-overlay`,
@@ -171,16 +181,32 @@ stop it from ever intercepting the mouse (fixing the loop) and fixed the
   a bug that only needed the cursor to stay OUTSIDE the panel's bounds,
   not for the panel to stop receiving events altogether.
 
-**Final (this spec, attempt 3):** drop `pointer-events: none` entirely
-(no regression), and instead offset `top` by a fixed `CURSOR_GAP_PX`
-below the raw cursor Y. Since `update()` recomputes `top` on every
-`mousemove`, the panel is always positioned a constant small distance
-below wherever the cursor currently is — the cursor cannot enter the
-panel's own bounds under ordinary hover movement (it would need to jump
-more than `CURSOR_GAP_PX` within a single rAF-throttled frame), so the
-loop from attempt 1 doesn't happen, and pointer events on the overlay are
-untouched, so scrolling long tool-command bodies keeps working exactly as
-before this PR.
+**Attempt 3:** dropped `pointer-events: none`, offset `top` by a fixed
+`CURSOR_GAP_PX` below the raw cursor Y instead, still via a single
+`clamp(lastMouseY + CURSOR_GAP_PX, minTop, maxTop)` — no flip, just an
+offset added to the same clamp shape as attempts 1–2.
+
+- **reagent P1 (re-review):** the offset only helps when the clamp
+  doesn't bind. `maxTop` (`container.bottom - BOTTOM_MARGIN_PX -
+  overlayHeight`, needed so the panel fits within the container without
+  `cap` collapsing — attempt 1's second bug) can itself be LESS than
+  `lastMouseY`, whenever the cursor is within `overlayHeight +
+  BOTTOM_MARGIN_PX` of the container's bottom edge (the lowest transcript
+  row, or a tall `ToolBlock` peek near the pane's bottom). Clamping down
+  to `maxTop` in that case silently placed `top` at or below the cursor's
+  own Y — right back inside `[top, top+overlayHeight]`, reintroducing
+  attempt 1's exact loop for that specific region. Untested, which is why
+  it slipped through three rounds of review before being caught on the
+  fourth.
+
+**Final (this spec, attempt 4):** replace the single clamp with an
+explicit two-branch placement — below-with-gap when it fits within the
+container, ABOVE-with-gap (the standard tooltip flip-direction pattern)
+when it doesn't. Both branches keep the cursor outside the overlay's
+bounds BY CONSTRUCTION (the gap is always applied on the far side of the
+overlay from the cursor), rather than relying on a clamp that can
+silently overrule the gap. No `pointer-events` involved, so scrolling
+long tool-command bodies is unaffected, same as attempt 3.
 
 ### 4.4 Why not thread mouse position through props instead
 

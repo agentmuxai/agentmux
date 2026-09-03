@@ -150,17 +150,6 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
         // Horizontal pinning (left/transform) is untouched. Falls back to
         // rect.top if no mouse position is known yet.
         //
-        // The upper clamp accounts for the overlay's OWN rendered height
-        // (`floatingEl`'s current rect, once mounted) rather than just
-        // `container.bottom` — otherwise, hovering near the scroll
-        // container's bottom edge would clamp `top` right up against it and
-        // the `max-height` cap below would collapse toward 0, clipping the
-        // timestamp/estimate/command content instead of just stopping the
-        // panel's downward travel while it's still fully visible (reagent +
-        // Codex P1 on PR #2949). Falls back to 0 extra headroom before the
-        // overlay's first paint, when its height isn't known yet — corrected
-        // on the very next update() once floatingEl exists.
-        //
         // `top` is offset CURSOR_GAP_PX below the raw cursor position, not
         // exactly at it. First cut of this fix set `top: mouseY` exactly,
         // which put the cursor precisely on the panel's own top edge — any
@@ -172,17 +161,45 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
         // loop for a real regression: `.agent-node-peek-overlay` has a load-
         // bearing `overflow-y: auto` (ToolBlock.tsx's `cmdText` body can be
         // long enough to need scrolling), which pointer-events: none also
-        // disables (reagent P1, 3rd round). Since `update()` recomputes `top`
-        // on every mousemove, keeping it a small FIXED distance below the
-        // cursor means the cursor never actually reaches the panel's own
-        // bounds under ordinary hover movement (it would have to jump more
-        // than CURSOR_GAP_PX within a single rAF-throttled frame) — no
-        // pointer-events override needed, so scrolling stays intact.
+        // disables (reagent P1, 3rd round).
+        //
+        // Placing the panel BELOW-with-a-gap isn't enough on its own,
+        // though: clamping `top` to fit the overlay's height within the
+        // container (so `max-height` doesn't collapse near the bottom edge)
+        // can push `top` back down to <= the cursor's raw Y whenever the
+        // cursor is within `overlayHeight + BOTTOM_MARGIN_PX` of the
+        // container's bottom — silently reintroducing the exact
+        // cursor-inside-the-overlay loop CURSOR_GAP_PX exists to prevent
+        // (reagent P1, 4th round: hovering the lowest transcript row, or any
+        // tall ToolBlock peek near the pane's bottom, hit this). Below-with-
+        // gap and the container-fit clamp can genuinely conflict — there is
+        // no single `top` that satisfies both that close to the edge — so
+        // this flips to ABOVE-with-a-gap instead of clamping when the
+        // below-placement wouldn't fit, the standard tooltip flip-direction
+        // pattern. Both branches keep the cursor strictly outside
+        // `[top, top + overlayHeight]` by construction (by `CURSOR_GAP_PX`),
+        // rather than relying on a clamp that can silently violate that
+        // invariant.
         const overlayHeight = floatingEl?.getBoundingClientRect().height ?? 0;
         const minTop = container.top;
-        const maxTop = Math.max(minTop, container.bottom - BOTTOM_MARGIN_PX - overlayHeight);
-        const top =
-            lastMouseY != null ? Math.min(Math.max(lastMouseY + CURSOR_GAP_PX, minTop), maxTop) : rect.top;
+        const containerBottomLimit = container.bottom - BOTTOM_MARGIN_PX;
+        let top: number;
+        if (lastMouseY != null) {
+            const belowTop = lastMouseY + CURSOR_GAP_PX;
+            if (belowTop + overlayHeight <= containerBottomLimit) {
+                top = Math.max(belowTop, minTop);
+            } else {
+                // Not enough room below the cursor to fit the overlay without
+                // clipping — flip above it instead. Still clamped to minTop
+                // for the degenerate case where the container itself is
+                // shorter than the overlay; some clipping is unavoidable
+                // there (BOTTOM_MARGIN_PX/`cap` below still bound it), but
+                // that's an existing edge case, not one this fix introduces.
+                top = Math.max(lastMouseY - CURSOR_GAP_PX - overlayHeight, minTop);
+            }
+        } else {
+            top = rect.top;
+        }
         const cap = Math.max(0, container.bottom - top - BOTTOM_MARGIN_PX);
         setFloatingStyle({
             position: "fixed",
