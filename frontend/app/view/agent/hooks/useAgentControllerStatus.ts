@@ -344,7 +344,22 @@ export function useAgentControllerStatus(
         // the same pending failure. relogin/loginViaTerminal set the value
         // themselves before calling this and pass nothing, so they are
         // unaffected. reagent P1 + manoz on PR #2951.
-        if (retryAfterLogin !== undefined) inFlightRetryAfterLogin = retryAfterLogin;
+        // FIRST FLOW WINS. Only record an intent when nothing is already in
+        // flight — a second flow joining must not redefine what the running
+        // one is recovering, and it is the running one whose AuthUrlBox (and
+        // therefore "Use terminal instead") the user is looking at.
+        //
+        // `/login` is the case that needs this: unlike relogin and
+        // loginViaTerminal it is never gated by `reloginInFlight`, so it can
+        // start while one of those is mid-flow. Without the guard its
+        // declaration silently clobbered the live flow's intent and the
+        // terminal escape then dropped, or wrongly issued, a turn retry.
+        // Same class as the guard-before-write fix, reached through the door
+        // opened by letting /login declare an intent at all. reagent P1 on
+        // PR #2951.
+        if (retryAfterLogin !== undefined && activeRecoveryFlows === 0) {
+            inFlightRetryAfterLogin = retryAfterLogin;
+        }
         activeRecoveryFlows += 1;
         setLoginWaiting(true);
     };

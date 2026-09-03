@@ -776,3 +776,50 @@ describe("useAgentControllerStatus — a no-provider bail-out leaves no intent b
         });
     });
 });
+
+describe("useAgentControllerStatus — a joining flow cannot redefine a live flow's intent (reagent P1 on PR #2951)", () => {
+    // /login is never gated by reloginInFlight, so it can begin while a
+    // relogin is mid-flow. beginRecoveryFlow used to overwrite the shared
+    // intent unconditionally, so that declaration clobbered the running
+    // flow's — and "Use terminal instead" on the RUNNING flow's panel then
+    // read the wrong value.
+    //
+    // Note this bug was introduced by the fix that let /login declare an
+    // intent at all: the previous round closed a divergence and opened a
+    // clobber. First-flow-wins closes it for every caller, not just /login.
+    it("keeps the running flow's intent when a second flow declares a different one", async () => {
+        const onRecovered = vi.fn();
+        const onReady = vi.fn();
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1", provider: () => claude, log: () => {},
+                onRecovered, onReady,
+            });
+
+            let release!: () => void;
+            const gate = new Promise<void>((r) => { release = r; });
+            hub.runProviderLogin.mockImplementation(async () => {
+                await gate;
+                return "terminal-unavailable";
+            });
+
+            const live = status.relogin({ retryAfterLogin: true }); // in flight, retry owed
+            status.beginRecoveryFlow(false);                        // /login joins, says otherwise
+            const escape = status.useTerminalInstead();
+            status.endRecoveryFlow();                               // /login's own flow ends
+            release();
+            await live;
+
+            hub.runProviderLogin.mockImplementation(async (o: any) => {
+                o.onAccountRegistered?.("acct-term", "/tmp/acct-term");
+                return "terminal-success";
+            });
+            await escape;
+
+            // Clobbered, this dropped a retry that was genuinely owed.
+            expect(onRecovered).toHaveBeenCalled();
+            expect(onReady).not.toHaveBeenCalled();
+            dispose();
+        });
+    });
+});
