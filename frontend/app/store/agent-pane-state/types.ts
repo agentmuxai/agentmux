@@ -157,6 +157,24 @@ export interface PaneFailure {
     data: AgentFailure;
     /** Wall-clock ms the failure landed. */
     at: number;
+    /**
+     * Whether a turn was ever actually attempted before this failure. `true`
+     * for every backend-classified failure (those are, by construction, the
+     * outcome of a turn that ran). `false` only for the synthetic pre-launch
+     * auth failure the pane raises itself when the mount-time launch flow
+     * bails with `auth_failed` — no turn was ever sent, so there is nothing
+     * to re-run after a successful login.
+     *
+     * Load-bearing, not cosmetic: it selects `relogin`'s `retryAfterLogin`
+     * argument. Passing `true` for a never-started agent makes a successful
+     * login silently re-send that agent's last OLD message as a new turn —
+     * the exact bug the (now-deleted) blue "Log in" bar's own call site was
+     * written to avoid. Defaults to `true` when absent, so a failure
+     * persisted before this field existed keeps the pre-existing behaviour.
+     *
+     * See docs/specs/PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md §4.
+     */
+    turnAttempted?: boolean;
 }
 
 /**
@@ -662,7 +680,17 @@ export type AgentPaneCommand =
      * exiting (persistent-mode agents never do between turns) to clear the
      * turn phase. See SPEC_AGENT_PANE_UNIFIED_FAILURE_REDUCER_2026_07_06.md.
      */
-    | { type: "FailureObserved"; failure: AgentFailure; at: number }
+    | {
+          type: "FailureObserved";
+          failure: AgentFailure;
+          at: number;
+          /**
+           * See {@link PaneFailure.turnAttempted}. Omitted by the backend-event
+           * path (a classified failure always FOLLOWS a turn that ran), set to
+           * `false` only by the pane's own synthetic pre-launch auth failure.
+           */
+          turnAttempted?: boolean;
+      }
     /** User dismissed the failure row (Dismiss / ×). Episode over. */
     | { type: "FailureCleared" }
 

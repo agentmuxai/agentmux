@@ -870,16 +870,26 @@ export function useAgentControllerStatus(
             reloginInFlight = false;
             endThisRecoveryFlow();
             setLaunchPhase(null);
-            // Restore the mount-time "Log in" button on any unsuccessful
+            // Restore the mount-time not-signed-in state on any unsuccessful
             // outcome — timeout, terminal-unavailable, persistence failure,
             // cancellation, or a thrown exception all fall through to here
             // via `return`/`break`/the catch above. Scoped to
             // `!retryAfterLogin`: that's the only case where THIS call set
-            // `canRetry` false in the first place (the "Log in" bar's own
-            // click handler); the `retryAfterLogin: true` ("Login Again")
-            // call site guards against a stale true from a *different*
-            // origin and was never showing that bar to begin with, so it
-            // must not start showing it now (reagent/codex on PR #2318).
+            // `canRetry` false in the first place (the pre-launch "Log in"
+            // action); the `retryAfterLogin: true` ("Login Again") call site
+            // guards against a stale true from a *different* origin and was
+            // never in the pre-launch state to begin with, so it must not
+            // enter it now (reagent/codex on PR #2318).
+            //
+            // `canRetry` no longer renders a bar of its own — the blue "Log
+            // in" bar it used to gate was removed in
+            // PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02 and that case now
+            // goes through the shared failure row. The signal is still
+            // load-bearing for two NON-display consumers: useAgentCommands
+            // fast-fails sends into an unauthenticated agent on it, and
+            // /login reads it. It also re-raises the row indirectly, via
+            // agent-view's synthetic pre-launch FailureObserved effect. Do not
+            // delete it as dead display state.
             if (!succeeded && !retryAfterLogin) {
                 setCanRetry(true);
             }

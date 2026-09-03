@@ -57,7 +57,7 @@ import {
 import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reveal";
 import { getTrail } from "@/log/render-trail";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
-import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { earliestLiveAttachedStartMs } from "./activity/attached-task";
 import { allSubagentsAtom } from "./activity/subagent-source";
@@ -1793,6 +1793,64 @@ const AgentPresentationView = ({
             void status.startLaunchFlow();
         }
     };
+    // Pre-launch auth failure → the SAME failure row every other auth failure
+    // uses, instead of the separate blue "Log in" bar this replaced
+    // (docs/specs/PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md).
+    //
+    // `canRetry` is precisely "the mount-time launch flow bailed with
+    // auth_failed" — no turn was ever attempted — so the synthetic failure
+    // carries `turnAttempted: false`, which is what makes the row render
+    // "Log in" (not "Login Again") and pass `retryAfterLogin: false`.
+    //
+    // Guarded on there being no failure already: a REAL backend-classified
+    // failure (turnAttempted true, possibly carrying a stderr tail and the
+    // auto-retry budget) is strictly more informative, and must never be
+    // overwritten by this synthetic one if both happen to be live at once —
+    // which is exactly the double-CTA case this consolidation exists to fix.
+    createEffect(() => {
+        const preLaunchAuthFailed = status.canRetry();
+        const current = untrack(() => agentAtoms().failureAtom[0]());
+        if (preLaunchAuthFailed) {
+            if (current) return; // real failure (or our own, already raised) wins
+            dispatchPane(
+                model.blockId,
+                {
+                    type: "FailureObserved",
+                    at: Date.now(),
+                    turnAttempted: false,
+                    failure: {
+                        code: "auth",
+                        title: "Not signed in",
+                        detail:
+                            "This agent hasn't been signed in to its provider yet, so it never started. " +
+                            "Sign in to launch it — nothing has run, so there's no turn to retry.",
+                        retryable: true,
+                    },
+                },
+                "system",
+            );
+            return;
+        }
+        // Deliberately reads `failureAtom` untracked: this effect re-runs on
+        // `canRetry` transitions ONLY. Tracking the failure too would make
+        // Dismiss on the synthetic row re-raise it immediately (canRetry is
+        // still true), i.e. an undismissable row. The trade-off is that
+        // dismissing leaves this pane with no auth CTA until `canRetry` next
+        // transitions — which a failed login attempt does (it restores
+        // canRetry, re-raising the row). Sending meanwhile is still blocked
+        // and logs "message not sent — not logged in", and /login still works,
+        // so dismiss is a real choice rather than a dead end. Note this is
+        // MORE user control than the deleted bar, which could not be dismissed
+        // at all.
+        //
+        // canRetry cleared (a login succeeded, or the pane moved on): retract
+        // ONLY our own synthetic row. A real failure's lifecycle is owned by
+        // FailureCleared / the next TurnStart, not by this signal.
+        if (current && current.turnAttempted === false) {
+            dispatchPane(model.blockId, { type: "FailureCleared" }, "system");
+        }
+    });
+
     const failureUI = useAgentFailure({
         blockId: model.blockId,
         // Per-pane model keeps dispatch sites default-safe; see useAgentStream above.
@@ -1816,9 +1874,20 @@ const AgentPresentationView = ({
         // (SPEC_REAUTH_FROM_AUTH_ERROR §11). The running persistent agent
         // re-reads its credential per request, so the next message uses the new
         // token and clears this failure row.
-        onLoginAgain: () => {
-            log("auth", "Login Again — forcing a fresh provider login");
-            void status.relogin();
+        onLoginAgain: (turnAttempted: boolean) => {
+            // `retryAfterLogin` mirrors whether a turn actually ran before this
+            // failure. The pre-launch case (turnAttempted false — what used to
+            // render its own blue "Log in" bar) must pass false: no turn was
+            // ever sent, and re-running "the failed turn" would re-send this
+            // agent's last OLD message as a new one on a successful login.
+            // See docs/specs/PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md.
+            log(
+                "auth",
+                turnAttempted
+                    ? "Login Again — forcing a fresh provider login"
+                    : "Log in — starting the provider login (no turn to retry)",
+            );
+            void status.relogin({ retryAfterLogin: turnAttempted });
         },
         // Open a real console window (CREATE_NEW_CONSOLE) so the browser OAuth
         // can launch. Polls for new credentials and seeds when they appear.
@@ -2174,27 +2243,23 @@ const AgentPresentationView = ({
                 launchPhase={status.launchPhase}
             />
 
-            <Show when={status.canRetry()}>
-                <div class="agent-retry-bar">
-                    {/* Wired to relogin(), not startLaunchFlow: the mount-time
-                        launch flow now only ever notifies and stops on
-                        auth_failed (launch-flow.ts), so re-running it here
-                        would immediately hit the same not-authenticated check
-                        and bail again with no login ever attempted — an
-                        infinite dead-end. relogin() is the one path that
-                        actually starts a login.
-                        retryAfterLogin: false — no turn was ever attempted
-                        here (Phase 2 bailed before Phase 3), so there's no
-                        failed turn to retry. Without this, a successful
-                        login on an agent with prior history silently resent
-                        its last old message as a new turn, burying the
-                        "Login successful" notification under that turn's
-                        immediate stream of output. */}
-                    <button class="agent-retry-btn" onClick={() => void status.relogin({ retryAfterLogin: false })}>
-                        Log in
-                    </button>
-                </div>
-            </Show>
+            {/* The separate blue "Log in" bar that used to render here on
+                `status.canRetry()` is GONE — it was a second CTA for the
+                identical action (relogin()) as the failure row below, and the
+                two could be on screen simultaneously (a pane reopened after an
+                auth failure seeds the row from persisted block meta while the
+                mount-time launch flow independently sets canRetry). That case
+                now raises a synthetic `turnAttempted: false` auth failure
+                instead (see the createEffect above), so it renders through the
+                one shared row, labelled "Log in" and still passing
+                `retryAfterLogin: false`.
+
+                `status.canRetry()` itself is DELIBERATELY still live — it is
+                not only a display gate: useAgentCommands reads it to fast-fail
+                sends into an unauthenticated agent, and /login reads it too.
+                Deleting the signal along with this bar would silently re-open
+                that hole. See
+                docs/specs/PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md. */}
 
             {/* Permission decision panel — surfaced when one or more
                 tool calls are gated by the CLI awaiting user approval.

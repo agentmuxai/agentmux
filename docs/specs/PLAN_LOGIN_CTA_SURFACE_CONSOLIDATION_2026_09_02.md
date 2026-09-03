@@ -1,0 +1,249 @@
+# Plan — consolidate the agent pane's two (really three) separate login CTAs
+
+**Date:** 2026-09-02
+**Status:** implemented — Phases 1-3 shipped.
+**Repo:** agentmuxai/agentmux
+**Trigger:** User report — the agent pane shows *two separate login buttons*: a
+blue "Log in" button, and a row of buttons that includes "Login Again". They
+should be one thing.
+
+**Scope note — this is about the CTA *surfaces*, not the login *implementations*.**
+`docs/specs/PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md` covers the
+orthogonal, still-open work of collapsing the four *login flow implementations*
+(`runProviderLogin`, `useGlobalLogin`, `loginViaTerminal`, `AuthFlowController`)
+onto one core. That plan is about what happens *after* a click. This plan is
+about how many different things the user can click. The two can ship
+independently; neither blocks the other.
+
+---
+
+## 1. What the user is seeing
+
+Three distinct login call-to-action surfaces exist in the agent pane today, all
+three of which ultimately call the **same** function — `status.relogin()`
+(`frontend/app/view/agent/hooks/useAgentControllerStatus.ts:499`). They differ
+only in chrome, placement, trigger condition, and one boolean argument.
+
+| # | Surface | Rendered at | Looks like | Gate |
+|---|---|---|---|---|
+| **A** | The blue "Log in" bar | `agent-view.tsx:2176-2196` | Full-width bar, solid `var(--accent-color)` background, white text (`.agent-retry-btn`, `styles/_retry-empty.scss:17-31`) | `status.canRetry()` |
+| **B** | The failure-recovery row | `agent-view.tsx:2253-2270` via `failure-accessory.ts:113-119` | `<PaneRow accent="error">` — a row of labelled buttons: 🔑 **Login Again** (primary) · 🖥 Login via terminal · 🗄 Armory → Accounts · Details · × | `failureAtom()` is set with `code === "auth"` |
+| **C** | The inline transcript CTA | `virtualization/DocumentRow.tsx:307-317` | Small red outlined button, "Login Again →" (`.agent-error-login-btn`, `styles/_document-nodes.scss:1808+`) | An `agent_error` document node with `code ∈ {401, 403}` |
+
+The user's "blue login button" is **A**; the "row of buttons" is **B**. **C** is
+a third instance of the same intent that the report didn't mention (it only
+appears inline next to a 401/403 transcript row, so it's easy to miss) but which
+any consolidation must account for or it becomes the *next* duplicate.
+
+Not in scope, because it isn't a CTA: `AgentAuthPanel` (`agent-view.tsx:2173`,
+bottom-docked `InAppLoginPanel`) is the *in-progress* login session UI — the URL
+box, paste-code field, Cancel / "Use terminal instead". It renders **after** a
+login has started, and is the correct shared destination for all three CTAs. It
+should stay exactly as it is.
+
+## 2. Why they're separate — the actual history, not a guess
+
+They are not redundant by accident. Each was added at a different time, for a
+different trigger, by a different spec, and nobody ever unified the *display*
+layer because each one's own gating condition was individually correct:
+
+- **A (`canRetry`)** answers *"the mount-time launch flow bailed before the agent
+  ever started."* It is set in exactly two places
+  (`useAgentControllerStatus.ts:340` on `runLaunchFlow` returning `auth_failed`,
+  and `:884` restoring itself after an unsuccessful `relogin`). At this point
+  **no turn has ever been attempted** — which is precisely why its click handler
+  passes `{ retryAfterLogin: false }` (`agent-view.tsx:2192`). There is no failed
+  turn to re-run, and a comment at that call site records the bug that taught
+  them: without the flag, a successful login on an agent with prior history
+  silently re-sent its last *old* message as a new turn.
+- **B (failure row)** answers *"a turn ran and the provider rejected our
+  credentials."* It is driven by the backend's failure classifier
+  (`agentmux-srv/src/agents/failure.rs`, `FailureClass::Auth`) arriving as an
+  `agentfailure` event → `FailureObserved` → `state.failure`. Because a turn
+  *did* fail here, its `relogin()` correctly takes the default
+  `retryAfterLogin: true` and re-runs it. It also carries genuinely
+  auth-specific extras A doesn't have: the terminal fallback, the Armory link,
+  the expandable stderr/detail body, dismiss, and the auto-retry budget in
+  `useAgentFailure.ts`. Spec: `SPEC_AGENT_FAILURE_RECOVERY_UI_2026_06_16.md`.
+- **C (inline node)** answers *"this specific message in the transcript is a
+  401."* Added by `SPEC_REAUTH_FROM_AUTH_ERROR` §7 so the fix is reachable from
+  where the error is *read*, without scrolling to a banner.
+
+So the split is historical accretion around three genuinely different *trigger
+conditions* — but the **action is identical** (`relogin()`), and the user
+correctly perceives them as the same button drawn three ways.
+
+### 2.1 They can be on screen simultaneously
+
+This is the part that makes it a real defect rather than a style inconsistency.
+`canRetry` and `failure` are independent signals with no mutual exclusion:
+
+- `useAgentFailure` seeds its row on mount from the persisted
+  `agent:last_failure` block meta (`useAgentFailure.test.ts:124` pins this), so a
+  pane reopened after an auth failure shows **B** immediately.
+- The same mount runs the launch flow, which hits the same bad credential,
+  returns `auth_failed`, and sets `canRetry(true)` — showing **A**.
+
+Result: a pane that failed auth, was closed, and reopened shows a blue "Log in"
+bar *and* a red failure row with "Login Again", stacked, both wired to the same
+function. Nothing in the code prevents this; no test asserts against it.
+
+## 3. Goals
+
+1. **One login CTA visible at a time**, in one visual language.
+2. **Preserve the `retryAfterLogin` distinction.** This is the one piece of real
+   behavioural difference and it must survive consolidation — a
+   never-started-agent must not re-send an old message.
+3. Preserve the auth-specific secondary actions (terminal fallback, Armory,
+   details, dismiss) that only B has today.
+4. No regression to the in-progress login UI (`AgentAuthPanel`) or to the
+   auto-retry budget in `useAgentFailure`.
+
+## 4. Proposed approach — make B the single surface, delete A, keep C as a jump
+
+**Adopt the failure row (`PaneRow`) as the one login CTA.** It is already the
+richest surface, already the shared accessory primitive used by the session
+digest / ActivityDock / fork bar, and already carries the secondary actions. A
+is a bespoke one-off bar with its own SCSS that exists only because it predates
+the failure row.
+
+### Phase 1 — give the pre-launch case a failure row instead of its own bar
+
+The blocker to simply deleting A is that `canRetry`'s trigger (`runLaunchFlow`
+→ `auth_failed`) does not currently produce a `state.failure`, so deleting the
+bar would leave that case with **no** CTA at all.
+
+1. On the `auth_failed` branch (`useAgentControllerStatus.ts:339-342`), dispatch
+   a `FailureObserved` carrying a synthetic `AgentFailure` with
+   `code: "auth"` — mirroring the shape the backend classifier already emits for
+   the mid-turn case (`failure.rs:206`/`:276`), with wording specific to
+   "never started" (e.g. title "Not signed in", detail explaining the agent
+   hasn't launched yet).
+2. Thread the `retryAfterLogin` distinction through the failure itself rather
+   than through the button. Add an optional field to the pane's failure state
+   (e.g. `turnAttempted: boolean`, default `true` for backend-classified
+   failures, `false` for this synthetic pre-launch one). `agent-view.tsx`'s
+   `onLoginAgain` then reads it:
+   `void status.relogin({ retryAfterLogin: failure.turnAttempted })`.
+   This is the load-bearing step — it is what lets one button serve both cases.
+3. `failureToRow`'s `"auth"` arm gets a label conditional on the same field:
+   "Log in" when `!turnAttempted`, "Login Again" when `turnAttempted`. (The
+   secondary actions — terminal, Armory — are correct for both cases as-is.)
+
+### Phase 2 — delete surface A
+
+4. Remove the `<Show when={status.canRetry()}>` block (`agent-view.tsx:2176-2196`)
+   and the `.agent-retry-bar` / `.agent-retry-btn` rules
+   (`styles/_retry-empty.scss:7-31`).
+5. **Keep the `canRetry` signal itself.** It is not only a display gate — it is
+   read by `useAgentCommands` to fast-fail sends while unauthenticated
+   (`useAgentCommands.test.ts:186`, `:203`, `:326` all pin this behaviour) and by
+   `/login` (`commands/global/login.ts:67-71`). Only its *rendering* goes away.
+   This is the highest-risk misstep available in this plan: deleting the signal
+   along with the button would silently re-enable sending messages into an
+   unauthenticated agent.
+6. Audit the `:884` "restore the mount-time Log in button" branch — its comment
+   and its `!retryAfterLogin` scoping both describe a button that will no longer
+   exist. The signal still needs restoring (for #5's gating), but the comment
+   must be rewritten or it will mislead the next reader.
+
+### Phase 3 — make C a jump, not a duplicate
+
+7. Leave the inline 401/403 CTA in place (it has real value at the point of
+   reading), but change it from a second entry point into a **scroll-to** for the
+   failure row — or, if the row is guaranteed visible whenever C is, remove C's
+   button entirely and let the row be the only actionable thing. Decide this from
+   a live repro: if the two are always co-visible, drop C's button; if C can
+   appear without a row (e.g. a 401 node from a *prior* session in scrollback
+   with no live failure), keep it and have it call the same handler.
+
+## 5. Alternative considered and rejected
+
+**Keep both, add mutual exclusion** (`<Show when={status.canRetry() && !failureUI.row()}>`).
+One line, zero risk, fixes the stacking. Rejected as the *end state* — it leaves
+two visual languages for one action and leaves the third surface untouched, so
+the next person to touch auth UI still finds three places to change. It is,
+however, a reasonable **stopgap to land first** if the double-button is
+user-visible today: it is independently correct and does not conflict with
+Phases 1-3.
+
+## 6. Testing
+
+- Reducer/hook: a synthetic pre-launch `FailureObserved` produces a row whose
+  action label is "Log in" and whose `relogin` call passes
+  `retryAfterLogin: false`; a backend auth failure produces "Login Again" with
+  `retryAfterLogin: true`. This is the invariant the whole plan rests on.
+- Regression: `useAgentCommands`'s existing `canRetry`-gating tests must still
+  pass unchanged after Phase 2 (proves the signal survived the button's deletion).
+- A pane-level test that the auth CTA appears **exactly once** in the two
+  scenarios that today produce two: (a) mount after a persisted auth failure,
+  (b) mid-turn 401 on an agent that also has `canRetry` set.
+- Manual: reopen a pane whose agent previously failed auth and confirm one CTA,
+  not a blue bar stacked above a red row.
+
+## 7. Decisions taken during implementation
+
+The two open questions were resolved as follows. Both are cheap to revisit —
+each is one expression.
+
+1. **Placement: the failure row's existing position, not the old bar's.**
+   Surface A sat directly above the composer; the row sits in the pane's
+   accessory stack. Keeping one component in one place is the whole point of the
+   consolidation, and splitting the same row across two positions by case would
+   have reintroduced a variant of the problem. If the never-launched case turns
+   out to need more prominence, move the row — don't re-fork it.
+2. **Accent: `"active"`, not `"error"`, for the never-signed-in case.** An
+   agent that has simply never been signed in hasn't failed at anything, so red
+   overstated it. `PaneRow`'s existing `"active"` accent is `var(--accent-color)`
+   — literally the same blue the deleted bar used — so the pre-launch case keeps
+   its original colour language while adopting the shared component.
+   `FailureRow.accent` widened from `"error"` to `"error" | "active"` for this;
+   every non-auth failure and every turn-attempted auth failure is unchanged.
+
+### Phase 3 outcome — surface C was KEPT, deliberately
+
+The plan left this to a live repro. Resolved from the code instead, which
+answers it definitively: `agent_error` nodes are produced only by the live
+stream parser (`stream-parser.ts:713`) and are **persistent document nodes**,
+whereas the failure row is transient pane state cleared by the next `TurnStart`.
+A 401 stays in the transcript long after its row is gone, so C is reachable
+without a row and cannot be replaced by a scroll-to. It is not a redundant CTA;
+it is the same action at a second, genuinely-different point in time. It always
+means a turn *did* run, so its existing `relogin()` default
+(`retryAfterLogin: true`) was already correct and is unchanged. The reasoning is
+recorded at the call site so it isn't "consolidated" away by mistake later.
+
+## 8. What actually shipped
+
+- `PaneFailure.turnAttempted` (`agent-pane-state/types.ts`) + the matching
+  optional field on the `FailureObserved` command, defaulted to `true` in the
+  reducer so every backend-classified failure is unchanged.
+- `agent-view.tsx`: a `createEffect` that raises a synthetic
+  `turnAttempted: false` auth failure while `status.canRetry()` is set, and
+  retracts *only that* synthetic row when it clears. Guarded so a real
+  backend failure (richer: stderr tail, auto-retry budget) always wins.
+- `failure-accessory.ts`: the auth arm's label ("Log in" / "Login Again") and
+  the row accent both key off `turnAttempted`.
+- `useAgentFailure`: `onLoginAgain` now takes `turnAttempted` and forwards it,
+  so the label and `relogin`'s `retryAfterLogin` are sourced from one value and
+  cannot disagree.
+- Deleted: the `<Show when={status.canRetry()}>` bar and its
+  `.agent-retry-bar` / `.agent-retry-btn` SCSS. **`canRetry` itself survives** —
+  it still gates `useAgentCommands`'s unauthenticated-send fast-fail and is read
+  by `/login`; the stale comment at its restore site was rewritten to say so.
+- 13 new tests (6 accessory, 3 reducer, 4 hook). The hook tests were
+  mutation-checked: hardcoding `onLoginAgain(true)` fails 2 of them.
+
+### One deliberate behaviour change worth knowing about
+
+The old blue bar could **not** be dismissed; the shared row can. The synthetic
+pre-launch row is raised on `canRetry` *transitions* only (the effect reads the
+current failure untracked), because tracking the failure as well would make
+Dismiss re-raise the row instantly — an undismissable row. So dismissing the
+"Not signed in" row leaves the pane with no auth CTA until `canRetry` next
+transitions, which a *failed* login attempt does (it restores `canRetry`,
+re-raising the row). Attempting to send meanwhile is still blocked and logs
+"message not sent — not logged in", and `/login` still works — so this is a real
+user choice rather than a dead end, and strictly more control than before. If it
+proves confusing in practice, the fix is to re-raise on a blocked send attempt
+rather than to make the row permanent again.
