@@ -5,10 +5,10 @@
 sure the agent pane loaded smooth... but now when the agent pane loads, I
 see the long-running tasks dock." Confirmed on follow-up: a flash lasting a
 couple of milliseconds to a few seconds, self-corrects.
-**Status:** Root cause identified with direct evidence (live trace + prior
-project history). Not a regression of any single commit — it's the
-previously-documented, explicitly-still-open structural gap in this feature
-area surfacing again on a heavy agent (Lzop).
+**Status:** Implemented — root cause identified with direct evidence (live
+trace + prior project history), fix shipped in PR #2937. Not a regression
+of any single commit — it's the previously-documented, explicitly-still-open
+structural gap in this feature area surfacing again on a heavy agent (Lzop).
 
 ---
 
