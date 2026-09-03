@@ -285,6 +285,50 @@ describe("useSubagentBackfillGate", () => {
         expect(settled()).toBe(true);
     });
 
+    // codex P2 + reagentx P1 (PR #2937): a settle refresh still in flight
+    // when the view flips away from "agent" and back (before the NEW cycle
+    // gets its own "started"/"done") must not be allowed to resolve into
+    // the new cycle — `disposed` resets to false on re-entry, so only the
+    // generation bump on cleanup fences the stale promise out.
+    it("a settle refresh in flight when the view changes away and back must not prematurely settle the new cycle", async () => {
+        vi.useFakeTimers();
+        const [viewType, setViewType] = createSignal<string | undefined>("agent");
+        let settled: () => boolean = () => false;
+        createRoot(() => {
+            settled = useSubagentBackfillGate("block-1", viewType, () => true);
+        });
+
+        // First cycle: "done" fires, kicking off a settle refresh that
+        // will NOT resolve until later in this test.
+        rpcHub.resolve?.([]);
+        await vi.advanceTimersByTimeAsync(0);
+        hub.handler?.({ data: { status: "started" } });
+        hub.handler?.({ data: { status: "done" } });
+        expect(settled()).toBe(false);
+
+        // View changes away from "agent" (e.g. "Replace With...") while
+        // that refresh is still in flight, then immediately back — a
+        // brand-new cycle starts, gated again, with no "started"/"done" of
+        // its own yet.
+        rpcHub.resolve = null;
+        setViewType("term");
+        setViewType("agent");
+        expect(settled()).toBe(false);
+
+        // The FIRST cycle's stale refresh finally resolves. It must NOT
+        // settle the new cycle — the new cycle has received no "done" of
+        // its own.
+        await resolveSettleRefresh();
+        expect(settled()).toBe(false);
+
+        // The new cycle's own real "done" + refresh settles it correctly.
+        rpcHub.resolve?.([]);
+        await vi.advanceTimersByTimeAsync(0);
+        hub.handler?.({ data: { status: "done" } });
+        await resolveSettleRefresh();
+        expect(settled()).toBe(true);
+    });
+
     // reagentx P2 (PR #2781, round 7): the safety net used to only ever
     // arm once, at initial wiring — a legitimate LATER "started" (e.g. an
     // overlapping re-registration backfill_generation, scan.rs, explicitly

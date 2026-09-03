@@ -268,6 +268,17 @@ export function useSubagentBackfillGate(
             // above, so a LATER change back to "agent" re-wires from
             // scratch rather than staying silently disabled forever.
             disposed = true;
+            // codex P2 + reagentx P1 (PR #2937): bump the generation here
+            // too, not just on a live "started". Without this, a "done"-
+            // triggered settle refresh still in flight when the view
+            // switches away from "agent" and back (before the NEW cycle
+            // gets its own "started"/"done") would resolve into the new
+            // cycle — `disposed` is reset to `false` on re-entry and
+            // `myGeneration` still equals `settleGeneration` (nothing else
+            // bumped it), so the stale refresh would pass both guards and
+            // prematurely settle the just-re-entered pane, reproducing the
+            // exact bug this PR fixes.
+            settleGeneration++;
             clearTimeout(safetyTimer);
             try { unsub(); } catch { /* ignore */ }
         });
