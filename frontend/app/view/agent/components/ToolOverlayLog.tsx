@@ -26,7 +26,7 @@ import { CompactResult } from "./CompactResult";
 import { DiffViewer } from "./DiffViewer";
 import { HighlightedCode } from "./HighlightedCode";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
-import { capChars, createChunkCapper, createSpinnerCollapser, capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
+import { capChars, createChunkCapper, createSpinnerCollapser, capText, dropSystemChunks, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { stripCommonIndent, stripCommonIndentNumbered } from "./dedent";
 import { detectLanguage } from "./detectLanguage";
 import {
@@ -384,7 +384,13 @@ function ChunkList(props: ChunkListProps): JSX.Element {
     const cap = createChunkCapper();
 
     const view = createMemo(() => {
-        const { display: collapsed, spinnerSlot } = spinnerCollapse(props.chunks);
+        // dropSystemChunks BEFORE collapse/cap, not after: filtering
+        // downstream would still burn one line of the cap budget per system
+        // chunk while hiding the rendered row, silently evicting real
+        // output. See output-cap.ts's doc comment for why this is also safe
+        // to call fresh every render despite the stateful collapse/cap
+        // functions' append-only identity tracking.
+        const { display: collapsed, spinnerSlot } = spinnerCollapse(dropSystemChunks(props.chunks));
         const { chunks: display, hiddenLines } = cap(collapsed);
         return { display, spinnerSlot, hiddenLines };
     });

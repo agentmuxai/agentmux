@@ -9,6 +9,7 @@ import {
     collapseSpinnerChunks,
     createChunkCapper,
     createSpinnerCollapser,
+    dropSystemChunks,
     MAX_TOOL_OUTPUT_CHARS,
     MAX_TOOL_OUTPUT_LINES,
 } from "./output-cap";
@@ -82,6 +83,58 @@ describe("capChars", () => {
         expect(r.length).toBeLessThan(1020);
         expect(r).toContain("truncated");
         expect(r.endsWith("x".repeat(1000))).toBe(true);
+    });
+});
+
+describe("dropSystemChunks", () => {
+    it("removes only kind:\"system\" chunks", () => {
+        const chunks = [
+            chunk("[bashwrap] starting: 12 chars", "system"),
+            chunk("real output", "stdout"),
+            chunk("an error", "stderr"),
+        ];
+        expect(dropSystemChunks(chunks)).toEqual([chunk("real output", "stdout"), chunk("an error", "stderr")]);
+    });
+
+    it("leaves a stream with no system chunks untouched", () => {
+        const chunks = [chunk("a"), chunk("b")];
+        expect(dropSystemChunks(chunks)).toEqual(chunks);
+    });
+
+    it("returns an empty array when every chunk is a system chunk", () => {
+        expect(dropSystemChunks([chunk("[bashwrap] starting: 5 chars", "system")])).toEqual([]);
+    });
+
+    it("preserves the surviving chunks' object identity, not just equal content", () => {
+        // The stateful collapsers this feeds (createSpinnerCollapser,
+        // createChunkCapper) anchor their append-only fast path on
+        // `chunks[0] !== anchor` — a REFERENCE comparison. filter() must not
+        // clone elements, or every call would look like a stream reset.
+        const real = chunk("real output", "stdout");
+        const filtered = dropSystemChunks([chunk("[bashwrap] starting: 3 chars", "system"), real]);
+        expect(filtered[0]).toBe(real);
+    });
+
+    it("keeps the same leading real chunk as anchor across repeated calls on a growing stream", () => {
+        // Simulates what the render path actually does: dropSystemChunks runs
+        // fresh on every reactive re-run, feeding a stateful collapser whose
+        // correctness depends on element 0 staying the SAME reference as the
+        // raw chunk array grows. This is the property the two call sites
+        // (ChunkList, PersistentShellBlock) actually rely on, exercised
+        // end-to-end rather than asserted structurally.
+        const sys = chunk("[bashwrap] starting: 3 chars", "system");
+        const first = chunk("line 1", "stdout");
+        const raw = [sys, first];
+        const collapse = createSpinnerCollapser<{ kind: string; content: string }>();
+
+        const view1 = collapse(dropSystemChunks(raw));
+        expect(view1.display).toEqual([first]);
+
+        raw.push(chunk("line 2", "stdout"));
+        const view2 = collapse(dropSystemChunks(raw));
+        // Had the anchor identity broken, this would reset to only the
+        // latest append instead of accumulating both real lines.
+        expect(view2.display.map((c) => c.content)).toEqual(["line 1", "line 2"]);
     });
 });
 

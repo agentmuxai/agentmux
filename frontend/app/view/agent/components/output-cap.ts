@@ -80,6 +80,35 @@ export function capChars(text: string, max: number = MAX_TOOL_OUTPUT_CHARS): str
     return TRUNCATED_MARKER + "\n" + text.slice(text.length - max);
 }
 
+/**
+ * Drop `kind: "system"` chunks — backend-internal plumbing published by
+ * `agentmux-bashwrap` (currently exactly one: `publish_system()` in
+ * `bash_wrap.rs`, whose only call site emits `"[bashwrap] starting: N
+ * chars"` the instant a Bash tool begins). It carries no information a user
+ * benefits from, has no dedicated styling (`agent-tool-log-line--system`
+ * exists in the KIND_CLASS map but has no CSS rule), and — because it is
+ * always the FIRST chunk to arrive — was the first thing visible in the
+ * panel the moment a running tool auto-expands: "Thinking…"/"Working…"
+ * straight to an internal debug string, then real output. Reported
+ * 2026-09-03 as the dominant case of the tool-call scroll-oscillation
+ * symptom.
+ *
+ * Called by each renderer (`ChunkList` in ToolOverlayLog.tsx,
+ * `PersistentShellBlock.tsx`'s equivalent) BEFORE `createSpinnerCollapser`/
+ * `createChunkCapper`, not after: filtering downstream of those would only
+ * hide the rendered line while still counting the system chunk against the
+ * line/char budget, silently evicting one line of real output for every
+ * system chunk seen. Safe to call every render despite allocating a new
+ * array each time — the append-only `chunks[0] !== anchor` identity check
+ * both stateful collapsers rely on compares the FIRST ELEMENT's reference,
+ * which `Array.prototype.filter` never changes; a real prior element stays
+ * the same object across calls regardless of how many times a leading
+ * system chunk is filtered out ahead of it.
+ */
+export function dropSystemChunks<T extends { kind: string }>(chunks: ReadonlyArray<T>): T[] {
+    return chunks.filter((c) => c.kind !== "system");
+}
+
 export interface CappedChunks<T> {
     chunks: ReadonlyArray<T>;
     /** Lines retained in the rendered window (== total when under budget). */
