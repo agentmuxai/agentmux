@@ -107,7 +107,18 @@
 
     .agent-working-row-anchor .agent-working-row {
         font-size: 10px;
-        font-family: var(--fixed-font, monospace);
+        // Same typeface as the normal agent thinking/markdown text
+        // (markdown.scss's `.content` rule) rather than --fixed-font's
+        // monospace — nothing about a status sentence ("Working…", a tool
+        // name) is code-shaped. Kept at the row's existing 10px rather than
+        // --markdown-font-size's 14px: this sits directly above the
+        // composer among other 10-11px control-bar text, and 14px would
+        // read oversized there. Bold as a deliberate distinguishing choice
+        // for this one live-status line, not a match to thinking text
+        // (which renders at normal weight). See
+        // SPEC_AGENT_WORKING_ROW_TYPOGRAPHY_REFRESH_2026_09_03.md.
+        font-family: var(--markdown-font-family);
+        font-weight: 700;
         display: flex;
         align-items: center;
         gap: 5px;
@@ -117,7 +128,11 @@
         padding: var(--space-1) var(--space-3) var(--space-1-5) var(--space-3);
 
         &--loading {
-            color: var(--accent-color);
+            // main-text-color, not accent — the row previously read as the
+            // theme's accent hue (blue by default) end to end, text and
+            // shimmer highlight alike. See
+            // SPEC_AGENT_WORKING_ROW_TYPOGRAPHY_REFRESH_2026_09_03.md §2.
+            color: var(--main-text-color);
             // Opaque, still — kept deliberately after the row moved out of
             // the scroll region. It no longer overlaps the message list, so
             // the original bleed-through this fixed (commit 6e4497b: history
@@ -152,16 +167,23 @@
                 // transition lands mid-cycle (validated in the sandbox).
                 // During the type-out reveal the `.is-typing` variant below
                 // overlays opaque text without touching the animation.
-                // `--secondary-text-color` base + `--accent-color` highlight
-                // keeps it theme-adaptive the same way .agent-pane-progress-bar
-                // derives its sweep from --accent-color. `alternate` direction
-                // is what makes the sweep reverse instead of snapping back.
+                // `--secondary-text-color` base + `--main-text-color`
+                // highlight — was `--accent-color` (blue by default);
+                // switched alongside the base `color:` above so the sweeping
+                // highlight band doesn't stay blue on its own. main-text is
+                // the brightest general-purpose text token available and is
+                // what --secondary-text-color already reads dim relative to
+                // elsewhere in this file, so the dim-to-bright sweep SHAPE is
+                // unchanged — only the hue is gone. See
+                // SPEC_AGENT_WORKING_ROW_TYPOGRAPHY_REFRESH_2026_09_03.md §3.
+                // `alternate` direction is what makes the sweep reverse
+                // instead of snapping back.
                 &.agent-working-shimmer {
                     background-image: linear-gradient(
                         90deg,
                         var(--secondary-text-color) 0%,
                         var(--secondary-text-color) 40%,
-                        var(--accent-color) 50%,
+                        var(--main-text-color) 50%,
                         var(--secondary-text-color) 60%,
                         var(--secondary-text-color) 100%
                     );
