@@ -5,10 +5,56 @@
 sure the agent pane loaded smooth... but now when the agent pane loads, I
 see the long-running tasks dock." Confirmed on follow-up: a flash lasting a
 couple of milliseconds to a few seconds, self-corrects.
-**Status:** Implemented — root cause identified with direct evidence (live
-trace + prior project history), fix shipped in PR #2937. Not a regression
-of any single commit — it's the previously-documented, explicitly-still-open
-structural gap in this feature area surfacing again on a heavy agent (Lzop).
+**Status:** Implemented — root cause found and fixed; confirmed resolved by
+the repo owner on a rebuilt dev instance. The fix is a backend timestamp-parsing
+bug (see "RESOLVED" below), NOT the structural paint-gate gap this retro
+originally concluded.
+
+---
+
+## RESOLVED — actual root cause (2026-09-03)
+
+The TL;DR below was written before the root cause was found, and its
+conclusion ("the never-built paint gate from the 08-27 report") is **wrong**.
+Kept as written because the elimination trail is the useful part, but read
+this section first.
+
+**Root cause: `parse.rs` read each subagent event's `timestamp` with a bare
+`as_u64()`.** Claude Code writes that field as an ISO-8601 *string*
+(`"2026-07-03T08:09:20.743Z"`); `as_u64()` returns `None` for a string, so it
+silently fell through to `now_millis()`. Every replayed historical event
+claimed to have happened at replay time.
+
+`last_event_at` becomes the dock row's `endedAt`
+(`activity/subagent-adapter.ts`), and the dock keeps a terminal row only
+while `now - endedAt < RETENTION_MS[status]`. With `endedAt ≈ now`, every
+long-dead subagent passed that window, rendered, then aged out.
+
+**Measured, not inferred:**
+- `ListActive` on the live instance returned all 19 of Lzop's subagents with
+  `spawned_at == last_event_at ==` exactly 127.6s ago — identical across all
+  19, matching pane-open time, from a transcript dated two months earlier.
+- Dock trace: appeared `07:22:15.005`, gone `07:22:18.362` = **3.357s**.
+  `RETENTION_MS.stopped` (3000) + `EXIT_FLASH_MS` (400) = **3400ms**.
+- After the fix, the same query returns **58.2 / 58.3 / 62.0 / 67.5 days**,
+  differing per subagent. Rows now fail the retention filter and never paint.
+  Confirmed visually by the repo owner.
+
+**Fixes (all in `agentmux-srv/src/backend/subagent_watcher/`):**
+1. `parse.rs` — `parse_event_timestamp` accepts ISO-8601 strings *and*
+   numeric epoch millis. **This is the actual fix.**
+2. `jsonl.rs` — `spawned_at` derives from the earliest real event instead of
+   replay time (elapsed display + newest-first ordering correctness).
+3. `scan.rs` — `reconcile_stale_subagents` retries on a bounded budget
+   instead of giving up after one 2s check. Complementary, not the fix: if
+   reconcile fails the subagents stay `active` → `RETENTION_MS.running` is
+   `Infinity` → shown forever regardless of timestamps.
+
+**Note on PR #2937** (the frontend backfill-gate change, same branch): it
+fixes a genuine settle race and its tests are real, but it did **not** fix
+this symptom, and I twice reported it as a likely fix before confirming. The
+flash was a *data* bug the whole time — one `ListActive` query would have
+shown it immediately.
 
 ---
 

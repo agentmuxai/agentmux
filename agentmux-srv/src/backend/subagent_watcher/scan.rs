@@ -18,6 +18,16 @@ use super::SubagentWatcher;
 use crate::backend::eventbus::{WSEventType, WS_EVENT_RPC};
 use crate::backend::wps;
 
+/// How many times `reconcile_stale_subagents` retries when the parent
+/// block's controller isn't registered yet, before giving up and leaving
+/// the entries as-is. See that function's own doc comment (2026-09-02
+/// update) for why a single 2s attempt proved too short in practice —
+/// `MAX_RECONCILE_RETRIES * RECONCILE_RETRY_INTERVAL_MS` (~15s) is a
+/// realistic bound for a real controller to finish spawning under load,
+/// while still failing open rather than chasing a block forever.
+const MAX_RECONCILE_RETRIES: u32 = 5;
+const RECONCILE_RETRY_INTERVAL_MS: u64 = 3_000;
+
 /// Publish a `wps::EVENT_SUBAGENT_BACKFILL_STATUS` ping, scoped to this
 /// pane's own block id. No-op if `self.broker` was never wired (tests, or a
 /// `SubagentWatcher` built via bare `new()`) -- see the `broker` field's own
@@ -158,29 +168,46 @@ impl SubagentWatcher {
     /// `CONTROLLER_REGISTRY`. Left unresolved, an entry hitting that race
     /// stayed `Active`-looking forever, since nothing else ever revisits it
     /// (see `SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md`
-    /// §2, mechanism 4). Fixed by treating `None` as "retry once, don't
-    /// give up silently" (`retry_reconcile_once`) instead of a terminal
-    /// no-op — still conservative (a genuine `Some(true)` never retries;
-    /// only the single ambiguous case does, and only once).
+    /// §2, mechanism 4). Fixed by treating `None` as "retry, don't give up
+    /// silently" (`retry_reconcile_once`) instead of a terminal no-op —
+    /// still conservative (a genuine `Some(true)` never retries; only the
+    /// ambiguous case does, and only up to `MAX_RECONCILE_RETRIES` times).
+    ///
+    /// 2026-09-02 (docs/retro/retro-activitydock-appears-on-agent-pane-load-2026-09-02.md):
+    /// the original version of this fix allowed exactly ONE 2s retry before
+    /// giving up permanently. Confirmed live on a real agent whose CLI
+    /// controller never registered at all (an expired provider login — the
+    /// process either never spawns or spawns and exits before reaching
+    /// `register_controller`): the single 2s retry window is frequently too
+    /// short to distinguish "controller is still starting up, wait" from
+    /// "controller is never coming" — for the FORMER case this left the
+    /// pane's Activity Dock showing genuinely-dead subagents as `Active`
+    /// indefinitely (no live turn-end ever fires to retry later either),
+    /// and for the LATTER case a couple of seconds is too optimistic a
+    /// bound for how long a real controller can legitimately take to spawn
+    /// and register under load. Extended to a bounded retry loop
+    /// (`MAX_RECONCILE_RETRIES` attempts, `RECONCILE_RETRY_INTERVAL_MS`
+    /// apart) — still fails open in bounded time (~`MAX_RECONCILE_RETRIES *
+    /// RECONCILE_RETRY_INTERVAL_MS`), just with a realistic window instead
+    /// of a single throw-away check.
+    ///
     /// Called from two places as of SPEC_SUBAGENT_LIVE_RECONCILIATION_AND_
     /// RETIRE_2026_07_20 Phase A: `scan_session_subagents` (reopen/backfill,
     /// unchanged) and `blockcontroller::persistent`'s turn-end hook (live —
     /// closes docs/specs/SPEC_SUBAGENT_LIFECYCLE_RECONCILIATION_2026_07_12.md
     /// Open Question 1, which deliberately deferred real-time wiring).
     /// `pub(crate)` so the live call site (a different module) can reach it.
-    /// Thin entry point — always allows the one `None`-case retry described
-    /// above. The retry itself calls `reconcile_stale_subagents_impl`
-    /// directly with `allow_retry: false`, so a still-`None` second attempt
-    /// gives up rather than chaining into an unbounded retry loop.
+    /// Thin entry point — always starts the retry budget at
+    /// `MAX_RECONCILE_RETRIES`.
     pub(crate) fn reconcile_stale_subagents(&self, parent_block_id: &str, session_id: &str) {
-        self.reconcile_stale_subagents_impl(parent_block_id, session_id, true);
+        self.reconcile_stale_subagents_impl(parent_block_id, session_id, MAX_RECONCILE_RETRIES);
     }
 
     // pub(super), not private — `tests.rs` (a sibling module, not a
     // descendant of `scan`) needs to call this directly with
-    // `allow_retry: false` to test the exhausted-retry path without
+    // `retries_remaining: 0` to test the exhausted-retry path without
     // depending on a real spawned watcher's tokio::spawn actually firing.
-    pub(super) fn reconcile_stale_subagents_impl(&self, parent_block_id: &str, session_id: &str, allow_retry: bool) {
+    pub(super) fn reconcile_stale_subagents_impl(&self, parent_block_id: &str, session_id: &str, retries_remaining: u32) {
         let turn_active = crate::backend::blockcontroller::get_block_controller_status(parent_block_id)
             .map(|s| s.turn_active);
         match turn_active {
@@ -192,20 +219,21 @@ impl SubagentWatcher {
                 );
                 return;
             }
-            None if allow_retry => {
+            None if retries_remaining > 0 => {
                 tracing::info!(
                     parent_block_id = %parent_block_id,
                     session_id = %session_id,
-                    "reconcile_stale_subagents: controller not yet registered — retrying once, not skipping silently"
+                    retries_remaining,
+                    "reconcile_stale_subagents: controller not yet registered — retrying, not giving up silently"
                 );
-                self.retry_reconcile_once(parent_block_id, session_id);
+                self.retry_reconcile_once(parent_block_id, session_id, retries_remaining - 1);
                 return;
             }
             None => {
                 tracing::info!(
                     parent_block_id = %parent_block_id,
                     session_id = %session_id,
-                    "reconcile_stale_subagents: controller still not registered after retry — giving up (bounded to one retry)"
+                    "reconcile_stale_subagents: controller still not registered after all retries — giving up (bounded)"
                 );
                 return;
             }
@@ -341,31 +369,28 @@ impl SubagentWatcher {
         }
     }
 
-    /// Bounded one-shot retry for `reconcile_stale_subagents`'s `None`
+    /// Bounded retry for `reconcile_stale_subagents`'s `None`
     /// (controller-not-yet-registered) case — see that function's doc
-    /// comment. Exactly one retry, not a loop: if the controller genuinely
-    /// never registers (e.g. the block was deleted in the meantime), a
-    /// single delayed re-check is enough to stop treating "unknown" as a
-    /// permanent no-op without risking an unbounded retry chain chasing a
-    /// block that's never coming back. 2s is long enough to clear the
-    /// observed registration race without meaningfully delaying the
-    /// correction a user would notice.
+    /// comment for why a single 2s attempt was too short in practice.
+    /// `retries_remaining` counts DOWN — the loop terminates because each
+    /// hop passes a strictly smaller budget, never because of a separate
+    /// flag; a block whose controller genuinely never registers (e.g. it
+    /// was deleted, or its provider login never resolves) still gets a
+    /// bounded, not unbounded, chase.
     ///
     /// Mirrors `trigger_eager_naming`'s `self_ref` upgrade-to-`Arc` pattern
     /// for spawning a task that outlives this sync call; silently no-ops
     /// for a bare `new()` watcher (most unit tests), same "untracked ->
     /// safe no-op" convention as that method.
-    fn retry_reconcile_once(&self, parent_block_id: &str, session_id: &str) {
+    fn retry_reconcile_once(&self, parent_block_id: &str, session_id: &str, retries_remaining: u32) {
         let Some(watcher) = self.self_ref.lock().unwrap().as_ref().and_then(|w| w.upgrade()) else {
             return;
         };
         let parent_block_id = parent_block_id.to_string();
         let session_id = session_id.to_string();
         tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            // allow_retry: false — this IS the one retry; a second `None`
-            // here gives up rather than spawning another.
-            watcher.reconcile_stale_subagents_impl(&parent_block_id, &session_id, false);
+            tokio::time::sleep(std::time::Duration::from_millis(RECONCILE_RETRY_INTERVAL_MS)).await;
+            watcher.reconcile_stale_subagents_impl(&parent_block_id, &session_id, retries_remaining);
         });
     }
 

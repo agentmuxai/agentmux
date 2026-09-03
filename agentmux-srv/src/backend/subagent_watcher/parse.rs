@@ -150,7 +150,7 @@ pub(super) fn read_jsonl_from_offset(
 
         let timestamp = value
             .get("timestamp")
-            .and_then(|v| v.as_u64())
+            .and_then(parse_event_timestamp)
             .unwrap_or_else(now_millis);
 
         let event_type = parse_event_type(&value);
@@ -329,6 +329,43 @@ pub(super) fn parse_event_type(value: &serde_json::Value) -> Option<SubagentEven
 /// Modification time of `path`, or `UNIX_EPOCH` if it can't be read (a
 /// vanished/permission-denied file sorts oldest — excluded first by
 /// `scan_subagents_dir`'s recency cap rather than crashing the scan).
+/// Epoch-millis for a subagent JSONL line's `timestamp` field, tolerant of
+/// BOTH shapes that occur in real transcripts.
+///
+/// Claude Code writes an ISO-8601 STRING (`"2026-07-03T08:09:20.743Z"`), but
+/// this was read with a bare `as_u64()`, which returns `None` for a string
+/// and silently fell through to `now_millis()`. Every replayed historical
+/// event therefore claimed to have happened *at replay time*.
+///
+/// That is not a cosmetic timestamp bug: `last_event_at` becomes
+/// `subagentToActivity`'s `endedAt` (activity/subagent-adapter.ts), and the
+/// Activity Dock keeps a terminal row only while
+/// `now - endedAt < RETENTION_MS[status]`. With `endedAt ≈ now`, every
+/// long-dead subagent replayed on pane (re)open passed that window and
+/// rendered as a live-looking dock row, then vanished a few seconds later
+/// when it aged out — the "dock flashes on load, then disappears" report.
+/// With real historical timestamps these rows are filtered out immediately
+/// and never paint at all.
+///
+/// Numeric epoch-millis are still accepted unchanged (other providers, and
+/// any future writer that emits a number). An unparseable value returns
+/// `None` so the caller keeps its existing `now_millis()` fallback — a
+/// genuinely-live event with a malformed timestamp is better dated "now"
+/// than dropped to the epoch.
+///
+/// See docs/retro/retro-activitydock-appears-on-agent-pane-load-2026-09-02.md.
+pub(super) fn parse_event_timestamp(v: &serde_json::Value) -> Option<u64> {
+    if let Some(n) = v.as_u64() {
+        return Some(n);
+    }
+    let s = v.as_str()?;
+    chrono::DateTime::parse_from_rfc3339(s)
+        .ok()
+        .map(|dt| dt.timestamp_millis())
+        .filter(|ms| *ms >= 0)
+        .map(|ms| ms as u64)
+}
+
 pub(super) fn file_mtime(path: &Path) -> std::time::SystemTime {
     std::fs::metadata(path)
         .and_then(|m| m.modified())
