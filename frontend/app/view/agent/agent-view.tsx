@@ -93,6 +93,7 @@ import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
 import { useAgentDecisions } from "./hooks/useAgentDecisions";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
 import { useAgentFailure } from "./hooks/useAgentFailure";
+import { postLoginRecoveryFor } from "./failure/recovery-action";
 import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
 import { useAgentQuestions } from "./hooks/useAgentQuestions";
 import { useBlockActivity } from "./hooks/useBlockActivity";
@@ -1252,10 +1253,32 @@ const AgentPresentationView = ({
             // prior history resends its last old transcript message, which is
             // the exact stale-resend this whole turnAttempted split exists to
             // prevent. Read before the clear below, which wipes the flag.
-            const preLaunch = untrack(() => agentAtoms().failureAtom[0]())?.turnAttempted === false;
+            const recovery = postLoginRecoveryFor(untrack(() => agentAtoms().failureAtom[0]()));
             dispatchPane(model.blockId, { type: "FailureCleared" }, "system");
-            if (preLaunch) {
-                log("auth", "Login successful — agent is signed in (no turn to retry)");
+            if (recovery === "send-startup") {
+                // Mirror relogin()'s own `!retryAfterLogin` success path
+                // (useAgentControllerStatus.ts:745/805): send the STARTUP
+                // sequence instead of retrying a turn. Skipping both is wrong —
+                // reagent P1, second re-review of PR #2951.
+                //
+                // `onReadyFn` is the only path that ever delivers identity /
+                // instructions / context to a fresh agent, and nothing else
+                // re-triggers it later (it fires only from startLaunchFlow's
+                // success branch and relogin's two). Before this PR the
+                // pre-launch case reached startLaunchFlow indirectly, via
+                // retryLastTurn's own "no prior message" fallback — so simply
+                // returning here would leave a never-started agent
+                // authenticated, with a running controller that never received
+                // its startup payload. That is the identical bug reagent/codex
+                // caught on relogin in PR #2318, reintroduced through the
+                // terminal path that this PR newly exposes for this case.
+                //
+                // Safe for the with-history case too: onReadyFn self-guards on
+                // `agent:sessionid` already being set, so it no-ops for
+                // anything but a genuine first login — which is exactly why
+                // this is NOT retryLastTurn (that would resend an old message).
+                log("auth", "Login successful — sending the agent's startup sequence (no turn to retry)");
+                onReadyFn?.();
                 return;
             }
             retryLastTurn();
