@@ -242,8 +242,29 @@ current failure untracked), because tracking the failure as well would make
 Dismiss re-raise the row instantly — an undismissable row. So dismissing the
 "Not signed in" row leaves the pane with no auth CTA until `canRetry` next
 transitions, which a *failed* login attempt does (it restores `canRetry`,
-re-raising the row). Attempting to send meanwhile is still blocked and logs
-"message not sent — not logged in", and `/login` still works — so this is a real
-user choice rather than a dead end, and strictly more control than before. If it
-proves confusing in practice, the fix is to re-raise on a blocked send attempt
-rather than to make the row permanent again.
+re-raising the row).
+
+This is safer than it first looks, and the reason is load-bearing rather than
+incidental (found by **manoz** reviewing this change). Attempting to send while
+dismissed is not only blocked-and-logged: `useAgentCommands`' guard gates
+`setAuthNotice` on `!authFailureToPreserve && !liveAuthFailure`, and for the
+synthetic pre-flight failure both are false once the row is dismissed — so this
+is precisely the case that notice fires for. The user gets visible feedback, and
+`/login` still works. Dismiss is a real choice, not a dead composer, and it is
+strictly more control than the old bar (which could not be dismissed at all).
+
+Because that behaviour depends on one condition staying false in exactly this
+case, it is pinned by a test — `useAgentCommands.test.ts`, *"still surfaces a
+visible authNotice after the pre-flight auth row is dismissed"* — so a later
+simplification of that condition can't silently turn dismiss into a dead end.
+Note the deliberate asymmetry with the mid-turn path (doc comment at
+`useAgentCommands.ts:218-224`), where the guard re-dispatches the failure and
+the row *does* reappear; the pre-flight row intentionally does not.
+
+**A copy bug fell out of checking this.** That same notice used to read *"Not
+logged in — click 'Log in' below to continue."* It fires only when
+`state.failure` is null — i.e. exactly when **no** row is rendered. That was
+correct while the standalone blue bar was always up in this state; with the bar
+deleted it pointed at a button that no longer exists. Changed to name the
+recovery that always works: *"Not logged in — run /login to sign in, then send
+again."*

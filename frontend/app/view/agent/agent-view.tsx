@@ -1838,10 +1838,16 @@ const AgentPresentationView = ({
         // dismissing leaves this pane with no auth CTA until `canRetry` next
         // transitions — which a failed login attempt does (it restores
         // canRetry, re-raising the row). Sending meanwhile is still blocked
-        // and logs "message not sent — not logged in", and /login still works,
-        // so dismiss is a real choice rather than a dead end. Note this is
-        // MORE user control than the deleted bar, which could not be dismissed
-        // at all.
+        // AND raises a user-visible authNotice — not merely a log line:
+        // useAgentCommands' guard gates that notice on
+        // `!authFailureToPreserve && !liveAuthFailure`, both false once this
+        // row is dismissed, so this is exactly the case it fires for (manoz,
+        // reviewing this change). /login still works too. So dismiss is a real
+        // choice rather than a dead end, and this is MORE user control than the
+        // deleted bar, which could not be dismissed at all. That notice
+        // condition is load-bearing for this design and is pinned by a test —
+        // useAgentCommands.test.ts, "still surfaces a visible authNotice after
+        // the pre-flight auth row is dismissed".
         //
         // canRetry cleared (a login succeeded, or the pane moved on): retract
         // ONLY our own synthetic row. A real failure's lifecycle is owned by

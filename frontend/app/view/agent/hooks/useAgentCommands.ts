@@ -1228,11 +1228,21 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 return true;
             }
             opts.log("auth", "message not sent — not logged in", "warn");
+            // This branch fires precisely when there is NO failure row on
+            // screen (`!liveAuthFailure` means `state.failure` is null, and the
+            // row renders off that field). It used to be safe to say "click
+            // 'Log in' below" because the standalone blue bar was always up in
+            // this state — but that bar was removed in
+            // PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02, and the row that
+            // replaced it is dismissible. So in this exact state there is no
+            // button to point at, and the copy names the recovery that always
+            // works instead. (manoz spotted that this notice fires at all here;
+            // the stale button reference fell out of checking why.)
             if (!authFailureToPreserve && !liveAuthFailure) {
                 opts.setAuthNotice(
                     loginStillWaiting
                         ? "Not logged in yet — wait for the login attempt to finish, then try again."
-                        : "Not logged in — click “Log in” below to continue.",
+                        : "Not logged in — run /login to sign in, then send again.",
                 );
             }
             opts.model.dispatchPane({

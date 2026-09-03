@@ -231,6 +231,73 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
         });
     });
 
+    // PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02 (manoz on review): the
+    // synthetic pre-flight auth row is DISMISSIBLE, and by design it does not
+    // re-raise itself (it is driven by canRetry TRANSITIONS only, so Dismiss
+    // would otherwise re-fire instantly and make the row undismissable). That
+    // makes this notice the user's only remaining feedback after a dismiss —
+    // so the condition it is gated on is load-bearing, not incidental.
+    //
+    // It fires precisely when `state.failure` is null (`!liveAuthFailure`),
+    // i.e. exactly when NO row is on screen. Anyone "simplifying" that
+    // condition turns dismiss into a silent dead composer. This pins it.
+    it("still surfaces a visible authNotice after the pre-flight auth row is dismissed (canRetry true, no state.failure)", async () => {
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+        const setAuthNotice = vi.fn();
+
+        // Raise the synthetic pre-flight row, then dismiss it — the exact state
+        // the consolidation introduced (previously the undismissable blue bar).
+        model.dispatchPane(
+            {
+                type: "FailureObserved",
+                at: Date.now(),
+                turnAttempted: false,
+                failure: { code: "auth", title: "Not signed in", detail: "", retryable: true },
+            },
+            "system",
+        );
+        expect(paneSnapshot(BLOCK_ID)?.failure).not.toBeNull();
+        model.dispatchPane({ type: "FailureCleared" }, "user");
+        expect(paneSnapshot(BLOCK_ID)?.failure).toBeNull();
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands({
+                blockId: BLOCK_ID,
+                model,
+                block: () => undefined,
+                provider: () => undefined,
+                documentAtom: [() => [], () => {}] as any,
+                log: () => {},
+                setAuthUrl: () => {},
+                // Still unauthenticated — the row was dismissed, not resolved.
+                canRetry: () => true,
+                loginWaiting: () => false,
+                setAuthNotice,
+                notifyControllerHealthy: () => {},
+                forceControllerRefresh: async () => true,
+                beginRecoveryFlow: () => {},
+                endRecoveryFlow: () => {},
+                isCancelled: () => false,
+                resetCancelled: () => {},
+                isBackendTurnActive: () => false,
+                isBackendTurnConfirmedIdle: () => true,
+                backToPicker: async () => {},
+            });
+
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("u there", false);
+
+            expect(hub.agentInput).not.toHaveBeenCalled();
+            expect(setAuthNotice).toHaveBeenCalledWith(expect.stringContaining("logged in"));
+            // Must NOT point at a button that isn't rendered any more — the
+            // standalone "Log in" bar this copy referenced was deleted.
+            expect(setAuthNotice).not.toHaveBeenCalledWith(expect.stringContaining("below"));
+            dispose();
+        });
+    });
+
     it("does not fast-fail a held message flush when canRetry() only became true after the turn was already running", async () => {
         const model = registerPane(BLOCK_ID, fullRegistration());
         model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
