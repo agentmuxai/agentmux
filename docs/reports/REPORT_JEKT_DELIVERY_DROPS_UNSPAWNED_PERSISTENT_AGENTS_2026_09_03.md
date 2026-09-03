@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-03
 **Author:** Agent4
-**Status:** Fixed
+**Status:** Fixed — verified end-to-end 2026-09-03 (§6)
 **Repo state:** main @ `25664855` (v0.55.32)
 
 **Sibling:** `REPORT_JEKT_DELIVERY_DROPS_SUBPROCESS_AGENTS_2026_09_02.md` (PR
@@ -167,18 +167,59 @@ directly, and the fall-through lives in the real sender. Surfacing a genuine
 failure is still the required behaviour; this change only adds a recovery ahead
 of it.
 
-## 6. Verification
+## 6. Verification — observed
 
-**The failure is confirmed observed** (§1) — three real sends, with matching srv
-logs on both sides.
+**Before** (§1): three real sends, matching srv logs on both sides, permanent
+`"persistent process not running"`.
 
-**The fix is unit-tested but not yet confirmed end-to-end at the time of
-writing.** The repro is: restart an instance, then send a jekt to an agent in it
-whose pane has *not* been opened. Before: permanent `"persistent process not
-running"`. Expected after: the controller spawns and the message is delivered.
-This section will be updated with the observed result — it is deliberately not
-claimed until it has actually been run, since the whole point of this report is
-a case where the machinery existed and the real path never exercised it.
+**After:** confirmed end-to-end on 2026-09-03 against a real instance.
+
+Precondition established and checked, not assumed — instance restarted, target
+agent's controller registered with no process, target's pane **not** opened by
+anyone:
+
+```
+07:52:27  persistent controller registered (spawns on first message)
+          (no "persistent process spawned" follows; 0 CLI processes for the agent)
+```
+
+A jekt was then sent from another channel. The dev instance's srv log:
+
+```
+07:52:49.089  reactive inject request received
+07:52:49.090  reactive delivery: persistent controller not yet spawned — starting a turn instead
+07:52:49.090  reactive delivery: starting agent turn (no PTY fallback)
+07:52:49.090  injected CLAUDE_CONFIG_DIR for oauth provider claude
+07:52:49.258  persistent process spawned
+07:52:56      blockfile:line_count            ← message written to the agent's conversation
+```
+
+169 ms from inject to spawn. No `structured delivery failed`. The message that
+previously would have been dropped is what started the agent.
+
+### 6.1 Caveat found during verification: the caller can see a timeout
+
+The sending client (`mcp__agentmux__SendMessage`) returned
+`error sending request for url (…/reactive/inject)` **even though delivery
+succeeded**. The spawn path is synchronous under `block_in_place` — that is
+#2930's deliberate "bounded stalling beats silent loss" trade — so first contact
+now takes as long as a CLI spawn, which can exceed the caller's HTTP timeout.
+
+This is a strictly better failure than before (message delivered vs. message
+lost), but it is not free, and it is **not fixed here**:
+
+- A caller that retries on timeout will send a second inject. By then the process
+  is live, so the retry lands as an ordinary mid-turn steer — i.e. a **duplicate
+  message**, not an error.
+- `cloud_subscriber` releases a claim for retry on `!delivery.success`. A
+  transport-level timeout is not a `success: false` response, so the interaction
+  between that retry path and a slow-but-successful spawn deserves its own look.
+
+Recommended follow-up: either make the first-contact spawn asynchronous with an
+honest "accepted, starting" response, or make the timeout long enough to cover a
+cold spawn and idempotency-key the inject so a retry cannot duplicate. Filed here
+rather than fixed because it is a distinct design question from the drop bug, and
+picking wrong is how you turn a lost message into a doubled one.
 
 ## 7. Out of scope
 
