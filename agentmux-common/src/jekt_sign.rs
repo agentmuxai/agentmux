@@ -282,6 +282,109 @@ pub fn verify_lan_jekt(
     verifying_key.verify(material.as_bytes(), &signature).is_ok()
 }
 
+// ── Cross-channel per-agent Ed25519 signing (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D5) ──
+//
+// Same machine, different AgentMux instance. Asymmetric for the same reason
+// LAN is: the receiving instance must be able to verify without being able to
+// forge — and unlike host-tier's HMAC, the key can therefore be published in
+// the host-global shared registry, which is what makes cross-channel
+// verification possible at all (§5 of the spec explains why globalizing the
+// symmetric host key instead would be strictly worse).
+//
+// Reuses the agent's EXISTING LAN keypair — no new key material, no new
+// provisioning step. What it does NOT reuse is the signed material.
+
+/// Domain separator for cross-channel signatures.
+///
+/// Without this, a cross-channel signature and a LAN signature over the same
+/// (msgid, source, target, ts, message) tuple would be byte-identical, signed
+/// by the byte-identical key — so either could be replayed as the other. The
+/// tiers make different trust claims (`TRUST=lan-verified` vs
+/// `TRUST=channel-verified`) and are verified against different key sources, so
+/// they must not be interchangeable. Cheap now; a flag day later.
+const CHANNEL_DOMAIN: &str = "amx-jekt-channel-v1";
+
+/// Signed material for a cross-channel jekt.
+///
+/// Differs from [`signed_material`] in two ways, both load-bearing:
+///  - the [`CHANNEL_DOMAIN`] prefix (see above), and
+///  - `source_channel`, which binds the signature to the channel that minted
+///    it. Without it, a signature legitimately produced by an agent running in
+///    channel A could be replayed as that same agent speaking from channel B —
+///    and since one agent name can legitimately be live in several channels at
+///    once (`AgentEntry::channel` exists precisely because of that), the
+///    receiver has no other way to tell those apart.
+fn channel_signed_material(
+    msgid: &str,
+    source_agent: &str,
+    source_channel: &str,
+    target_agent: &str,
+    ts_secs: i64,
+    message: &str,
+) -> String {
+    format!(
+        "{CHANNEL_DOMAIN}{FIELD_SEP}{msgid}{FIELD_SEP}{source_agent}{FIELD_SEP}\
+         {source_channel}{FIELD_SEP}{target_agent}{FIELD_SEP}{ts_secs}{FIELD_SEP}{message}"
+    )
+}
+
+/// Sign a cross-channel jekt with the sending agent's own LAN private key
+/// (`AGENTMUX_LAN_KEY`) — called client-side in `agentmux-mcp`, never
+/// server-side, exactly like [`sign_lan_jekt`].
+///
+/// `private_key` must be exactly 32 bytes (the seed [`generate_lan_keypair`]
+/// produced); returns `None` on any other length rather than panicking — same
+/// "a missing or malformed key must never block sending" policy the other
+/// signers use. A message that can't be signed is delivered unsigned, and the
+/// receiver decides what that means.
+pub fn sign_channel_jekt(
+    private_key: &[u8],
+    msgid: &str,
+    source_agent: &str,
+    source_channel: &str,
+    target_agent: &str,
+    ts_secs: i64,
+    message: &str,
+) -> Option<String> {
+    let seed: [u8; 32] = private_key.try_into().ok()?;
+    let signing_key = ed25519_dalek::SigningKey::from_bytes(&seed);
+    let material =
+        channel_signed_material(msgid, source_agent, source_channel, target_agent, ts_secs, message);
+    let signature = ed25519_dalek::Signer::sign(&signing_key, material.as_bytes());
+    Some(BASE64.encode(signature.to_bytes()))
+}
+
+/// Verify a claimed cross-channel signature against the claimed sender's
+/// published public key (read server-side from the host-global shared registry
+/// entry — `AgentEntry::jekt_public_key`).
+///
+/// Returns `false`, never panics, for a malformed public key, malformed
+/// base64, a wrong-length signature, or a signature that simply doesn't verify
+/// — the same "all of these are identically 'not verified'" policy
+/// [`verify_lan_jekt`] and [`verify_reagent_jekt`] already document. The
+/// caller distinguishes "couldn't check" from "checked and failed"; this
+/// function only answers the second question.
+#[allow(clippy::too_many_arguments)]
+pub fn verify_channel_jekt(
+    public_key: &[u8],
+    msgid: &str,
+    source_agent: &str,
+    source_channel: &str,
+    target_agent: &str,
+    ts_secs: i64,
+    message: &str,
+    sig_b64: &str,
+) -> bool {
+    let Ok(pubkey_arr) = <[u8; 32]>::try_from(public_key) else { return false };
+    let Ok(verifying_key) = VerifyingKey::from_bytes(&pubkey_arr) else { return false };
+    let Ok(sig_bytes) = BASE64.decode(sig_b64) else { return false };
+    let Ok(sig_arr) = <[u8; 64]>::try_from(sig_bytes.as_slice()) else { return false };
+    let signature = Signature::from_bytes(&sig_arr);
+    let material =
+        channel_signed_material(msgid, source_agent, source_channel, target_agent, ts_secs, message);
+    verifying_key.verify(material.as_bytes(), &signature).is_ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -685,5 +788,115 @@ mod tests {
         let (_, private_key) = generate_lan_keypair(lan_seed(5));
         let sig = sign_lan_jekt(&private_key, "msg-1", "agentx", "agenty", 1_000, "hello").unwrap();
         assert!(!verify_jekt(&private_key, "msg-1", "agentx", "agenty", 1_000, "hello", &sig));
+    }
+
+    // ---- Cross-channel Ed25519 signing (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D5) ----
+
+    #[test]
+    fn a_correctly_signed_channel_message_verifies() {
+        let (public_key, private_key) = generate_lan_keypair(lan_seed(9));
+        let sig =
+            sign_channel_jekt(&private_key, "msg-1", "agentx", "chan-a", "agenty", 1_000, "hello")
+                .unwrap();
+        assert!(verify_channel_jekt(
+            &public_key, "msg-1", "agentx", "chan-a", "agenty", 1_000, "hello", &sig
+        ));
+    }
+
+    #[test]
+    fn channel_wrong_key_fails_verification() {
+        let (_, private_key) = generate_lan_keypair(lan_seed(9));
+        let (other_public, _) = generate_lan_keypair(lan_seed(10));
+        let sig =
+            sign_channel_jekt(&private_key, "msg-1", "agentx", "chan-a", "agenty", 1_000, "hello")
+                .unwrap();
+        assert!(!verify_channel_jekt(
+            &other_public, "msg-1", "agentx", "chan-a", "agenty", 1_000, "hello", &sig
+        ));
+    }
+
+    #[test]
+    fn channel_tampered_fields_fail_verification() {
+        let (public_key, private_key) = generate_lan_keypair(lan_seed(9));
+        let sig =
+            sign_channel_jekt(&private_key, "msg-1", "agentx", "chan-a", "agenty", 1_000, "hello")
+                .unwrap();
+        // Every signed field must actually be covered.
+        for (msgid, src, chan, tgt, ts, msg) in [
+            ("msg-2", "agentx", "chan-a", "agenty", 1_000, "hello"),
+            ("msg-1", "agentz", "chan-a", "agenty", 1_000, "hello"),
+            ("msg-1", "agentx", "chan-a", "agentz", 1_000, "hello"),
+            ("msg-1", "agentx", "chan-a", "agenty", 1_001, "hello"),
+            ("msg-1", "agentx", "chan-a", "agenty", 1_000, "goodbye"),
+        ] {
+            assert!(
+                !verify_channel_jekt(&public_key, msgid, src, chan, tgt, ts, msg, &sig),
+                "tampering with a signed field must fail: {msgid}/{src}/{chan}/{tgt}/{ts}/{msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_signature_minted_for_one_channel_does_not_verify_as_another() {
+        // §D5 channel binding. One agent name can be live in several channels
+        // at once; without `source_channel` in the signed material, a signature
+        // legitimately produced in chan-a could be replayed as that same agent
+        // speaking from chan-b, and the receiver would have no way to tell.
+        let (public_key, private_key) = generate_lan_keypair(lan_seed(9));
+        let sig =
+            sign_channel_jekt(&private_key, "msg-1", "agentx", "chan-a", "agenty", 1_000, "hello")
+                .unwrap();
+        assert!(!verify_channel_jekt(
+            &public_key, "msg-1", "agentx", "chan-b", "agenty", 1_000, "hello", &sig
+        ));
+    }
+
+    #[test]
+    fn lan_and_channel_signatures_are_not_interchangeable_in_either_direction() {
+        // §D5 domain separation — the test the separator exists for. Same key,
+        // same (msgid, source, target, ts, message) tuple: without
+        // CHANNEL_DOMAIN these two signatures would be byte-identical and each
+        // would verify as the other, collapsing two different trust claims
+        // (TRUST=lan-verified vs TRUST=channel-verified) into one.
+        let (public_key, private_key) = generate_lan_keypair(lan_seed(9));
+        let lan_sig = sign_lan_jekt(&private_key, "msg-1", "agentx", "agenty", 1_000, "hello").unwrap();
+        let channel_sig =
+            sign_channel_jekt(&private_key, "msg-1", "agentx", "chan-a", "agenty", 1_000, "hello")
+                .unwrap();
+
+        assert_ne!(lan_sig, channel_sig, "the two schemes must not produce identical bytes");
+
+        // A LAN signature replayed as a cross-channel one.
+        assert!(!verify_channel_jekt(
+            &public_key, "msg-1", "agentx", "chan-a", "agenty", 1_000, "hello", &lan_sig
+        ));
+        // A cross-channel signature replayed as a LAN one.
+        assert!(!verify_lan_jekt(
+            &public_key, "msg-1", "agentx", "agenty", 1_000, "hello", &channel_sig
+        ));
+    }
+
+    #[test]
+    fn channel_malformed_inputs_fail_rather_than_panic() {
+        let (public_key, private_key) = generate_lan_keypair(lan_seed(9));
+        let sig =
+            sign_channel_jekt(&private_key, "msg-1", "agentx", "chan-a", "agenty", 1_000, "hello")
+                .unwrap();
+        // Wrong-length private key → None, never a panic.
+        assert!(sign_channel_jekt(&[1u8; 16], "m", "a", "c", "b", 1, "x").is_none());
+        // Malformed public key / base64 / signature length → false, never a panic.
+        assert!(!verify_channel_jekt(&[0u8; 16], "msg-1", "agentx", "chan-a", "agenty", 1_000, "hello", &sig));
+        assert!(!verify_channel_jekt(&public_key, "msg-1", "agentx", "chan-a", "agenty", 1_000, "hello", "!!not base64!!"));
+        assert!(!verify_channel_jekt(&public_key, "msg-1", "agentx", "chan-a", "agenty", 1_000, "hello", ""));
+    }
+
+    #[test]
+    fn an_empty_source_channel_is_still_bound_not_ignored() {
+        // A pre-upgrade or unknown channel id must not act as a wildcard that
+        // matches any channel — it is just another distinct value.
+        let (public_key, private_key) = generate_lan_keypair(lan_seed(9));
+        let sig = sign_channel_jekt(&private_key, "msg-1", "agentx", "", "agenty", 1_000, "hello").unwrap();
+        assert!(verify_channel_jekt(&public_key, "msg-1", "agentx", "", "agenty", 1_000, "hello", &sig));
+        assert!(!verify_channel_jekt(&public_key, "msg-1", "agentx", "chan-a", "agenty", 1_000, "hello", &sig));
     }
 }
