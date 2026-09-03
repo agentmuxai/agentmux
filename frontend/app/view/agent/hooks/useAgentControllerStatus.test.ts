@@ -580,3 +580,57 @@ describe("useAgentControllerStatus — 'Use terminal instead' preserves the reco
         });
     });
 });
+
+describe("useAgentControllerStatus — a guard-rejected loginViaTerminal must not corrupt the in-flight intent (reagent P1 + manoz on PR #2951)", () => {
+    // loginViaTerminal wrote inFlightRetryAfterLogin BEFORE checking
+    // reloginInFlight, unlike relogin which guards first. So a call the guard
+    // rejected still clobbered the flag on its way out.
+    //
+    // Reachable through the inline transcript CTA this PR deliberately keeps
+    // (surface C), which can coexist with a different-valued failure row:
+    //   1. old inline "Login Again"      -> relogin(true), reloginInFlight=true
+    //   2. current row "Login via terminal" -> (false) no-ops, used to write false
+    //   3. "Use terminal instead" on the original flow's AuthUrlBox
+    //      -> read false -> onReady() instead of retryLastTurn()
+    // i.e. silently dropping the retry of a turn that genuinely ran and failed.
+    it("keeps the original intent when a second, differently-valued call is rejected mid-flight", async () => {
+        const onRecovered = vi.fn();
+        const onReady = vi.fn();
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+                onRecovered,
+                onReady,
+            });
+
+            // A mid-turn recovery is in flight: retryAfterLogin true.
+            // Not awaited — the point is to have it still running.
+            hub.runProviderLogin.mockImplementation(async () => {
+                await new Promise((r) => setTimeout(r, 50));
+                return "terminal-unavailable";
+            });
+            const inFlight = status.relogin({ retryAfterLogin: true });
+
+            // A pre-launch-valued call arrives while that is running. The
+            // in-flight guard rejects it; it must not leave `false` behind.
+            await status.loginViaTerminal({ retryAfterLogin: false });
+            await inFlight;
+
+            onRecovered.mockClear();
+            onReady.mockClear();
+
+            // The original flow's own escape hatch must still mean "retry".
+            hub.runProviderLogin.mockImplementation(async (o: any) => {
+                o.onAccountRegistered?.("acct-term", "/tmp/acct-term");
+                return "terminal-success";
+            });
+            await status.useTerminalInstead();
+
+            expect(onRecovered).toHaveBeenCalled();
+            expect(onReady).not.toHaveBeenCalled();
+            dispose();
+        });
+    });
+});

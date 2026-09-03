@@ -283,6 +283,13 @@ export function useAgentControllerStatus(
      * agent's last old message — the exact never-started-agent stale-resend
      * this PR removes from the row's own buttons, reintroduced on the escape
      * path. reagent P1 on PR #2951.
+     *
+     * Deliberately NOT reset when a flow ends — it simply holds the last
+     * flow's value. That is safe because the only reader is
+     * `useTerminalInstead`, which is reachable only from the in-flight OAuth
+     * panel, i.e. only while a flow that just wrote it is live. Recorded so
+     * the next reader doesn't have to re-derive why a never-reset flag is not
+     * a staleness bug. (manoz, reviewing fbf484752.)
      */
     let inFlightRetryAfterLogin = true;
     const [flowRunning, setFlowRunning] = createSignal(false);
@@ -948,8 +955,20 @@ export function useAgentControllerStatus(
     // was fixed and the other wasn't.
     const loginViaTerminal = async (terminalOpts: { retryAfterLogin?: boolean } = {}) => {
         const retryAfterLogin = terminalOpts.retryAfterLogin ?? true;
-        inFlightRetryAfterLogin = retryAfterLogin;
+        // Guard BEFORE the write, matching relogin (:530-532). A call the guard
+        // rejects must not leave its intent behind: it no-ops, so recording its
+        // value would corrupt the flag for the flow that IS running.
+        //
+        // Reachable via the inline transcript CTA this PR deliberately keeps
+        // (DocumentRow.tsx, surface C), which can coexist with a
+        // different-valued failure row: start a relogin from the old inline
+        // "Login Again" (retryAfterLogin true, reloginInFlight true), then
+        // click the current row's "Login via terminal" (false) — that call
+        // no-ops but used to write false, so the original flow's later
+        // "Use terminal instead" read false and silently dropped the retry of
+        // a turn that genuinely ran. reagent P1 + manoz, on PR #2951.
         if (reloginInFlight) return;
+        inFlightRetryAfterLogin = retryAfterLogin;
         loginCancelled = false;
         const prov = opts.provider();
         if (!prov) {
