@@ -221,6 +221,21 @@ pub struct CommandAgentAnswerData {
     pub answers: serde_json::Value,
 }
 
+/// Data for AgentCancelCommand — a real protocol-level decline of a pending
+/// AskUserQuestion (Cancel button / Escape), delivered as a control_response
+/// carrying `behavior: "deny"` rather than the allow+answers shape above. No
+/// `answers` field: there is nothing to carry, the deny message is a fixed
+/// server-owned string (see `ASK_USER_QUESTION_DENY_MESSAGE` in
+/// blockcontroller/persistent.rs). Spec:
+/// docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CommandAgentCancelData {
+    pub blockid: String,
+    /// The `AskUserQuestion` tool_use id being declined (correlates with the
+    /// parked `can_use_tool` control_request).
+    pub tool_use_id: String,
+}
+
 // ---- Subprocess agent command data types ----
 
 /// Data for SubprocessSpawnCommand — spawn agent CLI for a single turn.

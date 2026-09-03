@@ -71,6 +71,13 @@ export const BlockApi = {
         return client.rpcCall("agentanswer", data, opts);
     },
 
+    // Deliver a real protocol-level decline of a pending AskUserQuestion
+    // (Cancel button / Escape) — a control_response with behavior: "deny".
+    // Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
+    AgentCancelCommand(client: RpcClient, data: CommandAgentCancelData, opts?: RpcOpts): Promise<void> {
+        return client.rpcCall("agentcancel", data, opts);
+    },
+
     ControllerResyncCommand(client: RpcClient, data: CommandControllerResyncData, opts?: RpcOpts): Promise<void> {
         return client.rpcCall("controllerresync", data, opts);
     },

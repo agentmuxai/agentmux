@@ -1276,6 +1276,19 @@
 
     }
 
+    // A declined AskUserQuestion (Cancel button / Escape) renders this
+    // instead of .agent-user-message above — there is no real answer, so a
+    // fake "user message" bubble would misrepresent what happened. Muted,
+    // NOT inverted like the message bubble, so it reads as a system note
+    // about the exchange rather than a message either side sent.
+    // AnsweredQuestionMessage.tsx, SPEC_ASK_USER_QUESTION_ACCEPT_RECOMMENDED_BUTTON_2026_09_03.md.
+    .agent-question-panel-cancelled-note {
+        padding: 3px var(--space-1);
+        color: var(--secondary-text-color);
+        font-size: var(--text-sm, 12px);
+        font-style: italic;
+    }
+
     // === Section Headings ===
     .agent-section {
         margin-top: var(--space-1-5);

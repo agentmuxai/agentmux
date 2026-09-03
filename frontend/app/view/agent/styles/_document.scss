@@ -76,7 +76,6 @@
     // the top-edge comment above).
     .agent-auth-panel-card:has(~ .agent-composer-strip),
     .agent-question-panel:has(~ .agent-composer-strip),
-    .agent-question-panel-minimized:has(~ .agent-composer-strip),
     .agent-disconnected-banner:has(~ .agent-composer-strip) {
         margin-bottom: 0;
     }

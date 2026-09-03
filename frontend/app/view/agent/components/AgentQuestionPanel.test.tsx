@@ -15,9 +15,17 @@
  *
  * Also covers the 30s auto-timeout (recommended-option auto-select +
  * countdown) added by
- * docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md, and the
+ * docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md, the
  * hover-pause behavior on top of it from
- * docs/specs/SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md.
+ * docs/specs/SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md, and
+ * the Cancel (real protocol-level decline, replacing the old non-functional
+ * "Answer later" minimize) + Accept Recommended buttons from
+ * docs/specs/SPEC_ASK_USER_QUESTION_ACCEPT_RECOMMENDED_BUTTON_2026_09_03.md.
+ *
+ * `onCancel` is a required prop on every render() call below — even tests
+ * that don't exercise Cancel need a no-op spy, since the panel calls it
+ * unconditionally from Escape's keydown path if that key is ever pressed
+ * during the test (most aren't, but TypeScript can't tell that statically).
  */
 
 import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
@@ -98,7 +106,7 @@ describe("AgentQuestionPanel keyboard handling", () => {
     it("does not submit on Enter before any option is selected", () => {
         const onAnswer = vi.fn();
         const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} />);
 
         enterOn(document.body);
         expect(onAnswer).not.toHaveBeenCalled();
@@ -107,7 +115,7 @@ describe("AgentQuestionPanel keyboard handling", () => {
     it("submits on Enter with no prior focus inside the panel, once an option is selected", async () => {
         const onAnswer = vi.fn();
         const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} />);
 
         const user = userEvent.setup();
         await user.click(screen.getByRole("radio", { name: /Red/ }));
@@ -123,7 +131,7 @@ describe("AgentQuestionPanel keyboard handling", () => {
     it("submits on Enter while the caret is in the 'Other' free-text field", async () => {
         const onAnswer = vi.fn();
         const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} />);
 
         const user = userEvent.setup();
         const otherInput = screen.getByPlaceholderText(/Type a custom answer/);
@@ -140,7 +148,7 @@ describe("AgentQuestionPanel keyboard handling", () => {
         render(() => (
             <div class="agent-view">
                 <input data-testid="outside-input" type="text" />
-                <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />
+                <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} />
             </div>
         ));
 
@@ -152,17 +160,44 @@ describe("AgentQuestionPanel keyboard handling", () => {
         expect(onAnswer).not.toHaveBeenCalled();
     });
 
-    it("Escape defers instead of submitting", async () => {
+    // reagent P1, PR #2950: Escape used to call defer() — a reversible,
+    // purely-local minimize, so misfiring from anywhere in the pane was
+    // harmless. It now calls cancel(), a real, irreversible protocol-level
+    // decline delivered to the agent. Without the same editable-target guard
+    // Enter already has, pressing Escape to clear the composer or dismiss an
+    // unrelated search input anywhere in the pane would silently and
+    // permanently decline the pending question.
+    it("does NOT cancel on Escape pressed in an editable input outside the panel (e.g. the composer)", () => {
         const onAnswer = vi.fn();
-        const onDefer = vi.fn();
+        const onCancel = vi.fn();
         const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onDefer={onDefer} />);
+        render(() => (
+            <div class="agent-view">
+                <textarea data-testid="composer" />
+                <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={onCancel} />
+            </div>
+        ));
+
+        escapeOn(screen.getByTestId("composer"));
+        expect(onCancel).not.toHaveBeenCalled();
+        expect(onAnswer).not.toHaveBeenCalled();
+    });
+
+    it("Escape cancels (a real decline) instead of submitting", async () => {
+        const onAnswer = vi.fn();
+        const onCancel = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={onCancel} />);
 
         const user = userEvent.setup();
         await user.click(screen.getByRole("radio", { name: /Red/ }));
 
         escapeOn(document.body);
-        expect(onDefer).toHaveBeenCalledTimes(1);
+        expect(onCancel).toHaveBeenCalledTimes(1);
+        // Passed the declined question's tool_use_id, same pattern as
+        // onAnswer receiving the full outcome — the caller shouldn't have
+        // to re-derive which question this was from the queue.
+        expect(onCancel).toHaveBeenCalledWith("q1");
         expect(onAnswer).not.toHaveBeenCalled();
     });
 });
@@ -193,6 +228,105 @@ describe("recommendedOptions", () => {
     });
 });
 
+describe("AgentQuestionPanel — Cancel and Accept Recommended buttons", () => {
+    it("renders exactly 3 actions: Cancel, Accept Recommended, Submit answer", () => {
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={vi.fn()} onCancel={vi.fn()} />);
+
+        expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Accept Recommended" })).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Submit answer" })).toBeTruthy();
+        // The old "Answer later" button/behavior no longer exists.
+        expect(screen.queryByRole("button", { name: /Answer later/ })).toBeNull();
+    });
+
+    it("Cancel button calls onCancel with the tool_use_id, not onAnswer", async () => {
+        const onAnswer = vi.fn();
+        const onCancel = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion("q7")]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={onCancel} />);
+
+        const user = userEvent.setup();
+        await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+        expect(onCancel).toHaveBeenCalledTimes(1);
+        expect(onCancel).toHaveBeenCalledWith("q7");
+        expect(onAnswer).not.toHaveBeenCalled();
+    });
+
+    it("Accept Recommended overwrites an already-selected non-recommended option and submits with autoFilledCount 0", async () => {
+        const onAnswer = vi.fn();
+        // "Blue (Recommended)" flags a specific option, distinct from the
+        // plain-first-option fallback used elsewhere in this file — makes
+        // the overwrite assertion below unambiguous.
+        const question: ToolNode = {
+            type: "tool",
+            id: "q8",
+            tool: "Other",
+            params: {},
+            status: "awaiting_answer",
+            collapsed: false,
+            summary: "❓ Waiting for your answer",
+            question: {
+                type: "ask_user_question",
+                tool_use_id: "q8",
+                questions: [
+                    {
+                        question: "Pick a color",
+                        header: "Test",
+                        multiSelect: false,
+                        options: [{ label: "Red" }, { label: "Blue (Recommended)" }],
+                    },
+                ],
+            },
+        };
+        const [pending] = createSignal<ToolNode[]>([question]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} />);
+
+        const user = userEvent.setup();
+        // Manually pick the NON-recommended option first.
+        await user.click(screen.getByRole("radio", { name: /^Red$/ }));
+        await user.click(screen.getByRole("button", { name: "Accept Recommended" }));
+
+        expect(onAnswer).toHaveBeenCalledTimes(1);
+        const outcome = onAnswer.mock.calls[0][0];
+        // Overwritten to the recommended option, NOT left as the user's
+        // manual "Red" pick — this is the whole point of the button, and the
+        // behavior that distinguishes it from applyRecommendedDefaults'
+        // merge-only-unanswered semantics.
+        expect(outcome.answers_map["Pick a color"]).toBe("Blue (Recommended)");
+        // Deliberate user action, not a timeout fill — renders as a plain
+        // "Answered" in history, not a timeout note.
+        expect(outcome.autoFilledCount).toBe(0);
+    });
+
+    it("Accept Recommended falls back to the placeholder text for a zero-options question", async () => {
+        const onAnswer = vi.fn();
+        const noOptionsQuestion: ToolNode = {
+            type: "tool",
+            id: "q9",
+            tool: "Other",
+            params: {},
+            status: "awaiting_answer",
+            collapsed: false,
+            summary: "❓ Waiting for your answer",
+            question: {
+                type: "ask_user_question",
+                tool_use_id: "q9",
+                questions: [{ question: "Pick one", header: "Test", multiSelect: false, options: [] }],
+            },
+        };
+        const [pending] = createSignal<ToolNode[]>([noOptionsQuestion]);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} />);
+
+        const user = userEvent.setup();
+        await user.click(screen.getByRole("button", { name: "Accept Recommended" }));
+
+        expect(onAnswer).toHaveBeenCalledTimes(1);
+        expect(onAnswer.mock.calls[0][0].answers_map["Pick one"]).toBe("No option was available to auto-select");
+    });
+});
+
 describe("AgentQuestionPanel 30s auto-timeout", () => {
     beforeEach(() => {
         vi.useFakeTimers();
@@ -205,7 +339,7 @@ describe("AgentQuestionPanel 30s auto-timeout", () => {
     it("auto-submits the recommended (fallback: first) option after 30s of no interaction", () => {
         const onAnswer = vi.fn();
         const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} />);
 
         vi.advanceTimersByTime(30_000);
 
@@ -219,7 +353,7 @@ describe("AgentQuestionPanel 30s auto-timeout", () => {
         const user = userEvent.setup({ delay: null });
         const onAnswer = vi.fn();
         const [pending] = createSignal<ToolNode[]>([twoQuestionSet()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} />);
 
         // Clicking the radio requires the pointer to be over it first, so
         // this also fires a real `mouseenter` on the panel — per
@@ -264,7 +398,7 @@ describe("AgentQuestionPanel 30s auto-timeout", () => {
             },
         };
         const [pending] = createSignal<ToolNode[]>([noOptionsQuestion]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} />);
 
         vi.advanceTimersByTime(30_000);
 
@@ -285,7 +419,7 @@ describe("AgentQuestionPanel 30s auto-timeout", () => {
             onAnswer(outcome);
             setPending([]);
         });
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={handleAnswer} />);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={handleAnswer} onCancel={vi.fn()} />);
 
         await user.click(screen.getByRole("radio", { name: /Red/ }));
         await user.click(screen.getByRole("button", { name: /Submit answer/ }));
@@ -300,7 +434,7 @@ describe("AgentQuestionPanel 30s auto-timeout", () => {
     it("countdown decrements once per second and reaches exactly 0 at 30s", () => {
         const onAnswer = vi.fn();
         const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} />);
 
         expect(screen.getByText(/Auto-selects recommended in 30s/)).toBeTruthy();
 
@@ -329,7 +463,7 @@ describe("AgentQuestionPanel hover-pause (SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_P
     it("hides the countdown immediately on mouse-enter", () => {
         const onAnswer = vi.fn();
         const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} />);
 
         vi.advanceTimersByTime(5_000); // 25s remaining
         expect(screen.getByText(/Auto-selects recommended in 25s/)).toBeTruthy();
@@ -353,7 +487,7 @@ describe("AgentQuestionPanel hover-pause (SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_P
     it("resumes at a fresh 30s exactly 15s after entry, even if the mouse never leaves the panel", () => {
         const onAnswer = vi.fn();
         const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} />);
 
         vi.advanceTimersByTime(18_000); // 12s remaining
         fireEvent.mouseEnter(panel());
@@ -377,7 +511,7 @@ describe("AgentQuestionPanel hover-pause (SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_P
     it("a fresh mouse-enter during the hide window restarts a fresh 15s from that point (the 'recursive' case)", () => {
         const onAnswer = vi.fn();
         const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} />);
 
         fireEvent.mouseEnter(panel());
         vi.advanceTimersByTime(10_000); // 10s into the first 15s window
@@ -404,7 +538,7 @@ describe("AgentQuestionPanel hover-pause (SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_P
             onAnswer(outcome);
             setPending([]);
         });
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={handleAnswer} />);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={handleAnswer} onCancel={vi.fn()} />);
 
         fireEvent.mouseEnter(panel());
         await user.click(screen.getByRole("radio", { name: /Red/ }));
@@ -418,7 +552,7 @@ describe("AgentQuestionPanel hover-pause (SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_P
     it("a new question-set arriving mid-hover starts unhidden and counting, ignoring the old head's hover state", () => {
         const onAnswer = vi.fn();
         const [pending, setPending] = createSignal<ToolNode[]>([singleSelectQuestion("q1")]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} />);
 
         fireEvent.mouseEnter(panel());
         expect(screen.queryByText(/Auto-selects recommended in/)).toBeNull();
@@ -430,21 +564,25 @@ describe("AgentQuestionPanel hover-pause (SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_P
         expect(onAnswer).toHaveBeenCalledTimes(1);
     });
 
-    it("minimizing (Answer later) while hidden forces an immediate resume, unaffected by hover history", async () => {
+    it("Cancel while hidden/hovered stops the timer without submitting (no leftover auto-submit)", async () => {
         const user = userEvent.setup({ delay: null });
         const onAnswer = vi.fn();
-        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+        const onCancel = vi.fn();
+        const [pending, setPending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        const handleCancel = vi.fn(() => {
+            onCancel();
+            setPending([]); // mirrors the real caller contract, same as handleAnswer above
+        });
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={handleCancel} />);
 
         fireEvent.mouseEnter(panel());
-        await user.click(screen.getByRole("button", { name: /Answer later/ }));
+        await user.click(screen.getByRole("button", { name: "Cancel" }));
 
-        // Minimized chip shows the countdown ticking normally — hover-pause
-        // never applies to it (§3.1).
-        expect(screen.getByText(/auto-selects in 30s/)).toBeTruthy();
+        expect(onCancel).toHaveBeenCalledTimes(1);
+        expect(onAnswer).not.toHaveBeenCalled();
 
         vi.advanceTimersByTime(30_000);
-        expect(onAnswer).toHaveBeenCalledTimes(1);
+        expect(onAnswer).not.toHaveBeenCalled();
     });
 });
 
@@ -462,7 +600,7 @@ describe("AgentQuestionPanel keyboard-pause (SPEC_ASK_USER_QUESTION_TIMEOUT_KEYB
     it("hides the countdown immediately on a qualifying keydown inside the panel", () => {
         const onAnswer = vi.fn();
         const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} />);
 
         vi.advanceTimersByTime(5_000); // 25s remaining
         expect(screen.getByText(/Auto-selects recommended in 25s/)).toBeTruthy();
@@ -478,7 +616,7 @@ describe("AgentQuestionPanel keyboard-pause (SPEC_ASK_USER_QUESTION_TIMEOUT_KEYB
     it("resumes at a fresh 30s exactly 15s after that keydown, then auto-submits on schedule with no further activity", () => {
         const onAnswer = vi.fn();
         const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} />);
 
         vi.advanceTimersByTime(18_000); // 12s remaining
         keydownOn(panel(), "Tab");
@@ -508,7 +646,7 @@ describe("AgentQuestionPanel keyboard-pause (SPEC_ASK_USER_QUESTION_TIMEOUT_KEYB
     it("repeated keydowns while still hidden do not extend the window past one HOVER_HIDE_GRACE_MS (key-repeat/continuous-typing safety bound)", () => {
         const onAnswer = vi.fn();
         const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} />);
 
         keydownOn(panel(), "Tab"); // first keydown — hides, starts the 15s window
         vi.advanceTimersByTime(10_000); // 10s into the window, still hidden
@@ -529,7 +667,7 @@ describe("AgentQuestionPanel keyboard-pause (SPEC_ASK_USER_QUESTION_TIMEOUT_KEYB
     it("a keydown after the window resumes starts a fresh window (recursive re-engagement, mirrors the mouse 'recursive' case)", () => {
         const onAnswer = vi.fn();
         const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} />);
 
         keydownOn(panel(), "Tab");
         vi.advanceTimersByTime(15_000); // window elapses, resumes at a fresh 30s
@@ -552,7 +690,7 @@ describe("AgentQuestionPanel keyboard-pause (SPEC_ASK_USER_QUESTION_TIMEOUT_KEYB
         render(() => (
             <div class="agent-view">
                 <textarea data-testid="composer" />
-                <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />
+                <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} />
             </div>
         ));
 
@@ -562,69 +700,10 @@ describe("AgentQuestionPanel keyboard-pause (SPEC_ASK_USER_QUESTION_TIMEOUT_KEYB
         expect(screen.getByText(/Auto-selects recommended in 25s/)).toBeTruthy();
     });
 
-    it("keydown while minimized does not hide/pause anything", async () => {
-        const user = userEvent.setup({ delay: null });
-        const onAnswer = vi.fn();
-        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
-
-        await user.click(screen.getByRole("button", { name: /Answer later/ }));
-        keydownOn(document.body, "a");
-
-        // Minimized chip shows the countdown ticking normally, unaffected —
-        // hover-pause never applies to it and neither does this new trigger.
-        expect(screen.getByText(/auto-selects in 30s/)).toBeTruthy();
-
-        vi.advanceTimersByTime(30_000);
-        expect(onAnswer).toHaveBeenCalledTimes(1);
-    });
-
-    // codex P2, PR #2787: while minimized, `rootRef` is reassigned to the
-    // separate minimized `<button>`, so a keydown/focus landing directly on
-    // THAT button (not just elsewhere, like the document.body case above)
-    // used to read as "inside the panel" and incorrectly pause a countdown
-    // that's supposed to keep running unaffected while minimized.
-    it("keydown targeting the minimized button itself does not hide/pause anything", async () => {
-        const user = userEvent.setup({ delay: null });
-        const onAnswer = vi.fn();
-        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
-
-        await user.click(screen.getByRole("button", { name: /Answer later/ }));
-        keydownOn(screen.getByRole("button", { name: /Question waiting/ }), "Tab");
-
-        expect(screen.getByText(/auto-selects in 30s/)).toBeTruthy();
-
-        vi.advanceTimersByTime(30_000);
-        expect(onAnswer).toHaveBeenCalledTimes(1);
-    });
-
-    it("focus landing on the minimized button does not hide/pause anything", async () => {
-        const user = userEvent.setup({ delay: null });
-        const onAnswer = vi.fn();
-        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
-
-        await user.click(screen.getByRole("button", { name: /Answer later/ }));
-        fireEvent.focusIn(screen.getByRole("button", { name: /Question waiting/ }));
-
-        expect(screen.getByText(/auto-selects in 30s/)).toBeTruthy();
-
-        vi.advanceTimersByTime(30_000);
-        expect(onAnswer).toHaveBeenCalledTimes(1);
-    });
-
-    // codex P2, PR #2787: a real browser moves focus only AFTER a Tab
-    // keydown's default action runs, so the keydown that causes a
-    // keyboard-only user's first entry into the panel has `e.target` still
-    // pointed at whatever they were focused on *before* — outside the
-    // panel. `handleKey`'s own `inPanel` check necessarily misses that one
-    // event; the separate `focusin` listener (which fires once focus has
-    // actually landed) is what catches it.
     it("focus landing inside the panel (e.g. via Tab) pauses the countdown even though the causing keydown's own target was outside", () => {
         const onAnswer = vi.fn();
         const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} />);
 
         vi.advanceTimersByTime(5_000); // 25s remaining
         expect(screen.getByText(/Auto-selects recommended in 25s/)).toBeTruthy();
@@ -636,7 +715,7 @@ describe("AgentQuestionPanel keyboard-pause (SPEC_ASK_USER_QUESTION_TIMEOUT_KEYB
     it("Enter fired inside the panel still submits, unaffected by the new pause trigger", async () => {
         const onAnswer = vi.fn();
         const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} />);
 
         const user = userEvent.setup({ delay: null });
         await user.click(screen.getByRole("radio", { name: /Red/ }));
@@ -646,21 +725,21 @@ describe("AgentQuestionPanel keyboard-pause (SPEC_ASK_USER_QUESTION_TIMEOUT_KEYB
         expect(onAnswer.mock.calls[0][0].answers_map["Pick a color"]).toBe("Red");
     });
 
-    it("Escape fired inside the panel still defers, unaffected by the new pause trigger", () => {
+    it("Escape fired inside the panel still cancels, unaffected by the new pause trigger", () => {
         const onAnswer = vi.fn();
-        const onDefer = vi.fn();
+        const onCancel = vi.fn();
         const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onDefer={onDefer} />);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={onCancel} />);
 
         escapeOn(panel());
-        expect(onDefer).toHaveBeenCalledTimes(1);
+        expect(onCancel).toHaveBeenCalledTimes(1);
         expect(onAnswer).not.toHaveBeenCalled();
     });
 
     it("composes with a mouse-triggered pause: a keydown while already hidden does not extend the mouse-triggered window (single shared bound)", () => {
         const onAnswer = vi.fn();
         const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} />);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={vi.fn()} />);
 
         fireEvent.mouseEnter(panel());
         vi.advanceTimersByTime(10_000); // 10s into the mouse-triggered 15s window, still hidden
@@ -683,7 +762,7 @@ describe("AgentQuestionPanel keyboard-pause (SPEC_ASK_USER_QUESTION_TIMEOUT_KEYB
 describe("AgentQuestionPanel scroll structure (SPEC_ASK_USER_QUESTION_PANEL_SCROLL_2026_08_25.md)", () => {
     it("wraps question content in a scroll region that is a sibling of the fixed-size header and actions bar", () => {
         const [pending] = createSignal<ToolNode[]>([twoQuestionSet()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={vi.fn()} />);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={vi.fn()} onCancel={vi.fn()} />);
 
         const panel = document.querySelector(".agent-question-panel") as HTMLElement;
         const scroll = panel.querySelector(":scope > .agent-question-panel-scroll");
@@ -705,15 +784,17 @@ describe("AgentQuestionPanel scroll structure (SPEC_ASK_USER_QUESTION_PANEL_SCRO
         expect(scroll?.contains(screen.getByText("Pick a size"))).toBe(true);
     });
 
-    it("does not put the Submit/Answer-later buttons inside the scroll region", () => {
+    it("does not put the Cancel/Accept Recommended/Submit buttons inside the scroll region", () => {
         const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
-        render(() => <AgentQuestionPanel pending={pending} onAnswer={vi.fn()} />);
+        render(() => <AgentQuestionPanel pending={pending} onAnswer={vi.fn()} onCancel={vi.fn()} />);
 
         const scroll = document.querySelector(".agent-question-panel-scroll");
+        const cancelBtn = screen.getByRole("button", { name: "Cancel" });
+        const recommendedBtn = screen.getByRole("button", { name: "Accept Recommended" });
         const submitBtn = screen.getByRole("button", { name: /Submit answer/ });
-        const deferBtn = screen.getByRole("button", { name: /Answer later/ });
 
+        expect(scroll?.contains(cancelBtn)).toBe(false);
+        expect(scroll?.contains(recommendedBtn)).toBe(false);
         expect(scroll?.contains(submitBtn)).toBe(false);
-        expect(scroll?.contains(deferBtn)).toBe(false);
     });
 });

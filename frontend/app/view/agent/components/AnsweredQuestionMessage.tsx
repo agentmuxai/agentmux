@@ -25,7 +25,16 @@
  * `answerText` — a transcript answered between the two shows the answer
  * alone, same as it always could before this component existed.
  *
- * See docs/specs/SPEC_ASK_USER_QUESTION_HISTORY_STYLING_2026_08_17.md.
+ * `cancelled` (added for the Cancel button / Escape, replacing the old
+ * non-functional "Answer later" minimize) renders a compact note instead of
+ * the `.agent-user-message` bubble above — there is no real answer to show,
+ * and a fake "user message" bubble would misrepresent what happened.
+ * `questionText` still renders unconditionally either way: a cancelled
+ * question still shows what was asked. `ToolBlock` routes here via its own
+ * sibling `isCancelledQuestion()` gate (status === "denied", not "success").
+ *
+ * See docs/specs/SPEC_ASK_USER_QUESTION_HISTORY_STYLING_2026_08_17.md,
+ * docs/specs/SPEC_ASK_USER_QUESTION_ACCEPT_RECOMMENDED_BUTTON_2026_09_03.md.
  */
 
 import { Markdown } from "@/app/element/markdown";
@@ -35,6 +44,9 @@ import type { ToolNode } from "../types";
 
 interface AnsweredQuestionMessageProps {
     node: ToolNode;
+    /** True for a declined (Cancel/Escape) question — renders a compact note
+     *  instead of the answer bubble, since there is no answer. */
+    cancelled?: boolean;
 }
 
 export const AnsweredQuestionMessage = (props: AnsweredQuestionMessageProps): JSX.Element => {
@@ -47,21 +59,26 @@ export const AnsweredQuestionMessage = (props: AnsweredQuestionMessageProps): JS
                     </div>
                 )}
             </Show>
-            <div class="agent-user-message">
-                <div class="agent-user-message-content agent-user-message-content--flow">
-                    {/* node.timeoutNote is computed in useAgentQuestions.ts from
-                        AnswerOutcome's numeric counts, not parsed back out of a
-                        decorated string here — the free-text answer can legally
-                        contain " — ", which broke two prior string-split
-                        attempts (reagent P1 x2 on PR #2630). */}
-                    <Show when={props.node.timeoutNote}>
-                        {(note) => <div class="agent-user-message-timeout-note">{note()}</div>}
-                    </Show>
-                    <pre>
-                        <LinkifiedText text={props.node.answerText ?? ""} />
-                    </pre>
+            <Show
+                when={!props.cancelled}
+                fallback={<div class="agent-question-panel-cancelled-note">🚫 Cancelled — no answer provided</div>}
+            >
+                <div class="agent-user-message">
+                    <div class="agent-user-message-content agent-user-message-content--flow">
+                        {/* node.timeoutNote is computed in useAgentQuestions.ts from
+                            AnswerOutcome's numeric counts, not parsed back out of a
+                            decorated string here — the free-text answer can legally
+                            contain " — ", which broke two prior string-split
+                            attempts (reagent P1 x2 on PR #2630). */}
+                        <Show when={props.node.timeoutNote}>
+                            {(note) => <div class="agent-user-message-timeout-note">{note()}</div>}
+                        </Show>
+                        <pre>
+                            <LinkifiedText text={props.node.answerText ?? ""} />
+                        </pre>
+                    </div>
                 </div>
-            </div>
+            </Show>
         </>
     );
 };
