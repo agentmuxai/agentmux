@@ -442,6 +442,10 @@ function mkNode(agentToolRows: ActiveSubagent[], workflowRows: WorkflowDispatch[
         agentStatus: "idle",
         agentToolRows,
         workflowRows,
+        todoRows: [],
+        todosTruncated: 0,
+        todosPartial: false,
+        currentTool: null,
         shellRows: [],
         cronRows: [],
     };

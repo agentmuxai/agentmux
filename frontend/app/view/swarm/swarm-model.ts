@@ -201,6 +201,43 @@ export interface AgentTreeNode {
      *  PROCESS_ROWS_2026_07_20 Phase 2), enabled or paused. Sorted
      *  newest-first by `last_fired` (nulls — never fired — last). */
     cronRows: ActiveCron[];
+    /** The agent's current todo checklist, in the agent's own order (NOT
+     *  sorted here — the order it wrote them in is the order it means).
+     *  Pushed by the backend's `agent:progress` sweep rather than read from
+     *  block meta, because the frontend only holds tool calls for panes that
+     *  are currently mounted and the Swarm's whole point is the ones that
+     *  aren't. */
+    todoRows: TodoItem[];
+    /** How many rows `MAX_TODOS` dropped backend-side, so the tree can say
+     *  "+N more" instead of showing a partial list as if it were whole. */
+    todosTruncated: number;
+    /** True when the backend first saw this block mid-stream, so item-at-a-time
+     *  (`TaskCreate`) entries from before that point were never observed.
+     *  Deliberately NOT folded into `todosTruncated`: that is a cap we chose
+     *  and can count, this is history we could not see and cannot. Rendering
+     *  them the same way would claim a precision we do not have. */
+    todosPartial: boolean;
+    /** The tool this agent is running right now, or null between tools.
+     *  Complements `activitySummary`: that is a Haiku paraphrase of the last
+     *  ~20s, this is the literal call in flight. */
+    currentTool: string | null;
+}
+
+/** One checklist entry, as published by the backend progress watcher. */
+export interface TodoItem {
+    text: string;
+    /** `pending` | `in_progress` | `completed`, or whatever a provider wrote —
+     *  passed through verbatim rather than coerced, so an unrecognized status
+     *  renders as itself instead of silently becoming "pending". */
+    status: string;
+}
+
+/** One `agent:progress` payload, keyed by block. */
+export interface AgentProgress {
+    todos: TodoItem[];
+    todosTruncated: number;
+    todosPartial: boolean;
+    currentTool: string | null;
 }
 
 /**
@@ -400,9 +437,8 @@ export function collectClearableRows(nodes: AgentTreeNode[]): { rowKey: string; 
  * `read_jsonl_from_offset`), which in practice is that CLI's own
  * per-session/per-batch codename. A whole Task/Workflow-tool batch of
  * genuinely distinct, unrelated subagents legitimately shares one slug —
- * already established as an expected, non-buggy signature in
- * docs/specs/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md Finding 3
- * ("one shared slug = one legitimate concurrent spawn") and relied on by
+ * an expected, non-buggy signature ("one shared slug = one legitimate
+ * concurrent spawn"), and one relied on by
  * `buildDispatchBuckets`'s `WorkflowDispatch.name` derivation above as a
  * fallback for the brief window before eager naming resolves.
  *
@@ -452,8 +488,7 @@ function shallowEqualSubagent(a: ActiveSubagent, b: ActiveSubagent): boolean {
  * object identity on every spawn/completed refresh, and SolidJS's `<For>`
  * (which diffs list items by reference, not value) tears down and remounts
  * every row in the tree on every refresh, silently collapsing any row a
- * user has expanded. See
- * docs/specs/REPORT_SWARM_SUBAGENT_DETAIL_UX_ANALYSIS_2026_07_07.md.
+ * user has expanded.
  */
 export function mergeSubagentsPreservingIdentity(
     prev: ActiveSubagent[],
@@ -852,6 +887,14 @@ export class SwarmViewModel implements ViewModel {
     cronsAtom: Accessor<ActiveCron[]> = this._crons[0];
     private setCrons: Setter<ActiveCron[]> = this._crons[1];
 
+    // Per-block todo checklist + in-flight tool, pushed by the backend's
+    // `agent:progress` sweep. Push-only (no fetch-on-open counterpart): the
+    // watcher republishes whenever the payload changes, so a Swarm opened
+    // mid-session fills in within one sweep rather than needing its own RPC.
+    private _progress = createSignal<Map<string, AgentProgress>>(new Map());
+    progressAtom: Accessor<Map<string, AgentProgress>> = this._progress[0];
+    private setProgress: Setter<Map<string, AgentProgress>> = this._progress[1];
+
     // AgentDispatches (SPEC §5) — one per Agent-tool-or-Workflow-tool call.
     // Fetched separately from subagentsAtom via subagent.ListDispatches;
     // buildTree() cross-references the two by dispatch_id/parent_block_id.
@@ -1124,6 +1167,36 @@ export class SwarmViewModel implements ViewModel {
             handler: () => this.scheduleLoadCrons(),
         });
         if (unsubCronChanged) this.unsubs.push(unsubCronChanged);
+
+        // Todo checklist + in-flight tool. Unlike the buckets above this
+        // carries its whole payload on the event, so there's nothing to
+        // reload — store it keyed by block and let buildTree read it.
+        const unsubProgress = waveEventSubscribe({
+            eventType: "agent:progress",
+            handler: (event: WaveEvent) => {
+                const data = event?.data as any;
+                const blockId = data?.blockId;
+                if (typeof blockId !== "string" || !blockId) return;
+                const todos: TodoItem[] = Array.isArray(data?.todos)
+                    ? data.todos
+                          .filter((t: any) => typeof t?.text === "string" && t.text.length > 0)
+                          .map((t: any) => ({
+                              text: t.text as string,
+                              status: typeof t?.status === "string" ? t.status : "pending",
+                          }))
+                    : [];
+                const next: AgentProgress = {
+                    todos,
+                    todosTruncated: typeof data?.todosTruncated === "number" ? data.todosTruncated : 0,
+                    todosPartial: data?.todosPartial === true,
+                    currentTool: typeof data?.currentTool === "string" ? data.currentTool : null,
+                };
+                // Replace the Map (not mutate) so Solid sees a new reference
+                // and buildTree's memo actually re-runs.
+                this.setProgress((prev) => new Map(prev).set(blockId, next));
+            },
+        });
+        if (unsubProgress) this.unsubs.push(unsubProgress);
 
         // Patch display_name in place (not a full loadSubagents() reload) so
         // every client watching this session picks up a generated name —
@@ -1733,6 +1806,20 @@ export class SwarmViewModel implements ViewModel {
             new Map(blockIds.map((id) => [id, prev.get(id) ?? ("idle" as const)]))
         );
 
+        // Prune pushed progress for blocks that are gone, mirroring the
+        // backend watcher's own per-sweep `retain` (reagent P2 on PR #2952).
+        // `agent:progress` is push-only, so without this the Map keeps an
+        // entry for every block that ever reported — unbounded across a long
+        // session with many ephemeral panes. This is the right place rather
+        // than the `block_pruned` event: the block-list refresh is the general
+        // case, and it's where the statuses Map above is already rebuilt from
+        // the same authoritative list.
+        const live = new Set(blockIds);
+        this.setProgress((prev) => {
+            if (![...prev.keys()].some((id) => !live.has(id))) return prev;
+            return new Map([...prev].filter(([id]) => live.has(id)));
+        });
+
         for (const blockId of blockIds) {
             // Fetch current status — don't assume idle for already-running agents.
             void BlockService.GetControllerStatus(blockId)
@@ -1772,6 +1859,7 @@ export class SwarmViewModel implements ViewModel {
         const shells = this.shellsAtom();
         const crons = this.cronsAtom();
         const statuses = this.agentStatusesAtom();
+        const progressByBlock = this.progressAtom();
 
         // Include parent block IDs from subagents as fallback for agent panes
         // that registered subagents before their own registration propagated.
@@ -1820,6 +1908,7 @@ export class SwarmViewModel implements ViewModel {
             const visibleWorkflowRows = filterRetired(workflowRows, retired, (w) => w.dispatchId, (w) => workflowRetireSignal(w));
             const shellRows = buildShellRows(shells, blockId);
             const cronRows = buildCronRows(crons, blockId);
+            const progress = progressByBlock.get(blockId);
             return {
                 blockId,
                 agentName,
@@ -1831,6 +1920,14 @@ export class SwarmViewModel implements ViewModel {
                 workflowRows: visibleWorkflowRows,
                 shellRows,
                 cronRows,
+                todoRows: progress?.todos ?? [],
+                todosTruncated: progress?.todosTruncated ?? 0,
+                todosPartial: progress?.todosPartial ?? false,
+                // Only meaningful while the agent is actually running — a
+                // stopped pane's last in-flight tool is stale, and showing it
+                // would read as "still doing this" (the payload is push-only,
+                // so nothing else clears it on stop).
+                currentTool: agentStatus === "running" ? (progress?.currentTool ?? null) : null,
             };
         });
 

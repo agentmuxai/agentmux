@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createMemo, createSignal, createEffect, onCleanup, For, onMount, Show, type Accessor, type JSX } from "solid-js";
-import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, ActiveCron, WorkflowDispatch, SubagentEvent, DispatchActivityEntry } from "./swarm-model";
+import type { SwarmViewModel, AgentTreeNode, ActiveSubagent, ActiveShell, ActiveCron, WorkflowDispatch, SubagentEvent, DispatchActivityEntry, TodoItem } from "./swarm-model";
 import { collectClearableRows, subagentDisplayLabel, subagentRowKey, workflowRetireSignal, AUTO_RETIRE_DELAY_MS } from "./swarm-model";
 import { ProviderLogo } from "@/app/element/ProviderLogo";
 import AnsiLine from "@/element/ansiline";
@@ -346,9 +346,25 @@ export function AgentRow({
                         {node.activitySummary}
                     </div>
                 </Show>
+                {/* The literal call in flight, next to the Haiku paraphrase
+                    above it. Deliberately OUTSIDE the collapsed() guard: it is
+                    one line, it is the most perishable thing on the card, and
+                    a collapsed agent is exactly when you want to know what it
+                    is doing without expanding it. */}
+                <Show when={node.currentTool}>
+                    <div class="swarm-current-tool">
+                        <i class="fa-solid fa-bolt swarm-current-tool-icon" />
+                        <span class="swarm-current-tool-name">{node.currentTool}</span>
+                    </div>
+                </Show>
             </div>
             <Show when={!collapsed()}>
                 <div class="swarm-children">
+                    <TodoBucket
+                        rows={node.todoRows}
+                        truncated={node.todosTruncated}
+                        partial={node.todosPartial}
+                    />
                     <AgentToolBucket rows={node.agentToolRows} model={model} parentAgentStatus={node.agentStatus} />
                     <WorkflowBucket rows={node.workflowRows} model={model} />
                     <ShellBucket rows={node.shellRows} />
@@ -364,6 +380,78 @@ export function AgentRow({
 //    MODEL_2026_07_19 §4) — always exactly these two, never data-driven
 //    groups; each hides entirely when empty (no "always visible" precedent
 //    exists anywhere else in this codebase, see that spec's §6). ─────────
+
+// Todo bucket — the agent's own checklist, pushed by the backend's
+// `agent:progress` sweep. Placed FIRST among the buckets: the other four are
+// mechanisms the agent is using, this is what it says it is trying to do, and
+// intent reads before mechanism.
+//
+// Rows are rendered in the agent's own order, never sorted here — a checklist
+// is an ordered artifact and re-ordering it (by status, say) would be editing
+// the agent's meaning rather than displaying it.
+function TodoBucket({
+    rows,
+    truncated,
+    partial,
+}: {
+    rows: TodoItem[];
+    truncated: number;
+    partial: boolean;
+}): JSX.Element {
+    const done = () => rows.filter((t) => t.status === "completed").length;
+    return (
+        <Show when={rows.length > 0}>
+            <div class="swarm-bucket swarm-bucket--todo">
+                <div class="swarm-bucket-header">
+                    <span class="swarm-bucket-label">Todos</span>
+                    {/* done/total, not a bare count like the other buckets —
+                        for a checklist the useful number is progress. */}
+                    <span class="swarm-bucket-count">
+                        {done()}/{rows.length}
+                    </span>
+                </div>
+                <For each={rows}>{(todo) => <TodoRow todo={todo} />}</For>
+                <Show when={truncated > 0}>
+                    <div class="swarm-todo-truncated">+{truncated} more</div>
+                </Show>
+                {/* Distinct from "+N more" above, and deliberately so: that is
+                    a cap we chose and can count, this is history the backend
+                    could not see (it started watching mid-stream, so
+                    item-at-a-time entries created earlier were never observed).
+                    Showing an incomplete checklist as if it were complete is
+                    the failure worth avoiding here. */}
+                <Show when={partial}>
+                    <div
+                        class="swarm-todo-partial"
+                        title="AgentMux started watching this agent mid-session, so items created before that may be missing."
+                    >
+                        earlier items may be missing
+                    </div>
+                </Show>
+            </div>
+        </Show>
+    );
+}
+
+/** Status glyphs. Unknown statuses fall through to the pending dot rather than
+ *  rendering nothing, so a provider we haven't seen still shows its row. */
+const TODO_SIGIL: Record<string, string> = {
+    completed: "✓",
+    in_progress: "▸",
+    pending: "○",
+};
+
+function TodoRow({ todo }: { todo: TodoItem }): JSX.Element {
+    const status = () => (todo.status in TODO_SIGIL ? todo.status : "pending");
+    return (
+        <div classList={{ "swarm-todo-row": true, [`swarm-todo-row--${status()}`]: true }}>
+            <span class="swarm-todo-sigil">{TODO_SIGIL[status()]}</span>
+            <span class="swarm-todo-text" title={todo.text}>
+                {todo.text}
+            </span>
+        </div>
+    );
+}
 
 function AgentToolBucket({
     rows,
@@ -482,6 +570,13 @@ function ShellRow({ shell }: { shell: ActiveShell }): JSX.Element {
  */
 export function agentChildRowCount(node: AgentTreeNode, longRunningCount: number): number {
     return (
+        // Todos count like any other bucket, and must: this total drives
+        // `hasChildren()`, which gates BOTH the expand affordance and the
+        // collapse guard that mounts the buckets at all. Omitting them would
+        // make an agent whose only activity is a checklist render nothing and
+        // offer no way to expand — the exact shape of the PR #2862 regression
+        // that `swarm-agent-row.render.test.tsx` exists to pin.
+        node.todoRows.length +
         node.agentToolRows.length +
         node.workflowRows.length +
         node.shellRows.length +
