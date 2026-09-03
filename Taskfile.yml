@@ -13,7 +13,7 @@ vars:
     APP_NAME: "AgentMux"
     BIN_DIR: "bin"
     VERSION:
-        sh: 'PATH="$HOME/.cargo/bin:/opt/homebrew/opt/node@20/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" node version.cjs'
+        sh: 'PATH="$HOME/.cargo/bin:/opt/homebrew/opt/node/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" node version.cjs'
     RM: '{{if eq OS "windows"}}pwsh -Command Remove-Item -Force -ErrorAction SilentlyContinue{{else}}rm -f{{end}}'
     RMRF: '{{if eq OS "windows"}}pwsh -Command Remove-Item -Force -Recurse -ErrorAction SilentlyContinue{{else}}rm -rf{{end}}'
     DATE: '{{if eq OS "windows"}}pwsh -Command Get-Date -UFormat{{else}}date{{end}}'
