@@ -1798,6 +1798,20 @@ export class SwarmViewModel implements ViewModel {
             new Map(blockIds.map((id) => [id, prev.get(id) ?? ("idle" as const)]))
         );
 
+        // Prune pushed progress for blocks that are gone, mirroring the
+        // backend watcher's own per-sweep `retain` (reagent P2 on PR #2952).
+        // `agent:progress` is push-only, so without this the Map keeps an
+        // entry for every block that ever reported — unbounded across a long
+        // session with many ephemeral panes. This is the right place rather
+        // than the `block_pruned` event: the block-list refresh is the general
+        // case, and it's where the statuses Map above is already rebuilt from
+        // the same authoritative list.
+        const live = new Set(blockIds);
+        this.setProgress((prev) => {
+            if (![...prev.keys()].some((id) => !live.has(id))) return prev;
+            return new Map([...prev].filter(([id]) => live.has(id)));
+        });
+
         for (const blockId of blockIds) {
             // Fetch current status — don't assume idle for already-running agents.
             void BlockService.GetControllerStatus(blockId)
