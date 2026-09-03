@@ -27,7 +27,7 @@ import { DiffViewer } from "./DiffViewer";
 import { HighlightedCode } from "./HighlightedCode";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { capChars, createChunkCapper, createSpinnerCollapser, capText, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
-import { stripCommonIndent, stripCommonIndentNumbered } from "./dedent";
+import { formatCodePreview, formatReadPreview } from "./dedent";
 import { detectLanguage } from "./detectLanguage";
 import {
     registerToolRenderer,
@@ -462,13 +462,15 @@ function renderRead(node: ToolNode): JSX.Element {
     // the conversation DOM; HighlightedCode stays simple (it injects
     // innerHTML, so capping here is cleaner than inside it).
     const capped = content ? capText(content, MAX_TOOL_OUTPUT_LINES, "head") : null;
-    // Strip indentation common to every VISIBLE line — computed after
-    // capping so a deeper hidden tail can't reduce the dedent of what's
-    // actually shown (SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §3.2.1). Claude
-    // Code's Read result lines are "<N>\t<code>"; the numbered variant
-    // splits off that prefix before dedenting so the line-number gutter
-    // itself is untouched.
-    const dedentedText = capped ? stripCommonIndentNumbered(capped.text) : "";
+    // Dedent (common to every VISIBLE line — computed after capping so a
+    // deeper hidden tail can't reduce the dedent of what's actually shown,
+    // SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §3.2.1), narrow the remaining
+    // relative indentation to 2 columns per level, and re-emit Claude Code's
+    // "<N>\t" line-number gutter right-aligned at a fixed width. That last
+    // part removes the tab, and with it the sideways step the code column
+    // took at every digit-count boundary (9→10, 999→1000) — see dedent.ts's
+    // module header and docs/analysis/tool-preview-indentation-and-wrapping-2026-09-02.md.
+    const preview = capped ? formatReadPreview(capped.text) : null;
     // Render markdown files as formatted markdown, matching renderWrite. Without
     // this a .md Read shows raw source instead of a rendered preview.
     const isMarkdown = filePath.endsWith(".md") || filePath.endsWith(".mdx");
@@ -487,7 +489,7 @@ function renderRead(node: ToolNode): JSX.Element {
                     when={isMarkdown}
                     fallback={
                         <HighlightedCode
-                            code={dedentedText}
+                            code={preview!.withGutter}
                             // Language detection reads the RAW (non-dedented) first
                             // line — shebang/content sniffing should see the file
                             // as-is; only the displayed text is dedented.
@@ -497,7 +499,12 @@ function renderRead(node: ToolNode): JSX.Element {
                     }
                 >
                     <div class="agent-tool-read-content agent-tool-read-md">
-                        <Markdown text={dedentedText} />
+                        {/* `body`, not `withGutter`: a line-number column is
+                            meaningless in rendered markdown and actively
+                            corrupts it (a "1\t# Title" line is not a heading).
+                            SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §2.1 flagged
+                            this in August and deferred it; this is the fix. */}
+                        <Markdown text={preview!.body} />
                     </div>
                 </Show>
                 <Show when={capped!.hiddenLines > 0}>
@@ -519,14 +526,16 @@ function renderWrite(node: ToolNode): JSX.Element {
     const content: string | undefined = (node.params as any).content;
     const bytes: number | undefined = (node.result as any)?.bytesWritten;
     const capped = content ? capText(content, MAX_TOOL_OUTPUT_LINES, "head") : null;
-    // Plain dedent, NOT the Read-specific numbered variant
+    // Plain dedent + narrow, NOT the Read-specific gutter-aware variant
     // (SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §3.2.3) — Write content has no
-    // CLI-added "<N>\t" line-number prefix, so stripCommonIndentNumbered's
+    // CLI-added "<N>\t" line-number prefix, so formatReadPreview's numbered
     // heuristic would misfire on a genuine tab-delimited file (TSV/BED/GTF)
     // whose every non-blank line happens to start with digits+tab, silently
-    // dropping that real leading column. stripCommonIndent has no such
-    // ambiguity and is a no-op for the common already-flush case anyway.
-    const dedentedText = capped ? stripCommonIndent(capped.text) : "";
+    // dropping that real leading column. formatCodePreview has no such
+    // ambiguity, and its dedent half is a no-op for the common already-flush
+    // case anyway (a whole file starts at column 0) — which is exactly why the
+    // narrowing half matters here: it's the only part that fires on a Write.
+    const dedentedText = capped ? formatCodePreview(capped.text) : "";
     const isMarkdown = filePath.endsWith(".md") || filePath.endsWith(".mdx");
     return (
         <div class="agent-tool-write">

@@ -59,8 +59,17 @@
         font-family: var(--fixed-font, monospace);
         font-size: 12px;
         line-height: 1.4;
-        white-space: pre;
-        overflow-wrap: normal;
+        // Must match `.agent-terminal-output > div` in _document-nodes.scss.
+        // These are the SAME bytes at two points in one tool's life: chunks
+        // render here while it streams, then the final result re-renders
+        // through the terminal/JSON viewers on completion. This used to be
+        // `pre` while that is `pre-wrap`, so a long-lined Bash block visibly
+        // reflowed at the moment it finished.
+        // docs/analysis/tool-preview-indentation-and-wrapping-2026-09-02.md §4.3.
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        padding-left: 3ch;
+        text-indent: -3ch;
 
         &--stdout {
             color: var(--term-foreground, #d3d7cf);
