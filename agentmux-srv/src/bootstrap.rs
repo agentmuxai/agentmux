@@ -864,6 +864,23 @@ pub fn open_stores_and_migrate(config: &config::Config, version: &str, build_tim
         }
     }
 
+    // Let the cross-instance agent registry publish each agent's Ed25519
+    // PUBLIC key alongside its entry, so a peer instance in a *different
+    // channel* can verify that agent's jekts — the one same-machine tier that
+    // had no verification path at all before
+    // `SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md`. Host-tier's HMAC key is
+    // symmetric and deliberately NOT published (spec §5).
+    //
+    // Installed here rather than next to `init_local_auth_key` in
+    // `load_config` because that runs before any store is open, and this is a
+    // per-agent lookup rather than a process constant. Registry writes before
+    // this point simply publish an empty key, which readers treat as "cannot
+    // check."
+    crate::backend::reactive::registry::init_jekt_public_key_resolver({
+        let wstore = wstore.clone();
+        move |agent_id| wstore.agent_lan_public_key_load(agent_id).ok().flatten()
+    });
+
     Stores {
         wstore,
         filestore,

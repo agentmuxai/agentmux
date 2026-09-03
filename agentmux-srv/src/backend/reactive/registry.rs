@@ -59,6 +59,23 @@ pub struct AgentEntry {
     /// fallback respawn's fresh entry (issue #2363).
     #[serde(default)]
     pub registration_nonce: u64,
+    /// Base64 Ed25519 **public** key for this agent, for cross-channel jekt
+    /// signature verification —
+    /// `docs/specs/SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md` §D1.
+    ///
+    /// The public half only. That is what makes publishing it here safe, and
+    /// is the whole reason this tier uses the agent's asymmetric LAN keypair
+    /// rather than its symmetric host-tier HMAC key: a shared file containing
+    /// HMAC secrets would let every channel on the machine *mint* signatures
+    /// for every agent (spec §5).
+    ///
+    /// Empty for entries written before this shipped, and for an agent whose
+    /// LAN keypair has not been minted yet. **An empty value means "cannot
+    /// check," never "failed the check"** — the verifier must map it to
+    /// `None`, not `Some(false)`, or every pre-upgrade sender on a
+    /// mixed-version machine gets escalated (spec §6).
+    #[serde(default)]
+    pub jekt_public_key: String,
 }
 
 /// Serializes this process's own read-compare-remove sequences
@@ -90,6 +107,46 @@ pub fn init_local_auth_key(key: impl Into<String>) {
 
 fn local_auth_key() -> &'static str {
     LOCAL_AUTH_KEY.get().map(String::as_str).unwrap_or("")
+}
+
+/// Resolves an agent's published Ed25519 public key for
+/// [`AgentEntry::jekt_public_key`].
+///
+/// Indirection rather than a `Store` handle because this module is
+/// deliberately pure filesystem — it is called from PTY auto-register,
+/// persistent-controller auto-register, and the HTTP register handler, none of
+/// which share a `Store` argument. Mirrors [`LOCAL_AUTH_KEY`]'s
+/// set-once-from-bootstrap pattern, except the value is per-agent so it has to
+/// be a lookup rather than a constant.
+type PubkeyResolver = Box<dyn Fn(&str) -> Option<String> + Send + Sync>;
+static JEKT_PUBLIC_KEY_RESOLVER: OnceLock<PubkeyResolver> = OnceLock::new();
+
+/// Install the process's agent-public-key resolver. Idempotent — first call
+/// wins, same contract as [`init_local_auth_key`].
+///
+/// Called from bootstrap once the Store is open. Until it is called (and for
+/// any agent with no LAN keypair minted yet) entries are written with an empty
+/// `jekt_public_key`, which readers treat as "cannot check" — see that field's
+/// doc comment.
+pub fn init_jekt_public_key_resolver<F>(resolver: F)
+where
+    F: Fn(&str) -> Option<String> + Send + Sync + 'static,
+{
+    let _ = JEKT_PUBLIC_KEY_RESOLVER.set(Box::new(resolver));
+}
+
+/// The agent's published public key, or empty if unavailable.
+///
+/// Deliberately a *load*, never an ensure/mint: registry writes happen on
+/// every registration and re-registration, and minting key material as a side
+/// effect of a bookkeeping write would be a surprising place to put it. Key
+/// creation stays where it already is, at config-injection time
+/// (`agent_config::inject_jekt_signing_keys_into_mcp_json`).
+fn jekt_public_key_for(agent_id: &str) -> String {
+    JEKT_PUBLIC_KEY_RESOLVER
+        .get()
+        .and_then(|resolve| resolve(agent_id))
+        .unwrap_or_default()
 }
 
 fn agents_dir(data_dir: &Path) -> PathBuf {
@@ -148,6 +205,10 @@ pub fn write_with_nonce(
         // doc comment on `AgentEntry`.
         channel: String::new(),
         registration_nonce,
+        // Written here too, for struct uniformity, but only the SHARED
+        // registry's copy is load-bearing: a same-instance sender is verified
+        // by the host-tier HMAC path, which never consults this file.
+        jekt_public_key: jekt_public_key_for(agent_id),
     };
     let path = agent_path(data_dir, agent_id);
     let Ok(json) = serde_json::to_string(&entry) else { return };
@@ -380,6 +441,7 @@ pub fn write_shared_with_nonce(
         auth_key: local_auth_key().to_string(),
         channel: channel.to_string(),
         registration_nonce,
+        jekt_public_key: jekt_public_key_for(agent_id),
     };
     write_entry_file(&path, &entry);
 }
@@ -646,6 +708,78 @@ mod shared_tests {
         assert_eq!(found[0].local_url, "http://127.0.0.1:9099");
     }
 
+    // ---- jekt_public_key publication (SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md §D1) ----
+
+    #[test]
+    fn a_shared_entry_publishes_the_agents_real_store_public_key() {
+        // Store-backed, not a stub: the closure installed here is the SAME
+        // shape bootstrap.rs installs, so this exercises the real
+        // resolver → Store → entry wiring rather than just the plumbing
+        // around it. That distinction matters — the last time a jekt key
+        // feature shipped, the code was correct and the real call path simply
+        // never ran it (REPORT_JEKT_SIGNING_KEY_INJECTION_GAP_2026_08_16.md).
+        //
+        // The resolver is a process-wide OnceLock, so this one test owns it
+        // for the whole test binary — hence both the resolvable and the
+        // unresolvable agent are covered here rather than in two tests that
+        // would race to set it.
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let store = crate::backend::storage::store::Store::open(tmp.path()).unwrap();
+        let minted = store.agent_lan_key_ensure("agentx").unwrap();
+
+        init_jekt_public_key_resolver(move |agent_id| {
+            store.agent_lan_public_key_load(agent_id).ok().flatten()
+        });
+
+        let dir = tempfile::tempdir().unwrap();
+        write_shared(dir.path(), "agentx", "http://127.0.0.1:9001", "block1", "dev-a");
+        let found = lookup_all_shared(dir.path(), "agentx");
+        assert_eq!(found.len(), 1);
+        assert_eq!(
+            found[0].jekt_public_key, minted.public_key,
+            "the shared entry must publish the agent's real public key from the store"
+        );
+        assert_ne!(
+            found[0].jekt_public_key, minted.private_key,
+            "the PRIVATE half must never reach the shared registry"
+        );
+
+        // Case-insensitivity: registry ids are lowercased on the path, the
+        // store lowercases on lookup — a display-cased name must still resolve.
+        write_shared(dir.path(), "AgentX", "http://127.0.0.1:9001", "block1", "dev-b");
+        let cased = lookup_all_shared(dir.path(), "agentx");
+        assert!(cased.iter().all(|e| e.jekt_public_key == minted.public_key));
+
+        // An agent with no LAN keypair minted yet publishes an empty key
+        // rather than failing the write. Empty means "cannot check" (§6) —
+        // the registry write itself must stay infallible.
+        write_shared(dir.path(), "agenty", "http://127.0.0.1:9002", "block2", "dev-a");
+        let other = lookup_all_shared(dir.path(), "agenty");
+        assert_eq!(other.len(), 1);
+        assert!(other[0].jekt_public_key.is_empty());
+    }
+
+    #[test]
+    fn an_entry_written_before_this_shipped_still_deserializes_with_an_empty_key() {
+        // §6 backward compatibility: a pre-upgrade file has no
+        // `jekt_public_key` member at all. It must load (not error), and it
+        // must load as EMPTY — which the verifier maps to "cannot check",
+        // never to "failed the check". Getting this wrong escalates every
+        // sender on a mixed-version machine.
+        let dir = tempfile::tempdir().unwrap();
+        let agent_dir = shared_agent_dir(dir.path(), "agentz");
+        std::fs::create_dir_all(&agent_dir).unwrap();
+        let legacy = r#"{"agent_id":"agentz","local_url":"http://127.0.0.1:9003",
+            "block_id":"b3","pid":1,"updated_at":1,"auth_key":"k","channel":"dev-a",
+            "registration_nonce":0}"#;
+        std::fs::write(shared_channel_path(dir.path(), "agentz", "dev-a"), legacy).unwrap();
+
+        let found = lookup_all_shared(dir.path(), "agentz");
+        assert_eq!(found.len(), 1, "a pre-upgrade entry must still deserialize");
+        assert!(found[0].jekt_public_key.is_empty());
+        assert_eq!(found[0].auth_key, "k", "the other fields must survive intact");
+    }
+
     #[test]
     fn lookup_all_shared_sorts_freshest_first() {
         let dir = tempfile::tempdir().unwrap();
@@ -855,6 +989,7 @@ mod shared_tests {
             auth_key: String::new(),
             channel: "dev-a".to_string(),
             registration_nonce: 0,
+            jekt_public_key: String::new(),
         }
     }
 

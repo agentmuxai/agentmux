@@ -2,7 +2,10 @@
 
 **Date:** 2026-09-02
 **Author:** Agent4
-**Status:** Proposed
+**Status:** **Phase A implemented** 2026-09-02 (D1 publication + D5 signing
+primitives). Phases B–D still proposed — see §10. Phase A is strictly additive:
+it publishes a public key and adds two unused functions. Nothing reads
+`jekt_public_key` yet, so no message's `TRUST=` can change until Phase B.
 **Repo state:** main @ `ec4241bd` (v0.55.32)
 **Prompted by:** a live incident on 2026-09-02 (§1.1), and the question
 "I thought we already had it."
@@ -441,7 +444,7 @@ this spec was exactly that setup, by accident.
 
 | Phase | Content | Ships with |
 |---|---|---|
-| **A** | D1 (publish pubkey), D5 (`sign_channel_jekt`/`verify_channel_jekt` + tests 9–10) | one release |
+| **A** ✅ | D1 (publish pubkey), D5 (`sign_channel_jekt`/`verify_channel_jekt` + tests 9–10) | **implemented 2026-09-02** |
 | **B** | D2 (verification), D4 (`DELIVERY=channel`), `channel-verified` added to the 08-17 verified-sender list; `Some(false)` **not yet** escalating | next release |
 | **C** | D3 enforcement (`Some(false)` → forced sensitive) | after A has propagated (§6) |
 | **D** | §7.3 escalation-chaining rule | separate spec |
@@ -449,3 +452,42 @@ this spec was exactly that setup, by accident.
 Phase C is the one that must not be rushed forward. Phases A and B are
 strictly additive — they can only move messages from `self-declared` to
 `channel-verified`, never the reverse.
+
+### 10.1 Phase A as built (2026-09-02)
+
+| Piece | Location |
+|---|---|
+| `sign_channel_jekt` / `verify_channel_jekt`, `CHANNEL_DOMAIN`, `channel_signed_material` | `agentmux-common/src/jekt_sign.rs` |
+| `AgentEntry::jekt_public_key` | `agentmux-srv/src/backend/reactive/registry.rs` |
+| `init_jekt_public_key_resolver` (mirrors `init_local_auth_key`) | same file |
+| Resolver wired to the Store | `agentmux-srv/src/bootstrap.rs`, end of `open_stores_and_migrate` |
+
+Notes on what was decided during implementation:
+
+- **The resolver is an indirection, not a `Store` handle.** `registry.rs` is
+  deliberately pure-filesystem and is called from three paths that share no
+  `Store` argument (PTY auto-register, persistent-controller auto-register, the
+  HTTP register handler). A process-wide set-once resolver mirrors the existing
+  `LOCAL_AUTH_KEY` pattern; the value is per-agent, so it is a lookup rather
+  than a constant.
+- **Load, never ensure.** The registry write path calls
+  `agent_lan_public_key_load`, not `..._ensure`. Registry writes happen on every
+  registration; minting key material as a side effect of a bookkeeping write
+  would be a surprising place for it. Key creation stays at config-injection
+  time, where it already is.
+- **Ordering verified:** the resolver is installed at `main.rs:69`
+  (`open_stores_and_migrate`); the HTTP server starts accepting registrations at
+  `main.rs:168`. No registry write can precede installation.
+- **Coverage verified:** `inject_jekt_signing_keys_into_mcp_json` calls
+  `agent_lan_key_ensure` unconditionally for every agent, independent of whether
+  LAN discovery is enabled — so every provisioned agent has a keypair to
+  publish. Measured on this machine: 7/7 host-channel agents and 1/1 dev-channel
+  agent have one.
+- **Not yet verified end-to-end in a live instance.** The store-backed test
+  covers resolver → Store → entry with the same closure shape bootstrap
+  installs, and the ordering above is confirmed by inspection, but no running
+  srv has yet written an entry carrying a non-empty key. Confirm by restarting
+  an instance and checking
+  `~/.agentmux/shared/agents/reactive/<agent>/<channel>.json`. This is the exact
+  failure mode `REPORT_JEKT_SIGNING_KEY_INJECTION_GAP_2026_08_16.md` records
+  (correct code, real path never ran it), so it is worth actually looking.
