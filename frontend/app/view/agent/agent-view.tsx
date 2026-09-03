@@ -22,7 +22,7 @@ import {
     dispatchIfRegistered as dispatchPaneIfRegistered,
     snapshot as paneSnapshot,
 } from "@/app/store/agent-pane-state-store";
-import { workingFromPhase } from "@/app/store/agent-pane-state/types";
+import { workingFromPhase, type PaneFailure } from "@/app/store/agent-pane-state/types";
 import {
     registerActivity as registerAgentActivity,
     unregisterActivity as unregisterAgentActivity,
@@ -93,6 +93,7 @@ import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
 import { useAgentDecisions } from "./hooks/useAgentDecisions";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
 import { useAgentFailure } from "./hooks/useAgentFailure";
+import { decideSyntheticRow } from "./failure/synthetic-row";
 import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
 import { useAgentQuestions } from "./hooks/useAgentQuestions";
 import { useBlockActivity } from "./hooks/useBlockActivity";
@@ -1820,21 +1821,30 @@ const AgentPresentationView = ({
     // uses, instead of the separate blue "Log in" bar this replaced
     // (docs/specs/PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md).
     //
-    // `canRetry` is precisely "the mount-time launch flow bailed with
-    // auth_failed" — no turn was ever attempted — so the synthetic failure
-    // carries `turnAttempted: false`, which is what makes the row render
-    // "Log in" (not "Login Again") and pass `retryAfterLogin: false`.
+    // The DECISION lives in decideSyntheticRow (failure/synthetic-row.ts) and
+    // is unit-tested there; this is wiring only. It was extracted after this
+    // effect produced several P1s across PR #2951 — it sits inline in the pane
+    // component and no existing harness can reach it, so the logic was
+    // unassertable while it lived here.
     //
-    // Guarded on there being no failure already: a REAL backend-classified
-    // failure (turnAttempted true, possibly carrying a stderr tail and the
-    // auto-retry budget) is strictly more informative, and must never be
-    // overwritten by this synthetic one if both happen to be live at once —
-    // which is exactly the double-CTA case this consolidation exists to fix.
+    // Tracks BOTH canRetry and the failure signal. Tracking the failure is
+    // what lets a dismissed REAL failure fall back to this row while the agent
+    // is still unauthenticated (reagent P1) — without it the pane kept no login
+    // affordance at all, strictly worse than the undismissable bar it replaced.
+    // Dismissing THIS row still sticks; decideSyntheticRow tells the two apart
+    // from the previous value, which is why that state is threaded here.
+    let prevFailure: PaneFailure | null = null;
+    let syntheticDismissed = false;
     createEffect(() => {
-        const preLaunchAuthFailed = status.canRetry();
-        const current = untrack(() => agentAtoms().failureAtom[0]());
-        if (preLaunchAuthFailed) {
-            if (current) return; // real failure (or our own, already raised) wins
+        const decision = decideSyntheticRow({
+            canRetry: status.canRetry(),
+            current: agentAtoms().failureAtom[0](),
+            previous: prevFailure,
+            syntheticDismissed,
+        });
+        prevFailure = untrack(() => agentAtoms().failureAtom[0]());
+        syntheticDismissed = decision.syntheticDismissed;
+        if (decision.action === "raise") {
             dispatchPane(
                 model.blockId,
                 {
@@ -1852,31 +1862,13 @@ const AgentPresentationView = ({
                 },
                 "system",
             );
-            return;
-        }
-        // Deliberately reads `failureAtom` untracked: this effect re-runs on
-        // `canRetry` transitions ONLY. Tracking the failure too would make
-        // Dismiss on the synthetic row re-raise it immediately (canRetry is
-        // still true), i.e. an undismissable row. The trade-off is that
-        // dismissing leaves this pane with no auth CTA until `canRetry` next
-        // transitions — which a failed login attempt does (it restores
-        // canRetry, re-raising the row). Sending meanwhile is still blocked
-        // AND raises a user-visible authNotice — not merely a log line:
-        // useAgentCommands' guard gates that notice on
-        // `!authFailureToPreserve && !liveAuthFailure`, both false once this
-        // row is dismissed, so this is exactly the case it fires for (manoz,
-        // reviewing this change). /login still works too. So dismiss is a real
-        // choice rather than a dead end, and this is MORE user control than the
-        // deleted bar, which could not be dismissed at all. That notice
-        // condition is load-bearing for this design and is pinned by a test —
-        // useAgentCommands.test.ts, "still surfaces a visible authNotice after
-        // the pre-flight auth row is dismissed".
-        //
-        // canRetry cleared (a login succeeded, or the pane moved on): retract
-        // ONLY our own synthetic row. A real failure's lifecycle is owned by
-        // FailureCleared / the next TurnStart, not by this signal.
-        if (current && current.turnAttempted === false) {
+            // Keep prevFailure in step with what we just dispatched, so the
+            // re-run this write triggers sees "our row is showing" rather than
+            // "a row just appeared from nowhere".
+            prevFailure = untrack(() => agentAtoms().failureAtom[0]());
+        } else if (decision.action === "retract") {
             dispatchPane(model.blockId, { type: "FailureCleared" }, "system");
+            prevFailure = null;
         }
     });
 
