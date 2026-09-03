@@ -120,6 +120,99 @@ describe("PeekOverlay", () => {
         }
     });
 
+    // Mouse-Y tracking (align="end" default) — SPEC_PEEK_OVERLAY_MOUSE_Y_TRACKING_2026_09_03.md.
+    // These exercise the exact invariant CURSOR_GAP_PX exists to guarantee:
+    // the cursor's Y must never fall inside the rendered overlay's own
+    // [top, top + height] bounds, or the row's mouseleave/mouseenter fire
+    // back-to-back and the panel flickers (reagent P1, 2nd/3rd/4th rounds
+    // on PR #2949).
+    describe("mouse-Y tracking", () => {
+        function setRect(el: Element, rect: Partial<DOMRect>) {
+            vi.spyOn(el, "getBoundingClientRect").mockReturnValue({
+                top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => {},
+                ...rect,
+            } as DOMRect);
+        }
+
+        function makeScrollableRow(containerRect: Partial<DOMRect>, rowRect: Partial<DOMRect>) {
+            const container = document.createElement("div");
+            container.style.overflowY = "auto";
+            document.body.appendChild(container);
+            const row = document.createElement("div");
+            container.appendChild(row);
+            setRect(container, containerRect);
+            setRect(row, rowRect);
+            return row;
+        }
+
+        it("positions the panel below the cursor, with room to spare", () => {
+            vi.useFakeTimers();
+            try {
+                const row = makeScrollableRow(
+                    { top: 0, bottom: 1000, right: 300 },
+                    { top: 100, bottom: 500, right: 300, width: 300 },
+                );
+                render(() => (
+                    <PeekOverlay show={true} rowEl={() => row}>
+                        <span>peek content</span>
+                    </PeekOverlay>
+                ));
+                vi.advanceTimersByTime(50);
+                const overlay = document.querySelector(".agent-node-peek-overlay") as HTMLElement;
+                setRect(overlay, { height: 40 });
+
+                const mouseY = 200;
+                row.dispatchEvent(new MouseEvent("mousemove", { clientY: mouseY, bubbles: true }));
+                vi.advanceTimersByTime(50);
+
+                const top = parseFloat(overlay.style.top);
+                expect(top).toBeGreaterThan(mouseY); // below the cursor, not at/above it
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+
+        // reagent P1 on PR #2949 (4th round): clamping `top` to fit the
+        // overlay within the container's bottom edge used to override the
+        // below-the-cursor placement whenever the cursor was within
+        // `overlayHeight + BOTTOM_MARGIN_PX` of that edge, landing `top`
+        // at or below the cursor's own Y — reintroducing the cursor-inside-
+        // the-overlay flicker the gap offset exists to prevent.
+        it("flips the panel ABOVE the cursor instead of clamping into it, near the scroll container's bottom edge", () => {
+            vi.useFakeTimers();
+            try {
+                const row = makeScrollableRow(
+                    { top: 0, bottom: 220, right: 300 },
+                    { top: 100, bottom: 220, right: 300, width: 300 },
+                );
+                render(() => (
+                    <PeekOverlay show={true} rowEl={() => row}>
+                        <span>peek content</span>
+                    </PeekOverlay>
+                ));
+                vi.advanceTimersByTime(50);
+                const overlay = document.querySelector(".agent-node-peek-overlay") as HTMLElement;
+                const overlayHeight = 40;
+                setRect(overlay, { height: overlayHeight });
+
+                // Close enough to container.bottom (220) that below-with-gap
+                // (mouseY + 12) + overlayHeight (40) would exceed it.
+                const mouseY = 210;
+                row.dispatchEvent(new MouseEvent("mousemove", { clientY: mouseY, bubbles: true }));
+                vi.advanceTimersByTime(50);
+
+                const top = parseFloat(overlay.style.top);
+                // The invariant: cursor must land strictly outside [top, top+height].
+                expect(top + overlayHeight <= mouseY || top > mouseY).toBe(true);
+                // Specifically: flips above (bottom edge of the panel sits
+                // above the cursor), not clamped down onto/past it.
+                expect(top + overlayHeight).toBeLessThanOrEqual(mouseY);
+            } finally {
+                vi.useRealTimers();
+            }
+        });
+    });
+
     it("re-hovering after a full hide→show cycle registers a fresh autoUpdate", () => {
         vi.useFakeTimers();
         try {
