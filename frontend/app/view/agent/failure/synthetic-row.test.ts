@@ -58,6 +58,47 @@ describe("decideSyntheticRow (PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02)",
             expect(d.action).toBe("raise");
             expect(d.syntheticDismissed).toBe(false);
         });
+
+        it("a REAL failure dismissal beats an earlier synthetic dismissal in the same episode (manoz)", () => {
+            // The sequence that short-circuited before: dismiss synthetic ->
+            // real failure arrives -> dismiss real. `syntheticDismissed` was
+            // sticky and checked FIRST, so step 4 returned "none" and the pane
+            // was left with no login CTA — reagent's P1 state, reached by a
+            // different route than the one it was reported for.
+            //
+            // Deliberate rule, not an accident of branch order: the two
+            // dismissals dismiss different things. Waving away "Not signed in"
+            // says "stop offering me this login"; waving away a real failure
+            // report dismisses an ERROR and says nothing about the CTA.
+            const dismissedSynthetic = decide({ current: null, previous: synthetic() });
+            expect(dismissedSynthetic.syntheticDismissed).toBe(true);
+
+            // Real failure arrives and is yielded to.
+            const realShowing = decide({
+                current: real(),
+                previous: null,
+                syntheticDismissed: dismissedSynthetic.syntheticDismissed,
+            });
+            expect(realShowing.action).toBe("none");
+            expect(realShowing.syntheticDismissed).toBe(true); // still sticky here
+
+            // User dismisses the REAL failure — must raise despite the sticky flag.
+            const afterRealDismissed = decide({
+                current: null,
+                previous: real(),
+                syntheticDismissed: realShowing.syntheticDismissed,
+            });
+            expect(afterRealDismissed.action).toBe("raise");
+            expect(afterRealDismissed.syntheticDismissed).toBe(false); // memory reset
+        });
+
+        it("the synthetic row is still dismissable AFTER that fallback raise", () => {
+            // The reset must not make the row undismissable again — dismissing
+            // the re-raised synthetic row still sticks.
+            const d = decide({ current: null, previous: synthetic(), syntheticDismissed: false });
+            expect(d.action).toBe("none");
+            expect(d.syntheticDismissed).toBe(true);
+        });
     });
 
     describe("once the agent is authenticated again (canRetry false)", () => {

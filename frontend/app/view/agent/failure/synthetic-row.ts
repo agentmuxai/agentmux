@@ -23,6 +23,17 @@
  *
  * Distinguishing them needs the PREVIOUS failure, which is why this is a
  * transition over (previous -> current) rather than a predicate on current.
+ *
+ * KNOWN LIMITATION, not currently reachable: if a real failure both arrived and
+ * was cleared within a SINGLE evaluation, `previous` would still hold the
+ * synthetic row and this would read it as "the user dismissed our row". That
+ * needs two failure writes to collapse into one effect run, i.e. batching —
+ * and there is none in the pane-state dispatch path today (no `batch(` in
+ * agent-pane-state/, and dispatchPane delegates straight through), while Solid
+ * flushes unbatched writes synchronously so each dispatch gets its own
+ * evaluation. Noted because a future caller wrapping two dispatches in
+ * `batch()` would make it live, and the symptom would be a silently missing
+ * login CTA. (manoz, reviewing 359482b1f.)
  */
 
 import type { PaneFailure } from "@/app/store/agent-pane-state/types";
@@ -77,17 +88,34 @@ export function decideSyntheticRow(input: SyntheticRowInput): SyntheticRowDecisi
         return { action: "none", syntheticDismissed };
     }
 
-    // Nothing showing, and the agent still needs a login.
+    // Nothing showing, and the agent still needs a login. What just
+    // disappeared decides what happens next.
     if (previous != null && isSynthetic(previous)) {
-        // The user just dismissed OUR row. Honour it for the rest of this
-        // episode — re-raising here is what would make it undismissable.
+        // The user dismissed OUR row. Honour it for the rest of this episode —
+        // re-raising here is what would make it undismissable.
         return { action: "none", syntheticDismissed: true };
+    }
+    if (previous != null) {
+        // A REAL failure was dismissed while the agent is still
+        // unauthenticated. Raise, and RESET the dismissal memory.
+        //
+        // The reset is deliberate and is checked BEFORE `syntheticDismissed`
+        // below, so this case wins even if the user had already dismissed a
+        // synthetic row earlier in the same episode (manoz, reviewing
+        // 359482b1f — that sequence otherwise short-circuits into exactly the
+        // no-CTA state reagent called a P1, reached by a different route).
+        //
+        // The two dismissals are dismissals of DIFFERENT things: waving away
+        // "Not signed in" says "stop offering me this login"; waving away a
+        // real failure report — different title, stderr detail, its own
+        // recovery actions — is dismissing an error, and carries no such
+        // instruction about the login CTA. Treating the second as if it
+        // implied the first is what left the pane with nothing.
+        return { action: "raise", syntheticDismissed: false };
     }
     if (syntheticDismissed) {
         return { action: "none", syntheticDismissed: true };
     }
-    // Either nothing was showing, or a REAL failure was just dismissed while
-    // the agent is still unauthenticated. The latter is reagent's P1: without
-    // this the pane keeps no login affordance at all.
+    // Nothing was showing and nothing was dismissed — first raise of the episode.
     return { action: "raise", syntheticDismissed: false };
 }
