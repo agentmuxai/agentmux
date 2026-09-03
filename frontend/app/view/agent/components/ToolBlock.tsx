@@ -379,8 +379,25 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
     const isAnsweredQuestion = () =>
         props.node.toolName === "AskUserQuestion" && props.node.status === "success" && props.node.answerText != null;
 
+    // A declined AskUserQuestion (Cancel button / Escape) — reuses the
+    // existing "denied" ToolNode status (already a full first-class status:
+    // icon, fail-terminal auto-collapse, STATUS_LABEL) rather than adding a
+    // new one, since it is the correct semantic fit: a rejected permission
+    // request, not an orphaned/force-terminated one ("canceled" is reserved
+    // for that — see the sibling status and useAgentQuestions.ts). Scoped by
+    // toolName so this can never collide with a real tool-permission denial
+    // (a different, unrelated feature — the tool:decision path). Gated on
+    // `questionText` the same way isAnsweredQuestion() gates on `answerText`:
+    // a transcript denied before this field existed falls back to the
+    // generic collapsed row instead of showing an empty body.
+    const isCancelledQuestion = () =>
+        props.node.toolName === "AskUserQuestion" && props.node.status === "denied" && props.node.questionText != null;
+
     return (
-        <Show when={!isAnsweredQuestion()} fallback={<AnsweredQuestionMessage node={props.node} />}>
+        <Show
+            when={!isAnsweredQuestion() && !isCancelledQuestion()}
+            fallback={<AnsweredQuestionMessage node={props.node} cancelled={isCancelledQuestion()} />}
+        >
             <div
                 ref={setPeekRowEl}
                 class={clsx("agent-tool-block", {

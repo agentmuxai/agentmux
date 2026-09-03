@@ -97,9 +97,9 @@
 }
 
 // 30s auto-timeout countdown (SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md
-// §2.4). In the header it's pushed to the far right like `.agent-question-panel-queue`
-// (both can be present at once — flex auto-margins group them together with no gap
-// beyond the header's own `gap`); in the minimized chip it just flows inline.
+// §2.4), pushed to the far right like `.agent-question-panel-queue` — both can
+// be present at once, flex auto-margins group them together with no gap
+// beyond the header's own `gap`.
 .agent-question-panel-header .agent-question-panel-countdown {
     margin-left: auto;
 }
@@ -241,15 +241,23 @@
 .agent-question-panel-actions {
     display: flex;
     justify-content: flex-end;
+    // Wraps to a second row rather than clipping — three buttons (Cancel /
+    // Accept Recommended / Submit answer, added by codex P2 on #2950) can
+    // exceed a narrow split pane's width (layoutResize.ts permits panes down
+    // to 128px), and .agent-view's overflow: hidden would otherwise silently
+    // cut off Cancel or Accept Recommended rather than showing an obviously
+    // broken layout. `gap` (not row-gap/column-gap separately) already
+    // covers both axes once wrapped.
+    flex-wrap: wrap;
     gap: var(--space-2);
-    // Submit answer / Answer later stay reachable even when the question
-    // content above is scrolled — see spec §2 for why this matters beyond
-    // cosmetics (the 30s auto-timeout still fires regardless of whether the
-    // user can reach these buttons). NOT via position: sticky (Codex P2,
-    // PR #2805 — see .agent-question-panel-header's comment for why sticky
-    // is inert here); flex-shrink: 0 below is what actually keeps this bar
-    // at its natural size while .agent-question-panel-scroll absorbs any
-    // squeeze.
+    // Cancel / Accept Recommended / Submit answer stay reachable even when
+    // the question content above is scrolled — see spec §2 for why this
+    // matters beyond cosmetics (the 30s auto-timeout still fires regardless
+    // of whether the user can reach these buttons). NOT via position: sticky
+    // (Codex P2, PR #2805 — see .agent-question-panel-header's comment for
+    // why sticky is inert here); flex-shrink: 0 below is what actually keeps
+    // this bar at its natural size while .agent-question-panel-scroll
+    // absorbs any squeeze.
     padding-top: var(--space-2);
     flex-shrink: 0;
 }
@@ -268,6 +276,22 @@
         background: var(--hover-bg-color, rgba(255, 255, 255, 0.06));
     }
 
+    // Accept Recommended — a lighter-weight secondary-accent style
+    // (bordered/text, not filled) so it's visually distinct from both the
+    // neutral Cancel and the filled-accent Submit below: a shortcut for the
+    // default path, not a competing primary CTA. A filled button here would
+    // push the user toward the shortcut over actually reading the options,
+    // which under-serves a question the agent thought worth asking at all.
+    // See docs/specs/SPEC_ASK_USER_QUESTION_ACCEPT_RECOMMENDED_BUTTON_2026_09_03.md §3.
+    &--recommended {
+        border-color: var(--accent-color);
+        color: var(--accent-color);
+
+        &:hover {
+            background: rgba(var(--accent-color-rgb, 65, 159, 224), 0.1);
+        }
+    }
+
     &--submit {
         background: var(--accent-color);
         border-color: var(--accent-color);
@@ -283,23 +307,4 @@
             cursor: not-allowed;
         }
     }
-}
-
-.agent-question-panel-minimized {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-2);
-    margin: var(--space-2) 0;
-    padding: var(--space-1-5) var(--space-3);
-    background: var(--modal-bg-color, #232323);
-    border: 1px solid var(--accent-color);
-    border-radius: var(--radius-md, 0);
-    color: var(--main-text-color);
-    cursor: default;
-    font-size: var(--text-sm, 12px);
-}
-
-.agent-question-panel-minimized-cta {
-    color: var(--secondary-text-color);
-    font-size: var(--text-xs, 11px);
 }

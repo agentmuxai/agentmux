@@ -903,31 +903,48 @@ function isDuplicate(
  * since the tool has terminated. For non-tool nodes the behavior is
  * the same as the prior unconditional replacement.
  *
- * Also preserves an already-answered AskUserQuestion's `answerText`/
- * `timeoutNote`/`questionText`/`summary` across a same-id replacement —
+ * Also preserves an already-RESOLVED AskUserQuestion's `status`/`summary`/
+ * `answerText`/`timeoutNote`/`questionText` across a same-id replacement —
  * those are frontend-only optimistic fields the parser's fresh-built
  * replacement never carries, and AskUserQuestion's own `tool_result` echo
- * (which always eventually arrives once the answer resumes the turn) would
- * otherwise wholesale-clobber them since the tool has no log buffer.
+ * (which always eventually arrives, whether the question was answered OR
+ * declined) would otherwise wholesale-clobber them since the tool has no
+ * log buffer.
  */
 function mergeReplacement(existing: DocumentNode, replacement: DocumentNode): DocumentNode {
     if (existing.type !== "tool" || replacement.type !== "tool") {
         return replacement;
     }
-    // An answered AskUserQuestion's `answerText`/`timeoutNote` are set only
-    // by useAgentQuestions.ts's optimistic handleAnswer — they never come
-    // from the event stream. But AskUserQuestion IS a real tool call, so
-    // once the answer resumes the turn, the CLI's own `tool_result` for the
-    // same tool_use_id still arrives and gets parsed into a fresh, generic
-    // ToolNode via stream-parser.ts's toolResultToNode() (no concept of
-    // these fields). Without this guard that update lands here and wins
-    // the wholesale-replace path below, silently reverting the node to the
-    // pre-answered-styling collapsed-row rendering shortly after the user
-    // answers. See docs/retro/RETRO_ASK_USER_QUESTION_ANSWER_TEXT_CLOBBER_2026_08_18.md.
+    // A resolved AskUserQuestion's `answerText`/`timeoutNote`/`questionText`
+    // are set only by useAgentQuestions.ts's optimistic handleAnswer/
+    // handleCancel — they never come from the event stream. But
+    // AskUserQuestion IS a real tool call, so its `tool_result` echo for the
+    // same tool_use_id still arrives once the turn resumes, whether the
+    // question was answered OR declined, and gets parsed into a fresh,
+    // generic ToolNode via stream-parser.ts's toolResultToNode() (no concept
+    // of these fields — `status` there is `event.status` verbatim from
+    // whatever the backend sends for this exact echo, unverified against a
+    // live deny). Without this guard that update lands here and wins the
+    // wholesale-replace path below, silently reverting the node to the
+    // pre-resolved-styling collapsed row shortly after the user acts. See
+    // docs/retro/RETRO_ASK_USER_QUESTION_ANSWER_TEXT_CLOBBER_2026_08_18.md
+    // (the original fix, for the answered case only) and codex P1 on
+    // #2950 (this widening, for the cancelled case, which sets
+    // `questionText` but deliberately never sets `answerText` — so keying
+    // this guard on `answerText != null` alone let a cancelled question's
+    // "denied" status and cancelled-note rendering get silently clobbered
+    // by whatever the raw echo happens to parse to). `questionText` is set
+    // by BOTH handlers unconditionally, so it is the right single signal for
+    // "this AskUserQuestion has already been resolved by our own optimistic
+    // handler, don't trust the parser's fresh view of it" — and `status` is
+    // now preserved too, not just the display fields, since unlike the
+    // answer case there is no guarantee the cancelled echo's raw status
+    // happens to already equal "denied".
     const existingTool = existing as ToolNode;
-    if (existingTool.toolName === "AskUserQuestion" && existingTool.answerText != null) {
+    if (existingTool.toolName === "AskUserQuestion" && existingTool.questionText != null) {
         return {
             ...(replacement as ToolNode),
+            status: existingTool.status,
             summary: existingTool.summary,
             answerText: existingTool.answerText,
             timeoutNote: existingTool.timeoutNote,

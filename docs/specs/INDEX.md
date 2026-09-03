@@ -178,7 +178,7 @@ are doing history". Everything else is here; the completeness
 assertion in the generator fails the build rather than emit a
 partial list.
 
-### implemented (130)
+### implemented (131)
 
 | Spec | Title |
 |---|---|
@@ -211,6 +211,7 @@ partial list.
 | [`SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17`](SPEC_AMBIENT_PANE_TITLE_OVERALL_GOAL_TRACKING_2026_08_17.md) | SPEC: Pane title tracks the session's overall goal, not the latest micro-step |
 | [`SPEC_ARMORY_BIND_TO_AGENT_CONTEXT_MENU_2026_08_09`](SPEC_ARMORY_BIND_TO_AGENT_CONTEXT_MENU_2026_08_09.md) | SPEC — Armory "Bind to Agent" context menu on account rows |
 | [`SPEC_ARMORY_MEMORY_GLOBAL_PERSONAL_RENAME_2026_08_22`](SPEC_ARMORY_MEMORY_GLOBAL_PERSONAL_RENAME_2026_08_22.md) | Spec: Armory rail — "Global Memory" / "Personal Memory" rename + reposition |
+| [`SPEC_ASK_USER_QUESTION_ACCEPT_RECOMMENDED_BUTTON_2026_09_03`](SPEC_ASK_USER_QUESTION_ACCEPT_RECOMMENDED_BUTTON_2026_09_03.md) | SPEC: "Accept Recommended" button for AskUserQuestion |
 | [`SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06`](SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md) | SPEC: Auto-timeout for AskUserQuestion — 30s countdown, auto-select the recommended option |
 | [`SPEC_ASK_USER_QUESTION_HISTORY_STYLING_2026_08_17`](SPEC_ASK_USER_QUESTION_HISTORY_STYLING_2026_08_17.md) | SPEC: Answered questions render as user input + inverted user-input surface |
 | [`SPEC_ASK_USER_QUESTION_PANEL_SCROLL_2026_08_25`](SPEC_ASK_USER_QUESTION_PANEL_SCROLL_2026_08_25.md) | SPEC: Scrolling for the AskUserQuestion panel |

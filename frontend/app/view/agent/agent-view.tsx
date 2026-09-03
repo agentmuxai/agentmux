@@ -1075,7 +1075,7 @@ const AgentPresentationView = ({
     // See hooks/useAgentQuestions.ts. `sendMessage` is passed as a thunk so
     // the non-persistent follow-up fallback (invoked only inside the async
     // catch) can delegate to the handleSendMessage defined below.
-    const { pendingQuestions, handleAnswer } = useAgentQuestions({
+    const { pendingQuestions, handleAnswer, handleCancel } = useAgentQuestions({
         blockId: model.blockId,
         getDocument,
         sendMessage: (message: string) => handleSendMessage(message),
@@ -2215,12 +2215,16 @@ const AgentPresentationView = ({
             {/* AskUserQuestion panel — surfaced when a tool call is in
                 `awaiting_answer` (the agent asked the user a structured
                 question and is blocked on the answer). Submitting delivers a
-                tool_result over the persistent controller's stdin.
-                Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md. */}
+                tool_result over the persistent controller's stdin. Cancel
+                (button / Escape) is a REAL protocol-level decline via
+                `handleCancel`, not a UI-only dismiss — replaces the old
+                "Answer later" minimize, which never told the agent anything.
+                Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md,
+                docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md. */}
             <AgentQuestionPanel
                 pending={pendingQuestions}
                 onAnswer={handleAnswer}
-                onDefer={() => log("agent", "Question minimized")}
+                onCancel={handleCancel}
             />
 
             {/* Queue sits directly below the feed so the user's newly-

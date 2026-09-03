@@ -323,6 +323,51 @@ describe("agent document reducer", () => {
             expect(result.summary).toBe("❓ Answered — Red");
             expect(result.questionText).toBe("Which color do you like?");
         });
+
+        // Codex P1 on #2950: the guard above keyed on `answerText != null`,
+        // which a CANCELLED question deliberately never sets (there is no
+        // answer). That let a declined question's "denied" status and
+        // cancelled-note rendering get silently clobbered by the CLI's own
+        // trailing tool_result echo for the same tool_use_id — exactly the
+        // clobbering bug RETRO_ASK_USER_QUESTION_ANSWER_TEXT_CLOBBER_2026_08_18.md
+        // already fixed once, reintroduced for a case that guard didn't
+        // cover. Also pins that `status` itself survives the echo, not just
+        // the display fields — unlike the answered case, there's no
+        // guarantee the real echo's raw status happens to already read
+        // "denied" (stream-parser.ts's toolResultToNode() passes the
+        // backend's event.status straight through, unverified against a
+        // live deny).
+        it("preserves a cancelled AskUserQuestion's status/questionText against the CLI's own trailing tool_result echo", () => {
+            const cancelled = tool("q2", {
+                toolName: "AskUserQuestion",
+                status: "denied",
+                summary: "🚫 Cancelled — no answer provided",
+                questionText: "Which color do you like?",
+            });
+            const s0 = seed([cancelled]);
+
+            // The CLI's own tool_result echo for the declined tool call —
+            // a fresh, generic node built the way toolResultToNode() would,
+            // with whatever raw status the backend happens to send (modeled
+            // here as "success", the worst case: an echo that would flip a
+            // declined question back to looking answered if unpreserved).
+            const echo = tool("q2", {
+                toolName: "AskUserQuestion",
+                status: "success",
+                summary: "✓ AskUserQuestion",
+            });
+            const r = update(s0, {
+                type: "StreamFlush",
+                newNodes: [],
+                updatedNodes: [echo],
+            });
+
+            const result = r.state.nodes[0] as ToolNode;
+            expect(result.status).toBe("denied");
+            expect(result.summary).toBe("🚫 Cancelled — no answer provided");
+            expect(result.questionText).toBe("Which color do you like?");
+            expect(result.answerText).toBeUndefined();
+        });
     });
 
     describe("StreamTruncate suppression", () => {

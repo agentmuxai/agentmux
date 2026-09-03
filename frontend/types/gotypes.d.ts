@@ -269,6 +269,16 @@ declare global {
         answers: {[key: string]: string | string[]};
     };
 
+    // CommandAgentCancelData — a real protocol-level decline of a pending
+    // AskUserQuestion (Cancel button / Escape), delivered as a control_response
+    // carrying behavior: "deny" rather than CommandAgentAnswerData's allow+answers
+    // shape. No answers field — the deny message is a fixed server-owned string.
+    // Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
+    type CommandAgentCancelData = {
+        blockid: string;
+        tool_use_id: string;
+    };
+
     // wshrpc.CommandBlockSetViewData
     type CommandBlockSetViewData = {
         blockid: string;
@@ -754,10 +764,9 @@ declare global {
     };
 
     // ────────────────────────────────────────────────────────────────
-    // Unified agent types (Drone Phase 1.5, see
-    // docs/specs/SPEC_UNIFIED_AGENT_TYPES_2026_05_13.md). Shared
-    // between the agent pane and the drone Agent block. Mirror
-    // of agentmux-srv/src/agents/types.rs — camelCase via serde
+    // Unified agent types (Drone Phase 1.5). Shared between the agent
+    // pane and the drone Agent block. Mirror of
+    // agentmux-srv/src/agents/types.rs — camelCase via serde
     // rename_all so the field shapes match without translation.
     // ────────────────────────────────────────────────────────────────
 
