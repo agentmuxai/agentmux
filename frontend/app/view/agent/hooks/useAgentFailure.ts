@@ -101,8 +101,16 @@ export interface UseAgentFailureOptions {
      * successful login silently re-send that agent's last OLD message.
      */
     onLoginAgain: (turnAttempted: boolean) => void;
-    /** Open a real terminal window for browser-based OAuth (Claude v2.1.x). */
-    onLoginViaTerminal: () => void;
+    /**
+     * Open a real terminal window for browser-based OAuth (Claude v2.1.x).
+     *
+     * Takes `turnAttempted` for the SAME reason {@link onLoginAgain} does, and
+     * it must be forwarded the same way: this action recovers the pre-launch
+     * row too, and a terminal login that "retries" a turn which never ran
+     * resends the agent's last old message. Deriving it after the login
+     * succeeds does not work — see loginViaTerminal's own doc comment.
+     */
+    onLoginViaTerminal: (turnAttempted: boolean) => void;
     /** Open Armory → Accounts. */
     onOpenArmory: () => void;
     /** Start a fresh agent session (context-window overflow recovery). */
@@ -290,7 +298,8 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 // disagree about which case this is (a never-started agent must
                 // not have an old message re-sent after a successful login).
                 loginAgain: () => opts.onLoginAgain(pf.turnAttempted ?? true),
-                loginViaTerminal: opts.onLoginViaTerminal,
+                // Same single-source forwarding as loginAgain above.
+                loginViaTerminal: () => opts.onLoginViaTerminal(pf.turnAttempted ?? true),
                 openArmory: opts.onOpenArmory,
                 newSession: opts.onNewSession,
                 toggleDetails: () => setExpanded((v) => !v),

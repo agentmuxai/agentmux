@@ -437,3 +437,79 @@ describe("useAgentControllerStatus — loginViaTerminal clears canRetry on succe
         });
     });
 });
+
+describe("useAgentControllerStatus — loginViaTerminal routes by retryAfterLogin, like relogin (reagent + manoz P1 on PR #2951)", () => {
+    // The cross-hook race both reviewers found: loginViaTerminal used to call
+    // onRecovered unconditionally, leaving the caller to infer retry-vs-startup
+    // from pane state AFTER the fact. But this branch's own setCanRetry(false)
+    // is an unbatched Solid write that synchronously flushes agent-view's
+    // effect, which clears the very failure that inference read — so the
+    // pre-launch case silently fell back to "retry" and resent a stale message.
+    //
+    // Fixed by removing the inference rather than timing it: the caller decides
+    // at click time, exactly as relogin has always worked. These pin the
+    // routing, which is what makes the decision independent of effect ordering.
+    const terminalSuccess = () => {
+        hub.runProviderLogin.mockImplementation(async (opts: any) => {
+            opts.onAccountRegistered?.("acct-term", "/tmp/acct-term");
+            return "terminal-success";
+        });
+    };
+
+    it("retryAfterLogin:false routes to onReady (startup), never onRecovered (retry)", async () => {
+        const onRecovered = vi.fn();
+        const onReady = vi.fn();
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+                onRecovered,
+                onReady,
+            });
+            terminalSuccess();
+            await status.loginViaTerminal({ retryAfterLogin: false });
+
+            // The stale-resend bug is exactly onRecovered firing here.
+            expect(onRecovered).not.toHaveBeenCalled();
+            expect(onReady).toHaveBeenCalled();
+            dispose();
+        });
+    });
+
+    it("retryAfterLogin:true routes to onRecovered (retry), matching the mid-turn 401 case", async () => {
+        const onRecovered = vi.fn();
+        const onReady = vi.fn();
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+                onRecovered,
+                onReady,
+            });
+            terminalSuccess();
+            await status.loginViaTerminal({ retryAfterLogin: true });
+
+            expect(onRecovered).toHaveBeenCalled();
+            dispose();
+        });
+    });
+
+    it("defaults to retry when the caller says nothing (pre-existing behaviour)", async () => {
+        const onRecovered = vi.fn();
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+                onRecovered,
+            });
+            terminalSuccess();
+            await status.loginViaTerminal();
+
+            expect(onRecovered).toHaveBeenCalled();
+            dispose();
+        });
+    });
+});

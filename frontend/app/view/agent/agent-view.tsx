@@ -93,7 +93,6 @@ import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
 import { useAgentDecisions } from "./hooks/useAgentDecisions";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
 import { useAgentFailure } from "./hooks/useAgentFailure";
-import { postLoginRecoveryFor } from "./failure/recovery-action";
 import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
 import { useAgentQuestions } from "./hooks/useAgentQuestions";
 import { useBlockActivity } from "./hooks/useBlockActivity";
@@ -1242,62 +1241,23 @@ const AgentPresentationView = ({
             // first, that same capture would see the stale failure on THIS
             // auto-retry too and wrongly reject the very resend recovery
             // just enabled. Codex P1 on PR #2338.
-            // codex P1 on PR #2951: do NOT auto-retry when the row that was
-            // showing is the synthetic PRE-LAUNCH one (turnAttempted false).
-            // `relogin` already gates its own onRecovered on retryAfterLogin,
-            // but `loginViaTerminal`'s terminal-success branch calls this
-            // unconditionally — and the pre-launch case now reaches it, because
-            // consolidating onto the failure row newly exposes "Login via
-            // terminal" for a case whose old blue bar had no such action. Left
-            // alone, a successful terminal login on a never-started agent WITH
-            // prior history resends its last old transcript message, which is
-            // the exact stale-resend this whole turnAttempted split exists to
-            // prevent. Read before the clear below, which wipes the flag.
-            const recovery = postLoginRecoveryFor(untrack(() => agentAtoms().failureAtom[0]()));
+            // Unconditional again, and deliberately so.
+            //
+            // Two earlier attempts on this PR tried to make the retry-vs-startup
+            // decision HERE, from pane state, because loginViaTerminal (unlike
+            // relogin) called this without saying which it wanted. Retrying
+            // unconditionally resent a stale message on a never-launched agent
+            // (codex); returning early instead dropped the startup sequence
+            // (reagent); and reading the failure to decide raced the login's own
+            // setCanRetry(false), which synchronously flushes the effect that
+            // clears that very failure (reagent + manoz, independently).
+            //
+            // The fix was to remove the inference, not to time it better:
+            // loginViaTerminal now takes an explicit retryAfterLogin like
+            // relogin always did, decided at click time from the row's own
+            // turnAttempted, and calls onReady() instead of this on its
+            // no-retry path. So every caller that reaches here wants a retry.
             dispatchPane(model.blockId, { type: "FailureCleared" }, "system");
-            if (recovery === "send-startup") {
-                // Mirror relogin()'s own `!retryAfterLogin` success path
-                // (useAgentControllerStatus.ts:745/805): send the STARTUP
-                // sequence instead of retrying a turn. Skipping both is wrong —
-                // reagent P1, second re-review of PR #2951.
-                //
-                // `onReadyFn` is the only path that ever delivers identity /
-                // instructions / context to a fresh agent, and nothing else
-                // re-triggers it later (it fires only from startLaunchFlow's
-                // success branch and relogin's two). Before this PR the
-                // pre-launch case reached startLaunchFlow indirectly, via
-                // retryLastTurn's own "no prior message" fallback — so simply
-                // returning here would leave a never-started agent
-                // authenticated, with a running controller that never received
-                // its startup payload. That is the identical bug reagent/codex
-                // caught on relogin in PR #2318, reintroduced through the
-                // terminal path that this PR newly exposes for this case.
-                //
-                // Safe for the with-history case too: onReadyFn self-guards on
-                // `agent:sessionid` already being set, so it no-ops for
-                // anything but a genuine first login — which is exactly why
-                // this is NOT retryLastTurn (that would resend an old message).
-                // NOT `onReadyFn?.()`: optional chaining would make an
-                // unassigned `onReadyFn` do silently nothing — the exact
-                // "does neither" shape just fixed above, reintroduced by
-                // ordering instead of control flow, and invisible when it
-                // happens. Currently unreachable (both the status object and
-                // the assignment happen during component setup, while this
-                // fires from an async login callback long after), but the
-                // failure would be silent, so make it loud instead.
-                // manoz, reviewing 708c7c1c6.
-                if (onReadyFn) {
-                    log("auth", "Login successful — sending the agent's startup sequence (no turn to retry)");
-                    onReadyFn();
-                } else {
-                    log(
-                        "auth",
-                        "Login succeeded but the startup sequence could not be sent (onReadyFn unassigned) — reopen the pane if the agent seems unconfigured",
-                        "warn",
-                    );
-                }
-                return;
-            }
             retryLastTurn();
         },
         getInitialTermSize: () => computeTermSizeFromEl(rootRef),
@@ -1960,9 +1920,9 @@ const AgentPresentationView = ({
         },
         // Open a real console window (CREATE_NEW_CONSOLE) so the browser OAuth
         // can launch. Polls for new credentials and seeds when they appear.
-        onLoginViaTerminal: () => {
+        onLoginViaTerminal: (turnAttempted: boolean) => {
             log("auth", "Login via terminal — opening a console window for browser login");
-            void status.loginViaTerminal();
+            void status.loginViaTerminal({ retryAfterLogin: turnAttempted });
         },
     });
 

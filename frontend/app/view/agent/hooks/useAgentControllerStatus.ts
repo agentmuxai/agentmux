@@ -135,7 +135,22 @@ export interface UseAgentControllerStatus {
      * seeds a real per-account isolated dir and registers/links the account
      * (not just a file — PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7).
      */
-    loginViaTerminal: () => Promise<void>;
+    /**
+     * Open a real terminal for the browser OAuth.
+     *
+     * `retryAfterLogin` mirrors {@link relogin}'s identical argument and must
+     * be decided by the CALLER, at click time, from the failure the button
+     * belongs to — NOT re-derived after the fact. Defaults to `true` (a turn
+     * ran and failed on auth; re-run it). Pass `false` for the pre-launch
+     * case: no turn ever ran, so there is nothing to retry and the agent needs
+     * its startup sequence instead.
+     *
+     * Deriving this after login succeeded is what produced the cross-hook race
+     * reagent and manoz both caught on PR #2951 — the success path's own
+     * `setCanRetry(false)` synchronously flushes an effect that clears the
+     * failure this decision was being read from.
+     */
+    loginViaTerminal: (opts?: { retryAfterLogin?: boolean }) => Promise<void>;
     /**
      * AuthUrlBox's "Use terminal instead" secondary action
      * (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 2): cancels
@@ -915,7 +930,8 @@ export function useAgentControllerStatus(
     // fixed once in runProviderLogin itself. A second hand-rolled copy would
     // only let that exact class of bug reappear the next time one of the two
     // was fixed and the other wasn't.
-    const loginViaTerminal = async () => {
+    const loginViaTerminal = async (terminalOpts: { retryAfterLogin?: boolean } = {}) => {
+        const retryAfterLogin = terminalOpts.retryAfterLogin ?? true;
         if (reloginInFlight) return;
         loginCancelled = false;
         const prov = opts.provider();
@@ -1030,7 +1046,22 @@ export function useAgentControllerStatus(
                         // See relogin()'s identical comment — reagent P0 on
                         // PR #2338.
                         endThisRecoveryFlow();
-                        opts.onRecovered?.();
+                        // Branch exactly as relogin does (:732/745, :800/805).
+                        // This asymmetry — relogin deciding from an explicit
+                        // argument while this path inferred it from pane state
+                        // afterwards — was the root of BOTH the dropped-startup
+                        // bug and the cross-hook race on PR #2951. The caller
+                        // now decides at click time, so nothing here depends on
+                        // what `setCanRetry(false)` above may have triggered.
+                        if (retryAfterLogin) {
+                            opts.onRecovered?.();
+                        } else {
+                            // No turn was ever attempted — send the startup
+                            // sequence instead of retrying. onReadyFn
+                            // self-guards on `agent:sessionid`, so this is a
+                            // no-op for anything but a genuine first login.
+                            opts.onReady?.();
+                        }
                     } else {
                         setAuthStatus("unauthenticated");
                         setAuthNotice(
