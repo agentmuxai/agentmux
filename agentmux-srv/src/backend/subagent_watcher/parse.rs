@@ -540,7 +540,7 @@ pub fn derive_claude_config_dir(agent_id: &str) -> Option<PathBuf> {
 /// agent forever (confirmed live: repeated "config dir does not exist yet"
 /// over 38+ minutes and multiple re-registrations, for an agent that had, in
 /// fact, already spawned subagents — just under the real shared path). See
-/// docs/specs/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md.
+/// docs/specs/archive/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md.
 pub fn resolve_claude_config_dir(
     meta: &crate::backend::obj::MetaMapType,
     agent_id: &str,
