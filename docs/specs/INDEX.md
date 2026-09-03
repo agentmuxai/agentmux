@@ -425,7 +425,7 @@ partial list.
 | [`uptime-adaptive-width-help-zoom`](uptime-adaptive-width-help-zoom.md) | Spec: Adaptive Uptime Width + Help View Zoom |
 | [`widget-visibility-rearchitecture`](widget-visibility-rearchitecture.md) | Widget Visibility Re-Architecture |
 
-### draft (242)
+### draft (241)
 
 | Spec | Title |
 |---|---|
@@ -456,7 +456,6 @@ partial list.
 | [`SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15`](SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15.md) | SPEC: Agent pane forks + a cohesive auxiliary-pins architecture |
 | [`SPEC_AGENT_PANE_HEADER_COLOR_THEME_2026_06_23`](SPEC_AGENT_PANE_HEADER_COLOR_THEME_2026_06_23.md) | SPEC: Agent Pane Header Color Theme (Right-Click Picker) |
 | [`SPEC_AGENT_PANE_HEADER_NAME_PRECEDENCE_2026_06_29`](SPEC_AGENT_PANE_HEADER_NAME_PRECEDENCE_2026_06_29.md) | SPEC: Agent Pane Header — Name Precedence + Drop "continued" Chip |
-| [`SPEC_AGENT_PANE_HISTORY_DAY_SEPARATORS_AND_READONLY_VIEW_2026_07_20`](SPEC_AGENT_PANE_HISTORY_DAY_SEPARATORS_AND_READONLY_VIEW_2026_07_20.md) | SPEC — Agent Pane History: Slack-Style Day Separators + "Open Full History" Read-Only Pane |
 | [`SPEC_AGENT_PANE_HYPERLINKS_2026_06_20`](SPEC_AGENT_PANE_HYPERLINKS_2026_06_20.md) | SPEC: Aggressive Hyperlink Detection in Agent Pane |
 | [`SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19`](SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md) | Agent Pane Memory & Identity Modals |
 | [`SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25`](SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md) | SPEC — Agent pane: remove the reserved-space gap above the tab strip; progress bar overlays instead |
