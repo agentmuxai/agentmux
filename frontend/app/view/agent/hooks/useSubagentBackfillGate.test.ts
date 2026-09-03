@@ -46,11 +46,52 @@ vi.mock("@/app/store/rpc-api", () => ({
     },
 }));
 
+// The settle decision now awaits these directly (2026-09-02 fix — see the
+// hook's own doc comment) instead of a blind timer, so tests drive settling
+// by resolving these mocks rather than advancing a fixed-duration clock.
+const refreshHub = vi.hoisted(() => ({
+    subagentsResolve: null as (() => void) | null,
+    dispatchesResolve: null as (() => void) | null,
+}));
+vi.mock("../activity/subagent-source", () => ({
+    refreshSubagentsNow: vi.fn(
+        () =>
+            new Promise<void>((resolve) => {
+                refreshHub.subagentsResolve = resolve;
+            })
+    ),
+}));
+vi.mock("../activity/dispatch-source", () => ({
+    refreshDispatchesNow: vi.fn(
+        () =>
+            new Promise<void>((resolve) => {
+                refreshHub.dispatchesResolve = resolve;
+            })
+    ),
+}));
+
 import { resolveBackfillStatus, useSubagentBackfillGate } from "./useSubagentBackfillGate";
+
+/** Resolve both settle-refresh mocks and flush the microtask queue so their
+ *  `.then()` chain (inside the hook) actually runs. Flushes twice up front
+ *  first — when "done" arrived via the async `EventReadHistoryCommand` path
+ *  rather than a synchronous live-event handler call, `scheduleSettle()`
+ *  (and therefore the calls that populate `refreshHub`) hasn't run yet at
+ *  the moment this is invoked. */
+async function resolveSettleRefresh(): Promise<void> {
+    await Promise.resolve();
+    await Promise.resolve();
+    refreshHub.subagentsResolve?.();
+    refreshHub.dispatchesResolve?.();
+    await Promise.resolve();
+    await Promise.resolve();
+}
 
 afterEach(() => {
     hub.handler = null;
     rpcHub.resolve = null;
+    refreshHub.subagentsResolve = null;
+    refreshHub.dispatchesResolve = null;
     vi.useRealTimers();
 });
 
@@ -112,7 +153,7 @@ describe("useSubagentBackfillGate", () => {
         expect(settled()).toBe(false);
     });
 
-    it("stays gated on a live 'started', settles (after the dock buffer) on a live 'done'", async () => {
+    it("stays gated on a live 'started', settles only once the dock's own refresh actually lands on a live 'done'", async () => {
         vi.useFakeTimers();
         const { settled } = mount("agent", true);
         rpcHub.resolve?.([]);
@@ -123,9 +164,14 @@ describe("useSubagentBackfillGate", () => {
         expect(settled()).toBe(false);
 
         hub.handler?.({ data: { status: "done" } });
-        expect(settled()).toBe(false); // buffer not elapsed yet
+        expect(settled()).toBe(false); // the settle refresh hasn't resolved yet
 
-        await vi.advanceTimersByTimeAsync(250);
+        // Even letting real time pass must not settle it early — only the
+        // actual refresh landing does now (the whole point of this fix).
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(settled()).toBe(false);
+
+        await resolveSettleRefresh();
         expect(settled()).toBe(true);
     });
 
@@ -145,7 +191,36 @@ describe("useSubagentBackfillGate", () => {
 
         // ...and finishes.
         hub.handler?.({ data: { status: "done" } });
-        await vi.advanceTimersByTimeAsync(250);
+        await resolveSettleRefresh();
+        expect(settled()).toBe(true);
+    });
+
+    it("a slow settle-refresh does not let a stale 'started' cycle settle late (generation guard)", async () => {
+        vi.useFakeTimers();
+        const { settled } = mount("agent", true);
+        rpcHub.resolve?.([]);
+        await vi.advanceTimersByTimeAsync(0);
+
+        // First cycle: "done" fires, kicking off a settle refresh that
+        // hasn't resolved yet.
+        hub.handler?.({ data: { status: "started" } });
+        hub.handler?.({ data: { status: "done" } });
+        expect(settled()).toBe(false);
+
+        // A NEW "started" re-closes the gate before that refresh landed
+        // (e.g. an overlapping re-registration, scan.rs's
+        // backfill_generation). The stale in-flight refresh from the FIRST
+        // cycle must not be allowed to settle this new cycle when it
+        // finally resolves.
+        hub.handler?.({ data: { status: "started" } });
+        expect(settled()).toBe(false);
+
+        await resolveSettleRefresh(); // resolves the FIRST cycle's stale refresh
+        expect(settled()).toBe(false); // must still be gated — that resolution was stale
+
+        // The new cycle's own "done" + refresh correctly settles it.
+        hub.handler?.({ data: { status: "done" } });
+        await resolveSettleRefresh();
         expect(settled()).toBe(true);
     });
 
@@ -168,7 +243,7 @@ describe("useSubagentBackfillGate", () => {
             { data: { status: "done" } },
         ]);
         await vi.advanceTimersByTimeAsync(0);
-        await vi.advanceTimersByTimeAsync(250);
+        await resolveSettleRefresh();
         expect(settled()).toBe(true);
     });
 
@@ -206,7 +281,7 @@ describe("useSubagentBackfillGate", () => {
         expect(hub.handler).not.toBeNull();
 
         rpcHub.resolve?.([{ data: { status: "done" } }]);
-        await vi.advanceTimersByTimeAsync(250);
+        await resolveSettleRefresh();
         expect(settled()).toBe(true);
     });
 
@@ -221,7 +296,7 @@ describe("useSubagentBackfillGate", () => {
 
         // First cycle settles normally.
         rpcHub.resolve?.([{ data: { status: "done" } }]);
-        await vi.advanceTimersByTimeAsync(250);
+        await resolveSettleRefresh();
         expect(settled()).toBe(true);
 
         // A later, legitimate re-registration re-closes the gate...

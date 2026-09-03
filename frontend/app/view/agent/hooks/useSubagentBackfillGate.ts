@@ -58,6 +58,23 @@
  *
  * Mirrors `useResumeRetryStream.ts`'s live-subscribe + mount-time
  * `EventReadHistoryCommand` read + discard-on-live-race shape.
+ *
+ * 2026-09-02 (docs/retro/retro-activitydock-appears-on-agent-pane-load-2026-09-02.md,
+ * following up on docs/reports/REPORT_AGENT_PANE_LOAD_RENDER_ARCHITECTURE_2026_08_27.md §2-3):
+ * the settle decision on a "done" event used to be a blind
+ * `DOCK_SETTLE_BUFFER_MS` (250ms) timer, guessed to give
+ * `subagent-source.ts`/`dispatch-source.ts`'s own independently-triggered,
+ * debounced refresh (`backfill-tracker.ts`'s `onNextBackfillSettle` →
+ * fire-and-forget `refreshNow()`) time to land before revealing the pane.
+ * There was no actual relationship between that guess and the real refresh
+ * — for a heavy agent (verified live: ~20 subagents replayed on reopen),
+ * the refresh's own RPC round trip could still be in flight well past
+ * 250ms, so the spinner faded and revealed a stale Activity Dock snapshot
+ * moments before the real data caught up and visibly corrected it — a
+ * flash on load, confirmed live via a CDP `MutationObserver` trace. Fixed
+ * by directly awaiting `refreshSubagentsNow()`/`refreshDispatchesNow()`
+ * (an explicit, non-debounced refresh of the exact data the dock renders)
+ * instead of guessing how long some OTHER refresh might take.
  */
 
 import { createEffect, createSignal, onCleanup, type Accessor } from "solid-js";
@@ -65,6 +82,8 @@ import { waveEventSubscribe } from "@/app/store/wps";
 import { WpsEvent } from "@/app/store/wps-events";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
+import { refreshSubagentsNow } from "../activity/subagent-source";
+import { refreshDispatchesNow } from "../activity/dispatch-source";
 
 /**
  * Resolve a raw `subagent:backfill_status` WPS payload into `"started"` /
@@ -76,19 +95,6 @@ export function resolveBackfillStatus(data: unknown): "started" | "done" | null 
     const status = (data as Record<string, unknown>).status;
     return status === "started" || status === "done" ? status : null;
 }
-
-/**
- * codex P2 (PR #2781, round 2): the backend publishes "done" the instant
- * its own file-scan returns, but `dispatch-source.ts`/`subagent-source.ts`
- * only SCHEDULE their own trailing-edge-debounced `ListActive`/
- * `ListDispatches` refresh in reaction to the same burst of events
- * (`debounced-refresh.ts`, 100ms window) — so revealing the pane the
- * instant "done" lands can still race ahead of the Activity Dock's own
- * data actually catching up. Not a guarantee (a slow network response
- * could still exceed this), but a pragmatic buffer comfortably covering
- * the common case.
- */
-const DOCK_SETTLE_BUFFER_MS = 250;
 
 /**
  * Safety net (PR #2781 round 4): fail open rather than get stuck forever
@@ -128,8 +134,13 @@ export function useSubagentBackfillGate(
     // the full 20s safety-timeout on essentially every first message of
     // every new agent conversation.
     let decided = false;
-    let settleTimer: ReturnType<typeof setTimeout> | undefined;
     let safetyTimer: ReturnType<typeof setTimeout> | undefined;
+    // Bumped on every "started" and on unmount — guards the async settle
+    // refresh below against resolving into a stale cycle (a new "started"
+    // reopening the gate, or the hook tearing down, while the refresh from
+    // a PRIOR "done" is still in flight).
+    let settleGeneration = 0;
+    let disposed = false;
 
     createEffect(() => {
         const vt = viewType();
@@ -159,6 +170,7 @@ export function useSubagentBackfillGate(
             return;
         }
 
+        disposed = false; // fresh decide cycle — see round-6's re-entry note above
         setSettled(false);
 
         // reagentx P2 (PR #2781, round 7): re-armed on EVERY "started", not
@@ -183,17 +195,30 @@ export function useSubagentBackfillGate(
         armSafetyTimer();
 
         let receivedLiveEvent = false;
+        // Wait for the dock's ACTUAL data (subagents + dispatches) to catch
+        // up with the settled backend state, rather than guessing a fixed
+        // duration — see this module's doc comment for why a blind timer
+        // raced ahead of the real refresh on a heavy agent. `myGeneration`
+        // makes this resolution a no-op if superseded by a later "started"
+        // or the hook unmounting before the refresh lands.
         const scheduleSettle = () => {
-            clearTimeout(settleTimer);
-            settleTimer = setTimeout(() => {
-                clearTimeout(safetyTimer);
-                setSettled(true);
-            }, DOCK_SETTLE_BUFFER_MS);
+            const myGeneration = ++settleGeneration;
+            void Promise.all([refreshSubagentsNow(), refreshDispatchesNow()])
+                .catch(() => {
+                    // Best-effort — fall through to settle anyway rather than
+                    // stay gated forever; the safety-net timer above still
+                    // covers a hang in either RPC.
+                })
+                .then(() => {
+                    if (disposed || myGeneration !== settleGeneration) return;
+                    clearTimeout(safetyTimer);
+                    setSettled(true);
+                });
         };
         const applyStatus = (data: unknown) => {
             const status = resolveBackfillStatus(data);
             if (status === "started") {
-                clearTimeout(settleTimer);
+                settleGeneration++; // invalidate any in-flight settle refresh from a prior cycle
                 setSettled(false);
                 armSafetyTimer();
             } else if (status === "done") {
@@ -242,7 +267,7 @@ export function useSubagentBackfillGate(
             // re-run — `decided` is reset in the `vt !== "agent"` branch
             // above, so a LATER change back to "agent" re-wires from
             // scratch rather than staying silently disabled forever.
-            clearTimeout(settleTimer);
+            disposed = true;
             clearTimeout(safetyTimer);
             try { unsub(); } catch { /* ignore */ }
         });
