@@ -89,11 +89,23 @@ Commander.js error, from the real binary. Likewise `ori codex exec --json
 --zzz-probe` produced codex's clap-style `unexpected argument '--zzz-probe'
 found / Usage: codex exec`.
 
-**What Ori consumes before the agent sees it:**
+**What Ori's help DECLARES as its own flags** — note this is the declared list,
+not the consumed list; the two differ and each entry needs testing:
 
 - Global: `--help/-h`, `--version/-v`, `--wizard`, `--completions`,
   `--log-level`, `--json/--agent`, `--human/--tty`
 - Per-agent: `--model`, `--reasoning-effort`
+
+**What is actually verified, one flag at a time:**
+
+| Flag | Reaches the agent? | Evidence |
+|---|---|---|
+| `--version` | **no** — Ori consumes it | `ori claude --version` prints `ori v0.13.0`, not `2.1.112` |
+| `--json` | **yes** — passes through | `ori codex exec --json` emits codex's JSONL, not its human banner |
+| everything else | untested | — |
+
+Assuming the declared list is the consumed list is what made the codex risk look
+real. It was not.
 
 **Demonstrated collision:** `ori claude --version` prints
 `ori v0.13.0+c7b5cda`, **not** Claude Code's `2.1.112`. Any health or auth probe
@@ -103,10 +115,40 @@ Checked against our actual args in `catalog.ts`:
 
 - **claude** — `-p --output-format stream-json --verbose
   --include-partial-messages --dangerously-skip-permissions`: **no collisions.**
-- **codex** — `exec --json ...`: `--json` is also an Ori global. My probe did
-  **not** isolate it, because codex errored on the deliberate bad flag either
-  way. Treat this as **unverified risk**, not a confirmed break. It is the first
-  thing to test if we wrap codex.
+- **codex** — `exec --json ...`: **RESOLVED — Ori does not consume it.**
+  Verified 2026-09-03 with a discriminator rather than inference: run bare,
+  `codex exec` prints a human banner (`OpenAI Codex v0.147.0`, `workdir:`,
+  `model:`), while `codex exec --json` emits JSONL (`{"type":"thread.started"}`
+  ...). Through Ori, `ori codex exec --json` produced the **JSONL** form, so the
+  flag reached codex. The same run shows Ori had correctly repointed codex at
+  `https://openrouter.ai/api/v1/responses`.
+
+  So `--version` is consumed but `--json` is not — the collision surface is
+  narrower than the global-flag list suggests, and wrapping codex is **not**
+  gated on this.
+
+### 3.1 Persistent mode survives the wrap
+
+Our providers are not all the same shape, and the spike's early framing implied
+they were. `claude` is `ControllerType::Persistent` — a long-lived process
+speaking bidirectional `--input-format stream-json` plus the Agent SDK control
+protocol — while `codex`, `gemini`, `qwen`, `kimi`, `muxcode` and `antigravity`
+are `Subprocess`, and `openclaw`/`pi`/`copilot` are `Acp`.
+
+That made claude the **riskiest** wrap, not the cheapest as §6 originally said:
+a wrapper sitting between us and the CLI could buffer stdout or fail to forward
+stdin, and a bidirectional protocol would break where a one-shot would not.
+
+**Verified working.** Feeding a stream-json message on stdin through
+`ori claude --input-format stream-json --output-format stream-json ...`
+produced clean framing on stdout — `system/init` carrying `session_id`, then
+`system/status`, `assistant`, `result` — identical in shape to running claude
+directly. Ori's own notices went to **stderr** only. The turn ends in
+`Not logged in`, which is the dummy key's 401 surfacing through claude, not a
+transport failure.
+
+So stdin passthrough and stdout cleanliness both hold, and `Persistent` is not
+a blocker.
 
 ## 4. Auth: OAuth is not required
 
@@ -232,14 +274,14 @@ Two independent options; (a) is cheap, (b) is the interesting one.
 Cheap, but only buys OpenRouter billing and guardrails for CLIs users can
 already run, and inherits both the `--version` collision and the tar/PATH bug.
 
-"Translators unchanged" holds **for claude only**, and an earlier revision of
-this section overclaimed it for codex. Our codex provider feeds the
-`codex-json` translator from `exec --json`, and §3 records that `--json` is
-also an Ori global whose ownership the probe did not resolve. If Ori consumes
-it, codex emits human-readable output and **every wrapped turn silently
-bypasses the translator** — output would degrade rather than error, which is
-the worst failure shape. Wrapping codex is therefore gated on resolving that
-one flag; wrapping claude is not.
+"Translators unchanged" now holds for **both claude and codex**. An earlier
+revision of this section gated codex on `--json` ownership; §3 records the
+resolution — Ori passes `--json` through, codex still emits JSONL, and the
+`codex-json` translator is unaffected. The failure mode that worried me (codex
+silently emitting human output and every wrapped turn bypassing the translator,
+degrading rather than erroring) does not occur.
+
+What remains true for both: the `--version` collision, and the tar/PATH bug.
 
 **(b) Add `ori code` as a provider in its own right.** This is what the 2026-06
 spec could not have proposed: a real harness with headless prompt, JSONL
@@ -260,8 +302,16 @@ None of that is large, and none of it is the "drop in a ProviderConfig" the
 first draft of this table implied. Worth doing if OpenRouter-as-a-model-option
 is a goal in itself; not worth doing incidentally.
 
-**Suggested order:** (a) for claude only — the cheapest real thing — then
-resolve codex's `--json` ownership, then (b) if the model-option goal stands.
+**Suggested order:** (a) for **codex first** — it is `Subprocess`, the simplest
+shape, and `ori codex exec --json` is demonstrated end to end — then claude,
+whose `Persistent` control-protocol path is also verified (§3.1) but has more
+moving parts. Then (b) if OpenRouter-as-a-model-option is a goal in itself.
+
+**Cost note for (a), measured rather than assumed:** 69 files reference a
+provider id like `"codex"` (seeds, bundle import/export/validate, argv
+handling, container spawn, failure classification, replay fixtures, generated
+types). Adding wrapped variants is not a two-line catalog edit, which is what
+an earlier draft of this section implied.
 
 ## 7. Operational notes
 
