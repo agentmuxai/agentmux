@@ -730,3 +730,49 @@ describe("useAgentControllerStatus — a caller-declared intent survives to the 
         });
     });
 });
+
+describe("useAgentControllerStatus — a no-provider bail-out leaves no intent behind (reagent P2 on PR #2951)", () => {
+    // Same rule as the in-flight guard: a call that returns WITHOUT starting a
+    // flow must not record its intent. There is no beginRecoveryFlow on that
+    // path, hence no paired endRecoveryFlow to clear it, so the value would
+    // persist until some unrelated flow happened to finish — and a later
+    // /login session (which declares its own intent only when a failure is
+    // pending) could read it from "Use terminal instead".
+    it("relogin with no provider does not record an intent", async () => {
+        const onRecovered = vi.fn();
+        const onReady = vi.fn();
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => undefined, // no provider: bails immediately
+                log: () => {},
+                onRecovered,
+                onReady,
+            });
+            await status.relogin({ retryAfterLogin: true });
+            dispose();
+        });
+
+        // A separate pane whose provider IS available: if the bail-out above
+        // had recorded `true`, this flow — which declares nothing — would
+        // inherit it and retry.
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-2", provider: () => claude, log: () => {},
+                onRecovered, onReady,
+            });
+            status.beginRecoveryFlow(); // no declared intent, as /login does with no failure
+            hub.runProviderLogin.mockImplementation(async (o: any) => {
+                o.onAccountRegistered?.("acct-term", "/tmp/acct-term");
+                return "terminal-success";
+            });
+            const escape = status.useTerminalInstead();
+            status.endRecoveryFlow();
+            await escape;
+
+            expect(onRecovered).not.toHaveBeenCalled();
+            expect(onReady).toHaveBeenCalled();
+            dispose();
+        });
+    });
+});

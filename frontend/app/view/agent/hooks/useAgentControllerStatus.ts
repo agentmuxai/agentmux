@@ -572,12 +572,18 @@ export function useAgentControllerStatus(
     const relogin = async (reloginOpts: { retryAfterLogin?: boolean } = {}) => {
         if (reloginInFlight) return;
         const retryAfterLogin = reloginOpts.retryAfterLogin ?? true;
-        inFlightRetryAfterLogin = retryAfterLogin;
         const prov = opts.provider();
         if (!prov) {
             opts.log("auth", "re-login: no active provider", "warn");
             return;
         }
+        // Past every bail-out: same rule as the in-flight guard above — a call
+        // that returns without starting a flow must not leave its intent
+        // behind. Nothing would reset it (no beginRecoveryFlow, so no paired
+        // endRecoveryFlow), and a later `/login` session — which declares its
+        // own intent only when a failure is pending — could read the stale
+        // value from its "Use terminal instead". reagent P2 on PR #2951.
+        inFlightRetryAfterLogin = retryAfterLogin;
         // Clears the "Log in" button immediately on click — this is also the
         // action the mount-time launch flow's first-login/auth-expired
         // states hand off to (they never trigger a login themselves; see
@@ -1004,13 +1010,19 @@ export function useAgentControllerStatus(
         // "Use terminal instead" read false and silently dropped the retry of
         // a turn that genuinely ran. reagent P1 + manoz, on PR #2951.
         if (reloginInFlight) return;
-        inFlightRetryAfterLogin = retryAfterLogin;
         loginCancelled = false;
         const prov = opts.provider();
         if (!prov) {
             opts.log("auth", "login via terminal: no active provider", "warn");
             return;
         }
+        // Past every bail-out: same rule as the in-flight guard above — a call
+        // that returns without starting a flow must not leave its intent
+        // behind. Nothing would reset it (no beginRecoveryFlow, so no paired
+        // endRecoveryFlow), and a later `/login` session — which declares its
+        // own intent only when a failure is pending — could read the stale
+        // value from its "Use terminal instead". reagent P2 on PR #2951.
+        inFlightRetryAfterLogin = retryAfterLogin;
         setAuthNotice(null);
         // Claim the in-flight guard BEFORE any await. The CLI resolve below
         // can take up to 300 s, and the recovery buttons have no disabled
