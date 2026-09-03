@@ -100,6 +100,12 @@ pub const COMMAND_AGENT_INPUT: &str = "agentinput";
 /// (`agentinput`, `agentstop`, `tooldecision`).
 /// Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
 pub const COMMAND_AGENT_ANSWER: &str = "agentanswer";
+/// Real protocol-level decline of a pending AskUserQuestion (Cancel button /
+/// Escape in AgentQuestionPanel.tsx) — a control_response with
+/// `behavior: "deny"`, not a UI-only dismiss. See
+/// `PersistentSubprocessController::deny_question` and
+/// docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
+pub const COMMAND_AGENT_CANCEL: &str = "agentcancel";
 pub const COMMAND_AGENT_STOP: &str = "agentstop";
 pub const COMMAND_SHELL_EXEC: &str = "shellexec";
 /// Stop a running persistent shell node (Phase 3) — UI stop button.

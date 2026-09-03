@@ -27,8 +27,8 @@ use crate::backend::rpc_types::{
     COMMAND_EVENT_UNSUB_ALL, COMMAND_GET_FULL_CONFIG, COMMAND_GET_META,
     COMMAND_GET_AI_RATE_LIMIT, COMMAND_ROUTE_ANNOUNCE, COMMAND_ROUTE_UNANNOUNCE,
     COMMAND_SET_META, COMMAND_SET_CONFIG, COMMAND_APP_INFO,
-    COMMAND_TOOL_DECISION, COMMAND_AGENT_ANSWER,
-    CommandAgentAnswerData,
+    COMMAND_TOOL_DECISION, COMMAND_AGENT_ANSWER, COMMAND_AGENT_CANCEL,
+    CommandAgentAnswerData, CommandAgentCancelData,
     COMMAND_DOCK_NODE_STATUS, CommandDockNodeStatusData,
     COMMAND_BACKGROUND_TASK_COMPLETION, CommandBackgroundTaskCompletionData,
     COMMAND_BACKGROUND_TASK_PID, CommandBackgroundTaskPidData,
@@ -1315,6 +1315,50 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
                     Ok(None)
                 } else {
                     Err("agent.answer: UNSUPPORTED_CONTROLLER: answering AskUserQuestion \
+                         requires a persistent (host) agent; container/one-shot agents are \
+                         not yet supported (Phase 2)".to_string())
+                }
+            })
+        }),
+    );
+
+    // agent.cancel → a REAL protocol-level decline of a pending AskUserQuestion
+    // (Cancel button / Escape in AgentQuestionPanel.tsx), not a UI-only dismiss.
+    // Sends `behavior: "deny"` over the same control protocol agent.answer uses
+    // for `behavior: "allow"` — see `deny_question`'s doc comment for why this
+    // is a general, documented Agent SDK mechanism rather than something
+    // special-cased for AskUserQuestion. Error strings below deliberately match
+    // agent.answer's wording verbatim (`no controller for block`,
+    // `UNSUPPORTED_CONTROLLER`): the frontend's SAFE_TO_RETRY_VIA_FOLLOWUP
+    // allowlist (useAgentQuestions.ts) matches on these substrings for both
+    // commands. Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
+    engine.register_handler(
+        COMMAND_AGENT_CANCEL,
+        Box::new(|data, _ctx| {
+            Box::pin(async move {
+                let cmd: CommandAgentCancelData = serde_json::from_value(data)
+                    .map_err(|e| format!("agent.cancel: {e}"))?;
+                if cmd.tool_use_id.is_empty() {
+                    return Err("agent.cancel: MISSING_ARG: tool_use_id".to_string());
+                }
+                let ctrl = blockcontroller::get_controller(&cmd.blockid)
+                    .ok_or_else(|| format!("agent.cancel: no controller for block {}", cmd.blockid))?;
+                if let Some(persistent_ctrl) = ctrl
+                    .as_any()
+                    .downcast_ref::<blockcontroller::persistent::PersistentSubprocessController>()
+                {
+                    persistent_ctrl.deny_question(
+                        cmd.tool_use_id.clone(),
+                        blockcontroller::persistent::ASK_USER_QUESTION_DENY_MESSAGE.to_string(),
+                    )?;
+                    tracing::info!(
+                        block_id = %cmd.blockid,
+                        tool_use_id = %cmd.tool_use_id,
+                        "[agent.cancel] deny control_response delivered to persistent stdin"
+                    );
+                    Ok(None)
+                } else {
+                    Err("agent.cancel: UNSUPPORTED_CONTROLLER: canceling AskUserQuestion \
                          requires a persistent (host) agent; container/one-shot agents are \
                          not yet supported (Phase 2)".to_string())
                 }

@@ -11,6 +11,8 @@
  * as the queue transitions empty↔non-empty. `handleAnswer` optimistically
  * transitions the node and delivers the answer over the persistent
  * controller (falling back to a follow-up turn for non-persistent agents).
+ * `handleCancel` is the same shape for a REAL protocol-level decline (Cancel
+ * button / Escape) — see docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
  *
  * Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md.
  *
@@ -41,11 +43,13 @@ export interface UseAgentQuestionsOptions {
 }
 
 // Error shapes where the backend GUARANTEES the control_response was never
-// sent — every one of these is returned by `agent.answer`'s handler or
-// `PersistentSubprocessController::answer_question` (agentmux-srv's
-// websocket.rs / blockcontroller/persistent.rs) strictly BEFORE (or instead
-// of) the `tx.try_send(control_response...)` call, so falling back to the
-// follow-up-message path can never duplicate-deliver the answer for these.
+// sent — every one of these is returned by `agent.answer`/`agent.cancel`'s
+// handlers or `PersistentSubprocessController::answer_question`/
+// `deny_question` (agentmux-srv's websocket.rs / blockcontroller/persistent.rs)
+// strictly BEFORE (or instead of) the `tx.try_send(control_response...)` call,
+// so falling back to the follow-up-message path can never duplicate-deliver
+// for either command — both share the identical pending_questions lookup and
+// error wording, verified against the current source, not assumed.
 // Deliberately an allowlist, not a blocklist: reagent P2 on the PR that
 // widened this fallback flagged that an RPC-engine-level failure (e.g. the
 // "EC-TIME: timeout" the engine's own `tokio::time::timeout` wrapper can
@@ -68,7 +72,16 @@ const SAFE_TO_RETRY_VIA_FOLLOWUP = [
 export interface UseAgentQuestionsResult {
     pendingQuestions: () => ToolNode[];
     handleAnswer: (outcome: AnswerOutcome) => void;
+    handleCancel: (toolUseId: string) => void;
 }
+
+/** Fixed, client-side mirror of the server's decline message — used only for
+ *  the SAFE_TO_RETRY_VIA_FOLLOWUP fallback text (a plain follow-up turn when
+ *  the control protocol itself is unavailable). The actual protocol-level
+ *  decline text is server-owned (ASK_USER_QUESTION_DENY_MESSAGE in
+ *  agentmux-srv's persistent.rs) — this is not read from there, just worded
+ *  identically so the model sees the same explanation either way. */
+const CANCEL_FALLBACK_MESSAGE = "The user declined to answer this question.";
 
 export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuestionsResult {
     // Pending AskUserQuestion queue — every ToolNode in `awaiting_answer`,
@@ -241,5 +254,63 @@ export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuest
         });
     };
 
-    return { pendingQuestions, handleAnswer };
+    // AskUserQuestion CANCEL handler — a real protocol-level decline (Cancel
+    // button / Escape in AgentQuestionPanel.tsx), not the old UI-only "Answer
+    // later" minimize. Mirrors handleAnswer's optimistic-transition +
+    // SAFE_TO_RETRY_VIA_FOLLOWUP fallback shape; the differences are just
+    // what a decline carries: no answers_map/answer_text, and the resolved
+    // node lands on status "denied" (already a full first-class ToolNode
+    // status — icon, fail-terminal auto-collapse, STATUS_LABEL — reused here
+    // rather than adding a new one) instead of "success".
+    const handleCancel = (toolUseId: string) => {
+        const originals: ToolNode[] = [];
+        const updated: ToolNode[] = [];
+        for (const n of opts.getDocument()) {
+            if (n.type !== "tool" || n.status !== "awaiting_answer") continue;
+            if (n.question?.tool_use_id !== toolUseId) continue;
+            originals.push(n);
+            // Same extraction as handleAnswer — the original prompt(s) as
+            // plain text BEFORE `question` is cleared, so AnsweredQuestionMessage
+            // can still show what was asked even though it wasn't answered.
+            const questionText = n.question?.questions.map((q) => q.question).join("\n\n");
+            updated.push({
+                ...n,
+                status: "denied",
+                question: undefined,
+                summary: "🚫 Cancelled — no answer provided",
+                questionText,
+                // answerText intentionally left unset: there is no answer, and
+                // ToolBlock's isAnsweredQuestion() gate keys off answerText !=
+                // null specifically to distinguish "really answered" from
+                // everything else — leaving it undefined is what keeps a
+                // cancelled question out of that path and into the sibling
+                // isCancelledQuestion() one instead.
+            });
+        }
+        const applyDoc = (nodes: ToolNode[]) => {
+            if (nodes.length > 0) {
+                dispatchDoc(opts.blockId, { type: "StreamFlush", newNodes: [], updatedNodes: nodes }, "user");
+            }
+        };
+        applyDoc(updated);
+
+        void RpcApi.AgentCancelCommand(TabRpcClient, {
+            blockid: opts.blockId,
+            tool_use_id: toolUseId,
+        }).catch((err: unknown) => {
+            const msg = String(err);
+            if (SAFE_TO_RETRY_VIA_FOLLOWUP.some((marker) => msg.includes(marker))) {
+                opts.log("agent", `Delivering AskUserQuestion cancel as a follow-up message (${msg})`);
+                // No rollback-on-failure here, same reasoning as handleAnswer's
+                // identical comment: opts.sendMessage never rejects, so a
+                // .catch() here would never run.
+                void opts.sendMessage(CANCEL_FALLBACK_MESSAGE);
+                return;
+            }
+            opts.log("error", `agent.cancel failed: ${msg}`);
+            applyDoc(originals);
+        });
+    };
+
+    return { pendingQuestions, handleAnswer, handleCancel };
 }

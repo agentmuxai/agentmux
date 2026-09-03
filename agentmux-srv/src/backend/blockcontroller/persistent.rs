@@ -776,6 +776,27 @@ fn build_answer_resume_message(answers: &serde_json::Value) -> String {
     out
 }
 
+/// Fixed, server-owned decline message for a cancelled AskUserQuestion (the
+/// Cancel button / Escape in `AgentQuestionPanel.tsx`) — not client-suppliable,
+/// since Cancel and Escape both mean exactly one thing and there is no user-
+/// authored content to carry. See `deny_question` and
+/// docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
+pub(crate) const ASK_USER_QUESTION_DENY_MESSAGE: &str = "The user declined to answer this question.";
+
+/// Compose the directive follow-up message used by the AskUserQuestion dead-air
+/// fallback when the answer was a DECLINE rather than a real answer. Mirrors
+/// `build_answer_resume_message`'s directive tone (resume the task, don't wait
+/// for further input) but tells the model the outcome was a decline so it
+/// doesn't hallucinate a value the user never provided.
+fn build_deny_resume_message(message: &str) -> String {
+    format!(
+        "[AgentMux] Your earlier question was declined, but the turn had already ended, \
+         so this is delivered here as a follow-up. Resume the task you were working on \
+         without this input — do not wait for further input. The user's response was: \
+         \"{message}\""
+    )
+}
+
 impl PersistentSubprocessController {
     pub fn new(
         tab_id: String,
@@ -2278,6 +2299,102 @@ impl PersistentSubprocessController {
                 None => tracing::warn!(
                     block_id = %block_id,
                     "AskUserQuestion dead-air fallback skipped: process not running"
+                ),
+            }
+        });
+        Ok(())
+    }
+
+    /// Decline a parked AskUserQuestion via the Agent SDK **control protocol**
+    /// — the Cancel button / Escape in `AgentQuestionPanel.tsx`. Structurally a
+    /// mirror of `answer_question` (same `pending_questions` lookup/removal,
+    /// same dead-air safety net — the CLI can abandon a pending tool_use whose
+    /// turn already ended regardless of whether the response was an allow or a
+    /// deny), but sends `behavior: "deny"` with a `message` instead of
+    /// `behavior: "allow"` with `updatedInput`. This is a general, documented
+    /// Agent SDK mechanism (`PermissionResult` deny case for the `canUseTool`
+    /// callback) — AskUserQuestion goes through the exact same callback as
+    /// ordinary tool permission requests, confirmed against the official Agent
+    /// SDK docs (code.claude.com/docs/en/agent-sdk/user-input). Spec:
+    /// docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
+    ///
+    /// See `answer_question`'s doc comment for the `pending_questions`
+    /// in-memory-only caveat and the exact error-prefix stability requirement
+    /// (`useAgentQuestions.ts`'s `SAFE_TO_RETRY_VIA_FOLLOWUP` allowlist matches
+    /// on this method's error text too, since it shares the identical lookup).
+    pub fn deny_question(&self, tool_use_id: String, message: String) -> Result<(), String> {
+        let (request_id, _questions, tx) = {
+            let mut inner = self.inner.lock().unwrap();
+            let (rid, qs) = inner
+                .pending_questions
+                .remove(&tool_use_id)
+                .ok_or_else(|| format!(
+                    "no pending AskUserQuestion for tool_use_id {tool_use_id} — this controller \
+                     instance never recorded it (process likely respawned since the question was \
+                     asked, e.g. a pane close/reopen); the caller should redeliver as a follow-up message"
+                ))?;
+            let tx = inner
+                .stdin_tx
+                .as_ref()
+                .ok_or("persistent process not running (cannot deliver decline)")?
+                .clone();
+            (rid, qs, tx)
+        };
+
+        let control_response = serde_json::json!({
+            "type": "control_response",
+            "response": {
+                "subtype": "success",
+                "request_id": request_id,
+                "response": {
+                    "behavior": "deny",
+                    "message": message,
+                    "toolUseID": tool_use_id,
+                }
+            }
+        });
+        // Snapshot stdout activity BEFORE sending, same reasoning as
+        // answer_question (codex review on #1536).
+        let stdout_seq = Arc::clone(&self.stdout_seq);
+        let before_seq = stdout_seq.load(Ordering::Relaxed);
+
+        tx.try_send(control_response.to_string())
+            .map_err(|e| format!("control_response send failed: {e}"))?;
+
+        // Dead-air safety net — identical mechanism to answer_question's, using
+        // the decline-flavored resume message. Reuses ANSWER_RESUME_FALLBACK_MS:
+        // same failure mode (turn already ended before the response arrived), no
+        // reason for a different timeout.
+        let inner = Arc::clone(&self.inner);
+        let block_id = self.block_id.clone();
+        let resume_msg = build_deny_resume_message(&message);
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(ANSWER_RESUME_FALLBACK_MS)).await;
+            if stdout_seq.load(Ordering::Relaxed) != before_seq {
+                return;
+            }
+            let line = serde_json::json!({
+                "type": "user",
+                "message": { "role": "user", "content": resume_msg }
+            })
+            .to_string();
+            let stdin_tx = { inner.lock().unwrap().stdin_tx.clone() };
+            match stdin_tx {
+                Some(stdin_tx) if stdin_tx.try_send(line).is_ok() => {
+                    tracing::warn!(
+                        block_id = %block_id,
+                        tool_use_id = %tool_use_id,
+                        fallback_ms = ANSWER_RESUME_FALLBACK_MS,
+                        "AskUserQuestion decline did not resume the turn — re-delivered as a follow-up message (dead-air fallback)"
+                    );
+                }
+                Some(_) => tracing::warn!(
+                    block_id = %block_id,
+                    "AskUserQuestion deny dead-air fallback: stdin send failed"
+                ),
+                None => tracing::warn!(
+                    block_id = %block_id,
+                    "AskUserQuestion deny dead-air fallback skipped: process not running"
                 ),
             }
         });
@@ -4543,6 +4660,36 @@ mod send_input_tests {
         assert!(
             err.contains("tu-unknown") && err.contains("respawned"),
             "error should name the tool_use_id and explain the likely cause, got {err:?}"
+        );
+    }
+
+    // deny_question shares the identical pending_questions lookup as
+    // answer_question, so the frontend's SAFE_TO_RETRY_VIA_FOLLOWUP allowlist
+    // (useAgentQuestions.ts) matches this error text too — keep the "no
+    // pending AskUserQuestion" prefix stable if this message ever changes.
+    #[test]
+    fn deny_question_on_untracked_tool_use_id_is_descriptive() {
+        let c = controller();
+        let err = c
+            .deny_question("tu-unknown".to_string(), "declined".to_string())
+            .unwrap_err();
+        assert!(
+            err.contains("tu-unknown") && err.contains("respawned"),
+            "error should name the tool_use_id and explain the likely cause, got {err:?}"
+        );
+    }
+
+    // The dead-air fallback for a decline must still tell the model to resume
+    // (not wait for further input it will never get) while making clear the
+    // outcome was a DECLINE, not a real answer — otherwise the model could
+    // hallucinate a value the user never provided.
+    #[test]
+    fn deny_resume_message_is_directive_and_includes_the_reason() {
+        let msg = build_deny_resume_message(ASK_USER_QUESTION_DENY_MESSAGE);
+        assert!(msg.contains("Resume the task"), "must be directive: {msg}");
+        assert!(
+            msg.contains("declined to answer"),
+            "must carry the decline reason: {msg}"
         );
     }
 

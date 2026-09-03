@@ -5,8 +5,14 @@
  * AgentQuestionPanel — surfaced when a `ToolNode` in the pane has
  * `status === "awaiting_answer"` (the agent called the `AskUserQuestion`
  * tool and is blocked on the user's answer). Renders the question(s) with
- * single- or multi-select options plus a free-text "Other", and submits the
- * answer so the caller can deliver it back to the agent as a tool_result.
+ * single- or multi-select options plus a free-text "Other". Three actions:
+ * **Cancel** (a real protocol-level decline — see `cancel()` below and
+ * docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md — NOT a UI-only
+ * dismiss; the earlier "Answer later" button minimized the panel without
+ * telling the agent anything, leaving it blocked forever, and was removed
+ * for exactly that reason), **Accept Recommended** (overwrites every
+ * question's selection with its recommended option(s) and submits — see
+ * `acceptRecommended()`), and **Submit answer** (the user's own selections).
  *
  * Also runs an auto-timeout (default 30s, user-configurable via
  * `agent:askquestiontimeoutms`) so an unanswered question can never block
@@ -25,7 +31,8 @@
  * Spec: docs/specs/SPEC_ASK_USER_QUESTION_2026_06_15.md,
  * docs/specs/SPEC_ASK_USER_QUESTION_AUTO_TIMEOUT_2026_08_06.md,
  * docs/specs/SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md,
- * docs/specs/SPEC_ASK_USER_QUESTION_TIMEOUT_KEYBOARD_PAUSE_2026_08_20.md.
+ * docs/specs/SPEC_ASK_USER_QUESTION_TIMEOUT_KEYBOARD_PAUSE_2026_08_20.md,
+ * docs/specs/SPEC_ASK_USER_QUESTION_ACCEPT_RECOMMENDED_BUTTON_2026_09_03.md.
  */
 
 import { createEffect, createMemo, createSignal, For, onCleanup, Show, untrack, type Accessor, type JSX } from "solid-js";
@@ -94,8 +101,13 @@ interface AgentQuestionPanelProps {
     pending: Accessor<ToolNode[]>;
     /** User answer. Caller advances the queue by transitioning the node. */
     onAnswer: (outcome: AnswerOutcome) => void | Promise<void>;
-    /** Defer — leave the node in awaiting_answer; minimise without answering. */
-    onDefer?: () => void;
+    /** Cancel — a real protocol-level decline (Cancel button / Escape), not a
+     *  UI-only dismiss. Passed the declined question's `tool_use_id`, same
+     *  pattern as `onAnswer` receiving the full outcome — the caller
+     *  shouldn't have to re-derive which question this was from the queue.
+     *  Required, unlike the old optional `onDefer`: every mount site needs a
+     *  real decline path now that Cancel actually tells the agent something. */
+    onCancel: (toolUseId: string) => void;
 }
 
 /** Per-question working state. */
@@ -141,7 +153,6 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
         return typeof v === "number" && v > 0 ? v : DEFAULT_AUTO_TIMEOUT_MS;
     };
 
-    const [minimized, setMinimized] = createSignal(false);
     const [state, setState] = createSignal<QState[]>([]);
     /** Milliseconds left before the auto-timeout fires. See the timer effect
      *  below (defined after `submit`, once all its dependencies exist). */
@@ -174,7 +185,6 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
     createEffect(() => {
         const r = request();
         void r?.tool_use_id; // touch so the effect re-runs on change
-        setMinimized(false);
         setState((r?.questions ?? []).map(() => ({ selected: [], other: "" })));
         setRemainingMs(autoTimeoutMs());
         clearHideTimer();
@@ -324,6 +334,38 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
         return count;
     };
 
+    // Accept Recommended button: unconditionally OVERWRITES every question's
+    // selection with its recommended option(s), even ones the user already
+    // answered — unlike `applyRecommendedDefaults` above (the timeout path),
+    // which only fills UNANSWERED questions and leaves everything else
+    // untouched. Deliberately different semantics, not a reuse: the whole
+    // point of a one-click "accept recommended" action is that it does what
+    // it says regardless of stray clicks made before pressing it — an
+    // outcome that depends on click order would be worse than either
+    // "always overwrite" or "disabled once anything is answered." See
+    // docs/specs/SPEC_ASK_USER_QUESTION_ACCEPT_RECOMMENDED_BUTTON_2026_09_03.md §2.
+    //
+    // No `autoFilledCount` marker on the resulting submission (calls
+    // `submit(0)`, same as a manual click on "Submit answer"): this is a
+    // deliberate, explicit user action, not the agent's turn stalling
+    // unattended, so it renders as a plain "Answered" in history rather than
+    // a timeout note — confirmed with the repo owner rather than assumed.
+    const acceptRecommended = () => {
+        const r = request();
+        if (!r) return;
+        r.questions.forEach((q, i) => {
+            const recommended = recommendedOptions(q.options);
+            if (recommended.length > 0) {
+                setQ(i, { selected: recommended.map((o) => o.label), other: "" });
+            } else {
+                // Same zero-options fallback applyRecommendedDefaults uses,
+                // so allAnswered() still passes and submit() doesn't no-op.
+                setQ(i, { selected: [], other: "No option was available to auto-select" });
+            }
+        });
+        submit(0);
+    };
+
     // 30s auto-timeout: fires unconditionally at zero once armed, regardless
     // of any *past* interaction. Deliberately NOT disarmed permanently on the
     // first click/keystroke — an earlier design did that, and it was
@@ -370,16 +412,20 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
         onCleanup(() => clearInterval(intervalId));
     });
 
-    const defer = () => {
-        // Hover-pause is a full-panel-only affordance (the minimized chip
-        // has no typing surface) — force an immediate resume so minimizing
-        // always returns the timer to its original, hover-independent
-        // behavior, preserving "keeps running while minimized" unchanged.
-        // SPEC_ASK_USER_QUESTION_TIMEOUT_HOVER_PAUSE_2026_08_10.md §3.1, §3.3.
+    // Cancel — a REAL protocol-level decline delivered to the agent (Cancel
+    // button / Escape), replacing the old "Answer later" defer/minimize
+    // behavior. That earlier behavior only hid the panel and logged a
+    // message; it never told the agent anything, so the agent stayed
+    // blocked on the question forever — confirmed non-functional, not a
+    // design choice being revisited. `onCancel` is a real RPC call
+    // (`agentcancel` → a control_response with `behavior: "deny"`); this
+    // component's job is just to stop its own local timers/countdown and
+    // hand off. See docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
+    const cancel = () => {
+        const r = request();
         clearHideTimer();
         setHidden(false);
-        setMinimized(true);
-        props.onDefer?.();
+        if (r) props.onCancel(r.tool_use_id);
     };
 
     // Any `<input>`/`<textarea>`/contentEditable is "editable" — this is the
@@ -399,14 +445,7 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
     // Shared gate for both keyboard-pause trigger paths below (`handleKey`'s
     // keydown and `handleFocusIn`'s focusin). A target counts as
     // pause-worthy engagement only if it's actually inside this panel's own
-    // DOM AND the panel is in its expanded (non-minimized) state AND we're
-    // not already paused:
-    //  - `!minimized()`: while minimized, `rootRef` is reassigned to the
-    //    separate `<button class="agent-question-panel-minimized">` (below),
-    //    so a keydown/Tab landing on that focusable button would otherwise
-    //    read as "inside the panel" and incorrectly pause a countdown that's
-    //    supposed to keep running unaffected while minimized — codex P2,
-    //    PR #2787.
+    // DOM AND we're not already paused:
     //  - `!hidden()`: only the *transition into* the paused state re-arms
     //    the flat HOVER_HIDE_GRACE_MS window. Unlike `mouseenter` — which a
     //    real browser only fires on an actual boundary-crossing, so it can't
@@ -423,7 +462,7 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
     //    `hidden()` has flipped back to false.
     const maybePauseFor = (target: EventTarget | null) => {
         const inPanel = !!rootRef && !!target && rootRef.contains(target as Node);
-        if (inPanel && !minimized() && !hidden()) onPanelPointerEnter();
+        if (inPanel && !hidden()) onPanelPointerEnter();
     };
 
     const handleKey = (e: KeyboardEvent) => {
@@ -450,7 +489,7 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
         // (the chat composer, Ctrl+F) isn't engagement with this question.
         // Deliberately unconditional on which key, including Enter/Escape:
         // both already tear down or reset this same pause state via their
-        // own existing paths immediately below/in `defer()`, so firing this
+        // own existing paths immediately below/in `cancel()`, so firing this
         // first for them is a harmless, immediately-superseded no-op, not
         // worth special-casing out. See
         // SPEC_ASK_USER_QUESTION_TIMEOUT_KEYBOARD_PAUSE_2026_08_20.md §2,
@@ -468,7 +507,7 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
             submit();
         } else if (e.key === "Escape") {
             e.preventDefault();
-            defer();
+            cancel();
         }
     };
 
@@ -512,30 +551,7 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
     return (
         <Show when={request()} keyed>
             {(r) => (
-                <Show
-                    when={!minimized()}
-                    fallback={
-                        <button
-                            type="button"
-                            ref={(el) => (rootRef = el)}
-                            class="agent-question-panel-minimized"
-                            onClick={() => setMinimized(false)}
-                        >
-                            <span class="agent-question-panel-icon" aria-hidden="true">❓</span>
-                            <span>Question waiting</span>
-                            <span
-                                class="agent-question-panel-countdown"
-                                classList={{
-                                    "agent-question-panel-countdown--warning": countdownSeverity() === "warning",
-                                    "agent-question-panel-countdown--critical": countdownSeverity() === "critical",
-                                }}
-                            >
-                                auto-selects in {countdownSeconds()}s
-                            </span>
-                            <span class="agent-question-panel-minimized-cta">click to answer</span>
-                        </button>
-                    }
-                >
+                <>
                     <QuestionPanelClip getEl={() => rootRef} />
                     {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
                     <div
@@ -641,9 +657,16 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
                             <button
                                 type="button"
                                 class="agent-question-panel-btn agent-question-panel-btn--cancel"
-                                onClick={defer}
+                                onClick={cancel}
                             >
-                                Answer later
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                class="agent-question-panel-btn agent-question-panel-btn--recommended"
+                                onClick={acceptRecommended}
+                            >
+                                Accept Recommended
                             </button>
                             <button
                                 type="button"
@@ -655,7 +678,7 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
                             </button>
                         </div>
                     </div>
-                </Show>
+                </>
             )}
         </Show>
     );

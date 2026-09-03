@@ -16,6 +16,15 @@
  * control_response actually landed server-side, so that case still rolls
  * back rather than risking a duplicate delivery — reagent P2). See
  * docs/reports/REPORT_WORKING_STATE_REGRESSION_AND_STUCK_QUESTION_PANEL_2026_07_27.md §2.7/§2.8.
+ *
+ * Also covers `handleCancel` — the real protocol-level decline (Cancel
+ * button / Escape) that replaced the old non-functional "Answer later"
+ * minimize. Mirrors handleAnswer's fallback shape exactly: same
+ * SAFE_TO_RETRY_VIA_FOLLOWUP allowlist, same "roll back on anything else"
+ * reasoning, since `deny_question` shares the identical pending_questions
+ * lookup as `answer_question` on the backend. See
+ * docs/specs/SPEC_ASK_USER_QUESTION_ACCEPT_RECOMMENDED_BUTTON_2026_09_03.md,
+ * docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
  */
 
 import { createRoot } from "solid-js";
@@ -24,12 +33,14 @@ import type { ToolNode } from "../types";
 
 const hub = vi.hoisted(() => ({
     agentAnswer: vi.fn(),
+    agentCancel: vi.fn(),
     dispatched: [] as unknown[],
 }));
 
 vi.mock("@/app/store/rpc-api", () => ({
     RpcApi: {
         AgentAnswerCommand: (...args: unknown[]) => hub.agentAnswer(...args),
+        AgentCancelCommand: (...args: unknown[]) => hub.agentCancel(...args),
     },
 }));
 vi.mock("@/app/store/rpc-util", () => ({ TabRpcClient: {} }));
@@ -65,6 +76,7 @@ function updatedNodeFromDispatch(): ToolNode | undefined {
 
 beforeEach(() => {
     hub.agentAnswer.mockReset();
+    hub.agentCancel.mockReset();
     hub.dispatched.length = 0;
 });
 afterEach(() => {
@@ -73,17 +85,18 @@ afterEach(() => {
 
 function setup(sendMessage: (m: string) => Promise<void>, log: (ch: string, msg: string) => void = () => {}) {
     let handleAnswer!: ReturnType<typeof useAgentQuestions>["handleAnswer"];
+    let handleCancel!: ReturnType<typeof useAgentQuestions>["handleCancel"];
     let dispose: () => void = () => {};
     createRoot((d) => {
         dispose = d;
-        ({ handleAnswer } = useAgentQuestions({
+        ({ handleAnswer, handleCancel } = useAgentQuestions({
             blockId: BLOCK_ID,
             getDocument: () => [pendingQuestionNode()],
             sendMessage,
             log,
         }));
     });
-    return { handleAnswer, dispose };
+    return { handleAnswer, handleCancel, dispose };
 }
 
 describe("useAgentQuestions — handleAnswer fallback", () => {
@@ -291,6 +304,90 @@ describe("useAgentQuestions — handleAnswer fallback", () => {
             answer_text: "Pick one: a",
             autoFilledCount: 0,
         });
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(sendMessage).not.toHaveBeenCalled();
+        const lastFlush = hub.dispatched[hub.dispatched.length - 1] as any;
+        expect(lastFlush.updatedNodes[0].status).toBe("awaiting_answer");
+        dispose();
+    });
+});
+
+describe("useAgentQuestions — handleCancel fallback", () => {
+    it("transitions to status 'denied' and does not fall back when AgentCancelCommand succeeds", async () => {
+        hub.agentCancel.mockResolvedValue(undefined);
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const { handleCancel, dispose } = setup(sendMessage);
+
+        handleCancel(TOOL_USE_ID);
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(hub.agentCancel).toHaveBeenCalledTimes(1);
+        const [, cancelData] = hub.agentCancel.mock.calls[0];
+        expect(cancelData).toEqual({ blockid: BLOCK_ID, tool_use_id: TOOL_USE_ID });
+        expect(sendMessage).not.toHaveBeenCalled();
+        const node = updatedNodeFromDispatch();
+        // "denied", not "success" — this is a decline, not an answer. Reuses
+        // the existing first-class ToolNode status rather than a new one.
+        expect(node?.status).toBe("denied");
+        expect(node?.question).toBeUndefined();
+        // No fake answer — answerText intentionally stays unset so ToolBlock's
+        // isAnsweredQuestion() gate (answerText != null) can't mistake this
+        // for a real answer.
+        expect(node?.answerText).toBeUndefined();
+        dispose();
+    });
+
+    it("sets questionText from the original prompt(s), same extraction as handleAnswer", async () => {
+        hub.agentCancel.mockResolvedValue(undefined);
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const { handleCancel, dispose } = setup(sendMessage);
+
+        handleCancel(TOOL_USE_ID);
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(updatedNodeFromDispatch()?.questionText).toBe("Pick one");
+        dispose();
+    });
+
+    it("falls back to a follow-up message for a known-safe backend error — the same SAFE_TO_RETRY_VIA_FOLLOWUP allowlist handleAnswer uses", async () => {
+        // deny_question shares the identical pending_questions lookup as
+        // answer_question, so it produces the identical error shape after a
+        // pane reopen / process respawn.
+        hub.agentCancel.mockRejectedValue(
+            new Error(
+                `no pending AskUserQuestion for tool_use_id ${TOOL_USE_ID} — this controller instance never recorded it`,
+            ),
+        );
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const { handleCancel, dispose } = setup(sendMessage);
+
+        handleCancel(TOOL_USE_ID);
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(sendMessage).toHaveBeenCalledWith("The user declined to answer this question.");
+        // Optimistic "denied" state is kept, same reasoning as handleAnswer's
+        // equivalent case: the panel must not flicker back to
+        // awaiting_answer just because the control-protocol path failed.
+        expect(updatedNodeFromDispatch()?.status).toBe("denied");
+        dispose();
+    });
+
+    // reagent P2's reasoning (see the handleAnswer test above) applies
+    // identically here: an RPC-engine-level timeout does not prove the deny
+    // was never delivered, so it must roll back rather than guess.
+    it("rolls back (does NOT fall back) on an unrecognized error like an RPC-engine timeout", async () => {
+        hub.agentCancel.mockRejectedValue(new Error("EC-TIME: timeout (5000ms)"));
+        const sendMessage = vi.fn().mockResolvedValue(undefined);
+        const { handleCancel, dispose } = setup(sendMessage);
+
+        handleCancel(TOOL_USE_ID);
         await Promise.resolve();
         await Promise.resolve();
         await Promise.resolve();

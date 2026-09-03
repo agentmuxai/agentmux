@@ -269,6 +269,16 @@ declare global {
         answers: {[key: string]: string | string[]};
     };
 
+    // CommandAgentCancelData — a real protocol-level decline of a pending
+    // AskUserQuestion (Cancel button / Escape), delivered as a control_response
+    // carrying behavior: "deny" rather than CommandAgentAnswerData's allow+answers
+    // shape. No answers field — the deny message is a fixed server-owned string.
+    // Spec: docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
+    type CommandAgentCancelData = {
+        blockid: string;
+        tool_use_id: string;
+    };
+
     // wshrpc.CommandBlockSetViewData
     type CommandBlockSetViewData = {
         blockid: string;
