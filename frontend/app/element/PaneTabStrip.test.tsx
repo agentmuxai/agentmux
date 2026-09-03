@@ -177,6 +177,47 @@ describe("PaneTabStrip", () => {
         expect(onAdd).toHaveBeenCalledTimes(1);
     });
 
+    // The agent pane's "+ New Agent". Opt-in per pane so the editor and
+    // terminal strips keep the bare 28×28px glyph.
+    it("renders visible text beside the + when addLabel is given", () => {
+        const { container } = render(() => (
+            <PaneTabStrip
+                tabs={TABS}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                onActivate={vi.fn()}
+                onAdd={vi.fn()}
+                addTitle="New agent"
+                addLabel="New Agent"
+            />
+        ));
+        // Named by the label, not the tooltip — the visible text is what a
+        // screen reader should announce once there is one.
+        const addBtn = screen.getByRole("button", { name: "New Agent" });
+        expect(addBtn.textContent).toContain("+");
+        expect(addBtn.textContent).toContain("New Agent");
+        expect(container.querySelector(".pane-tab-strip-add-labeled")).toBe(addBtn);
+    });
+
+    it("stays a bare glyph — no label span, no widening class — without addLabel", () => {
+        const { container } = render(() => (
+            <PaneTabStrip
+                tabs={TABS}
+                activeId="a"
+                getId={(t: T) => t.id}
+                getLabel={(t: T) => t.label}
+                onActivate={vi.fn()}
+                onAdd={vi.fn()}
+                addTitle="New shell tab"
+            />
+        ));
+        const addBtn = screen.getByRole("button", { name: "New shell tab" });
+        expect(addBtn.textContent).toBe("+");
+        expect(container.querySelector(".pane-tab-strip-add-label")).toBeNull();
+        expect(container.querySelector(".pane-tab-strip-add-labeled")).toBeNull();
+    });
+
     it("renders custom label content from renderLabel instead of the plain label", () => {
         render(() => (
             <PaneTabStrip

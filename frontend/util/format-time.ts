@@ -23,16 +23,36 @@ export function formatElapsedCompact(ms: number): string {
 }
 
 /**
- * Clock form: "M:SS", zero-padded seconds. Floors negative durations to 0 —
- * one of the 5 original copies (`PersistentShellBlock.tsx`) was missing this
- * guard and could render e.g. "-1:05" on a clock-skew edge case; the other
- * clock-style copies already had it.
+ * Clock form, growing a field at a time as the duration does:
+ * `M:SS` → `H:MM:SS` → `D:HH:MM:SS`.
+ *
+ * The hour and day fields are not cosmetic. This drives the long-running
+ * process dock, whose whole purpose is processes that outlive a turn, and the
+ * minutes-only form silently kept counting past 60 — an hour-old `task dev`
+ * read "75:03", which is not a duration anyone can parse at a glance, and a
+ * day-old one read "1508:22".
+ *
+ * Fields are added rather than always padded (no "0:00:05" for a five-second
+ * tool call) because the overwhelmingly common case is seconds-to-minutes, and
+ * the dock shows these inline next to a title where width matters. Same
+ * convention as ffmpeg/YouTube timestamps.
+ *
+ * Floors negative durations to 0 — one of the 5 original copies
+ * (`PersistentShellBlock.tsx`) was missing this guard and could render e.g.
+ * "-1:05" on a clock-skew edge case; the other clock-style copies already
+ * had it.
  */
 export function formatElapsedClock(ms: number): string {
     const totalSec = Math.max(0, Math.floor(ms / 1000));
-    const m = Math.floor(totalSec / 60);
     const s = totalSec % 60;
-    return `${m}:${String(s).padStart(2, "0")}`;
+    const m = Math.floor(totalSec / 60) % 60;
+    const h = Math.floor(totalSec / 3_600) % 24;
+    const d = Math.floor(totalSec / 86_400);
+
+    const ss = String(s).padStart(2, "0");
+    if (d > 0) return `${d}:${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${ss}`;
+    if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${ss}`;
+    return `${m}:${ss}`;
 }
 
 /**
