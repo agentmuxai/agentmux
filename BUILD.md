@@ -87,6 +87,10 @@ winget install Task.Task
 
 See full instructions: https://taskfile.dev/installation/
 
+**Starting from nothing?** `scripts/bootstrap.sh` (macOS/Linux) and
+`scripts/bootstrap.ps1` (Windows) run the commands above for you — see
+"Clone the Repository" below.
+
 ---
 
 ## Clone the Repository
@@ -95,6 +99,29 @@ See full instructions: https://taskfile.dev/installation/
 git clone https://github.com/agentmuxai/agentmux.git
 cd agentmux
 ```
+
+## Bootstrap and Initialize
+
+On a fresh machine with nothing installed, two steps get you to a working
+dev environment:
+
+```bash
+# 1. Get Task itself installed (macOS/Linux):
+sh scripts/bootstrap.sh
+# ...or on Windows (PowerShell):
+powershell -ExecutionPolicy Bypass -File scripts\bootstrap.ps1
+
+# 2. Verify the rest of the toolchain (Rust/Node/CMake/Ninja/git) and
+#    install frontend dependencies:
+task init
+```
+
+`task init` fails with a clear message (and does not run `npm install`) if
+anything required is still missing or the wrong version — reinstall the
+flagged tool and re-run it. It cannot install Task itself; that circularity
+is exactly why step 1 exists as a separate, non-Task script.
+
+If you already have Task installed, you can skip straight to `task init`.
 
 ---
 
