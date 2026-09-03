@@ -67,17 +67,87 @@ function Install-WithWinget {
     return $false
 }
 
+# A working `git` on PATH does NOT imply `sh`/`bash` are too. Per this
+# repo's own CLAUDE.md ("Gap B"): a standard Git for Windows install adds
+# `Git\cmd` (git.exe and other shims) to PATH, not `Git\bin` where
+# sh.exe/bash.exe live. Two independent reviewers on PR #2943 caught that my
+# first fix here assumed installing Git was sufficient to unblock `task
+# init`'s `sh scripts/check-toolchain.sh` -- it wasn't.
+#
+# My first attempt at a real fix derived Git's bin directory from wherever
+# `Get-Command git` currently resolved (e.g. going up from .../cmd or
+# .../bin). Testing it on this machine caught a second, worse bug in that
+# approach before it shipped: here `git` resolves via `Git\mingw64\bin`
+# (some other PATH entry wins ahead of the standard shim), so deriving from
+# it computed `Git\mingw64\bin` as the target -- which contains a git.exe
+# but NOT sh.exe (that's under `Git\usr\bin`, a sibling of `mingw64`, not a
+# child of it). The derivation is exactly the kind of "looks right, isn't"
+# logic this whole onboarding effort exists to catch.
+#
+# scripts/dev-agent.cmd already solves this exact problem, for the exact
+# same reason (go-task spawning bash on Windows), by hardcoding the standard
+# Git for Windows install location instead of deriving it -- confirmed
+# real on this machine: sh.exe and bash.exe genuinely exist under
+# `Git\bin`, and sh.exe also under `Git\usr\bin`, regardless of what `git`
+# currently resolves to via other PATH entries. Matching that precedent
+# here rather than reinventing a fragile derivation.
+function Ensure-GitShellOnPath {
+    if (Get-Command sh -ErrorAction SilentlyContinue) {
+        return $true
+    }
+
+    $candidates = @(
+        "$env:ProgramFiles\Git\bin",
+        "$env:ProgramFiles\Git\usr\bin",
+        "${env:ProgramFiles(x86)}\Git\bin",
+        "${env:ProgramFiles(x86)}\Git\usr\bin"
+    )
+    $found = $candidates | Where-Object { Test-Path (Join-Path $_ "sh.exe") }
+
+    if (-not $found) {
+        Write-Host "Could not locate sh.exe under any standard Git for Windows install path ($($candidates -join ', '))."
+        Write-Host "If Git is installed somewhere else, add its bin directory to PATH manually."
+        return $false
+    }
+
+    foreach ($dir in $found) {
+        if ($env:Path -notlike "*$dir*") {
+            $env:Path = "$dir;$env:Path"
+        }
+    }
+
+    # Persist to the User PATH too, so a new terminal also has it without
+    # re-running this script -- Update-SessionPath only fixes the current
+    # process; without this, `task init` would work now but break again
+    # after closing this terminal.
+    $currentUserPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
+    $toAdd = $found | Where-Object { $currentUserPath -notlike "*$_*" }
+    if ($toAdd) {
+        [System.Environment]::SetEnvironmentVariable("Path", ($currentUserPath, ($toAdd -join ";") -join ";"), "User")
+    }
+
+    return [bool](Get-Command sh -ErrorAction SilentlyContinue)
+}
+
 $gitOk = Install-WithWinget -DisplayName "Git" -Command "git" -WingetId "Git.Git"
+$shellOk = $false
+if ($gitOk) {
+    $shellOk = Ensure-GitShellOnPath
+    if (-not $shellOk) {
+        Write-Host "Git is installed but its shell (sh.exe/bash.exe) could not be found or added to PATH."
+        Write-Host "task init and other Task cross-platform commands need this -- see CLAUDE.md's Gap A/B notes."
+    }
+}
 $taskOk = Install-WithWinget -DisplayName "Task" -Command "task" -WingetId "Task.Task"
 
 Write-Host ""
 
-if ($gitOk -and $taskOk) {
-    Write-Host "Git and Task are both ready: $(git --version), $(task --version)"
+if ($gitOk -and $shellOk -and $taskOk) {
+    Write-Host "Git (with its shell on PATH) and Task are both ready: $(git --version), $(task --version)"
     Write-Host "Next: clone the repo if you haven't, cd into it, then run: task init"
     exit 0
 } else {
-    Write-Host "One or more tools could not be confirmed on PATH in this session."
+    Write-Host "One or more tools (or Git's shell) could not be confirmed on PATH in this session."
     Write-Host "Open a NEW terminal (PATH changes from installers often don't reach this one) and re-run this script."
     exit 1
 }
