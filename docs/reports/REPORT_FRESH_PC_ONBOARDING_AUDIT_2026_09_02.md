@@ -91,17 +91,25 @@ competing entrypoint.
 
 ```
 BUILD.md's documented list:  cmake ninja-build build-essential curl wget file libssl-dev git zip
-CI's actual list (build-linux.yml): ninja-build cmake libwayland-dev libxkbcommon-dev libgtk-3-dev
+CI's actual list (build-linux.yml lines 113-117):
+  cmake ninja-build
+  libwayland-dev libxkbcommon-dev libgtk-3-dev
+  libglib2.0-dev libpango1.0-dev libcairo2-dev
+  libgdk-pixbuf2.0-dev libatk1.0-dev
 ```
 
-`libwayland-dev`, `libxkbcommon-dev`, `libgtk-3-dev` are installed by CI but
-absent from BUILD.md. A from-scratch Linux build following only BUILD.md's
-list risks a missing-library link error CI never hits. This is exactly the
-kind of gap the fresh-Ubuntu test machine can either confirm or rule out —
-CI runs in a container image that may have some of these preinstalled;
-whether they're genuinely required on a bare Ubuntu desktop install is an
-open question this project should answer empirically rather than by reading
-the CI YAML.
+Eight packages CI installs are absent from BUILD.md, not three — the first
+pass of this audit under-quoted the CI list, catching only the first line of
+a three-line `apt-get install` continuation and missing the GTK/GLib/Pango/
+Cairo/GdkPixbuf/Atk block CI installs immediately after (caught in review,
+verified directly against the workflow file rather than re-trusting the
+original grep). A from-scratch Linux build following only BUILD.md's list
+risks a missing-library link error CI never hits. This is exactly the kind
+of gap the fresh-Ubuntu test machine can either confirm or rule out — CI
+runs in a container image that may have some of these preinstalled; whether
+they're genuinely required on a bare Ubuntu desktop install is an open
+question this project should answer empirically rather than by reading the
+CI YAML.
 
 ### 2d. Stale PATH hint in `Taskfile.yml`
 
@@ -157,12 +165,23 @@ there; scope creep into the from-source path would turn a "get building in
 
 1. **Fix the confirmed defects (2a–2d)** — cheap, unambiguous, no design
    decisions required. Do this first regardless of what else follows.
-2. **Grow `task init` into a real bootstrap entrypoint**: detect Rust/Node/Task/CMake/Ninja/git
-   presence and version, print clear per-OS install instructions for
-   anything missing (reusing BUILD.md's corrected command list, and the
-   toolchain-installer spec's detection *pattern* where it fits), then run
-   `npm install`. Document it by name in README.md and BUILD.md so it stops
-   being an undiscoverable no-op.
+2. **Grow `task init` into a real bootstrap entrypoint — but not for Task
+   itself.** `task init` cannot be the thing that detects or installs Task,
+   because reaching it at all already requires Task to be installed and
+   working (caught in review — the original draft of this plan had `task
+   init` checking for Task, which is circular on exactly the fresh-PC
+   scenario this project targets). Split into two layers:
+   - A **platform bootstrap script outside Task** (plain `.sh`/`.ps1`,
+     runnable with nothing but a shell) that checks for/installs Task itself
+     first, matching how BUILD.md already documents installing Task via
+     brew/snap/winget before anything else.
+   - `task init` then owns everything *after* Task exists: Rust/Node/CMake/Ninja/git
+     presence and version, printing clear per-OS install instructions for
+     anything missing (reusing BUILD.md's corrected command list, and the
+     toolchain-installer spec's detection *pattern* where it fits), then
+     `npm install`.
+   Document both by name in README.md and BUILD.md so neither stays an
+   undiscoverable no-op.
 3. **Reconcile BUILD.md's Linux prerequisite list against CI's**, verified
    empirically on the real fresh-Ubuntu machine rather than assumed from the
    YAML diff alone (2c is a hypothesis until tested).
