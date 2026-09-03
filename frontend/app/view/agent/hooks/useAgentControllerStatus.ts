@@ -284,14 +284,28 @@ export function useAgentControllerStatus(
      * this PR removes from the row's own buttons, reintroduced on the escape
      * path. reagent P1 on PR #2951.
      *
-     * Deliberately NOT reset when a flow ends — it simply holds the last
-     * flow's value. That is safe because the only reader is
-     * `useTerminalInstead`, which is reachable only from the in-flight OAuth
-     * panel, i.e. only while a flow that just wrote it is live. Recorded so
-     * the next reader doesn't have to re-derive why a never-reset flag is not
-     * a staleness bug. (manoz, reviewing fbf484752.)
+     * SCOPED TO ONE FLOW: cleared by `endRecoveryFlow` once nothing is in
+     * flight, and `false` at rest.
+     *
+     * An earlier revision left it unreset, on the reasoning that the only
+     * reader (`useTerminalInstead`) is reachable only from the in-flight OAuth
+     * panel and so could only ever read a live flow's value. That reasoning
+     * was wrong, and the counterexample is `/login`: it drives its own OAuth
+     * directly, shares only the `activeRecoveryFlows` counter, and NEVER
+     * writes this — yet its session shows the same AuthUrlBox and therefore
+     * the same "Use terminal instead" handler. So a `/login` session read
+     * whatever an unrelated earlier relogin had left behind, and branched on
+     * it. reagent P1 on PR #2951, correcting a rationale manoz and I had both
+     * signed off on.
+     *
+     * `false` at rest is deliberate rather than incidental: it is the right
+     * answer for a flow that never declared intent. `/login` is a command the
+     * user ran explicitly — there is no failed turn to re-run — so the
+     * no-retry branch (`onReady`, which self-guards on `agent:sessionid`) is
+     * a no-op rather than a surprise resend of their last message. Callers
+     * that DO have an intent set it explicitly at entry and are unaffected.
      */
-    let inFlightRetryAfterLogin = true;
+    let inFlightRetryAfterLogin = false;
     const [flowRunning, setFlowRunning] = createSignal(false);
     const [agentReady, setAgentReady] = createSignal(false);
     const [loginWaiting, setLoginWaiting] = createSignal(false);
@@ -324,7 +338,17 @@ export function useAgentControllerStatus(
     };
     const endRecoveryFlow = () => {
         activeRecoveryFlows = Math.max(0, activeRecoveryFlows - 1);
-        if (activeRecoveryFlows === 0) setLoginWaiting(false);
+        if (activeRecoveryFlows === 0) {
+            setLoginWaiting(false);
+            // Drop the recorded intent once nothing is in flight, so it cannot
+            // leak into a LATER flow that never declares one. `/login` is
+            // exactly that flow: it drives its own OAuth directly and shares
+            // only this counter, yet its session shows the same AuthUrlBox and
+            // therefore the same "Use terminal instead" handler. Without this
+            // it read whatever a previous relogin left behind. reagent P1 on
+            // PR #2951.
+            inFlightRetryAfterLogin = false;
+        }
     };
 
     // Mutable cancellation flag. Flipped by cancelLogin() and by onCleanup.
@@ -1154,6 +1178,18 @@ export function useAgentControllerStatus(
     // CheckCliAuthCommand RPC (its own ~10s timeout, which doesn't itself
     // recheck isCancelled).
     const useTerminalInstead = async () => {
+        // Capture BEFORE cancelling: the wait below is a wait for THIS flow to
+        // tear down, and teardown clears the intent (endRecoveryFlow). Reading
+        // it after would always see the cleared value — the same
+        // read-after-the-thing-that-clears-it mistake as the cross-hook race
+        // earlier on this PR, one layer out.
+        //
+        // For a `/login`-driven session nothing ever wrote it, so this is
+        // `false`: onReady rather than a retry. That is correct — the user
+        // ran a command explicitly, there is no failed turn to re-run, and
+        // onReadyFn self-guards on `agent:sessionid` so an existing session
+        // is a no-op rather than a surprise resend.
+        const intent = inFlightRetryAfterLogin;
         cancelLogin();
         // reagent P1 on PR #2413 (round 3): AuthUrlBox's "Use terminal
         // instead" is also shown while a `/login`-driven session is in
@@ -1191,7 +1227,7 @@ export function useAgentControllerStatus(
         // Continue the SAME intent the cancelled flow was started with — this
         // is a switch of mechanism, not a new decision by the user. Defaulting
         // to `true` here is what reintroduced the stale-resend on this path.
-        await loginViaTerminal({ retryAfterLogin: inFlightRetryAfterLogin });
+        await loginViaTerminal({ retryAfterLogin: intent });
     };
 
     const notifyControllerHealthy = () => {

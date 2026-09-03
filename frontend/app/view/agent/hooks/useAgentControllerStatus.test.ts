@@ -514,15 +514,57 @@ describe("useAgentControllerStatus — loginViaTerminal routes by retryAfterLogi
     });
 });
 
-describe("useAgentControllerStatus — 'Use terminal instead' preserves the recovery intent (reagent P1 on PR #2951)", () => {
-    // useTerminalInstead CANCELS the in-flight relogin and starts a terminal
-    // login as a continuation of the SAME user intent. It called
-    // loginViaTerminal() with no arguments, so retryAfterLogin defaulted to
-    // true and a pre-launch "Log in" that escaped to the terminal came back
-    // through onRecovered -> retryLastTurn, resending the agent's last old
-    // message. That is the never-started-agent stale-resend this PR removes
-    // from the row's own buttons, reintroduced on the escape path.
-    it("carries retryAfterLogin:false from the pre-launch relogin into the terminal flow", async () => {
+describe("useAgentControllerStatus — a guard-rejected loginViaTerminal must not corrupt the live intent (reagent P1 + manoz on PR #2951)", () => {
+    // loginViaTerminal wrote inFlightRetryAfterLogin BEFORE checking
+    // reloginInFlight, so a call the guard rejected still clobbered the flag on
+    // its way out. Reachable through the inline transcript CTA this PR keeps
+    // (surface C), which can coexist with a different-valued row:
+    //   1. old inline "Login Again"        -> relogin(true), in flight
+    //   2. row's "Login via terminal"      -> (false) no-ops, used to write false
+    //   3. "Use terminal instead" on (1)'s panel -> read false -> onReady()
+    // i.e. silently dropping the retry of a turn that genuinely ran.
+    it("keeps the live flow's intent when a differently-valued call is rejected mid-flight", async () => {
+        const onRecovered = vi.fn();
+        const onReady = vi.fn();
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1", provider: () => claude, log: () => {},
+                onRecovered, onReady,
+            });
+
+            let release!: () => void;
+            const gate = new Promise<void>((r) => { release = r; });
+            hub.runProviderLogin.mockImplementation(async () => {
+                await gate;
+                return "terminal-unavailable";
+            });
+
+            const live = status.relogin({ retryAfterLogin: true });   // in flight
+            await status.loginViaTerminal({ retryAfterLogin: false }); // rejected by the guard
+            const escape = status.useTerminalInstead();
+            release();
+            await live;
+
+            hub.runProviderLogin.mockImplementation(async (o: any) => {
+                o.onAccountRegistered?.("acct-term", "/tmp/acct-term");
+                return "terminal-success";
+            });
+            await escape;
+
+            expect(onRecovered).toHaveBeenCalled();
+            expect(onReady).not.toHaveBeenCalled();
+            dispose();
+        });
+    });
+});
+
+describe("useAgentControllerStatus — the recovery intent is scoped to one flow (reagent P1 on PR #2951)", () => {
+    // `/login` drives its own OAuth, shares only the activeRecoveryFlows
+    // counter, and never writes inFlightRetryAfterLogin — yet its session
+    // shows the same AuthUrlBox and so the same "Use terminal instead"
+    // handler. The flag used to survive between flows, so a /login session
+    // read whatever an unrelated earlier relogin had left behind.
+    it("does not leak a previous flow's intent into a later one that never declared one", async () => {
         const onRecovered = vi.fn();
         const onReady = vi.fn();
         await createRoot(async (dispose) => {
@@ -534,102 +576,93 @@ describe("useAgentControllerStatus — 'Use terminal instead' preserves the reco
                 onReady,
             });
 
-            // Pre-launch "Log in": relogin with retryAfterLogin false. Tier 1
-            // yields no usable session, leaving the user on the escape hatch.
+            // An earlier mid-turn recovery records retryAfterLogin:true and
+            // fully completes.
             hub.runProviderLogin.mockResolvedValue("terminal-unavailable");
-            await status.relogin({ retryAfterLogin: false });
-            onRecovered.mockClear();
-            onReady.mockClear();
+            await status.relogin({ retryAfterLogin: true });
 
-            // User switches to "Use terminal instead", which succeeds.
-            hub.runProviderLogin.mockImplementation(async (opts: any) => {
-                opts.onAccountRegistered?.("acct-term", "/tmp/acct-term");
+            // A later flow that declares nothing (the /login shape) escapes to
+            // the terminal and succeeds. It must NOT inherit that true.
+            hub.runProviderLogin.mockImplementation(async (o: any) => {
+                o.onAccountRegistered?.("acct-term", "/tmp/acct-term");
                 return "terminal-success";
             });
+            onRecovered.mockClear();
+            onReady.mockClear();
             await status.useTerminalInstead();
 
-            // The bug is onRecovered firing here — it means retryLastTurn.
+            // Inheriting `true` would resend the agent's last message.
+            expect(onRecovered).not.toHaveBeenCalled();
+            expect(onReady).toHaveBeenCalled();
+            dispose();
+        });
+    });
+});
+
+describe("useAgentControllerStatus — 'Use terminal instead' carries the LIVE flow's intent (reagent P1 on PR #2951)", () => {
+    // Models the real lifecycle: the user clicks "Use terminal instead" on the
+    // AuthUrlBox WHILE the originating flow is still in flight. An earlier
+    // version of these tests awaited the relogin to completion first, which is
+    // not how the panel is reached — and once the intent became flow-scoped,
+    // that shape stopped exercising the mechanism at all (it read the cleared
+    // resting value and would have passed either way). reagent flagged the
+    // sequential-only coverage; this is the fix for the tests, not just the code.
+    const inFlightLogin = () => {
+        let release!: () => void;
+        const gate = new Promise<void>((r) => { release = r; });
+        hub.runProviderLogin.mockImplementation(async () => {
+            await gate;
+            return "terminal-unavailable";
+        });
+        return { release };
+    };
+    const terminalSucceeds = () => {
+        hub.runProviderLogin.mockImplementation(async (o: any) => {
+            o.onAccountRegistered?.("acct-term", "/tmp/acct-term");
+            return "terminal-success";
+        });
+    };
+
+    it("escaping a PRE-LAUNCH relogin routes to onReady, never a retry", async () => {
+        const onRecovered = vi.fn();
+        const onReady = vi.fn();
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1", provider: () => claude, log: () => {},
+                onRecovered, onReady,
+            });
+            const { release } = inFlightLogin();
+            const live = status.relogin({ retryAfterLogin: false }); // in flight
+            const escape = status.useTerminalInstead();              // clicked NOW
+            release();
+            await live;
+            terminalSucceeds();
+            await escape;
+
             expect(onRecovered).not.toHaveBeenCalled();
             expect(onReady).toHaveBeenCalled();
             dispose();
         });
     });
 
-    it("still retries after escaping from a mid-turn relogin (retryAfterLogin true)", async () => {
-        const onRecovered = vi.fn();
-        await createRoot(async (dispose) => {
-            const status = useAgentControllerStatus({
-                blockId: "block-1",
-                provider: () => claude,
-                log: () => {},
-                onRecovered,
-            });
-
-            hub.runProviderLogin.mockResolvedValue("terminal-unavailable");
-            await status.relogin({ retryAfterLogin: true });
-            onRecovered.mockClear();
-
-            hub.runProviderLogin.mockImplementation(async (opts: any) => {
-                opts.onAccountRegistered?.("acct-term", "/tmp/acct-term");
-                return "terminal-success";
-            });
-            await status.useTerminalInstead();
-
-            expect(onRecovered).toHaveBeenCalled();
-            dispose();
-        });
-    });
-});
-
-describe("useAgentControllerStatus — a guard-rejected loginViaTerminal must not corrupt the in-flight intent (reagent P1 + manoz on PR #2951)", () => {
-    // loginViaTerminal wrote inFlightRetryAfterLogin BEFORE checking
-    // reloginInFlight, unlike relogin which guards first. So a call the guard
-    // rejected still clobbered the flag on its way out.
-    //
-    // Reachable through the inline transcript CTA this PR deliberately keeps
-    // (surface C), which can coexist with a different-valued failure row:
-    //   1. old inline "Login Again"      -> relogin(true), reloginInFlight=true
-    //   2. current row "Login via terminal" -> (false) no-ops, used to write false
-    //   3. "Use terminal instead" on the original flow's AuthUrlBox
-    //      -> read false -> onReady() instead of retryLastTurn()
-    // i.e. silently dropping the retry of a turn that genuinely ran and failed.
-    it("keeps the original intent when a second, differently-valued call is rejected mid-flight", async () => {
+    it("escaping a MID-TURN relogin still retries the failed turn", async () => {
         const onRecovered = vi.fn();
         const onReady = vi.fn();
         await createRoot(async (dispose) => {
             const status = useAgentControllerStatus({
-                blockId: "block-1",
-                provider: () => claude,
-                log: () => {},
-                onRecovered,
-                onReady,
+                blockId: "block-1", provider: () => claude, log: () => {},
+                onRecovered, onReady,
             });
+            const { release } = inFlightLogin();
+            const live = status.relogin({ retryAfterLogin: true });
+            const escape = status.useTerminalInstead();
+            release();
+            await live;
+            terminalSucceeds();
+            await escape;
 
-            // A mid-turn recovery is in flight: retryAfterLogin true.
-            // Not awaited — the point is to have it still running.
-            hub.runProviderLogin.mockImplementation(async () => {
-                await new Promise((r) => setTimeout(r, 50));
-                return "terminal-unavailable";
-            });
-            const inFlight = status.relogin({ retryAfterLogin: true });
-
-            // A pre-launch-valued call arrives while that is running. The
-            // in-flight guard rejects it; it must not leave `false` behind.
-            await status.loginViaTerminal({ retryAfterLogin: false });
-            await inFlight;
-
-            onRecovered.mockClear();
-            onReady.mockClear();
-
-            // The original flow's own escape hatch must still mean "retry".
-            hub.runProviderLogin.mockImplementation(async (o: any) => {
-                o.onAccountRegistered?.("acct-term", "/tmp/acct-term");
-                return "terminal-success";
-            });
-            await status.useTerminalInstead();
-
+            // The mirror-image bug: dropping a retry that genuinely was owed.
             expect(onRecovered).toHaveBeenCalled();
-            expect(onReady).not.toHaveBeenCalled();
             dispose();
         });
     });
