@@ -12,9 +12,11 @@ These instructions cover setting up dependencies and building AgentMux from sour
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| **Node.js** | v22 LTS | Frontend build (SolidJS/Vite) |
+| **Node.js** | v24 LTS | Frontend build (SolidJS/Vite) |
 | **Rust** | 1.77+ | Backend (agentmux-srv) + Host (agentmux-cef) |
 | **Task** | Latest | Build orchestration |
+| **CMake** | 3.20+ | CEF native build (cef-dll-sys) |
+| **Ninja** | 1.10+ | CEF native build (cef-dll-sys) |
 
 > **Note:** Go and Zig are no longer required. The backend is 100% Rust since v0.31.0.
 
@@ -52,9 +54,14 @@ AgentMux embeds Chromium via CEF — no system WebKitGTK or WebView2 required.
 
 1. **Install build tools** (Debian/Ubuntu):
    ```bash
-   sudo apt install cmake ninja-build build-essential curl wget file libssl-dev git zip
+   sudo apt install cmake ninja-build build-essential curl wget file libssl-dev git zip \
+     libwayland-dev libxkbcommon-dev libgtk-3-dev \
+     libglib2.0-dev libpango1.0-dev libcairo2-dev \
+     libgdk-pixbuf2.0-dev libatk1.0-dev
    ```
    CMake and Ninja are required by `cef-dll-sys`, which builds CEF's C wrapper at compile time.
+   The remaining packages are CEF/GTK runtime dev headers — see `.github/workflows/build-linux.yml`
+   for the list this repo's own CI installs; keep this list in sync with it.
 
 2. **Install Rust**:
    ```bash
