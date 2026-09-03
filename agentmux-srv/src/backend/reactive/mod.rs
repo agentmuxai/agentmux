@@ -10,6 +10,7 @@
 
 pub mod activity_watcher;
 pub mod handler;
+pub mod progress_watcher;
 pub mod poller;
 pub mod registry;
 pub mod sanitize;

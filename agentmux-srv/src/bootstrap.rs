@@ -980,6 +980,19 @@ pub fn spawn_background_subsystems(
         ).await;
     });
 
+    // Push each agent's todo checklist + in-flight tool (swarm rows under the
+    // agent name). Separate loop from the summary above deliberately: this one
+    // is a tail-read + JSON parse with no model call, so it sweeps every 3s
+    // instead of 20s — a checklist that lags is worse than none. Same
+    // registry, same no-AppState property.
+    let progress_filestore = Arc::clone(filestore);
+    let progress_broker = broker.clone();
+    tokio::spawn(async move {
+        backend::reactive::progress_watcher::run_agent_progress_loop(
+            progress_filestore, progress_broker,
+        ).await;
+    });
+
     // Reactive handler (global singleton) + poller
     let reactive_handler = reactive::get_global_handler();
     reactive_handler.set_input_sender(Arc::new(|block_id: &str, data: &[u8]| {

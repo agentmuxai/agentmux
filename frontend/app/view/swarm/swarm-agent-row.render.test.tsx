@@ -60,6 +60,10 @@ function treeNode(): AgentTreeNode {
         workflowRows: [],
         shellRows: [],
         cronRows: [],
+        todoRows: [],
+        todosTruncated: 0,
+        todosPartial: false,
+        currentTool: null,
     } as AgentTreeNode;
 }
 
