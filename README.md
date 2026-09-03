@@ -83,9 +83,14 @@ Platform-specific:
 
 ### Development
 
+Starting from nothing (no Task, no toolchain installed yet)? See
+[BUILD.md](./BUILD.md#bootstrap-and-initialize) for `scripts/bootstrap.sh` /
+`scripts/bootstrap.ps1` and `task init`, which verify/install the
+prerequisites above before you run anything else.
+
 ```bash
-npm install        # install frontend dependencies
-task dev           # CEF host + Vite hot reload
+task init           # verify toolchain, install frontend dependencies
+task dev            # CEF host + Vite hot reload
 ```
 
 ### Production Build
