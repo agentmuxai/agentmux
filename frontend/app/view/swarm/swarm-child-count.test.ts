@@ -25,6 +25,9 @@ function node(over: Partial<AgentTreeNode> = {}): AgentTreeNode {
         workflowRows: [],
         shellRows: [],
         cronRows: [],
+        todoRows: [],
+        todosTruncated: 0,
+        currentTool: null,
         ...over,
     } as AgentTreeNode;
 }

@@ -265,6 +265,17 @@
     &--longrunning .swarm-bucket-label {
         color: var(--secondary-text-color);
     }
+    // Todos — deliberately NOT a sixth saturated hue, for the mirror of the
+    // reason longrunning is grey. The four hues above label MECHANISMS the
+    // agent is using (a dispatch, a workflow, a shell, a cron); a checklist is
+    // the agent's stated INTENT, which is a different kind of thing rather
+    // than a fifth peer. Plain primary text reads as "the agent's own words"
+    // and, unlike another hue, doesn't compete with the four for attention —
+    // while still sitting brighter than the inferred longrunning bucket,
+    // matching the relative weight of intent vs. inference.
+    &--todo .swarm-bucket-label {
+        color: var(--main-text-color);
+    }
 }
 
 .swarm-bucket-header {
@@ -286,6 +297,94 @@
 .swarm-bucket-count {
     font-size: 10px;
     color: var(--secondary-text-color);
+}
+
+// ── Todos ────────────────────────────────────────────────────────────────
+// Indented to the same 22px gutter the bucket header uses, so checklist rows
+// line up under their label rather than under the agent name.
+
+.swarm-todo-row {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 1px 6px 1px 22px;
+    font-size: 11px;
+    line-height: 1.4;
+    min-width: 0;
+
+    &--completed .swarm-todo-text {
+        // Struck AND dimmed: strike-through alone is easy to miss at 11px,
+        // and a long finished list should recede as a block.
+        text-decoration: line-through;
+        color: var(--secondary-text-color);
+        opacity: 0.75;
+    }
+    &--in_progress .swarm-todo-text {
+        color: var(--main-text-color);
+        font-weight: 600;
+    }
+    &--pending .swarm-todo-text {
+        color: var(--secondary-text-color);
+    }
+}
+
+.swarm-todo-sigil {
+    flex: 0 0 auto;
+    width: 10px;
+    text-align: center;
+    font-size: 10px;
+    color: var(--secondary-text-color);
+
+    .swarm-todo-row--completed & {
+        color: var(--success-color);
+    }
+    .swarm-todo-row--in_progress & {
+        color: var(--accent-color);
+    }
+}
+
+.swarm-todo-text {
+    // One line per todo — a checklist is scanned, not read, and wrapping a
+    // long item would push every other row out of view. Full text is on the
+    // element's own title attribute.
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+
+.swarm-todo-truncated {
+    padding: 1px 6px 1px 38px;
+    font-size: 10px;
+    font-style: italic;
+    color: var(--secondary-text-color);
+}
+
+// ── Current tool ─────────────────────────────────────────────────────────
+// Sits on the agent card itself (not inside the collapsible children), beside
+// the activity summary — see the JSX comment for why it stays visible while
+// collapsed.
+
+.swarm-current-tool {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0 6px 2px 22px;
+    font-size: 10px;
+    color: var(--secondary-text-color);
+    min-width: 0;
+}
+
+.swarm-current-tool-icon {
+    font-size: 8px;
+    color: var(--accent-color);
+}
+
+.swarm-current-tool-name {
+    font-family: var(--termfontfamily, monospace);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 // ── Workflow group (subagents spawned together by one Task/Workflow-tool

@@ -201,6 +201,36 @@ export interface AgentTreeNode {
      *  PROCESS_ROWS_2026_07_20 Phase 2), enabled or paused. Sorted
      *  newest-first by `last_fired` (nulls — never fired — last). */
     cronRows: ActiveCron[];
+    /** The agent's current todo checklist, in the agent's own order (NOT
+     *  sorted here — the order it wrote them in is the order it means).
+     *  Pushed by the backend's `agent:progress` sweep rather than read from
+     *  block meta, because the frontend only holds tool calls for panes that
+     *  are currently mounted and the Swarm's whole point is the ones that
+     *  aren't. */
+    todoRows: TodoItem[];
+    /** How many rows `MAX_TODOS` dropped backend-side, so the tree can say
+     *  "+N more" instead of showing a partial list as if it were whole. */
+    todosTruncated: number;
+    /** The tool this agent is running right now, or null between tools.
+     *  Complements `activitySummary`: that is a Haiku paraphrase of the last
+     *  ~20s, this is the literal call in flight. */
+    currentTool: string | null;
+}
+
+/** One checklist entry, as published by the backend progress watcher. */
+export interface TodoItem {
+    text: string;
+    /** `pending` | `in_progress` | `completed`, or whatever a provider wrote —
+     *  passed through verbatim rather than coerced, so an unrecognized status
+     *  renders as itself instead of silently becoming "pending". */
+    status: string;
+}
+
+/** One `agent:progress` payload, keyed by block. */
+export interface AgentProgress {
+    todos: TodoItem[];
+    todosTruncated: number;
+    currentTool: string | null;
 }
 
 /**
@@ -852,6 +882,14 @@ export class SwarmViewModel implements ViewModel {
     cronsAtom: Accessor<ActiveCron[]> = this._crons[0];
     private setCrons: Setter<ActiveCron[]> = this._crons[1];
 
+    // Per-block todo checklist + in-flight tool, pushed by the backend's
+    // `agent:progress` sweep. Push-only (no fetch-on-open counterpart): the
+    // watcher republishes whenever the payload changes, so a Swarm opened
+    // mid-session fills in within one sweep rather than needing its own RPC.
+    private _progress = createSignal<Map<string, AgentProgress>>(new Map());
+    progressAtom: Accessor<Map<string, AgentProgress>> = this._progress[0];
+    private setProgress: Setter<Map<string, AgentProgress>> = this._progress[1];
+
     // AgentDispatches (SPEC §5) — one per Agent-tool-or-Workflow-tool call.
     // Fetched separately from subagentsAtom via subagent.ListDispatches;
     // buildTree() cross-references the two by dispatch_id/parent_block_id.
@@ -1124,6 +1162,35 @@ export class SwarmViewModel implements ViewModel {
             handler: () => this.scheduleLoadCrons(),
         });
         if (unsubCronChanged) this.unsubs.push(unsubCronChanged);
+
+        // Todo checklist + in-flight tool. Unlike the buckets above this
+        // carries its whole payload on the event, so there's nothing to
+        // reload — store it keyed by block and let buildTree read it.
+        const unsubProgress = waveEventSubscribe({
+            eventType: "agent:progress",
+            handler: (event: WaveEvent) => {
+                const data = event?.data as any;
+                const blockId = data?.blockId;
+                if (typeof blockId !== "string" || !blockId) return;
+                const todos: TodoItem[] = Array.isArray(data?.todos)
+                    ? data.todos
+                          .filter((t: any) => typeof t?.text === "string" && t.text.length > 0)
+                          .map((t: any) => ({
+                              text: t.text as string,
+                              status: typeof t?.status === "string" ? t.status : "pending",
+                          }))
+                    : [];
+                const next: AgentProgress = {
+                    todos,
+                    todosTruncated: typeof data?.todosTruncated === "number" ? data.todosTruncated : 0,
+                    currentTool: typeof data?.currentTool === "string" ? data.currentTool : null,
+                };
+                // Replace the Map (not mutate) so Solid sees a new reference
+                // and buildTree's memo actually re-runs.
+                this.setProgress((prev) => new Map(prev).set(blockId, next));
+            },
+        });
+        if (unsubProgress) this.unsubs.push(unsubProgress);
 
         // Patch display_name in place (not a full loadSubagents() reload) so
         // every client watching this session picks up a generated name —
@@ -1772,6 +1839,7 @@ export class SwarmViewModel implements ViewModel {
         const shells = this.shellsAtom();
         const crons = this.cronsAtom();
         const statuses = this.agentStatusesAtom();
+        const progressByBlock = this.progressAtom();
 
         // Include parent block IDs from subagents as fallback for agent panes
         // that registered subagents before their own registration propagated.
@@ -1820,6 +1888,7 @@ export class SwarmViewModel implements ViewModel {
             const visibleWorkflowRows = filterRetired(workflowRows, retired, (w) => w.dispatchId, (w) => workflowRetireSignal(w));
             const shellRows = buildShellRows(shells, blockId);
             const cronRows = buildCronRows(crons, blockId);
+            const progress = progressByBlock.get(blockId);
             return {
                 blockId,
                 agentName,
@@ -1831,6 +1900,13 @@ export class SwarmViewModel implements ViewModel {
                 workflowRows: visibleWorkflowRows,
                 shellRows,
                 cronRows,
+                todoRows: progress?.todos ?? [],
+                todosTruncated: progress?.todosTruncated ?? 0,
+                // Only meaningful while the agent is actually running — a
+                // stopped pane's last in-flight tool is stale, and showing it
+                // would read as "still doing this" (the payload is push-only,
+                // so nothing else clears it on stop).
+                currentTool: agentStatus === "running" ? (progress?.currentTool ?? null) : null,
             };
         });
 
