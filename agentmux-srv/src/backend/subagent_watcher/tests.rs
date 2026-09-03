@@ -1626,15 +1626,14 @@ fn reconcile_stale_subagents_leaves_active_alone_when_no_controller_is_registere
     // No register_stub_controller call — block id is guaranteed unique
     // (per-test suffix) so get_block_controller_status returns None. The
     // public entry point's synchronous behavior is unchanged by the
-    // None-retry fix: it queues a bounded one-shot retry
-    // (`retry_reconcile_once`) rather than leaving the entry untouched
-    // forever, but that retry itself silently no-ops here because
-    // `fixture_watcher()` is built via bare `new()` (no `self_ref` to
-    // upgrade to a real `Arc` — see `retry_reconcile_once`'s doc comment,
-    // same "untracked -> safe no-op" convention `trigger_eager_naming`
-    // uses). So immediately after this call, nothing has changed yet —
-    // covered directly (not via a real spawned retry) by the
-    // `_impl(..., allow_retry: false)` tests below.
+    // None-retry fix: it queues a bounded retry (`retry_reconcile_once`)
+    // rather than leaving the entry untouched forever, but that retry
+    // itself silently no-ops here because `fixture_watcher()` is built via
+    // bare `new()` (no `self_ref` to upgrade to a real `Arc` — see
+    // `retry_reconcile_once`'s doc comment, same "untracked -> safe no-op"
+    // convention `trigger_eager_naming` uses). So immediately after this
+    // call, nothing has changed yet — covered directly (not via a real
+    // spawned retry) by the `_impl(..., retries_remaining: 0)` tests below.
     let block_id = format!("recon-unregistered-{}", now_millis());
 
     let watcher = fixture_watcher();
@@ -1655,10 +1654,11 @@ fn reconcile_stale_subagents_leaves_active_alone_when_no_controller_is_registere
 
 #[test]
 fn reconcile_stale_subagents_impl_with_retry_exhausted_leaves_active_alone_when_no_controller_is_registered() {
-    // The bounded-retry fix's terminal case: a second attempt (allow_retry:
-    // false, as the real tokio::spawn'd retry calls it) with the controller
-    // STILL unregistered must give up, not chain into another retry or
-    // panic. See SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.2.
+    // The bounded-retry fix's terminal case: a call with `retries_remaining:
+    // 0` (as the real tokio::spawn'd retry chain eventually reaches) and
+    // the controller STILL unregistered must give up, not chain into
+    // another retry or panic. See
+    // SPEC_SWARM_DISPATCH_ATTRIBUTION_AND_LIFECYCLE_2026_08_19.md §3.2.
     let block_id = format!("recon-unregistered-exhausted-{}", now_millis());
 
     let watcher = fixture_watcher();
@@ -1671,10 +1671,42 @@ fn reconcile_stale_subagents_impl_with_retry_exhausted_leaves_active_alone_when_
         sessions.insert("s1".to_string(), s1);
     }
 
-    watcher.reconcile_stale_subagents_impl(&block_id, "s1", false);
+    watcher.reconcile_stale_subagents_impl(&block_id, "s1", 0);
 
     let info = watcher.get_info("sub-a").expect("sub-a should still exist");
-    assert_eq!(info.status, SubAgentStatus::Active, "unregistered + retry exhausted must still not guess");
+    assert_eq!(info.status, SubAgentStatus::Active, "unregistered + retries exhausted must still not guess");
+}
+
+#[test]
+fn reconcile_stale_subagents_impl_retries_again_when_controller_is_still_unregistered_but_budget_remains() {
+    // 2026-09-02 fix: a `None` read with retries_remaining > 0 must queue
+    // ANOTHER retry (decrementing the budget), not give up on the first
+    // unregistered read the way the old allow_retry:bool version did.
+    // Confirmed by checking the entry is untouched (still Active, not yet
+    // reconciled) after a call that still has retries left — the real
+    // assertion that matters (does it eventually give up vs. loop forever)
+    // is covered by the exhausted-vs-registers-before-retry tests either
+    // side of this one; this test isolates the "still retrying, not done
+    // yet" middle state.
+    let block_id = format!("recon-unregistered-midbudget-{}", now_millis());
+
+    let watcher = fixture_watcher();
+    {
+        let mut sessions = watcher.sessions.lock().unwrap();
+        let mut s1 = SessionWatch { subagents: HashMap::new() };
+        let mut state = fixture_state("parent-1", "sub-a", "s1");
+        state.info.parent_block_id = block_id.clone();
+        s1.subagents.insert("sub-a".to_string(), state);
+        sessions.insert("s1".to_string(), s1);
+    }
+
+    // fixture_watcher() has no self_ref, so the queued retry silently
+    // no-ops (same convention as the exhausted-case test above) — this
+    // call itself must not touch the entry regardless of retry budget.
+    watcher.reconcile_stale_subagents_impl(&block_id, "s1", 3);
+
+    let info = watcher.get_info("sub-a").expect("sub-a should still exist");
+    assert_eq!(info.status, SubAgentStatus::Active, "still unregistered with budget remaining must not reconcile yet");
 }
 
 #[test]
@@ -1696,7 +1728,7 @@ fn reconcile_stale_subagents_impl_reconciles_normally_once_the_controller_regist
         sessions.insert("s1".to_string(), s1);
     }
 
-    watcher.reconcile_stale_subagents_impl(&block_id, "s1", false);
+    watcher.reconcile_stale_subagents_impl(&block_id, "s1", 0);
 
     let info = watcher.get_info("sub-a").expect("sub-a should still exist");
     assert_eq!(info.status, SubAgentStatus::Abandoned);
@@ -2289,4 +2321,51 @@ fn a_live_observation_does_not_resurrect_a_completed_subagent() {
     );
 
     std::fs::remove_dir_all(&dir).ok();
+}
+
+// ── parse_event_timestamp ────────────────────────────────────────────────
+// docs/retro/retro-activitydock-appears-on-agent-pane-load-2026-09-02.md:
+// Claude Code writes `timestamp` as an ISO-8601 STRING, but this was read
+// with a bare `as_u64()` (which returns None for a string) and silently
+// fell back to `now_millis()`. Every replayed historical subagent therefore
+// reported `last_event_at ≈ now`, which becomes the dock row's `endedAt`,
+// which kept it inside `RETENTION_MS.stopped` — so long-dead subagents
+// rendered as dock rows on every pane (re)open and vanished ~3.4s later.
+// Confirmed live: 19 of Lzop's subagents all reported spawned_at ==
+// last_event_at == pane-open time, from a transcript dated two months
+// earlier.
+
+#[test]
+fn parse_event_timestamp_reads_an_iso8601_string_as_real_epoch_millis() {
+    // The exact shape observed in a real subagent JSONL.
+    let v = serde_json::json!("2026-07-03T08:09:20.743Z");
+    let got = parse_event_timestamp(&v).expect("an ISO-8601 string must parse");
+    assert_eq!(got, 1783066160743, "must be the transcript's real time, not now");
+}
+
+#[test]
+fn parse_event_timestamp_still_accepts_numeric_epoch_millis() {
+    let v = serde_json::json!(1783066160743u64);
+    assert_eq!(parse_event_timestamp(&v), Some(1783066160743));
+}
+
+#[test]
+fn parse_event_timestamp_returns_none_for_unparseable_values_so_the_caller_can_fall_back() {
+    assert_eq!(parse_event_timestamp(&serde_json::json!("not-a-date")), None);
+    assert_eq!(parse_event_timestamp(&serde_json::json!(null)), None);
+    assert_eq!(parse_event_timestamp(&serde_json::json!({})), None);
+}
+
+#[test]
+fn parse_event_timestamp_does_not_return_now_for_a_historical_string() {
+    // The actual regression guard: whatever this returns, it must NOT be
+    // "roughly now" for a two-month-old transcript timestamp. This is the
+    // property the dock's retention filter depends on.
+    let v = serde_json::json!("2026-07-03T08:09:20.743Z");
+    let got = parse_event_timestamp(&v).expect("must parse");
+    let now = now_millis();
+    assert!(
+        now.saturating_sub(got) > 24 * 60 * 60 * 1000,
+        "a historical timestamp must read as historical (got {got}, now {now})"
+    );
 }

@@ -37,7 +37,7 @@ vi.mock("@/app/store/wps", () => ({
 
 const callBackendServiceSpy = vi.spyOn(wos, "callBackendService").mockResolvedValue([]);
 
-import { allSubagentsAtom } from "./subagent-source";
+import { allSubagentsAtom, refreshSubagentsNow } from "./subagent-source";
 
 function mkSubagent(overrides: Partial<ActiveSubagent> & Pick<ActiveSubagent, "agent_id">): ActiveSubagent {
     return {
@@ -73,6 +73,23 @@ async function flushMicrotasks(): Promise<void> {
 // unchanged alongside them.
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
+
+// docs/retro/retro-activitydock-appears-on-agent-pane-load-2026-09-02.md:
+// `useSubagentBackfillGate` needs to know when the dock's OWN data has
+// actually caught up with a settled backfill, not guess a fixed duration.
+describe("subagent-source — refreshSubagentsNow", () => {
+    it("bypasses the debounce entirely and resolves once ListActive has actually landed", async () => {
+        await flushMicrotasks();
+        callBackendServiceSpy.mockClear();
+        callBackendServiceSpy.mockResolvedValueOnce([mkSubagent({ agent_id: "a1" })]);
+
+        await refreshSubagentsNow();
+
+        expect(callBackendServiceSpy).toHaveBeenCalledTimes(1);
+        expect(callBackendServiceSpy).toHaveBeenCalledWith("subagent", "ListActive", []);
+        expect(allSubagentsAtom().find((s) => s.agent_id === "a1")).toBeDefined();
+    });
+});
 
 describe("subagent-source — subagent:abandoned wiring", () => {
     it("registered a handler for subagent:abandoned (the fix's own precondition)", () => {

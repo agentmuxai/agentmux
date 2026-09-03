@@ -112,3 +112,12 @@ waveEventSubscribe({ eventType: "dispatch:updated", handler: () => trigger() });
 /** Every tracked dispatch (Solo or Workflow) currently known, across the
  *  whole app. Callers filter by `parent_block_id` for their own pane. */
 export const allDispatchesAtom: Accessor<AgentDispatch[]> = allDispatches;
+
+/**
+ * Force an immediate (non-debounced) refresh and resolve once it has
+ * actually landed. Mirrors `subagent-source.ts`'s `refreshSubagentsNow` —
+ * same rationale, same caller (`useSubagentBackfillGate.ts`).
+ */
+export function refreshDispatchesNow(): Promise<void> {
+    return refresh();
+}

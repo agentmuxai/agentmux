@@ -81,3 +81,17 @@ waveEventSubscribe({
 /** Every subagent currently known (active or recently completed), across the
  *  whole app. Callers filter by `parent_block_id` for their own pane. */
 export const allSubagentsAtom: Accessor<ActiveSubagent[]> = allSubagents;
+
+/**
+ * Force an immediate (non-debounced) refresh and resolve once it has
+ * actually landed — i.e. `allSubagentsAtom()` genuinely reflects the
+ * result, not just that a call was scheduled. `useSubagentBackfillGate.ts`
+ * uses this to know the dock's own data has caught up with a settled
+ * backend backfill before revealing the pane, instead of guessing a fixed
+ * duration (see that hook's doc comment and
+ * docs/reports/REPORT_AGENT_PANE_LOAD_RENDER_ARCHITECTURE_2026_08_27.md §2-3
+ * for why a blind timer raced ahead of this same refresh on a heavy agent).
+ */
+export function refreshSubagentsNow(): Promise<void> {
+    return refresh();
+}

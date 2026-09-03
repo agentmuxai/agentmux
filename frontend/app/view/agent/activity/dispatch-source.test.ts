@@ -21,7 +21,7 @@ vi.mock("@/app/store/wps", () => ({
 
 const callBackendServiceSpy = vi.spyOn(wos, "callBackendService").mockResolvedValue([]);
 
-import { msUntilNextQuietWindowRefresh } from "./dispatch-source";
+import { allDispatchesAtom, msUntilNextQuietWindowRefresh, refreshDispatchesNow } from "./dispatch-source";
 
 function mkDispatch(overrides: Partial<AgentDispatch> & Pick<AgentDispatch, "dispatch_id">): AgentDispatch {
     return {
@@ -83,6 +83,28 @@ describe("msUntilNextQuietWindowRefresh", () => {
 // dispatch:updated event (up to ~200 in a real trace). These events must
 // now collapse into a single call once the burst goes quiet. Mirrors
 // subagent-source.test.ts's own coalescing tests for its sibling singleton.
+// docs/retro/retro-activitydock-appears-on-agent-pane-load-2026-09-02.md —
+// mirrors subagent-source.test.ts's identical coverage for the sibling
+// singleton.
+describe("dispatch-source — refreshDispatchesNow", () => {
+    async function flushMicrotasks(): Promise<void> {
+        await Promise.resolve();
+        await Promise.resolve();
+    }
+
+    it("bypasses the debounce entirely and resolves once ListDispatches has actually landed", async () => {
+        await flushMicrotasks();
+        callBackendServiceSpy.mockClear();
+        callBackendServiceSpy.mockResolvedValueOnce([mkDispatch({ dispatch_id: "d1" })]);
+
+        await refreshDispatchesNow();
+
+        expect(callBackendServiceSpy).toHaveBeenCalledTimes(1);
+        expect(callBackendServiceSpy).toHaveBeenCalledWith("subagent", "ListDispatches", []);
+        expect(allDispatchesAtom().find((d) => d.dispatch_id === "d1")).toBeDefined();
+    });
+});
+
 describe("dispatch-source — refresh coalescing", () => {
     beforeEach(() => vi.useFakeTimers());
     afterEach(() => vi.useRealTimers());

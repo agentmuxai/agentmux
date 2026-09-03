@@ -141,6 +141,20 @@ impl SubagentWatcher {
                     _ => SubAgentStatus::Active,
                 }
             };
+            // Real spawn time for a REPLAYED file, not replay time. The
+            // events were just parsed from a transcript that may be months
+            // old; stamping `now_millis()` made every backfilled subagent
+            // claim to have started at pane-open, which both misreported
+            // elapsed time and corrupted the dock's newest-first ordering.
+            // Falls back to `now_millis()` only when the file yielded no
+            // parseable event at all (a genuinely new/empty transcript,
+            // where "now" is the honest answer). See
+            // docs/retro/retro-activitydock-appears-on-agent-pane-load-2026-09-02.md.
+            let initial_spawned_at = new_events
+                .iter()
+                .map(|e| e.timestamp)
+                .min()
+                .unwrap_or_else(now_millis);
             let state = session.subagents.entry(agent_id.clone()).or_insert_with(|| {
                 SubagentState {
                     info: SubAgent {
@@ -150,8 +164,8 @@ impl SubagentWatcher {
                         parent_agent: parent_agent.to_string(),
                         parent_block_id: parent_block_id.to_string(),
                         session_id: session_id.clone(),
-                        spawned_at: now_millis(),
-                        last_event_at: now_millis(),
+                        spawned_at: initial_spawned_at,
+                        last_event_at: initial_spawned_at,
                         status: initial_status,
                         event_count: 0,
                         model: None,
