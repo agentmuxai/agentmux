@@ -70,7 +70,7 @@ Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). CEF ho
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| **Node.js** | 22 LTS | Frontend build |
+| **Node.js** | 24 LTS | Frontend build |
 | **Rust** | 1.77+ | Backend + CEF host |
 | **[Task](https://taskfile.dev/)** | Latest | Build orchestration |
 | **CMake** | 3.20+ | CEF native build (cef-dll-sys) |
@@ -79,7 +79,7 @@ Cross-platform (Windows, macOS, Linux). 100% Rust backend (Tokio + Axum). CEF ho
 Platform-specific:
 - **Windows:** Visual Studio Build Tools (CMake + Ninja ship with VS, but Ninja must be on PATH — see CLAUDE.md)
 - **macOS:** Xcode Command Line Tools, `brew install cmake ninja`
-- **Linux:** Build essentials, `apt install cmake ninja-build build-essential` — see [Linux guide](docs/linux.md)
+- **Linux:** Build essentials, `apt install cmake ninja-build build-essential libwayland-dev libxkbcommon-dev libgtk-3-dev libglib2.0-dev libpango1.0-dev libcairo2-dev libgdk-pixbuf2.0-dev libatk1.0-dev` — see [Linux guide](docs/linux.md)
 
 ### Development
 
