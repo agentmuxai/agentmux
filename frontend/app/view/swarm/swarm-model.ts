@@ -430,9 +430,8 @@ export function collectClearableRows(nodes: AgentTreeNode[]): { rowKey: string; 
  * `read_jsonl_from_offset`), which in practice is that CLI's own
  * per-session/per-batch codename. A whole Task/Workflow-tool batch of
  * genuinely distinct, unrelated subagents legitimately shares one slug —
- * already established as an expected, non-buggy signature in
- * docs/specs/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md Finding 3
- * ("one shared slug = one legitimate concurrent spawn") and relied on by
+ * an expected, non-buggy signature ("one shared slug = one legitimate
+ * concurrent spawn"), and one relied on by
  * `buildDispatchBuckets`'s `WorkflowDispatch.name` derivation above as a
  * fallback for the brief window before eager naming resolves.
  *
@@ -482,8 +481,7 @@ function shallowEqualSubagent(a: ActiveSubagent, b: ActiveSubagent): boolean {
  * object identity on every spawn/completed refresh, and SolidJS's `<For>`
  * (which diffs list items by reference, not value) tears down and remounts
  * every row in the tree on every refresh, silently collapsing any row a
- * user has expanded. See
- * docs/specs/REPORT_SWARM_SUBAGENT_DETAIL_UX_ANALYSIS_2026_07_07.md.
+ * user has expanded.
  */
 export function mergeSubagentsPreservingIdentity(
     prev: ActiveSubagent[],
