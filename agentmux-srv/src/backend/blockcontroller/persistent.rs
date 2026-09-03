@@ -4093,6 +4093,35 @@ impl PersistentSubprocessController {
         self.inner.lock().unwrap().session_id.clone()
     }
 
+    /// True when this controller is registered but has **no live process and no
+    /// spawn already in flight** — the state a lazily-registered controller sits
+    /// in between `register` ("spawns on first message") and its first
+    /// `send_message`.
+    ///
+    /// In that state `inject_message` cannot deliver: it has no spawn config and
+    /// only writes to a live `stdin_tx`, so it returns "persistent process not
+    /// running". The caller can, however, start a *turn* — `run_agent_turn`
+    /// re-reads the spawn config from block metadata and calls `send_message`,
+    /// which does spawn. This predicate is what lets the reactive delivery path
+    /// tell those two situations apart. See
+    /// `docs/reports/REPORT_JEKT_DELIVERY_DROPS_UNSPAWNED_PERSISTENT_AGENTS_2026_09_03.md`.
+    ///
+    /// Deliberately `&& !spawning_in_progress`: a caller that has already
+    /// committed to spawning owns this round (see `spawning_in_progress`'s doc
+    /// comment on the concurrent-spawn TOCTOU race). Reporting "needs spawn"
+    /// during that window would invite a second, racing spawn — the exact
+    /// orphaned-child bug that field exists to prevent. That window instead
+    /// surfaces as "still starting up — try again shortly", which is retryable
+    /// by design.
+    ///
+    /// Racy by nature, and safe to be: the process can exit the instant after
+    /// this returns `false`. It is a routing hint, not a guarantee — the spawn
+    /// claim inside `send_message` is what actually serialises spawners.
+    pub fn needs_spawn(&self) -> bool {
+        let inner = self.inner.lock().unwrap();
+        inner.stdin_tx.is_none() && !inner.spawning_in_progress
+    }
+
     /// Ask this controller to restart itself once the current turn ends,
     /// instead of being torn down and replaced right now.
     ///
@@ -4441,6 +4470,47 @@ mod send_input_tests {
     /// arriving in that window (and turn end is EXACTLY when the frontend
     /// flushes queued follow-ups) would take `DeliverDirect` into a process
     /// about to receive EOF: acknowledged, then lost.
+    // ---- needs_spawn: the reactive-delivery routing predicate ----
+    // REPORT_JEKT_DELIVERY_DROPS_UNSPAWNED_PERSISTENT_AGENTS_2026_09_03.md
+
+    #[test]
+    fn needs_spawn_is_true_for_a_freshly_registered_controller() {
+        // The state every persistent controller sits in after an srv restart:
+        // registered ("spawns on first message"), no process yet. This is the
+        // case that used to fail agent-to-agent delivery permanently.
+        let c = controller();
+        assert!(c.needs_spawn());
+    }
+
+    #[test]
+    fn needs_spawn_is_false_once_a_process_is_live() {
+        // A live process can be steered mid-turn by the ordinary delivery path;
+        // starting a second turn here would be wrong.
+        let c = controller();
+        let (tx, _rx) = mpsc::channel::<String>(4);
+        c.inner.lock().unwrap().stdin_tx = Some(tx);
+        assert!(!c.needs_spawn());
+    }
+
+    #[test]
+    fn needs_spawn_is_false_while_a_spawn_is_already_in_flight() {
+        // The load-bearing case. A caller that has claimed the spawn owns this
+        // round; reporting "needs spawn" here would invite a second, racing
+        // spawn — the orphaned-child bug `spawning_in_progress` exists to
+        // prevent. This window is retryable ("still starting up"), not
+        // spawnable.
+        let c = controller();
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = None;
+            inner.spawning_in_progress = true;
+        }
+        assert!(
+            !c.needs_spawn(),
+            "must not invite a second spawn while one is already claimed",
+        );
+    }
+
     #[test]
     fn a_committed_restart_refuses_deliver_direct_even_with_a_live_stdin() {
         let c = controller();
