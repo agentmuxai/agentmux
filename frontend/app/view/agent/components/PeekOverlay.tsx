@@ -39,6 +39,13 @@
  * to sit at the entry's own top rather than floating below/above it, so
  * there's no direction to pick — height is simply capped to the space
  * between the entry's top and the scroll container's bottom.
+ *
+ * `align="end"` mode additionally tracks the mouse's Y position while
+ * hovering (2026-09-03, SPEC_PEEK_OVERLAY_MOUSE_Y_TRACKING_2026_09_03.md):
+ * horizontal position stays pinned to the row's right edge exactly as
+ * before, but `top` follows the cursor instead of freezing at the row's
+ * top edge, clamped to the scroll container's own bounds. `align="stretch"`
+ * (UserMessageBlock's full-body preview) is unaffected — still top-anchored.
  */
 
 import clsx from "clsx";
@@ -103,14 +110,21 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
 
     let floatingEl: HTMLElement | undefined;
     let cleanupAutoUpdate: (() => void) | null = null;
+    // Latest mouse Y within the hovered row, tracked continuously (not
+    // gated on `show`) so the panel already has a real position for its
+    // very first render instead of flashing at rect.top first. Plain
+    // closure var, not a signal — applied via direct style writes, same as
+    // the rest of this component's positioning.
+    let lastMouseY: number | null = null;
+    let mouseMoveRaf: number | null = null;
 
     const update = () => {
         const row = props.rowEl();
         if (!row) return;
         const rect = row.getBoundingClientRect();
         const container = findScrollContainerRect(row);
-        const cap = Math.max(0, container.bottom - rect.top - BOTTOM_MARGIN_PX);
         if ((props.align ?? "end") === "stretch") {
+            const cap = Math.max(0, container.bottom - rect.top - BOTTOM_MARGIN_PX);
             setFloatingStyle({
                 position: "fixed",
                 left: `${rect.left}px`,
@@ -123,15 +137,74 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
         // Shrink-wrapped and right-anchored. No `width` is set at all, so the
         // stylesheet's `width: max-content` governs; `max-width` still clamps
         // it to the row so a long tool command can't escape the pane.
+        //
+        // `top` tracks the mouse's Y (clamped to the scroll container's own
+        // bounds) instead of freezing at rect.top — SPEC_PEEK_OVERLAY_MOUSE_Y_TRACKING_2026_09_03.md.
+        // Horizontal pinning (left/transform) is untouched. Falls back to
+        // rect.top if no mouse position is known yet.
+        //
+        // The upper clamp accounts for the overlay's OWN rendered height
+        // (`floatingEl`'s current rect, once mounted) rather than just
+        // `container.bottom` — otherwise, hovering near the scroll
+        // container's bottom edge would clamp `top` right up against it and
+        // the `max-height` cap below would collapse toward 0, clipping the
+        // timestamp/estimate/command content instead of just stopping the
+        // panel's downward travel while it's still fully visible (reagent +
+        // Codex P1 on PR #2949). Falls back to 0 extra headroom before the
+        // overlay's first paint, when its height isn't known yet — corrected
+        // on the very next update() once floatingEl exists.
+        const overlayHeight = floatingEl?.getBoundingClientRect().height ?? 0;
+        const minTop = container.top;
+        const maxTop = Math.max(minTop, container.bottom - BOTTOM_MARGIN_PX - overlayHeight);
+        const top = lastMouseY != null ? Math.min(Math.max(lastMouseY, minTop), maxTop) : rect.top;
+        const cap = Math.max(0, container.bottom - top - BOTTOM_MARGIN_PX);
         setFloatingStyle({
             position: "fixed",
             left: `${rect.right}px`,
-            top: `${rect.top}px`,
+            top: `${top}px`,
             transform: "translateX(-100%)",
             "max-width": `${rect.width}px`,
             "max-height": `${cap}px`,
+            // The panel now tracks the cursor's exact Y, so without this it
+            // sits directly under the pointer: moving further down targets
+            // the (Portal-rendered, non-descendant) overlay itself instead
+            // of the row, firing the row's onMouseLeave and hiding the
+            // panel — which un-hovers the overlay, re-triggers the row's
+            // onMouseEnter, and reshows it at the new Y, looping. Scoped to
+            // "end" mode only: "stretch" (UserMessageBlock's full message
+            // body preview) still needs normal pointer events for text
+            // selection (reagent + Codex P1 on PR #2949).
+            "pointer-events": "none",
         });
     };
+
+    // Track the mouse continuously while the row exists, independent of
+    // `show` (the 50ms enter-delay in useNodePeek means `show` flips true
+    // slightly after hover starts — this way the first visible frame
+    // already has a real Y instead of one captured from a stale/absent
+    // mousemove). rAF-coalesced so fast mouse movement doesn't write
+    // styles once per raw event — same pattern `registerFloating` below
+    // already uses for its own rAF-gated setup.
+    createEffect(() => {
+        const row = props.rowEl();
+        if (!row || (props.align ?? "end") === "stretch") return;
+        const onMouseMove = (e: MouseEvent) => {
+            lastMouseY = e.clientY;
+            if (mouseMoveRaf != null) return;
+            mouseMoveRaf = requestAnimationFrame(() => {
+                mouseMoveRaf = null;
+                if (props.show) update();
+            });
+        };
+        row.addEventListener("mousemove", onMouseMove);
+        onCleanup(() => {
+            row.removeEventListener("mousemove", onMouseMove);
+            if (mouseMoveRaf != null) {
+                cancelAnimationFrame(mouseMoveRaf);
+                mouseMoveRaf = null;
+            }
+        });
+    });
 
     // reagent P1 on PR #2392: the RAF below used to be un-cancellable and
     // `floatingEl` was never reset, so a rapid hover→leave (very reachable

@@ -155,7 +155,7 @@
             // --elevated-bg-color instead (aliases --modal-bg-color, a
             // plain per-theme hex literal with no window-opacity coupling —
             // see theme.scss) — same dark value, genuinely always opaque.
-            background: color-mix(in srgb, var(--accent-color) 4%, var(--elevated-bg-color));
+            background: color-mix(in srgb, var(--secondary-text-color) 4%, var(--elevated-bg-color));
 
             .agent-working-row-left {
                 flex: 1;
