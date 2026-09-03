@@ -88,6 +88,45 @@ Result: a pane that failed auth, was closed, and reopened shows a blue "Log in"
 bar *and* a red failure row with "Login Again", stacked, both wired to the same
 function. Nothing in the code prevents this; no test asserts against it.
 
+An earlier draft of this section claimed the two were mutually exclusive
+(citing `useAgentControllerStatus.ts:219-220`, "mid-turn auth failures don't set
+`canRetry`"). That citation is accurate but covers only the **live** path; it
+does not constrain the **mount** path above. The two surfaces are separate
+sibling `<Show>`s (`agent-view.tsx:2176` and `:2253`) with no gating between
+them.
+
+#### Reproduced live (manoz, 2026-09-02) — observed, not inferred
+
+Run against a dev instance on main **without** this change, on an agent whose
+Claude login was genuinely expired (so the mount-time pre-flight check really
+failed and really set `canRetry`). The other half was staged by writing
+`agent:last_failure` directly to that block's meta via `object.UpdateObjectMeta`
+(`code: "auth"`, `retryable: true`) — the exact state
+`core::persist_last_failure` leaves behind after a real mid-turn 401 — then
+forcing a remount. Sampled 3× at 6s intervals, identical every time:
+
+```
+bars: 1  barText: ["Log in"]
+rows: 1  rowText: ["🔐 Authentication failed / auth · retryable /
+                   🔑 Login Again / 🖥 Login via terminal /
+                   Armory → Accounts / ▸ Details / ×"]
+```
+
+Both surfaces on screen simultaneously and **stable** — not a transient flash.
+
+Two things that repro establishes, beyond "it happens":
+
+1. **The seed is mount-only, and that is load-bearing.** Staging the meta
+   against an *already-mounted* pane changed nothing; the stacking required a
+   close-and-reopen. That is precisely why this survived so long: it is not
+   visible while you sit in the pane watching it, only on reopen — which is
+   also when a user is least able to report it precisely.
+2. **In the stacked state the ROW is the richer surface and the BAR is the
+   redundant one** (the row carries terminal fallback, Armory, Details, dismiss;
+   the bar carries one button). So collapsing onto the row is not merely
+   deduplication — it strictly preserves the better of the two. This is the
+   answer to "why keep the row rather than the bar".
+
 ## 3. Goals
 
 1. **One login CTA visible at a time**, in one visual language.
@@ -252,6 +291,18 @@ synthetic pre-flight failure both are false once the row is dismissed — so thi
 is precisely the case that notice fires for. The user gets visible feedback, and
 `/login` still works. Dismiss is a real choice, not a dead composer, and it is
 strictly more control than the old bar (which could not be dismissed at all).
+
+Three alternatives to the canRetry-transitions-only design were considered and
+rejected (manoz, independently, on review):
+
+- **Track `failureAtom` as well** — reintroduces the undismissable row.
+- **Re-raise on `TurnStart`** — fires too late; the send is already blocked by
+  then.
+- **Re-raise on composer focus** — surprising, and focus is not an auth event.
+
+Neither of us found a fourth that keeps dismiss working *and* re-raises on a
+better signal, so the shipped combination (canRetry transition + authNotice on a
+blocked send) stands.
 
 Because that behaviour depends on one condition staying false in exactly this
 case, it is pinned by a test — `useAgentCommands.test.ts`, *"still surfaces a
