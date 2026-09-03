@@ -326,9 +326,6 @@ pub(super) fn parse_event_type(value: &serde_json::Value) -> Option<SubagentEven
     }
 }
 
-/// Modification time of `path`, or `UNIX_EPOCH` if it can't be read (a
-/// vanished/permission-denied file sorts oldest — excluded first by
-/// `scan_subagents_dir`'s recency cap rather than crashing the scan).
 /// Epoch-millis for a subagent JSONL line's `timestamp` field, tolerant of
 /// BOTH shapes that occur in real transcripts.
 ///
@@ -366,6 +363,9 @@ pub(super) fn parse_event_timestamp(v: &serde_json::Value) -> Option<u64> {
         .map(|ms| ms as u64)
 }
 
+/// Modification time of `path`, or `UNIX_EPOCH` if it can't be read (a
+/// vanished/permission-denied file sorts oldest — excluded first by
+/// `scan_subagents_dir`'s recency cap rather than crashing the scan).
 pub(super) fn file_mtime(path: &Path) -> std::time::SystemTime {
     std::fs::metadata(path)
         .and_then(|m| m.modified())
