@@ -80,3 +80,27 @@ describe("PersistentShellBlock — peek tooltip", () => {
         }
     });
 });
+
+describe("PersistentShellBlock — hides bashwrap's internal starting-chunk (2026-09-03)", () => {
+    it("does not render the leading [bashwrap] starting system chunk in the expanded panel", () => {
+        const running: ShellNode = {
+            ...node,
+            status: "running",
+            exitCode: undefined,
+            exitedAt: undefined,
+            log: {
+                open: true,
+                chunks: [
+                    { kind: "system", content: "[bashwrap] starting: 12 chars", timestamp: 1 },
+                    { kind: "stdout", content: "server listening on :3000", timestamp: 2 },
+                ],
+            },
+        };
+        const { container } = render(() => (
+            <PersistentShellBlock node={running} pinned={true} onTogglePin={() => {}} />
+        ));
+        expect(container.textContent).not.toContain("bashwrap");
+        expect(container.textContent).toContain("server listening on :3000");
+        expect(container.querySelectorAll(".agent-tool-log-line")).toHaveLength(1);
+    });
+});
