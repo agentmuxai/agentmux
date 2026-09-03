@@ -229,3 +229,59 @@ describe("ToolOverlayLog — height-FLIP transition", () => {
         vi.useRealTimers();
     });
 });
+
+describe("ToolOverlayLog — hides bashwrap's internal starting-chunk (2026-09-03)", () => {
+    it("does not render the [bashwrap] starting system chunk while streaming", () => {
+        const node: ToolNode = {
+            ...streamingNode,
+            log: {
+                open: true,
+                chunks: [
+                    // The real, always-first chunk bashwrap publishes
+                    // (bash_wrap.rs's one `publish_system()` call site) —
+                    // reported as reading like a jarring "Thinking… ->
+                    // internal debug string -> real output" transition.
+                    { kind: "system", content: "[bashwrap] starting: 42 chars", timestamp: 1 },
+                ],
+            },
+        };
+        const { container } = render(() => <ToolOverlayLog node={node} />);
+        expect(container.textContent).not.toContain("bashwrap");
+        expect(container.querySelectorAll(".agent-tool-log-line")).toHaveLength(0);
+    });
+
+    it("shows real output immediately alongside a leading system chunk, not just eventually", () => {
+        const node: ToolNode = {
+            ...streamingNode,
+            log: {
+                open: true,
+                chunks: [
+                    { kind: "system", content: "[bashwrap] starting: 5 chars", timestamp: 1 },
+                    { kind: "stdout", content: "real output line", timestamp: 2 },
+                ],
+            },
+        };
+        const { container } = render(() => <ToolOverlayLog node={node} />);
+        expect(container.textContent).not.toContain("bashwrap");
+        expect(container.textContent).toContain("real output line");
+        expect(container.querySelectorAll(".agent-tool-log-line")).toHaveLength(1);
+    });
+
+    it("still shows real output once the tool completes, with no trace of the system chunk", () => {
+        const node: ToolNode = {
+            ...terminalNode,
+            log: {
+                open: false,
+                chunks: [
+                    { kind: "system", content: "[bashwrap] starting: 5 chars", timestamp: 1 },
+                    { kind: "stdout", content: "line 1", timestamp: 2 },
+                ],
+            },
+        };
+        // Terminal + no structured result -> falls into the "chunks-final"
+        // branch (still ChunkList), per the branch() logic in the component.
+        const { container } = render(() => <ToolOverlayLog node={{ ...node, result: undefined }} />);
+        expect(container.textContent).not.toContain("bashwrap");
+        expect(container.textContent).toContain("line 1");
+    });
+});

@@ -9,6 +9,7 @@ import {
     collapseSpinnerChunks,
     createChunkCapper,
     createSpinnerCollapser,
+    dropBashwrapStartingChunk,
     MAX_TOOL_OUTPUT_CHARS,
     MAX_TOOL_OUTPUT_LINES,
 } from "./output-cap";
@@ -82,6 +83,84 @@ describe("capChars", () => {
         expect(r.length).toBeLessThan(1020);
         expect(r).toContain("truncated");
         expect(r.endsWith("x".repeat(1000))).toBe(true);
+    });
+});
+
+describe("dropBashwrapStartingChunk", () => {
+    it("removes the bashwrap-starting marker and nothing else", () => {
+        const chunks = [
+            chunk("[bashwrap] starting: 12 chars", "system"),
+            chunk("real output", "stdout"),
+            chunk("an error", "stderr"),
+        ];
+        expect(dropBashwrapStartingChunk(chunks)).toEqual([chunk("real output", "stdout"), chunk("an error", "stderr")]);
+    });
+
+    it("leaves a stream with no bashwrap-starting chunk untouched", () => {
+        const chunks = [chunk("a"), chunk("b")];
+        expect(dropBashwrapStartingChunk(chunks)).toEqual(chunks);
+    });
+
+    it("returns an empty array when the only chunk is the bashwrap-starting marker", () => {
+        expect(dropBashwrapStartingChunk([chunk("[bashwrap] starting: 5 chars", "system")])).toEqual([]);
+    });
+
+    // codex P1 on PR #2948: the first version of this function filtered by
+    // `kind === "system"` alone. `kind: "system"` is a shared channel — these
+    // three are OTHER real messages published on it that must keep
+    // rendering, not backend-internal noise like the starting marker.
+    it("keeps a synthesized exit-status chunk (useToolChunkStream.ts, no structured result case)", () => {
+        const chunks = [
+            chunk("[bashwrap] starting: 3 chars", "system"),
+            chunk("output", "stdout"),
+            chunk("[exited 0]", "system"),
+        ];
+        expect(dropBashwrapStartingChunk(chunks)).toEqual([chunk("output", "stdout"), chunk("[exited 0]", "system")]);
+    });
+
+    it("keeps a persistent-shell cwd-not-found warning (shell_node.rs)", () => {
+        const chunks = [
+            chunk("[cwd not found: /tmp/gone — running in the server's working directory]", "system"),
+            chunk("output", "stdout"),
+        ];
+        expect(dropBashwrapStartingChunk(chunks)).toEqual(chunks);
+    });
+
+    it("keeps a spawn-error message — often the only output a shell that failed to start ever produces (shell_node.rs)", () => {
+        const chunks = [chunk("[spawn error: No such file or directory (os error 2)]", "system")];
+        expect(dropBashwrapStartingChunk(chunks)).toEqual(chunks);
+    });
+
+    it("preserves the surviving chunks' object identity, not just equal content", () => {
+        // The stateful collapsers this feeds (createSpinnerCollapser,
+        // createChunkCapper) anchor their append-only fast path on
+        // `chunks[0] !== anchor` — a REFERENCE comparison. filter() must not
+        // clone elements, or every call would look like a stream reset.
+        const real = chunk("real output", "stdout");
+        const filtered = dropBashwrapStartingChunk([chunk("[bashwrap] starting: 3 chars", "system"), real]);
+        expect(filtered[0]).toBe(real);
+    });
+
+    it("keeps the same leading real chunk as anchor across repeated calls on a growing stream", () => {
+        // Simulates what the render path actually does: dropBashwrapStartingChunk runs
+        // fresh on every reactive re-run, feeding a stateful collapser whose
+        // correctness depends on element 0 staying the SAME reference as the
+        // raw chunk array grows. This is the property the two call sites
+        // (ChunkList, PersistentShellBlock) actually rely on, exercised
+        // end-to-end rather than asserted structurally.
+        const sys = chunk("[bashwrap] starting: 3 chars", "system");
+        const first = chunk("line 1", "stdout");
+        const raw = [sys, first];
+        const collapse = createSpinnerCollapser<{ kind: string; content: string }>();
+
+        const view1 = collapse(dropBashwrapStartingChunk(raw));
+        expect(view1.display).toEqual([first]);
+
+        raw.push(chunk("line 2", "stdout"));
+        const view2 = collapse(dropBashwrapStartingChunk(raw));
+        // Had the anchor identity broken, this would reset to only the
+        // latest append instead of accumulating both real lines.
+        expect(view2.display.map((c) => c.content)).toEqual(["line 1", "line 2"]);
     });
 });
 

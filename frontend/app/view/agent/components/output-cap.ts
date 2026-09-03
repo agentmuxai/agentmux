@@ -80,6 +80,53 @@ export function capChars(text: string, max: number = MAX_TOOL_OUTPUT_CHARS): str
     return TRUNCATED_MARKER + "\n" + text.slice(text.length - max);
 }
 
+/**
+ * The one specific chunk this drops: `agentmux-bashwrap`'s startup marker
+ * (`publish_system()` in `bash_wrap.rs`, whose only call site emits exactly
+ * this prefix + a char count) the instant a Bash tool begins, before any
+ * real output exists. It carries no information a user benefits from, has
+ * no dedicated styling (`agent-tool-log-line--system` exists in the
+ * KIND_CLASS map but has no CSS rule), and — because it is always the FIRST
+ * chunk to arrive — was the first thing visible the moment a running tool's
+ * panel auto-expanded: "Thinking…"/"Working…" straight to an internal debug
+ * string, then real output. Reported 2026-09-03 as the dominant case of the
+ * tool-call scroll-oscillation symptom.
+ */
+const BASHWRAP_STARTING_PREFIX = "[bashwrap] starting:";
+
+/**
+ * Drop ONLY the bashwrap-starting chunk above — NOT every `kind: "system"`
+ * chunk. `kind: "system"` is a shared, actively-used channel for several
+ * other genuinely informative messages that must keep rendering (codex P1,
+ * caught after this function's first version filtered by kind alone):
+ *   - `[exited N]` — `useToolChunkStream.ts:83-87` synthesizes this on the
+ *     WPS `terminal` event; it's the ONLY exit-status signal a Bash tool
+ *     with no structured result ever gets.
+ *   - `[cwd not found: ... — running in the server's working directory]` —
+ *     `shell_node.rs:360-368`, a real behavior-deviation warning for a
+ *     persistent shell node.
+ *   - `[spawn error: {e}]` — `shell_node.rs:407`, often the ONLY output a
+ *     shell that failed to spawn at all will ever produce.
+ * A kind-only filter would have silently swallowed all three.
+ *
+ * Called by each renderer (`ChunkList` in ToolOverlayLog.tsx,
+ * `PersistentShellBlock.tsx`'s equivalent) BEFORE `createSpinnerCollapser`/
+ * `createChunkCapper`, not after: filtering downstream of those would still
+ * count the dropped chunk against the line/char budget while hiding it,
+ * silently evicting one line of real output per bashwrap-starting chunk
+ * seen. Safe to call every render despite allocating a new array each time
+ * — the append-only `chunks[0] !== anchor` identity check both stateful
+ * collapsers rely on compares the FIRST ELEMENT's reference, which
+ * `Array.prototype.filter` never changes; a real prior element stays the
+ * same object across calls regardless of how many times a leading
+ * bashwrap-starting chunk is filtered out ahead of it.
+ */
+export function dropBashwrapStartingChunk<T extends { kind: string; content: string }>(
+    chunks: ReadonlyArray<T>,
+): T[] {
+    return chunks.filter((c) => !(c.kind === "system" && c.content.startsWith(BASHWRAP_STARTING_PREFIX)));
+}
+
 export interface CappedChunks<T> {
     chunks: ReadonlyArray<T>;
     /** Lines retained in the rendered window (== total when under budget). */
