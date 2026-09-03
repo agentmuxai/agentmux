@@ -210,7 +210,7 @@ fn apply_lines(state: &mut BlockState, lines: &[&str]) {
             // item-at-a-time call after it would be describing a different
             // vocabulary than the one currently in force.
             if state.list.is_none() {
-                merge_single_task(&mut state.tasks, input);
+                merge_single_task(&mut state.tasks, input, name);
             }
         }
     }
@@ -314,15 +314,47 @@ fn parse_todo_entry(entry: &serde_json::Value) -> Option<TodoItem> {
 /// reason to resend text that did not change. Requiring a complete item meant
 /// such a call parsed to nothing and the row sat at `pending` forever, which is
 /// precisely the case a checklist exists to show moving.
-fn merge_single_task(items: &mut Vec<(String, TodoItem)>, input: &serde_json::Value) {
+/// Does this tool name describe CREATING an item, as opposed to revising one?
+///
+/// Only consulted for calls that carry no id (reagent P2 on PR #2952). With an
+/// id the key is unambiguous; without one, text is the only identity available,
+/// and keying on it alone silently collapses two genuinely distinct in-flight
+/// tasks that happen to share a title. Two visible duplicate rows are a much
+/// smaller harm than one invisibly missing row, so an idless CREATE always
+/// appends and only an idless UPDATE matches by text.
+fn is_create_call(tool_name: &str) -> bool {
+    tool_name.contains("Create") || tool_name.contains("Add") || tool_name.contains("New")
+}
+
+fn merge_single_task(items: &mut Vec<(String, TodoItem)>, input: &serde_json::Value, tool_name: &str) {
     let text = first_string(input, &["content", "title", "text", "activeForm", "description"]);
     let status = first_string(input, &["status", "state"]);
-    let Some(key) = first_string(input, &["task_id", "taskId", "id"]).or_else(|| text.clone()) else {
-        // Neither an id nor any text — nothing identifies a row to touch.
-        return;
-    };
+    let id = first_string(input, &["task_id", "taskId", "id"]);
 
-    if let Some(slot) = items.iter_mut().find(|(k, _)| *k == key) {
+    // An idless create is its own row, always — see `is_create_call`.
+    if id.is_none() && is_create_call(tool_name) {
+        let Some(text) = text else { return };
+        items.push((
+            // Unique so no later call can match it by key; an idless tool
+            // gives us nothing to correlate a future update against anyway.
+            format!("{}#{}", text, items.len()),
+            TodoItem { text, status: status.unwrap_or_else(|| "pending".to_string()) },
+        ));
+        return;
+    }
+
+    // Find the row this call refers to. An id matches the key it was stored
+    // under; an idless update has only its text, and must compare against each
+    // row's TEXT rather than its key — a row created WITH an id is keyed by
+    // that id, so a key comparison would miss it and append a duplicate.
+    let existing = match &id {
+        Some(id) => items.iter_mut().find(|(k, _)| k == id),
+        None => match &text {
+            Some(text) => items.iter_mut().find(|(_, item)| item.text == *text),
+            None => None,
+        },
+    };
+    if let Some(slot) = existing {
         if let Some(text) = text {
             slot.1.text = text;
         }
@@ -331,6 +363,11 @@ fn merge_single_task(items: &mut Vec<(String, TodoItem)>, input: &serde_json::Va
         }
         return;
     }
+
+    let Some(key) = id.or_else(|| text.clone()) else {
+        // Neither an id nor any text — nothing identifies a row to touch.
+        return;
+    };
 
     // Creating a row still needs something to display; an update for a task we
     // never saw created (seeded mid-stream) has no text to show.
@@ -405,6 +442,60 @@ fn consume_new_output(filestore: &FileStore, block_id: &str, state: &mut BlockSt
 }
 
 /// Run the progress sweep loop. Never returns.
+/// One block's worth of work decided by a sweep — what to publish, if anything.
+struct SweepOutcome {
+    agent_id: String,
+    block_id: String,
+    progress: AgentProgress,
+}
+
+/// The whole file-reading half of a sweep, run OFF the async runtime.
+///
+/// `FileStore::stat`/`read_at` are synchronous, mutex-guarded SQLite reads, and
+/// this loop runs them for every live agent at a 3s cadence (reagent P2 on PR
+/// #2952). Doing that inline would park a Tokio worker thread on disk I/O
+/// several times a second — tolerable at `activity_watcher`'s 20s, much less so
+/// here. `states` is moved in and back out rather than shared behind a lock:
+/// only this loop ever touches it, and one owner is simpler than one mutex.
+fn sweep_blocking(
+    filestore: &FileStore,
+    agents: Vec<(String, String)>,
+    mut states: HashMap<String, BlockState>,
+    last_published: &HashMap<String, AgentProgress>,
+    force_republish: bool,
+) -> (HashMap<String, BlockState>, Vec<SweepOutcome>) {
+    let mut out = Vec::new();
+
+    for (agent_id, block_id) in agents {
+        // Same gate as the summary loop: an idle or non-agent pane has no
+        // progress to report and shouldn't be read every tick.
+        let Some(status) = get_block_controller_status(&block_id) else { continue };
+        if status.shellprocstatus != STATUS_RUNNING || !status.is_agent_pane {
+            continue;
+        }
+
+        let state = states.entry(block_id.clone()).or_default();
+        let had_new = consume_new_output(filestore, &block_id, state);
+        let progress = state.progress();
+
+        // Nothing new AND nothing already published for this block — an agent
+        // that has never had progress costs no events at all.
+        if !had_new && !last_published.contains_key(&block_id) {
+            continue;
+        }
+        if progress.is_empty() && !last_published.contains_key(&block_id) {
+            continue;
+        }
+        if !force_republish && last_published.get(&block_id) == Some(&progress) {
+            continue;
+        }
+        out.push(SweepOutcome { agent_id, block_id, progress });
+    }
+
+    (states, out)
+}
+
+/// Run the progress sweep loop. Never returns.
 pub async fn run_agent_progress_loop(filestore: Arc<FileStore>, broker: Arc<Broker>) {
     let mut ticker = interval(Duration::from_secs(SWEEP_INTERVAL_SECS));
     let mut tick: u64 = 0;
@@ -418,39 +509,41 @@ pub async fn run_agent_progress_loop(filestore: Arc<FileStore>, broker: Arc<Brok
         tick += 1;
         let force_republish = tick % REPUBLISH_EVERY_TICKS == 0;
 
-        let agents = get_global_handler().list_agents();
+        let agents: Vec<(String, String)> = get_global_handler()
+            .list_agents()
+            .into_iter()
+            .map(|a| (a.agent_id, a.block_id))
+            .collect();
         let registered: std::collections::HashSet<String> =
-            agents.iter().map(|a| a.block_id.clone()).collect();
+            agents.iter().map(|(_, block_id)| block_id.clone()).collect();
         // Both maps are bounded by the live agent count, not by every block_id
         // ever seen in the process's lifetime.
         states.retain(|block_id, _| registered.contains(block_id));
         last_published.retain(|block_id, _| registered.contains(block_id));
 
-        for agent in agents {
-            let block_id = agent.block_id.clone();
+        let fs = filestore.clone();
+        let published = last_published.clone();
+        let taken = std::mem::take(&mut states);
+        let joined = tokio::task::spawn_blocking(move || {
+            sweep_blocking(&fs, agents, taken, &published, force_republish)
+        })
+        .await;
 
-            // Same gate as the summary loop: an idle or non-agent pane has no
-            // progress to report and shouldn't be read every tick.
-            let Some(status) = get_block_controller_status(&block_id) else { continue };
-            if status.shellprocstatus != STATUS_RUNNING || !status.is_agent_pane {
+        // A panic inside the blocking closure loses that tick's accumulated
+        // state. Start clean rather than killing the loop: the next sweep
+        // re-seeds from the tail (flagged partial), which is degraded but
+        // recoverable, whereas returning here would end progress reporting for
+        // the life of the process.
+        let (returned_states, outcomes) = match joined {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!(error = %e, "progress sweep task failed; state reset for next tick");
                 continue;
             }
+        };
+        states = returned_states;
 
-            let state = states.entry(block_id.clone()).or_default();
-            let had_new = consume_new_output(&filestore, &block_id, state);
-            let progress = state.progress();
-
-            // Nothing new AND nothing already published for this block — an
-            // agent that has never had progress costs no events at all.
-            if !had_new && !last_published.contains_key(&block_id) {
-                continue;
-            }
-            if progress.is_empty() && !last_published.contains_key(&block_id) {
-                continue;
-            }
-            if !force_republish && last_published.get(&block_id) == Some(&progress) {
-                continue;
-            }
+        for SweepOutcome { agent_id, block_id, progress } in outcomes {
             last_published.insert(block_id.clone(), progress.clone());
 
             let ts = SystemTime::now()
@@ -467,7 +560,7 @@ pub async fn run_agent_progress_loop(filestore: Arc<FileStore>, broker: Arc<Brok
                 // for the agent's next change — see REPUBLISH_EVERY_TICKS.
                 persist: 1,
                 data: Some(serde_json::json!({
-                    "agentId": agent.agent_id,
+                    "agentId": agent_id,
                     "blockId": block_id,
                     "todos": progress.todos,
                     "todosTruncated": progress.todos_truncated,
@@ -795,6 +888,66 @@ mod tests {
         feed(&mut st, &[r#"{"type":"system","subtype":"init","name":"TodoWrite"}"#.to_string()]);
         assert!(st.progress().todos.is_empty());
         assert_eq!(st.progress().current_tool, None);
+    }
+
+    /// reagent P2: with no id, text is the only identity available, and keying
+    /// on it alone silently merged two genuinely distinct in-flight tasks that
+    /// happened to share a title. One invisibly missing row is a worse failure
+    /// than two visible duplicates, so an idless CREATE always appends.
+    #[test]
+    fn two_idless_creates_with_the_same_title_stay_two_rows() {
+        let idless_create = |id: &str, title: &str| {
+            format!(
+                r#"{{"type":"assistant","message":{{"content":[{{"type":"tool_use","id":"{id}","name":"TaskCreate","input":{{"title":"{title}","status":"pending"}}}}]}}}}"#
+            )
+        };
+        let p = run(&[idless_create("c1", "Retry the flaky step"), idless_create("c2", "Retry the flaky step")]);
+        assert_eq!(p.todos.len(), 2, "two distinct tasks must not collapse into one row");
+        assert!(p.todos.iter().all(|t| t.text == "Retry the flaky step"));
+    }
+
+    /// …but an idless UPDATE still has to find its row, since matching by text
+    /// is the only correlation available and appending would be a duplicate.
+    #[test]
+    fn an_idless_update_still_matches_its_row_by_text() {
+        let mut st = BlockState::default();
+        feed(&mut st, &[task_call("c1", "TaskCreate", "k1", "Ship it", "pending")]);
+        feed(
+            &mut st,
+            &[format!(
+                r#"{{"type":"assistant","message":{{"content":[{{"type":"tool_use","id":"u1","name":"TaskUpdate","input":{{"title":"Ship it","status":"completed"}}}}]}}}}"#
+            )],
+        );
+        assert_eq!(
+            st.progress().todos,
+            vec![TodoItem { text: "Ship it".into(), status: "completed".into() }],
+        );
+    }
+
+    /// An id, when present, is always the key — two same-titled tasks with
+    /// distinct ids stay distinct, and an update by id finds its own row.
+    #[test]
+    fn ids_take_precedence_over_text_for_identity() {
+        let p = run(&[
+            task_call("c1", "TaskCreate", "k1", "Same title", "pending"),
+            task_call("c2", "TaskCreate", "k2", "Same title", "pending"),
+            task_call("u1", "TaskUpdate", "k2", "Same title", "completed"),
+        ]);
+        assert_eq!(
+            p.todos,
+            vec![
+                TodoItem { text: "Same title".into(), status: "pending".into() },
+                TodoItem { text: "Same title".into(), status: "completed".into() },
+            ],
+        );
+    }
+
+    #[test]
+    fn create_style_tool_names_are_recognized() {
+        assert!(is_create_call("TaskCreate"));
+        assert!(is_create_call("TodoAdd"));
+        assert!(!is_create_call("TaskUpdate"));
+        assert!(!is_create_call("TodoWrite"), "a whole-list write never reaches the single-item path");
     }
 
     #[test]
