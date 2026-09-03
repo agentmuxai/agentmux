@@ -103,10 +103,17 @@ Checked against our actual args in `catalog.ts`:
 
 - **claude** — `-p --output-format stream-json --verbose
   --include-partial-messages --dangerously-skip-permissions`: **no collisions.**
-- **codex** — `exec --json ...`: `--json` is also an Ori global. My probe did
-  **not** isolate it, because codex errored on the deliberate bad flag either
-  way. Treat this as **unverified risk**, not a confirmed break. It is the first
-  thing to test if we wrap codex.
+- **codex** — `exec --json ...`: **RESOLVED — Ori does not consume it.**
+  Verified 2026-09-03 with a discriminator rather than inference: run bare,
+  `codex exec` prints a human banner (`OpenAI Codex v0.147.0`, `workdir:`,
+  `model:`), while `codex exec --json` emits JSONL (`{"type":"thread.started"}`
+  ...). Through Ori, `ori codex exec --json` produced the **JSONL** form, so the
+  flag reached codex. The same run shows Ori had correctly repointed codex at
+  `https://openrouter.ai/api/v1/responses`.
+
+  So `--version` is consumed but `--json` is not — the collision surface is
+  narrower than the global-flag list suggests, and wrapping codex is **not**
+  gated on this.
 
 ## 4. Auth: OAuth is not required
 
@@ -232,14 +239,14 @@ Two independent options; (a) is cheap, (b) is the interesting one.
 Cheap, but only buys OpenRouter billing and guardrails for CLIs users can
 already run, and inherits both the `--version` collision and the tar/PATH bug.
 
-"Translators unchanged" holds **for claude only**, and an earlier revision of
-this section overclaimed it for codex. Our codex provider feeds the
-`codex-json` translator from `exec --json`, and §3 records that `--json` is
-also an Ori global whose ownership the probe did not resolve. If Ori consumes
-it, codex emits human-readable output and **every wrapped turn silently
-bypasses the translator** — output would degrade rather than error, which is
-the worst failure shape. Wrapping codex is therefore gated on resolving that
-one flag; wrapping claude is not.
+"Translators unchanged" now holds for **both claude and codex**. An earlier
+revision of this section gated codex on `--json` ownership; §3 records the
+resolution — Ori passes `--json` through, codex still emits JSONL, and the
+`codex-json` translator is unaffected. The failure mode that worried me (codex
+silently emitting human output and every wrapped turn bypassing the translator,
+degrading rather than erroring) does not occur.
+
+What remains true for both: the `--version` collision, and the tar/PATH bug.
 
 **(b) Add `ori code` as a provider in its own right.** This is what the 2026-06
 spec could not have proposed: a real harness with headless prompt, JSONL
@@ -260,8 +267,8 @@ None of that is large, and none of it is the "drop in a ProviderConfig" the
 first draft of this table implied. Worth doing if OpenRouter-as-a-model-option
 is a goal in itself; not worth doing incidentally.
 
-**Suggested order:** (a) for claude only — the cheapest real thing — then
-resolve codex's `--json` ownership, then (b) if the model-option goal stands.
+**Suggested order:** (a) for claude and codex — both now verified safe for
+translation — then (b) if OpenRouter-as-a-model-option is a goal in itself.
 
 ## 7. Operational notes
 
