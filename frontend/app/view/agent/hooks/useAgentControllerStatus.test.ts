@@ -667,3 +667,66 @@ describe("useAgentControllerStatus — 'Use terminal instead' carries the LIVE f
         });
     });
 });
+
+describe("useAgentControllerStatus — a caller-declared intent survives to the terminal escape (manoz on PR #2951)", () => {
+    // `/login` drives its own OAuth and never writes the intent directly, but
+    // its session shows the same AuthUrlBox and so the same "Use terminal
+    // instead". With the flag resting at false, that escape called onReady()
+    // and silently dropped a retry that WAS owed when a real auth failure was
+    // pending — while the row's own "Login via terminal" retried in the
+    // identical state. Same situation, opposite outcome, by entry point.
+    //
+    // Also a behaviour CHANGE rather than a pre-existing gap: before this PR
+    // that handler defaulted to true and the retry happened.
+    it("beginRecoveryFlow(true) makes the escape retry, matching the row button", async () => {
+        const onRecovered = vi.fn();
+        const onReady = vi.fn();
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1", provider: () => claude, log: () => {},
+                onRecovered, onReady,
+            });
+            // What /login now does when a real auth failure is pending.
+            status.beginRecoveryFlow(true);
+
+            hub.runProviderLogin.mockImplementation(async (o: any) => {
+                o.onAccountRegistered?.("acct-term", "/tmp/acct-term");
+                return "terminal-success";
+            });
+            // The escape waits for THIS flow to tear down before starting the
+            // terminal one — so end it while the wait is in progress, which is
+            // the real sequence (cancelLogin -> flow unwinds -> terminal runs).
+            const escape = status.useTerminalInstead();
+            status.endRecoveryFlow();
+            await escape;
+
+            expect(onRecovered).toHaveBeenCalled();
+            expect(onReady).not.toHaveBeenCalled();
+            dispose();
+        });
+    });
+
+    it("beginRecoveryFlow(false) keeps the no-retry branch for a pure credential operation", async () => {
+        const onRecovered = vi.fn();
+        const onReady = vi.fn();
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1", provider: () => claude, log: () => {},
+                onRecovered, onReady,
+            });
+            status.beginRecoveryFlow(false); // /login with no pending failure
+
+            hub.runProviderLogin.mockImplementation(async (o: any) => {
+                o.onAccountRegistered?.("acct-term", "/tmp/acct-term");
+                return "terminal-success";
+            });
+            const escape = status.useTerminalInstead();
+            status.endRecoveryFlow();
+            await escape;
+
+            expect(onRecovered).not.toHaveBeenCalled();
+            expect(onReady).toHaveBeenCalled();
+            dispose();
+        });
+    });
+});

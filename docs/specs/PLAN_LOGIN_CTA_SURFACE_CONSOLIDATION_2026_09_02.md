@@ -274,6 +274,30 @@ recovery flow:
 4. **Prefer carrying intent explicitly over re-deriving it.** Every attempt on
    this PR to infer intent after the fact raced something that had already
    changed underneath it.
+5. **Every entry point must derive the intent the same way.** `/login` reads the
+   pending failure's `turnAttempted` exactly as the row's buttons do. When it
+   did not, the same pending failure retried or didn't depending purely on
+   which control the user happened to use — and that divergence is invisible
+   from either call site alone.
+
+### A test-process rule this PR earned
+
+**Re-run mutation checks on EXISTING tests when you change shared-state
+semantics, not only on new ones.**
+
+Five results on this PR looked like evidence and were not. Four had familiar
+shapes — an input path that never reached the app, a test asserting nothing, a
+mutation that silently didn't apply, a proposed assertion that was
+unsatisfiable. The fifth was new and is the reason for this rule: three tests
+were written correctly, genuinely failed under mutation at the time, and then
+**stopped measuring anything** when a later commit changed the state they
+depended on. They kept passing while asserting nothing.
+
+Mutation discipline alone does not catch that, because the check passed
+honestly when it was run. The two defences that would have: shaping a test like
+the real lifecycle rather than a convenient sequential approximation (the tests
+in question awaited a flow to completion, where the real user clicks mid-flight),
+and re-mutating existing tests after changing shared state.
 
 ### Phase 3 outcome — surface C was KEPT, deliberately
 

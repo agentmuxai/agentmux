@@ -239,7 +239,11 @@ export interface UseAgentControllerStatus {
      * exactly once per `beginRecoveryFlow` call (a `finally` block), same
      * contract as the counter's other three callers.
      */
-    beginRecoveryFlow: () => void;
+    /**
+     * Register a recovery flow. Pass `retryAfterLogin` when the caller drives
+     * its own login (i.e. `/login`) — see the implementation's comment.
+     */
+    beginRecoveryFlow: (retryAfterLogin?: boolean) => void;
     /** Pairs with `beginRecoveryFlow` — see its doc comment. */
     endRecoveryFlow: () => void;
 }
@@ -332,7 +336,15 @@ export function useAgentControllerStatus(
     // clears early (before onRecovered, per the reagent P0 fix) avoids a
     // double-decrement from its own trailing finally.
     let activeRecoveryFlows = 0;
-    const beginRecoveryFlow = () => {
+    const beginRecoveryFlow = (retryAfterLogin?: boolean) => {
+        // `/login` drives its own OAuth and never writes the intent directly,
+        // but its session shows the same AuthUrlBox — and therefore the same
+        // "Use terminal instead" handler — as relogin's. Letting it declare
+        // the intent here is what stops the two entry points disagreeing about
+        // the same pending failure. relogin/loginViaTerminal set the value
+        // themselves before calling this and pass nothing, so they are
+        // unaffected. reagent P1 + manoz on PR #2951.
+        if (retryAfterLogin !== undefined) inFlightRetryAfterLogin = retryAfterLogin;
         activeRecoveryFlows += 1;
         setLoginWaiting(true);
     };
