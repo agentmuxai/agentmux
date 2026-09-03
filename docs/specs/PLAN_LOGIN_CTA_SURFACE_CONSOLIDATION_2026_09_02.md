@@ -239,6 +239,42 @@ each is one expression.
    `FailureRow.accent` widened from `"error"` to `"error" | "active"` for this;
    every non-auth failure and every turn-attempted auth failure is unchanged.
 
+### Standing design property: auth CTAs coexist, so shared state must be scoped
+
+Recorded as a property of the design rather than a note about one bug, because
+the next person adding an entry point will not read the PR thread.
+
+Keeping surface C means **two auth CTAs can be live at once, by design** — a
+persistent `agent_error` document node and a transient failure row, reachable
+independently. That is correct and worth keeping (see below), but it has a
+standing consequence: **any mutable state shared behind those entry points can
+be written by one while another is in flight.**
+
+Two P1s on this PR came from exactly that, and both were reached through
+surfaces or flows their author had not enumerated:
+
+- `inFlightRetryAfterLogin` was written *before* the in-flight guard, so a
+  no-op'd call from one CTA corrupted the intent of a live flow started from
+  another. Fixed by guarding first — both writers are now structurally
+  identical.
+- The same flag was assumed to be readable only by the flow that wrote it. It
+  is not: `/login` opens the same `AuthUrlBox`, and therefore the same "Use
+  terminal instead" handler, without ever writing it. Fixed by scoping the
+  value to one flow (cleared in `endRecoveryFlow`, `false` at rest).
+
+The rules that fall out, for anyone adding a fourth entry point or a new
+recovery flow:
+
+1. **Guard before you write.** A call that no-ops must not leave state behind.
+2. **Enumerate the flows that reach a shared handler, not just its callers.**
+   `useTerminalInstead` is reached by `relogin`, `loginViaTerminal` *and*
+   `/login`; only the first two write the state it reads.
+3. **Capture before teardown.** If a handler waits for a flow to end, read what
+   it needs *before* the wait — ending the flow is what clears it.
+4. **Prefer carrying intent explicitly over re-deriving it.** Every attempt on
+   this PR to infer intent after the fact raced something that had already
+   changed underneath it.
+
 ### Phase 3 outcome — surface C was KEPT, deliberately
 
 The plan left this to a live repro. Resolved from the code instead, which
