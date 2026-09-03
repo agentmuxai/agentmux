@@ -42,6 +42,31 @@ function setOffset(el: HTMLElement, height: number, width = 100): void {
     Object.defineProperty(el, "offsetWidth", { configurable: true, value: width });
 }
 
+/**
+ * A more realistic `offsetHeight` fake than `setOffset`'s fixed value,
+ * specifically for the re-entrancy tests below: an explicit inline
+ * `height` ALWAYS overrides content-based sizing in a real browser, so
+ * `offsetHeight` must report the PINNED value while one is set, and only
+ * fall through to the "natural" (content-driven) value once
+ * `el.style.height` is cleared. `setOffset`'s plain fixed value can't model
+ * this — it's exactly why the original version of the re-entrancy bug
+ * these tests cover went undetected (codex's review comment on PR #2954
+ * names this specifically: "the test misses this because it mocks
+ * offsetHeight independently of style.height").
+ */
+function makeHeightAware(el: HTMLElement): (naturalPx: number) => void {
+    let natural = 0;
+    Object.defineProperty(el, "offsetHeight", {
+        configurable: true,
+        get: () => {
+            const inline = el.style.height;
+            return inline.endsWith("px") ? parseFloat(inline) : natural;
+        },
+    });
+    Object.defineProperty(el, "offsetWidth", { configurable: true, value: 100 });
+    return (naturalPx: number) => { natural = naturalPx; };
+}
+
 // Real ids + real removal-on-cancel — NOT a no-op cancelAnimationFrame. A
 // no-op cancel would let this suite's cancellation test pass even with
 // cancellation itself deleted from the source: both the stale and the
@@ -151,6 +176,26 @@ describe("withHeightContinuity", () => {
         expect(el.style.height).toBe(""); // never touched
     });
 
+    it("skips measurement when an ANCESTOR (not el itself) is content-visibility:hidden", () => {
+        // codex P1, PR #2954: content-visibility is NON-INHERITED. The
+        // intended migration target (ToolOverlayLog.tsx) sets it on the
+        // PANEL, an ancestor of the scrollable log body that's actually
+        // passed as `el` — checking only el's own computed style would
+        // never see the panel's "hidden", exactly the gap this covers.
+        const panel = document.createElement("div");
+        const el = document.createElement("div");
+        panel.appendChild(el);
+        setHidden(panel, true); // el's OWN computed content-visibility stays "visible"
+        setOffset(el, 999);
+        let mutated = false;
+        withHeightContinuity(el, () => {
+            mutated = true;
+            setOffset(el, 40);
+        });
+        expect(mutated).toBe(true);
+        expect(el.style.height).toBe("");
+    });
+
     it("does not FLIP from a zero (display:none-equivalent) starting height", () => {
         // Covered by shouldAnimate's own `fromPx <= 0` guard, not a
         // dedicated isMeasurable branch — see that function's doc comment
@@ -191,6 +236,38 @@ describe("withHeightContinuity", () => {
         expect(el.style.height).toBe("");
     });
 
+    it("a re-entrant mutation while a prior FLIP is still in flight measures the TRUE current height, not the stale pin", () => {
+        // codex P1, PR #2954. Sequence: natural 40 -> 300 starts a FLIP (el
+        // is now pinned at "300px" inline, transitionend not yet fired —
+        // genuinely still in-flight). THEN a second, unrelated content
+        // change happens: natural 300 -> 999. Without cancelling the first
+        // flip before measuring, `fromPx`/`toPx` would both read the STALE
+        // PIN ("300", unaffected by the second mutate()'s natural-height
+        // change), see a zero delta, skip animating the real change
+        // entirely, and leave el wrongly stuck at 300px until the first
+        // flip's own unrelated transitionend eventually fires and SNAPS it
+        // straight to 999 with no easing at all — an uncontrolled jump,
+        // exactly what this module exists to prevent.
+        const el = document.createElement("div");
+        const setNatural = makeHeightAware(el);
+        setNatural(40);
+
+        withHeightContinuity(el, () => setNatural(300)); // flip #1 starts
+        flushRaf(); // el.style.height is now the literal string "300px" — still "in flight" (no transitionend yet)
+        expect(el.style.height).toBe("300px");
+
+        withHeightContinuity(el, () => setNatural(999)); // the re-entrant mutation
+        // Correct: cancelled flip #1 first (clears the pin), read true
+        // fromPx=300, ran mutate (natural=999), read true toPx=999, and
+        // started a NEW flip freezing at the real 300.
+        expect(el.style.height).toBe("300px");
+
+        flushRaf();
+        expect(el.style.height).toBe("999px");
+        endTransition(el);
+        expect(el.style.height).toBe("");
+    });
+
     it("two independent elements animate without interfering with each other", () => {
         const a = document.createElement("div");
         const b = document.createElement("div");
@@ -219,6 +296,27 @@ describe("beginHeightContinuity", () => {
         expect(el.style.height).toBe("40px"); // frozen at the height captured at begin() time
         flushRaf();
         expect(el.style.height).toBe("120px");
+    });
+
+    it("commit also cancels a DIFFERENT flip that started AFTER begin() was called (codex P1, PR #2954)", () => {
+        const el = document.createElement("div");
+        const setNatural = makeHeightAware(el);
+        setNatural(40);
+        const commit = beginHeightContinuity(el); // captures fromPx=40
+
+        // An UNRELATED flip starts and is still in flight when commit() runs.
+        withHeightContinuity(el, () => setNatural(300));
+        flushRaf();
+        expect(el.style.height).toBe("300px");
+
+        setNatural(999); // the deferred mutation this begin/commit pair was for
+        commit();
+        // Correct: cancelled the unrelated in-flight flip first, so toPx
+        // reads the true natural 999, not the stale "300" pin — FLIPs from
+        // the ORIGINALLY captured 40 straight to 999.
+        expect(el.style.height).toBe("40px");
+        flushRaf();
+        expect(el.style.height).toBe("999px");
     });
 
     it("commit is a no-op if the element is unmeasurable by the time it's called", () => {

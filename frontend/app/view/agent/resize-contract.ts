@@ -82,11 +82,24 @@ const inFlight = new WeakMap<HTMLElement, () => void>();
 
 /**
  * Can `el`'s height be usefully measured and FLIPped right now? Only one
- * case says no: `content-visibility: hidden` — reading `offsetHeight` there
- * would force a synchronous layout of a subtree the browser has
- * deliberately skipped laying out, which both emits a console warning AND
- * produces a measurement that doesn't reflect what will actually render
- * once visible again.
+ * case says no: `content-visibility: hidden` on `el` OR ANY ANCESTOR —
+ * reading `offsetHeight` there would force a synchronous layout of a
+ * subtree the browser has deliberately skipped laying out, which both
+ * emits a console warning AND produces a measurement that doesn't reflect
+ * what will actually render once visible again.
+ *
+ * Walks the ancestor chain rather than checking only `el` itself because
+ * `content-visibility` is a NON-INHERITED property (codex P1, PR #2954):
+ * for the intended `ToolOverlayLog` migration, `el` is
+ * `.agent-tool-overlay-log`, but `.agent-tool-panel--hidden` (the ancestor
+ * that actually sets `content-visibility: hidden`, `_document-nodes.scss`)
+ * is a DIFFERENT element — confirmed directly, `ToolOverlayLog.tsx`'s own
+ * current code walks `scrollRef.closest(".agent-tool-panel")` to reach it,
+ * proving it's an ancestor, not the element itself. `getComputedStyle(el)`
+ * on the descendant reports the descendant's OWN value (the initial
+ * `visible`, absent an explicit override) regardless of an ancestor
+ * skipping its layout — checking only `el` would never detect the one case
+ * this function exists to catch.
  *
  * A zero-size element (`display: none`, or genuinely 0px tall) does NOT
  * need a separate branch here — `shouldAnimate`'s own `fromPx <= 0` guard
@@ -97,19 +110,22 @@ const inFlight = new WeakMap<HTMLElement, () => void>();
  * deleting it and running the suite — nothing failed), which is exactly
  * why it was worth deleting rather than keeping "for safety."
  *
- * Deliberately reads the COMPUTED `content-visibility`, not a class name or
- * a `MutationObserver`-driven signal tracking one — this is the fix for the
- * bug SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md §3a traces in
- * `ToolOverlayLog.tsx`'s current `panelHidden`: a `MutationObserver` on a
- * `--hidden` class flips instantly, but the CSS collapse it triggers uses
- * `content-visibility ... allow-discrete`, which doesn't actually take
- * effect until the END of that transition — so for the whole transition
- * window, class-based detection says "hidden" while the computed style
- * (and the rendered pixels) still say otherwise. Reading the computed style
- * directly has no such lag.
+ * Deliberately reads the COMPUTED `content-visibility` at each ancestor,
+ * not a class name or a `MutationObserver`-driven signal tracking one —
+ * this is the fix for the bug SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md
+ * §3a traces in `ToolOverlayLog.tsx`'s current `panelHidden`: a
+ * `MutationObserver` on a `--hidden` class flips instantly, but the CSS
+ * collapse it triggers uses `content-visibility ... allow-discrete`, which
+ * doesn't actually take effect until the END of that transition — so for
+ * the whole transition window, class-based detection says "hidden" while
+ * the computed style (and the rendered pixels) still say otherwise.
+ * Reading the computed style directly has no such lag.
  */
 function isMeasurable(el: HTMLElement): boolean {
-    return getComputedStyle(el).contentVisibility !== "hidden";
+    for (let node: Element | null = el; node; node = node.parentElement) {
+        if (getComputedStyle(node).contentVisibility === "hidden") return false;
+    }
+    return true;
 }
 
 function shouldAnimate(fromPx: number, toPx: number): boolean {
@@ -128,7 +144,12 @@ function shouldAnimate(fromPx: number, toPx: number): boolean {
  * on/off as the height passes through intermediate values.
  */
 function flip(el: HTMLElement, fromPx: number, toPx: number): void {
-    inFlight.get(el)?.();
+    // No cancel-in-flight check here — by the time this runs, every call
+    // site has already cancelled any prior transition on `el` BEFORE
+    // measuring (see `withHeightContinuity`/`beginHeightContinuity`'s own
+    // comments for why measuring first is itself the bug). Cancelling here
+    // too would be redundant and one JS-visible tick too late to fix a
+    // measurement that already happened.
     el.style.transition = "none";
     el.style.height = `${fromPx}px`;
     el.style.overflowY = "hidden";
@@ -153,6 +174,27 @@ function flip(el: HTMLElement, fromPx: number, toPx: number): void {
 }
 
 /**
+ * Cancel any transition already in flight on `el`, BEFORE measuring it.
+ * Required, not optional (codex P1, PR #2954): while a prior FLIP is still
+ * running, `el` has an explicit inline `height` pinning its rendered size —
+ * an explicit height always overrides content-based sizing, so
+ * `el.offsetHeight` reports the PINNED value regardless of what the
+ * content actually is, for BOTH the "from" read (would report a stale
+ * pinned value instead of the true current height) and the "to" read after
+ * `mutate()` runs (a content change doesn't move a height-pinned box at
+ * all, so it would report the SAME pinned value again, making `shouldAnimate`
+ * see a zero delta and skip animating a real change — leaving `el` wrongly
+ * pinned at the stale height until the ORIGINAL transition's own
+ * `transitionend` eventually fires and clears it, at which point the box
+ * snaps instantly to the true height — an uncontrolled jump, exactly what
+ * this module exists to prevent). Cancelling first clears the pin so every
+ * subsequent read in this call reflects reality.
+ */
+function cancelInFlight(el: HTMLElement): void {
+    inFlight.get(el)?.();
+}
+
+/**
  * Run `mutate` (assumed to synchronously produce `el`'s new rendered
  * height — true for a plain Solid signal write, per the same synchronous-
  * effect guarantee `ToolOverlayLog.tsx`'s own comments already rely on),
@@ -161,6 +203,7 @@ function flip(el: HTMLElement, fromPx: number, toPx: number): void {
  * currently measurable — there is nothing to FLIP FROM.
  */
 export function withHeightContinuity(el: HTMLElement, mutate: () => void): void {
+    cancelInFlight(el);
     if (!isMeasurable(el)) {
         mutate();
         return;
@@ -177,13 +220,21 @@ export function withHeightContinuity(el: HTMLElement, mutate: () => void): void 
  * once the mutation has actually landed in the DOM. Calling the returned
  * function is what performs the measure-after + FLIP; if it's never called,
  * nothing happens (no timer, no listener left running).
+ *
+ * Cancels an in-flight transition at BOTH capture and commit time, not just
+ * once — a different mutation could start a fresh flip on the same `el`
+ * during the (potentially long) gap between calling this and calling the
+ * function it returns, and the "to" read needs the same unpinning the
+ * "from" read does, for the identical reason (see `cancelInFlight`).
  */
 export function beginHeightContinuity(el: HTMLElement): (this: void) => void {
+    cancelInFlight(el);
     if (!isMeasurable(el)) {
         return () => {};
     }
     const fromPx = el.offsetHeight;
     return () => {
+        cancelInFlight(el);
         if (!isMeasurable(el)) return;
         const toPx = el.offsetHeight;
         if (shouldAnimate(fromPx, toPx)) flip(el, fromPx, toPx);
