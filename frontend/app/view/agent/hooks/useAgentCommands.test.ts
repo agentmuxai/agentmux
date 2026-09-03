@@ -50,6 +50,23 @@ import {
 import { snapshot as paneSnapshot, __resetAllSlots as resetPaneStateSlots } from "@/app/store/agent-pane-state-store";
 import { __resetAllSlots as resetDocSlots } from "@/app/store/agent-document-store";
 import type { AgentPaneProjections } from "@/app/store/agent-pane-state-store";
+import type { PaneFailure } from "@/app/store/agent-pane-state/types";
+
+/**
+ * Wrap a bare AgentFailure in the PaneFailure envelope `sendMessage` now takes.
+ *
+ * The preserve path carries the WHOLE PaneFailure (not just `.data`) so
+ * `turnAttempted` survives the guard's re-dispatch — capturing only the inner
+ * failure discarded it structurally and silently flipped a pre-launch "Log in"
+ * row into "Login Again" with retryAfterLogin:true. Defaults to `true` here
+ * because every pre-existing test models a real, turn-following auth failure;
+ * pass `false` for the pre-launch case.
+ */
+const asPane = (f: AgentFailure, turnAttempted = true): PaneFailure => ({
+    data: f,
+    at: 1,
+    turnAttempted,
+});
 
 function noopProjections(): AgentPaneProjections {
     return {
@@ -693,7 +710,7 @@ describe("useAgentCommands — fast-fail when the pane is already known-unauthen
             });
 
             model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
-            await commands.sendMessage("u there", false, authFailure);
+            await commands.sendMessage("u there", false, asPane(authFailure));
 
             expect(hub.agentInput).not.toHaveBeenCalled();
             expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).toBe("Idle");
@@ -751,7 +768,7 @@ describe("useAgentCommands — authFailureToPreserve survives a local command", 
         await createRoot(async (dispose) => {
             const commands = useAgentCommands(makeOpts(model));
             model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
-            await commands.sendMessage("!pwd", false, authFailure);
+            await commands.sendMessage("!pwd", false, asPane(authFailure));
 
             expect(hub.agentInput).not.toHaveBeenCalled();
             expect(paneSnapshot(BLOCK_ID)?.failure?.data).toEqual(authFailure);
@@ -765,7 +782,7 @@ describe("useAgentCommands — authFailureToPreserve survives a local command", 
         await createRoot(async (dispose) => {
             const commands = useAgentCommands(makeOpts(model));
             model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
-            await commands.sendMessage("/help", false, authFailure);
+            await commands.sendMessage("/help", false, asPane(authFailure));
 
             expect(hub.agentInput).not.toHaveBeenCalled();
             expect(paneSnapshot(BLOCK_ID)?.failure?.data).toEqual(authFailure);
@@ -782,7 +799,7 @@ describe("useAgentCommands — authFailureToPreserve survives a local command", 
         await createRoot(async (dispose) => {
             const commands = useAgentCommands(makeOpts(model));
             model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
-            await commands.sendMessage("/login", false, authFailure);
+            await commands.sendMessage("/login", false, asPane(authFailure));
 
             expect(hub.agentInput).not.toHaveBeenCalled();
             // Restoring the stale pre-command failure here would resurrect a
@@ -798,7 +815,7 @@ describe("useAgentCommands — authFailureToPreserve survives a local command", 
         await createRoot(async (dispose) => {
             const commands = useAgentCommands(makeOpts(model));
             model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
-            await commands.sendMessage("/whatever", false, authFailure);
+            await commands.sendMessage("/whatever", false, asPane(authFailure));
 
             expect(paneSnapshot(BLOCK_ID)?.failure?.data).toEqual(authFailure);
             dispose();
@@ -863,7 +880,7 @@ describe("useAgentCommands — authFailureToPreserve survives a local command", 
             const busyPhase = paneSnapshot(BLOCK_ID)?.turnPhase.kind;
             expect(busyPhase).not.toBe("Idle");
 
-            await commands.sendMessage("!pwd", /* wasAlreadyWorking */ true, authFailure);
+            await commands.sendMessage("!pwd", /* wasAlreadyWorking */ true, asPane(authFailure));
 
             // The genuinely active turn must survive — restoring a stale
             // auth banner is not a valid reason to end it.
@@ -1942,7 +1959,7 @@ describe("useAgentCommands — idle sendMessage runs the deferred controller ref
             // live auth failure — mirrors handleSendMessage's own capture
             // right before dispatching TurnStart.
             const staleAuthFailure: AgentFailure = { code: "auth", title: "Not logged in", detail: "401", retryable: true };
-            await commands.sendMessage("fresh message", /* wasAlreadyWorking */ false, staleAuthFailure);
+            await commands.sendMessage("fresh message", /* wasAlreadyWorking */ false, asPane(staleAuthFailure));
 
             expect(forceControllerRefresh).toHaveBeenCalledOnce();
             // Must NOT have been fast-failed on the stale snapshot.
@@ -2148,7 +2165,7 @@ describe("useAgentCommands — idle sendMessage runs the deferred controller ref
             // TurnStart clears it — mirrors handleSendMessage's own
             // capture. The refresh is still blocked, so this gets held.
             const capturedFailure: AgentFailure = { code: "auth", title: "Not logged in", detail: "401", retryable: true };
-            await commands.sendMessage("fresh message", /* wasAlreadyWorking */ false, capturedFailure);
+            await commands.sendMessage("fresh message", /* wasAlreadyWorking */ false, asPane(capturedFailure));
             expect(commands.hasHeldMessages()).toBe(true);
             expect(hub.agentInput).not.toHaveBeenCalled();
 
@@ -2222,7 +2239,7 @@ describe("useAgentCommands — idle sendMessage runs the deferred controller ref
             // TurnStart clears it — mirrors handleSendMessage's own
             // capture. The refresh is still blocked, so this gets held.
             const capturedFailure: AgentFailure = { code: "auth", title: "Not logged in", detail: "401", retryable: true };
-            await commands.sendMessage("fresh message", /* wasAlreadyWorking */ false, capturedFailure);
+            await commands.sendMessage("fresh message", /* wasAlreadyWorking */ false, asPane(capturedFailure));
             expect(commands.hasHeldMessages()).toBe(true);
             expect(hub.agentInput).not.toHaveBeenCalled();
 
@@ -2302,7 +2319,7 @@ describe("useAgentCommands — idle sendMessage runs the deferred controller ref
             // the ONLY push site that sets initiatedTurnOptimistically:
             // true.
             const capturedFailure: AgentFailure = { code: "auth", title: "Not logged in", detail: "401", retryable: true };
-            await commands.sendMessage("fresh message", /* wasAlreadyWorking */ false, capturedFailure);
+            await commands.sendMessage("fresh message", /* wasAlreadyWorking */ false, asPane(capturedFailure));
             expect(commands.hasHeldMessages()).toBe(true);
             expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).not.toBe("Idle");
 
@@ -2369,7 +2386,7 @@ describe("useAgentCommands — idle sendMessage runs the deferred controller ref
             // TurnStart clears it. The refresh is still blocked, so this
             // gets held.
             const capturedFailure: AgentFailure = { code: "auth", title: "Not logged in", detail: "401", retryable: true };
-            await commands.sendMessage("held message", /* wasAlreadyWorking */ false, capturedFailure);
+            await commands.sendMessage("held message", /* wasAlreadyWorking */ false, asPane(capturedFailure));
             expect(commands.hasHeldMessages()).toBe(true);
 
             // The user presses ArrowUp to recall the message un-sent —
@@ -2432,7 +2449,7 @@ describe("useAgentCommands — idle sendMessage runs the deferred controller ref
             // ONLY one that sets initiatedTurnOptimistically: true. The
             // refresh is still blocked, so this gets held.
             const capturedFailure: AgentFailure = { code: "auth", title: "Not logged in", detail: "401", retryable: true };
-            await commands.sendMessage("held message", /* wasAlreadyWorking */ false, capturedFailure);
+            await commands.sendMessage("held message", /* wasAlreadyWorking */ false, asPane(capturedFailure));
             expect(commands.hasHeldMessages()).toBe(true);
             expect(paneSnapshot(BLOCK_ID)?.turnPhase.kind).not.toBe("Idle");
 
@@ -2826,5 +2843,82 @@ describe("useAgentCommands — pre-turn cmd:args honours agentMode, not just con
     /** Blocks predating the agentMode meta key must keep host behaviour. */
     it("treats a block with no agentMode as a host agent", async () => {
         expect(await argsWrittenFor(undefined)).toContain("--input-format");
+    });
+});
+
+describe("useAgentCommands — turnAttempted survives the guard's re-dispatch (codex + manoz P1 on PR #2951)", () => {
+    // The preserve path captures the failure BEFORE TurnStart clears it, then
+    // re-dispatches it when the send is rejected. It used to capture only the
+    // inner AgentFailure, so `turnAttempted` — which lives on the PaneFailure
+    // wrapper — was discarded structurally and the reducer's `?? true` default
+    // silently flipped it. For a pre-launch row that means:
+    //   "Log in" -> "Login Again", accent active -> error, and worst,
+    //   relogin() gets retryAfterLogin:true, resending an old message on an
+    //   agent that never ran a turn.
+    // This drives the REAL guard path (TurnStart -> checkAuthGuard ->
+    // re-dispatch) rather than stubbing the failure, which is why the other
+    // tests in this file could not catch it.
+    const preLaunchAuth: AgentFailure = {
+        code: "auth", title: "Not signed in", detail: "", retryable: true,
+    };
+
+    // Same shape as the sibling describe's helper — redeclared because that one
+    // is scoped to its own block.
+    const opts = (model: ReturnType<typeof registerPane>) => ({
+        blockId: BLOCK_ID,
+        model,
+        block: () => undefined,
+        provider: () => undefined,
+        documentAtom: [() => [], () => {}] as any,
+        log: () => {},
+        setAuthUrl: () => {},
+        canRetry: () => false,
+        loginWaiting: () => false,
+        setAuthNotice: () => {},
+        notifyControllerHealthy: () => {},
+        forceControllerRefresh: async () => true,
+        beginRecoveryFlow: () => {},
+        endRecoveryFlow: () => {},
+        isCancelled: () => false,
+        resetCancelled: () => {},
+        isBackendTurnActive: () => false,
+        isBackendTurnConfirmedIdle: () => true,
+        backToPicker: async () => {},
+    });
+
+    it("preserves turnAttempted:false through a rejected send (pre-launch row stays 'Log in')", async () => {
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands(opts(model));
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            // Exactly what agent-view's handleSendMessage captures for the
+            // synthetic pre-launch row.
+            await commands.sendMessage("u there", false, asPane(preLaunchAuth, /* turnAttempted */ false));
+
+            expect(hub.agentInput).not.toHaveBeenCalled();
+            const restored = paneSnapshot(BLOCK_ID)?.failure;
+            expect(restored?.data).toEqual(preLaunchAuth);
+            // The regression: this read `true` before the fix.
+            expect(restored?.turnAttempted).toBe(false);
+            dispose();
+        });
+    });
+
+    it("still restores turnAttempted:true for a real, turn-following auth failure", async () => {
+        const model = registerPane(BLOCK_ID, fullRegistration());
+        model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
+        model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
+
+        await createRoot(async (dispose) => {
+            const commands = useAgentCommands(opts(model));
+            model.dispatchPane({ type: "TurnStart", at: Date.now() }, "user");
+            await commands.sendMessage("u there", false, asPane(preLaunchAuth, /* turnAttempted */ true));
+
+            expect(paneSnapshot(BLOCK_ID)?.failure?.turnAttempted).toBe(true);
+            dispose();
+        });
     });
 });

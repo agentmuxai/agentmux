@@ -1241,7 +1241,23 @@ const AgentPresentationView = ({
             // first, that same capture would see the stale failure on THIS
             // auto-retry too and wrongly reject the very resend recovery
             // just enabled. Codex P1 on PR #2338.
+            // codex P1 on PR #2951: do NOT auto-retry when the row that was
+            // showing is the synthetic PRE-LAUNCH one (turnAttempted false).
+            // `relogin` already gates its own onRecovered on retryAfterLogin,
+            // but `loginViaTerminal`'s terminal-success branch calls this
+            // unconditionally — and the pre-launch case now reaches it, because
+            // consolidating onto the failure row newly exposes "Login via
+            // terminal" for a case whose old blue bar had no such action. Left
+            // alone, a successful terminal login on a never-started agent WITH
+            // prior history resends its last old transcript message, which is
+            // the exact stale-resend this whole turnAttempted split exists to
+            // prevent. Read before the clear below, which wipes the flag.
+            const preLaunch = untrack(() => agentAtoms().failureAtom[0]())?.turnAttempted === false;
             dispatchPane(model.blockId, { type: "FailureCleared" }, "system");
+            if (preLaunch) {
+                log("auth", "Login successful — agent is signed in (no turn to retry)");
+                return;
+            }
             retryLastTurn();
         },
         getInitialTermSize: () => computeTermSizeFromEl(rootRef),
@@ -1747,7 +1763,14 @@ const AgentPresentationView = ({
         // banner instead of leaving it cleared with no recovery affordance
         // (Codex P1, third re-review).
         const liveFailure = agentAtoms().failureAtom[0]();
-        const authFailureToPreserve = liveFailure?.data.code === "auth" ? liveFailure.data : null;
+        // Carry the WHOLE PaneFailure, not just `.data`: `turnAttempted` lives
+        // on the wrapper, and capturing only the inner AgentFailure discarded
+        // it structurally — so the guard's re-dispatch below rebuilt the
+        // failure with the reducer's `?? true` default and silently flipped a
+        // pre-launch "Log in" row into "Login Again" (+ retryAfterLogin true,
+        // i.e. an old message resent on an agent that never ran a turn).
+        // Found independently by codex and manoz on PR #2951.
+        const authFailureToPreserve = liveFailure?.data.code === "auth" ? liveFailure : null;
         // Only start a NEW turn when the agent is idle. Dispatching TurnStart
         // while a turn is already running regresses Streaming → Submitting,
         // which would flicker the busy indicator back to its "Submitting"
