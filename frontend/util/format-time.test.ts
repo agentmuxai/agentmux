@@ -34,6 +34,28 @@ describe("formatElapsedClock", () => {
     it("floors negative durations to 0:00 (fixes the PersistentShellBlock gap)", () => {
         expect(formatElapsedClock(-65_000)).toBe("0:00");
     });
+
+    // The dock exists for processes that outlive a turn, so the minutes field
+    // overflowing past 60 was the common case, not an edge case.
+    it("grows an hours field instead of counting minutes past 60", () => {
+        expect(formatElapsedClock(3_599_000)).toBe("59:59");
+        expect(formatElapsedClock(3_600_000)).toBe("1:00:00");
+        expect(formatElapsedClock(4_505_000)).toBe("1:15:05");
+        // Previously rendered "75:03".
+        expect(formatElapsedClock(4_503_000)).toBe("1:15:03");
+    });
+
+    it("grows a days field instead of counting hours past 24", () => {
+        expect(formatElapsedClock(86_399_000)).toBe("23:59:59");
+        expect(formatElapsedClock(86_400_000)).toBe("1:00:00:00");
+        // Previously rendered "1508:22".
+        expect(formatElapsedClock(90_502_000)).toBe("1:01:08:22");
+    });
+
+    it("keeps the short form short — no leading zero fields under an hour", () => {
+        expect(formatElapsedClock(5_000)).toBe("0:05");
+        expect(formatElapsedClock(600_000)).toBe("10:00");
+    });
 });
 
 describe("formatTimeAgo", () => {

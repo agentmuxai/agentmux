@@ -268,6 +268,28 @@
     }
 }
 
+// Labeled variant — opt-in via PaneTabStrip's `addLabel` prop (the agent pane's
+// "+ New Agent"). The bare 28×28px square above stays the default for the
+// editor and terminal strips, which have no label.
+//
+// `width: auto` rather than a wider fixed width: the label is caller-supplied,
+// so the button has to size to whatever text it is given. Note this widens the
+// tab strip itself, which in the agent pane is deliberately shrink-to-fit and
+// overlays the conversation (SPEC_AGENT_PANE_TAB_STRIP_OVERLAY_2026_08_10.md) —
+// so a longer label covers correspondingly more of the content beneath it.
+.pane-tab-strip-add-labeled {
+    width: auto;
+    padding: 0 8px;
+    gap: 4px;
+}
+
+// Smaller than the 15px glyph it sits beside: this is a text affordance, and at
+// the glyph's own size it would out-weigh the actual tab labels next to it.
+.pane-tab-strip-add-label {
+    font-size: 11px;
+    white-space: nowrap;
+}
+
 // The "+" glyph's own line box (centered by the button's flex align-items/
 // justify-content above) isn't the same as its visual ink — measured live
 // (screenshot pixel-sampling, 2026-08-25) at ~1-2px low relative to the
