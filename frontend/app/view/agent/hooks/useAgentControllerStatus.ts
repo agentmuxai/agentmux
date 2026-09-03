@@ -336,6 +336,28 @@ export function useAgentControllerStatus(
     // clears early (before onRecovered, per the reagent P0 fix) avoids a
     // double-decrement from its own trailing finally.
     let activeRecoveryFlows = 0;
+    /**
+     * THE only writer of `inFlightRetryAfterLogin`. First flow wins: an intent
+     * is recorded only when nothing is already in flight, so a flow that joins
+     * cannot redefine what the running one is recovering — and it is the
+     * running one whose AuthUrlBox (and "Use terminal instead") the user is
+     * looking at.
+     *
+     * A chokepoint rather than the same condition repeated at each writer,
+     * because the previous revision put the guard inside `beginRecoveryFlow`
+     * only. That closed `/login`-joins-relogin but NOT the mirror case:
+     * `relogin`/`loginViaTerminal` wrote directly, bypassing it, so `/login`
+     * first and a row button second still clobbered. `/login` is never gated by
+     * `reloginInFlight` and the row's buttons are never disabled while
+     * `loginWaiting()` is true, so both orderings are reachable. reagent P1 on
+     * PR #2951 — including that the previous commit's "closes it for every
+     * caller" was wrong: it closed it for callers routed through this
+     * function's parameter.
+     */
+    const recordRecoveryIntent = (retryAfterLogin: boolean) => {
+        if (activeRecoveryFlows === 0) inFlightRetryAfterLogin = retryAfterLogin;
+    };
+
     const beginRecoveryFlow = (retryAfterLogin?: boolean) => {
         // `/login` drives its own OAuth and never writes the intent directly,
         // but its session shows the same AuthUrlBox — and therefore the same
@@ -344,22 +366,7 @@ export function useAgentControllerStatus(
         // the same pending failure. relogin/loginViaTerminal set the value
         // themselves before calling this and pass nothing, so they are
         // unaffected. reagent P1 + manoz on PR #2951.
-        // FIRST FLOW WINS. Only record an intent when nothing is already in
-        // flight — a second flow joining must not redefine what the running
-        // one is recovering, and it is the running one whose AuthUrlBox (and
-        // therefore "Use terminal instead") the user is looking at.
-        //
-        // `/login` is the case that needs this: unlike relogin and
-        // loginViaTerminal it is never gated by `reloginInFlight`, so it can
-        // start while one of those is mid-flow. Without the guard its
-        // declaration silently clobbered the live flow's intent and the
-        // terminal escape then dropped, or wrongly issued, a turn retry.
-        // Same class as the guard-before-write fix, reached through the door
-        // opened by letting /login declare an intent at all. reagent P1 on
-        // PR #2951.
-        if (retryAfterLogin !== undefined && activeRecoveryFlows === 0) {
-            inFlightRetryAfterLogin = retryAfterLogin;
-        }
+        if (retryAfterLogin !== undefined) recordRecoveryIntent(retryAfterLogin);
         activeRecoveryFlows += 1;
         setLoginWaiting(true);
     };
@@ -598,7 +605,7 @@ export function useAgentControllerStatus(
         // endRecoveryFlow), and a later `/login` session — which declares its
         // own intent only when a failure is pending — could read the stale
         // value from its "Use terminal instead". reagent P2 on PR #2951.
-        inFlightRetryAfterLogin = retryAfterLogin;
+        recordRecoveryIntent(retryAfterLogin);
         // Clears the "Log in" button immediately on click — this is also the
         // action the mount-time launch flow's first-login/auth-expired
         // states hand off to (they never trigger a login themselves; see
@@ -1037,7 +1044,7 @@ export function useAgentControllerStatus(
         // endRecoveryFlow), and a later `/login` session — which declares its
         // own intent only when a failure is pending — could read the stale
         // value from its "Use terminal instead". reagent P2 on PR #2951.
-        inFlightRetryAfterLogin = retryAfterLogin;
+        recordRecoveryIntent(retryAfterLogin);
         setAuthNotice(null);
         // Claim the in-flight guard BEFORE any await. The CLI resolve below
         // can take up to 300 s, and the recovery buttons have no disabled

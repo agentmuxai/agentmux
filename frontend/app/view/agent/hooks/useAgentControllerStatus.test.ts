@@ -823,3 +823,51 @@ describe("useAgentControllerStatus — a joining flow cannot redefine a live flo
         });
     });
 });
+
+describe("useAgentControllerStatus — first-flow-wins holds in BOTH orderings (reagent P1 on PR #2951)", () => {
+    // The previous fix guarded inside beginRecoveryFlow only, so it closed
+    // relogin-then-/login but not /login-then-relogin: relogin and
+    // loginViaTerminal wrote the intent directly and bypassed the guard.
+    // Both orderings are reachable — /login is never gated by reloginInFlight,
+    // and the row's buttons are never disabled while loginWaiting() is true.
+    it("/login first, then a row button: the row button must not redefine /login's intent", async () => {
+        const onRecovered = vi.fn();
+        const onReady = vi.fn();
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1", provider: () => claude, log: () => {},
+                onRecovered, onReady,
+            });
+
+            // /login begins first and declares "no turn owed".
+            status.beginRecoveryFlow(false);
+
+            // User then clicks the row's "Login via terminal", which declares
+            // the opposite. It must NOT redefine the running flow's intent.
+            let release!: () => void;
+            const gate = new Promise<void>((r) => { release = r; });
+            hub.runProviderLogin.mockImplementation(async () => {
+                await gate;
+                return "terminal-unavailable";
+            });
+            const second = status.loginViaTerminal({ retryAfterLogin: true });
+
+            // /login's own escape hatch reads the intent.
+            const escape = status.useTerminalInstead();
+            status.endRecoveryFlow();
+            release();
+            await second;
+
+            hub.runProviderLogin.mockImplementation(async (o: any) => {
+                o.onAccountRegistered?.("acct-term", "/tmp/acct-term");
+                return "terminal-success";
+            });
+            await escape;
+
+            // Clobbered, this would have retried a turn nothing said was owed.
+            expect(onRecovered).not.toHaveBeenCalled();
+            expect(onReady).toHaveBeenCalled();
+            dispose();
+        });
+    });
+});
