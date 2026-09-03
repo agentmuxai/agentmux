@@ -43,6 +43,7 @@ function treeNode(over: Partial<AgentTreeNode> = {}): AgentTreeNode {
         cronRows: [],
         todoRows: [],
         todosTruncated: 0,
+        todosPartial: false,
         currentTool: null,
         ...over,
     } as AgentTreeNode;
@@ -102,6 +103,31 @@ describe("Swarm todo rows", () => {
     it("discloses backend truncation instead of showing a partial list as whole", () => {
         const { container } = renderRow(treeNode({ todoRows: TODOS, todosTruncated: 7 }));
         expect(container.querySelector(".swarm-todo-truncated")?.textContent).toBe("+7 more");
+    });
+
+    /** `todosPartial` and `todosTruncated` are different claims and must not
+     *  look the same: one is a cap we chose and can count, the other is
+     *  history the backend could not see. Rendering only the countable one
+     *  would show an incomplete checklist as if it were whole. */
+    it("discloses a partial checklist separately from a truncated one", () => {
+        const { container } = renderRow(treeNode({ todoRows: TODOS, todosPartial: true }));
+        expect(container.querySelector(".swarm-todo-partial")?.textContent).toBe(
+            "earlier items may be missing"
+        );
+        expect(container.querySelector(".swarm-todo-truncated")).toBeNull();
+    });
+
+    it("says nothing about completeness when the checklist is complete", () => {
+        const { container } = renderRow(treeNode({ todoRows: TODOS }));
+        expect(container.querySelector(".swarm-todo-partial")).toBeNull();
+    });
+
+    it("can report both at once — they are independent facts", () => {
+        const { container } = renderRow(
+            treeNode({ todoRows: TODOS, todosTruncated: 2, todosPartial: true })
+        );
+        expect(container.querySelector(".swarm-todo-truncated")?.textContent).toBe("+2 more");
+        expect(container.querySelector(".swarm-todo-partial")).not.toBeNull();
     });
 
     it("keeps the full text reachable on hover, since rows are single-line", () => {

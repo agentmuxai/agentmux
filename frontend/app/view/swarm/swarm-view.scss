@@ -353,6 +353,17 @@
     min-width: 0;
 }
 
+// Warmer than the neutral "+N more" beside it: that reports a cap working as
+// designed, this reports a gap in what we could observe, which is the one the
+// reader might want to act on (restart the pane to re-seed cleanly).
+.swarm-todo-partial {
+    padding: 1px 6px 1px 38px;
+    font-size: 10px;
+    font-style: italic;
+    color: var(--warning-color, #f5a623);
+    opacity: 0.85;
+}
+
 .swarm-todo-truncated {
     padding: 1px 6px 1px 38px;
     font-size: 10px;

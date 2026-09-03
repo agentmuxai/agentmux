@@ -211,6 +211,12 @@ export interface AgentTreeNode {
     /** How many rows `MAX_TODOS` dropped backend-side, so the tree can say
      *  "+N more" instead of showing a partial list as if it were whole. */
     todosTruncated: number;
+    /** True when the backend first saw this block mid-stream, so item-at-a-time
+     *  (`TaskCreate`) entries from before that point were never observed.
+     *  Deliberately NOT folded into `todosTruncated`: that is a cap we chose
+     *  and can count, this is history we could not see and cannot. Rendering
+     *  them the same way would claim a precision we do not have. */
+    todosPartial: boolean;
     /** The tool this agent is running right now, or null between tools.
      *  Complements `activitySummary`: that is a Haiku paraphrase of the last
      *  ~20s, this is the literal call in flight. */
@@ -230,6 +236,7 @@ export interface TodoItem {
 export interface AgentProgress {
     todos: TodoItem[];
     todosTruncated: number;
+    todosPartial: boolean;
     currentTool: string | null;
 }
 
@@ -1181,6 +1188,7 @@ export class SwarmViewModel implements ViewModel {
                 const next: AgentProgress = {
                     todos,
                     todosTruncated: typeof data?.todosTruncated === "number" ? data.todosTruncated : 0,
+                    todosPartial: data?.todosPartial === true,
                     currentTool: typeof data?.currentTool === "string" ? data.currentTool : null,
                 };
                 // Replace the Map (not mutate) so Solid sees a new reference
@@ -1914,6 +1922,7 @@ export class SwarmViewModel implements ViewModel {
                 cronRows,
                 todoRows: progress?.todos ?? [],
                 todosTruncated: progress?.todosTruncated ?? 0,
+                todosPartial: progress?.todosPartial ?? false,
                 // Only meaningful while the agent is actually running — a
                 // stopped pane's last in-flight tool is stale, and showing it
                 // would read as "still doing this" (the payload is push-only,

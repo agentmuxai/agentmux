@@ -360,7 +360,11 @@ export function AgentRow({
             </div>
             <Show when={!collapsed()}>
                 <div class="swarm-children">
-                    <TodoBucket rows={node.todoRows} truncated={node.todosTruncated} />
+                    <TodoBucket
+                        rows={node.todoRows}
+                        truncated={node.todosTruncated}
+                        partial={node.todosPartial}
+                    />
                     <AgentToolBucket rows={node.agentToolRows} model={model} parentAgentStatus={node.agentStatus} />
                     <WorkflowBucket rows={node.workflowRows} model={model} />
                     <ShellBucket rows={node.shellRows} />
@@ -385,7 +389,15 @@ export function AgentRow({
 // Rows are rendered in the agent's own order, never sorted here — a checklist
 // is an ordered artifact and re-ordering it (by status, say) would be editing
 // the agent's meaning rather than displaying it.
-function TodoBucket({ rows, truncated }: { rows: TodoItem[]; truncated: number }): JSX.Element {
+function TodoBucket({
+    rows,
+    truncated,
+    partial,
+}: {
+    rows: TodoItem[];
+    truncated: number;
+    partial: boolean;
+}): JSX.Element {
     const done = () => rows.filter((t) => t.status === "completed").length;
     return (
         <Show when={rows.length > 0}>
@@ -401,6 +413,20 @@ function TodoBucket({ rows, truncated }: { rows: TodoItem[]; truncated: number }
                 <For each={rows}>{(todo) => <TodoRow todo={todo} />}</For>
                 <Show when={truncated > 0}>
                     <div class="swarm-todo-truncated">+{truncated} more</div>
+                </Show>
+                {/* Distinct from "+N more" above, and deliberately so: that is
+                    a cap we chose and can count, this is history the backend
+                    could not see (it started watching mid-stream, so
+                    item-at-a-time entries created earlier were never observed).
+                    Showing an incomplete checklist as if it were complete is
+                    the failure worth avoiding here. */}
+                <Show when={partial}>
+                    <div
+                        class="swarm-todo-partial"
+                        title="AgentMux started watching this agent mid-session, so items created before that may be missing."
+                    >
+                        earlier items may be missing
+                    </div>
                 </Show>
             </div>
         </Show>

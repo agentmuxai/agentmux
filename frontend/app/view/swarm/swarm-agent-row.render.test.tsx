@@ -62,6 +62,7 @@ function treeNode(): AgentTreeNode {
         cronRows: [],
         todoRows: [],
         todosTruncated: 0,
+        todosPartial: false,
         currentTool: null,
     } as AgentTreeNode;
 }
