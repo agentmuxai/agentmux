@@ -10,8 +10,8 @@ for real end-to-end testing, not just a paper audit.
 and CI workflow in the repo (via a dedicated Explore pass), then direct
 verification of every claim against the current files on `main` at
 `256648552` — no finding below is taken on the subagent's word alone.
-**Status:** Investigation complete. No code changes yet. Tracking issue:
-TBD (opened alongside this report — see bottom).
+**Status:** active — investigation complete, no code changes yet. Tracking
+issue: [#2940](https://github.com/agentmuxai/agentmux/issues/2940).
 
 ---
 
