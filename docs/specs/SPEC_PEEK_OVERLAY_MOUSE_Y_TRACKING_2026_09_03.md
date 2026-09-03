@@ -99,13 +99,15 @@ positioning implementation.
 
 ### 4.3 Computing `top`
 
-In `update()`, for `align === "end"`:
+**Revised twice from the original design during review (reagent + Codex,
+both P1, both correct) — see §4.3.1 for what was tried first and why it
+didn't work.** Final version, in `update()`, for `align === "end"`:
 
 ```ts
-const container = findScrollContainerRect(row);
+const overlayHeight = floatingEl?.getBoundingClientRect().height ?? 0;
 const minTop = container.top;
-const maxTop = container.bottom - BOTTOM_MARGIN_PX;
-const top = lastMouseY != null ? Math.min(Math.max(lastMouseY, minTop), maxTop) : rect.top;
+const maxTop = Math.max(minTop, container.bottom - BOTTOM_MARGIN_PX - overlayHeight);
+const top = lastMouseY != null ? Math.min(Math.max(lastMouseY + CURSOR_GAP_PX, minTop), maxTop) : rect.top;
 const cap = Math.max(0, container.bottom - top - BOTTOM_MARGIN_PX);
 setFloatingStyle({
     position: "fixed",
@@ -119,19 +121,66 @@ setFloatingStyle({
 
 - `left`/`transform` (horizontal pinning) is **unchanged** — "pinned to
   the right" stays exactly as it behaves today.
-- `top` follows `lastMouseY` once available, clamped to the scroll
-  container's own vertical bounds (reusing `findScrollContainerRect`,
-  already imported) rather than the row's bounds — a tall row means the
-  mouse can be anywhere within it, and the container clamp is what
-  already existed for the `cap` calculation, so this reuses the same
-  reference frame rather than introducing a second one.
+- `top` follows `lastMouseY` once available, offset by a fixed
+  `CURSOR_GAP_PX` (12px) below the raw cursor position — see §4.3.1 for
+  why this offset must be nonzero — clamped to the scroll container's own
+  vertical bounds (reusing `findScrollContainerRect`, already imported)
+  minus the overlay's own rendered height, rather than the row's bounds.
 - Falls back to `rect.top` (today's behavior) if no mouse position is
   known yet (shouldn't normally happen per §4.2, but keeps the function
   total/safe).
 - `max-height` (`cap`) is recomputed relative to the new `top`, same
   formula as before just parameterized — otherwise a panel positioned
   further down the row would keep the old, too-generous height budget
-  and could overflow past the container's bottom edge.
+  and could overflow past the container's bottom edge. Combined with the
+  height-aware `maxTop` clamp above, `cap` should now stay generous
+  (>= `overlayHeight`) in the normal case rather than collapsing near the
+  container's bottom edge (see §4.3.1, second bug).
+
+#### 4.3.1 What was tried first, and why it changed
+
+**Attempt 1 (initial PR):** `top = clamp(lastMouseY, minTop, maxTop)` —
+no offset, no overlay-height awareness in the clamp. Two bugs, both
+caught in review before merge:
+
+- **reagent P1, Codex P1 (same finding, independently):** positioning the
+  panel's top edge at the cursor's EXACT Y meant any further downward
+  mouse movement immediately entered the panel itself (Portal-rendered,
+  not a DOM descendant of the row). That fired the row's `onMouseLeave`
+  (unrelated element per the DOM, from the row's point of view this
+  really did leave), hiding the panel via `useNodePeek`'s `isPeeking`,
+  which un-hovered the now-removed overlay and let the row's
+  `onMouseEnter` fire again at the new Y after the enter delay — a
+  continuous hide/show loop on ordinary mouse movement, not an edge case.
+- **Codex P1:** the `maxTop` clamp only accounted for `container.bottom`,
+  not the overlay's own height — hovering near the scroll container's
+  bottom edge pushed `cap` toward 0, clipping the timestamp/estimate/
+  command content instead of just stopping the panel's downward travel.
+
+**Attempt 2 (first review-response push):** kept `top = clamp(lastMouseY,
+...)` unchanged, added `pointer-events: none` to the whole overlay to
+stop it from ever intercepting the mouse (fixing the loop) and fixed the
+`maxTop`/overlay-height issue as in the final version above.
+
+- **reagent P1 (re-review):** `pointer-events: none` also disables the
+  overlay's own `overflow-y: auto` (`.agent-node-peek-overlay`,
+  `_document-nodes.scss:2101`) — load-bearing for `ToolBlock.tsx`'s
+  `cmdText` body, which can be long enough to need scrolling. This
+  regressed previously-working wheel-scroll on that content (pointer
+  events were unset/`auto` before this PR at all), for the sake of fixing
+  a bug that only needed the cursor to stay OUTSIDE the panel's bounds,
+  not for the panel to stop receiving events altogether.
+
+**Final (this spec, attempt 3):** drop `pointer-events: none` entirely
+(no regression), and instead offset `top` by a fixed `CURSOR_GAP_PX`
+below the raw cursor Y. Since `update()` recomputes `top` on every
+`mousemove`, the panel is always positioned a constant small distance
+below wherever the cursor currently is — the cursor cannot enter the
+panel's own bounds under ordinary hover movement (it would need to jump
+more than `CURSOR_GAP_PX` within a single rAF-throttled frame), so the
+loop from attempt 1 doesn't happen, and pointer events on the overlay are
+untouched, so scrolling long tool-command bodies keeps working exactly as
+before this PR.
 
 ### 4.4 Why not thread mouse position through props instead
 

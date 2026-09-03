@@ -43,9 +43,11 @@
  * `align="end"` mode additionally tracks the mouse's Y position while
  * hovering (2026-09-03, SPEC_PEEK_OVERLAY_MOUSE_Y_TRACKING_2026_09_03.md):
  * horizontal position stays pinned to the row's right edge exactly as
- * before, but `top` follows the cursor instead of freezing at the row's
- * top edge, clamped to the scroll container's own bounds. `align="stretch"`
- * (UserMessageBlock's full-body preview) is unaffected — still top-anchored.
+ * before, but `top` follows the cursor (offset by CURSOR_GAP_PX below it —
+ * see `update()`'s own comment for why the offset must be nonzero) instead
+ * of freezing at the row's top edge, clamped to the scroll container's own
+ * bounds. `align="stretch"` (UserMessageBlock's full-body preview) is
+ * unaffected — still top-anchored.
  */
 
 import clsx from "clsx";
@@ -101,6 +103,11 @@ interface PeekOverlayProps {
 // rationale as hover-anchor.ts's `maxOverlayHeight` margin default.
 const BOTTOM_MARGIN_PX = 4;
 
+// Vertical clearance kept between the cursor and the mouse-tracking overlay's
+// own top edge (align="end" mode only) — see the `top` computation in
+// `update()` below for why this must be strictly positive.
+const CURSOR_GAP_PX = 12;
+
 export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
     const [floatingStyle, setFloatingStyle] = createSignal<JSX.CSSProperties>({
         position: "fixed",
@@ -153,10 +160,29 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
         // Codex P1 on PR #2949). Falls back to 0 extra headroom before the
         // overlay's first paint, when its height isn't known yet — corrected
         // on the very next update() once floatingEl exists.
+        //
+        // `top` is offset CURSOR_GAP_PX below the raw cursor position, not
+        // exactly at it. First cut of this fix set `top: mouseY` exactly,
+        // which put the cursor precisely on the panel's own top edge — any
+        // further downward movement immediately entered the (Portal-rendered,
+        // non-descendant-of-the-row) overlay itself, firing the row's
+        // onMouseLeave and hiding it, which then re-triggered onMouseEnter at
+        // the new Y and looped (reagent P1 on PR #2949, 2nd round). The fix
+        // tried next — `pointer-events: none` on the overlay — traded that
+        // loop for a real regression: `.agent-node-peek-overlay` has a load-
+        // bearing `overflow-y: auto` (ToolBlock.tsx's `cmdText` body can be
+        // long enough to need scrolling), which pointer-events: none also
+        // disables (reagent P1, 3rd round). Since `update()` recomputes `top`
+        // on every mousemove, keeping it a small FIXED distance below the
+        // cursor means the cursor never actually reaches the panel's own
+        // bounds under ordinary hover movement (it would have to jump more
+        // than CURSOR_GAP_PX within a single rAF-throttled frame) — no
+        // pointer-events override needed, so scrolling stays intact.
         const overlayHeight = floatingEl?.getBoundingClientRect().height ?? 0;
         const minTop = container.top;
         const maxTop = Math.max(minTop, container.bottom - BOTTOM_MARGIN_PX - overlayHeight);
-        const top = lastMouseY != null ? Math.min(Math.max(lastMouseY, minTop), maxTop) : rect.top;
+        const top =
+            lastMouseY != null ? Math.min(Math.max(lastMouseY + CURSOR_GAP_PX, minTop), maxTop) : rect.top;
         const cap = Math.max(0, container.bottom - top - BOTTOM_MARGIN_PX);
         setFloatingStyle({
             position: "fixed",
@@ -165,16 +191,6 @@ export function PeekOverlay(props: PeekOverlayProps): JSX.Element {
             transform: "translateX(-100%)",
             "max-width": `${rect.width}px`,
             "max-height": `${cap}px`,
-            // The panel now tracks the cursor's exact Y, so without this it
-            // sits directly under the pointer: moving further down targets
-            // the (Portal-rendered, non-descendant) overlay itself instead
-            // of the row, firing the row's onMouseLeave and hiding the
-            // panel — which un-hovers the overlay, re-triggers the row's
-            // onMouseEnter, and reshows it at the new Y, looping. Scoped to
-            // "end" mode only: "stretch" (UserMessageBlock's full message
-            // body preview) still needs normal pointer events for text
-            // selection (reagent + Codex P1 on PR #2949).
-            "pointer-events": "none",
         });
     };
 
