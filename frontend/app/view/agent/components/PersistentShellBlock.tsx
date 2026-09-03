@@ -17,7 +17,7 @@ import { useTick } from "@/app/hook/useTick";
 import { estimateTokenCount, formatCompactNumber } from "@/util/format-count";
 import { formatElapsedClock, formatExactTime, formatTimeAgo } from "@/util/format-time";
 import { useNodePeek } from "../hooks/useNodePeek";
-import { capChars, createChunkCapper, createSpinnerCollapser, dropSystemChunks, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
+import { capChars, createChunkCapper, createSpinnerCollapser, dropBashwrapStartingChunk, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { LinkifiedText } from "@/app/element/linkified-text";
 import { PeekOverlay } from "./PeekOverlay";
@@ -115,9 +115,9 @@ export const PersistentShellBlock = (props: PersistentShellBlockProps): JSX.Elem
     const spinnerCollapse = createSpinnerCollapser<ToolLogChunk>();
     const chunkCap = createChunkCapper(MAX_TOOL_OUTPUT_LINES);
     const cappedView = createMemo(() => {
-        // dropSystemChunks BEFORE collapse/cap — see output-cap.ts's doc
+        // dropBashwrapStartingChunk BEFORE collapse/cap — see output-cap.ts's doc
         // comment (also applies to ToolOverlayLog.tsx's identical pipeline).
-        const raw = dropSystemChunks(props.node.log.chunks as ToolLogChunk[]);
+        const raw = dropBashwrapStartingChunk(props.node.log.chunks as ToolLogChunk[]);
         const { display: collapsed, spinnerSlot } = spinnerCollapse(raw);
         const { chunks: display, hiddenLines } = chunkCap(collapsed);
         return { display, spinnerSlot, hiddenLines };
