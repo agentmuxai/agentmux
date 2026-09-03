@@ -91,10 +91,26 @@ export interface UseAgentFailureOptions {
     failure: Accessor<PaneFailure | null>;
     /** Re-run the failed turn (re-send the last user message). */
     onRetry: () => void;
-    /** Re-authenticate this agent's provider account (P2). */
-    onLoginAgain: () => void;
-    /** Open a real terminal window for browser-based OAuth (Claude v2.1.x). */
-    onLoginViaTerminal: () => void;
+    /**
+     * Re-authenticate this agent's provider account (P2).
+     *
+     * `turnAttempted` is forwarded from the failure the row was built from
+     * (see {@link PaneFailure.turnAttempted}) and MUST be passed through to
+     * `relogin({ retryAfterLogin })`: for a never-started agent (`false`)
+     * there is no failed turn to re-run, and re-running anyway makes a
+     * successful login silently re-send that agent's last OLD message.
+     */
+    onLoginAgain: (turnAttempted: boolean) => void;
+    /**
+     * Open a real terminal window for browser-based OAuth (Claude v2.1.x).
+     *
+     * Takes `turnAttempted` for the SAME reason {@link onLoginAgain} does, and
+     * it must be forwarded the same way: this action recovers the pre-launch
+     * row too, and a terminal login that "retries" a turn which never ran
+     * resends the agent's last old message. Deriving it after the login
+     * succeeds does not work — see loginViaTerminal's own doc comment.
+     */
+    onLoginViaTerminal: (turnAttempted: boolean) => void;
     /** Open Armory → Accounts. */
     onOpenArmory: () => void;
     /** Start a fresh agent session (context-window overflow recovery). */
@@ -267,11 +283,23 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
         const f = pf.data;
         return failureToRow(
             f,
-            { expanded: expanded(), autoRetryIn: autoRetryIn(), retrying: retrying() },
+            {
+                expanded: expanded(),
+                autoRetryIn: autoRetryIn(),
+                retrying: retrying(),
+                // Selects the auth arm's "Log in" vs "Login Again" label and
+                // the row's accent — see failure-accessory's FailureViewState.
+                turnAttempted: pf.turnAttempted,
+            },
             {
                 retry: doRetry,
-                loginAgain: opts.onLoginAgain,
-                loginViaTerminal: opts.onLoginViaTerminal,
+                // Forwarded the SAME `turnAttempted` the row was built from, so
+                // the button's label and its relogin() argument can never
+                // disagree about which case this is (a never-started agent must
+                // not have an old message re-sent after a successful login).
+                loginAgain: () => opts.onLoginAgain(pf.turnAttempted ?? true),
+                // Same single-source forwarding as loginAgain above.
+                loginViaTerminal: () => opts.onLoginViaTerminal(pf.turnAttempted ?? true),
                 openArmory: opts.onOpenArmory,
                 newSession: opts.onNewSession,
                 toggleDetails: () => setExpanded((v) => !v),

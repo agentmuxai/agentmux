@@ -18,6 +18,7 @@
  * is the exception. See spec §4.4 dispatcher note.
  */
 
+import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import { RpcApi } from "@/app/store/rpc-api";
 import { sleep } from "@/util/util";
 import { TabRpcClient } from "@/app/store/rpc-util";
@@ -113,7 +114,22 @@ export const loginCommand: SlashCommand = {
         // re-review). Paired with the endRecoveryFlow() in this function's
         // own finally below — every return path (success, error, and the
         // catch) goes through it exactly once.
-        ctx.beginRecoveryFlow();
+        // Declare this flow's recovery intent, the same way the failure row's
+        // own buttons do — from the pending failure's `turnAttempted`.
+        //
+        // /login shows the same AuthUrlBox as relogin, so its session offers
+        // the same "Use terminal instead". Without this, that escape read the
+        // resting `false` and called onReady(), silently dropping a retry that
+        // WAS owed when a real auth failure was pending — while clicking the
+        // row's own "Login via terminal" in the identical state retried. Same
+        // situation, opposite outcome, decided by which entry point the user
+        // happened to use. Note this is also a behaviour CHANGE rather than a
+        // pre-existing gap: before this PR that handler defaulted to true and
+        // the retry did happen. manoz on PR #2951.
+        //
+        // Defaults false with no pending failure — /login is then a pure
+        // credential operation with no turn owed a retry.
+        ctx.beginRecoveryFlow(paneSnapshot(ctx.blockId)?.failure?.turnAttempted ?? false);
         try {
             const authEnv: Record<string, string> = {};
             const envMeta = ctx.block()?.meta?.["cmd:env"];

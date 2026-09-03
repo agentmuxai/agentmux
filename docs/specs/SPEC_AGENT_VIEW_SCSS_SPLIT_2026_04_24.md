@@ -80,7 +80,10 @@ frontend/app/view/agent/
     ├── _activity-log.scss       ← .agent-activity-log (~80 lines)
     ├── _status-line.scss        ← .agent-status-line + spinner-dot + process-badge (~190 lines)
     ├── _auth.scss               ← .agent-auth-url-* + .agent-auth-paste-* (~140 lines)
-    ├── _retry-empty.scss        ← .agent-retry-bar + .agent-empty + .agent-connect-btn (~80 lines)
+    ├── _retry-empty.scss        ← .agent-empty + .agent-connect-btn (~80 lines)
+    │                               (.agent-retry-bar/.agent-retry-btn removed with the
+    │                                standalone "Log in" bar — see
+    │                                PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md)
     ├── _focused-overlay.scss    ← .agent-focused-* (~110 lines)
     ├── _nodejs-notice.scss      ← .agent-nodejs-notice (~40 lines)
     ├── _composer.scss           ← .agent-composer-region + .agent-control-bar (~130 lines)

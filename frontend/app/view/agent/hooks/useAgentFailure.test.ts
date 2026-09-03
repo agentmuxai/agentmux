@@ -335,3 +335,82 @@ describe("useAgentFailure auto-retry budget (§6)", () => {
         });
     });
 });
+
+describe("useAgentFailure — turnAttempted forwarding (PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02)", () => {
+    // The single most load-bearing invariant of the login-CTA consolidation.
+    // One button now serves both the "never signed in" and "a turn got 401'd"
+    // cases; it distinguishes them ONLY by forwarding the failure's own
+    // `turnAttempted` into relogin()'s `retryAfterLogin`. Passing true for a
+    // never-started agent makes a successful login silently re-send that
+    // agent's last OLD message as a new turn — the exact bug the deleted blue
+    // "Log in" bar's own call site was written to avoid.
+    const authFailure: AgentFailure = {
+        code: "auth", title: "Not authenticated", detail: "401", retryable: true,
+    };
+
+    const clickLoginAgain = (turnAttempted?: boolean) => {
+        const seen: boolean[] = [];
+        createRoot((dispose) => {
+            const [failure] = createSignal<PaneFailure | null>({
+                data: authFailure, at: 1, ...(turnAttempted === undefined ? {} : { turnAttempted }),
+            });
+            const ui = useAgentFailure({
+                blockId: BLOCK_ID,
+                model: { blockId: BLOCK_ID, disposed: false, dispatchPane: vi.fn(() => []), dispatchDoc: vi.fn(() => []) } as any,
+                failure,
+                onRetry() {},
+                onLoginAgain: (t) => void seen.push(t),
+                onLoginViaTerminal() {},
+                onOpenArmory() {},
+                onNewSession() {},
+            });
+            ui.row()?.actions.find((a) => a.glyph === "🔑")?.onClick();
+            dispose();
+        });
+        return seen;
+    };
+
+    beforeEach(() => {
+        hub.handlers.clear();
+        hub.persistedFailure = null;
+        __resetListeners();
+    });
+
+    it("forwards turnAttempted:false — the never-signed-in case must NOT retry a turn", () => {
+        expect(clickLoginAgain(false)).toEqual([false]);
+    });
+
+    it("forwards turnAttempted:true — a real 401 SHOULD re-run the failed turn", () => {
+        expect(clickLoginAgain(true)).toEqual([true]);
+    });
+
+    it("defaults to true when the failure predates the field", () => {
+        expect(clickLoginAgain(undefined)).toEqual([true]);
+    });
+
+    it("the label and the forwarded flag always agree about which case this is", () => {
+        // Guards the specific way this could rot: label says "Log in" (no turn
+        // to retry) while the handler still asks to retry one, or vice versa.
+        for (const turnAttempted of [true, false]) {
+            const seen: boolean[] = [];
+            createRoot((dispose) => {
+                const [failure] = createSignal<PaneFailure | null>({ data: authFailure, at: 1, turnAttempted });
+                const ui = useAgentFailure({
+                    blockId: BLOCK_ID,
+                    model: { blockId: BLOCK_ID, disposed: false, dispatchPane: vi.fn(() => []), dispatchDoc: vi.fn(() => []) } as any,
+                    failure,
+                    onRetry() {},
+                    onLoginAgain: (t) => void seen.push(t),
+                    onLoginViaTerminal() {},
+                    onOpenArmory() {},
+                    onNewSession() {},
+                });
+                const action = ui.row()?.actions.find((a) => a.glyph === "🔑");
+                action?.onClick();
+                expect(action?.label).toBe(turnAttempted ? "Login Again" : "Log in");
+                dispose();
+            });
+            expect(seen).toEqual([turnAttempted]);
+        }
+    });
+});

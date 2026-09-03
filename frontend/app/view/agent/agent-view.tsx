@@ -22,7 +22,7 @@ import {
     dispatchIfRegistered as dispatchPaneIfRegistered,
     snapshot as paneSnapshot,
 } from "@/app/store/agent-pane-state-store";
-import { workingFromPhase } from "@/app/store/agent-pane-state/types";
+import { workingFromPhase, type PaneFailure } from "@/app/store/agent-pane-state/types";
 import {
     registerActivity as registerAgentActivity,
     unregisterActivity as unregisterAgentActivity,
@@ -57,7 +57,7 @@ import {
 import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reveal";
 import { getTrail } from "@/log/render-trail";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
-import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { earliestLiveAttachedStartMs } from "./activity/attached-task";
 import { allSubagentsAtom } from "./activity/subagent-source";
@@ -93,6 +93,7 @@ import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
 import { useAgentDecisions } from "./hooks/useAgentDecisions";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
 import { useAgentFailure } from "./hooks/useAgentFailure";
+import { decideSyntheticRow } from "./failure/synthetic-row";
 import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
 import { useAgentQuestions } from "./hooks/useAgentQuestions";
 import { useBlockActivity } from "./hooks/useBlockActivity";
@@ -1241,6 +1242,22 @@ const AgentPresentationView = ({
             // first, that same capture would see the stale failure on THIS
             // auto-retry too and wrongly reject the very resend recovery
             // just enabled. Codex P1 on PR #2338.
+            // Unconditional again, and deliberately so.
+            //
+            // Two earlier attempts on this PR tried to make the retry-vs-startup
+            // decision HERE, from pane state, because loginViaTerminal (unlike
+            // relogin) called this without saying which it wanted. Retrying
+            // unconditionally resent a stale message on a never-launched agent
+            // (codex); returning early instead dropped the startup sequence
+            // (reagent); and reading the failure to decide raced the login's own
+            // setCanRetry(false), which synchronously flushes the effect that
+            // clears that very failure (reagent + manoz, independently).
+            //
+            // The fix was to remove the inference, not to time it better:
+            // loginViaTerminal now takes an explicit retryAfterLogin like
+            // relogin always did, decided at click time from the row's own
+            // turnAttempted, and calls onReady() instead of this on its
+            // no-retry path. So every caller that reaches here wants a retry.
             dispatchPane(model.blockId, { type: "FailureCleared" }, "system");
             retryLastTurn();
         },
@@ -1747,7 +1764,14 @@ const AgentPresentationView = ({
         // banner instead of leaving it cleared with no recovery affordance
         // (Codex P1, third re-review).
         const liveFailure = agentAtoms().failureAtom[0]();
-        const authFailureToPreserve = liveFailure?.data.code === "auth" ? liveFailure.data : null;
+        // Carry the WHOLE PaneFailure, not just `.data`: `turnAttempted` lives
+        // on the wrapper, and capturing only the inner AgentFailure discarded
+        // it structurally — so the guard's re-dispatch below rebuilt the
+        // failure with the reducer's `?? true` default and silently flipped a
+        // pre-launch "Log in" row into "Login Again" (+ retryAfterLogin true,
+        // i.e. an old message resent on an agent that never ran a turn).
+        // Found independently by codex and manoz on PR #2951.
+        const authFailureToPreserve = liveFailure?.data.code === "auth" ? liveFailure : null;
         // Only start a NEW turn when the agent is idle. Dispatching TurnStart
         // while a turn is already running regresses Streaming → Submitting,
         // which would flicker the busy indicator back to its "Submitting"
@@ -1793,6 +1817,61 @@ const AgentPresentationView = ({
             void status.startLaunchFlow();
         }
     };
+    // Pre-launch auth failure → the SAME failure row every other auth failure
+    // uses, instead of the separate blue "Log in" bar this replaced
+    // (docs/specs/PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md).
+    //
+    // The DECISION lives in decideSyntheticRow (failure/synthetic-row.ts) and
+    // is unit-tested there; this is wiring only. It was extracted after this
+    // effect produced several P1s across PR #2951 — it sits inline in the pane
+    // component and no existing harness can reach it, so the logic was
+    // unassertable while it lived here.
+    //
+    // Tracks BOTH canRetry and the failure signal. Tracking the failure is
+    // what lets a dismissed REAL failure fall back to this row while the agent
+    // is still unauthenticated (reagent P1) — without it the pane kept no login
+    // affordance at all, strictly worse than the undismissable bar it replaced.
+    // Dismissing THIS row still sticks; decideSyntheticRow tells the two apart
+    // from the previous value, which is why that state is threaded here.
+    let prevFailure: PaneFailure | null = null;
+    let syntheticDismissed = false;
+    createEffect(() => {
+        const decision = decideSyntheticRow({
+            canRetry: status.canRetry(),
+            current: agentAtoms().failureAtom[0](),
+            previous: prevFailure,
+            syntheticDismissed,
+        });
+        prevFailure = untrack(() => agentAtoms().failureAtom[0]());
+        syntheticDismissed = decision.syntheticDismissed;
+        if (decision.action === "raise") {
+            dispatchPane(
+                model.blockId,
+                {
+                    type: "FailureObserved",
+                    at: Date.now(),
+                    turnAttempted: false,
+                    failure: {
+                        code: "auth",
+                        title: "Not signed in",
+                        detail:
+                            "This agent hasn't been signed in to its provider yet, so it never started. " +
+                            "Sign in to launch it — nothing has run, so there's no turn to retry.",
+                        retryable: true,
+                    },
+                },
+                "system",
+            );
+            // Keep prevFailure in step with what we just dispatched, so the
+            // re-run this write triggers sees "our row is showing" rather than
+            // "a row just appeared from nowhere".
+            prevFailure = untrack(() => agentAtoms().failureAtom[0]());
+        } else if (decision.action === "retract") {
+            dispatchPane(model.blockId, { type: "FailureCleared" }, "system");
+            prevFailure = null;
+        }
+    });
+
     const failureUI = useAgentFailure({
         blockId: model.blockId,
         // Per-pane model keeps dispatch sites default-safe; see useAgentStream above.
@@ -1816,15 +1895,26 @@ const AgentPresentationView = ({
         // (SPEC_REAUTH_FROM_AUTH_ERROR §11). The running persistent agent
         // re-reads its credential per request, so the next message uses the new
         // token and clears this failure row.
-        onLoginAgain: () => {
-            log("auth", "Login Again — forcing a fresh provider login");
-            void status.relogin();
+        onLoginAgain: (turnAttempted: boolean) => {
+            // `retryAfterLogin` mirrors whether a turn actually ran before this
+            // failure. The pre-launch case (turnAttempted false — what used to
+            // render its own blue "Log in" bar) must pass false: no turn was
+            // ever sent, and re-running "the failed turn" would re-send this
+            // agent's last OLD message as a new one on a successful login.
+            // See docs/specs/PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md.
+            log(
+                "auth",
+                turnAttempted
+                    ? "Login Again — forcing a fresh provider login"
+                    : "Log in — starting the provider login (no turn to retry)",
+            );
+            void status.relogin({ retryAfterLogin: turnAttempted });
         },
         // Open a real console window (CREATE_NEW_CONSOLE) so the browser OAuth
         // can launch. Polls for new credentials and seeds when they appear.
-        onLoginViaTerminal: () => {
+        onLoginViaTerminal: (turnAttempted: boolean) => {
             log("auth", "Login via terminal — opening a console window for browser login");
-            void status.loginViaTerminal();
+            void status.loginViaTerminal({ retryAfterLogin: turnAttempted });
         },
     });
 
@@ -2174,27 +2264,23 @@ const AgentPresentationView = ({
                 launchPhase={status.launchPhase}
             />
 
-            <Show when={status.canRetry()}>
-                <div class="agent-retry-bar">
-                    {/* Wired to relogin(), not startLaunchFlow: the mount-time
-                        launch flow now only ever notifies and stops on
-                        auth_failed (launch-flow.ts), so re-running it here
-                        would immediately hit the same not-authenticated check
-                        and bail again with no login ever attempted — an
-                        infinite dead-end. relogin() is the one path that
-                        actually starts a login.
-                        retryAfterLogin: false — no turn was ever attempted
-                        here (Phase 2 bailed before Phase 3), so there's no
-                        failed turn to retry. Without this, a successful
-                        login on an agent with prior history silently resent
-                        its last old message as a new turn, burying the
-                        "Login successful" notification under that turn's
-                        immediate stream of output. */}
-                    <button class="agent-retry-btn" onClick={() => void status.relogin({ retryAfterLogin: false })}>
-                        Log in
-                    </button>
-                </div>
-            </Show>
+            {/* The separate blue "Log in" bar that used to render here on
+                `status.canRetry()` is GONE — it was a second CTA for the
+                identical action (relogin()) as the failure row below, and the
+                two could be on screen simultaneously (a pane reopened after an
+                auth failure seeds the row from persisted block meta while the
+                mount-time launch flow independently sets canRetry). That case
+                now raises a synthetic `turnAttempted: false` auth failure
+                instead (see the createEffect above), so it renders through the
+                one shared row, labelled "Log in" and still passing
+                `retryAfterLogin: false`.
+
+                `status.canRetry()` itself is DELIBERATELY still live — it is
+                not only a display gate: useAgentCommands reads it to fast-fail
+                sends into an unauthenticated agent, and /login reads it too.
+                Deleting the signal along with this bar would silently re-open
+                that hole. See
+                docs/specs/PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md. */}
 
             {/* Permission decision panel — surfaced when one or more
                 tool calls are gated by the CLI awaiting user approval.

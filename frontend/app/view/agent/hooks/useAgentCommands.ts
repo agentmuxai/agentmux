@@ -29,7 +29,7 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import * as WOS from "@/app/store/wos";
 import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
-import { workingFromPhase } from "@/app/store/agent-pane-state/types";
+import { workingFromPhase, type PaneFailure } from "@/app/store/agent-pane-state/types";
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { buildRuntimeArgs, getRuntimeConfig } from "../buildRuntimeArgs";
 import { selectLaunchArgs } from "../launch-args";
@@ -232,7 +232,7 @@ export interface UseAgentCommands {
     sendMessage: (
         message: string,
         wasAlreadyWorking?: boolean,
-        authFailureToPreserve?: AgentFailure | null,
+        authFailureToPreserve?: PaneFailure | null,
     ) => Promise<void>;
     /**
      * Deliver any messages held while the agent was busy (the "send now"
@@ -362,7 +362,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
          * instead of silently vanishing. codex P2 on PR #2338 (twenty-third
          * re-review).
          */
-        authFailureToPreserve: AgentFailure | null;
+        authFailureToPreserve: PaneFailure | null;
         /**
          * True only for the idle-send hold (the branch below gated on
          * controllerRefreshPendingUntilIdle) — that path's caller
@@ -803,7 +803,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
     const sendMessage = async (
         message: string,
         wasAlreadyWorking = false,
-        authFailureToPreserve: AgentFailure | null = null,
+        authFailureToPreserve: PaneFailure | null = null,
     ): Promise<void> => {
         // Crash trace: this is the entry point for "user pressed send."
         // The boundary dumps this trail when a renderer fault catches —
@@ -863,7 +863,20 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // re-review).
             if (wasAlreadyWorking) return;
             if (authFailureToPreserve && !clearedByCommand) {
-                opts.model.dispatchPane({ type: "FailureObserved", failure: authFailureToPreserve, at: Date.now() }, "system");
+                opts.model.dispatchPane(
+                    {
+                        type: "FailureObserved",
+                        failure: authFailureToPreserve.data,
+                        at: Date.now(),
+                        // Preserve the ORIGINAL flag. Without this the reducer
+                        // defaults it to true and a pre-launch row silently
+                        // becomes "Login Again" + retryAfterLogin:true, which
+                        // resends an old message on an agent that never ran a
+                        // turn. See PaneFailure.turnAttempted.
+                        turnAttempted: authFailureToPreserve.turnAttempted,
+                    },
+                    "system",
+                );
             }
         };
 
@@ -1138,7 +1151,7 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
          *  sendMessage's doc comment. Always null for a held-message flush
          *  (mirrors initiatesTurn — a flush's guard question is about the
          *  ALREADY-active turn, not a fresh capture). */
-        authFailureToPreserve: AgentFailure | null,
+        authFailureToPreserve: PaneFailure | null,
     ): Promise<void> => {
         // The pane is ALREADY showing the mount-time "Log in" bar
         // (opts.canRetry()) — sending anyway used to travel all the way
@@ -1228,11 +1241,21 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 return true;
             }
             opts.log("auth", "message not sent — not logged in", "warn");
+            // This branch fires precisely when there is NO failure row on
+            // screen (`!liveAuthFailure` means `state.failure` is null, and the
+            // row renders off that field). It used to be safe to say "click
+            // 'Log in' below" because the standalone blue bar was always up in
+            // this state — but that bar was removed in
+            // PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02, and the row that
+            // replaced it is dismissible. So in this exact state there is no
+            // button to point at, and the copy names the recovery that always
+            // works instead. (manoz spotted that this notice fires at all here;
+            // the stale button reference fell out of checking why.)
             if (!authFailureToPreserve && !liveAuthFailure) {
                 opts.setAuthNotice(
                     loginStillWaiting
                         ? "Not logged in yet — wait for the login attempt to finish, then try again."
-                        : "Not logged in — click “Log in” below to continue.",
+                        : "Not logged in — run /login to sign in, then send again.",
                 );
             }
             opts.model.dispatchPane({
@@ -1245,17 +1268,31 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             if (authFailureToPreserve) {
                 // Re-dispatch the SAME failure TurnStart just cleared — the
                 // failure banner (and its "Login Again"/"Login via terminal"
-                // actions) is this pane's actual recovery path; a generic
-                // authNotice that mentions a "Log in" button not even shown
-                // here (canRetry() is false in this scenario) would leave
-                // the user with no working recovery affordance at all. Codex
-                // P1 on PR #2338 (third re-review). Dispatched AFTER
+                // actions) is this pane's actual recovery path; falling back
+                // to the generic authNotice instead would leave the user with
+                // no working recovery affordance at all. Codex P1 on PR #2338
+                // (third re-review).
+                //
+                // This comment used to add "(canRetry() is false in this
+                // scenario)" as the reason the notice would be useless. That
+                // premise no longer holds: since
+                // PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02, canRetry()
+                // CAN be true here — it raises a synthetic pre-launch auth
+                // failure, which is exactly what `authFailureToPreserve`
+                // carries in that case. The conclusion is unchanged (re-dispatch
+                // the real banner rather than fall back to a generic string);
+                // only the stated reason needed correcting. manoz on PR #2951. Dispatched AFTER
                 // TurnStartFailed so turnPhase is already Idle when this
                 // reducer case runs — otherwise it reads the still-Submitting
                 // phase as "a turn just ended" and hops through a transient
                 // Done state before TurnStartFailed settles it back to Idle.
                 opts.model.dispatchPane(
-                    { type: "FailureObserved", failure: authFailureToPreserve, at: Date.now() },
+                    {
+                        type: "FailureObserved",
+                        failure: authFailureToPreserve.data,
+                        at: Date.now(),
+                        turnAttempted: authFailureToPreserve.turnAttempted, // see :866
+                    },
                     "system",
                 );
             }
@@ -1497,7 +1534,15 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                     // restoreAuthFailureIfUnresolved for the bang/slash-
                     // command local-command path.
                     if (item.authFailureToPreserve && !liveAuthFailure) {
-                        opts.model.dispatchPane({ type: "FailureObserved", failure: item.authFailureToPreserve, at: Date.now() }, "system");
+                        opts.model.dispatchPane(
+                        {
+                            type: "FailureObserved",
+                            failure: item.authFailureToPreserve.data,
+                            at: Date.now(),
+                            turnAttempted: item.authFailureToPreserve.turnAttempted, // see :866
+                        },
+                        "system",
+                    );
                     }
                     opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
                     continue;
@@ -1552,7 +1597,15 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
         // left to bring it back. reagent P2 on PR #2338 (twenty-ninth
         // re-review).
         if (item.authFailureToPreserve && paneSnapshot(opts.blockId)?.failure?.data.code !== "auth") {
-            opts.model.dispatchPane({ type: "FailureObserved", failure: item.authFailureToPreserve, at: Date.now() }, "system");
+            opts.model.dispatchPane(
+                        {
+                            type: "FailureObserved",
+                            failure: item.authFailureToPreserve.data,
+                            at: Date.now(),
+                            turnAttempted: item.authFailureToPreserve.turnAttempted, // see :866
+                        },
+                        "system",
+                    );
         }
         opts.model.dispatchPane({ type: "PendingMessageRejected", id: item.id });
         return { text: item.text };

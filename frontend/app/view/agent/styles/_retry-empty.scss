@@ -1,34 +1,14 @@
 // Copyright 2024-2026, AgentMux Corp.
 // SPDX-License-Identifier: Apache-2.0
 
-// Retry-login bar + empty state (shown when no agent session is active). Wrapped in .agent-view so the cascade chain matches
+// Empty state (shown when no agent session is active). Wrapped in .agent-view so the cascade chain matches
 // the pre-split file (SPEC_AGENT_VIEW_SCSS_SPLIT_2026_04_24).
+//
+// The "Retry Login Bar" (.agent-retry-bar / .agent-retry-btn) that used to live
+// here was removed with the blue "Log in" button it styled — that pre-launch
+// auth case now renders through the shared failure PaneRow instead. See
+// docs/specs/PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md.
 .agent-view {
-    // === Retry Login Bar ===
-    .agent-retry-bar {
-        flex-shrink: 0;
-        padding: var(--space-0-5) var(--space-1);
-        display: flex;
-        justify-content: center;
-        border-top: 1px solid var(--border-color, rgba(255,255,255,0.1));
-    }
-
-    .agent-retry-btn {
-        padding: 5px 18px;
-        font-size: 12px;
-        font-family: inherit;
-        background: var(--accent-color);
-        color: #fff; /* stylelint-disable-line color-no-hex */
-        border: none;
-        border-radius: 0;
-        cursor: default;
-        &:hover { opacity: 0.85; }
-        &:active { opacity: 0.7; }
-        &--cancel {
-            background: var(--secondary-text-color);
-        }
-    }
-
     // === Empty State ===
     .agent-empty {
         display: flex;

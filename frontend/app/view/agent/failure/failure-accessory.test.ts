@@ -181,3 +181,58 @@ describe("failureToRow", () => {
         expect(on._calls.retry).toBe(1);
     });
 });
+
+describe("auth row: pre-launch vs post-turn (PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02)", () => {
+    // The blue "Log in" bar and this row used to be two separate widgets for
+    // the identical action (relogin()), able to render simultaneously. The bar
+    // is gone; its case now arrives here as an auth failure with
+    // `turnAttempted: false`. These pin the two behaviours that distinction
+    // has to drive.
+    const authFailure = () =>
+        mkFailure({ code: "auth", title: "Not authenticated", detail: "401", retryable: true });
+
+    const authAction = (view: Partial<FailureViewState>) =>
+        failureToRow(authFailure(), mkView(view), mkActions()).actions.find((a) => a.glyph === "🔑");
+
+    it('labels the primary action "Login Again" when a turn was attempted', () => {
+        expect(authAction({ turnAttempted: true })?.label).toBe("Login Again");
+    });
+
+    it('labels it "Log in" when no turn was ever attempted (the old blue-bar case)', () => {
+        expect(authAction({ turnAttempted: false })?.label).toBe("Log in");
+    });
+
+    it("defaults to the turn-attempted wording when the flag is absent", () => {
+        // Backward compatibility: a failure persisted before `turnAttempted`
+        // existed must keep behaving exactly as it did.
+        expect(authAction({})?.label).toBe("Login Again");
+    });
+
+    it("keeps the same secondary recovery actions in both cases", () => {
+        // The consolidation must not cost the pre-launch case the terminal
+        // fallback / Armory link it never had as a bare blue button.
+        const labels = (turnAttempted: boolean) =>
+            failureToRow(authFailure(), mkView({ turnAttempted }), mkActions())
+                .actions.map((a) => a.label);
+        expect(labels(false)).toContain("Login via terminal");
+        expect(labels(false)).toContain("Armory → Accounts");
+        expect(labels(true)).toEqual(
+            labels(false).map((l) => (l === "Log in" ? "Login Again" : l)),
+        );
+    });
+
+    it("accents a real auth failure as an error, but the never-signed-in case as active", () => {
+        // An agent that simply hasn't been signed in yet hasn't failed at
+        // anything — painting it red overstates it. "active" is the same
+        // --accent-color the deleted bar used.
+        expect(failureToRow(authFailure(), mkView({ turnAttempted: true }), mkActions()).accent)
+            .toBe("error");
+        expect(failureToRow(authFailure(), mkView({ turnAttempted: false }), mkActions()).accent)
+            .toBe("active");
+    });
+
+    it("leaves NON-auth failures on the error accent regardless of turnAttempted", () => {
+        const ctx = mkFailure({ code: "context_exceeded", title: "Context full", detail: "" });
+        expect(failureToRow(ctx, mkView({ turnAttempted: false }), mkActions()).accent).toBe("error");
+    });
+});
