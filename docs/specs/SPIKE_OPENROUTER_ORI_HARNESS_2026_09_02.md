@@ -89,11 +89,23 @@ Commander.js error, from the real binary. Likewise `ori codex exec --json
 --zzz-probe` produced codex's clap-style `unexpected argument '--zzz-probe'
 found / Usage: codex exec`.
 
-**What Ori consumes before the agent sees it:**
+**What Ori's help DECLARES as its own flags** — note this is the declared list,
+not the consumed list; the two differ and each entry needs testing:
 
 - Global: `--help/-h`, `--version/-v`, `--wizard`, `--completions`,
   `--log-level`, `--json/--agent`, `--human/--tty`
 - Per-agent: `--model`, `--reasoning-effort`
+
+**What is actually verified, one flag at a time:**
+
+| Flag | Reaches the agent? | Evidence |
+|---|---|---|
+| `--version` | **no** — Ori consumes it | `ori claude --version` prints `ori v0.13.0`, not `2.1.112` |
+| `--json` | **yes** — passes through | `ori codex exec --json` emits codex's JSONL, not its human banner |
+| everything else | untested | — |
+
+Assuming the declared list is the consumed list is what made the codex risk look
+real. It was not.
 
 **Demonstrated collision:** `ori claude --version` prints
 `ori v0.13.0+c7b5cda`, **not** Claude Code's `2.1.112`. Any health or auth probe
@@ -114,6 +126,29 @@ Checked against our actual args in `catalog.ts`:
   So `--version` is consumed but `--json` is not — the collision surface is
   narrower than the global-flag list suggests, and wrapping codex is **not**
   gated on this.
+
+### 3.1 Persistent mode survives the wrap
+
+Our providers are not all the same shape, and the spike's early framing implied
+they were. `claude` is `ControllerType::Persistent` — a long-lived process
+speaking bidirectional `--input-format stream-json` plus the Agent SDK control
+protocol — while `codex`, `gemini`, `qwen`, `kimi`, `muxcode` and `antigravity`
+are `Subprocess`, and `openclaw`/`pi`/`copilot` are `Acp`.
+
+That made claude the **riskiest** wrap, not the cheapest as §6 originally said:
+a wrapper sitting between us and the CLI could buffer stdout or fail to forward
+stdin, and a bidirectional protocol would break where a one-shot would not.
+
+**Verified working.** Feeding a stream-json message on stdin through
+`ori claude --input-format stream-json --output-format stream-json ...`
+produced clean framing on stdout — `system/init` carrying `session_id`, then
+`system/status`, `assistant`, `result` — identical in shape to running claude
+directly. Ori's own notices went to **stderr** only. The turn ends in
+`Not logged in`, which is the dummy key's 401 surfacing through claude, not a
+transport failure.
+
+So stdin passthrough and stdout cleanliness both hold, and `Persistent` is not
+a blocker.
 
 ## 4. Auth: OAuth is not required
 
@@ -267,8 +302,16 @@ None of that is large, and none of it is the "drop in a ProviderConfig" the
 first draft of this table implied. Worth doing if OpenRouter-as-a-model-option
 is a goal in itself; not worth doing incidentally.
 
-**Suggested order:** (a) for claude and codex — both now verified safe for
-translation — then (b) if OpenRouter-as-a-model-option is a goal in itself.
+**Suggested order:** (a) for **codex first** — it is `Subprocess`, the simplest
+shape, and `ori codex exec --json` is demonstrated end to end — then claude,
+whose `Persistent` control-protocol path is also verified (§3.1) but has more
+moving parts. Then (b) if OpenRouter-as-a-model-option is a goal in itself.
+
+**Cost note for (a), measured rather than assumed:** 69 files reference a
+provider id like `"codex"` (seeds, bundle import/export/validate, argv
+handling, container spawn, failure classification, replay fixtures, generated
+types). Adding wrapped variants is not a two-line catalog edit, which is what
+an earlier draft of this section implied.
 
 ## 7. Operational notes
 
