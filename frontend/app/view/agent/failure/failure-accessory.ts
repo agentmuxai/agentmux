@@ -38,6 +38,18 @@ export interface FailureActions {
 
 /** Transient view state for the failure row (no backing store). */
 export interface FailureViewState {
+    /**
+     * Whether a turn was ever attempted before this failure — mirrors
+     * {@link PaneFailure.turnAttempted}. `false` only for the synthetic
+     * pre-launch auth failure raised when the mount-time launch flow bails
+     * with `auth_failed`, i.e. the case that used to render its own
+     * separate blue "Log in" bar. Drives the auth arm's label and accent
+     * below; the caller separately uses it to pick `relogin`'s
+     * `retryAfterLogin`. Defaults to `true` (a real, turn-following
+     * failure) when omitted.
+     * See docs/specs/PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md.
+     */
+    turnAttempted?: boolean;
     /** stderr tail revealed. */
     expanded: boolean;
     /** Seconds left on the auto-retry countdown, or null when not armed. */
@@ -71,7 +83,14 @@ export interface FailureRow {
     sigil: string;
     title: string;
     meta: string;
-    accent: "error";
+    /**
+     * "error" for every real failure. "active" (the accent-coloured left
+     * border — the same `--accent-color` blue the deleted "Log in" bar
+     * used) for the never-signed-in pre-launch case: an agent that has
+     * simply not been signed in yet has not failed at anything, and
+     * painting it red overstates it.
+     */
+    accent: "error" | "active";
     actions: PaneRowAction[];
     expanded: boolean;
     /** Human-readable explanation (rendered in the expanded body). */
@@ -82,6 +101,7 @@ export interface FailureRow {
 
 /** Project a failure + view state + handlers into a PaneRow descriptor. */
 export function failureToRow(f: AgentFailure, view: FailureViewState, on: FailureActions): FailureRow {
+    const turnAttempted = view.turnAttempted ?? true;
     const meta: string[] = [f.code];
     if (f.signal != null) meta.push(`signal ${f.signal}`);
     else if (f.exitCode != null) meta.push(`exit ${f.exitCode}`);
@@ -111,7 +131,20 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
             // only ever meant "provider is Claude"), so both arms collapse into
             // one.
             actions.push(
-                { glyph: "🔑", label: "Login Again", title: "Re-authenticate this agent", primary: true, onClick: on.loginAgain },
+                {
+                    glyph: "🔑",
+                    // "Log in" for a never-signed-in agent, "Login Again" once a
+                    // turn has actually run and been rejected. Before
+                    // PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02 these were
+                    // two separate widgets (a blue bar vs. this row) that could
+                    // both be on screen at once, wired to the same relogin().
+                    label: turnAttempted ? "Login Again" : "Log in",
+                    title: turnAttempted
+                        ? "Re-authenticate this agent"
+                        : "Sign in to this agent's provider",
+                    primary: true,
+                    onClick: on.loginAgain,
+                },
                 { glyph: "🖥", label: "Login via terminal", title: "Open a terminal window where the browser login can complete", onClick: on.loginViaTerminal },
                 openArmory,
             );
@@ -164,7 +197,8 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
         sigil: ICON[f.code] ?? "⚠",
         title: f.title || "Agent run failed",
         meta: meta.join(" · "),
-        accent: "error",
+        // Only the never-signed-in auth case is not an error — see FailureRow.accent.
+        accent: f.code === "auth" && !turnAttempted ? "active" : "error",
         actions,
         expanded: view.expanded,
         detail: f.detail,

@@ -303,7 +303,21 @@ function DocumentNodeBody(props: DocumentNodeBodyProps): JSX.Element {
                     {/* Auth errors (401 Unauthorized / 403 Forbidden) are recoverable
                         by re-running the provider login — surface an inline CTA that
                         drives the same flow as the failure banner. Other codes have no
-                        in-place fix, so no button. SPEC_REAUTH_FROM_AUTH_ERROR §7. */}
+                        in-place fix, so no button. SPEC_REAUTH_FROM_AUTH_ERROR §7.
+
+                        DELIBERATELY KEPT when the blue "Log in" bar was folded
+                        into the shared failure row
+                        (PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02 §4
+                        Phase 3). This is NOT a third redundant CTA: an
+                        `agent_error` node is a persistent DOCUMENT node that
+                        stays in the transcript forever, whereas the failure row
+                        is transient pane state cleared by the next TurnStart.
+                        Scrolling back to an old 401 long after its row is gone
+                        is exactly the case this serves, so it can't be replaced
+                        by a scroll-to. It always means a turn DID run and was
+                        rejected, so its handler correctly takes relogin()'s
+                        default `retryAfterLogin: true` — unlike the pre-launch
+                        case, which has no turn to retry. */}
                     <Show when={
                         props.onAgentErrorLogin
                         && [401, 403].includes((props.node() as Extract<DocumentNode, { type: "agent_error" }>).code)

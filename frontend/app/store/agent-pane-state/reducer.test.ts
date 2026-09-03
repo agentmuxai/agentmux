@@ -3168,7 +3168,9 @@ describe("agent-pane-state reducer", () => {
             const s0 = streaming(100);
             const r = update(s0, { type: "FailureObserved", failure: rateLimited, at: 200 });
             expect(r.state.turnPhase).toEqual({ kind: "Done", outcome: "errored", finishedAt: 200 });
-            expect(r.state.failure).toEqual({ data: rateLimited, at: 200 });
+            // turnAttempted defaults to true — a backend-classified failure always
+            // follows a turn that ran (PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02).
+            expect(r.state.failure).toEqual({ data: rateLimited, at: 200, turnAttempted: true });
             expect(r.events).toContainEqual({ type: "failure-observed", code: "rate_limited", turnWasEnded: true });
         });
 
@@ -3191,7 +3193,7 @@ describe("agent-pane-state reducer", () => {
             expect(s0.turnPhase.kind).toBe("Idle");
             const r = update(s0, { type: "FailureObserved", failure: rateLimited, at: 150 });
             expect(r.state.turnPhase.kind).toBe("Idle");
-            expect(r.state.failure).toEqual({ data: rateLimited, at: 150 });
+            expect(r.state.failure).toEqual({ data: rateLimited, at: 150, turnAttempted: true });
             expect(r.events).toContainEqual({ type: "failure-observed", code: "rate_limited", turnWasEnded: false });
         });
 
@@ -3204,6 +3206,40 @@ describe("agent-pane-state reducer", () => {
             expect(r.state.currentTool).toBeNull();
             expect(r.state.currentToolArg).toBeNull();
             expect(r.state.turnTokens).toBeNull();
+        });
+
+        // PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02: the pre-launch
+        // "never signed in" case (which used to render its own separate blue
+        // "Log in" bar) is raised as a synthetic auth failure carrying
+        // turnAttempted:false. That flag selects relogin()'s retryAfterLogin,
+        // so getting it wrong re-sends the agent's last OLD message.
+        it("FailureObserved records turnAttempted:false when the command sets it", () => {
+            const s0 = ready(100);
+            const r = update(s0, {
+                type: "FailureObserved",
+                failure: { code: "auth", title: "Not signed in", detail: "", retryable: true },
+                at: 200,
+                turnAttempted: false,
+            });
+            expect(r.state.failure?.turnAttempted).toBe(false);
+        });
+
+        it("FailureObserved defaults turnAttempted to true when the command omits it", () => {
+            const s0 = streaming(100);
+            const r = update(s0, { type: "FailureObserved", failure: rateLimited, at: 200 });
+            expect(r.state.failure?.turnAttempted).toBe(true);
+        });
+
+        it("FailureCleared clears a synthetic pre-launch failure the same as any other", () => {
+            const s0 = ready(100);
+            const s1 = update(s0, {
+                type: "FailureObserved",
+                failure: { code: "auth", title: "Not signed in", detail: "", retryable: true },
+                at: 200,
+                turnAttempted: false,
+            }).state;
+            expect(s1.failure).not.toBeNull();
+            expect(update(s1, { type: "FailureCleared" }).state.failure).toBeNull();
         });
 
         it("FailureCleared clears state.failure", () => {

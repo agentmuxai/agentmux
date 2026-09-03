@@ -1167,7 +1167,16 @@ export function update(
                     currentTool: turnWasEnded ? null : state.currentTool,
                     currentToolArg: turnWasEnded ? null : state.currentToolArg,
                     turnTokens: turnWasEnded ? null : state.turnTokens,
-                    failure: { data: command.failure, at: command.at },
+                    failure: {
+                        data: command.failure,
+                        at: command.at,
+                        // Defaults to true when the command omits it — every
+                        // backend-classified failure is by construction the
+                        // outcome of a turn that ran. Only the pane's own
+                        // synthetic pre-launch auth failure passes false.
+                        // See PaneFailure.turnAttempted (types.ts).
+                        turnAttempted: command.turnAttempted ?? true,
+                    },
                     // reagent P1 on PR #2378 (round 3): a failure classification
                     // ends the turn the same way TurnEnd/TurnReset/RequestStop/
                     // StreamUnsubscribe do — same "whatever compaction was in

@@ -214,7 +214,7 @@ export interface SlashCommandContext {
      * controller. Codex P1 on PR #2338 (ninth re-review). Must be paired
      * with exactly one `endRecoveryFlow()` call (a `finally` block).
      */
-    beginRecoveryFlow: () => void;
+    beginRecoveryFlow: (retryAfterLogin?: boolean) => void;
     /** Pairs with `beginRecoveryFlow` — see its doc comment. */
     endRecoveryFlow: () => void;
     /**

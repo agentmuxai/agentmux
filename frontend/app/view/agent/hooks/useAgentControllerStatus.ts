@@ -135,7 +135,22 @@ export interface UseAgentControllerStatus {
      * seeds a real per-account isolated dir and registers/links the account
      * (not just a file — PLAN_LOGIN_SINGLE_PATH_CONSOLIDATION_2026_07_20.md §7).
      */
-    loginViaTerminal: () => Promise<void>;
+    /**
+     * Open a real terminal for the browser OAuth.
+     *
+     * `retryAfterLogin` mirrors {@link relogin}'s identical argument and must
+     * be decided by the CALLER, at click time, from the failure the button
+     * belongs to — NOT re-derived after the fact. Defaults to `true` (a turn
+     * ran and failed on auth; re-run it). Pass `false` for the pre-launch
+     * case: no turn ever ran, so there is nothing to retry and the agent needs
+     * its startup sequence instead.
+     *
+     * Deriving this after login succeeded is what produced the cross-hook race
+     * reagent and manoz both caught on PR #2951 — the success path's own
+     * `setCanRetry(false)` synchronously flushes an effect that clears the
+     * failure this decision was being read from.
+     */
+    loginViaTerminal: (opts?: { retryAfterLogin?: boolean }) => Promise<void>;
     /**
      * AuthUrlBox's "Use terminal instead" secondary action
      * (SPEC_INAPP_CLAUDE_OAUTH_LOGIN_2026_08_03.md §3.3 surface 2): cancels
@@ -224,7 +239,11 @@ export interface UseAgentControllerStatus {
      * exactly once per `beginRecoveryFlow` call (a `finally` block), same
      * contract as the counter's other three callers.
      */
-    beginRecoveryFlow: () => void;
+    /**
+     * Register a recovery flow. Pass `retryAfterLogin` when the caller drives
+     * its own login (i.e. `/login`) — see the implementation's comment.
+     */
+    beginRecoveryFlow: (retryAfterLogin?: boolean) => void;
     /** Pairs with `beginRecoveryFlow` — see its doc comment. */
     endRecoveryFlow: () => void;
 }
@@ -255,6 +274,42 @@ export function useAgentControllerStatus(
     const [authUrl, setAuthUrl] = createSignal<string | null>(null);
     const [authNotice, setAuthNotice] = createSignal<string | null>(null);
     const [canRetry, setCanRetry] = createSignal(false);
+    /**
+     * `retryAfterLogin` of the recovery currently in flight — the caller's
+     * "was a turn ever attempted?" intent, which outlives the individual call
+     * that started the flow.
+     *
+     * Exists because "Use terminal instead" (`useTerminalInstead`) CANCELS the
+     * in-flight relogin and starts a terminal login as a continuation of the
+     * SAME user intent. Without remembering it, that hand-off silently
+     * defaulted to `true`, so a pre-launch "Log in" that escaped to the
+     * terminal came back through onRecovered -> retryLastTurn and resent the
+     * agent's last old message — the exact never-started-agent stale-resend
+     * this PR removes from the row's own buttons, reintroduced on the escape
+     * path. reagent P1 on PR #2951.
+     *
+     * SCOPED TO ONE FLOW: cleared by `endRecoveryFlow` once nothing is in
+     * flight, and `false` at rest.
+     *
+     * An earlier revision left it unreset, on the reasoning that the only
+     * reader (`useTerminalInstead`) is reachable only from the in-flight OAuth
+     * panel and so could only ever read a live flow's value. That reasoning
+     * was wrong, and the counterexample is `/login`: it drives its own OAuth
+     * directly, shares only the `activeRecoveryFlows` counter, and NEVER
+     * writes this — yet its session shows the same AuthUrlBox and therefore
+     * the same "Use terminal instead" handler. So a `/login` session read
+     * whatever an unrelated earlier relogin had left behind, and branched on
+     * it. reagent P1 on PR #2951, correcting a rationale manoz and I had both
+     * signed off on.
+     *
+     * `false` at rest is deliberate rather than incidental: it is the right
+     * answer for a flow that never declared intent. `/login` is a command the
+     * user ran explicitly — there is no failed turn to re-run — so the
+     * no-retry branch (`onReady`, which self-guards on `agent:sessionid`) is
+     * a no-op rather than a surprise resend of their last message. Callers
+     * that DO have an intent set it explicitly at entry and are unaffected.
+     */
+    let inFlightRetryAfterLogin = false;
     const [flowRunning, setFlowRunning] = createSignal(false);
     const [agentReady, setAgentReady] = createSignal(false);
     const [loginWaiting, setLoginWaiting] = createSignal(false);
@@ -281,13 +336,53 @@ export function useAgentControllerStatus(
     // clears early (before onRecovered, per the reagent P0 fix) avoids a
     // double-decrement from its own trailing finally.
     let activeRecoveryFlows = 0;
-    const beginRecoveryFlow = () => {
+    /**
+     * THE only writer of `inFlightRetryAfterLogin`. First flow wins: an intent
+     * is recorded only when nothing is already in flight, so a flow that joins
+     * cannot redefine what the running one is recovering — and it is the
+     * running one whose AuthUrlBox (and "Use terminal instead") the user is
+     * looking at.
+     *
+     * A chokepoint rather than the same condition repeated at each writer,
+     * because the previous revision put the guard inside `beginRecoveryFlow`
+     * only. That closed `/login`-joins-relogin but NOT the mirror case:
+     * `relogin`/`loginViaTerminal` wrote directly, bypassing it, so `/login`
+     * first and a row button second still clobbered. `/login` is never gated by
+     * `reloginInFlight` and the row's buttons are never disabled while
+     * `loginWaiting()` is true, so both orderings are reachable. reagent P1 on
+     * PR #2951 — including that the previous commit's "closes it for every
+     * caller" was wrong: it closed it for callers routed through this
+     * function's parameter.
+     */
+    const recordRecoveryIntent = (retryAfterLogin: boolean) => {
+        if (activeRecoveryFlows === 0) inFlightRetryAfterLogin = retryAfterLogin;
+    };
+
+    const beginRecoveryFlow = (retryAfterLogin?: boolean) => {
+        // `/login` drives its own OAuth and never writes the intent directly,
+        // but its session shows the same AuthUrlBox — and therefore the same
+        // "Use terminal instead" handler — as relogin's. Letting it declare
+        // the intent here is what stops the two entry points disagreeing about
+        // the same pending failure. relogin/loginViaTerminal set the value
+        // themselves before calling this and pass nothing, so they are
+        // unaffected. reagent P1 + manoz on PR #2951.
+        if (retryAfterLogin !== undefined) recordRecoveryIntent(retryAfterLogin);
         activeRecoveryFlows += 1;
         setLoginWaiting(true);
     };
     const endRecoveryFlow = () => {
         activeRecoveryFlows = Math.max(0, activeRecoveryFlows - 1);
-        if (activeRecoveryFlows === 0) setLoginWaiting(false);
+        if (activeRecoveryFlows === 0) {
+            setLoginWaiting(false);
+            // Drop the recorded intent once nothing is in flight, so it cannot
+            // leak into a LATER flow that never declares one. `/login` is
+            // exactly that flow: it drives its own OAuth directly and shares
+            // only this counter, yet its session shows the same AuthUrlBox and
+            // therefore the same "Use terminal instead" handler. Without this
+            // it read whatever a previous relogin left behind. reagent P1 on
+            // PR #2951.
+            inFlightRetryAfterLogin = false;
+        }
     };
 
     // Mutable cancellation flag. Flipped by cancelLogin() and by onCleanup.
@@ -504,6 +599,13 @@ export function useAgentControllerStatus(
             opts.log("auth", "re-login: no active provider", "warn");
             return;
         }
+        // Past every bail-out: same rule as the in-flight guard above — a call
+        // that returns without starting a flow must not leave its intent
+        // behind. Nothing would reset it (no beginRecoveryFlow, so no paired
+        // endRecoveryFlow), and a later `/login` session — which declares its
+        // own intent only when a failure is pending — could read the stale
+        // value from its "Use terminal instead". reagent P2 on PR #2951.
+        recordRecoveryIntent(retryAfterLogin);
         // Clears the "Log in" button immediately on click — this is also the
         // action the mount-time launch flow's first-login/auth-expired
         // states hand off to (they never trigger a login themselves; see
@@ -870,16 +972,26 @@ export function useAgentControllerStatus(
             reloginInFlight = false;
             endThisRecoveryFlow();
             setLaunchPhase(null);
-            // Restore the mount-time "Log in" button on any unsuccessful
+            // Restore the mount-time not-signed-in state on any unsuccessful
             // outcome — timeout, terminal-unavailable, persistence failure,
             // cancellation, or a thrown exception all fall through to here
             // via `return`/`break`/the catch above. Scoped to
             // `!retryAfterLogin`: that's the only case where THIS call set
-            // `canRetry` false in the first place (the "Log in" bar's own
-            // click handler); the `retryAfterLogin: true` ("Login Again")
-            // call site guards against a stale true from a *different*
-            // origin and was never showing that bar to begin with, so it
-            // must not start showing it now (reagent/codex on PR #2318).
+            // `canRetry` false in the first place (the pre-launch "Log in"
+            // action); the `retryAfterLogin: true` ("Login Again") call site
+            // guards against a stale true from a *different* origin and was
+            // never in the pre-launch state to begin with, so it must not
+            // enter it now (reagent/codex on PR #2318).
+            //
+            // `canRetry` no longer renders a bar of its own — the blue "Log
+            // in" bar it used to gate was removed in
+            // PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02 and that case now
+            // goes through the shared failure row. The signal is still
+            // load-bearing for two NON-display consumers: useAgentCommands
+            // fast-fails sends into an unauthenticated agent on it, and
+            // /login reads it. It also re-raises the row indirectly, via
+            // agent-view's synthetic pre-launch FailureObserved effect. Do not
+            // delete it as dead display state.
             if (!succeeded && !retryAfterLogin) {
                 setCanRetry(true);
             }
@@ -905,7 +1017,20 @@ export function useAgentControllerStatus(
     // fixed once in runProviderLogin itself. A second hand-rolled copy would
     // only let that exact class of bug reappear the next time one of the two
     // was fixed and the other wasn't.
-    const loginViaTerminal = async () => {
+    const loginViaTerminal = async (terminalOpts: { retryAfterLogin?: boolean } = {}) => {
+        const retryAfterLogin = terminalOpts.retryAfterLogin ?? true;
+        // Guard BEFORE the write, matching relogin (:530-532). A call the guard
+        // rejects must not leave its intent behind: it no-ops, so recording its
+        // value would corrupt the flag for the flow that IS running.
+        //
+        // Reachable via the inline transcript CTA this PR deliberately keeps
+        // (DocumentRow.tsx, surface C), which can coexist with a
+        // different-valued failure row: start a relogin from the old inline
+        // "Login Again" (retryAfterLogin true, reloginInFlight true), then
+        // click the current row's "Login via terminal" (false) — that call
+        // no-ops but used to write false, so the original flow's later
+        // "Use terminal instead" read false and silently dropped the retry of
+        // a turn that genuinely ran. reagent P1 + manoz, on PR #2951.
         if (reloginInFlight) return;
         loginCancelled = false;
         const prov = opts.provider();
@@ -913,6 +1038,13 @@ export function useAgentControllerStatus(
             opts.log("auth", "login via terminal: no active provider", "warn");
             return;
         }
+        // Past every bail-out: same rule as the in-flight guard above — a call
+        // that returns without starting a flow must not leave its intent
+        // behind. Nothing would reset it (no beginRecoveryFlow, so no paired
+        // endRecoveryFlow), and a later `/login` session — which declares its
+        // own intent only when a failure is pending — could read the stale
+        // value from its "Use terminal instead". reagent P2 on PR #2951.
+        recordRecoveryIntent(retryAfterLogin);
         setAuthNotice(null);
         // Claim the in-flight guard BEFORE any await. The CLI resolve below
         // can take up to 300 s, and the recovery buttons have no disabled
@@ -993,12 +1125,49 @@ export function useAgentControllerStatus(
                         opts.log("auth", "Login successful — retrying…");
                         setAuthNotice(null);
                         setAuthStatus("authenticated");
+                        // reagent P1 on PR #2951. relogin() clears this
+                        // synchronously on click (see its own setCanRetry(false)
+                        // above); loginViaTerminal never did, and the only other
+                        // clear — notifyControllerHealthy — needs an ACTIVE TURN,
+                        // which checkAuthGuard will not let start while canRetry
+                        // is true. That is a deadlock: canRetry stays true
+                        // forever and every subsequent send is fast-failed as
+                        // "not logged in" on an agent that just logged in
+                        // successfully.
+                        //
+                        // Cleared on SUCCESS only, deliberately not at the start
+                        // like relogin: relogin pairs its early clear with a
+                        // restore-on-failure in its finally, and clearing here
+                        // without that pairing would drop both the send guard
+                        // and the failure row after a FAILED terminal login.
+                        // Success is precisely when "this agent is
+                        // unauthenticated" stops being true.
+                        //
+                        // Must precede onRecovered() below: that callback's
+                        // send-startup path issues a real send, which reads
+                        // canRetry through checkAuthGuard.
+                        setCanRetry(false);
                         await forceControllerRefresh();
                         opts.onLoginSuccess?.(null);
                         // See relogin()'s identical comment — reagent P0 on
                         // PR #2338.
                         endThisRecoveryFlow();
-                        opts.onRecovered?.();
+                        // Branch exactly as relogin does (:732/745, :800/805).
+                        // This asymmetry — relogin deciding from an explicit
+                        // argument while this path inferred it from pane state
+                        // afterwards — was the root of BOTH the dropped-startup
+                        // bug and the cross-hook race on PR #2951. The caller
+                        // now decides at click time, so nothing here depends on
+                        // what `setCanRetry(false)` above may have triggered.
+                        if (retryAfterLogin) {
+                            opts.onRecovered?.();
+                        } else {
+                            // No turn was ever attempted — send the startup
+                            // sequence instead of retrying. onReadyFn
+                            // self-guards on `agent:sessionid`, so this is a
+                            // no-op for anything but a genuine first login.
+                            opts.onReady?.();
+                        }
                     } else {
                         setAuthStatus("unauthenticated");
                         setAuthNotice(
@@ -1055,6 +1224,18 @@ export function useAgentControllerStatus(
     // CheckCliAuthCommand RPC (its own ~10s timeout, which doesn't itself
     // recheck isCancelled).
     const useTerminalInstead = async () => {
+        // Capture BEFORE cancelling: the wait below is a wait for THIS flow to
+        // tear down, and teardown clears the intent (endRecoveryFlow). Reading
+        // it after would always see the cleared value — the same
+        // read-after-the-thing-that-clears-it mistake as the cross-hook race
+        // earlier on this PR, one layer out.
+        //
+        // For a `/login`-driven session nothing ever wrote it, so this is
+        // `false`: onReady rather than a retry. That is correct — the user
+        // ran a command explicitly, there is no failed turn to re-run, and
+        // onReadyFn self-guards on `agent:sessionid` so an existing session
+        // is a no-op rather than a surprise resend.
+        const intent = inFlightRetryAfterLogin;
         cancelLogin();
         // reagent P1 on PR #2413 (round 3): AuthUrlBox's "Use terminal
         // instead" is also shown while a `/login`-driven session is in
@@ -1089,7 +1270,10 @@ export function useAgentControllerStatus(
         // just set (e.g. "inapp-timeout"'s message) — the user asked to
         // switch flows, not to be told their login attempt failed.
         setAuthNotice(null);
-        await loginViaTerminal();
+        // Continue the SAME intent the cancelled flow was started with — this
+        // is a switch of mechanism, not a new decision by the user. Defaulting
+        // to `true` here is what reintroduced the stale-resend on this path.
+        await loginViaTerminal({ retryAfterLogin: intent });
     };
 
     const notifyControllerHealthy = () => {
