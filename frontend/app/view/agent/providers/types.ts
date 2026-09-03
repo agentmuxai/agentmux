@@ -2,10 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A system tool the provider's CLI needs at runtime — beyond Node
- * itself, which is checked separately by `check_nodejs_available`.
- * Examples: Claude Code calls `git` from inside session-start; the
- * GitHub Copilot CLI wraps `gh`.
+ * A system tool the provider's CLI needs at runtime. Examples: Claude
+ * Code calls `git` from inside session-start; the GitHub Copilot CLI
+ * wraps `gh`; every npm-installed provider needs Node.js/npm to reach
+ * `npm install -g <npmPackage>` before it exists at all (`NODE_PREREQ`/
+ * `NPM_PREREQ`, catalog.ts).
+ *
+ * Node/npm are ALSO checked separately at launch time by
+ * `check_nodejs_available` (`checkNodejsForProvider`, agent-launch-env.ts)
+ * — that's a narrower, PATH-mismatch-prone secondary check (it probes the
+ * CEF host's own PATH, not the enriched PATH the actual npm spawn runs
+ * with in the srv sidecar), not the primary gate. Declaring Node/npm here
+ * routes providers through the correctly-PATH-sourced backend check
+ * instead (tracking issue #2940).
  *
  * Probed pre-launch via the `resolve_prereqs` RPC. Missing prereqs
  * open the `AgentPrereqModal` with platform-aware install links.

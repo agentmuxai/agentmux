@@ -13,15 +13,50 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Logger } from "@/util/logger";
 import { DEFAULT_RUNTIME_CONFIG, type AgentRuntimeConfig } from "./types";
-import type { ProviderModel } from "./providers/types";
+import type { ProviderDefinition, ProviderModel } from "./providers/types";
 
 /**
- * Check if Node.js is available. Required for npm-based providers (Codex, Gemini).
- * Claude has its own standalone installer and doesn't need Node.js.
- * Returns null if Node.js is available or not needed, or an error message string.
+ * Check if Node.js is available for a provider actually installed via
+ * `npm install -g <npmPackage>` (AgentInstallModal -> install.start ->
+ * agentmux-srv's install_handlers.rs) — which today is every provider
+ * except kimi (pip-based, `npmPackage: ""`).
+ *
+ * **The `claude` exemption below is a workaround for a real PATH mismatch,
+ * not a claim Claude doesn't need Node.** This check's probe
+ * (`getApi().checkNodejsAvailable()`) runs in the CEF host process's own
+ * PATH. The actual npm install/spawn runs in the agentmux-srv sidecar,
+ * whose PATH is separately reconstructed from the user's login shell
+ * (`agentmux-cef/src/sidecar.rs`, `resolve_login_path`) specifically so it
+ * can find Homebrew/nvm-installed Node on macOS — the host process does
+ * NOT get that same enrichment. So this check can genuinely disagree with
+ * reality on those setups: report "Node.js is not installed" when the
+ * process that actually spawns npm can find it fine.
+ *
+ * This function used to hardcode `providerId === "claude"` as a skip for a
+ * DIFFERENT, wrong reason (the stale belief that Claude installs via its
+ * own standalone script rather than npm — it doesn't; AgentInstallModal
+ * always uses `npmPackage`). An earlier revision of this fix removed the
+ * skip on that basis, which fixed the wrong reasoning but reintroduced
+ * this PATH-mismatch bug for Claude specifically: a previously-exempt
+ * provider could now hit a false-negative launch block on affected macOS
+ * setups (Codex review finding, PR #2947). Every OTHER npm-based provider
+ * was already exposed to this same pre-existing PATH-mismatch bug before
+ * this change (never exempted) — extending the derivation to them isn't
+ * new risk, just not-yet-fixed. Claude is kept exempt here, with an
+ * accurate reason this time, until `checkNodejsAvailable()` itself is
+ * fixed to probe the same enriched PATH the sidecar spawns with.
+ *
+ * The actual reported bug this whole change addresses — a fresh machine
+ * with no Node.js at all crashing on first launch — is fixed independently
+ * by `catalog.ts`'s `NODE_PREREQ`/`NPM_PREREQ`, which route through
+ * `resolve.prereqs`, a backend (srv) check that already uses the correct,
+ * enriched PATH. This function is a secondary, launch-time check (covers
+ * e.g. Node being removed between install and launch); it was never the
+ * primary fix.
  */
-export async function checkNodejsForProvider(providerId: string): Promise<string | null> {
-    if (providerId === "claude") return null; // Claude has standalone installer
+export async function checkNodejsForProvider(provider: Pick<ProviderDefinition, "id" | "npmPackage">): Promise<string | null> {
+    if (provider.id === "claude") return null; // see note above — PATH-mismatch workaround, not "doesn't need Node"
+    if (!provider.npmPackage) return null; // not npm-installed (e.g. kimi, via pip)
     try {
         const status = await getApi().checkNodejsAvailable();
         if (!status.available || !status.npm_available) {
