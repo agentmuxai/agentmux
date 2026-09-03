@@ -873,8 +873,7 @@ fn register_handlers(engine: &Arc<WshRpcEngine>, state: AppState, conn_id: Strin
 
     // createsubblock → create a headless sub-block (no tab/layout entry)
     // parented to an existing block, e.g. a `term`-view PTY embedded in an
-    // agent pane's details drawer. Spec:
-    // docs/specs/SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md §4.
+    // agent pane's details drawer.
     let wstore_csb = state.wstore.clone();
     engine.register_handler(
         COMMAND_CREATE_SUB_BLOCK,

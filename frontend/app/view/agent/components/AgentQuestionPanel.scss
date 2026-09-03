@@ -241,6 +241,14 @@
 .agent-question-panel-actions {
     display: flex;
     justify-content: flex-end;
+    // Wraps to a second row rather than clipping — three buttons (Cancel /
+    // Accept Recommended / Submit answer, added by codex P2 on #2950) can
+    // exceed a narrow split pane's width (layoutResize.ts permits panes down
+    // to 128px), and .agent-view's overflow: hidden would otherwise silently
+    // cut off Cancel or Accept Recommended rather than showing an obviously
+    // broken layout. `gap` (not row-gap/column-gap separately) already
+    // covers both axes once wrapped.
+    flex-wrap: wrap;
     gap: var(--space-2);
     // Cancel / Accept Recommended / Submit answer stay reachable even when
     // the question content above is scrolled — see spec §2 for why this

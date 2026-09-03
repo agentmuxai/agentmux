@@ -371,6 +371,12 @@ describe("useAgentQuestions — handleCancel fallback", () => {
         await Promise.resolve();
         await Promise.resolve();
 
+        // Exact literal, not a substring match — this is the frontend half of
+        // the cross-file sync pinned by persistent.rs's
+        // ask_user_question_deny_message_matches_frontend_cancel_fallback_text.
+        // See CANCEL_FALLBACK_MESSAGE's own comment: no shared constant
+        // crosses the Rust/TypeScript boundary, so both literals are
+        // hand-copied and must be updated together.
         expect(sendMessage).toHaveBeenCalledWith("The user declined to answer this question.");
         // Optimistic "denied" state is kept, same reasoning as handleAnswer's
         // equivalent case: the panel must not flicker back to

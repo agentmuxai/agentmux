@@ -44,7 +44,7 @@ pub const COMMAND_CONTROLLER_RESYNC: &str = "controllerresync";
 
 /// Create a headless sub-block (no tab/layout entry) parented to an
 /// existing block — e.g. a `term`-view PTY embedded in an agent pane's
-/// details drawer. Spec: docs/specs/SPEC_AGENT_SHELL_XTERM_TERMINAL_2026_07_03.md §4.
+/// details drawer.
 pub const COMMAND_CREATE_SUB_BLOCK: &str = "createsubblock";
 /// Tear down a sub-block created via `createsubblock`: kills its
 /// controller first, then deletes the block row and unlinks it from
@@ -550,8 +550,7 @@ pub const COMMAND_SESSION_NEXT_PROMPT_SUGGESTION: &str = "session:next_prompt_su
 // A session zone is bound to the *agent definition* (`definition_id`),
 // not the identity bundle. Every block of the same agent reads/writes
 // through `agent:<defId>:current`; archiving snapshots to
-// `agent:<defId>:archive:<ts_ms>`. See
-// docs/specs/SPEC_CONTINUATION_SESSION_PERSISTENCE_2026_05_23.md.
+// `agent:<defId>:archive:<ts_ms>`.
 pub const COMMAND_AGENT_SESSION_READ: &str = "agent:session:read";
 pub const COMMAND_AGENT_SESSION_WRITE_STATE: &str = "agent:session:write_state";
 pub const COMMAND_AGENT_SESSION_APPEND_OUTPUT: &str = "agent:session:append_output";

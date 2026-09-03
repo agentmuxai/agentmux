@@ -160,6 +160,29 @@ describe("AgentQuestionPanel keyboard handling", () => {
         expect(onAnswer).not.toHaveBeenCalled();
     });
 
+    // reagent P1, PR #2950: Escape used to call defer() — a reversible,
+    // purely-local minimize, so misfiring from anywhere in the pane was
+    // harmless. It now calls cancel(), a real, irreversible protocol-level
+    // decline delivered to the agent. Without the same editable-target guard
+    // Enter already has, pressing Escape to clear the composer or dismiss an
+    // unrelated search input anywhere in the pane would silently and
+    // permanently decline the pending question.
+    it("does NOT cancel on Escape pressed in an editable input outside the panel (e.g. the composer)", () => {
+        const onAnswer = vi.fn();
+        const onCancel = vi.fn();
+        const [pending] = createSignal<ToolNode[]>([singleSelectQuestion()]);
+        render(() => (
+            <div class="agent-view">
+                <textarea data-testid="composer" />
+                <AgentQuestionPanel pending={pending} onAnswer={onAnswer} onCancel={onCancel} />
+            </div>
+        ));
+
+        escapeOn(screen.getByTestId("composer"));
+        expect(onCancel).not.toHaveBeenCalled();
+        expect(onAnswer).not.toHaveBeenCalled();
+    });
+
     it("Escape cancels (a real decline) instead of submitting", async () => {
         const onAnswer = vi.fn();
         const onCancel = vi.fn();

@@ -506,6 +506,17 @@ export const AgentQuestionPanel = (props: AgentQuestionPanelProps): JSX.Element 
             e.preventDefault();
             submit();
         } else if (e.key === "Escape") {
+            // Same editable-target guard as Enter above, and it matters more
+            // here now than it used to: Escape used to call defer(), a
+            // reversible, purely-local minimize, so misfiring from a stray
+            // Escape elsewhere in the pane was harmless. It now calls
+            // cancel() — a real, irreversible protocol-level decline
+            // delivered to the agent (agent.cancel -> behavior: "deny").
+            // Without this guard, pressing Escape to clear the composer
+            // textarea or dismiss an unrelated search/autocomplete input
+            // anywhere in the pane would silently and permanently decline
+            // the pending question. reagent P1, PR #2950.
+            if (!inPanel && isEditableTarget(target)) return;
             e.preventDefault();
             cancel();
         }

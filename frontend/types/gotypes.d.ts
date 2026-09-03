@@ -764,10 +764,9 @@ declare global {
     };
 
     // ────────────────────────────────────────────────────────────────
-    // Unified agent types (Drone Phase 1.5, see
-    // docs/specs/SPEC_UNIFIED_AGENT_TYPES_2026_05_13.md). Shared
-    // between the agent pane and the drone Agent block. Mirror
-    // of agentmux-srv/src/agents/types.rs — camelCase via serde
+    // Unified agent types (Drone Phase 1.5). Shared between the agent
+    // pane and the drone Agent block. Mirror of
+    // agentmux-srv/src/agents/types.rs — camelCase via serde
     // rename_all so the field shapes match without translation.
     // ────────────────────────────────────────────────────────────────
 

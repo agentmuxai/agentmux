@@ -79,8 +79,17 @@ export interface UseAgentQuestionsResult {
  *  the SAFE_TO_RETRY_VIA_FOLLOWUP fallback text (a plain follow-up turn when
  *  the control protocol itself is unavailable). The actual protocol-level
  *  decline text is server-owned (ASK_USER_QUESTION_DENY_MESSAGE in
- *  agentmux-srv's persistent.rs) — this is not read from there, just worded
- *  identically so the model sees the same explanation either way. */
+ *  agentmux-srv/src/backend/blockcontroller/persistent.rs) — this is not read
+ *  from there, just worded identically so the model sees the same
+ *  explanation either way.
+ *
+ *  KEEP IN SYNC: no shared constant crosses the Rust/TypeScript boundary for
+ *  a plain string literal, so this has to be hand-copied. If you change this
+ *  string, update ASK_USER_QUESTION_DENY_MESSAGE too — persistent.rs's
+ *  `ask_user_question_deny_message_matches_frontend_cancel_fallback_text`
+ *  pins the literal on that side; the "handleCancel fallback" describe block
+ *  below (asserting `sendMessage` was called with this exact text) pins it
+ *  here. Neither test can see the other language's constant. */
 const CANCEL_FALLBACK_MESSAGE = "The user declined to answer this question.";
 
 export function useAgentQuestions(opts: UseAgentQuestionsOptions): UseAgentQuestionsResult {

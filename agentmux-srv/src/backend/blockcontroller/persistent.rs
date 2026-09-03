@@ -781,6 +781,18 @@ fn build_answer_resume_message(answers: &serde_json::Value) -> String {
 /// since Cancel and Escape both mean exactly one thing and there is no user-
 /// authored content to carry. See `deny_question` and
 /// docs/specs/SPEC_AGENT_CONTROL_PROTOCOL_2026_06_15.md.
+///
+/// KEEP IN SYNC (no shared constant crosses the Rust/TypeScript boundary for
+/// a plain string literal): `CANCEL_FALLBACK_MESSAGE` in
+/// `frontend/app/view/agent/hooks/useAgentQuestions.ts` is a hand-copied
+/// mirror of this exact text, used only for its SAFE_TO_RETRY_VIA_FOLLOWUP
+/// fallback path. If you change this string, update that one too — the test
+/// `ask_user_question_deny_message_matches_frontend_cancel_fallback_text`
+/// below pins the literal on this side; the frontend test asserting
+/// `sendMessage` was called with this exact text (in
+/// `useAgentQuestions.test.ts`, "handleCancel fallback" describe block)
+/// pins it on that side. Neither test can see the other language's
+/// constant, so both must be updated by hand together.
 pub(crate) const ASK_USER_QUESTION_DENY_MESSAGE: &str = "The user declined to answer this question.";
 
 /// Compose the directive follow-up message used by the AskUserQuestion dead-air
@@ -4683,6 +4695,23 @@ mod send_input_tests {
     // (not wait for further input it will never get) while making clear the
     // outcome was a DECLINE, not a real answer — otherwise the model could
     // hallucinate a value the user never provided.
+    // Pins the exact literal (not just a substring) so an edit to this
+    // constant is impossible to make silently — see the KEEP IN SYNC comment
+    // on ASK_USER_QUESTION_DENY_MESSAGE's own definition. There is no way for
+    // this test to reach across the Rust/TypeScript boundary and check
+    // useAgentQuestions.ts's CANCEL_FALLBACK_MESSAGE directly; failing loudly
+    // here is what prompts a human/reviewer to go update that copy too.
+    #[test]
+    fn ask_user_question_deny_message_matches_frontend_cancel_fallback_text() {
+        assert_eq!(
+            ASK_USER_QUESTION_DENY_MESSAGE,
+            "The user declined to answer this question.",
+            "this literal is hand-mirrored as CANCEL_FALLBACK_MESSAGE in \
+             frontend/app/view/agent/hooks/useAgentQuestions.ts — update both \
+             together"
+        );
+    }
+
     #[test]
     fn deny_resume_message_is_directive_and_includes_the_reason() {
         let msg = build_deny_resume_message(ASK_USER_QUESTION_DENY_MESSAGE);
