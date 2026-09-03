@@ -13,7 +13,7 @@ vars:
     APP_NAME: "AgentMux"
     BIN_DIR: "bin"
     VERSION:
-        sh: 'PATH="$HOME/.cargo/bin:/opt/homebrew/opt/node@20/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" node version.cjs'
+        sh: 'PATH="$HOME/.cargo/bin:/opt/homebrew/opt/node/bin:/opt/homebrew/bin:/usr/local/bin:$PATH" node version.cjs'
     RM: '{{if eq OS "windows"}}pwsh -Command Remove-Item -Force -ErrorAction SilentlyContinue{{else}}rm -f{{end}}'
     RMRF: '{{if eq OS "windows"}}pwsh -Command Remove-Item -Force -Recurse -ErrorAction SilentlyContinue{{else}}rm -rf{{end}}'
     DATE: '{{if eq OS "windows"}}pwsh -Command Get-Date -UFormat{{else}}date{{end}}'
@@ -369,8 +369,9 @@ tasks:
             - task: dev:cleardata:macos
 
     init:
-        desc: Initialize the project for development.
+        desc: 'Initialize the project for development: verify the required toolchain is present (Rust/Node/CMake/Ninja/git), then npm install. See scripts/bootstrap.sh / scripts/bootstrap.ps1 first if Task itself was just installed.'
         cmds:
+            - sh scripts/check-toolchain.sh
             - npm install
 
     dev:cleardata:windows:

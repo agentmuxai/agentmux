@@ -12,9 +12,11 @@ These instructions cover setting up dependencies and building AgentMux from sour
 
 | Tool | Version | Purpose |
 |------|---------|---------|
-| **Node.js** | v22 LTS | Frontend build (SolidJS/Vite) |
+| **Node.js** | v24 LTS | Frontend build (SolidJS/Vite) |
 | **Rust** | 1.77+ | Backend (agentmux-srv) + Host (agentmux-cef) |
 | **Task** | Latest | Build orchestration |
+| **CMake** | 3.20+ | CEF native build (cef-dll-sys) |
+| **Ninja** | 1.10+ | CEF native build (cef-dll-sys) |
 
 > **Note:** Go and Zig are no longer required. The backend is 100% Rust since v0.31.0.
 
@@ -52,9 +54,14 @@ AgentMux embeds Chromium via CEF — no system WebKitGTK or WebView2 required.
 
 1. **Install build tools** (Debian/Ubuntu):
    ```bash
-   sudo apt install cmake ninja-build build-essential curl wget file libssl-dev git zip
+   sudo apt install cmake ninja-build build-essential curl wget file libssl-dev git zip \
+     libwayland-dev libxkbcommon-dev libgtk-3-dev \
+     libglib2.0-dev libpango1.0-dev libcairo2-dev \
+     libgdk-pixbuf2.0-dev libatk1.0-dev
    ```
    CMake and Ninja are required by `cef-dll-sys`, which builds CEF's C wrapper at compile time.
+   The remaining packages are CEF/GTK runtime dev headers — see `.github/workflows/build-linux.yml`
+   for the list this repo's own CI installs; keep this list in sync with it.
 
 2. **Install Rust**:
    ```bash
@@ -80,6 +87,13 @@ winget install Task.Task
 
 See full instructions: https://taskfile.dev/installation/
 
+**Starting from nothing?** `scripts/bootstrap.sh` (macOS/Linux, installs
+Task) and `scripts/bootstrap.ps1` (Windows, installs **Git and Task**) run
+the commands above for you — see "Bootstrap and Initialize" below. On
+Windows specifically, `bootstrap.ps1` is the one entry point that works
+before you've cloned anything, since a stock Windows install has neither
+Git nor Task.
+
 ---
 
 ## Clone the Repository
@@ -88,6 +102,41 @@ See full instructions: https://taskfile.dev/installation/
 git clone https://github.com/agentmuxai/agentmux.git
 cd agentmux
 ```
+
+macOS and most Linux distros ship (or trivially provide, via Xcode Command
+Line Tools / `apt`) a `git` you can clone with directly. A stock Windows
+install does not — see "Bootstrap and Initialize" below if you're starting
+from a completely bare Windows machine.
+
+## Bootstrap and Initialize
+
+On a fresh machine with nothing installed, two steps get you to a working
+dev environment:
+
+```bash
+# 1. Get Task (and, on Windows, Git) installed:
+
+# macOS/Linux:
+sh scripts/bootstrap.sh
+
+# Windows (PowerShell) — works even before cloning, since it installs Git too:
+irm https://raw.githubusercontent.com/agentmuxai/agentmux/main/scripts/bootstrap.ps1 | iex
+# ...or, after cloning some other way (zip download, GitHub Desktop, etc.):
+powershell -ExecutionPolicy Bypass -File scripts\bootstrap.ps1
+
+# 2. Verify the rest of the toolchain (Rust/Node/CMake/Ninja/git — including
+#    minimum versions, not just presence) and install frontend dependencies:
+task init
+```
+
+`task init` fails with a clear message (and does not run `npm install`) if
+anything required is still missing or below the minimum version — install
+or upgrade the flagged tool and re-run it. It cannot install Task itself, or
+(on Windows) the shell it needs to run its own cross-platform tasks; that
+circularity is exactly why step 1 exists as a separate, non-Task script.
+
+If you already have Task (and, on Windows, Git) installed, you can skip
+straight to `task init`.
 
 ---
 
