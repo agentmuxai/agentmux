@@ -330,7 +330,7 @@ partial list.
 | [`SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29`](SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md) | Spec: multi-tier discovery + remote API invocation over muxbus |
 | [`SPEC_WINDOW_NAME_API_HARDENING_2026_08_08`](SPEC_WINDOW_NAME_API_HARDENING_2026_08_08.md) | SPEC: Window-name App API hardening (phantom-id success + status codes) |
 
-### proposed (89)
+### proposed (90)
 
 | Spec | Title |
 |---|---|
@@ -341,6 +341,7 @@ partial list.
 | [`SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17`](SPEC_AGENT_DISPATCH_SUBAGENT_HIERARCHY_2026_07_17.md) | SPEC: two-level dispatch/member schema for subagents and workflows |
 | [`SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11`](SPEC_AGENT_HISTORY_AS_TAB_AND_DRAFT_PRESERVATION_2026_08_11.md) | SPEC: Agent History as a pane tab, composer draft preservation, and a scrolling link row |
 | [`SPEC_AGENT_WORKING_ROW_TOOL_BURST_REVEAL_INTERRUPT_2026_08_21`](SPEC_AGENT_WORKING_ROW_TOOL_BURST_REVEAL_INTERRUPT_2026_08_21.md) | SPEC: Tool-call bursts restart the agent-pane "Working…" row's type-out reveal |
+| [`SPEC_AGENT_WORKING_ROW_TYPOGRAPHY_REFRESH_2026_09_03`](SPEC_AGENT_WORKING_ROW_TYPOGRAPHY_REFRESH_2026_09_03.md) | SPEC: `AgentWorkingRow` typography refresh — drop the accent-color text, match the thinking-text font, go bold |
 | [`SPEC_AGENT_ZOOM_PERSISTENCE_2026_06_22`](SPEC_AGENT_ZOOM_PERSISTENCE_2026_06_22.md) | Per-agent zoom persistence |
 | [`SPEC_ARMORY_DROP_HOST_CLI_CONFIG_BLOCK_2026_09_01`](SPEC_ARMORY_DROP_HOST_CLI_CONFIG_BLOCK_2026_09_01.md) | Spec: Drop the "Claude Code — host CLI config" block from Armory Global Memory |
 | [`SPEC_ARMORY_MEMORY_TAB_MERGE_2026_08_30`](SPEC_ARMORY_MEMORY_TAB_MERGE_2026_08_30.md) | Spec: Armory rail — merge "Global Memory" + "Personal Memory" into one "Memory" tab |
@@ -424,7 +425,7 @@ partial list.
 | [`uptime-adaptive-width-help-zoom`](uptime-adaptive-width-help-zoom.md) | Spec: Adaptive Uptime Width + Help View Zoom |
 | [`widget-visibility-rearchitecture`](widget-visibility-rearchitecture.md) | Widget Visibility Re-Architecture |
 
-### draft (241)
+### draft (242)
 
 | Spec | Title |
 |---|---|
@@ -455,6 +456,7 @@ partial list.
 | [`SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15`](SPEC_AGENT_PANE_FORKS_AND_AUX_PINS_2026_06_15.md) | SPEC: Agent pane forks + a cohesive auxiliary-pins architecture |
 | [`SPEC_AGENT_PANE_HEADER_COLOR_THEME_2026_06_23`](SPEC_AGENT_PANE_HEADER_COLOR_THEME_2026_06_23.md) | SPEC: Agent Pane Header Color Theme (Right-Click Picker) |
 | [`SPEC_AGENT_PANE_HEADER_NAME_PRECEDENCE_2026_06_29`](SPEC_AGENT_PANE_HEADER_NAME_PRECEDENCE_2026_06_29.md) | SPEC: Agent Pane Header — Name Precedence + Drop "continued" Chip |
+| [`SPEC_AGENT_PANE_HISTORY_DAY_SEPARATORS_AND_READONLY_VIEW_2026_07_20`](SPEC_AGENT_PANE_HISTORY_DAY_SEPARATORS_AND_READONLY_VIEW_2026_07_20.md) | SPEC — Agent Pane History: Slack-Style Day Separators + "Open Full History" Read-Only Pane |
 | [`SPEC_AGENT_PANE_HYPERLINKS_2026_06_20`](SPEC_AGENT_PANE_HYPERLINKS_2026_06_20.md) | SPEC: Aggressive Hyperlink Detection in Agent Pane |
 | [`SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19`](SPEC_AGENT_PANE_MEMORY_IDENTITY_MODALS_2026_06_19.md) | Agent Pane Memory & Identity Modals |
 | [`SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25`](SPEC_AGENT_PANE_PROGRESS_BAR_OVERLAY_NO_GAP_2026_08_25.md) | SPEC — Agent pane: remove the reserved-space gap above the tab strip; progress bar overlays instead |

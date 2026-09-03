@@ -107,18 +107,6 @@
 
     .agent-working-row-anchor .agent-working-row {
         font-size: 10px;
-        // Same typeface as the normal agent thinking/markdown text
-        // (markdown.scss's `.content` rule) rather than --fixed-font's
-        // monospace — nothing about a status sentence ("Working…", a tool
-        // name) is code-shaped. Kept at the row's existing 10px rather than
-        // --markdown-font-size's 14px: this sits directly above the
-        // composer among other 10-11px control-bar text, and 14px would
-        // read oversized there. Bold as a deliberate distinguishing choice
-        // for this one live-status line, not a match to thinking text
-        // (which renders at normal weight). See
-        // SPEC_AGENT_WORKING_ROW_TYPOGRAPHY_REFRESH_2026_09_03.md.
-        font-family: var(--markdown-font-family);
-        font-weight: 700;
         display: flex;
         align-items: center;
         gap: 5px;
@@ -128,6 +116,24 @@
         padding: var(--space-1) var(--space-3) var(--space-1-5) var(--space-3);
 
         &--loading {
+            // Same typeface as the normal agent thinking/markdown text
+            // (markdown.scss's `.content` rule) rather than --fixed-font's
+            // monospace — nothing about a status sentence ("Working…", a
+            // tool name) is code-shaped. Kept at the row's existing 10px
+            // rather than --markdown-font-size's 14px: this sits directly
+            // above the composer among other 10-11px control-bar text, and
+            // 14px would read oversized there. Bold as a deliberate
+            // distinguishing choice for this one live-status line, not a
+            // match to thinking text (which renders at normal weight).
+            // Scoped to --loading only, NOT the shared base rule above —
+            // the --worked (post-completion) state below is explicitly out
+            // of scope (already non-accent) and must keep its own
+            // typography untouched (codex P2 on PR #2946: the first version
+            // of this put these two declarations on the base selector,
+            // which also reached --worked). See
+            // SPEC_AGENT_WORKING_ROW_TYPOGRAPHY_REFRESH_2026_09_03.md.
+            font-family: var(--markdown-font-family);
+            font-weight: 700;
             // main-text-color, not accent — the row previously read as the
             // theme's accent hue (blue by default) end to end, text and
             // shimmer highlight alike. See
