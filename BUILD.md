@@ -87,9 +87,12 @@ winget install Task.Task
 
 See full instructions: https://taskfile.dev/installation/
 
-**Starting from nothing?** `scripts/bootstrap.sh` (macOS/Linux) and
-`scripts/bootstrap.ps1` (Windows) run the commands above for you — see
-"Clone the Repository" below.
+**Starting from nothing?** `scripts/bootstrap.sh` (macOS/Linux, installs
+Task) and `scripts/bootstrap.ps1` (Windows, installs **Git and Task**) run
+the commands above for you — see "Bootstrap and Initialize" below. On
+Windows specifically, `bootstrap.ps1` is the one entry point that works
+before you've cloned anything, since a stock Windows install has neither
+Git nor Task.
 
 ---
 
@@ -100,28 +103,40 @@ git clone https://github.com/agentmuxai/agentmux.git
 cd agentmux
 ```
 
+macOS and most Linux distros ship (or trivially provide, via Xcode Command
+Line Tools / `apt`) a `git` you can clone with directly. A stock Windows
+install does not — see "Bootstrap and Initialize" below if you're starting
+from a completely bare Windows machine.
+
 ## Bootstrap and Initialize
 
 On a fresh machine with nothing installed, two steps get you to a working
 dev environment:
 
 ```bash
-# 1. Get Task itself installed (macOS/Linux):
+# 1. Get Task (and, on Windows, Git) installed:
+
+# macOS/Linux:
 sh scripts/bootstrap.sh
-# ...or on Windows (PowerShell):
+
+# Windows (PowerShell) — works even before cloning, since it installs Git too:
+irm https://raw.githubusercontent.com/agentmuxai/agentmux/main/scripts/bootstrap.ps1 | iex
+# ...or, after cloning some other way (zip download, GitHub Desktop, etc.):
 powershell -ExecutionPolicy Bypass -File scripts\bootstrap.ps1
 
-# 2. Verify the rest of the toolchain (Rust/Node/CMake/Ninja/git) and
-#    install frontend dependencies:
+# 2. Verify the rest of the toolchain (Rust/Node/CMake/Ninja/git — including
+#    minimum versions, not just presence) and install frontend dependencies:
 task init
 ```
 
 `task init` fails with a clear message (and does not run `npm install`) if
-anything required is still missing or the wrong version — reinstall the
-flagged tool and re-run it. It cannot install Task itself; that circularity
-is exactly why step 1 exists as a separate, non-Task script.
+anything required is still missing or below the minimum version — install
+or upgrade the flagged tool and re-run it. It cannot install Task itself, or
+(on Windows) the shell it needs to run its own cross-platform tasks; that
+circularity is exactly why step 1 exists as a separate, non-Task script.
 
-If you already have Task installed, you can skip straight to `task init`.
+If you already have Task (and, on Windows, Git) installed, you can skip
+straight to `task init`.
 
 ---
 

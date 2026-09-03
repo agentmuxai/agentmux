@@ -371,7 +371,7 @@ tasks:
     init:
         desc: 'Initialize the project for development: verify the required toolchain is present (Rust/Node/CMake/Ninja/git), then npm install. See scripts/bootstrap.sh / scripts/bootstrap.ps1 first if Task itself was just installed.'
         cmds:
-            - bash scripts/check-toolchain.sh
+            - sh scripts/check-toolchain.sh
             - npm install
 
     dev:cleardata:windows:
