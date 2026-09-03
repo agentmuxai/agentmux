@@ -1268,11 +1268,20 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             if (authFailureToPreserve) {
                 // Re-dispatch the SAME failure TurnStart just cleared — the
                 // failure banner (and its "Login Again"/"Login via terminal"
-                // actions) is this pane's actual recovery path; a generic
-                // authNotice that mentions a "Log in" button not even shown
-                // here (canRetry() is false in this scenario) would leave
-                // the user with no working recovery affordance at all. Codex
-                // P1 on PR #2338 (third re-review). Dispatched AFTER
+                // actions) is this pane's actual recovery path; falling back
+                // to the generic authNotice instead would leave the user with
+                // no working recovery affordance at all. Codex P1 on PR #2338
+                // (third re-review).
+                //
+                // This comment used to add "(canRetry() is false in this
+                // scenario)" as the reason the notice would be useless. That
+                // premise no longer holds: since
+                // PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02, canRetry()
+                // CAN be true here — it raises a synthetic pre-launch auth
+                // failure, which is exactly what `authFailureToPreserve`
+                // carries in that case. The conclusion is unchanged (re-dispatch
+                // the real banner rather than fall back to a generic string);
+                // only the stated reason needed correcting. manoz on PR #2951. Dispatched AFTER
                 // TurnStartFailed so turnPhase is already Idle when this
                 // reducer case runs — otherwise it reads the still-Submitting
                 // phase as "a turn just ended" and hops through a transient
