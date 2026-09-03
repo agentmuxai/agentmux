@@ -270,6 +270,21 @@ export function useAgentControllerStatus(
     const [authUrl, setAuthUrl] = createSignal<string | null>(null);
     const [authNotice, setAuthNotice] = createSignal<string | null>(null);
     const [canRetry, setCanRetry] = createSignal(false);
+    /**
+     * `retryAfterLogin` of the recovery currently in flight — the caller's
+     * "was a turn ever attempted?" intent, which outlives the individual call
+     * that started the flow.
+     *
+     * Exists because "Use terminal instead" (`useTerminalInstead`) CANCELS the
+     * in-flight relogin and starts a terminal login as a continuation of the
+     * SAME user intent. Without remembering it, that hand-off silently
+     * defaulted to `true`, so a pre-launch "Log in" that escaped to the
+     * terminal came back through onRecovered -> retryLastTurn and resent the
+     * agent's last old message — the exact never-started-agent stale-resend
+     * this PR removes from the row's own buttons, reintroduced on the escape
+     * path. reagent P1 on PR #2951.
+     */
+    let inFlightRetryAfterLogin = true;
     const [flowRunning, setFlowRunning] = createSignal(false);
     const [agentReady, setAgentReady] = createSignal(false);
     const [loginWaiting, setLoginWaiting] = createSignal(false);
@@ -514,6 +529,7 @@ export function useAgentControllerStatus(
     const relogin = async (reloginOpts: { retryAfterLogin?: boolean } = {}) => {
         if (reloginInFlight) return;
         const retryAfterLogin = reloginOpts.retryAfterLogin ?? true;
+        inFlightRetryAfterLogin = retryAfterLogin;
         const prov = opts.provider();
         if (!prov) {
             opts.log("auth", "re-login: no active provider", "warn");
@@ -932,6 +948,7 @@ export function useAgentControllerStatus(
     // was fixed and the other wasn't.
     const loginViaTerminal = async (terminalOpts: { retryAfterLogin?: boolean } = {}) => {
         const retryAfterLogin = terminalOpts.retryAfterLogin ?? true;
+        inFlightRetryAfterLogin = retryAfterLogin;
         if (reloginInFlight) return;
         loginCancelled = false;
         const prov = opts.provider();
@@ -1152,7 +1169,10 @@ export function useAgentControllerStatus(
         // just set (e.g. "inapp-timeout"'s message) — the user asked to
         // switch flows, not to be told their login attempt failed.
         setAuthNotice(null);
-        await loginViaTerminal();
+        // Continue the SAME intent the cancelled flow was started with — this
+        // is a switch of mechanism, not a new decision by the user. Defaulting
+        // to `true` here is what reintroduced the stale-resend on this path.
+        await loginViaTerminal({ retryAfterLogin: inFlightRetryAfterLogin });
     };
 
     const notifyControllerHealthy = () => {

@@ -513,3 +513,70 @@ describe("useAgentControllerStatus — loginViaTerminal routes by retryAfterLogi
         });
     });
 });
+
+describe("useAgentControllerStatus — 'Use terminal instead' preserves the recovery intent (reagent P1 on PR #2951)", () => {
+    // useTerminalInstead CANCELS the in-flight relogin and starts a terminal
+    // login as a continuation of the SAME user intent. It called
+    // loginViaTerminal() with no arguments, so retryAfterLogin defaulted to
+    // true and a pre-launch "Log in" that escaped to the terminal came back
+    // through onRecovered -> retryLastTurn, resending the agent's last old
+    // message. That is the never-started-agent stale-resend this PR removes
+    // from the row's own buttons, reintroduced on the escape path.
+    it("carries retryAfterLogin:false from the pre-launch relogin into the terminal flow", async () => {
+        const onRecovered = vi.fn();
+        const onReady = vi.fn();
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+                onRecovered,
+                onReady,
+            });
+
+            // Pre-launch "Log in": relogin with retryAfterLogin false. Tier 1
+            // yields no usable session, leaving the user on the escape hatch.
+            hub.runProviderLogin.mockResolvedValue("terminal-unavailable");
+            await status.relogin({ retryAfterLogin: false });
+            onRecovered.mockClear();
+            onReady.mockClear();
+
+            // User switches to "Use terminal instead", which succeeds.
+            hub.runProviderLogin.mockImplementation(async (opts: any) => {
+                opts.onAccountRegistered?.("acct-term", "/tmp/acct-term");
+                return "terminal-success";
+            });
+            await status.useTerminalInstead();
+
+            // The bug is onRecovered firing here — it means retryLastTurn.
+            expect(onRecovered).not.toHaveBeenCalled();
+            expect(onReady).toHaveBeenCalled();
+            dispose();
+        });
+    });
+
+    it("still retries after escaping from a mid-turn relogin (retryAfterLogin true)", async () => {
+        const onRecovered = vi.fn();
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+                onRecovered,
+            });
+
+            hub.runProviderLogin.mockResolvedValue("terminal-unavailable");
+            await status.relogin({ retryAfterLogin: true });
+            onRecovered.mockClear();
+
+            hub.runProviderLogin.mockImplementation(async (opts: any) => {
+                opts.onAccountRegistered?.("acct-term", "/tmp/acct-term");
+                return "terminal-success";
+            });
+            await status.useTerminalInstead();
+
+            expect(onRecovered).toHaveBeenCalled();
+            dispose();
+        });
+    });
+});
