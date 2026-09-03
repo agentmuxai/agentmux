@@ -13,15 +13,28 @@ import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { Logger } from "@/util/logger";
 import { DEFAULT_RUNTIME_CONFIG, type AgentRuntimeConfig } from "./types";
-import type { ProviderModel } from "./providers/types";
+import type { ProviderDefinition, ProviderModel } from "./providers/types";
 
 /**
- * Check if Node.js is available. Required for npm-based providers (Codex, Gemini).
- * Claude has its own standalone installer and doesn't need Node.js.
- * Returns null if Node.js is available or not needed, or an error message string.
+ * Check if Node.js is available. Required for any provider actually installed
+ * via `npm install -g <npmPackage>` (AgentInstallModal -> install.start ->
+ * agentmux-srv's install_handlers.rs) — which today is every provider except
+ * kimi (pip-based, `npmPackage: ""`).
+ *
+ * This used to hardcode `providerId === "claude"` as a skip, on the belief
+ * that Claude installs via its own standalone script
+ * (`catalog.ts`'s `windowsInstallCommand: "irm https://claude.ai/install.ps1
+ * | iex"`). That belief doesn't match the actual install code: AgentInstallModal
+ * always installs via `npmPackage` regardless of `windowsInstallCommand` (which
+ * only the later `resolvecli` resolution path reads, after a CLI is already in
+ * place) — so on a fresh machine with git but no Node.js, launching Claude Code
+ * hit a raw, unfriendly npm-spawn error with no recovery path (confirmed live,
+ * fresh-PC onboarding investigation, tracking issue #2940). Deriving the check
+ * from `npmPackage` directly, rather than a per-provider special case, fixes
+ * Claude and stays correct if another provider ever moves off npm too.
  */
-export async function checkNodejsForProvider(providerId: string): Promise<string | null> {
-    if (providerId === "claude") return null; // Claude has standalone installer
+export async function checkNodejsForProvider(provider: Pick<ProviderDefinition, "npmPackage">): Promise<string | null> {
+    if (!provider.npmPackage) return null; // not npm-installed (e.g. kimi, via pip)
     try {
         const status = await getApi().checkNodejsAvailable();
         if (!status.available || !status.npm_available) {

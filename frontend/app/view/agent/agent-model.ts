@@ -221,7 +221,7 @@ export class AgentViewModel implements ViewModel {
         }
 
         // Check Node.js availability for npm-based providers
-        const nodejsError = await checkNodejsForProvider(provider.id);
+        const nodejsError = await checkNodejsForProvider(provider);
         if (nodejsError) {
             this.nodejsError = nodejsError;
             Logger.error("agent", "Node.js not available", { agentId, error: nodejsError });
@@ -351,7 +351,7 @@ export class AgentViewModel implements ViewModel {
         }
 
         // Check Node.js availability for npm-based providers
-        const nodejsError = await checkNodejsForProvider(provider.id);
+        const nodejsError = await checkNodejsForProvider(provider);
         if (nodejsError) {
             this.nodejsError = nodejsError;
             Logger.error("agent", "Node.js not available for agent definition", { agentId: agent.id, error: nodejsError });

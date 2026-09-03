@@ -21,6 +21,32 @@ export const GIT_PREREQ: SystemPrereq = {
     },
 };
 
+/** Shared Node.js prereq. Every provider below except kimi (pip-based) is
+ *  installed via `npm install -g <npmPackage>` (AgentInstallModal ->
+ *  install.start -> `Command::new("npm.cmd"/"npm")`, agentmux-srv's
+ *  install_handlers.rs) — on a machine with no Node.js/npm, that spawn
+ *  fails immediately with a raw, unfriendly OS error and no recovery path
+ *  (confirmed live: fresh-PC onboarding investigation, tracking issue
+ *  #2940). `git`/`node`/`npm`/`python` are already fully wired as
+ *  one-click-installable ids in AgentPrereqModal's SYSTEM_INSTALLABLE_IDS
+ *  and agentmux-srv's system_install_handlers.rs (winget/brew/pkexec) —
+ *  this constant just routes providers through that already-working gate
+ *  instead of letting them hit the raw npm-spawn failure. */
+export const NODE_PREREQ: SystemPrereq = {
+    tool: "node",
+    label: "Node.js",
+    installUrls: {
+        windows: "https://nodejs.org/",
+        macos: "https://nodejs.org/",
+        linux: "https://nodejs.org/",
+    },
+    installLinkText: {
+        windows: "Install Node.js",
+        macos: "Install Node.js",
+        linux: "Install Node.js",
+    },
+};
+
 export const PROVIDERS: Record<string, ProviderDefinition> = {
     claude: {
         id: "claude",
@@ -104,7 +130,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // Claude Code calls `git` at session-start (issue
         // anthropics/claude-code#29898). Without git the CLI fails
         // with `Error: Git is required but was not found.`.
-        systemPrereqs: [GIT_PREREQ],
+        systemPrereqs: [GIT_PREREQ, NODE_PREREQ],
         contextWindow: 200_000,
         // Labels carry the concrete version the pinned CLI (see `pinnedVersion`)
         // currently resolves each family alias to — curated, kept in sync on a
@@ -157,6 +183,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         resumeStrategy: "codex-exec",
         sessionIdField: "thread_id",
         controllerType: "subprocess",
+        systemPrereqs: [NODE_PREREQ],
         contextWindow: 200_000,
         // Verify ChatGPT-account availability when bumping the codex CLI pin.
         models: [
@@ -200,6 +227,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         resumeFlag: "--resume",
         sessionIdField: "session_id",
         controllerType: "subprocess",
+        systemPrereqs: [NODE_PREREQ],
         contextWindow: 200_000,
     },
     gemini: {
@@ -230,6 +258,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         resumeFlag: "-r",
         sessionIdField: "session_id",
         controllerType: "subprocess",
+        systemPrereqs: [NODE_PREREQ],
         contextWindow: 1_000_000,
     },
     // Qwen Code — Alibaba's open-source coding agent, a fork of Gemini CLI.
@@ -270,6 +299,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         resumeFlag: null,
         sessionIdField: "session_id",
         controllerType: "subprocess",
+        systemPrereqs: [NODE_PREREQ],
     },
     // OpenClaw — model-agnostic personal AI assistant from openclaw.ai.
     // We launch its `openclaw acp` bridge: speaks ACP over stdio (our
@@ -328,7 +358,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         requiresLoginTty: true,
         // Same git dependency as Claude Code — OpenClaw uses git for
         // project-context features when invoking the Codex harness.
-        systemPrereqs: [GIT_PREREQ],
+        systemPrereqs: [GIT_PREREQ, NODE_PREREQ],
         contextWindow: 200_000,
     },
     // Kimi Code CLI — Moonshot AI's coding agent.
@@ -393,6 +423,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         resumeFlag: null,
         sessionIdField: "sessionId",
         controllerType: "acp",
+        systemPrereqs: [NODE_PREREQ],
         contextWindow: 128_000,
     },
     // Pi — the lightweight coding agent that powers OpenClaw.
@@ -423,6 +454,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         resumeFlag: null,
         sessionIdField: "sessionId",
         controllerType: "acp",
+        systemPrereqs: [NODE_PREREQ],
     },
     // Antigravity (AGY) — Google's agentic coding CLI harness. Emits the
     // same stream-json NDJSON envelope as Gemini CLI (its sibling
@@ -455,6 +487,7 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         resumeFlag: "-r",
         sessionIdField: "session_id",
         controllerType: "subprocess",
+        systemPrereqs: [NODE_PREREQ],
         contextWindow: 1_000_000,
         models: [
             { value: "gemini-3.6-flash", label: "Gemini 3.6 Flash", default: true, description: "Fast, highly capable frontier model with 1M context" },
