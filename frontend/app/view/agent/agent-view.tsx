@@ -1277,8 +1277,25 @@ const AgentPresentationView = ({
                 // `agent:sessionid` already being set, so it no-ops for
                 // anything but a genuine first login — which is exactly why
                 // this is NOT retryLastTurn (that would resend an old message).
-                log("auth", "Login successful — sending the agent's startup sequence (no turn to retry)");
-                onReadyFn?.();
+                // NOT `onReadyFn?.()`: optional chaining would make an
+                // unassigned `onReadyFn` do silently nothing — the exact
+                // "does neither" shape just fixed above, reintroduced by
+                // ordering instead of control flow, and invisible when it
+                // happens. Currently unreachable (both the status object and
+                // the assignment happen during component setup, while this
+                // fires from an async login callback long after), but the
+                // failure would be silent, so make it loud instead.
+                // manoz, reviewing 708c7c1c6.
+                if (onReadyFn) {
+                    log("auth", "Login successful — sending the agent's startup sequence (no turn to retry)");
+                    onReadyFn();
+                } else {
+                    log(
+                        "auth",
+                        "Login succeeded but the startup sequence could not be sent (onReadyFn unassigned) — reopen the pane if the agent seems unconfigured",
+                        "warn",
+                    );
+                }
                 return;
             }
             retryLastTurn();

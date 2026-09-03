@@ -29,16 +29,19 @@ describe("postLoginRecoveryFor (PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02)
     it("sends the startup sequence for the pre-launch case — never a retry", () => {
         // codex P1: retrying here resends an old transcript message on an
         // agent that never ran a turn.
+        //
+        // WHAT THIS FILE DOES NOT COVER, stated so the count isn't misread:
+        // the OTHER P1 on this branch (reagent — the first fix for the above
+        // returned early and did NEITHER action) happened at the CALL SITE,
+        // `onRecovered` in agent-view.tsx, not here. A pure function returning
+        // a two-member union cannot express "did nothing", so no test in this
+        // file could have caught it, before or after the extraction. The
+        // extraction made the DECISION testable; it did not make the ACTION
+        // testable. Call-site wiring is compiler- and review-guarded.
+        // (manoz, reviewing 708c7c1c6, caught an earlier version of this file
+        // asserting that via a tautology and naming it as if it covered the
+        // real failure.)
         expect(postLoginRecoveryFor(paneFailure(false))).toBe("send-startup");
-    });
-
-    it("still does SOMETHING for the pre-launch case — never neither", () => {
-        // reagent P1 (second re-review): the first fix for the codex P1 simply
-        // returned early, which left a never-launched agent authenticated with
-        // a controller that never got its startup payload. "send-startup" is
-        // the whole point of this branch existing rather than a bare guard.
-        expect(postLoginRecoveryFor(paneFailure(false))).not.toBe("retry-turn");
-        expect(["retry-turn", "send-startup"]).toContain(postLoginRecoveryFor(paneFailure(false)));
     });
 
     it("defaults to retry-turn when the flag is absent (pre-existing behaviour)", () => {

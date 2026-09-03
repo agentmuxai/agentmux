@@ -371,3 +371,69 @@ describe("useAgentControllerStatus — in-app login session (SPEC_INAPP_CLAUDE_O
         });
     });
 });
+
+describe("useAgentControllerStatus — loginViaTerminal clears canRetry on success (reagent P1 on PR #2951)", () => {
+    // Deadlock guard. `relogin` clears canRetry synchronously on click;
+    // loginViaTerminal never did. The only other clear is
+    // notifyControllerHealthy, which requires an ACTIVE TURN — and
+    // checkAuthGuard refuses to start one while canRetry is true. So a
+    // successful terminal login left canRetry stuck true forever and every
+    // later send was fast-failed as "not logged in" on an agent that had just
+    // logged in successfully.
+    //
+    // Only reachable since PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02
+    // exposed "Login via terminal" on the pre-launch row — the old blue bar
+    // offered "Log in" (relogin) alone.
+
+    it("clears canRetry after a successful terminal login", async () => {
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+            });
+
+            // Reach the pre-launch state the consolidated row represents:
+            // canRetry TRUE. A FAILED no-retry relogin is what restores it
+            // (:894) — a succeeding one would leave it false and make this
+            // test vacuous, which an earlier version of it was.
+            hub.runProviderLogin.mockResolvedValue("terminal-unavailable");
+            await status.relogin({ retryAfterLogin: false });
+            expect(status.canRetry()).toBe(true); // precondition, not the assertion
+
+            hub.runProviderLogin.mockImplementation(async (opts: any) => {
+                opts.onAccountRegistered?.("acct-term", "/tmp/acct-term");
+                return "terminal-success";
+            });
+            await status.loginViaTerminal();
+
+            // The regression: this read `true`, and nothing could ever clear it
+            // — notifyControllerHealthy needs a turn the guard won't allow.
+            expect(status.canRetry()).toBe(false);
+            dispose();
+        });
+    });
+
+    it("leaves canRetry alone when the terminal login does NOT succeed", async () => {
+        // Cleared on success only — deliberately not at the start like relogin,
+        // which pairs its early clear with a restore-on-failure. Dropping it
+        // here on failure would remove both the send guard and the failure row
+        // for an agent that is still unauthenticated.
+        hub.runProviderLogin.mockResolvedValue("terminal-unavailable");
+
+        await createRoot(async (dispose) => {
+            const status = useAgentControllerStatus({
+                blockId: "block-1",
+                provider: () => claude,
+                log: () => {},
+            });
+            await status.relogin({ retryAfterLogin: false });
+            const before = status.canRetry();
+
+            await status.loginViaTerminal();
+
+            expect(status.canRetry()).toBe(before);
+            dispose();
+        });
+    });
+});

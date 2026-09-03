@@ -1003,6 +1003,28 @@ export function useAgentControllerStatus(
                         opts.log("auth", "Login successful — retrying…");
                         setAuthNotice(null);
                         setAuthStatus("authenticated");
+                        // reagent P1 on PR #2951. relogin() clears this
+                        // synchronously on click (see its own setCanRetry(false)
+                        // above); loginViaTerminal never did, and the only other
+                        // clear — notifyControllerHealthy — needs an ACTIVE TURN,
+                        // which checkAuthGuard will not let start while canRetry
+                        // is true. That is a deadlock: canRetry stays true
+                        // forever and every subsequent send is fast-failed as
+                        // "not logged in" on an agent that just logged in
+                        // successfully.
+                        //
+                        // Cleared on SUCCESS only, deliberately not at the start
+                        // like relogin: relogin pairs its early clear with a
+                        // restore-on-failure in its finally, and clearing here
+                        // without that pairing would drop both the send guard
+                        // and the failure row after a FAILED terminal login.
+                        // Success is precisely when "this agent is
+                        // unauthenticated" stops being true.
+                        //
+                        // Must precede onRecovered() below: that callback's
+                        // send-startup path issues a real send, which reads
+                        // canRetry through checkAuthGuard.
+                        setCanRetry(false);
                         await forceControllerRefresh();
                         opts.onLoginSuccess?.(null);
                         // See relogin()'s identical comment — reagent P0 on
