@@ -136,21 +136,17 @@ pub(crate) fn reveal_gated_window(
     // all. Pool windows never reach this function (they skip the whole
     // reveal call — see `on_load_end`), so that race is now closed the same
     // way Linux's ready-file was already immune to it.
+    //
+    // Also called from `reveal_top_level_window`'s `label: None` fallback
+    // branch — that path never arms the paint gate (no label to key it on),
+    // so it must fire this signal itself rather than relying on this
+    // function, which the fallback never reaches. Reagent PR #2968 review:
+    // the signal used to fire unconditionally in `on_load_end` regardless of
+    // label resolution; moving it here alone silently dropped that fallback
+    // case, leaving the launcher's splash wait (no overall timeout,
+    // `agentmux-launcher/src/splash.rs::run_splash`) to hang forever.
     #[cfg(target_os = "windows")]
-    {
-        use windows_sys::Win32::Foundation::CloseHandle;
-        use windows_sys::Win32::System::Threading::{OpenEventW, SetEvent, EVENT_MODIFY_STATE};
-        if let Ok(event_name) = std::env::var("AGENTMUX_SPLASH_EVENT") {
-            let nul: Vec<u16> = format!("{}\0", event_name).encode_utf16().collect();
-            unsafe {
-                let ev = OpenEventW(EVENT_MODIFY_STATE, 0, nul.as_ptr());
-                if !ev.is_null() {
-                    SetEvent(ev);
-                    CloseHandle(ev);
-                }
-            }
-        }
-    }
+    signal_windows_splash_dismiss();
     let Some(mut browser) = state.get_browser(label) else { return };
     if let Some(bv) = browser_view_get_for_browser(Some(&mut browser)) {
         if let Some(window) = bv.window() {
@@ -159,6 +155,29 @@ pub(crate) fn reveal_gated_window(
                 if let Some(host) = browser.host() {
                     host.set_focus(1);
                 }
+            }
+        }
+    }
+}
+
+/// Signal the named Win32 event the launcher's splash thread is waiting on
+/// (`AGENTMUX_SPLASH_EVENT`). Shared by both `reveal_gated_window` (the
+/// normal, label-resolved path) and `reveal_top_level_window`'s `label:
+/// None` fallback (which never arms the paint gate, so it never reaches
+/// `reveal_gated_window` at all) — every code path that can show the
+/// top-level window for the first time must dismiss the splash, or
+/// `run_splash`'s untimed wait hangs forever.
+#[cfg(target_os = "windows")]
+fn signal_windows_splash_dismiss() {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenEventW, SetEvent, EVENT_MODIFY_STATE};
+    if let Ok(event_name) = std::env::var("AGENTMUX_SPLASH_EVENT") {
+        let nul: Vec<u16> = format!("{}\0", event_name).encode_utf16().collect();
+        unsafe {
+            let ev = OpenEventW(EVENT_MODIFY_STATE, 0, nul.as_ptr());
+            if !ev.is_null() {
+                SetEvent(ev);
+                CloseHandle(ev);
             }
         }
     }
@@ -294,6 +313,11 @@ fn reveal_top_level_window(
         }
         return;
     }
+    // No resolvable label — the paint gate above never armed, so this is
+    // also this window's only chance to dismiss the Windows splash (see
+    // `signal_windows_splash_dismiss`'s doc comment).
+    #[cfg(target_os = "windows")]
+    signal_windows_splash_dismiss();
     window.show();
     if let Some(b) = browser {
         if let Some(host) = b.host() {
