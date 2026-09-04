@@ -441,6 +441,20 @@ pub fn write_shared_with_nonce(
     channel: &str,
     registration_nonce: u64,
 ) {
+    // Resolved BEFORE taking the guard. This is a synchronous SQLite read
+    // serialized on the store's single `Mutex<Connection>`, and it can itself
+    // queue behind an unrelated slow store operation. Holding the process-wide
+    // REGISTRY_OP_LOCK across it would block every other registry file
+    // operation for every agent in the process — writes, removes, and the
+    // nonce compare-and-remove — behind a DB query (reagent P1 on PR #2959).
+    //
+    // Safe to hoist: the key depends only on `agent_id`, not on anything
+    // REGISTRY_OP_LOCK protects. The lock serialises this process's own
+    // read-compare-remove sequences against its own writes; a stale key here
+    // would be no worse than the entry being rewritten a moment later, which
+    // re-registration does anyway.
+    let jekt_public_key = jekt_public_key_for(agent_id);
+
     let _guard = REGISTRY_OP_LOCK.lock().unwrap();
     let dir = shared_agent_dir(shared_dir, agent_id);
     let _ = std::fs::create_dir_all(&dir);
@@ -454,7 +468,7 @@ pub fn write_shared_with_nonce(
         auth_key: local_auth_key().to_string(),
         channel: channel.to_string(),
         registration_nonce,
-        jekt_public_key: jekt_public_key_for(agent_id),
+        jekt_public_key,
     };
     write_entry_file(&path, &entry);
 }
