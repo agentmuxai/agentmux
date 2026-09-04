@@ -33,6 +33,7 @@ import {
     atoms,
     createBlock,
     getApi,
+    getBlockMetaKeyAtom,
     openOrFocusPaneByView,
     pushNotification,
     refocusNode,
@@ -41,8 +42,9 @@ import {
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { BlockService, ObjectService } from "@/app/store/services";
+import { waveEventSubscribe } from "@/app/store/wps";
 import { scheduleOnSettle } from "@/app/util/settle-detector";
-import { loadAccounts, type AgentAccounts } from "@/app/view/identity/identity-model";
+import { loadAccounts, subscribeAccountChanges, type Account, type AgentAccounts } from "@/app/view/identity/identity-model";
 import { handleAgentIdChange } from "@/app/view/term/termagent";
 import { makeWindowFocusSignal } from "@/app/window/window-focus";
 import { ConfirmModal } from "@/element/modal";
@@ -93,6 +95,7 @@ import { useAgentControllerStatus } from "./hooks/useAgentControllerStatus";
 import { useAgentDecisions } from "./hooks/useAgentDecisions";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
 import { useAgentFailure } from "./hooks/useAgentFailure";
+import { computeAccountBindCandidates } from "./failure/bind-account-candidates";
 import { decideSyntheticRow } from "./failure/synthetic-row";
 import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
 import { useAgentQuestions } from "./hooks/useAgentQuestions";
@@ -110,6 +113,7 @@ import { buildResumePreflightNode, injectResumePreflight } from "./inject-resume
 import { useResumePreflight } from "./hooks/useResumePreflight";
 import { HISTORY_TAB_FOR_META_KEY, openOrFocusHistoryTab } from "./open-history-tab";
 import { getProvider } from "./providers";
+import { lastLinkedAccountId } from "./providers/provider-id-aliases";
 import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
 import type { SignalPair } from "./state";
 import { createAgentAtoms } from "./state";
@@ -1368,8 +1372,8 @@ const AgentPresentationView = ({
             // is valid, and would otherwise silently clear that recovery's
             // own canRetry=true, letting the next message bypass the
             // fast-fail guard and reach the still-known-bad process.
-            status.notifyControllerHealthy();
-            // Also clear a stale live "auth"-classified state.failure —
+            //
+            // Also clears a stale live "auth"-classified state.failure —
             // unlike the OTHER two places in this PR that declare a
             // controller healthy (login.ts's finalizeLoginSuccess,
             // useAgentCommands.ts's flushPendingControllerRefresh success
@@ -1392,9 +1396,12 @@ const AgentPresentationView = ({
             // a turn-active event arrives, even though that unrelated
             // problem was never actually resolved. reagentx P1 on PR #2338
             // (thirty-fifth re-review).
-            if (paneSnapshot(model.blockId)?.failure?.data.code === "auth") {
-                dispatchPane(model.blockId, { type: "FailureCleared" }, "system");
-            }
+            //
+            // Extracted into `declareAuthHealthy` (defined below, in scope
+            // via closure) so the SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md
+            // §2 bind-event listener can reuse the identical logic instead of
+            // duplicating this exact gating a second time.
+            declareAuthHealthy();
         },
     });
 
@@ -1872,6 +1879,109 @@ const AgentPresentationView = ({
         }
     });
 
+    // ---- Bind-account (SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md §2/§3) ----
+    //
+    // Cross-pane/cross-tab live account cache — same subscription pattern
+    // `AgentLaunchModal.tsx` already uses. Seeded synchronously (no network
+    // round trip; the app-wide cache is already warm) then kept live.
+    const [accountCache, setAccountCache] = createSignal<Account[]>(loadAccounts());
+    createEffect(() => {
+        const unsub = subscribeAccountChanges((list) => setAccountCache(list));
+        onCleanup(unsub);
+    });
+
+    // This agent's own currently-linked account for its provider, if any —
+    // excluded from bind candidates (nothing to adopt). Refreshed on mount
+    // and whenever this agent's identity links change (below) — the same
+    // event that also drives the auto-unblock check, since both concerns
+    // become stale for the identical reason.
+    const [linkedAccountId, setLinkedAccountId] = createSignal<string | undefined>(undefined);
+    const refreshLinkedAccountId = async () => {
+        const agentDefinitionId = getBlockMetaKeyAtom(model.blockId, "agentId")() as string | undefined;
+        const prov = provider();
+        if (!agentDefinitionId || !prov) {
+            setLinkedAccountId(undefined);
+            return;
+        }
+        try {
+            const links = await RpcApi.ListAgentIdentitiesCommand(TabRpcClient, { agent_id: agentDefinitionId });
+            setLinkedAccountId(lastLinkedAccountId(links, prov.id));
+        } catch {
+            setLinkedAccountId(undefined);
+        }
+    };
+    void refreshLinkedAccountId();
+
+    const bindCandidates = createMemo(() => {
+        const prov = provider();
+        if (!prov) return [];
+        return computeAccountBindCandidates(prov.id, accountCache(), linkedAccountId());
+    });
+
+    const onBindAccount = (e?: MouseEvent) => {
+        const candidates = bindCandidates();
+        if (candidates.length === 0) return;
+        if (candidates.length === 1) {
+            void status.bindExistingAccount(candidates[0]);
+            return;
+        }
+        // 2+ candidates: a picker, anchored at the click — same
+        // ContextMenuModel primitive the Armory's Bind-to-Agent menu uses
+        // (SPEC_ARMORY_BIND_TO_AGENT_CONTEXT_MENU_2026_08_09.md), just a flat
+        // list here (this button IS the trigger — no outer submenu to nest
+        // under). No event to anchor on (shouldn't happen — PaneRow's render
+        // call site always passes one) → no-op rather than guessing a position.
+        if (!e) return;
+        ContextMenuModel.showContextMenu(
+            candidates.map((acct) => ({
+                label: acct.name,
+                click: () => void status.bindExistingAccount(acct),
+            })),
+            e,
+        );
+    };
+
+    // Declare the auth-blocking state resolved: clears canRetry/authNotice
+    // (notifyControllerHealthy) and, ONLY when the live failure is actually
+    // an auth failure, clears it too — never unconditionally, so an
+    // unrelated concurrent failure (rate_limited, context_exceeded, …) that
+    // happens to be showing isn't silently wiped. Shared by two independent
+    // proofs of health: a live controllerstatus event showing an active turn
+    // (below), and a verified auth re-check after an external bind (below).
+    const declareAuthHealthy = () => {
+        status.notifyControllerHealthy();
+        if (paneSnapshot(model.blockId)?.failure?.data.code === "auth") {
+            dispatchPane(model.blockId, { type: "FailureCleared" }, "system");
+        }
+    };
+
+    // Auto-unblock: a bind can happen from ANYWHERE (the Armory's
+    // Bind-to-Agent menu, the per-agent Identity tab, or this pane's own
+    // "Bind account" above) — this pane must notice regardless of source.
+    // `agentidentities:changed:<agentId>` already fires on every one of
+    // those; nothing previously listened for it here.
+    //
+    // Re-verifies via CheckCliAuth before declaring healthy (a bind event is
+    // not itself proof the new credential works) and NEVER auto-retries a
+    // turn — see recheckAuthAfterBind's and declareAuthHealthy's own doc
+    // comments. SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md §2.
+    createEffect(() => {
+        const agentDefinitionId = getBlockMetaKeyAtom(model.blockId, "agentId")() as string | undefined;
+        if (!agentDefinitionId) return;
+        const unsub = waveEventSubscribe({
+            eventType: `agentidentities:changed:${agentDefinitionId}`,
+            handler: () => {
+                void refreshLinkedAccountId();
+                const blocked = status.canRetry() || paneSnapshot(model.blockId)?.failure?.data.code === "auth";
+                if (!blocked) return;
+                void status.recheckAuthAfterBind().then((ok) => {
+                    if (ok) declareAuthHealthy();
+                });
+            },
+        });
+        onCleanup(unsub);
+    });
+
     const failureUI = useAgentFailure({
         blockId: model.blockId,
         // Per-pane model keeps dispatch sites default-safe; see useAgentStream above.
@@ -1916,6 +2026,8 @@ const AgentPresentationView = ({
             log("auth", "Login via terminal — opening a console window for browser login");
             void status.loginViaTerminal({ retryAfterLogin: turnAttempted });
         },
+        bindCandidates,
+        onBindAccount,
     });
 
     // Deliver queued-while-busy ("send now") messages at the next tool-call

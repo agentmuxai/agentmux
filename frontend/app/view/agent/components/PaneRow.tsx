@@ -44,7 +44,13 @@ export interface PaneRowAction {
     label?: string;
     /** Accessible name / tooltip. */
     title: string;
-    onClick: () => void;
+    /** Receives the click event — most actions ignore it; actions that need
+     *  to anchor a popover (e.g. a context-menu picker) at the click
+     *  position use it. Optional (not just optionally-ignored) so existing
+     *  callers that invoke `onClick()` directly — every current test in
+     *  `failure-accessory.test.ts` does — keep typechecking without a
+     *  synthetic event; the real render call site always passes one. */
+    onClick: (e?: MouseEvent) => void;
     /** Tints the glyph on hover with the error colour (destructive actions). */
     danger?: boolean;
     /** Emphasise as the primary action (filled accent). */
@@ -103,7 +109,7 @@ export const PaneRow = (props: PaneRowProps): JSX.Element => {
                             aria-label={action.title}
                             disabled={action.disabled}
                             // stopPropagation so an action never also fires onActivate.
-                            onClick={(e) => { e.stopPropagation(); action.onClick(); }}
+                            onClick={(e) => { e.stopPropagation(); action.onClick(e); }}
                         >
                             <Show
                                 when={action.icon}
