@@ -97,7 +97,26 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
      * highlighted Read content were silently dropped post-completion.
      */
     const isStreaming = () => props.node.log?.open === true;
-    const hasChunks = () => (props.node.log?.chunks?.length ?? 0) > 0;
+    // Filtered the same way `ChunkList` filters below — NOT the raw
+    // `log.chunks.length`. A Bash tool's very first chunk is always
+    // bashwrap's own `[bashwrap] starting: N chars` marker (see
+    // output-cap.ts's `dropBashwrapStartingChunk`), which `ChunkList`
+    // already hides from render. Before this fix, `hasChunks()` counted
+    // that hidden chunk, so `isStreaming() && hasChunks()` matched and
+    // routed to `ChunkList` — which then rendered nothing (the one chunk
+    // it had was filtered out), instead of falling through to the
+    // `!hasChunks() && !hasResult()` branch's "⏳ Running…" placeholder a
+    // few lines down. The net effect: the tool panel auto-expanded (see
+    // ToolBlock.tsx's `autoExpanded()`, gated on status alone) straight
+    // into a visibly blank body for however long real output took to
+    // arrive, between the Working row's "Thinking…" and the first real
+    // chunk — the exact gap user reports still exist after
+    // dropBashwrapStartingChunk shipped (which only fixed what ChunkList
+    // rendered once it WAS the active branch, not which branch got
+    // chosen). Counting the post-filter length here means an all-
+    // bashwrap-marker chunk list now correctly reads as "no visible
+    // content yet" and shows the placeholder instead of an empty box.
+    const hasChunks = () => dropBashwrapStartingChunk(props.node.log?.chunks ?? []).length > 0;
     const hasResult = () => props.node.result != null;
     const chunks = () => props.node.log?.chunks ?? [];
 
