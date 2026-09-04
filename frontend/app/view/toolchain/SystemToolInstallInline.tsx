@@ -31,6 +31,16 @@ import "./SystemToolInstallInline.scss";
 
 type Phase = "checking" | "unavailable" | "idle" | "installing" | "done" | "failed";
 
+interface ResolvedInstallInfo {
+    commandPreview: string;
+    needsElevation: boolean;
+    /** Version this exact command would install, queried live from the
+     *  package manager's own catalog — `null`/absent when the query
+     *  failed or isn't implemented for this platform. Never a hardcoded
+     *  guess (see #2942). */
+    resolvedVersion?: string | null;
+}
+
 interface SystemToolInstallInlineProps {
     toolId: string;
     /** Fires once, on a successful install — the caller re-probes its
@@ -43,12 +53,21 @@ interface SystemToolInstallInlineProps {
      *  blank expanded area with no visible fallback. reagent P2,
      *  PR #2790. */
     onUnavailable?: () => void;
+    /** Pre-resolved install info from the caller (e.g. a parent that
+     *  already resolved every missing tool's command/version up front to
+     *  label its own toggle button) — when provided, this component skips
+     *  its own `toolchain.resolve_install_command` call and uses this
+     *  directly instead. Callers that don't pre-resolve (e.g. the
+     *  Toolchain modal's core-tools list) omit this and keep the
+     *  existing self-resolve-on-mount behavior. */
+    resolvedInfo?: ResolvedInstallInfo;
 }
 
 export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JSX.Element => {
     const [phase, setPhase] = createSignal<Phase>("checking");
     const [commandPreview, setCommandPreview] = createSignal("");
     const [needsElevation, setNeedsElevation] = createSignal(false);
+    const [resolvedVersion, setResolvedVersion] = createSignal<string | null>(null);
     const [lines, setLines] = createSignal<Array<{ line: string; stream: "stdout" | "stderr" }>>([]);
     const [error, setError] = createSignal<string | null>(null);
 
@@ -65,6 +84,13 @@ export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JS
     let disposed = false;
 
     onMount(async () => {
+        if (props.resolvedInfo) {
+            setCommandPreview(props.resolvedInfo.commandPreview);
+            setNeedsElevation(props.resolvedInfo.needsElevation);
+            setResolvedVersion(props.resolvedInfo.resolvedVersion ?? null);
+            setPhase("idle");
+            return;
+        }
         try {
             const r = await RpcApi.ToolchainResolveInstallCommandCommand(TabRpcClient, { toolId: props.toolId });
             if (disposed) return;
@@ -75,6 +101,7 @@ export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JS
             }
             setCommandPreview(r.commandPreview);
             setNeedsElevation(r.needsElevation);
+            setResolvedVersion(r.resolvedVersion ?? null);
             setPhase("idle");
         } catch {
             // Treat a failed probe the same as "unavailable" — the
@@ -151,7 +178,7 @@ export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JS
                             </p>
                         </Show>
                         <Button onClick={() => void startInstall()} className="green solid">
-                            Install
+                            {resolvedVersion() ? `Install v${resolvedVersion()} now` : "Install"}
                         </Button>
                     </div>
                 </Show>
@@ -159,7 +186,7 @@ export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JS
                     <div class="system-tool-install-log" classList={{ "is-done": phase() === "done", "is-failed": phase() === "failed" }}>
                         <div class="system-tool-install-log-header">
                             <Show when={phase() === "installing"}>
-                                <span class="system-tool-install-spinner" aria-hidden="true">⏳</span> Installing…
+                                <i class="fa-solid fa-spinner fa-spin" aria-hidden="true" /> Installing…
                             </Show>
                             <Show when={phase() === "done"}>
                                 <span class="system-tool-install-ok" aria-hidden="true">✓</span> Installed
@@ -168,9 +195,17 @@ export const SystemToolInstallInline = (props: SystemToolInstallInlineProps): JS
                                 <span class="system-tool-install-fail" aria-hidden="true">✗</span> Failed
                             </Show>
                         </div>
-                        <pre class="system-tool-install-log-body">
-                            {lines().map((l) => l.line).join("\n")}
-                        </pre>
+                        <Show when={phase() === "installing"}>
+                            <div class="system-tool-install-progress" aria-hidden="true">
+                                <div class="system-tool-install-progress-bar" />
+                            </div>
+                        </Show>
+                        <details class="system-tool-install-details">
+                            <summary>Details</summary>
+                            <pre class="system-tool-install-log-body">
+                                {lines().map((l) => l.line).join("\n")}
+                            </pre>
+                        </details>
                         <Show when={error()}>
                             <div class="system-tool-install-error">{String(error())}</div>
                         </Show>

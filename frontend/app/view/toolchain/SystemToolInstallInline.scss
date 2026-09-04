@@ -65,12 +65,39 @@
     color: var(--error-color);
 }
 
-.system-tool-install-spinner {
-    display: inline-block;
+.system-tool-install-progress {
+    height: 3px;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
+}
+
+.system-tool-install-progress-bar {
+    width: 40%;
+    height: 100%;
+    background: var(--accent-color);
+    animation: system-tool-install-progress-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes system-tool-install-progress-slide {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(250%); }
+}
+
+.system-tool-install-details {
+    summary {
+        cursor: pointer;
+        font-size: var(--text-xs, 11px);
+        color: var(--secondary-text-color);
+        user-select: none;
+
+        &:hover {
+            color: var(--main-text-color);
+        }
+    }
 }
 
 .system-tool-install-log-body {
-    margin: 0;
+    margin: var(--space-1, 6px) 0 0;
     padding: var(--space-1-5, 10px);
     max-height: 200px;
     overflow-y: auto;

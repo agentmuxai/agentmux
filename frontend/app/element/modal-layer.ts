@@ -129,6 +129,20 @@ export interface AgentPrereqRequest {
         installUrl: string;
         installLinkText: string;
     }>;
+    /** Tools successfully installed via the inline system-tool installer
+     *  in THIS prereq flow, kept alive across `modalLayer.replace()` calls
+     *  by the caller (`AgentPicker.tsx`) — `ModalLayer` remounts the whole
+     *  panel subtree on every `replace`, so any state owned by
+     *  `AgentPrereqModalPanel` itself would be wiped the moment a
+     *  post-install refresh (which routinely still reports the tool
+     *  missing — srv's own PATH is stale until restart) replaces this
+     *  request. reagent + Codex, PR #2966. */
+    installedPendingRestart: ReadonlySet<string>;
+    /** Fires once per successful install (before the caller's own
+     *  `onRefresh` re-probe) so the caller can add the tool to
+     *  `installedPendingRestart` in the SAME persistent set it threads
+     *  through every subsequent `replace` call. */
+    onToolInstalled: (tool: string) => void;
     /** User clicked "Refresh" — caller re-probes and either closes
      *  this modal (no missing) or replaces it with an updated list. */
     onRefresh: () => void;
