@@ -27,7 +27,7 @@ import { DiffViewer } from "./DiffViewer";
 import { HighlightedCode } from "./HighlightedCode";
 import { OutputHiddenMarker } from "./OutputHiddenMarker";
 import { capChars, createChunkCapper, createSpinnerCollapser, capText, dropBashwrapStartingChunk, MAX_TOOL_OUTPUT_LINES } from "./output-cap";
-import { formatCodePreview, formatReadPreview } from "./dedent";
+import { formatCodePreview, formatMarkdownPreview, formatReadPreview } from "./dedent";
 import { detectLanguage } from "./detectLanguage";
 import {
     registerToolRenderer,
@@ -542,6 +542,10 @@ function renderWrite(node: ToolNode): JSX.Element {
     // case anyway (a whole file starts at column 0) — which is exactly why the
     // narrowing half matters here: it's the only part that fires on a Write.
     const dedentedText = capped ? formatCodePreview(capped.text) : "";
+    // Markdown is indentation-sensitive — four leading spaces are a code
+    // block, and rescaling them to two turns it into prose. Dedent only for
+    // that path (codex P2 on PR #2958); `formatMarkdownPreview` documents why.
+    const markdownText = capped ? formatMarkdownPreview(capped.text) : "";
     const isMarkdown = filePath.endsWith(".md") || filePath.endsWith(".mdx");
     return (
         <div class="agent-tool-write">
@@ -563,7 +567,7 @@ function renderWrite(node: ToolNode): JSX.Element {
                     }
                 >
                     <div class="agent-tool-write-content agent-tool-write-md">
-                        <Markdown text={dedentedText} />
+                        <Markdown text={markdownText} />
                     </div>
                 </Show>
                 <Show when={capped!.hiddenLines > 0}>

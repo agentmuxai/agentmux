@@ -59,17 +59,23 @@
         font-family: var(--fixed-font, monospace);
         font-size: 12px;
         line-height: 1.4;
-        // Must match `.agent-terminal-output > div` in _document-nodes.scss.
-        // These are the SAME bytes at two points in one tool's life: chunks
-        // render here while it streams, then the final result re-renders
-        // through the terminal/JSON viewers on completion. This used to be
-        // `pre` while that is `pre-wrap`, so a long-lined Bash block visibly
-        // reflowed at the moment it finished.
-        // docs/analysis/tool-preview-indentation-and-wrapping-2026-09-02.md §4.3.
-        white-space: pre-wrap;
-        overflow-wrap: anywhere;
-        padding-left: 3ch;
-        text-indent: -3ch;
+        // Stays `pre`, deliberately — must match the viewer the completed tool
+        // actually renders through.
+        //
+        // An earlier revision of this PR switched these streaming chunks to
+        // `pre-wrap` to match `.agent-terminal-output > div`, on the theory that
+        // a Bash block reflowed when it finished. That was the wrong viewer:
+        // `renderBash` routes a completed Bash result to `BashOutputViewer`,
+        // which renders `<pre class="agent-bash-output">` — UA `white-space:
+        // pre`, no wrap. Bash was already consistent; the change *created* the
+        // reflow it claimed to remove, in the opposite direction (codex P2 on
+        // PR #2958).
+        //
+        // `.agent-terminal-output` is the CompactResult/string-body path, a
+        // different set of tools. Any genuine streaming-vs-final mismatch there
+        // is its own question and is not addressed here.
+        white-space: pre;
+        overflow-wrap: normal;
 
         &--stdout {
             color: var(--term-foreground, #d3d7cf);

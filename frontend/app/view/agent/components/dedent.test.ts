@@ -3,6 +3,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+    formatMarkdownPreview,
     formatCodePreview,
     formatReadPreview,
     normalizeIndentWidth,
@@ -179,7 +180,9 @@ describe("formatReadPreview", () => {
         // common 8-space prefix stripped; the remaining 4-space level narrowed
         // to 2; gutter right-aligned at width 2 with a single space.
         expect(out.withGutter).toBe('80 unsetEnv: ["CLAUDECODE"],\n81   authConfigDirEnvVar: "X",');
-        expect(out.body).toBe('unsetEnv: ["CLAUDECODE"],\n  authConfigDirEnvVar: "X",');
+        // `body` feeds the Markdown renderer, so it is dedent-only — the 4-space
+        // relative level survives rather than being halved (codex P2 on #2958).
+        expect(out.body).toBe('unsetEnv: ["CLAUDECODE"],\n    authConfigDirEnvVar: "X",');
     });
 
     it("removes the 9→10 column step that the raw <N>\\t gutter produced", () => {
@@ -196,7 +199,8 @@ describe("formatReadPreview", () => {
     it("degrades to plain dedent+narrow for unnumbered input", () => {
         const out = formatReadPreview("        a();\n            b();");
         expect(out.withGutter).toBe("a();\n  b();");
-        expect(out.body).toBe(out.withGutter);
+        // dedent-only, deliberately NOT narrowed — see formatMarkdownPreview
+        expect(out.body).toBe("a();\n    b();");
     });
 
     it("handles an empty string", () => {
@@ -267,8 +271,13 @@ describe("formatReadPreview — real transcript sample", () => {
     it("keeps relative structure intact — the nesting levels all survive", () => {
         // Source depths are 0/8/12/16; GCD is 4, so each halves to 0/4/6/8.
         // Same number of distinct levels, same ordering, half the width.
+        // Measured on the CODE half (`withGutter`), which is the one that gets
+        // narrowed; `body` is dedent-only for the Markdown renderer's sake.
         const depths = formatReadPreview(REAL)
-            .body.split("\n")
+            .withGutter.split("\n")
+            .map((l) => l.replace(/^\s*\d+ ?/, ""))
+            // strip the gutter FIRST — a blank source line is gutter-only, and
+            // filtering before stripping would count it as a depth-0 code line
             .filter((l) => l.trim() !== "")
             .map((l) => l.length - l.trimStart().length);
         expect(depths).toEqual([0, 0, 0, 4, 6, 6, 6, 6, 8]);
@@ -283,6 +292,37 @@ describe("formatReadPreview — real transcript sample", () => {
 
     it("contains no tab characters at all — the gutter tab is gone", () => {
         expect(formatReadPreview(REAL).withGutter).not.toContain("\t");
+    });
+});
+
+describe("formatMarkdownPreview — indentation is load-bearing in markdown", () => {
+    // codex P2 on PR #2958. Width normalisation is a readability win for a
+    // syntax-highlighted source preview and a correctness bug for a rendered one.
+
+    it("does NOT rescale a four-space indented code block into prose", () => {
+        const md = "# Title\n\n    const x = 1;\n    const y = 2;\n";
+        // 4 leading spaces = an indented code block. formatCodePreview would
+        // halve it to 2 and markdown would render it as an ordinary paragraph.
+        expect(formatCodePreview(md)).toContain("  const x = 1;");
+        expect(formatMarkdownPreview(md)).toContain("    const x = 1;");
+    });
+
+    it("does NOT re-nest nested lists", () => {
+        const md = "- a\n    - b\n        - c\n";
+        expect(formatMarkdownPreview(md)).toBe(md);
+    });
+
+    it("still dedents a uniformly-indented body (pre-existing behaviour)", () => {
+        expect(formatMarkdownPreview("  # Title\n  text")).toBe("# Title\ntext");
+    });
+
+    it("formatReadPreview.body is markdown-safe while withGutter is normalised", () => {
+        const read = "1\t# Title\n2\t\n3\t    code block line\n";
+        const out = formatReadPreview(read);
+        expect(out.body).toContain("    code block line");
+        expect(out.body).not.toMatch(/^\s*\d+ /m);
+        // the source-preview half keeps the narrowing
+        expect(out.withGutter).toContain("  code block line");
     });
 });
 

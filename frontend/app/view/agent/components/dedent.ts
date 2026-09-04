@@ -269,6 +269,24 @@ export function formatCodePreview(text: string): string {
 }
 
 /**
+ * Preview pipeline for text that will be handed to a **Markdown renderer**:
+ * dedent only, **never** {@link normalizeIndentWidth}.
+ *
+ * Markdown is indentation-sensitive in a way source code is not. Four leading
+ * spaces make an indented code block; rescaling them to two turns that block
+ * into ordinary prose, and the same rescale silently re-nests nested lists.
+ * Width normalisation is a readability win for a syntax-highlighted source
+ * preview and a correctness bug for a rendered one (codex P2 on PR #2958).
+ *
+ * Dedent is kept because it only removes a prefix *common to every line*, which
+ * is the pre-existing behaviour for this path and does not change relative
+ * structure.
+ */
+export function formatMarkdownPreview(text: string): string {
+    return stripCommonIndent(text);
+}
+
+/**
  * Full preview pipeline for a `Read` body. Splits the `<N>\t` gutter off,
  * dedents and narrows the code, then re-emits the gutter right-aligned
  * (see {@link renderNumberedGutter}).
@@ -283,12 +301,14 @@ export function formatCodePreview(text: string): string {
 export function formatReadPreview(text: string): { withGutter: string; body: string } {
     if (!text) return { withGutter: text, body: text };
     const split = splitNumberedGutter(text);
-    if (!split) {
-        const plain = formatCodePreview(text);
-        return { withGutter: plain, body: plain };
-    }
-    const body = formatCodePreview(split.body);
-    return { withGutter: renderNumberedGutter(split.numbers, body), body };
+    const raw = split ? split.body : text;
+    // `body` is dedent-only. It feeds the Markdown renderer, which is
+    // indentation-sensitive — see `formatMarkdownPreview`. Only `withGutter`,
+    // which feeds the syntax-highlighted source preview, gets the width
+    // normalisation. (codex P2 on PR #2958)
+    const body = formatMarkdownPreview(raw);
+    const code = formatCodePreview(raw);
+    return { withGutter: split ? renderNumberedGutter(split.numbers, code) : code, body };
 }
 
 /**

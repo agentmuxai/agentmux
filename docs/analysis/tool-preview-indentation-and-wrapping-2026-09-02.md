@@ -2,6 +2,9 @@
 
 **Date:** 2026-09-02
 **Author:** Agent4
+**Status:** active — §6.2, §6.3, §6.5, §6.6 shipped in #2958; §6.4 WITHDRAWN (its premise was wrong, see §4.3). §6.1's gutter-as-a-separate-column
+half is deliberately NOT built (see the note under it); the raggedness and markdown
+halves of §6.1 did ship. Remaining: the gutter column, and the ACP question in §7.
 **Repo state:** `agentmuxai/agentmux` main @ `01cd708e`
 **Method:** static read of the render path + CSS cascade, arithmetic on the
 tab-stop behaviour, and **measurement against real stored transcripts**
@@ -198,12 +201,29 @@ long tokens (long paths, base64, etc.)"). On `.agent-terminal-output` and
 arbitrary character. For code-bearing content that is worse than a horizontal
 scrollbar.
 
-**4.3 — A Bash block changes wrap behaviour when it finishes.** While running it
-renders through `ChunkList` → `.agent-tool-log-line` (`white-space: pre`, no
-wrap). On completion it re-renders through `BashOutputViewer` →
-`.agent-terminal-output > div` (`pre-wrap`, wraps). Same content, same panel,
-different layout — a visible reflow at the moment the tool completes.
-(`ToolOverlayLog.tsx:110-114` selects the branch.)
+**4.3 — ~~A Bash block changes wrap behaviour when it finishes.~~ WRONG — see
+the correction below.**
+
+> **Correction (2026-09-03, codex P2 on PR #2958).** This claimed that a Bash
+> block streams through `.agent-tool-log-line` (`pre`) and completes through
+> `.agent-terminal-output > div` (`pre-wrap`), reflowing at completion. **The
+> completion viewer is wrong.** `renderBash` routes a completed Bash result to
+> `BashOutputViewer`, which renders `<pre class="agent-bash-output">` — a `<pre>`
+> with no `white-space` declaration, so UA `white-space: pre`, no wrap.
+>
+> **Bash was already consistent.** `pre` while streaming, `pre` when finished.
+> There was no flip.
+>
+> `.agent-terminal-output` is the `CompactResult`/string-body path — a different
+> set of tools. Whether *those* have a genuine streaming-vs-final mismatch is a
+> separate question this analysis did not actually establish.
+>
+> Acting on the wrong claim briefly *created* the reflow it described, in the
+> opposite direction: an earlier revision of #2958 switched
+> `.agent-tool-log-line` to `pre-wrap`, making Bash wrap while streaming and
+> snap to horizontal scroll on completion. Reverted before merge. The lesson is
+> narrow and worth stating: §4's table was assembled by reading CSS and matching
+> class names, without tracing which viewer each *tool* actually routes to.
 
 ---
 
@@ -313,10 +333,16 @@ If wrapping must stay on Bash/Grep output, then at minimum:
   so continuations align under their own line's indentation instead of
   restarting at column 0.
 
-### 6.4 Fix the streaming→final wrap flip (§4.3)
+### 6.4 ~~Fix the streaming→final wrap flip (§4.3)~~ — WITHDRAWN
 
-Make `.agent-tool-log-line` and `.agent-terminal-output > div` agree. Whichever
-policy 6.3 picks, both should use it.
+Withdrawn: the flip it was fixing does not exist. See the correction in §4.3 —
+Bash completes through `BashOutputViewer` → `<pre class="agent-bash-output">`
+(`white-space: pre`), not `.agent-terminal-output`, so streaming and final
+already agree. `.agent-tool-log-line` stays `pre`.
+
+If a genuine mismatch exists on the `CompactResult`/string-body path, it needs
+establishing first — by tracing which viewer the tool actually routes to, not by
+matching class names in the stylesheet.
 
 ### 6.5 Give `.agent-diff` an explicit `white-space` (§5.1)
 
