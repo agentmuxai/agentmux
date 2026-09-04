@@ -550,9 +550,8 @@ pub struct AppState {
     /// Per-pane Ctrl+Wheel zoom factor, keyed by block_id. Applied as CSS
     /// `zoom` via `ExecuteJavaScript` (`BrowserPaneManager::apply_zoom`),
     /// deliberately NOT Chromium's native page zoom — every browser pane
-    /// shares its parent window's RequestContext (see
-    /// docs/specs/pane-shares-window-request-context-linux-2026-05-13.md),
-    /// so native zoom is scoped to HostZoomMap and shared across every pane
+    /// shares its parent window's RequestContext, so native zoom is scoped
+    /// to HostZoomMap and shared across every pane
     /// on the same host/profile. CSS injection sidesteps that entirely: no
     /// RequestContext/HostZoomMap involvement, so no cookie/session sharing
     /// tradeoff, and it's per-CefFrame by construction. Absent entry means
