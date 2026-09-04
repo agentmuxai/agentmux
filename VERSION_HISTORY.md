@@ -1,5 +1,14 @@
 # AgentMux Version History
 
+## 0.55.34 — 2026-09-03
+
+- fix(agent-pane): tool-preview code previews waste half their width on indentation
+- feat(jekt): publish per-agent public keys for cross-channel trust (phase A)
+- fix(reactive): start a turn for persistent agents that have not spawned yet
+- fix(launcher): widen the Windows splash window to fit staged status messages
+- fix(agent-pane): migrate ToolOverlayLog's height FLIP to the shared resize contract
+
+
 ## 0.55.33 — 2026-09-03
 
 - docs: record the OpenRouter Ori harness spike
