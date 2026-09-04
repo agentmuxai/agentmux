@@ -1844,11 +1844,48 @@ pub fn install_agent_turn_delivery(state: &AppState) {
                 .downcast_ref::<backend::blockcontroller::subprocess::SubprocessController>()
                 .is_some();
             if !is_subprocess {
-                return match backend::blockcontroller::deliver_agent_message(block_id, message) {
-                    Ok(backend::blockcontroller::AgentDelivery::Structured) => Ok(true),
-                    Ok(backend::blockcontroller::AgentDelivery::Pty) => Ok(false),
-                    Err(e) => Err(e),
-                };
+                match backend::blockcontroller::deliver_agent_message(block_id, message) {
+                    Ok(backend::blockcontroller::AgentDelivery::Structured) => return Ok(true),
+                    Ok(backend::blockcontroller::AgentDelivery::Pty) => return Ok(false),
+                    Err(e) => {
+                        // A persistent controller that is REGISTERED BUT NOT YET
+                        // SPAWNED can't be steered — `deliver_agent_message`
+                        // writes to a live stdin and there isn't one — but it can
+                        // be STARTED. Controllers register lazily ("spawns on
+                        // first message"), so after any srv restart every
+                        // persistent agent sits in this state until a human sends
+                        // it something from the UI. Without this fall-through,
+                        // agent-to-agent delivery to such an agent fails
+                        // permanently with "persistent process not running", and
+                        // first contact is exactly the case that breaks.
+                        // #2930 built the machinery to start a turn from here and
+                        // scoped it to subprocess controllers; this widens it to
+                        // the one other case that needs it.
+                        // docs/reports/REPORT_JEKT_DELIVERY_DROPS_UNSPAWNED_PERSISTENT_AGENTS_2026_09_03.md
+                        //
+                        // Narrow on purpose. `needs_spawn()` is false while a
+                        // spawn is already in flight (that surfaces as the
+                        // retryable "still starting up"), and false for a live
+                        // process whose delivery failed for some other reason —
+                        // both must keep returning the original error rather than
+                        // starting a second turn.
+                        let recoverable = ctrl
+                            .as_any()
+                            .downcast_ref::<backend::blockcontroller::persistent::PersistentSubprocessController>()
+                            .is_some_and(|p| p.needs_spawn());
+                        if !recoverable {
+                            return Err(e);
+                        }
+                        // Nothing was persisted or written: `inject_message`
+                        // returns before its blockfile append, so falling through
+                        // cannot double-deliver.
+                        tracing::info!(
+                            block_id = %block_id,
+                            error = %e,
+                            "reactive delivery: persistent controller not yet spawned — starting a turn instead"
+                        );
+                    }
+                }
             }
 
             // `MessageSender` is synchronous but starting a turn is not, so this
@@ -1886,7 +1923,7 @@ pub fn install_agent_turn_delivery(state: &AppState) {
             // registered by construction. Do not "simplify" this to Register.
             let Ok(handle) = tokio::runtime::Handle::try_current() else {
                 return Err(
-                    "no tokio runtime available to start a subprocess agent turn".to_string(),
+                    "no tokio runtime available to start an agent turn".to_string(),
                 );
             };
             // `block_in_place` panics on a current-thread runtime. Production is
@@ -1894,7 +1931,7 @@ pub fn install_agent_turn_delivery(state: &AppState) {
             // is correct, since the alternative is the optimistic lie above.
             if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::CurrentThread {
                 return Err(
-                    "cannot start a subprocess agent turn from a current-thread runtime"
+                    "cannot start an agent turn from a current-thread runtime"
                         .to_string(),
                 );
             }
@@ -1903,7 +1940,8 @@ pub fn install_agent_turn_delivery(state: &AppState) {
             let message = message.to_string();
             tracing::info!(
                 block_id = %block_id_owned,
-                "reactive delivery: starting subprocess agent turn (no PTY fallback)"
+                kind = if is_subprocess { "subprocess" } else { "persistent (not yet spawned)" },
+                "reactive delivery: starting agent turn (no PTY fallback)"
             );
             let started = tokio::task::block_in_place(|| {
                 handle.block_on(crate::server::agent_handlers::run_agent_turn(
@@ -1920,7 +1958,7 @@ pub fn install_agent_turn_delivery(state: &AppState) {
                     tracing::error!(
                         block_id = %block_id_owned,
                         error = %e,
-                        "reactive delivery: subprocess agent turn failed to start"
+                        "reactive delivery: agent turn failed to start"
                     );
                     Err(e)
                 }
