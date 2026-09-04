@@ -10,13 +10,13 @@
 
 ## Summary
 
-While testing the fresh-PC onboarding fix (#2942/#2943/#2947) on a real Windows 11 VM, the VM was left running unattended and went to sleep for ~4h15m (`Sleep Reason: System Idle`, confirmed via the Windows System event log). The running AgentMux instance's live WebSocket connection died silently at the moment sleep began — VM suspend doesn't deliver a graceful TCP close, so the backend (`agentmux-srv`) had no signal that the frontend was gone. When the user later double-clicked the exe expecting a fresh window, the launcher did exactly what it's designed to do — detected the still-running instance via the named pipe and forwarded an `open_new_window` request — but the window that request produced was **a pre-warmed "pool" window promoted from before the sleep**, whose own frontend connection was equally dead. The user saw nothing respond. Four overlapping top-level AgentMux windows now exist on screen at conflicting positions from repeated attempts, none of them confirmed working.
+While testing the fresh-PC onboarding fix (#2942/#2943/#2947) on a real Windows 11 VM, the VM was left running unattended and went to sleep for ~4h15m (`Sleep Reason: System Idle`, confirmed via the Windows System event log). The running AgentMux instance's WebSocket connection dropped at the moment sleep began — **and, corrected from an earlier draft of this retro (Codex review, PR #2957), the backend actually did detect and cleanly handle that disconnect** (`agentmux-srv/src/server/websocket.rs`'s `handle_ws_connection` logs `"WebSocket client disconnected"` and runs `unregister_ws`/`unsubscribe_all` right after its read loop exits — that's a real, logged detection, not a silent failure), and the frontend has its own automatic reconnect logic (`frontend/app/store/ws.ts`'s `onclose` → `reconnect()`, backoff-timed, up to 20 attempts). What's genuinely unproven, not what was originally claimed here, is *why* that reconnect machinery didn't restore a working connection across a multi-hour suspend — see Root Cause below. When the user later double-clicked the exe expecting a fresh window, the launcher did exactly what it's designed to do — detected the still-running instance via the named pipe and forwarded an `open_new_window` request — but the window that request produced was **a pre-warmed "pool" window promoted from before the sleep**, and the user saw nothing respond. Four overlapping top-level AgentMux windows now exist on screen at conflicting positions from repeated attempts, none of them confirmed working.
 
 ## Timeline (all times reconstructed from real logs — `agentmux-launcher.log` — and the Windows System event log, not inferred)
 
 - **~12:53 local** — first clean launch of the app on this VM (separate, unrelated investigation of first-launch latency — see tracking issue #2940).
 - **13:38:59** — `Microsoft-Windows-Kernel-Power` Event ID 42: *"The system is entering sleep. Sleep Reason: System Idle."*
-- **20:38:57.020135Z** (`agentmux-launcher.log`) — `WebSocket client disconnected conn_id=b7f3c2a9-...`. This is ~1 second after the sleep event above (UTC/local offset accounts for the hour gap between the two timestamps) — the disconnect is the OS tearing down network state as the machine suspends, not a graceful app-level close.
+- **20:38:57.020135Z** (`agentmux-launcher.log`) — `WebSocket client disconnected conn_id=b7f3c2a9-...`. This is ~1 second after the sleep event above (UTC/local offset accounts for the hour gap between the two timestamps). The disconnect itself is real and was properly detected — the backend's read loop exited (network state torn down by suspend, not a graceful close frame from the client) and the server ran its normal cleanup (`unregister_ws`/`unsubscribe_all`). What's not established is whether this specific `b7f3c2a9` connection belonged to one of the pool windows later promoted, or to an unrelated already-open window — not traced.
 - **20:38:59** (`[1788467940]`) — last launcher log line before a **4-hour-16-minute gap with zero log activity** — no `ui-liveness` probes, no `srv` stderr relayed, nothing. The launcher process itself was suspended along with the rest of the VM.
 - **13:39:01 / 17:54:27 local** — `Microsoft-Windows-Kernel-Power` Event ID 107 (*"The system has resumed from sleep"*) and `Microsoft-Windows-Kernel-General` Event ID 1 (*system clock jumped from `20:39:01` to `00:54:27`*) — the VM woke back up.
 - **`[1788483271]`** (log resumes) — `[ui-liveness] UI thread alive — probe nonce=39 rtt=4ms` — the launcher's liveness probe to the host succeeds again (host process survived the suspend, Win32 message loop responsive).
@@ -31,25 +31,46 @@ While testing the fresh-PC onboarding fix (#2942/#2943/#2947) on a real Windows 
 
 **Confirmed:** the VM's system sleep is what broke the running instance's live connections. This is not in dispute — the WebSocket disconnect timestamp and the `Sleep` event are ~1 second apart, and the entire 4h16m log-silence gap exactly matches the sleep→resume window.
 
-**Strongly supported, not yet visually confirmed:** the promoted window the user's double-click produced is one of the pool's pre-warmed windows, created *before* the sleep, carrying a dead connection. Read directly in `agentmux-cef/src/commands/window_pool.rs`'s `promote_pool_window`:
+**Corrected (Codex review, PR #2957 round 1):** an earlier draft of this retro quoted the wrong platform's code for the promote path and mischaracterized the disconnect as unnoticed. Neither survives scrutiny as originally written. The actual picture, verified directly against the Windows-specific code (this incident happened on Windows; the non-Windows fallback in the same file is irrelevant here):
 
 ```rust
-// Validate browser is still alive. On non-Windows we don't cache a
-// native window handle; CEF state presence is the liveness check.
-if state.get_browser(&label).is_none() {
+// agentmux-cef/src/commands/window_pool.rs:1009 — #[cfg(target_os = "windows")]
+pub fn promote_pool_window(...) -> Option<String> {
     ...
-    cleanup_failed_promote_orphan_cross_platform(state, &label);
-    return None;
-}
+    let raw_hwnd: Option<*mut std::ffi::c_void> = match state.get_browser(&label) {
+        None => { /* log + None */ }
+        Some(browser) => match browser.host() {
+            None => { /* log + None */ }
+            Some(host) => {
+                let cef_hwnd = host.window_handle().0;
+                if !cef_hwnd.is_null() {
+                    Some(cef_hwnd as *mut std::ffi::c_void)
+                } else {
+                    // CEF lost the reference — fall back to cache, then
+                    // verify the cached HWND is still a live OS window.
+                    let cached = pool_hwnd_cache().lock().unwrap().get(&label).copied();
+                    match cached {
+                        None => None,
+                        Some(h) => {
+                            let alive = unsafe { IsWindow(h as HWND) } != 0;
+                            if alive { Some(h as *mut std::ffi::c_void) } else { None }
+                        }
+                    }
+                }
+            }
+        },
+    };
 ```
 
-The only "liveness" check before promoting a pool window is **"does this CEF browser handle still exist in the host's own state map"** — a process-object-existence check, not a functional one. A pool window's CEF browser object survives a VM suspend perfectly well (it's just memory); its WebSocket connection to the backend does not. Promotion doesn't re-verify the connection, doesn't force a reload, and doesn't wait for a fresh first-paint/connect signal before considering the `open_new_window` request satisfied — the saga (`pool_respawn_on_promote`) only tracks the pool *refill*, not whether the promoted window is actually usable.
+This is a genuinely more thorough check than "does an object exist in a map" — it resolves the browser, its host, the CEF-reported HWND (falling back to a cache, a known CEF quirk per `SPEC_POOL_WINDOW_HWND_NULL_2026_05_06.md`), and validates that cached handle against the real OS window table via Win32 `IsWindow()`. **It is still insufficient for this specific failure mode, but for a narrower and more precise reason than the earlier draft claimed**: `IsWindow()` only confirms the OS hasn't destroyed or recycled the window handle. A VM suspend/resume cycle does not destroy window handles — nothing in the OS reclaims them just because the machine slept — so `IsWindow()` returns true regardless of whether the CEF renderer process behind that handle is still responsive or whether its page's WebSocket connection survived. The check validates window-handle existence, not renderer or connection health, and none of the Windows promote path's checks reach either of those.
 
-`pool_respawn_on_promote`'s own doc comment (`saga/pool_respawn.rs:70-79`) already states the failure posture plainly: *"if refill genuinely fails, the next promote will start a fresh saga"* — the saga has no concept of "the promote itself produced a dead window," only "did the pool get refilled." That's a real, load-bearing gap for exactly this scenario.
+**What is NOT established, and should not be presented as settled:** whether the specific promoted pool window(s) actually carried a dead connection. The backend did detect and cleanly handle at least one disconnect (`b7f3c2a9`, see Timeline), and the frontend's `ws.ts` has automatic reconnect with up to 20 backoff-timed attempts — this is not a system with no recovery path. A plausible mechanism for why recovery still failed: browser/renderer `setTimeout` scheduling does not fire while a process is suspended, so a reconnect timer armed before sleep would not "count down" during the 4h16m gap — but if `reconnectTimes` was already elevated before sleep, or the scheduling resumes in a way that immediately exhausts the remaining attempts against a still-unreachable backend right at wake, the 20-attempt budget could burn out in the first few seconds after resume, before the backend's own `srv-liveness` had recovered from its own missed probes (see Timeline). This is a plausible, mechanism-grounded hypothesis, not a confirmed one — it has not been traced through actual `reconnectTimes` values or `ws.ts` log output from this incident.
+
+The saga (`pool_respawn_on_promote`) itself doesn't help either way — it only tracks the pool *refill* (spawning a replacement background window), not whether the just-promoted window is functional. Its own doc comment (`saga/pool_respawn.rs:70-79`) states the failure posture plainly: *"if refill genuinely fails, the next promote will start a fresh saga"* — there is no concept anywhere in this path of "the promote itself produced a window that isn't actually usable," independent of whatever the real mechanism turns out to be.
 
 ## Why the user saw "nothing happens"
 
-The launcher did not fail silently — it correctly forwarded the request and the host correctly ran its promote/refill machinery, logging success the whole way. The gap is entirely in what "success" means: the code confirms *a window object exists and the pool was refilled*, never *the window the user is looking at is actually connected and responsive*. From the user's side, double-clicking the exe either re-surfaced an already-dead window, or added a new dead one to the stack — visually indistinguishable from "nothing happened."
+The launcher did not fail silently — it correctly forwarded the request and the host correctly ran its promote/refill machinery, logging success the whole way, and every layer involved (backend disconnect handling, frontend reconnect, Windows HWND validation) has real, working failure-handling of its own. The gap is that none of those individually-correct mechanisms compose into an end-to-end guarantee: the promote path confirms a window *handle* is valid, not that the page behind it is connected and responsive, and whatever actually broke the frontend connection (most plausibly, but not confirmed, an exhausted reconnect budget across a multi-hour suspend) sits below the level any of these checks look at. From the user's side, double-clicking the exe either re-surfaced an already-broken window, or added a new one to the stack in the same state — visually indistinguishable from "nothing happened."
 
 ## Recommendation
 
@@ -66,3 +87,5 @@ Matches what was asked for directly: **at the very worst, double-clicking the ex
 - Still open: which of the four stacked windows (if any) is actually rendering correctly — the log evidence strongly implies at least one promoted window is dead, but this remains inference from logs + a `EnumWindows` dump, not a direct visual check.
 - Why `srv-liveness` missed 2 consecutive probes right after resume, then apparently recovered on its own (no further missed-probe lines after `[1788483284]`) — likely just the backend catching up on deferred timer work after a long suspend, but not directly traced.
 - Whether the `9ceeb40c` connection in the `ws egress lane full` burst is definitively the pre-sleep zombie connection, versus some other in-flight connection — inferred from conn-id mismatch with the freshly-connected `75390d27`, not confirmed by reading server-side connection-tracking state directly.
+- **New, from the Codex-prompted correction above**: whether the promoted windows' frontends actually failed to reconnect, and if so, by which mechanism — the "reconnect budget exhausted across a multi-hour suspend" explanation is plausible and grounded in real code (`ws.ts`'s 20-attempt cap, browser timer suspension), but not traced through actual reconnect-attempt logs from this incident. This is now the load-bearing open question the original draft treated as settled.
+- Whether `b7f3c2a9` (the one disconnect actually observed in the launcher log) belonged to any of the windows later promoted, or to some other already-open window entirely unrelated to the double-click's outcome.
