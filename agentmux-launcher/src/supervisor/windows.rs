@@ -523,7 +523,7 @@ pub(crate) async fn run_windows(
                 let delayed_host_pipe = std::sync::Arc::clone(&host_pipe);
                 tokio::spawn(async move {
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                    if !delayed_host_pipe.has_registered_host().await {
+                    if !delayed_host_pipe.is_connected().await {
                         delayed_sink.sub_begin(
                             "host",
                             "first-run-wait",
