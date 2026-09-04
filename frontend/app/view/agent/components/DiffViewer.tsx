@@ -253,11 +253,31 @@ export const DiffViewer = (props: DiffViewerProps): JSX.Element => {
         })();
     });
 
+    // Applying the Shiki HTML has to happen BOTH when the html arrives and when
+    // the element is created, because neither event implies the other.
+    //
+    // The <pre> lives inside the `highlightedHtml() !== null` <Show> below, so
+    // the same signal that carries the html also creates the element that
+    // receives it. An effect alone loses that race: it can run while `preEl` is
+    // still undefined, the `if (preEl && ...)` guard silently does nothing, and
+    // because the signal never changes again nothing ever fills the freshly
+    // created <pre>. What the user sees is the diff appearing (the plain
+    // fallback, while Shiki loads) and then vanishing the moment highlighting
+    // resolves, leaving just the file-path header — reported as "the preview
+    // shows for a moment, then is replaced by a single path to the file", and
+    // confirmed live: `.agent-diff--highlighted` mounted with its <pre> at
+    // height 0 and textContent "".
+    //
+    // `applyHighlight` is therefore called from the ref callback too, which
+    // runs exactly when the element exists. Whichever happens last wins, and
+    // both orderings end up with a filled <pre>. (`HighlightedCode` never hit
+    // this because its <pre> is unconditionally mounted.)
     let preEl: HTMLPreElement | undefined;
-    createEffect(() => {
+    const applyHighlight = () => {
         const h = highlightedHtml();
         if (preEl && h !== null) preEl.innerHTML = h;
-    });
+    };
+    createEffect(applyHighlight);
 
     // --- No diff path ---
     if (!diff()) {
@@ -305,7 +325,13 @@ export const DiffViewer = (props: DiffViewerProps): JSX.Element => {
                     does not overwrite it. The <pre> receives only Shiki content. */}
                 <div class="agent-diff agent-diff--highlighted">
                     <div class="agent-diff-header">{filePath()}</div>
-                    <pre ref={preEl} class="agent-diff-highlighted-body" />
+                    <pre
+                        ref={(el) => {
+                            preEl = el;
+                            applyHighlight();
+                        }}
+                        class="agent-diff-highlighted-body"
+                    />
                 </div>
             </Show>
             <Show when={(diffCap()?.hiddenLines ?? 0) > 0}>
