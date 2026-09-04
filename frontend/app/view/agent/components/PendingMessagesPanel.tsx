@@ -41,20 +41,46 @@ export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Elem
     const queuedMessages = createMemo(() =>
         props.pendingMessages().filter((m) => m.enqueuedWhileBusy),
     );
+    // SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md Phase 1: once
+    // flushHeldMessages has actually started delivering an entry
+    // (`PendingMessageFlushStarted`, dispatched right before its
+    // `deliverToBackend` call), "sends at the agent's next step" is no
+    // longer true — delivery is already in flight — and the recall/edit
+    // affordance no longer applies to it. Only the still-open (non-flushing)
+    // count keeps the original copy; a flushing-only queue gets its own,
+    // honest wording instead of implying it's still waiting.
+    const stillQueuedCount = createMemo(
+        () => queuedMessages().filter((m) => !m.flushing).length,
+    );
     return (
         <Show when={queuedMessages().length > 0}>
             <div class="agent-pending-zone">
                 <div class="agent-pending-header">
                     <span class="agent-spinner-dot" />
                     <span class="agent-pending-header-text">
-                        Queued — sends at the agent's next step; ↑ to edit, Esc to send now (
-                        {queuedMessages().length}
-                        {queuedMessages().length === 1 ? " message" : " messages"})
+                        <Show
+                            when={stillQueuedCount() > 0}
+                            fallback={
+                                <>
+                                    Sending — reaching the agent any moment (
+                                    {queuedMessages().length}
+                                    {queuedMessages().length === 1 ? " message" : " messages"})
+                                </>
+                            }
+                        >
+                            Queued — sends at the agent's next step; ↑ to edit, Esc to send now (
+                            {stillQueuedCount()}
+                            {stillQueuedCount() === 1 ? " message" : " messages"})
+                        </Show>
                     </span>
                 </div>
                 <For each={queuedMessages()}>
                     {(msg) => (
-                        <div class="agent-pending-item" data-message-id={msg.id}>
+                        <div
+                            class="agent-pending-item"
+                            classList={{ "agent-pending-item-flushing": !!msg.flushing }}
+                            data-message-id={msg.id}
+                        >
                             <pre>{msg.text}</pre>
                         </div>
                     )}

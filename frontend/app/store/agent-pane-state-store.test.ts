@@ -364,4 +364,79 @@ describe("agent-pane-state-store (cascade contracts)", () => {
             }
         });
     });
+
+    // SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md: the attached-task
+    // axis (SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md) had zero logging —
+    // every other axis this file logs got a `[wave-turn]` line via
+    // SPEC_AGENT_TURN_PHASE_TIMELINE_LOGGING_2026_08_18.md, this one didn't.
+    // Without it, `muxlog phases` couldn't confirm whether the axis actually
+    // tracked a long-running attached task through a "pane reads Worked
+    // while clearly still working" window, or never observed it at all.
+    describe("[wave-turn] attached-task axis logging", () => {
+        it("logs attached-task-observed with the current phase and axis state", () => {
+            const info = vi.spyOn(console, "info").mockImplementation(() => {});
+            try {
+                registerPane("blockAttached", "agentA", noopProj());
+                info.mockClear();
+
+                dispatch("blockAttached", { type: "AttachedTaskObserved", at: 500 });
+
+                const line = info.mock.calls.find((c) => c.join(" ").includes("attachedTask: attached-task-observed"));
+                expect(line).toBeDefined();
+                expect(line?.join(" ")).toContain("phase=Idle");
+                expect(line?.join(" ")).toContain("attachedTask=since=500");
+            } finally {
+                info.mockRestore();
+            }
+        });
+
+        it("logs attached-task-cleared", () => {
+            const info = vi.spyOn(console, "info").mockImplementation(() => {});
+            try {
+                registerPane("blockAttached2", "agentA", noopProj());
+                dispatch("blockAttached2", { type: "AttachedTaskObserved", at: 500 });
+                info.mockClear();
+
+                dispatch("blockAttached2", { type: "AttachedTaskCleared" });
+
+                const line = info.mock.calls.find((c) => c.join(" ").includes("attachedTask: attached-task-cleared"));
+                expect(line).toBeDefined();
+                expect(line?.join(" ")).toContain("attachedTask=null");
+            } finally {
+                info.mockRestore();
+            }
+        });
+
+        it("logs the registry-derived axis independently of the live axis", () => {
+            const info = vi.spyOn(console, "info").mockImplementation(() => {});
+            try {
+                registerPane("blockAttached3", "agentA", noopProj());
+                info.mockClear();
+
+                dispatch("blockAttached3", { type: "RegistryAttachedTaskObserved", at: 700 });
+
+                const line = info.mock.calls.find((c) => c.join(" ").includes("attachedTask: registry-attached-task-observed"));
+                expect(line).toBeDefined();
+                expect(line?.join(" ")).toContain("registryAttachedTaskSince=700");
+                expect(line?.join(" ")).toContain("attachedTask=null");
+            } finally {
+                info.mockRestore();
+            }
+        });
+
+        it("does not log for a no-op (already-observed) dispatch", () => {
+            const info = vi.spyOn(console, "info").mockImplementation(() => {});
+            try {
+                registerPane("blockAttached4", "agentA", noopProj());
+                dispatch("blockAttached4", { type: "AttachedTaskObserved", at: 500 });
+                info.mockClear();
+
+                dispatch("blockAttached4", { type: "AttachedTaskObserved", at: 999 });
+
+                expect(info.mock.calls.some((c) => c.join(" ").includes("attachedTask:"))).toBe(false);
+            } finally {
+                info.mockRestore();
+            }
+        });
+    });
 });

@@ -649,6 +649,18 @@ export type AgentPaneCommand =
            */
           enqueuedWhileBusy: boolean;
       }
+    /**
+     * flushHeldMessages (useAgentCommands.ts) is about to actually deliver
+     * this held message — dispatched right before the `deliverToBackend`
+     * call, i.e. the moment sending genuinely begins, not merely "the turn
+     * it was queued behind has ended" (those can be far apart when a
+     * controller refresh is deferred — see the `PendingMessageFlushStarted`
+     * reducer arm's own doc comment). Marks the entry `flushing` so
+     * PendingMessagesPanel can stop claiming "sends at the agent's next
+     * step" once that's no longer true. See
+     * docs/specs/SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md Phase 1.
+     */
+    | { type: "PendingMessageFlushStarted"; id: string }
     /** Backend acknowledged the message — remove from pending. */
     | { type: "PendingMessageAccepted"; id: string }
     /** RPC failed — remove the entry so user doesn't see a ghost row. */
@@ -966,6 +978,7 @@ export type AgentPaneEvent =
      * PR D — spec §8 / issue #728 gap 2.
      */
     | { type: "submit-timed-out"; at: number }
+    | { type: "pending-flush-started"; id: string }
     | { type: "pending-queued"; id: string }
     | { type: "pending-accepted"; id: string; wasPresent: boolean }
     | { type: "pending-rejected"; id: string; wasPresent: boolean }

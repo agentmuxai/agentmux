@@ -1344,6 +1344,75 @@ describe("agent-pane-state reducer", () => {
             const r = update(s2, { type: "PendingMessageAccepted", id: "b" });
             expect(r.state.pending.map((m) => m.id)).toEqual(["a", "c"]);
         });
+
+        // SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md Phase 1
+        // (codex P2 on PR #2970, corrected design): `flushing` is set at the
+        // moment flushHeldMessages actually starts delivering a held
+        // message — NOT unconditionally on TurnEnd, which can be well
+        // before delivery genuinely begins if a controller refresh is still
+        // deferred. This closes the "Worked" + stale "Queued — sends at
+        // next step" copy desync without ever claiming "Sending" for a
+        // message that hasn't actually started sending.
+        it("PendingMessageFlushStarted marks the matching entry flushing", () => {
+            const s0 = update(mk(), {
+                type: "PendingMessageQueued",
+                enqueuedWhileBusy: true,
+                id: "m1",
+                text: "hi",
+                at: 150,
+            }).state;
+            expect(s0.pending[0].flushing).toBeFalsy();
+            const r = update(s0, { type: "PendingMessageFlushStarted", id: "m1" });
+            expect(r.state.pending).toHaveLength(1);
+            expect(r.state.pending[0]).toMatchObject({ id: "m1", flushing: true });
+            expect(r.events[0]).toMatchObject({ type: "pending-flush-started", id: "m1" });
+        });
+
+        it("PendingMessageFlushStarted only touches the matching id, leaving others untouched", () => {
+            const s0 = update(
+                update(mk(), {
+                    type: "PendingMessageQueued", enqueuedWhileBusy: true, id: "a", text: "1", at: 100,
+                }).state,
+                { type: "PendingMessageQueued", enqueuedWhileBusy: true, id: "b", text: "2", at: 110 },
+            ).state;
+            const r = update(s0, { type: "PendingMessageFlushStarted", id: "a" });
+            expect(r.state.pending.find((m) => m.id === "a")?.flushing).toBe(true);
+            expect(r.state.pending.find((m) => m.id === "b")?.flushing).toBeFalsy();
+        });
+
+        it("PendingMessageFlushStarted for an unknown id is a same-ref no-op", () => {
+            const start = mk();
+            const r = update(start, { type: "PendingMessageFlushStarted", id: "ghost" });
+            expect(r.state).toBe(start);
+            expect(r.events).toEqual([]);
+        });
+
+        it("PendingMessageFlushStarted is idempotent on an already-flushing entry (no redundant array churn)", () => {
+            const s0 = update(mk(), {
+                type: "PendingMessageQueued",
+                enqueuedWhileBusy: true,
+                id: "m1",
+                text: "hi",
+                at: 150,
+            }).state;
+            const s1 = update(s0, { type: "PendingMessageFlushStarted", id: "m1" }).state;
+            const r2 = update(s1, { type: "PendingMessageFlushStarted", id: "m1" });
+            expect(r2.state).toBe(s1);
+            expect(r2.events).toEqual([]);
+        });
+
+        it("TurnEnd does NOT mark pending entries flushing — that's PendingMessageFlushStarted's job now", () => {
+            const s0 = update(streaming(100), {
+                type: "PendingMessageQueued",
+                enqueuedWhileBusy: true,
+                id: "m1",
+                text: "hi",
+                at: 150,
+            }).state;
+            const r = update(s0, { type: "TurnEnd", stats: null }, 200);
+            expect(r.state.turnPhase.kind).toBe("Done");
+            expect(r.state.pending[0].flushing).toBeFalsy();
+        });
     });
 
     describe("Init phase (gap 1)", () => {
