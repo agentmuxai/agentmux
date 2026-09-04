@@ -205,10 +205,13 @@ pub fn write_with_nonce(
         // doc comment on `AgentEntry`.
         channel: String::new(),
         registration_nonce,
-        // Written here too, for struct uniformity, but only the SHARED
-        // registry's copy is load-bearing: a same-instance sender is verified
-        // by the host-tier HMAC path, which never consults this file.
-        jekt_public_key: jekt_public_key_for(agent_id),
+        // Deliberately EMPTY in the per-channel registry. Only the shared
+        // registry's copy is load-bearing — a same-instance sender is verified
+        // by the host-tier HMAC path, which never consults this file — so
+        // resolving it here would mean a synchronous SQLite lookup, held under
+        // `REGISTRY_OP_LOCK`, on every local agent registration and
+        // re-registration, for a value nothing reads (reagent P2 on PR #2959).
+        jekt_public_key: String::new(),
     };
     let path = agent_path(data_dir, agent_id);
     let Ok(json) = serde_json::to_string(&entry) else { return };
