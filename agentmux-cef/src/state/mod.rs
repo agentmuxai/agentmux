@@ -115,8 +115,9 @@ pub struct AppState {
     /// Window initialization status ("ready" or "wave-ready")
     pub window_init_status: Mutex<String>,
 
-    /// Linux startup white-flash fix (docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md).
-    /// Window labels whose native `window.show()`/focus + splash-ready-file has
+    /// Startup white-flash fix (docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md,
+    /// docs/reports/REPORT_SPLASH_TO_FIRST_PAINT_BLANK_WINDOW_GAP_2026_09_03.md).
+    /// Window labels whose native `window.show()`/focus + splash dismiss has
     /// been deferred by `on_load_end` pending a real first-paint confirmation
     /// from the frontend (`report_first_paint` IPC command) or a safety-net
     /// timeout, whichever fires first. Value is `(armed_at, epoch)` — `epoch`
@@ -124,21 +125,23 @@ pub struct AppState {
     /// call for the same label (e.g. a reload/retry mid-startup re-arms the
     /// gate) firing at its original, now-too-early deadline and revealing the
     /// window ahead of the *current* navigation's real paint. Mirrors the
-    /// epoch pattern in `browser_pane::auth`. Only populated/consumed on
-    /// Linux; the field exists unconditionally to keep `AppState` un-cfg'd.
+    /// epoch pattern in `browser_pane::auth`. Populated/consumed on Linux
+    /// (original) and Windows (ported 2026-09-03, same field — no reason for
+    /// a second copy); the field exists unconditionally to keep `AppState`
+    /// un-cfg'd, so it stays inert-but-present on macOS too.
     pub linux_paint_gate_pending: Mutex<std::collections::HashMap<String, (std::time::Instant, u64)>>,
 
-    /// Linux startup white-flash fix, second-round race (reagent PR #2151
-    /// review): `report_first_paint` can reach the UI thread before
-    /// `on_load_end` arms `linux_paint_gate_pending` for the same label — CEF's
-    /// main-frame load-complete isn't guaranteed to fire after the frontend's
-    /// first compositor frame (render-blocking stylesheets can resolve, and a
-    /// frame can paint, before other load-blocking resources finish and
+    /// Startup white-flash fix, second-round race (reagent PR #2151 review):
+    /// `report_first_paint` can reach the UI thread before `on_load_end` arms
+    /// `linux_paint_gate_pending` for the same label — CEF's main-frame
+    /// load-complete isn't guaranteed to fire after the frontend's first
+    /// compositor frame (render-blocking stylesheets can resolve, and a frame
+    /// can paint, before other load-blocking resources finish and
     /// `on_load_end` runs). Labels land here when the signal arrives too
     /// early; `on_load_end` checks this set before arming so it can reveal
     /// immediately instead of falling through to the slower safety timeout.
-    /// Only populated/consumed on Linux; unconditional field for the same
-    /// reason as `linux_paint_gate_pending` above.
+    /// Populated/consumed on Linux and Windows (see `linux_paint_gate_pending`
+    /// above); unconditional field for the same reason.
     pub linux_first_paint_seen: Mutex<std::collections::HashSet<String>>,
 
     /// Browser-pane top-level navigation watchdog. Chromium's underlying TCP
