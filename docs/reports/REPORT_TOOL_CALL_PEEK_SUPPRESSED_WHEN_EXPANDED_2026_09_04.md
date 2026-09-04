@@ -1,5 +1,6 @@
 # Report: hover-to-peek time/token panel is missing on expanded tool calls
 
+**Status:** implemented — fix + updated tests in PR #2972.
 **Date:** 2026-09-04
 **Author:** agent3
 **Repo state:** `agentmuxai/agentmux` main @ `b2fbf8bd1`
