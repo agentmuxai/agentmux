@@ -49,8 +49,22 @@ use crate::startup_events::{StartupEvent, StartupStatus};
 include!(concat!(env!("OUT_DIR"), "/brain_dims.rs"));
 
 const SPLASH_PADDING: i32 = 12;
-const SPLASH_SIZE: i32 = BRAIN_W + SPLASH_PADDING * 2;
-const BRAIN_X: i32 = SPLASH_PADDING;
+// Vertical size of the brain-logo region only (280px) — was also the
+// window's WIDTH until the fix below (SPLASH_W was `= SPLASH_SIZE`), which
+// left only ~28 monospace characters per stage-telemetry row with no
+// word-wrap (`splash_text.rs` clips silently past the DIB edge). A staged
+// "still starting, first run can take longer" message for the
+// suspend->host-registration wait (see tracking issue #2940 — Windows
+// Defender's on-execution cloud reputation check for newly-extracted
+// binaries can hold this gap open 20+ seconds on a genuinely fresh
+// machine) didn't fit. BRAIN_AREA_H keeps the old value for everything
+// that used to read SPLASH_SIZE as a *height*; SPLASH_W below is now
+// independent and wider.
+const BRAIN_AREA_H: i32 = BRAIN_H + SPLASH_PADDING * 2;
+// Brain logo is centered horizontally in the now-wider window rather than
+// pinned at SPLASH_PADDING — it stays visually centered instead of
+// drifting to the left edge.
+const BRAIN_X: i32 = (SPLASH_W - BRAIN_W) / 2;
 const BRAIN_Y: i32 = SPLASH_PADDING;
 
 // ── Footer ──────────────────────────────────────────────────────────────────
@@ -92,8 +106,11 @@ const SEP_G: u8 = 0x36;
 const SEP_R: u8 = 0x36;
 
 // ── Window geometry ─────────────────────────────────────────────────────────
-const SPLASH_W: i32 = SPLASH_SIZE;
-const SPLASH_H: i32 = SPLASH_SIZE + STAGE_AREA_H + FOOTER_H;
+// Widened from the old `= SPLASH_SIZE` (280px, ~28 chars/row) to comfortably
+// fit a one-line staged status message (~43 chars/row) without word-wrap.
+// See BRAIN_AREA_H's comment above for why.
+const SPLASH_W: i32 = 460;
+const SPLASH_H: i32 = BRAIN_AREA_H + STAGE_AREA_H + FOOTER_H;
 
 const BG_B: u8 = 0x1F;
 const BG_G: u8 = 0x1A;
@@ -422,7 +439,7 @@ fn composite(
     draw_stages(dib, stages, total_ms, restoring);
 
     // Separator line between stage area and footer.
-    let sep_y = SPLASH_SIZE + STAGE_AREA_H - STAGE_PAD_BOTTOM / 2;
+    let sep_y = BRAIN_AREA_H + STAGE_AREA_H - STAGE_PAD_BOTTOM / 2;
     let sep_x0 = STAGE_MARGIN_L;
     let sep_x1 = SPLASH_W - STAGE_MARGIN_R;
     if sep_y >= 0 && sep_y < SPLASH_H {
@@ -485,7 +502,7 @@ fn draw_border(dib: &mut [u8]) {
 fn draw_stages(dib: &mut [u8], stages: &[StageRow], total_ms: Option<u64>, restoring: bool) {
     use crate::splash_text::{draw_text, text_width};
 
-    let y0 = SPLASH_SIZE + STAGE_PAD_TOP;
+    let y0 = BRAIN_AREA_H + STAGE_PAD_TOP;
     let x_label = STAGE_MARGIN_L;
     // Right edge for right-aligned time column.
     let x_time_right = SPLASH_W - STAGE_MARGIN_R;
