@@ -346,11 +346,29 @@ unsafe fn run_splash(
 
         // Check for dismiss signal from CEF host's on_load_end.
         if WaitForSingleObject(dismiss_ev, 0) == WAIT_OBJECT_0 {
-            // Drain any final events that arrived at the same time.
+            // Drain any final events that arrived at the same time. The
+            // dismiss signal (a synchronous Win32 SetEvent) and the last
+            // stage-end command (an async message queued on the CEF host
+            // side and drained over the launcher IPC pipe by a background
+            // task) are sent moments apart on the same call path — SetEvent
+            // can win that race, in which case a single non-blocking
+            // try_recv() pass here would miss the trailing stage-end and
+            // freeze the summary showing that row as still in progress for
+            // the whole hold. Keep polling briefly, but only while some row
+            // is genuinely still open (`done.is_none()`) — the common case
+            // (every stage already resolved) exits immediately, same as
+            // before. Reagent PR #2968 review.
+            let drain_deadline = Instant::now() + std::time::Duration::from_millis(150);
             loop {
                 match events_rx.try_recv() {
                     Ok(ev) => apply_event(&mut stages, ev),
-                    Err(_) => break,
+                    Err(_) => {
+                        let still_open = stages.iter().any(|s| s.done.is_none());
+                        if !still_open || Instant::now() >= drain_deadline {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
                 }
             }
 

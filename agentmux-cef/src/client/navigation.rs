@@ -9,12 +9,14 @@ use cef::*;
 
 use super::AgentMuxHandler;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 use std::sync::Arc;
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 use crate::state::AppState;
 
-/// Linux startup white-flash fix (docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md).
+/// Startup white-flash fix
+/// (docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md,
+/// docs/reports/REPORT_SPLASH_TO_FIRST_PAINT_BLANK_WINDOW_GAP_2026_09_03.md).
 ///
 /// Bound on how long the real window + native splash can stay hidden/up
 /// waiting for the frontend's first-paint signal before we show anyway.
@@ -31,15 +33,26 @@ use crate::state::AppState;
 /// Set well above the observed worst case so the real signal wins in
 /// practice; this only matters as a backstop against a genuinely stalled
 /// renderer (crashed JS, rAF never firing at all).
-#[cfg(target_os = "linux")]
+///
+/// Reused verbatim for Windows (ported 2026-09-03) rather than picking a
+/// separate constant: this is a backstop, not a target, and the whole point
+/// is that the real signal should win in practice on any machine capable of
+/// running the app at all. A tighter Windows-specific value would need its
+/// own dedicated measurement pass — see
+/// `docs/reports/REPORT_SPLASH_TO_FIRST_PAINT_BLANK_WINDOW_GAP_2026_09_03.md`
+/// §5.1 for why this report does not claim to have done that. If this timeout
+/// is ever observed firing on real Windows hardware (not a crashed-JS case),
+/// that is the signal a dedicated pass is now overdue, not a reason to
+/// silently raise the number.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 const PAINT_GATE_SAFETY_TIMEOUT_MS: i64 = 4000;
 
-/// Monotonic arm counter for the Linux paint gate. Each `on_load_end` call
-/// that (re-)arms a label's gate gets a fresh epoch; its safety-net timeout
-/// task captures that epoch and only acts if it's still current when the
-/// timeout fires (see `reveal_gated_window`). Mirrors the identical
-/// stale-timeout guard in `browser_pane::auth` (`NEXT_EPOCH`/`Entry::epoch`).
-#[cfg(target_os = "linux")]
+/// Monotonic arm counter for the paint gate. Each `on_load_end` call that
+/// (re-)arms a label's gate gets a fresh epoch; its safety-net timeout task
+/// captures that epoch and only acts if it's still current when the timeout
+/// fires (see `reveal_gated_window`). Mirrors the identical stale-timeout
+/// guard in `browser_pane::auth` (`NEXT_EPOCH`/`Entry::epoch`).
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 static PAINT_GATE_NEXT_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Reveal (show + focus the real window, dismiss the native splash) once —
@@ -58,7 +71,7 @@ static PAINT_GATE_NEXT_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::
 /// reagent PR #2151 review).
 ///
 /// Must run on the CEF UI thread.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) fn reveal_gated_window(
     state: &Arc<AppState>,
     label: &str,
@@ -83,32 +96,171 @@ pub(crate) fn reveal_gated_window(
             None => return,
         }
     };
+    let elapsed_ms = armed_at.elapsed().as_millis() as u64;
     tracing::info!(
         target: "startup-paint",
         label = %label,
         reason,
-        elapsed_ms = armed_at.elapsed().as_millis() as u64,
+        elapsed_ms,
         "[startup-paint] revealing gated window"
+    );
+    finish_gated_reveal(state, label, reason, elapsed_ms, SHOW_WINDOW_MAX_RETRIES);
+}
+
+/// Physically show a window whose paint gate has already fired (label
+/// already removed from `linux_paint_gate_pending`). Returns `true` once
+/// the `browser`/`BrowserView`/`Window` chain resolves — whether or not a
+/// `show()` was actually needed (already-visible counts as resolved) —
+/// `false` if any link in that chain isn't available yet, in which case the
+/// caller should retry rather than treat it as permanent: the same chain
+/// can resolve successfully at arm-time (`try_show_top_level_window`) and
+/// still transiently fail moments later — the same documented CEF Views
+/// quirk `SHOW_WINDOW_MAX_RETRIES` above exists to cover, just hit at a
+/// later point in the gated path. Reagent/Codex PR #2968 review: this used
+/// to be an inline, non-retrying lookup, with the splash dismiss signal
+/// already fired unconditionally before it even ran — a transient failure
+/// here would dismiss the splash while permanently leaving the window
+/// hidden.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn try_show_resolved_window(state: &Arc<AppState>, label: &str) -> bool {
+    let Some(mut browser) = state.get_browser(label) else { return false };
+    let Some(bv) = browser_view_get_for_browser(Some(&mut browser)) else { return false };
+    let Some(window) = bv.window() else { return false };
+    if window.is_visible() == 0 {
+        window.show();
+        if let Some(host) = browser.host() {
+            host.set_focus(1);
+        }
+    }
+    true
+}
+
+/// Finish a gated reveal: retry `try_show_resolved_window` until it
+/// succeeds or `retries_left` is exhausted, THEN fire the "paint" stage-end
+/// telemetry and the ready-file/`SetEvent` splash-dismiss signals — never
+/// before the window is confirmed shown (or retries are genuinely
+/// exhausted). Firing the dismiss signals only at that point, instead of
+/// unconditionally ahead of the fallible lookup, is what makes the retry
+/// meaningful: dismissing early would let the splash close over a window
+/// that never actually appeared. Retries are still exhausted with the
+/// dismiss signals fired anyway (with an error logged) rather than silently
+/// never firing them — `run_splash`'s wait has no overall timeout, so never
+/// dismissing would hang the splash forever even though the underlying
+/// window-show failure is a separate, already-logged problem.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn finish_gated_reveal(
+    state: &Arc<AppState>,
+    label: &str,
+    reason: &'static str,
+    elapsed_ms: u64,
+    retries_left: u32,
+) {
+    if try_show_resolved_window(state, label) {
+        signal_gated_reveal_complete(elapsed_ms, reason, "ok");
+        return;
+    }
+    if retries_left == 0 {
+        tracing::error!(
+            target: "startup-paint",
+            label = %label,
+            max_retries = SHOW_WINDOW_MAX_RETRIES,
+            "[startup-paint] browser_view/window still not resolvable after gate fired — \
+             dismissing splash anyway to avoid hanging it; window will stay hidden"
+        );
+        signal_gated_reveal_complete(elapsed_ms, reason, "error");
+        return;
+    }
+    let mut next = GatedRevealRetryTask::new(
+        state.clone(),
+        label.to_string(),
+        reason,
+        elapsed_ms,
+        retries_left - 1,
+    );
+    post_delayed_task(ThreadId::UI, Some(&mut next), SHOW_WINDOW_RETRY_DELAY_MS);
+}
+
+/// "paint" stage telemetry + the ready-file/`SetEvent` splash-dismiss
+/// signals (docs/reports/REPORT_SPLASH_TO_FIRST_PAINT_BLANK_WINDOW_GAP_2026_09_03.md
+/// §5.3), fired together once `finish_gated_reveal` knows the window is
+/// either shown or permanently unshowable — never any earlier.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn signal_gated_reveal_complete(elapsed_ms: u64, reason: &'static str, status: &str) {
+    crate::launcher_ipc::report_startup_stage_end(
+        "paint",
+        elapsed_ms,
+        status,
+        Some(reason.to_string()),
     );
     if let Ok(path) = std::env::var("AGENTMUX_SPLASH_READY_FILE") {
         if !path.is_empty() {
             let _ = std::fs::write(&path, b"ready");
         }
     }
-    let Some(mut browser) = state.get_browser(label) else { return };
-    if let Some(bv) = browser_view_get_for_browser(Some(&mut browser)) {
-        if let Some(window) = bv.window() {
-            if window.is_visible() == 0 {
-                window.show();
-                if let Some(host) = browser.host() {
-                    host.set_focus(1);
-                }
+    // Windows analogue of the macOS/Linux ready-file above: signal the named
+    // Win32 event the launcher's splash thread is waiting on. Ported from
+    // `on_load_end`'s old unconditional call (2026-09-03) — moving it here
+    // means it now fires only once the window has something real to show,
+    // instead of at bare document-load-complete. This also fixes a latent
+    // bug the move inherits a fix for: the old call ran for EVERY on_load_end
+    // including hidden pool-window prewarms (nothing gated it on
+    // `is_pool_window`, which is checked later in `on_load_end`), so a
+    // background prewarm racing ahead of the real main window during a cold
+    // start could dismiss the splash before the real window had loaded at
+    // all. Pool windows never reach this function (they skip the whole
+    // reveal call — see `on_load_end`), so that race is now closed the same
+    // way Linux's ready-file was already immune to it.
+    //
+    // Also called from `reveal_top_level_window`'s `label: None` fallback
+    // branch — that path never arms the paint gate (no label to key it on),
+    // so it must fire this signal itself rather than relying on this
+    // function, which the fallback never reaches. Reagent PR #2968 review:
+    // the signal used to fire unconditionally in `on_load_end` regardless of
+    // label resolution; moving it here alone silently dropped that fallback
+    // case, leaving the launcher's splash wait (no overall timeout,
+    // `agentmux-launcher/src/splash.rs::run_splash`) to hang forever.
+    #[cfg(target_os = "windows")]
+    signal_windows_splash_dismiss();
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+wrap_task! {
+    struct GatedRevealRetryTask {
+        state: Arc<AppState>,
+        label: String,
+        reason: &'static str,
+        elapsed_ms: u64,
+        retries_left: u32,
+    }
+    impl Task { fn execute(&self) {
+        finish_gated_reveal(&self.state, &self.label, self.reason, self.elapsed_ms, self.retries_left);
+    }}
+}
+
+/// Signal the named Win32 event the launcher's splash thread is waiting on
+/// (`AGENTMUX_SPLASH_EVENT`). Shared by both `reveal_gated_window` (the
+/// normal, label-resolved path) and `reveal_top_level_window`'s `label:
+/// None` fallback (which never arms the paint gate, so it never reaches
+/// `reveal_gated_window` at all) — every code path that can show the
+/// top-level window for the first time must dismiss the splash, or
+/// `run_splash`'s untimed wait hangs forever.
+#[cfg(target_os = "windows")]
+fn signal_windows_splash_dismiss() {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenEventW, SetEvent, EVENT_MODIFY_STATE};
+    if let Ok(event_name) = std::env::var("AGENTMUX_SPLASH_EVENT") {
+        let nul: Vec<u16> = format!("{}\0", event_name).encode_utf16().collect();
+        unsafe {
+            let ev = OpenEventW(EVENT_MODIFY_STATE, 0, nul.as_ptr());
+            if !ev.is_null() {
+                SetEvent(ev);
+                CloseHandle(ev);
             }
         }
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 wrap_task! {
     struct PaintGateRevealTask {
         state: Arc<AppState>,
@@ -134,7 +286,7 @@ wrap_task! {
 ///   to the slower safety timeout. Reagent PR #2151 second-round review.
 ///
 /// Must run on the CEF UI thread.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) fn handle_first_paint_signal(state: &Arc<AppState>, label: &str) {
     let already_armed = state.linux_paint_gate_pending.lock().contains_key(label);
     if already_armed {
@@ -144,7 +296,7 @@ pub(crate) fn handle_first_paint_signal(state: &Arc<AppState>, label: &str) {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 wrap_task! {
     struct FirstPaintSignalTask { state: Arc<AppState>, label: String }
     impl Task { fn execute(&self) {
@@ -157,7 +309,7 @@ wrap_task! {
 /// presented a frame. Posts to the UI thread to reveal the window if
 /// `on_load_end` already deferred it, or to record the signal for `on_load_end`
 /// to consume if it hasn't run yet (see `handle_first_paint_signal`).
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) fn on_frontend_first_paint(state: Arc<AppState>, label: String) {
     let mut task = FirstPaintSignalTask::new(state, label);
     post_task(ThreadId::UI, Some(&mut task));
@@ -193,17 +345,25 @@ const SHOW_WINDOW_RETRY_DELAY_MS: i64 = 50;
 /// — matches the pre-existing "can't gate safely on an unknown label"
 /// fallback (immediate show, every platform).
 ///
-/// `state`/`label` are only read inside the `#[cfg(target_os = "linux")]`
-/// branch below — unused on every other platform, hence the `allow`.
-#[cfg_attr(not(target_os = "linux"), allow(unused_variables))]
+/// `state`/`label` are only read inside the `#[cfg(any(target_os = "linux",
+/// target_os = "windows"))]` branch below — unused on macOS, hence the
+/// `allow`. See `docs/reports/REPORT_SPLASH_TO_FIRST_PAINT_BLANK_WINDOW_GAP_2026_09_03.md`
+/// §6 for why macOS is deliberately not included here: it needs its own
+/// live-verified pass, not a blind extension of the Linux/Windows cfg gate.
+#[cfg_attr(target_os = "macos", allow(unused_variables))]
 fn reveal_top_level_window(
     state: &std::sync::Arc<crate::state::AppState>,
     label: Option<&str>,
     window: &cef::Window,
     browser: Option<&mut Browser>,
 ) {
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     if let Some(label) = label {
+        // "paint" stage begin — pairs with the stage_end call inside
+        // reveal_gated_window, whichever path below resolves it. Fired once
+        // per arm regardless of which sub-path (early-signal vs timeout)
+        // ends up resolving, by sitting above both.
+        crate::launcher_ipc::report_startup_stage_begin("paint", "Window paint");
         // The real paint signal can race ahead of this call (see
         // handle_first_paint_signal) — if it already arrived, reveal
         // immediately instead of arming a gate + safety timeout for a paint
@@ -230,6 +390,11 @@ fn reveal_top_level_window(
         }
         return;
     }
+    // No resolvable label — the paint gate above never armed, so this is
+    // also this window's only chance to dismiss the Windows splash (see
+    // `signal_windows_splash_dismiss`'s doc comment).
+    #[cfg(target_os = "windows")]
+    signal_windows_splash_dismiss();
     window.show();
     if let Some(b) = browser {
         if let Some(host) = b.host() {
@@ -432,27 +597,17 @@ impl AgentMuxHandler {
             return;
         }
 
-        // Signal the pre-splash to fade out the moment CEF's first frame
-        // is ready. The launcher created this named event and forwarded
-        // its name via AGENTMUX_SPLASH_EVENT. OpenEventW + SetEvent is
-        // fire-and-forget; missing env var means no splash was running.
-        #[cfg(target_os = "windows")]
-        {
-            use windows_sys::Win32::Foundation::CloseHandle;
-            use windows_sys::Win32::System::Threading::{
-                OpenEventW, SetEvent, EVENT_MODIFY_STATE,
-            };
-            if let Ok(event_name) = std::env::var("AGENTMUX_SPLASH_EVENT") {
-                let nul: Vec<u16> = format!("{}\0", event_name).encode_utf16().collect();
-                unsafe {
-                    let ev = OpenEventW(EVENT_MODIFY_STATE, 0, nul.as_ptr());
-                    if !ev.is_null() {
-                        SetEvent(ev);
-                        CloseHandle(ev);
-                    }
-                }
-            }
-        }
+        // Windows: the old unconditional AGENTMUX_SPLASH_EVENT SetEvent that
+        // used to live here was moved into `reveal_gated_window`
+        // (2026-09-03, docs/reports/REPORT_SPLASH_TO_FIRST_PAINT_BLANK_WINDOW_GAP_2026_09_03.md).
+        // Firing it here — at bare `on_load_end`, before anything has visually
+        // painted — is exactly the too-early dismiss defect A of that report
+        // diagnoses; it also had no `is_pool_window` guard, so a hidden
+        // pool-window prewarm racing ahead of the real main window during a
+        // cold start could dismiss the splash before the real window had even
+        // loaded. See `reveal_top_level_window`/`reveal_gated_window` below,
+        // which now gate this on the same real first-paint confirmation Linux
+        // already used, reached only via the non-pool-window path.
 
         // macOS analogue of the Win32 splash signal: the launcher owns the native
         // splash (see agentmux-launcher/src/splash_mac.rs) and passes a ready-file

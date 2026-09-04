@@ -413,16 +413,20 @@ pub fn set_window_init_status(state: &Arc<AppState>, args: &serde_json::Value) -
     serde_json::Value::Null
 }
 
-/// First-paint signal from the frontend (Linux startup white-flash fix, see
-/// docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md). Sent via a
-/// double-`requestAnimationFrame` at the very top of `bootstrap.ts` — the
-/// earliest reliable proxy for "the compositor actually presented a frame",
-/// as opposed to CEF's `on_load_end` which only means "main-frame HTML
-/// finished loading" and can fire before anything has visually painted.
+/// First-paint signal from the frontend (startup white-flash fix, see
+/// docs/specs/REPORT_NEW_WINDOW_STARTUP_COLOR_FLASH_2026_07_14.md and
+/// docs/reports/REPORT_SPLASH_TO_FIRST_PAINT_BLANK_WINDOW_GAP_2026_09_03.md).
+/// Sent via a double-`requestAnimationFrame` at the very top of
+/// `bootstrap.ts` — the earliest reliable proxy for "the compositor actually
+/// presented a frame", as opposed to CEF's `on_load_end` which only means
+/// "main-frame HTML finished loading" and can fire before anything has
+/// visually painted.
 ///
-/// On Linux this unblocks the window `on_load_end` deferred (see
-/// `client::navigation::reveal_gated_window`). On other platforms it's
-/// currently just logged for telemetry — Windows/macOS aren't gated on it.
+/// On Linux and Windows this unblocks the window `on_load_end` deferred (see
+/// `client::navigation::reveal_gated_window`) — Windows ported 2026-09-03,
+/// same mechanism, not a separate implementation. On macOS it's currently
+/// just logged for telemetry — not gated on it; see that report's §6 for why
+/// macOS is deliberately not included in this pass.
 pub fn report_first_paint(state: &Arc<AppState>, args: &serde_json::Value) -> serde_json::Value {
     let label = args
         .get("label")
@@ -434,7 +438,9 @@ pub fn report_first_paint(state: &Arc<AppState>, args: &serde_json::Value) -> se
         label = %label,
         "[startup-paint] frontend reported first paint"
     );
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     crate::client::navigation::on_frontend_first_paint(state.clone(), label);
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    let _ = state;
     serde_json::Value::Null
 }
