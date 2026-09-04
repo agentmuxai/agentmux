@@ -315,7 +315,7 @@ partial list.
 | [`jekt-visibility-completion`](jekt-visibility-completion.md) | Spec: Jekt Visibility Completion — persistent-agent visibility + outgoing echo |
 | [`swarm-active-pane-sync`](swarm-active-pane-sync.md) | Swarm ↔ Pane Two-Way Active-Row Sync |
 
-### active (13)
+### active (14)
 
 | Spec | Title |
 |---|---|
