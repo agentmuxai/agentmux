@@ -39,6 +39,11 @@ const SYSTEM_INSTALLABLE_IDS = new Set(["git", "node", "npm", "python"]);
 interface AgentPrereqModalPanelProps {
     agent: AgentDefinition;
     missing: MissingPrereq[];
+    /** Owned by the caller (`AgentPicker.tsx`), not this component — see
+     *  `AgentPrereqRequest.installedPendingRestart`'s doc comment in
+     *  `modal-layer.ts` for why this can't be local state here. */
+    installedPendingRestart: ReadonlySet<string>;
+    onToolInstalled: (tool: string) => void;
     onRefresh: () => void;
     onProceed: () => void;
     onCancel: () => void;
@@ -106,15 +111,6 @@ export const AgentPrereqModalPanel = (props: AgentPrereqModalPanelProps): JSX.El
         }
     });
 
-    // Once an install genuinely succeeds, keep saying so even if the
-    // post-install refresh's re-probe still reports "missing" — srv's own
-    // PATH is captured at process startup, so a freshly-installed binary
-    // routinely isn't visible to it yet without a restart. Tracked here
-    // (not left to the child's own "done" phase) because `onRefresh()`
-    // re-renders `props.missing` with a new array, which can remount the
-    // child and reset its local phase signal right back to "checking".
-    const [installedPendingRestart, setInstalledPendingRestart] = createSignal<ReadonlySet<string>>(new Set());
-
     return (
         <>
             <header class="modal-panel-header">
@@ -132,10 +128,10 @@ export const AgentPrereqModalPanel = (props: AgentPrereqModalPanelProps): JSX.El
                         {(req) => (
                             <li
                                 class="agent-prereq-modal-row"
-                                classList={{ "is-ok": installedPendingRestart().has(req.tool) }}
+                                classList={{ "is-ok": props.installedPendingRestart.has(req.tool) }}
                             >
                                 <Show
-                                    when={!installedPendingRestart().has(req.tool)}
+                                    when={!props.installedPendingRestart.has(req.tool)}
                                     fallback={
                                         <>
                                             <span class="agent-prereq-modal-icon agent-prereq-modal-icon-ok" aria-hidden="true">✓</span>
@@ -182,10 +178,7 @@ export const AgentPrereqModalPanel = (props: AgentPrereqModalPanelProps): JSX.El
                                                 <SystemToolInstallInline
                                                     toolId={req.tool}
                                                     resolvedInfo={resolvedInstalls().get(req.tool)}
-                                                    onInstalled={() => {
-                                                        setInstalledPendingRestart((prev) => new Set(prev).add(req.tool));
-                                                        props.onRefresh();
-                                                    }}
+                                                    onInstalled={() => props.onToolInstalled(req.tool)}
                                                     onUnavailable={() => markUnavailable(req.tool)}
                                                 />
                                             </Show>

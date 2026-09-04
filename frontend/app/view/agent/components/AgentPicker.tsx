@@ -729,6 +729,15 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                         openCreateFromTemplateModal(agent);
                     }
                 };
+                // Lives OUTSIDE `openPrereqModal` (not re-created per call)
+                // specifically so it survives every `modalLayer.replace()`
+                // in the `refresh` loop below — `ModalLayer` remounts the
+                // whole `AgentPrereqModalPanel` subtree on each replace, so
+                // any state the panel owned itself would be wiped right
+                // when a post-install refresh (which routinely still
+                // reports the tool missing — srv's own PATH is stale until
+                // restart) replaces the request. reagent + Codex, PR #2966.
+                const installedPendingRestart = new Set<string>();
                 const openPrereqModal = (currentMissing: typeof missing, op: "open" | "replace"): void => {
                     const refresh = async () => {
                         for (const m of currentMissing) prereqCache.delete(m.tool);
@@ -744,6 +753,11 @@ export const AgentPicker = (props: AgentPickerProps): JSX.Element => {
                         agent,
                         originBlockId: props.model.blockId,
                         missing: currentMissing,
+                        installedPendingRestart,
+                        onToolInstalled: (tool: string) => {
+                            installedPendingRestart.add(tool);
+                            void refresh();
+                        },
                         onRefresh: () => void refresh(),
                         onProceed: proceedWithFlow,
                         onCancel: () => {},

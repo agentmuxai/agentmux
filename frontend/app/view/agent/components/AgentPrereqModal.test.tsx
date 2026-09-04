@@ -7,6 +7,16 @@
  * so a freshly-installed binary routinely still probes as "missing"
  * right after install — the row must keep saying "installed" instead of
  * silently reverting to the same "not found" state the user just fixed.
+ *
+ * `installedPendingRestart` is deliberately NOT local state in
+ * `AgentPrereqModalPanel` — `AgentPicker.tsx`'s refresh loop calls
+ * `modalLayer.replace()`, which `ModalLayer` remounts the whole panel
+ * subtree for (reagent + Codex, PR #2966). The caller owns this set and
+ * threads it through every `replace`; this component only ever reads it
+ * from props. The tests below exercise that contract directly: they
+ * simulate a full unmount + remount with fresh props, the same thing
+ * `ModalLayer.replace()` does to the real component, instead of relying
+ * on any internal signal surviving.
  */
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-library";
@@ -57,6 +67,8 @@ describe("AgentPrereqModalPanel", () => {
             <AgentPrereqModalPanel
                 agent={{ name: "Claude" } as any}
                 missing={missing}
+                installedPendingRestart={new Set()}
+                onToolInstalled={() => {}}
                 onRefresh={() => {}}
                 onProceed={() => {}}
                 onCancel={() => {}}
@@ -65,7 +77,7 @@ describe("AgentPrereqModalPanel", () => {
         await screen.findByText("Install v2.47.1 now ↓");
     });
 
-    it("keeps showing 'installed, restart AgentMux to use it' after a successful install, even if refresh still reports it missing", async () => {
+    it("reports a successful install to the caller via onToolInstalled instead of owning the state itself", async () => {
         resolveMock.mockResolvedValue({
             available: true,
             program: "winget",
@@ -75,13 +87,15 @@ describe("AgentPrereqModalPanel", () => {
             resolvedVersion: "2.47.1",
         });
         installMock.mockResolvedValue({ sessionId: "sysinstall-1" });
-        const onRefresh = vi.fn();
+        const onToolInstalled = vi.fn();
         const { AgentPrereqModalPanel } = await import("./AgentPrereqModal");
         render(() => (
             <AgentPrereqModalPanel
                 agent={{ name: "Claude" } as any}
                 missing={missing}
-                onRefresh={onRefresh}
+                installedPendingRestart={new Set()}
+                onToolInstalled={onToolInstalled}
+                onRefresh={() => {}}
                 onProceed={() => {}}
                 onCancel={() => {}}
             />
@@ -95,11 +109,53 @@ describe("AgentPrereqModalPanel", () => {
         await waitFor(() => expect(chunkHandler).not.toBeNull());
         chunkHandler!({ data: { op: "done", ok: true } });
 
+        await waitFor(() => expect(onToolInstalled).toHaveBeenCalledWith("git"));
+    });
+
+    it("keeps showing 'installed, restart AgentMux to use it' across a full remount, purely from installedPendingRestart props — even though the stale-PATH re-probe still lists the tool as missing", async () => {
+        resolveMock.mockResolvedValue({
+            available: true,
+            program: "winget",
+            args: ["install", "--id", "Git.Git"],
+            needsElevation: true,
+            commandPreview: "winget install --id Git.Git",
+            resolvedVersion: "2.47.1",
+        });
+        const { AgentPrereqModalPanel } = await import("./AgentPrereqModal");
+
+        // Mount 1: nothing installed yet — normal "not found" row.
+        const { unmount } = render(() => (
+            <AgentPrereqModalPanel
+                agent={{ name: "Claude" } as any}
+                missing={missing}
+                installedPendingRestart={new Set()}
+                onToolInstalled={() => {}}
+                onRefresh={() => {}}
+                onProceed={() => {}}
+                onCancel={() => {}}
+            />
+        ));
+        await screen.findByText(/— not found/);
+
+        // Simulate exactly what `ModalLayer.replace()` does to the real
+        // component: destroy this instance entirely and mount a fresh one.
+        // `missing` still lists git (the stale-PATH re-probe outcome this
+        // PR exists to handle) but `installedPendingRestart` — owned by
+        // the caller, not this component — now contains it.
+        unmount();
+        render(() => (
+            <AgentPrereqModalPanel
+                agent={{ name: "Claude" } as any}
+                missing={missing}
+                installedPendingRestart={new Set(["git"])}
+                onToolInstalled={() => {}}
+                onRefresh={() => {}}
+                onProceed={() => {}}
+                onCancel={() => {}}
+            />
+        ));
+
         await screen.findByText(/installed, restart AgentMux to use it/);
-        expect(onRefresh).toHaveBeenCalledTimes(1);
-        // The stale-PATH re-probe in the real app would still report "not
-        // found" here (props.missing is unchanged in this test) — the
-        // persisted success state must win over that, not revert to it.
         expect(screen.queryByText(/— not found/)).toBeNull();
     });
 });
