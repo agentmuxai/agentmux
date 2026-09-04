@@ -479,6 +479,47 @@ pub(crate) async fn run_windows(
                 startup_events::StartupStatus::Ok,
                 None,
             );
+            // Issue #2940: the gap this is meant to explain — suspended
+            // host process exists, zero instructions executed, up to ~30s
+            // before it registers over the IPC pipe — happens entirely
+            // AFTER this stage already ended (spawn_host_supervised
+            // returning is fast; the actual wait is Windows Defender's
+            // on-execution cloud reputation check on the newly-extracted
+            // exes, confirmed via the Defender operational event log,
+            // 2026-09-04). Nothing else reports progress during that gap
+            // today. Deliberately does NOT claim "Windows Defender is
+            // scanning" — that can't actually be known from here (no
+            // event-log/process-state access in this path), and a wrong
+            // guess is worse than a generic one; see the tracking issue
+            // comment for why detection was ruled out. A launcher-side
+            // timer, not host cooperation: the host executes zero code
+            // during this gap, so it cannot report progress itself.
+            //
+            // 5s threshold: comfortably above a normal launch's ~1s host-
+            // registration time (confirmed via a same-machine relaunch
+            // immediately after a slow first launch — the SAME gap was
+            // 23s on the fresh-machine run vs. 1s on the immediate
+            // relaunch, same binaries) so this never appears on the fast
+            // path, while still showing well before this gap's own
+            // observed 18-30s+ worst case ends.
+            //
+            // Fire-and-forget, no cancellation: if the host registers
+            // (and the splash dismisses) before 5s, this message is sent
+            // into either an already-torn-down channel (silently dropped,
+            // see StartupEventSink's own doc comment) or one whose
+            // consumer has already stopped draining it mid-hold/fade —
+            // both cases are harmless no-ops, never a visible glitch.
+            if splash_event_name.is_some() {
+                let delayed_sink = startup_sink.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                    delayed_sink.sub_begin(
+                        "host",
+                        "first-run-wait",
+                        "First run can take longer",
+                    );
+                });
+            }
             c
         }
         None => {
