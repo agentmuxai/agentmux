@@ -337,12 +337,18 @@ async function main() {
         );
 
         process.stdout.write("\n  Flooding pane A with a continuous output loop...\n");
-        // A PowerShell-compatible unbounded output loop (this harness targets
-        // whichever shell `pane.open` spawns by default, which on Windows is
-        // PowerShell, not bash) — same role as the canonical `yes` flood, just
-        // portable to the default shell here. Text and Enter sent separately,
-        // same PSReadLine-safety reason as measureEchoLatency above.
-        sendInputFire(client, blockA, "while($true){'y'}");
+        // `pane.open` spawns a platform-appropriate default shell — PowerShell
+        // on Windows (detect_local_shell_path_windows), $SHELL (bash/zsh) on
+        // macOS/Linux (lifecycle.rs) — so the flood generator must match
+        // whichever shell THIS process's OS would get, or pane A stays quiet
+        // and the benchmark silently reports a false "no regression" result
+        // (caught in review: a PowerShell-only command is a syntax error in
+        // bash/zsh). `yes` is the canonical flood on POSIX shells; PowerShell
+        // has no `yes`, so it gets an equivalent infinite-output loop. Text
+        // and Enter sent separately, same PSReadLine-safety reason as
+        // measureEchoLatency above (harmless no-op split on POSIX shells).
+        const floodCmd = process.platform === "win32" ? "while($true){'y'}" : "yes";
+        sendInputFire(client, blockA, floodCmd);
         await sleep(250);
         sendInputFire(client, blockA, "\r");
         await sleep(500);

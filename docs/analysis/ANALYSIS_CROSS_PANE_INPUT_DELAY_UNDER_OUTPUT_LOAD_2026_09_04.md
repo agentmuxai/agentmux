@@ -1,7 +1,7 @@
 # Analysis & Recommendations: Cross-Pane Input Delay Under Output Load
 
 **Date:** 2026-09-04
-**Status:** §5 item 1 (per-pane fair egress dequeue) implemented on
+**Status:** Implemented — §5 item 1 (per-pane fair egress dequeue) landed on
 `agent2/fix-cross-pane-input-delay` — see `agentmux-srv/src/server/websocket.rs`'s
 `fair_drain_priority`/`priority_pane_key`, unit-tested (TDD), and validated live
 against a real running dev build: `tools/tests/bench-term-cross-pane.mjs` against
@@ -11,6 +11,20 @@ regression. An unpatched-vs-patched side-by-side run was attempted on a second
 isolated dev instance to get a directly-comparable "before" number but got stuck
 behind heavy build contention from other concurrent agents on the shared build
 machine and was abandoned; the live numbers above are from the patched build only.
+**Post-review hardening (same PR):** the first revision forwarded an entire
+fairly-ordered drained batch inside one `select!` branch body, which starved
+`socket.recv()` (this connection's own incoming keystrokes) for the whole
+batch — reintroducing head-of-line blocking on the read path (Codex + ReAgent
+both flagged this independently). Fixed by trickling one event per `'ws` loop
+iteration via a `pending_priority` queue, so `socket.recv()` is re-polled
+between every send, matching the original per-event cadence. Separately,
+`priority_pane_key` originally keyed ALL priority-lane events (including
+`waveobj:update`/`waveobj:batchedupdates` object-model events) by scope/oref,
+which let round-robin reorder an object's individual update relative to a
+later unscoped batch touching the same object — a real corruption risk (the
+frontend doesn't version-guard deletes). Fairness reordering is now scoped to
+`blockfile` (terminal output) events only; every other event type shares one
+key and stays in pure FIFO order. Both fixes are covered by new unit tests.
 Items 2-6 below remain unimplemented recommendations.
 **Symptom (user-reported):** while one pane (terminal or agent) is actively producing output, typing into a *different* pane feels slow/delayed.
 
