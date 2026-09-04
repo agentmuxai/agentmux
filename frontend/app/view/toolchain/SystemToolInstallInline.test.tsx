@@ -83,6 +83,33 @@ describe("SystemToolInstallInline", () => {
         expect(installMock).not.toHaveBeenCalled();
     });
 
+    it("labels the install button with the resolved version when the backend reports one", async () => {
+        resolveMock.mockResolvedValue({
+            available: true,
+            program: "brew",
+            args: ["install", "git"],
+            needsElevation: false,
+            commandPreview: "brew install git",
+            resolvedVersion: "2.47.1",
+        });
+        const { SystemToolInstallInline } = await import("./SystemToolInstallInline");
+        render(() => <SystemToolInstallInline toolId="git" onInstalled={() => {}} />);
+        await screen.findByText("Install v2.47.1 now");
+    });
+
+    it("uses caller-provided resolvedInfo instead of self-resolving", async () => {
+        const { SystemToolInstallInline } = await import("./SystemToolInstallInline");
+        render(() => (
+            <SystemToolInstallInline
+                toolId="git"
+                onInstalled={() => {}}
+                resolvedInfo={{ commandPreview: "brew install git", needsElevation: false, resolvedVersion: "2.47.1" }}
+            />
+        ));
+        await screen.findByText("Install v2.47.1 now");
+        expect(resolveMock).not.toHaveBeenCalled();
+    });
+
     it("shows the elevation note only when the resolved step needs it", async () => {
         resolveMock.mockResolvedValue({
             available: true,

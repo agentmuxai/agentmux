@@ -34,6 +34,11 @@
     background: color-mix(in srgb, var(--warning-color, #e9b800) 6%, transparent);
     border: 1px solid color-mix(in srgb, var(--warning-color, #e9b800) 30%, transparent);
     border-radius: 0;
+
+    &.is-ok {
+        background: color-mix(in srgb, var(--success-color, #3ba55d) 6%, transparent);
+        border-color: color-mix(in srgb, var(--success-color, #3ba55d) 30%, transparent);
+    }
 }
 
 .agent-prereq-modal-icon {
@@ -42,6 +47,10 @@
     font-size: 18px;
     line-height: 1;
     padding-top: 2px;
+
+    &.agent-prereq-modal-icon-ok {
+        color: var(--success-color, #3ba55d);
+    }
 }
 
 .agent-prereq-modal-info {
@@ -61,6 +70,10 @@
 .agent-prereq-modal-tool-status {
     font-weight: 400;
     color: var(--secondary-text-color);
+
+    &.agent-prereq-modal-tool-status-ok {
+        color: var(--success-color, #3ba55d);
+    }
 }
 
 .agent-prereq-modal-link {

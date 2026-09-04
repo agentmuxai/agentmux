@@ -174,6 +174,8 @@ export function renderRequest(
                     <AgentPrereqModalPanel
                         agent={req.agent}
                         missing={req.missing}
+                        installedPendingRestart={req.installedPendingRestart}
+                        onToolInstalled={(tool) => req.onToolInstalled(tool)}
                         onRefresh={() => req.onRefresh()}
                         onProceed={() => req.onProceed()}
                         onCancel={() => {

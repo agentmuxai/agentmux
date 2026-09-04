@@ -9,11 +9,19 @@
  * SPEC_PROVIDER_SYSTEM_PREREQS_2026_05_18.md.
  */
 
-import { createSignal, For, Show, type JSX } from "solid-js";
+import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 
 import { Button } from "@/element/button";
 import { getApi } from "@/app/store/global";
+import { RpcApi } from "@/app/store/rpc-api";
+import { TabRpcClient } from "@/app/store/rpc-util";
 import { SystemToolInstallInline } from "@/app/view/toolchain/SystemToolInstallInline";
+
+interface ResolvedInstallInfo {
+    commandPreview: string;
+    needsElevation: boolean;
+    resolvedVersion?: string | null;
+}
 
 interface MissingPrereq {
     tool: string;
@@ -31,6 +39,11 @@ const SYSTEM_INSTALLABLE_IDS = new Set(["git", "node", "npm", "python"]);
 interface AgentPrereqModalPanelProps {
     agent: AgentDefinition;
     missing: MissingPrereq[];
+    /** Owned by the caller (`AgentPicker.tsx`), not this component — see
+     *  `AgentPrereqRequest.installedPendingRestart`'s doc comment in
+     *  `modal-layer.ts` for why this can't be local state here. */
+    installedPendingRestart: ReadonlySet<string>;
+    onToolInstalled: (tool: string) => void;
     onRefresh: () => void;
     onProceed: () => void;
     onCancel: () => void;
@@ -70,6 +83,34 @@ export const AgentPrereqModalPanel = (props: AgentPrereqModalPanelProps): JSX.El
         setUnavailableInstalls((prev) => new Set(prev).add(tool));
     };
 
+    // Resolved once, up front, per missing+installable tool — lets the
+    // toggle button itself read "Install v<version> now" before the user
+    // ever expands the panel, instead of only the panel's own inner
+    // button knowing the version.
+    const [resolvedInstalls, setResolvedInstalls] = createSignal<ReadonlyMap<string, ResolvedInstallInfo>>(new Map());
+    onMount(() => {
+        for (const req of props.missing) {
+            if (!SYSTEM_INSTALLABLE_IDS.has(req.tool)) continue;
+            void RpcApi.ToolchainResolveInstallCommandCommand(TabRpcClient, { toolId: req.tool })
+                .then((r) => {
+                    if (!r.available) {
+                        markUnavailable(req.tool);
+                        return;
+                    }
+                    setResolvedInstalls((prev) => {
+                        const next = new Map(prev);
+                        next.set(req.tool, {
+                            commandPreview: r.commandPreview,
+                            needsElevation: r.needsElevation,
+                            resolvedVersion: r.resolvedVersion ?? null,
+                        });
+                        return next;
+                    });
+                })
+                .catch(() => markUnavailable(req.tool));
+        }
+    });
+
     return (
         <>
             <header class="modal-panel-header">
@@ -85,44 +126,65 @@ export const AgentPrereqModalPanel = (props: AgentPrereqModalPanelProps): JSX.El
                 <ul class="agent-prereq-modal-list">
                     <For each={props.missing}>
                         {(req) => (
-                            <li class="agent-prereq-modal-row">
-                                <span class="agent-prereq-modal-icon" aria-hidden="true">⚠</span>
-                                <div class="agent-prereq-modal-info">
-                                    <div class="agent-prereq-modal-tool">
-                                        {req.label}
-                                        <span class="agent-prereq-modal-tool-status"> — not found</span>
-                                    </div>
-                                    <a
-                                        class="agent-prereq-modal-link"
-                                        href={req.installUrl}
-                                        onClick={(e) => {
-                                            e.preventDefault();
-                                            open(req.installUrl);
-                                        }}
-                                    >
-                                        {req.installLinkText}
-                                        <span class="agent-prereq-modal-link-arrow" aria-hidden="true"> ↗</span>
-                                    </a>
-                                    <Show when={SYSTEM_INSTALLABLE_IDS.has(req.tool) && !unavailableInstalls().has(req.tool)}>
-                                        <button
-                                            type="button"
+                            <li
+                                class="agent-prereq-modal-row"
+                                classList={{ "is-ok": props.installedPendingRestart.has(req.tool) }}
+                            >
+                                <Show
+                                    when={!props.installedPendingRestart.has(req.tool)}
+                                    fallback={
+                                        <>
+                                            <span class="agent-prereq-modal-icon agent-prereq-modal-icon-ok" aria-hidden="true">✓</span>
+                                            <div class="agent-prereq-modal-info">
+                                                <div class="agent-prereq-modal-tool">
+                                                    {req.label}
+                                                    <span class="agent-prereq-modal-tool-status agent-prereq-modal-tool-status-ok">
+                                                        {" "}— installed, restart AgentMux to use it
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </>
+                                    }
+                                >
+                                    <span class="agent-prereq-modal-icon" aria-hidden="true">⚠</span>
+                                    <div class="agent-prereq-modal-info">
+                                        <div class="agent-prereq-modal-tool">
+                                            {req.label}
+                                            <span class="agent-prereq-modal-tool-status"> — not found</span>
+                                        </div>
+                                        <a
                                             class="agent-prereq-modal-link"
-                                            onClick={() => toggleInstallPanel(req.tool)}
+                                            href={req.installUrl}
+                                            onClick={(e) => {
+                                                e.preventDefault();
+                                                open(req.installUrl);
+                                            }}
                                         >
-                                            or install it now ↓
-                                        </button>
-                                        <Show when={expandedInstalls().has(req.tool)}>
-                                            <SystemToolInstallInline
-                                                toolId={req.tool}
-                                                onInstalled={() => {
-                                                    toggleInstallPanel(req.tool);
-                                                    props.onRefresh();
-                                                }}
-                                                onUnavailable={() => markUnavailable(req.tool)}
-                                            />
+                                            {req.installLinkText}
+                                            <span class="agent-prereq-modal-link-arrow" aria-hidden="true"> ↗</span>
+                                        </a>
+                                        <Show when={SYSTEM_INSTALLABLE_IDS.has(req.tool) && !unavailableInstalls().has(req.tool)}>
+                                            <button
+                                                type="button"
+                                                class="agent-prereq-modal-link"
+                                                onClick={() => toggleInstallPanel(req.tool)}
+                                            >
+                                                {(() => {
+                                                    const version = resolvedInstalls().get(req.tool)?.resolvedVersion;
+                                                    return version ? `Install v${version} now ↓` : "or install it now ↓";
+                                                })()}
+                                            </button>
+                                            <Show when={expandedInstalls().has(req.tool)}>
+                                                <SystemToolInstallInline
+                                                    toolId={req.tool}
+                                                    resolvedInfo={resolvedInstalls().get(req.tool)}
+                                                    onInstalled={() => props.onToolInstalled(req.tool)}
+                                                    onUnavailable={() => markUnavailable(req.tool)}
+                                                />
+                                            </Show>
                                         </Show>
-                                    </Show>
-                                </div>
+                                    </div>
+                                </Show>
                             </li>
                         )}
                     </For>

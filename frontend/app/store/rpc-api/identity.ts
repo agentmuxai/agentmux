@@ -276,7 +276,18 @@ export const IdentityApi = {
         opts?: RpcOpts,
     ): Promise<
         | { available: false }
-        | { available: true; program: string; args: string[]; needsElevation: boolean; commandPreview: string }
+        | {
+              available: true;
+              program: string;
+              args: string[];
+              needsElevation: boolean;
+              commandPreview: string;
+              /** Version this exact command would install, queried live from
+               *  the package manager's own catalog — `null`/absent when the
+               *  query failed or isn't implemented for this platform's
+               *  package manager. Never a hardcoded guess (see #2942). */
+              resolvedVersion?: string | null;
+          }
     > {
         return client.rpcCall("toolchain.resolve_install_command", data, opts);
     },

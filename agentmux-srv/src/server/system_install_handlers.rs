@@ -72,6 +72,16 @@ struct SystemInstallStep {
     /// before the caller's own immediate re-probe shows "still not
     /// found" — Codex P1, PR #2790.
     verify_bin: String,
+    /// Version this exact command would install, queried live from the
+    /// package manager's own catalog at resolve time — never hardcoded.
+    /// A hardcoded "v24" here would repeat the exact staleness bug this
+    /// repo already hit once (Taskfile.yml's VERSION var pinned to a
+    /// specific `node@20` brew formula that outlived that major version
+    /// — see #2942). `None` when the query itself fails or isn't
+    /// implemented for this package manager (most Linux managers below);
+    /// the frontend falls back to unversioned copy in that case, never a
+    /// stale guess.
+    resolved_version: Option<String>,
 }
 
 /// Linux package managers this module knows how to drive, in detection
@@ -152,17 +162,49 @@ fn verify_bin_for_tool(tool_id: &str, windows: bool) -> Option<&'static str> {
     }
 }
 
-fn resolve_windows_step(tool_id: &str) -> Option<SystemInstallStep> {
-    // winget package identifiers — see https://github.com/microsoft/winget-pkgs.
-    // `node`/`npm` share one identifier: npm ships bundled with Node, so
-    // there is no separate winget package for it (mirrors the frontend
-    // catalog's existing node/npm-both-resolve-to-node modeling).
-    let winget_id = match tool_id {
-        "git" => "Git.Git",
-        "node" | "npm" => "OpenJS.NodeJS.LTS",
-        "python" => "Python.Python.3.12",
-        _ => return None,
-    };
+/// Parses `winget show --id <id> -e`'s `Version:` line. Best-effort: any
+/// failure (winget missing/erroring, unexpected output format) returns
+/// `None` and the frontend falls back to unversioned copy — never a
+/// guess. Deliberately a separate call from the actual install, not a
+/// flag on it: `show` never mutates anything, so it's safe to run purely
+/// for display even before the user has consented to installing.
+async fn query_winget_version(winget_id: &str) -> Option<String> {
+    let mut c = tokio::process::Command::new("winget");
+    c.args(["show", "--id", winget_id, "-e"]);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        c.creation_flags(CREATE_NO_WINDOW);
+    }
+    let output = c.output().await.ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout.lines().find_map(|line| {
+        line.strip_prefix("Version:").map(|v| v.trim().to_string())
+    })
+}
+
+// winget package identifiers — see https://github.com/microsoft/winget-pkgs.
+// `node`/`npm` share one identifier: npm ships bundled with Node, so there
+// is no separate winget package for it (mirrors the frontend catalog's
+// existing node/npm-both-resolve-to-node modeling). Its own function (not
+// inlined into `resolve_windows_step`) so `resolve_install_step` can look
+// up the same id to query a version from, without a second copy of this
+// match that could drift from the one that builds the actual install args.
+fn windows_winget_id(tool_id: &str) -> Option<&'static str> {
+    match tool_id {
+        "git" => Some("Git.Git"),
+        "node" | "npm" => Some("OpenJS.NodeJS.LTS"),
+        "python" => Some("Python.Python.3.12"),
+        _ => None,
+    }
+}
+
+fn resolve_windows_step(tool_id: &str, resolved_version: Option<String>) -> Option<SystemInstallStep> {
+    let winget_id = windows_winget_id(tool_id)?;
     Some(SystemInstallStep {
         program: "winget".to_string(),
         args: vec![
@@ -183,18 +225,47 @@ fn resolve_windows_step(tool_id: &str) -> Option<SystemInstallStep> {
         // hardware verification item, not yet confirmed.
         needs_elevation: true,
         verify_bin: verify_bin_for_tool(tool_id, true)?.to_string(),
+        resolved_version,
     })
+}
+
+/// Parses `brew info --json=v2 <formula>`'s `versions.stable` field.
+/// Best-effort, same posture as `query_winget_version`.
+async fn query_brew_version(formula: &str) -> Option<String> {
+    let output = tokio::process::Command::new("brew")
+        .args(["info", "--json=v2", formula])
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let parsed: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    parsed
+        .get("formulae")?
+        .get(0)?
+        .get("versions")?
+        .get("stable")?
+        .as_str()
+        .map(|s| s.to_string())
+}
+
+/// Homebrew formula names — its own function for the same reason as
+/// `windows_winget_id` above: shared between the install-args builder and
+/// the version query, without a second copy that could drift.
+fn brew_formula(tool_id: &str) -> Option<&'static str> {
+    match tool_id {
+        "git" => Some("git"),
+        "node" | "npm" => Some("node"),
+        "python" => Some("python@3.12"),
+        _ => None,
+    }
 }
 
 /// Only reachable when `brew` is already on PATH (checked by the caller,
 /// `resolve_install_step`) — this module never bootstraps Homebrew itself.
-fn resolve_brew_step(tool_id: &str) -> Option<SystemInstallStep> {
-    let formula = match tool_id {
-        "git" => "git",
-        "node" | "npm" => "node",
-        "python" => "python@3.12",
-        _ => return None,
-    };
+fn resolve_brew_step(tool_id: &str, resolved_version: Option<String>) -> Option<SystemInstallStep> {
+    let formula = brew_formula(tool_id)?;
     Some(SystemInstallStep {
         program: "brew".to_string(),
         args: vec!["install".to_string(), formula.to_string()],
@@ -202,7 +273,47 @@ fn resolve_brew_step(tool_id: &str) -> Option<SystemInstallStep> {
         // with no elevation step to build at all.
         needs_elevation: false,
         verify_bin: verify_bin_for_tool(tool_id, false)?.to_string(),
+        resolved_version,
     })
+}
+
+/// Parses `apt-cache policy <pkg>`'s `Candidate:` line — the version apt
+/// would actually install right now. Scoped to apt only, deliberately:
+/// `dnf`/`pacman`/`zypper`/`apk` each have a genuinely different query
+/// command and output format (`dnf info`, `pacman -Si`, `zypper info`,
+/// `apk policy`/`apk info`), and implementing all five for a display-only
+/// version label isn't worth the surface area in one pass. Returns `None`
+/// for every other manager — the frontend falls back to unversioned copy,
+/// which is honest, not a stale guess pretending to be real.
+async fn query_apt_version(pkg: &str) -> Option<String> {
+    let output = tokio::process::Command::new("apt-cache")
+        .args(["policy", pkg])
+        .output()
+        .await
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout.lines().find_map(|line| {
+        line.trim()
+            .strip_prefix("Candidate:")
+            .map(|v| v.trim().to_string())
+            .filter(|v| v != "(none)")
+    })
+}
+
+/// Primary package name to query a version for on apt specifically — the
+/// actual install still uses `resolve_linux_step`'s full, PM-aware package
+/// list below; this is only the one representative package worth asking
+/// apt "what version would you install" about for display purposes.
+fn apt_primary_package(tool_id: &str) -> Option<&'static str> {
+    match tool_id {
+        "git" => Some("git"),
+        "node" | "npm" => Some("nodejs"),
+        "python" => Some("python3"),
+        _ => None,
+    }
 }
 
 /// Elevated via `pkexec`, which raises the desktop's own native polkit
@@ -221,7 +332,11 @@ fn resolve_brew_step(tool_id: &str) -> Option<SystemInstallStep> {
 /// not a plain package install) and is deliberately NOT implemented
 /// here. `dnf`/`pacman`/`zypper`/`apk`'s Node packages don't have the
 /// same well-known staleness reputation.
-fn resolve_linux_step(tool_id: &str, pm: LinuxPackageManager) -> Option<SystemInstallStep> {
+fn resolve_linux_step(
+    tool_id: &str,
+    pm: LinuxPackageManager,
+    resolved_version: Option<String>,
+) -> Option<SystemInstallStep> {
     let packages: &[&str] = match tool_id {
         "git" => &["git"],
         "node" | "npm" => &["nodejs", "npm"],
@@ -240,6 +355,7 @@ fn resolve_linux_step(tool_id: &str, pm: LinuxPackageManager) -> Option<SystemIn
         args,
         needs_elevation: true,
         verify_bin: verify_bin_for_tool(tool_id, false)?.to_string(),
+        resolved_version,
     })
 }
 
@@ -271,10 +387,18 @@ async fn resolve_install_step(tool_id: &str) -> Option<SystemInstallStep> {
         // gracefully falling back to the existing link+copy-command UI.
         // reagent P1, PR #2790.
         resolve_tool_path("winget").await?;
-        resolve_windows_step(tool_id)
+        let resolved_version = match windows_winget_id(tool_id) {
+            Some(id) => query_winget_version(id).await,
+            None => None,
+        };
+        resolve_windows_step(tool_id, resolved_version)
     } else if cfg!(target_os = "macos") {
         resolve_tool_path("brew").await?;
-        resolve_brew_step(tool_id)
+        let resolved_version = match brew_formula(tool_id) {
+            Some(formula) => query_brew_version(formula).await,
+            None => None,
+        };
+        resolve_brew_step(tool_id, resolved_version)
     } else {
         let pm = detect_linux_package_manager().await?;
         // Same class of check as the Windows/winget and macOS/brew
@@ -286,7 +410,11 @@ async fn resolve_install_step(tool_id: &str) -> Option<SystemInstallStep> {
         // reported with a command that fails to spawn instead of falling
         // back to the link+copy-command UI. reagent P2, PR #2790.
         resolve_tool_path("pkexec").await?;
-        resolve_linux_step(tool_id, pm)
+        let resolved_version = match (pm, apt_primary_package(tool_id)) {
+            (LinuxPackageManager::AptGet, Some(pkg)) => query_apt_version(pkg).await,
+            _ => None,
+        };
+        resolve_linux_step(tool_id, pm, resolved_version)
     }
 }
 
@@ -316,6 +444,7 @@ pub fn register_system_install_handlers(engine: &Arc<WshRpcEngine>, state: &AppS
                         "args": step.args,
                         "needsElevation": step.needs_elevation,
                         "commandPreview": format!("{} {}", step.program, step.args.join(" ")),
+                        "resolvedVersion": step.resolved_version,
                     }))),
                     None => Ok(Some(json!({ "available": false }))),
                 }
@@ -558,56 +687,63 @@ mod tests {
 
     #[test]
     fn resolve_windows_step_covers_the_catalog_and_rejects_unknown_ids() {
-        let git = resolve_windows_step("git").unwrap();
+        let git = resolve_windows_step("git", None).unwrap();
         assert_eq!(git.program, "winget");
         assert!(git.args.contains(&"Git.Git".to_string()));
         assert!(git.needs_elevation);
 
         // node and npm resolve to the SAME winget package — npm ships
         // bundled with Node, there is no separate winget entry for it.
-        let node = resolve_windows_step("node").unwrap();
-        let npm = resolve_windows_step("npm").unwrap();
+        let node = resolve_windows_step("node", None).unwrap();
+        let npm = resolve_windows_step("npm", None).unwrap();
         assert_eq!(node.args, npm.args);
         assert!(node.args.contains(&"OpenJS.NodeJS.LTS".to_string()));
 
-        assert!(resolve_windows_step("python").is_some());
-        assert!(resolve_windows_step("docker").is_none());
-        assert!(resolve_windows_step("").is_none());
+        assert!(resolve_windows_step("python", None).is_some());
+        assert!(resolve_windows_step("docker", None).is_none());
+        assert!(resolve_windows_step("", None).is_none());
+    }
+
+    #[test]
+    fn resolve_windows_step_carries_the_resolved_version_through() {
+        let git = resolve_windows_step("git", Some("2.47.1".to_string())).unwrap();
+        assert_eq!(git.resolved_version.as_deref(), Some("2.47.1"));
     }
 
     #[test]
     fn resolve_brew_step_covers_the_catalog_and_never_needs_elevation() {
         for id in ["git", "node", "npm", "python"] {
-            let step = resolve_brew_step(id).unwrap();
+            let step = resolve_brew_step(id, None).unwrap();
             assert_eq!(step.program, "brew");
             assert!(!step.needs_elevation, "brew must never be modeled as needing elevation");
         }
-        assert!(resolve_brew_step("docker").is_none());
+        assert!(resolve_brew_step("docker", None).is_none());
     }
 
     #[test]
     fn resolve_linux_step_uses_the_correct_flag_syntax_per_manager() {
-        let apt = resolve_linux_step("git", LinuxPackageManager::AptGet).unwrap();
+        let apt = resolve_linux_step("git", LinuxPackageManager::AptGet, None).unwrap();
         assert_eq!(apt.program, "pkexec");
         assert_eq!(apt.args, vec!["apt-get", "install", "-y", "git"]);
 
-        let pacman = resolve_linux_step("git", LinuxPackageManager::Pacman).unwrap();
+        let pacman = resolve_linux_step("git", LinuxPackageManager::Pacman, None).unwrap();
         assert_eq!(pacman.args, vec!["pacman", "-S", "--noconfirm", "git"]);
 
-        let apk = resolve_linux_step("node", LinuxPackageManager::Apk).unwrap();
+        let apk = resolve_linux_step("node", LinuxPackageManager::Apk, None).unwrap();
         assert_eq!(apk.args, vec!["apk", "add", "nodejs", "npm"]);
 
         // python's package list is genuinely different per manager —
         // not just a flag-syntax difference.
-        let python_pacman = resolve_linux_step("python", LinuxPackageManager::Pacman).unwrap();
+        let python_pacman =
+            resolve_linux_step("python", LinuxPackageManager::Pacman, None).unwrap();
         assert_eq!(python_pacman.args, vec!["pacman", "-S", "--noconfirm", "python", "python-pip"]);
-        let python_apt = resolve_linux_step("python", LinuxPackageManager::AptGet).unwrap();
+        let python_apt = resolve_linux_step("python", LinuxPackageManager::AptGet, None).unwrap();
         assert_eq!(
             python_apt.args,
             vec!["apt-get", "install", "-y", "python3", "python3-pip", "python3-venv"]
         );
 
-        assert!(resolve_linux_step("docker", LinuxPackageManager::AptGet).is_none());
+        assert!(resolve_linux_step("docker", LinuxPackageManager::AptGet, None).is_none());
     }
 
     #[test]
@@ -618,14 +754,14 @@ mod tests {
         // "sh"/"bash"/"cmd"/"powershell" wrapping a formatted string.
         let shells = ["sh", "bash", "cmd", "cmd.exe", "powershell", "powershell.exe"];
         for id in ["git", "node", "npm", "python"] {
-            if let Some(s) = resolve_windows_step(id) {
+            if let Some(s) = resolve_windows_step(id, None) {
                 assert!(!shells.contains(&s.program.as_str()));
             }
-            if let Some(s) = resolve_brew_step(id) {
+            if let Some(s) = resolve_brew_step(id, None) {
                 assert!(!shells.contains(&s.program.as_str()));
             }
             for pm in LinuxPackageManager::ALL_IN_PRIORITY_ORDER {
-                if let Some(s) = resolve_linux_step(id, pm) {
+                if let Some(s) = resolve_linux_step(id, pm, None) {
                     assert!(!shells.contains(&s.program.as_str()));
                     assert_eq!(s.program, "pkexec");
                 }
