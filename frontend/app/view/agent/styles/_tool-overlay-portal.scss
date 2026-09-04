@@ -59,6 +59,21 @@
         font-family: var(--fixed-font, monospace);
         font-size: 12px;
         line-height: 1.4;
+        // Stays `pre`, deliberately — must match the viewer the completed tool
+        // actually renders through.
+        //
+        // An earlier revision of this PR switched these streaming chunks to
+        // `pre-wrap` to match `.agent-terminal-output > div`, on the theory that
+        // a Bash block reflowed when it finished. That was the wrong viewer:
+        // `renderBash` routes a completed Bash result to `BashOutputViewer`,
+        // which renders `<pre class="agent-bash-output">` — UA `white-space:
+        // pre`, no wrap. Bash was already consistent; the change *created* the
+        // reflow it claimed to remove, in the opposite direction (codex P2 on
+        // PR #2958).
+        //
+        // `.agent-terminal-output` is the CompactResult/string-body path, a
+        // different set of tools. Any genuine streaming-vs-final mismatch there
+        // is its own question and is not addressed here.
         white-space: pre;
         overflow-wrap: normal;
 
