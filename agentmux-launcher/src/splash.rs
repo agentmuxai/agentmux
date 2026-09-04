@@ -89,9 +89,13 @@ const MAX_STAGE_ROWS: usize = 12;
 const STAGE_AREA_H: i32 =
     STAGE_PAD_TOP + MAX_STAGE_ROWS as i32 * STAGE_ROW_H + STAGE_PAD_BOTTOM;
 
-// Stage label character budget (truncated if longer).
+// Stage label character budget (truncated if longer). SUB_LABEL_MAX_CHARS was
+// 14 until the SPLASH_W widening above (PR #2961) — bumped to fit the
+// "First run can take longer" sub-row message (below) at its full length;
+// existing short sub-labels (individual migration names, etc.) are
+// unaffected, this only raises the truncation threshold.
 const LABEL_MAX_CHARS: usize = 16;
-const SUB_LABEL_MAX_CHARS: usize = 14;
+const SUB_LABEL_MAX_CHARS: usize = 28;
 
 // Colors
 const STAGE_COLOR: [u8; 3] = [0xC0, 0xC0, 0xCC];

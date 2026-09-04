@@ -479,6 +479,59 @@ pub(crate) async fn run_windows(
                 startup_events::StartupStatus::Ok,
                 None,
             );
+            // Issue #2940: the gap this is meant to explain — suspended
+            // host process exists, zero instructions executed, up to ~30s
+            // before it registers over the IPC pipe — happens entirely
+            // AFTER this stage already ended (spawn_host_supervised
+            // returning is fast; the actual wait is Windows Defender's
+            // on-execution cloud reputation check on the newly-extracted
+            // exes, confirmed via the Defender operational event log,
+            // 2026-09-04). Nothing else reports progress during that gap
+            // today. Deliberately does NOT claim "Windows Defender is
+            // scanning" — that can't actually be known from here (no
+            // event-log/process-state access in this path), and a wrong
+            // guess is worse than a generic one; see the tracking issue
+            // comment for why detection was ruled out. A launcher-side
+            // timer, not host cooperation: the host executes zero code
+            // during this gap, so it cannot report progress itself.
+            //
+            // 5s threshold: comfortably above a normal launch's ~1s host-
+            // registration time (confirmed via a same-machine relaunch
+            // immediately after a slow first launch — the SAME gap was
+            // 23s on the fresh-machine run vs. 1s on the immediate
+            // relaunch, same binaries) so this never appears on the fast
+            // path, while still showing well before this gap's own
+            // observed 18-30s+ worst case ends.
+            //
+            // Gated on `host_pipe.is_connected()`, NOT on splash
+            // dismiss timing — Codex P2, PR #2967: host IPC registration
+            // (this timer's actual target) happens well before the splash
+            // dismisses (that waits for CEF's `on_load_end`, i.e. full
+            // init + first paint). An earlier version of this comment
+            // assumed those two events were close enough together that a
+            // plain fire-and-forget timer would only ever land in the
+            // pre-registration gap or a torn-down channel; that's false
+            // whenever registration succeeds quickly but CEF init/first
+            // paint alone runs past 5s (slow disk, cold caches, etc.) — a
+            // real, if unrelated, delay this message must not be shown
+            // for, since it isn't the first-run-scan gap it exists to
+            // explain. Checking registration state directly, right before
+            // sending, fixes that regardless of how long the splash stays
+            // up afterward.
+            if splash_event_name.is_some() {
+                let delayed_sink = startup_sink.clone();
+                let delayed_host_pipe = std::sync::Arc::clone(&host_pipe);
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    if !delayed_host_pipe.is_connected().await {
+                        delayed_sink.sub_begin(
+                            "host",
+                            "first-run-wait",
+                            "First run can take longer",
+                        );
+                    }
+                });
+            }
             c
         }
         None => {
