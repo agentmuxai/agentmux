@@ -110,7 +110,7 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                 props.blockId,
                 getProvider(props.providerId),
                 { ...runtime(), ...patch },
-                props.blockAtom()?.meta?.["agentMode"] as string | undefined,
+                props.blockAtom()?.meta,
             );
         } catch {
             // Silent — settings retry on next change (matches the prior

@@ -12,7 +12,13 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { isPersistentLaunch, selectLaunchArgs, type LaunchArgsProvider } from "./launch-args";
+import {
+    isPersistentLaunch,
+    parseProviderFlags,
+    selectLaunchArgs,
+    withProviderFlags,
+    type LaunchArgsProvider,
+} from "./launch-args";
 
 /** Claude's real shape, copied from providers/catalog.ts. */
 const claude: LaunchArgsProvider = {
@@ -87,5 +93,66 @@ describe("selectLaunchArgs", () => {
         expect(args).not.toBe(claude.persistentLaunchArgs);
         args.push("--mutated");
         expect(claude.persistentLaunchArgs).not.toContain("--mutated");
+    });
+});
+
+/**
+ * The per-turn `cmd:args` rebuild derives its base from the provider CATALOG,
+ * so anything the launch path appended afterwards is dropped unless something
+ * puts it back. Two things get appended, and they are NOT the same kind of
+ * thing (#2872):
+ *
+ *   provider_flags   durable  — how this agent always runs → reapply every turn
+ *   --fork-session   one-shot — fork the session being resumed AT LAUNCH
+ *
+ * Reapplying `--fork-session` would pair it with the `--resume <sid>` srv adds
+ * on every later turn, forking again each time instead of once. So the fix is
+ * deliberately asymmetric, and that asymmetry is the part worth pinning.
+ */
+describe("provider_flags are durable; --fork-session is not", () => {
+    it("splits provider_flags on whitespace, the way the launch path always has", () => {
+        expect(parseProviderFlags("--foo --bar=1")).toEqual(["--foo", "--bar=1"]);
+        expect(parseProviderFlags("  --a   --b  ")).toEqual(["--a", "--b"]);
+    });
+
+    /** A pane launched before the meta key existed, or an agent with none. */
+    it("treats absent or non-string provider_flags as no flags", () => {
+        expect(parseProviderFlags(undefined)).toEqual([]);
+        expect(parseProviderFlags("")).toEqual([]);
+        expect(parseProviderFlags(null)).toEqual([]);
+        expect(parseProviderFlags(42)).toEqual([]);
+    });
+
+    /** The bug: the user's flags must survive a rebuild. */
+    it("reapplies provider_flags onto a rebuilt argv", () => {
+        const rebuilt = ["-p", "--model", "opus"];
+        expect(withProviderFlags(rebuilt, "--my-flag 7")).toEqual([
+            "-p", "--model", "opus", "--my-flag", "7",
+        ]);
+    });
+
+    it("returns the argv untouched when there are no flags to reapply", () => {
+        const rebuilt = ["-p", "--model", "opus"];
+        expect(withProviderFlags(rebuilt, "")).toEqual(rebuilt);
+        expect(withProviderFlags(rebuilt, undefined)).toEqual(rebuilt);
+    });
+
+    /** The asymmetry. `--fork-session` must NOT come back: this helper only
+     *  ever knows about provider_flags, so a future caller can't accidentally
+     *  route a one-shot launch intent through it. */
+    it("never reintroduces --fork-session", () => {
+        const rebuilt = ["-p", "--model", "opus"];
+        expect(withProviderFlags(rebuilt, "--my-flag")).not.toContain("--fork-session");
+        // Even if it were somehow stored there, it is the caller's job not to —
+        // this documents that the helper is not a general "restore everything".
+        expect(parseProviderFlags("--fork-session")).toEqual(["--fork-session"]);
+    });
+
+    /** Appends, never rewrites — the catalog base can't already carry these. */
+    it("does not mutate the argv it is given", () => {
+        const rebuilt = ["-p"];
+        const out = withProviderFlags(rebuilt, "--x");
+        expect(rebuilt).toEqual(["-p"]);
+        expect(out).not.toBe(rebuilt);
     });
 });
