@@ -677,22 +677,6 @@ export function update(
             const finishedAt = phase.kind === "Done"
                 ? phase.finishedAt
                 : nowMs;
-            // SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md Phase 1: mark
-            // any still-queued "sends behind this turn" entries as `flushing`
-            // in the SAME atomic transition that flips turnPhase to Done —
-            // closing the window where the label already reads "Worked" but
-            // the panel still says "Queued — sends at the agent's next step"
-            // (a claim that's false the instant the turn ends; only the
-            // backend's async accept ack is left to wait for). Entries
-            // already flushing, or not enqueuedWhileBusy at all (idle sends),
-            // are left untouched — this only affects the removal COPY, never
-            // whether/when an entry actually leaves `pending` (still owned
-            // exclusively by PendingMessageAccepted/Rejected/Expired).
-            const pending = state.pending.some((m) => m.enqueuedWhileBusy && !m.flushing)
-                ? state.pending.map((m) =>
-                      m.enqueuedWhileBusy && !m.flushing ? { ...m, flushing: true } : m,
-                  )
-                : state.pending;
             return {
                 state: {
                     ...state,
@@ -701,7 +685,6 @@ export function update(
                     currentTool: null,
                     currentToolArg: null,
                     turnTokens: null,
-                    pending,
                     turnPhase: {
                         kind: "Done",
                         outcome,
@@ -1058,6 +1041,34 @@ export function update(
                     pendingCompactionPing: null,
                 },
                 events: [{ type: "submit-timed-out", at: command.at }],
+            };
+        }
+
+        case "PendingMessageFlushStarted": {
+            // Dispatched from useAgentCommands.ts's flushHeldMessages, right
+            // before the actual deliverToBackend call — i.e. the moment
+            // delivery genuinely begins, not merely "the turn that was
+            // queued behind has ended." Codex P2 on PR #2970: an earlier
+            // version of this fix set `flushing` unconditionally on TurnEnd,
+            // which is wrong when flushHeldMessages bails without draining
+            // (a still-pending controller refresh, useAgentCommands.ts
+            // ~1433-1455) — the panel would claim "Sending — reaching the
+            // agent any moment" (and hide the recall guidance) for a message
+            // that hadn't actually started sending, possibly for as long as
+            // the deferred refresh takes. Tying this to the real delivery
+            // start instead means the entry only ever reads "Sending" when
+            // that's genuinely true. No-op if the id isn't found (already
+            // accepted/rejected/expired) or is already flushing.
+            const entry = state.pending.find((m) => m.id === command.id);
+            if (!entry || entry.flushing) return { state, events: [] };
+            return {
+                state: {
+                    ...state,
+                    pending: state.pending.map((m) =>
+                        m.id === command.id ? { ...m, flushing: true } : m,
+                    ),
+                },
+                events: [{ type: "pending-flush-started", id: command.id }],
             };
         }
 
