@@ -169,6 +169,22 @@ export interface PendingMessage {
      * See docs/analysis/ANALYSIS_IDLE_SEND_RACE_2026_06_11.md.
      */
     enqueuedWhileBusy: boolean;
+    /**
+     * Set by the `TurnEnd` reducer arm, atomically with the same command
+     * that flips `turnPhase` to `Done` — true once the turn this message was
+     * queued behind has actually finished, so the backend's async
+     * `agent-message-accepted` ack (which is what actually removes this
+     * entry, via `usePendingMessageAcceptance.ts`) is the only thing left to
+     * wait for. Before this flag existed, the panel had no way to
+     * distinguish "still behind a running turn" from "turn just ended,
+     * message is in flight" — it read the same "Queued — sends at the
+     * agent's next step" copy in both cases, which is actively wrong once
+     * the turn is Done (there is no "next step" left to wait for) and is
+     * what let "Queued message" visibly coexist with "Worked" for the
+     * length of that ack round-trip. See
+     * docs/specs/SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md Phase 1.
+     */
+    flushing?: boolean;
 }
 
 /**

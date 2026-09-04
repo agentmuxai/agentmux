@@ -407,6 +407,35 @@ export function dispatch(
                 `pane=${blockId.slice(0, 7)}`,
                 `watchdog: FIRED — force-recovered to Idle, idleSinceMs=${ev.idleSinceMs}`,
             );
+        } else if (
+            ev.type === "attached-task-observed" ||
+            ev.type === "attached-task-cleared" ||
+            ev.type === "registry-attached-task-observed" ||
+            ev.type === "registry-attached-task-cleared"
+        ) {
+            // The attached-task axis (turnPhase's sibling for "≥1 agent-
+            // declared long-running task is live", see
+            // SPEC_ATTACHED_TASK_STATUS_AXIS_2026_08_02.md) had zero logging
+            // of its own — every OTHER axis this file logs (turnPhase
+            // transitions, the watchdog's reasoning) has a `[wave-turn]`
+            // line, but this one was silent, which matters specifically for
+            // the "pane reads Worked/Idle while a long-running process is
+            // still attached" class of report: without this, there was no
+            // way to confirm from `muxlog phases` alone whether the axis
+            // correctly tracked the attached task through that window, or
+            // never observed it in the first place. Logs `turnPhase.kind`
+            // alongside so a reader can directly see the Done/Idle-while-
+            // attached shape land, or catch the axis itself failing to
+            // observe/clear at the expected moment.
+            // See docs/specs/SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md.
+            console.info(
+                "[wave-turn]",
+                `pane=${blockId.slice(0, 7)}`,
+                `attachedTask: ${ev.type}`,
+                `phase=${slot.state.turnPhase.kind}`,
+                `attachedTask=${slot.state.attachedTask ? `since=${slot.state.attachedTask.since}` : "null"}`,
+                `registryAttachedTaskSince=${slot.state.registryAttachedTaskSince ?? "null"}`,
+            );
         }
         eventSink(blockId, ev);
         for (const l of extraListeners) {

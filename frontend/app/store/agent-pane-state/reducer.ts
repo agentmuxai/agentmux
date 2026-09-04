@@ -677,6 +677,22 @@ export function update(
             const finishedAt = phase.kind === "Done"
                 ? phase.finishedAt
                 : nowMs;
+            // SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md Phase 1: mark
+            // any still-queued "sends behind this turn" entries as `flushing`
+            // in the SAME atomic transition that flips turnPhase to Done —
+            // closing the window where the label already reads "Worked" but
+            // the panel still says "Queued — sends at the agent's next step"
+            // (a claim that's false the instant the turn ends; only the
+            // backend's async accept ack is left to wait for). Entries
+            // already flushing, or not enqueuedWhileBusy at all (idle sends),
+            // are left untouched — this only affects the removal COPY, never
+            // whether/when an entry actually leaves `pending` (still owned
+            // exclusively by PendingMessageAccepted/Rejected/Expired).
+            const pending = state.pending.some((m) => m.enqueuedWhileBusy && !m.flushing)
+                ? state.pending.map((m) =>
+                      m.enqueuedWhileBusy && !m.flushing ? { ...m, flushing: true } : m,
+                  )
+                : state.pending;
             return {
                 state: {
                     ...state,
@@ -685,6 +701,7 @@ export function update(
                     currentTool: null,
                     currentToolArg: null,
                     turnTokens: null,
+                    pending,
                     turnPhase: {
                         kind: "Done",
                         outcome,
