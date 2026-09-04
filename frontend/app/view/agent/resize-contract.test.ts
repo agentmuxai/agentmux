@@ -359,3 +359,52 @@ describe("beginHeightContinuity", () => {
         expect(el.style.height).toBe("");
     });
 });
+
+describe("custom measure function", () => {
+    /** offsetHeight and scrollHeight independently controllable, modeling
+     *  an internally-scrolling element (ToolOverlayLog.tsx's
+     *  .agent-tool-overlay-log: overflow-y: auto, bounded by an ancestor's
+     *  max-height) where the two genuinely diverge — offsetHeight clamps at
+     *  the ancestor's budget once content exceeds it; scrollHeight keeps
+     *  reflecting the true content height. */
+    function setDivergentHeights(el: HTMLElement, offset: number, scroll: number): void {
+        Object.defineProperty(el, "offsetHeight", { configurable: true, value: offset });
+        Object.defineProperty(el, "scrollHeight", { configurable: true, value: scroll });
+    }
+
+    it("defaults to offsetHeight when no measure function is given", () => {
+        const el = document.createElement("div");
+        // offsetHeight says "no real change" (clamped, both reads land on
+        // the ancestor's cap); scrollHeight says "shrank a lot". The
+        // DEFAULT must follow offsetHeight and see nothing to animate —
+        // proves the default didn't quietly start reading scrollHeight.
+        setDivergentHeights(el, 800, 5000);
+        withHeightContinuity(el, () => setDivergentHeights(el, 800, 200));
+        expect(el.style.height).toBe("");
+    });
+
+    it("uses a custom measure function instead of offsetHeight when one is given", () => {
+        const el = document.createElement("div");
+        setDivergentHeights(el, 800, 1200); // offsetHeight clamped, scrollHeight is the true 1200
+        withHeightContinuity(
+            el,
+            () => setDivergentHeights(el, 800, 200), // offsetHeight stays clamped at 800 throughout
+            (e) => e.scrollHeight,
+        );
+        // Must FLIP using scrollHeight's real 1200 -> 200, not offsetHeight's unchanged 800 -> 800.
+        expect(el.style.height).toBe("1200px");
+        flushRaf();
+        expect(el.style.height).toBe("200px");
+    });
+
+    it("beginHeightContinuity also accepts and uses a custom measure function", () => {
+        const el = document.createElement("div");
+        setDivergentHeights(el, 800, 1200);
+        const commit = beginHeightContinuity(el, (e) => e.scrollHeight);
+        setDivergentHeights(el, 800, 200);
+        commit();
+        expect(el.style.height).toBe("1200px");
+        flushRaf();
+        expect(el.style.height).toBe("200px");
+    });
+});

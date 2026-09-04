@@ -1,7 +1,8 @@
 # SPEC: A single content-resize contract for the agent pane
 
 **Date:** 2026-08-31
-**Status:** Proposed. No code changed by this document.
+**Status:** Active. Steps 1-3 of §5 landed (real code, not just this document);
+steps 4-6 still pending.
 **Supersedes as the recommended next step:** `ANALYSIS_TOOL_CALL_SCROLL_OSCILLATION_2026_08_17.md` §7's "fix B",
 which called for this but deferred scoping it.
 
@@ -23,6 +24,7 @@ agent pane changes height and the scroll position visibly jumps":
 | 08-21 | `FINDINGS_TOOL_CALL_SCROLL_OSCILLATION` | Corrected twice by PR review |
 | 08-22 | `FINDINGS_..._LIVE_INSTANCE_DATA` | Corrected twice by PR review |
 | 08-31 | this doc | Two further candidate fixes ruled out (§3); a third ruled out in draft, then withdrawn on review (§3a) |
+| 09-03 | step 3 migration | A design assumption in this very document's §4 (`el.offsetHeight` is the right universal measurement) turned out wrong the moment it met its first real consumer — see §4 |
 
 Every pass was made by someone reasoning carefully from the source, and most
 produced at least one confident conclusion that a later pass had to withdraw.
@@ -47,8 +49,8 @@ change, none aware of the others. All six verified present as of `216c593c4`:
 | 1 | Itemized pin effect | `AgentDocumentVirtualList.tsx:521-544` | node count / `layoutView().totalSize` / `workingRowHeight` |
 | 2 | RO #1 (viewport) | `AgentDocumentVirtualList.tsx:566-588` | `scrollRef.clientHeight` |
 | 3 | RO #2 (content) | `AgentDocumentVirtualList.tsx:619-631` | `virtualContainerRef` / `streamingBufferRef` box size |
-| 4 | Local FLIP | `ToolOverlayLog.tsx:246-298` | its own `<Switch>` branch changing |
-| 5 | Local panel auto-scroll | `ToolOverlayLog.tsx:187-208` | `chunks()` / `panelHidden()`, panel-internal only |
+| 4 | Local FLIP | `ToolOverlayLog.tsx:210-283` (migrated 09-03 — now calls `resize-contract.ts`'s `beginHeightContinuity`, not its own `flipHeight()`) | its own `<Switch>` branch changing |
+| 5 | Local panel auto-scroll | `ToolOverlayLog.tsx:187-208` (untouched by the step 3 migration — a different effect, still its own `panelHidden` `MutationObserver`) | `chunks()` / `panelHidden()`, panel-internal only |
 | 6 | Throttled re-render timers | `MarkdownBlock.tsx:62-81`, `output-cap.ts:369-440` | their own timers/heuristics, invisible to 1–5 |
 
 Each was added in response to one reported symptom. The result is what you
@@ -114,7 +116,7 @@ own caveat that a repeated *net* delta between two pin-checks cannot establish
 a single discrete element. This lead is closed; it needs mutation-level
 instrumentation (§5) or nothing.
 
-### 3a. Open — the `heightStale` FLIP bypass, and a worked example of this document's own thesis
+### 3a. Resolved (09-03, step 3 migration) — the `heightStale` FLIP bypass, and a worked example of this document's own thesis
 
 The bypass is real and its mechanism is now understood: `.agent-tool-panel`'s
 close transition uses `content-visibility 120ms allow-discrete`
@@ -155,6 +157,23 @@ Caught by Codex in review of this PR. Two things follow:
    height-behavior claim in this subsystem, including the ones above, as
    provisional until instrumented.
 
+**Resolution, 09-03, step 3:** subsumed exactly the way point 2 above
+predicted it might — not by a targeted fix, but as a side effect of
+unifying the mechanism. `resize-contract.ts`'s `isMeasurable()` reads
+`getComputedStyle` on `el` AND every ancestor (a separate real bug, caught
+by review — see §4), which means it detects `.agent-tool-panel`'s
+`content-visibility: hidden` at the moment the CSS actually applies it, not
+at the moment a `MutationObserver` sees the class added. The class-vs-
+computed-style lag this section describes no longer has anywhere to hide:
+there is no class-based signal left in the migrated code at all.
+
+Verified, not assumed: `ToolOverlayLog.test.tsx`'s corresponding test was
+itself a false pass twice before it actually exercised this (jsdom applies
+no real stylesheet, so a naive mock made the test pass regardless of
+whether the fix worked) — see that test's own comments for both corrections.
+Confirmed by deliberately breaking `isMeasurable`'s ancestor walk and
+checking the test fails.
+
 ---
 
 ## 4. Proposed contract
@@ -164,17 +183,38 @@ site reports through it instead of implementing its own FLIP or relying on an
 outer observer to notice after the fact.
 
 ```ts
-// frontend/app/view/agent/resize-contract.ts  (proposed)
+// frontend/app/view/agent/resize-contract.ts
 
 /** Freeze `el` at its current height, run `mutate`, then ease to the new
  *  natural height. The caller never measures, never touches transitions, and
  *  never needs to know whether an outer scroll container is pinned. */
-export function withHeightContinuity(el: HTMLElement, mutate: () => void): void;
+export function withHeightContinuity(
+    el: HTMLElement, mutate: () => void, measure?: (el: HTMLElement) => number,
+): void;
 
 /** Same, for a mutation that lands asynchronously (a throttle timer's trailing
  *  commit): capture the "from" height now, ease once the mutation settles. */
-export function beginHeightContinuity(el: HTMLElement): (this: void) => void;
+export function beginHeightContinuity(
+    el: HTMLElement, measure?: (el: HTMLElement) => number,
+): (this: void) => void;
 ```
+
+**`measure`, 09-03: not in the original signature, added the moment step 3
+met its first real consumer.** The draft above assumed `el.offsetHeight`
+(the rendered box) was the universally correct read. It is wrong for
+`.agent-tool-overlay-log` specifically: that element scrolls its own
+overflow (`overflow-y: auto`) inside `.agent-tool-panel`'s
+`max-height: 50vh` cap, so its `offsetHeight` clamps at whatever's left of
+that budget and stops changing once content exceeds it — while
+`scrollHeight` keeps reflecting the true content height. That is precisely
+the large-shrink case (a long raw chunk log collapsing to a short compact
+result) this whole document exists to fix, and `offsetHeight` alone would
+have silently failed to detect it. `measure` defaults to `offsetHeight`
+(correct for the common non-scrolling row) and lets a caller with this
+shape pass `(el) => el.scrollHeight` instead. Another data point for §0's
+thesis: this was a design decision made confidently in this very document,
+and it was wrong the moment it was tested against something real rather
+than reasoned about in the abstract.
 
 Properties the single implementation owns, which no current call site owns
 consistently:
@@ -204,19 +244,20 @@ Deliberately incremental. The six mechanisms have their own regression suites
 `ToolOverlayLog.test.tsx`, `anchor.test.ts`, `output-cap.test.ts`); a wholesale
 replacement trades a known-fragmented system for an unknown one.
 
-1. **Instrument before refactoring.** The 08-17 doc's own recommendation #1,
-   still unactioned: a `MutationObserver`/`ResizeObserver` trace at the
-   *component* level, finer-grained than the existing pin-check-level
-   `[wave-scroll-shrink]` diagnostic. Every conclusion in the 08-21/08-22
-   findings was limited by that diagnostic's granularity, and §3.3 closed the
-   last lead that log-level data could reach. **This is the gating step — it
-   is what tells us which call sites actually matter, rather than which ones
-   look like they should.**
-2. **Land `resize-contract.ts` with no call sites**, plus its own unit tests.
-   Zero runtime effect; reviewable in isolation.
-3. **Migrate `ToolOverlayLog.tsx`'s `flipHeight()` to it** — one call site, the
-   one with existing test coverage to prove equivalence. `heightStale` (§3a)
-   is resolved here or not at all.
+1. **Done (#2887).** Instrument before refactoring — the 08-17 doc's own
+   recommendation #1. Real data landed 09-03 (351 captured shrinks, one live
+   session): 284/351 (81%) attributed to `tool`-kind nodes, 0 to `markdown` —
+   Source A (this step's own migration target) confirmed dominant, step 4
+   (`MarkdownBlock`) correspondingly de-prioritized rather than assumed.
+2. **Done (#2954).** Land `resize-contract.ts` with no call sites, plus its
+   own unit tests. Two P1s caught and fixed before merge (ancestor
+   content-visibility, re-entrant-flip measurement) — see that PR.
+3. **Done (09-03).** Migrate `ToolOverlayLog.tsx`'s `flipHeight()` to it —
+   the one call site with existing test coverage to prove equivalence.
+   `heightStale` (§3a) resolved as a side effect, not a targeted fix. Also
+   surfaced the `measure` parameter (§4) — the migration target's own
+   `offsetHeight`/`scrollHeight` divergence wasn't anticipated by the
+   original design.
 4. **Migrate `MarkdownBlock.tsx`'s throttled highlight commit** (mechanism #6)
    — the only fully unmitigated source, and the one that fires on the same
    cadence users describe ("during normal streaming, not just at turn

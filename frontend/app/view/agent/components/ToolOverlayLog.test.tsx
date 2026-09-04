@@ -106,13 +106,22 @@ describe("ToolOverlayLog — height-FLIP transition", () => {
     });
 
     it("does not animate when the branch is unchanged (only chunks growing)", async () => {
+        // The height genuinely differs across the two ticks (40 -> 500) —
+        // a constant stub can't distinguish "correctly gated on branch
+        // staying the same" from "shouldAnimate's own zero-delta check
+        // happened to block it anyway" (the growth never produced a real
+        // height difference to react to either way). A prior version of
+        // this test used a constant stub and stayed green even after
+        // deliberately removing the branch-change gate from the source.
         vi.useFakeTimers();
-        stubScrollHeight(40);
+        const heightStub = stubScrollHeight(40);
         const [node, setNode] = createSignal<ToolNode>(streamingNode);
         const { container } = render(() => <ToolOverlayLog node={node()} />);
         const el = container.querySelector(".agent-tool-overlay-log") as HTMLElement;
         await vi.runOnlyPendingTimersAsync();
 
+        heightStub.mockRestore();
+        stubScrollHeight(500);
         setNode({
             ...streamingNode,
             log: {
@@ -121,7 +130,7 @@ describe("ToolOverlayLog — height-FLIP transition", () => {
             },
         });
         await vi.runOnlyPendingTimersAsync();
-        expect(el.style.height).toBe(""); // still "streaming" branch — no FLIP
+        expect(el.style.height).toBe(""); // still "streaming" branch — no FLIP despite a real height change
 
         vi.useRealTimers();
     });
@@ -141,14 +150,44 @@ describe("ToolOverlayLog — height-FLIP transition", () => {
         vi.useRealTimers();
     });
 
-    it("resyncs without animating when a branch change happened entirely while the panel was hidden", async () => {
+    it("resyncs without animating when a branch change happened entirely while the panel was hidden", () => {
         // A failed/denied/canceled tool auto-collapses the instant it
         // leaves "running" (ToolBlock.tsx autoExpanded()), so the
         // running->result branch change commonly happens while
-        // content-visibility:hidden. The first re-measurement after the
-        // panel becomes visible again (e.g. the user expands it to
-        // inspect the error) must show the final state directly, NOT
-        // FLIP from the stale pre-collapse height (reagent P1 on #1975).
+        // content-visibility:hidden. Must show the final state directly,
+        // NOT FLIP from the stale pre-collapse height (reagent P1 on
+        // #1975).
+        //
+        // jsdom applies no real stylesheet, so the `--hidden` CLASS by
+        // itself proves nothing about computed content-visibility — the
+        // mechanism this migrated to (resize-contract.ts's isMeasurable)
+        // reads getComputedStyle, not the class. A prior version of this
+        // test asserted el.style.height === "" without this mock and
+        // stayed green for the wrong reason: the scrollHeight stub simply
+        // hadn't changed value yet at the point of the assertion, so
+        // nothing would have animated regardless of whether hidden-
+        // detection worked at all. This mock makes getComputedStyle
+        // actually reflect the class, mirroring what the real stylesheet
+        // does in production, so the test exercises the real gate.
+        //
+        // Deliberately checks el.classList directly, NOT el.closest(...) —
+        // content-visibility is non-inherited, so a real getComputedStyle
+        // call reports ONLY the exact queried element's own value, never an
+        // ancestor's. Using closest() here would answer "hidden" for the
+        // DESCENDANT too, which would make this test pass even if
+        // resize-contract.ts's own isMeasurable stopped walking ancestors
+        // and only checked its argument directly (confirmed: the first
+        // version of this mock did exactly that, and this test stayed
+        // green after deliberately breaking the ancestor walk in
+        // resize-contract.ts to check).
+        const realGetComputedStyle = window.getComputedStyle;
+        vi.spyOn(window, "getComputedStyle").mockImplementation((el: Element) => {
+            if (el.classList?.contains("agent-tool-panel--hidden")) {
+                return { contentVisibility: "hidden" } as CSSStyleDeclaration;
+            }
+            return realGetComputedStyle(el);
+        });
+
         stubScrollHeight(40);
         const [node, setNode] = createSignal<ToolNode>(streamingNode);
         const { container } = render(() => (
@@ -156,19 +195,15 @@ describe("ToolOverlayLog — height-FLIP transition", () => {
                 <ToolOverlayLog node={node()} />
             </div>
         ));
-        const panel = container.querySelector(".agent-tool-panel") as HTMLElement;
         const el = container.querySelector(".agent-tool-overlay-log") as HTMLElement;
 
-        setNode(terminalNode); // branch changes entirely while hidden
+        // The branch change's real height differs sharply WHILE hidden —
+        // if the hidden-gate weren't working, this is exactly the delta
+        // that would produce a visible FLIP.
+        stubScrollHeight(900);
+        setNode(terminalNode);
         expect(el.style.height).toBe(""); // never measured/animated while hidden
-
-        stubScrollHeight(120); // the terminal branch's real (now-visible) height
-        panel.classList.remove("agent-tool-panel--hidden"); // panel becomes visible
-        // MutationObserver callbacks run as a microtask.
-        await Promise.resolve();
-        await Promise.resolve();
-
-        expect(el.style.height).toBe(""); // resynced silently, no FLIP
+        expect(el.style.transition).toBe(""); // nothing armed either — no leftover to resolve once visible
     });
 
     it("does not animate when a different tool node swaps into the same slot", async () => {

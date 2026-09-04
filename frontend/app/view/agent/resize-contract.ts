@@ -2,12 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A single content-resize contract for the agent pane — step 2 of
+ * A single content-resize contract for the agent pane —
  * docs/specs/SPEC_CONTENT_RESIZE_CONTRACT_2026_08_31.md.
  *
- * Landed with NO call sites yet (spec §5 step 2) — zero runtime effect. The
- * migration (step 3: `ToolOverlayLog.tsx`'s `flipHeight()`) is a separate,
- * reviewable-in-isolation change.
+ * Landed with no call sites (step 2, zero runtime effect); step 3 migrated
+ * `ToolOverlayLog.tsx`'s `flipHeight()` to it, the first real consumer.
  *
  * ## What this replaces
  *
@@ -47,15 +46,23 @@
  * call that once the mutation has landed in the DOM.
  *
  * Both close over their OWN `fromPx` in their own call's closure — neither
- * reads or writes any state shared across calls. This is what eliminates
- * the node-identity-reset class of bug by construction rather than by a
- * bespoke guard: `ToolOverlayLog.tsx`'s current `flipHeight()` needs a
- * `prevNodeId` check specifically because its baseline
- * (`lastMeasuredHeight`) is a variable shared across every effect
- * invocation, so a streaming-buffer cap-advance swapping a different node
- * into the same DOM slot without unmounting can make an unrelated old
- * height leak into a new node's first real transition. Neither entry point
- * here has an equivalent shared field for that to leak through.
+ * reads or writes any state shared across calls, which shrinks (but does
+ * NOT eliminate) the node-identity-reset class of bug: the ORIGINAL version
+ * of this comment claimed callers would never need a `prevNodeId`-style
+ * guard because of this. That was wrong, corrected once `ToolOverlayLog.tsx`
+ * actually migrated (step 3): a streaming-buffer cap-advance can still swap
+ * a different node into the same DOM slot between calling
+ * `beginHeightContinuity` and calling the commit function it returned — the
+ * CALLER still holds that returned closure across the swap in its own
+ * variable, and this module has no way to know the node identity changed
+ * underneath it. `ToolOverlayLog.tsx` keeps its own `lastNodeId` guard for
+ * exactly this — simplified from the old code (no `lastMeasuredHeight`/
+ * `heightStale` to carry, just discard the pending commit on a swap), but
+ * still necessary. What this module's closure-per-call design DOES remove
+ * is the OTHER half of the old bug: a stale `lastMeasuredHeight` baseline
+ * leaking from the outgoing node into whatever the incoming node's `commit`
+ * eventually reads as `toPx` — that's now impossible by construction, since
+ * `fromPx` is captured fresh in each `beginHeightContinuity` call.
  */
 
 import { atoms } from "@/app/store/global";
@@ -194,6 +201,26 @@ function cancelInFlight(el: HTMLElement): void {
     inFlight.get(el)?.();
 }
 
+/** Default height read — `offsetHeight`, the rendered box. Correct for the
+ *  common case (a row that simply grows/shrinks with its own content, e.g.
+ *  `AgentDocumentVirtualList`'s row-height sampling), wrong for an element
+ *  that scrolls its OWN overflow inside an ancestor's `max-height` — for
+ *  that shape, `offsetHeight` is clamped to whatever's left of the
+ *  ancestor's budget and stops changing once content exceeds it, while
+ *  `scrollHeight` keeps reflecting the true content height. That's exactly
+ *  `ToolOverlayLog.tsx`'s `.agent-tool-overlay-log` (bounded by
+ *  `.agent-tool-panel`'s `max-height: 50vh`, `overflow-y: auto` on itself)
+ *  — the element this module's first real migration target needs to FLIP,
+ *  and precisely the large-shrink case (a long raw chunk log collapsing to
+ *  a short compact result) this whole effort exists to fix. Callers with
+ *  that shape must pass `measure: (el) => el.scrollHeight` explicitly; the
+ *  default stays `offsetHeight` rather than switching everyone to
+ *  `scrollHeight`, since for a non-scrolling element the two are normally
+ *  identical and `offsetHeight` is the cheaper, more universally correct
+ *  read (a `position: absolute`/zero-overflow row has no scrollHeight
+ *  distinct from its rendered size to begin with). */
+const DEFAULT_MEASURE = (el: HTMLElement): number => el.offsetHeight;
+
 /**
  * Run `mutate` (assumed to synchronously produce `el`'s new rendered
  * height — true for a plain Solid signal write, per the same synchronous-
@@ -202,15 +229,19 @@ function cancelInFlight(el: HTMLElement): void {
  * through to `mutate()` with no measurement at all when `el` isn't
  * currently measurable — there is nothing to FLIP FROM.
  */
-export function withHeightContinuity(el: HTMLElement, mutate: () => void): void {
+export function withHeightContinuity(
+    el: HTMLElement,
+    mutate: () => void,
+    measure: (el: HTMLElement) => number = DEFAULT_MEASURE,
+): void {
     cancelInFlight(el);
     if (!isMeasurable(el)) {
         mutate();
         return;
     }
-    const fromPx = el.offsetHeight;
+    const fromPx = measure(el);
     mutate();
-    const toPx = el.offsetHeight;
+    const toPx = measure(el);
     if (shouldAnimate(fromPx, toPx)) flip(el, fromPx, toPx);
 }
 
@@ -227,16 +258,19 @@ export function withHeightContinuity(el: HTMLElement, mutate: () => void): void 
  * function it returns, and the "to" read needs the same unpinning the
  * "from" read does, for the identical reason (see `cancelInFlight`).
  */
-export function beginHeightContinuity(el: HTMLElement): (this: void) => void {
+export function beginHeightContinuity(
+    el: HTMLElement,
+    measure: (el: HTMLElement) => number = DEFAULT_MEASURE,
+): (this: void) => void {
     cancelInFlight(el);
     if (!isMeasurable(el)) {
         return () => {};
     }
-    const fromPx = el.offsetHeight;
+    const fromPx = measure(el);
     return () => {
         cancelInFlight(el);
         if (!isMeasurable(el)) return;
-        const toPx = el.offsetHeight;
+        const toPx = measure(el);
         if (shouldAnimate(fromPx, toPx)) flip(el, fromPx, toPx);
     };
 }
