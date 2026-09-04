@@ -58,10 +58,30 @@ function stubScrollHeight(px: number) {
     return vi.spyOn(HTMLDivElement.prototype, "scrollHeight", "get").mockReturnValue(px);
 }
 
+/** Stub `offsetHeight` independently of `scrollHeight` — needed to model
+ *  `.agent-tool-overlay-log`'s real shape (an internally-scrolling box
+ *  bounded by its ancestor panel's max-height), where the two genuinely
+ *  diverge. Defaults to 0 (jsdom's own default) unless stubbed. */
+function stubOffsetHeight(px: number) {
+    return vi.spyOn(HTMLDivElement.prototype, "offsetHeight", "get").mockReturnValue(px);
+}
+
 describe("ToolOverlayLog — height-FLIP transition", () => {
     it("freezes at the previous height then eases to the new height on a branch change", async () => {
         vi.useFakeTimers();
         const heightStub = stubScrollHeight(40); // streaming-branch height
+        // The magnitude-gating measure (offsetHeight) is independent of
+        // scrollHeight (codex P2, PR #2962) — jsdom's own default is 0,
+        // which would make shouldAnimate's fromPx<=0 guard block every FLIP
+        // in this file. Must genuinely change value across the branch swap
+        // too (not just be nonzero): shouldAnimate's magnitude check needs
+        // a real gate DELTA, and a constant offsetHeight stub produces a
+        // zero gate delta regardless of how the (irrelevant to this test)
+        // absolute value is chosen — this test doesn't care what the
+        // rendered values actually are, only that SOME real change is
+        // present so scrollHeight (the FLIP's own from/to) is what actually
+        // drives the outcome, same as before this parameter existed.
+        const offsetStub = stubOffsetHeight(50);
         const [node, setNode] = createSignal<ToolNode>(streamingNode);
         const { container } = render(() => <ToolOverlayLog node={node()} />);
         const el = container.querySelector(".agent-tool-overlay-log") as HTMLElement;
@@ -72,6 +92,8 @@ describe("ToolOverlayLog — height-FLIP transition", () => {
         expect(el.style.height).toBe("");
 
         heightStub.mockRestore();
+        offsetStub.mockRestore();
+        stubOffsetHeight(80);
         stubScrollHeight(120); // terminal-branch (result view) is taller
         setNode(terminalNode);
 
@@ -214,6 +236,11 @@ describe("ToolOverlayLog — height-FLIP transition", () => {
         // analogous slot-reuse hazard on `onHoldOpen` (PR #1317).
         vi.useFakeTimers();
         stubScrollHeight(40); // tc-1's "streaming" height
+        // offsetHeight (the magnitude-gating measure, codex P2 PR #2962)
+        // must genuinely differ across the THIRD phase's compared reads
+        // below, same reasoning as the previous test — a constant value
+        // produces a zero gate delta regardless of how scrollHeight moves.
+        stubOffsetHeight(50);
         const [node, setNode] = createSignal<ToolNode>(streamingNode);
         const { container } = render(() => <ToolOverlayLog node={node()} />);
         const el = container.querySelector(".agent-tool-overlay-log") as HTMLElement;
@@ -227,6 +254,7 @@ describe("ToolOverlayLog — height-FLIP transition", () => {
             id: "tc-2",
         };
         stubScrollHeight(500);
+        stubOffsetHeight(55); // tc-2's fresh baseline gate value
         setNode(otherNode);
         await vi.runOnlyPendingTimersAsync();
         // Must resync silently — NOT FLIP from tc-1's stale 40px baseline.
@@ -238,6 +266,7 @@ describe("ToolOverlayLog — height-FLIP transition", () => {
         // 500px (tc-2's own terminal-branch height, recorded at the swap),
         // so this eases from 500px down to the new 120px.
         stubScrollHeight(120);
+        stubOffsetHeight(90); // genuinely differs from the 55 baseline above
         setNode({ ...otherNode, log: { open: true, chunks: [{ kind: "stdout", content: "x", timestamp: 1 }] } });
         expect(el.style.height).toBe("500px"); // frozen "from" synchronously
         await vi.runOnlyPendingTimersAsync();
@@ -260,6 +289,41 @@ describe("ToolOverlayLog — height-FLIP transition", () => {
         setNode(terminalNode);
         await vi.runOnlyPendingTimersAsync();
         expect(el.style.height).toBe(""); // branch changed + heights differ, but motion is disabled
+
+        vi.useRealTimers();
+    });
+});
+
+describe("ToolOverlayLog — magnitude gating uses the rendered height, not scrollHeight (codex P2, PR #2962)", () => {
+    it("animates a long-output running->terminal transition even though scrollHeight's own delta is far past the cap", async () => {
+        // The real scenario the bug report describes: a raw chunk log near
+        // MAX_TOOL_OUTPUT_LINES has a scrollHeight delta easily in the tens
+        // of thousands of px against a short terminal result — but the
+        // box's RENDERED shrink is bounded by the ancestor panel's
+        // max-height to a few hundred px. Gating the magnitude cap on
+        // scrollHeight would skip animating exactly this case.
+        vi.useFakeTimers();
+        const scrollStub = stubScrollHeight(15000); // huge raw chunk log
+        stubOffsetHeight(500); // but rendered/clamped to the panel's own cap
+        const [node, setNode] = createSignal<ToolNode>(streamingNode);
+        const { container } = render(() => <ToolOverlayLog node={node()} />);
+        const el = container.querySelector(".agent-tool-overlay-log") as HTMLElement;
+        await vi.runOnlyPendingTimersAsync();
+
+        scrollStub.mockRestore();
+        stubScrollHeight(200); // compact terminal result
+        stubOffsetHeight(220); // rendered delta: 500 -> 220 = 280px, well under the cap
+        setNode(terminalNode);
+
+        // Synchronous: frozen at the scrollHeight-based FROM value. Checked
+        // immediately, not after a timer flush — a naive scrollHeight-gated
+        // version sees a ~14800px delta (past MAX_ANIMATED_DELTA_PX) and
+        // skips animating entirely, so el.style.height would stay "" here
+        // instead.
+        expect(el.style.height).toBe("15000px");
+
+        await vi.runOnlyPendingTimersAsync();
+        expect(el.style.height).toBe("200px"); // eased to the true (scrollHeight) terminal height
 
         vi.useRealTimers();
     });

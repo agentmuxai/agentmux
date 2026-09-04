@@ -229,6 +229,20 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
     // it must measure `scrollHeight`, not the default.
     const measureHeight = (el: HTMLElement): number => el.scrollHeight;
 
+    // BUT the magnitude cap (resize-contract.ts's MAX_ANIMATED_DELTA_PX)
+    // must be gated on the RENDERED delta, not this scrollHeight one
+    // (codex P2, PR #2962): a raw chunk log anywhere near
+    // MAX_TOOL_OUTPUT_LINES (1,000) has a scrollHeight delta easily in the
+    // tens of thousands of px against a short terminal result, which would
+    // blow the cap and skip animating — even though the box's actual
+    // VISIBLE shrink is bounded by the same 50vh cap to at most a few
+    // hundred px. The cap exists for an unrelated phenomenon (a whole
+    // pane's scrollHeight collapsing by 20,000+px — see that constant's
+    // own doc comment); measured against scrollHeight here, it would fire
+    // for exactly the long-output transitions this FLIP most needs to
+    // smooth. offsetHeight is what the user actually sees change size.
+    const measureRenderedHeight = (el: HTMLElement): number => el.offsetHeight;
+
     // `lastBranch`/`pendingCommit` hold what the PREVIOUS run of this
     // effect captured — Solid effects always run after the DOM has already
     // been patched for the change that triggered them, so a run can only
@@ -262,7 +276,7 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
             // incoming node.
             lastNodeId = nodeId;
             lastBranch = b;
-            pendingCommit = beginHeightContinuity(el, measureHeight);
+            pendingCommit = beginHeightContinuity(el, measureHeight, measureRenderedHeight);
             return;
         }
 
@@ -278,7 +292,7 @@ export const ToolOverlayLog = (props: ToolOverlayLogProps): JSX.Element => {
         // transition, which is exactly what should happen once content has
         // moved on again.
         const commit = pendingCommit;
-        pendingCommit = beginHeightContinuity(el, measureHeight);
+        pendingCommit = beginHeightContinuity(el, measureHeight, measureRenderedHeight);
         if (branchChanged) commit?.();
     });
     // No onCleanup here (the old code had one, cancelling any in-flight

@@ -24,7 +24,7 @@ agent pane changes height and the scroll position visibly jumps":
 | 08-21 | `FINDINGS_TOOL_CALL_SCROLL_OSCILLATION` | Corrected twice by PR review |
 | 08-22 | `FINDINGS_..._LIVE_INSTANCE_DATA` | Corrected twice by PR review |
 | 08-31 | this doc | Two further candidate fixes ruled out (§3); a third ruled out in draft, then withdrawn on review (§3a) |
-| 09-03 | step 3 migration | A design assumption in this very document's §4 (`el.offsetHeight` is the right universal measurement) turned out wrong the moment it met its first real consumer — see §4 |
+| 09-03 | step 3 migration | Two design assumptions in this very document's §4 turned out wrong within hours of each other, the second caught by review of the PR fixing the first — see §4 |
 
 Every pass was made by someone reasoning carefully from the source, and most
 produced at least one confident conclusion that a later pass had to withdraw.
@@ -189,13 +189,15 @@ outer observer to notice after the fact.
  *  natural height. The caller never measures, never touches transitions, and
  *  never needs to know whether an outer scroll container is pinned. */
 export function withHeightContinuity(
-    el: HTMLElement, mutate: () => void, measure?: (el: HTMLElement) => number,
+    el: HTMLElement, mutate: () => void,
+    measure?: (el: HTMLElement) => number, measureForGating?: (el: HTMLElement) => number,
 ): void;
 
 /** Same, for a mutation that lands asynchronously (a throttle timer's trailing
  *  commit): capture the "from" height now, ease once the mutation settles. */
 export function beginHeightContinuity(
-    el: HTMLElement, measure?: (el: HTMLElement) => number,
+    el: HTMLElement,
+    measure?: (el: HTMLElement) => number, measureForGating?: (el: HTMLElement) => number,
 ): (this: void) => void;
 ```
 
@@ -215,6 +217,26 @@ shape pass `(el) => el.scrollHeight` instead. Another data point for §0's
 thesis: this was a design decision made confidently in this very document,
 and it was wrong the moment it was tested against something real rather
 than reasoned about in the abstract.
+
+**`measureForGating`, also 09-03, caught by review of the `measure` PR
+itself, not anticipated when `measure` was added a few hours earlier in the
+same document.** `measure`'s own fix has a second-order consequence:
+`MAX_ANIMATED_DELTA_PX` (§4 above) now gets evaluated against whatever
+`measure` returns — for `.agent-tool-overlay-log`, that is `scrollHeight`,
+which is unclamped by design (that is the entire point of the `measure`
+fix). A raw chunk log anywhere near `MAX_TOOL_OUTPUT_LINES` (1,000) has a
+`scrollHeight` delta easily in the tens of thousands of px against a short
+terminal result — comfortably past the cap — while the box's actual
+RENDERED shrink stays bounded by the same `max-height: 50vh` to at most a
+few hundred px. Gating on the unclamped number would skip animating
+exactly the long-output transitions this whole effort exists to smooth —
+the cap firing for a reason (§4's original whole-pane-collapse rationale)
+that has nothing to do with what this specific element's user actually
+sees change size. Fixed with a second optional parameter,
+`measureForGating`, defaulting to `measure` (a no-op for every caller
+without this divergence): the FLIP still eases between the true
+`scrollHeight` endpoints, but the cap is now checked against `offsetHeight`
+instead. `ToolOverlayLog.tsx` passes both.
 
 Properties the single implementation owns, which no current call site owns
 consistently:

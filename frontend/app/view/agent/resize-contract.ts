@@ -228,11 +228,28 @@ const DEFAULT_MEASURE = (el: HTMLElement): number => el.offsetHeight;
  * easing `el`'s height across the change if it's animatable. Falls straight
  * through to `mutate()` with no measurement at all when `el` isn't
  * currently measurable — there is nothing to FLIP FROM.
+ *
+ * `measureForGating` (codex P2, PR #2962): the delta `MAX_ANIMATED_DELTA_PX`
+ * bounds must be the VISUALLY RENDERED one, not necessarily the same number
+ * `measure` produces. For `ToolOverlayLog.tsx`'s `.agent-tool-overlay-log`,
+ * `measure` is `scrollHeight` (see `DEFAULT_MEASURE`'s doc comment for why) —
+ * but a long raw chunk log easily exceeds several thousand px of
+ * `scrollHeight` (the 1,000-line output cap alone gets there), while the
+ * box's actual RENDERED shrink is bounded by the ancestor panel's
+ * `max-height: 50vh` to at most a few hundred px. Gating the magnitude cap
+ * on the unclamped `scrollHeight` delta would skip animating exactly the
+ * long-output transitions this module exists to smooth, for a reason
+ * (`MAX_ANIMATED_DELTA_PX`) that was never about THIS element's visible
+ * shrink at all — it exists for the OTHER, unrelated whole-pane-collapse
+ * case (see that constant's own doc comment). Defaults to `measure` — most
+ * callers have no scrolling/clamping divergence, so the two numbers are the
+ * same and this parameter is a no-op for them.
  */
 export function withHeightContinuity(
     el: HTMLElement,
     mutate: () => void,
     measure: (el: HTMLElement) => number = DEFAULT_MEASURE,
+    measureForGating: (el: HTMLElement) => number = measure,
 ): void {
     cancelInFlight(el);
     if (!isMeasurable(el)) {
@@ -240,9 +257,11 @@ export function withHeightContinuity(
         return;
     }
     const fromPx = measure(el);
+    const fromGatePx = measureForGating(el);
     mutate();
     const toPx = measure(el);
-    if (shouldAnimate(fromPx, toPx)) flip(el, fromPx, toPx);
+    const toGatePx = measureForGating(el);
+    if (shouldAnimate(fromGatePx, toGatePx)) flip(el, fromPx, toPx);
 }
 
 /**
@@ -257,20 +276,26 @@ export function withHeightContinuity(
  * during the (potentially long) gap between calling this and calling the
  * function it returns, and the "to" read needs the same unpinning the
  * "from" read does, for the identical reason (see `cancelInFlight`).
+ *
+ * `measureForGating` — see `withHeightContinuity`'s doc comment; same
+ * reasoning, applied at both capture and commit time.
  */
 export function beginHeightContinuity(
     el: HTMLElement,
     measure: (el: HTMLElement) => number = DEFAULT_MEASURE,
+    measureForGating: (el: HTMLElement) => number = measure,
 ): (this: void) => void {
     cancelInFlight(el);
     if (!isMeasurable(el)) {
         return () => {};
     }
     const fromPx = measure(el);
+    const fromGatePx = measureForGating(el);
     return () => {
         cancelInFlight(el);
         if (!isMeasurable(el)) return;
         const toPx = measure(el);
-        if (shouldAnimate(fromPx, toPx)) flip(el, fromPx, toPx);
+        const toGatePx = measureForGating(el);
+        if (shouldAnimate(fromGatePx, toGatePx)) flip(el, fromPx, toPx);
     };
 }
