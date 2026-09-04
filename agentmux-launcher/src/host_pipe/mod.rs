@@ -605,8 +605,16 @@ impl HostPipe {
         self.inner.lock().await.pending_buffer.len()
     }
 
-    /// Test-only inspection of whether a writer is currently set.
-    #[cfg(test)]
+    /// Whether a writer is currently set — i.e. a CEF host has called
+    /// `set_writer` (registered as `ClientKind::Host` over the IPC pipe)
+    /// and hasn't since disconnected. Originally test-only inspection;
+    /// also used in production by the splash's delayed "first run can
+    /// take longer" hint (`supervisor/windows.rs`) to distinguish the
+    /// pre-registration gap (host process exists, zero code executed —
+    /// where that message belongs) from ordinary post-registration
+    /// CEF-init/first-paint time (where it would be misleading). reagent
+    /// P2, PR #2967 — was a separate `has_registered_host` method with an
+    /// identical body; merged to avoid keeping two copies in sync.
     pub async fn is_connected(&self) -> bool {
         self.inner.lock().await.writer.is_some()
     }
