@@ -2823,6 +2823,7 @@ mod fleet_tests {
             auth_key: auth_key.to_string(),
             channel: "test-channel".to_string(),
             registration_nonce: 0,
+            jekt_public_key: String::new(),
         };
         std::fs::write(dir.join("test-channel.json"), serde_json::to_string(&entry).unwrap()).unwrap();
     }

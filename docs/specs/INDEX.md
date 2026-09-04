@@ -315,7 +315,7 @@ partial list.
 | [`jekt-visibility-completion`](jekt-visibility-completion.md) | Spec: Jekt Visibility Completion — persistent-agent visibility + outgoing echo |
 | [`swarm-active-pane-sync`](swarm-active-pane-sync.md) | Swarm ↔ Pane Two-Way Active-Row Sync |
 
-### active (13)
+### active (14)
 
 | Spec | Title |
 |---|---|
@@ -329,6 +329,7 @@ partial list.
 | [`SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03`](SPEC_DOCS_LIFECYCLE_HARDENING_2026_08_03.md) | Docs Lifecycle Audit & Hardening Plan |
 | [`SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03`](SPEC_EDITOR_MCP_OPEN_BLANK_PREVIEW_AND_PANE_REUSE_2026_08_03.md) | Plan: MCP-opened markdown blank-preview investigation + Editor-pane reuse |
 | [`SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31`](SPEC_HEADLESS_TRANSIENT_RETRY_2026_08_31.md) | Transient-failure retry for turns with no rendered pane |
+| [`SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02`](SPEC_JEKT_CROSS_CHANNEL_TRUST_2026_09_02.md) | SPEC: Cross-channel jekt trust — closing the last unverifiable same-machine tier |
 | [`SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03`](SPEC_MIGRATION_SYSTEM_HARDENING_2026_08_03.md) | Migration System Audit & Hardening Plan |
 | [`SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29`](SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md) | Spec: multi-tier discovery + remote API invocation over muxbus |
 | [`SPEC_WINDOW_NAME_API_HARDENING_2026_08_08`](SPEC_WINDOW_NAME_API_HARDENING_2026_08_08.md) | SPEC: Window-name App API hardening (phantom-id success + status codes) |
