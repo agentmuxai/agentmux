@@ -44,8 +44,18 @@ pub struct AgentEntry {
     /// channel tag is redundant — the whole file is already channel-
     /// scoped by its directory); populated for entries in the host-global
     /// shared registry (§ below), where multiple channels' entries for
-    /// the same agent name coexist and need distinguishing. See
-    /// `docs/specs/SPEC_MUXBUS_CROSS_CHANNEL_DELIVERY_2026_07_02.md`.
+    /// the same agent name coexist and need distinguishing. MuxBus Tier 2b
+    /// same-host cross-channel delivery, issue #1916.
+    ///
+    /// (This previously cited a `SPEC_MUXBUS_CROSS_CHANNEL_DELIVERY` spec dated
+    /// 2026-07-02 that has never existed in any commit — `check-spec-citations`
+    /// flags it the moment this file is touched. Repointed at the issue rather
+    /// than at a plausible-looking neighbour, since the similarly-named
+    /// duplicate-delivery spec is a different document about duplicate
+    /// suppression, not this registry's shape. `registry/paths.rs` carries the
+    /// same dead pointer and is deliberately left alone here: it is unchanged
+    /// by this PR so the gate does not see it, and widening a security PR to
+    /// sweep unrelated files is its own risk. Worth a follow-up.)
     #[serde(default)]
     pub channel: String,
     /// Process-wide unique nonce of the persistent-controller spawn this

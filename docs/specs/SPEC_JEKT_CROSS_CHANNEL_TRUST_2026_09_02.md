@@ -16,8 +16,9 @@ distribution — the design this spec extends),
 `SPEC_JEKT_SENSITIVE_TIER_NARROWING_2026_08_15.md`,
 `SPEC_JEKT_SENSITIVE_TIER_VERIFIED_SENDER_NO_STOP_2026_08_17.md` (the
 `ESCALATE=none` relaxation — load-bearing for §7.3),
-`SPEC_MUXBUS_CROSS_CHANNEL_DELIVERY_2026_07_02.md` (the delivery path this
-secures), issues #1387–#1396 (the globalization sweep that missed this).
+issue #1916 (MuxBus Tier 2b same-host cross-channel delivery — the delivery
+path this secures; note the spec filename cited for it in `registry.rs` and
+`registry/paths.rs` has never existed), issues #1387–#1396 (the globalization sweep that missed this).
 
 ---
 
