@@ -486,18 +486,22 @@ export const ToolBlock = (props: ToolBlockProps): JSX.Element => {
                 </div>
                 {/* Peek overlay — SPEC_TRANSCRIPT_NODE_HOVER_PEEK_2026_08_03.md,
                 styled to match UserMessageBlock.tsx's "Session context"
-                hover-to-peek (see PeekOverlay.tsx). Suppressed once the
-                panel is already expanded, since the command/time are
-                visible in context there — same condition the old
-                Tooltip-based version used. */}
-                <PeekOverlay show={isPeeking() && hasAnyPeekContent() && !expanded()} rowEl={peekRowEl}>
+                hover-to-peek (see PeekOverlay.tsx). Time/estimate show
+                regardless of expand state — MarkdownBlock/UserMessageBlock
+                never suppressed these either, and unlike the command text
+                below, they're not shown anywhere in the expanded panel body
+                (REPORT_TOOL_CALL_PEEK_SUPPRESSED_WHEN_EXPANDED_2026_09_04.md).
+                Only the bare command line stays gated on !expanded() — that
+                one genuinely is redundant once the panel shows it in
+                context. */}
+                <PeekOverlay show={isPeeking() && hasAnyPeekContent()} rowEl={peekRowEl}>
                     <Show when={peekTimeText()}>
                         <div class="agent-node-peek-tooltip-meta">{peekTimeText()}</div>
                     </Show>
                     <Show when={peekEstimateText()}>
                         <div class="agent-node-peek-tooltip-meta">{peekEstimateText()}</div>
                     </Show>
-                    <Show when={cmdText()}>
+                    <Show when={cmdText() && !expanded()}>
                         <div class="agent-node-peek-tooltip-body">{cmdText()}</div>
                     </Show>
                 </PeekOverlay>
