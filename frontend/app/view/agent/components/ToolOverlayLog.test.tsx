@@ -366,6 +366,34 @@ describe("ToolOverlayLog — hides bashwrap's internal starting-chunk (2026-09-0
         expect(container.querySelectorAll(".agent-tool-log-line")).toHaveLength(1);
     });
 
+    // The test above only proves "bashwrap" text doesn't leak and zero
+    // `.agent-tool-log-line` rows render — true both before AND after this
+    // fix, since the pre-fix bug rendered an EMPTY ChunkList (also zero
+    // rows), not visible text. It doesn't distinguish "correctly blank" from
+    // "wrongly blank instead of the Thinking placeholder" — this test does.
+    // User report, 2026-09-04: dropBashwrapStartingChunk (above) only fixed
+    // what ChunkList renders once it's the active branch; hasChunks() still
+    // counted the raw (pre-filter) chunk length, so an all-bashwrap-marker
+    // log still routed to ChunkList instead of falling through to
+    // ToolOverlayResult's own "still running, nothing to show yet" branch —
+    // rendering a visibly empty box between the Working row's "Thinking…"
+    // and the first real chunk, instead of a continuous "Thinking…" through
+    // both surfaces.
+    it("falls through to the Thinking placeholder (not a blank box) when only a bashwrap-starting chunk exists", () => {
+        const node: ToolNode = {
+            ...streamingNode,
+            log: {
+                open: true,
+                chunks: [
+                    { kind: "system", content: "[bashwrap] starting: 42 chars", timestamp: 1 },
+                ],
+            },
+        };
+        const { container } = render(() => <ToolOverlayLog node={node} />);
+        expect(container.querySelector(".agent-tool-loading")).not.toBeNull();
+        expect(container.textContent).toContain("Thinking...");
+    });
+
     it("still shows real output once the tool completes, with no trace of the system chunk", () => {
         const node: ToolNode = {
             ...terminalNode,
