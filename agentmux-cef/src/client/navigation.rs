@@ -104,18 +104,92 @@ pub(crate) fn reveal_gated_window(
         elapsed_ms,
         "[startup-paint] revealing gated window"
     );
-    // "paint" stage telemetry (docs/reports/REPORT_SPLASH_TO_FIRST_PAINT_BLANK_WINDOW_GAP_2026_09_03.md
-    // §5.3): reports the on_load_end -> real-paint gap this whole gate exists
-    // to close, as its own splash row. Paired with the `stage_begin` call at
-    // the point this label was armed (`reveal_top_level_window` below).
-    // Placed here rather than gated on the fallible browser/window lookups
-    // further down, matching the ready-file/SetEvent dismiss signals below:
-    // the paint gate resolving is the event worth reporting, independent of
-    // whether the low-level show() that follows happens to succeed.
+    finish_gated_reveal(state, label, reason, elapsed_ms, SHOW_WINDOW_MAX_RETRIES);
+}
+
+/// Physically show a window whose paint gate has already fired (label
+/// already removed from `linux_paint_gate_pending`). Returns `true` once
+/// the `browser`/`BrowserView`/`Window` chain resolves — whether or not a
+/// `show()` was actually needed (already-visible counts as resolved) —
+/// `false` if any link in that chain isn't available yet, in which case the
+/// caller should retry rather than treat it as permanent: the same chain
+/// can resolve successfully at arm-time (`try_show_top_level_window`) and
+/// still transiently fail moments later — the same documented CEF Views
+/// quirk `SHOW_WINDOW_MAX_RETRIES` above exists to cover, just hit at a
+/// later point in the gated path. Reagent/Codex PR #2968 review: this used
+/// to be an inline, non-retrying lookup, with the splash dismiss signal
+/// already fired unconditionally before it even ran — a transient failure
+/// here would dismiss the splash while permanently leaving the window
+/// hidden.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn try_show_resolved_window(state: &Arc<AppState>, label: &str) -> bool {
+    let Some(mut browser) = state.get_browser(label) else { return false };
+    let Some(bv) = browser_view_get_for_browser(Some(&mut browser)) else { return false };
+    let Some(window) = bv.window() else { return false };
+    if window.is_visible() == 0 {
+        window.show();
+        if let Some(host) = browser.host() {
+            host.set_focus(1);
+        }
+    }
+    true
+}
+
+/// Finish a gated reveal: retry `try_show_resolved_window` until it
+/// succeeds or `retries_left` is exhausted, THEN fire the "paint" stage-end
+/// telemetry and the ready-file/`SetEvent` splash-dismiss signals — never
+/// before the window is confirmed shown (or retries are genuinely
+/// exhausted). Firing the dismiss signals only at that point, instead of
+/// unconditionally ahead of the fallible lookup, is what makes the retry
+/// meaningful: dismissing early would let the splash close over a window
+/// that never actually appeared. Retries are still exhausted with the
+/// dismiss signals fired anyway (with an error logged) rather than silently
+/// never firing them — `run_splash`'s wait has no overall timeout, so never
+/// dismissing would hang the splash forever even though the underlying
+/// window-show failure is a separate, already-logged problem.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn finish_gated_reveal(
+    state: &Arc<AppState>,
+    label: &str,
+    reason: &'static str,
+    elapsed_ms: u64,
+    retries_left: u32,
+) {
+    if try_show_resolved_window(state, label) {
+        signal_gated_reveal_complete(elapsed_ms, reason, "ok");
+        return;
+    }
+    if retries_left == 0 {
+        tracing::error!(
+            target: "startup-paint",
+            label = %label,
+            max_retries = SHOW_WINDOW_MAX_RETRIES,
+            "[startup-paint] browser_view/window still not resolvable after gate fired — \
+             dismissing splash anyway to avoid hanging it; window will stay hidden"
+        );
+        signal_gated_reveal_complete(elapsed_ms, reason, "error");
+        return;
+    }
+    let mut next = GatedRevealRetryTask::new(
+        state.clone(),
+        label.to_string(),
+        reason,
+        elapsed_ms,
+        retries_left - 1,
+    );
+    post_delayed_task(ThreadId::UI, Some(&mut next), SHOW_WINDOW_RETRY_DELAY_MS);
+}
+
+/// "paint" stage telemetry + the ready-file/`SetEvent` splash-dismiss
+/// signals (docs/reports/REPORT_SPLASH_TO_FIRST_PAINT_BLANK_WINDOW_GAP_2026_09_03.md
+/// §5.3), fired together once `finish_gated_reveal` knows the window is
+/// either shown or permanently unshowable — never any earlier.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+fn signal_gated_reveal_complete(elapsed_ms: u64, reason: &'static str, status: &str) {
     crate::launcher_ipc::report_startup_stage_end(
         "paint",
         elapsed_ms,
-        "ok",
+        status,
         Some(reason.to_string()),
     );
     if let Ok(path) = std::env::var("AGENTMUX_SPLASH_READY_FILE") {
@@ -147,17 +221,20 @@ pub(crate) fn reveal_gated_window(
     // `agentmux-launcher/src/splash.rs::run_splash`) to hang forever.
     #[cfg(target_os = "windows")]
     signal_windows_splash_dismiss();
-    let Some(mut browser) = state.get_browser(label) else { return };
-    if let Some(bv) = browser_view_get_for_browser(Some(&mut browser)) {
-        if let Some(window) = bv.window() {
-            if window.is_visible() == 0 {
-                window.show();
-                if let Some(host) = browser.host() {
-                    host.set_focus(1);
-                }
-            }
-        }
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+wrap_task! {
+    struct GatedRevealRetryTask {
+        state: Arc<AppState>,
+        label: String,
+        reason: &'static str,
+        elapsed_ms: u64,
+        retries_left: u32,
     }
+    impl Task { fn execute(&self) {
+        finish_gated_reveal(&self.state, &self.label, self.reason, self.elapsed_ms, self.retries_left);
+    }}
 }
 
 /// Signal the named Win32 event the launcher's splash thread is waiting on
