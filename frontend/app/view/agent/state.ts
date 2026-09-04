@@ -169,6 +169,28 @@ export interface PendingMessage {
      * See docs/analysis/ANALYSIS_IDLE_SEND_RACE_2026_06_11.md.
      */
     enqueuedWhileBusy: boolean;
+    /**
+     * Set by the `PendingMessageFlushStarted` reducer arm, dispatched from
+     * `flushHeldMessages` (`useAgentCommands.ts`) right before its actual
+     * `deliverToBackend` call — the moment delivery genuinely begins, not
+     * merely "the turn this message was queued behind has ended." Those two
+     * moments can be far apart when a controller refresh is still deferred
+     * (`flushHeldMessages` bails without draining `heldQueue` in that case);
+     * an earlier version of this flag was set unconditionally on `TurnEnd`
+     * and could read `flushing` while delivery hadn't actually started yet
+     * (codex P2 on PR #2970). Once set, the backend's async
+     * `agent-message-accepted` ack (which is what actually removes this
+     * entry, via `usePendingMessageAcceptance.ts`) or a delivery failure
+     * (`PendingMessageRejected`) is the only thing left to wait for. Before
+     * this flag existed, the panel had no way to distinguish "still behind a
+     * running turn" from "turn ended, delivery in flight" — it read the same
+     * "Queued — sends at the agent's next step" copy in both cases, which is
+     * actively wrong once the turn is Done (there is no "next step" left to
+     * wait for) and is what let "Queued message" visibly coexist with
+     * "Worked" for the length of that ack round-trip. See
+     * docs/specs/SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md Phase 1.
+     */
+    flushing?: boolean;
 }
 
 /**

@@ -1562,6 +1562,16 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
                 // deliverToBackend's guard/catch stay no-ops for it exactly
                 // as before. reagentx P1 on PR #2338 (thirty-eighth
                 // re-review).
+                //
+                // SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md Phase 1
+                // (codex P2 on PR #2970): mark the pending entry `flushing`
+                // right here — the moment delivery genuinely starts — not
+                // earlier on TurnEnd, which could be long before this point
+                // if the branch above bailed on a still-pending controller
+                // refresh. PendingMessagesPanel reads this to switch from
+                // "Queued — sends at the agent's next step" to an honest
+                // "Sending…" only once that's actually true.
+                opts.model.dispatchPane({ type: "PendingMessageFlushStarted", id: item.id });
                 await deliverToBackend(item.text, item.id, /* armExpiry */ false, /* initiatesTurn */ item.initiatedTurnOptimistically, /* authFailureToPreserve */ null);
             }
         })().finally(() => {
