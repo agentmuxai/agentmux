@@ -2,14 +2,11 @@
 
 **Date:** 2026-09-02
 **Author:** Agent4
-**Status:** **Phase A implemented** 2026-09-02 (D1 publication + D5 signing
-primitives). Phases B–D still proposed — see §10. Phase A is strictly additive:
-it publishes a public key and adds two unused functions. Nothing reads
-`jekt_public_key` yet, so no message's `TRUST=` can change until Phase B.
-**Repo state:** main @ `ec4241bd` (v0.55.32)
-**Prompted by:** a live incident on 2026-09-02 (§1.1), and the question
-"I thought we already had it."
-
+**Status:** active — Phase A (D1 key publication + D5 signing primitives)
+shipped in #2959. Phases B (verification), C (enforcement) and D (escalation
+chaining) remain — see §10. Phase A is strictly additive: it publishes a public
+key and adds two as-yet-unused functions, so no message's `TRUST=` can change
+until Phase B.
 **Related (all real, all shipped):**
 `SPEC_JEKT_SECURITY_AND_VISIBILITY_2026_07_01.md` (marker format, tier rules),
 `SPEC_JEKT_TRUST_LAYER_COMPLETION_2026_08_13.md` (host-tier HMAC),
