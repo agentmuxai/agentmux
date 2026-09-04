@@ -611,6 +611,19 @@ impl HostPipe {
         self.inner.lock().await.writer.is_some()
     }
 
+    /// Production counterpart of `is_connected` above (which is test-only):
+    /// has a CEF host ever called `set_writer` — i.e. registered as
+    /// `ClientKind::Host` over the IPC pipe — since this `HostPipe` was
+    /// created (or since its writer was last cleared)? Used by the
+    /// splash's delayed "first run can take longer" hint
+    /// (`supervisor/windows.rs`) to distinguish the pre-registration gap
+    /// (host process exists, zero code executed — where that message
+    /// belongs) from ordinary post-registration CEF-init/first-paint time
+    /// (where it would be misleading). Codex P2, PR #2967.
+    pub async fn has_registered_host(&self) -> bool {
+        self.inner.lock().await.writer.is_some()
+    }
+
     /// Test-only: force the disconnect timer back by `delta` so the
     /// 30s timeout fires without sleeping in tests.
     #[cfg(test)]

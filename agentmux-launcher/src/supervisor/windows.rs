@@ -503,21 +503,33 @@ pub(crate) async fn run_windows(
             // path, while still showing well before this gap's own
             // observed 18-30s+ worst case ends.
             //
-            // Fire-and-forget, no cancellation: if the host registers
-            // (and the splash dismisses) before 5s, this message is sent
-            // into either an already-torn-down channel (silently dropped,
-            // see StartupEventSink's own doc comment) or one whose
-            // consumer has already stopped draining it mid-hold/fade —
-            // both cases are harmless no-ops, never a visible glitch.
+            // Gated on `host_pipe.has_registered_host()`, NOT on splash
+            // dismiss timing — Codex P2, PR #2967: host IPC registration
+            // (this timer's actual target) happens well before the splash
+            // dismisses (that waits for CEF's `on_load_end`, i.e. full
+            // init + first paint). An earlier version of this comment
+            // assumed those two events were close enough together that a
+            // plain fire-and-forget timer would only ever land in the
+            // pre-registration gap or a torn-down channel; that's false
+            // whenever registration succeeds quickly but CEF init/first
+            // paint alone runs past 5s (slow disk, cold caches, etc.) — a
+            // real, if unrelated, delay this message must not be shown
+            // for, since it isn't the first-run-scan gap it exists to
+            // explain. Checking registration state directly, right before
+            // sending, fixes that regardless of how long the splash stays
+            // up afterward.
             if splash_event_name.is_some() {
                 let delayed_sink = startup_sink.clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_secs(5));
-                    delayed_sink.sub_begin(
-                        "host",
-                        "first-run-wait",
-                        "First run can take longer",
-                    );
+                let delayed_host_pipe = std::sync::Arc::clone(&host_pipe);
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    if !delayed_host_pipe.has_registered_host().await {
+                        delayed_sink.sub_begin(
+                            "host",
+                            "first-run-wait",
+                            "First run can take longer",
+                        );
+                    }
                 });
             }
             c
