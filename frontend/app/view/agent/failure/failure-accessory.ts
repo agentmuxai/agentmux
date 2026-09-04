@@ -27,6 +27,17 @@ export interface FailureActions {
     loginViaTerminal: () => void;
     /** Open Armory → Accounts. */
     openArmory: () => void;
+    /**
+     * Bind an already-authenticated account (of this agent's provider) to
+     * this agent, replacing the round-trip through the Armory. Receives the
+     * click event so the caller can anchor a picker popover at the click
+     * position when there's more than one candidate — see
+     * SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md §3.2. Never fires a
+     * retry itself (§3.4) — binding only clears the way; the row's own
+     * Retry/Login-Again action (or the auto-unblock in useAgentControllerStatus)
+     * is what acts on it.
+     */
+    bindAccount: (e?: MouseEvent) => void;
     /** Start a fresh agent session — recovery for a context-window overflow,
      *  where resuming the same (full) session would only re-fail. */
     newSession: () => void;
@@ -50,6 +61,16 @@ export interface FailureViewState {
      * See docs/specs/PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md.
      */
     turnAttempted?: boolean;
+    /**
+     * Already-authenticated accounts for this agent's provider that could be
+     * bound in one click, excluding the account already linked here — see
+     * `computeAccountBindCandidates` (bind-account-candidates.ts). Empty or
+     * omitted → the auth row shows "Armory → Accounts" as it always has;
+     * non-empty → it shows "Bind: <name>" (one candidate) or "Bind account"
+     * (2+, opens a picker) instead. See
+     * docs/specs/SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md §3.1.
+     */
+    bindCandidates?: { id: string; name: string }[];
     /** stderr tail revealed. */
     expanded: boolean;
     /** Seconds left on the auto-retry countdown, or null when not armed. */
@@ -121,7 +142,7 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
 
     const actions: PaneRowAction[] = [];
     switch (f.code) {
-        case "auth":
+        case "auth": {
             // "Use existing login" REMOVED 2026-08-31. It copied the user's
             // personal `~/.claude` credential into this agent, which defeated
             // per-channel isolation — see
@@ -130,6 +151,28 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
             // this channel. `canSeed` no longer branches the action list (it
             // only ever meant "provider is Claude"), so both arms collapse into
             // one.
+            //
+            // NOTE: this is a DIFFERENT thing from `bindCandidates` below —
+            // that reuses an existing per-channel Armory account (a real,
+            // channel-local login someone already completed), not the raw
+            // ambient `~/.claude` file. See
+            // SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md §0.
+            const bindCandidates = view.bindCandidates ?? [];
+            // "Login via terminal" stays unconditionally — it's the only
+            // working recovery for providers whose in-app OAuth can't
+            // complete in-app (SPEC_HOST_CLI_LOGIN_CAPTURE_2026_06_20.md
+            // §5.5). What "Bind account" replaces is "Armory → Accounts",
+            // and only when it actually has something to offer instead —
+            // decided 2026-09-04, see the spec's §3 for the full rationale.
+            const armoryOrBind: PaneRowAction =
+                bindCandidates.length === 0
+                    ? openArmory
+                    : {
+                          icon: "vault",
+                          label: bindCandidates.length === 1 ? `Bind: ${bindCandidates[0].name}` : "Bind account",
+                          title: "Bind an already-signed-in account to this agent",
+                          onClick: on.bindAccount,
+                      };
             actions.push(
                 {
                     glyph: "🔑",
@@ -146,9 +189,10 @@ export function failureToRow(f: AgentFailure, view: FailureViewState, on: Failur
                     onClick: on.loginAgain,
                 },
                 { glyph: "🖥", label: "Login via terminal", title: "Open a terminal window where the browser login can complete", onClick: on.loginViaTerminal },
-                openArmory,
+                armoryOrBind,
             );
             break;
+        }
         case "usage_limit":
             actions.push({ ...openArmory, label: "Armory (switch / upgrade)", primary: true });
             break;

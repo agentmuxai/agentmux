@@ -45,6 +45,8 @@ import { persistAndLinkAccount, runProviderLogin } from "../flows/run-provider-l
 import { LOGIN_LINK_CAPTURE_LABEL_MS, type LaunchPhase } from "../flows/launch-phase";
 import { lastLinkedAccountId } from "../providers/provider-id-aliases";
 import type { ProviderDefinition } from "../providers";
+import { bindAccountToAgent, type BindCandidate } from "@/app/view/identity/bind-to-agent-menu";
+import type { Account } from "@/app/view/identity/identity-model";
 
 import type { LogFn } from "../types";
 export type { LogFn };
@@ -246,6 +248,34 @@ export interface UseAgentControllerStatus {
     beginRecoveryFlow: (retryAfterLogin?: boolean) => void;
     /** Pairs with `beginRecoveryFlow` — see its doc comment. */
     endRecoveryFlow: () => void;
+    /**
+     * Re-run the CLI auth check against this pane's CURRENT `cmd`/`cmd:env`
+     * block meta, without opening any login flow. Used after an external
+     * bind event (a different pane, the Armory's Bind-to-Agent menu, or
+     * this pane's own `bindExistingAccount` below) to verify the newly
+     * bound credential actually works before declaring the pane unblocked.
+     * On success, clears `canRetry`/`authNotice` via `notifyControllerHealthy()`
+     * and returns `true`; the CALLER is responsible for also clearing a
+     * live `state.failure` row if one is showing (reducer-owned, outside
+     * this hook — mirror the exact `paneSnapshot(...).failure?.data.code
+     * === "auth"` guard `agent-view.tsx`'s `onActiveTurnConfirmed` already
+     * uses, so an unrelated concurrent non-auth failure is never silently
+     * wiped). See docs/specs/SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md §2.2.
+     */
+    recheckAuthAfterBind: () => Promise<boolean>;
+    /**
+     * Bind `account` to this pane's agent (link upsert + best-effort live
+     * `cmd:env`/forced-resync apply) — identical sequence to the Armory's
+     * Bind-to-Agent context menu (`bindAccountToAgent`, reused directly, not
+     * reimplemented). Deliberately does NOT retry the failed turn or call
+     * `recheckAuthAfterBind` itself: binding fires the same
+     * `agentidentities:changed:<agentId>` event any other bind source does,
+     * and the pane's own subscription to that event (agent-view.tsx) is
+     * what re-verifies and unblocks — one code path for "how does a pane
+     * recover after a bind," regardless of where the bind came from. See
+     * spec §3.4.
+     */
+    bindExistingAccount: (account: Account) => Promise<void>;
 }
 
 /**
@@ -366,6 +396,13 @@ export function useAgentControllerStatus(
         // the same pending failure. relogin/loginViaTerminal set the value
         // themselves before calling this and pass nothing, so they are
         // unaffected. reagent P1 + manoz on PR #2951.
+        //
+        // `bindExistingAccount` (SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md
+        // §3.4) is a THIRD no-intent caller, same shape as `/login`: it never
+        // retries a turn, so it has no `retryAfterLogin` to declare, and its
+        // `beginRecoveryFlow()` call only participates in the shared
+        // `activeRecoveryFlows`/`loginWaiting()` counter — not the intent
+        // chokepoint.
         if (retryAfterLogin !== undefined) recordRecoveryIntent(retryAfterLogin);
         activeRecoveryFlows += 1;
         setLoginWaiting(true);
@@ -1286,6 +1323,65 @@ export function useAgentControllerStatus(
         setAuthStatus("authenticated");
     };
 
+    const recheckAuthAfterBind = async (): Promise<boolean> => {
+        const prov = opts.provider();
+        if (!prov) return false;
+        // Reuse whatever this pane already has on disk — after a bind's
+        // live-apply step (bindAccountToAgent) refreshed `cmd:env`, this is
+        // the newly-bound account's dir; before any bind, it's whatever the
+        // last launch/recovery attempt wrote. Never re-derive a fresh env
+        // here — that would risk checking a DIFFERENT dir than the one the
+        // running controller will actually use next.
+        const cliPath = getBlockMetaKeyAtom(opts.blockId, "cmd")() as string | undefined;
+        if (!cliPath) return false;
+        const envMeta = getBlockMetaKeyAtom(opts.blockId, "cmd:env")();
+        const authEnv: Record<string, string> = {};
+        if (envMeta && typeof envMeta === "object") {
+            for (const [k, v] of Object.entries(envMeta as Record<string, unknown>)) {
+                if (typeof v === "string") authEnv[k] = v;
+            }
+        }
+        try {
+            const result = await RpcApi.CheckCliAuthCommand(TabRpcClient, {
+                cli_path: cliPath,
+                auth_check_args: prov.authCheckCommand,
+                auth_env: authEnv,
+            }, { timeout: 10000 });
+            if (!result.authenticated) return false;
+            notifyControllerHealthy();
+            return true;
+        } catch {
+            // Transient RPC error — treated as "still blocked," matching
+            // every other best-effort auth check in this hook. The pane
+            // simply stays as it was; the next bind event (or a manual
+            // retry) gets another chance.
+            return false;
+        }
+    };
+
+    const bindExistingAccount = async (account: Account): Promise<void> => {
+        const agentDefinitionId = getBlockMetaKeyAtom(opts.blockId, "agentId")() as string | undefined;
+        if (!agentDefinitionId) return;
+        // No retryAfterLogin declared — this flow never retries a turn (spec
+        // §3.4), so there is no intent to record. Still goes through
+        // beginRecoveryFlow/endRecoveryFlow so loginWaiting()'s shared
+        // counter (and therefore the fast-fail send guard) sees this as an
+        // in-flight recovery, same as every other entry point.
+        beginRecoveryFlow();
+        try {
+            const candidate: BindCandidate = {
+                agentId: agentDefinitionId,
+                agentName: "",
+                runningBlockId: opts.blockId,
+                boundHere: false,
+                boundElsewhereName: null,
+            };
+            await bindAccountToAgent(account, candidate);
+        } finally {
+            endRecoveryFlow();
+        }
+    };
+
     // If the pane is closed while login is in progress, cancel and kill
     // the host CLI process. This onCleanup is registered against the
     // SolidJS owner context that called useAgentControllerStatus — the
@@ -1323,5 +1419,7 @@ export function useAgentControllerStatus(
         resetCancelled: () => { loginCancelled = false; },
         beginRecoveryFlow,
         endRecoveryFlow,
+        recheckAuthAfterBind,
+        bindExistingAccount,
     };
 }
