@@ -2,7 +2,9 @@
 
 **Date:** 2026-09-03
 **Author:** Agent4
-**Status:** Fixed — verified end-to-end 2026-09-03 (§6)
+**Status:** implemented — fixed in #2960 and verified end-to-end against a
+running instance on 2026-09-03 (§6). The §6.1 caveat (a slow spawn can surface
+to the caller as a transport timeout) is a separate open follow-up.
 **Repo state:** main @ `25664855` (v0.55.32)
 
 **Sibling:** `REPORT_JEKT_DELIVERY_DROPS_SUBPROCESS_AGENTS_2026_09_02.md` (PR
