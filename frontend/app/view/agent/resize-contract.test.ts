@@ -359,3 +359,122 @@ describe("beginHeightContinuity", () => {
         expect(el.style.height).toBe("");
     });
 });
+
+describe("custom measure function", () => {
+    /** offsetHeight and scrollHeight independently controllable, modeling
+     *  an internally-scrolling element (ToolOverlayLog.tsx's
+     *  .agent-tool-overlay-log: overflow-y: auto, bounded by an ancestor's
+     *  max-height) where the two genuinely diverge — offsetHeight clamps at
+     *  the ancestor's budget once content exceeds it; scrollHeight keeps
+     *  reflecting the true content height. */
+    function setDivergentHeights(el: HTMLElement, offset: number, scroll: number): void {
+        Object.defineProperty(el, "offsetHeight", { configurable: true, value: offset });
+        Object.defineProperty(el, "scrollHeight", { configurable: true, value: scroll });
+    }
+
+    it("defaults to offsetHeight when no measure function is given", () => {
+        const el = document.createElement("div");
+        // offsetHeight says "no real change" (clamped, both reads land on
+        // the ancestor's cap); scrollHeight says "shrank a lot". The
+        // DEFAULT must follow offsetHeight and see nothing to animate —
+        // proves the default didn't quietly start reading scrollHeight.
+        setDivergentHeights(el, 800, 5000);
+        withHeightContinuity(el, () => setDivergentHeights(el, 800, 200));
+        expect(el.style.height).toBe("");
+    });
+
+    it("uses a custom measure function instead of offsetHeight when one is given", () => {
+        const el = document.createElement("div");
+        setDivergentHeights(el, 800, 1200); // offsetHeight clamped, scrollHeight is the true 1200
+        withHeightContinuity(
+            el,
+            () => setDivergentHeights(el, 800, 200), // offsetHeight stays clamped at 800 throughout
+            (e) => e.scrollHeight,
+        );
+        // Must FLIP using scrollHeight's real 1200 -> 200, not offsetHeight's unchanged 800 -> 800.
+        expect(el.style.height).toBe("1200px");
+        flushRaf();
+        expect(el.style.height).toBe("200px");
+    });
+
+    it("beginHeightContinuity also accepts and uses a custom measure function", () => {
+        const el = document.createElement("div");
+        setDivergentHeights(el, 800, 1200);
+        const commit = beginHeightContinuity(el, (e) => e.scrollHeight);
+        setDivergentHeights(el, 800, 200);
+        commit();
+        expect(el.style.height).toBe("1200px");
+        flushRaf();
+        expect(el.style.height).toBe("200px");
+    });
+});
+
+describe("measureForGating", () => {
+    // codex P2, PR #2962. Exactly ToolOverlayLog.tsx's real shape: scrollHeight
+    // (the FLIP's own from/to) can be huge — well past MAX_ANIMATED_DELTA_PX
+    // (2000) — while offsetHeight (the actually-rendered, panel-clamped box)
+    // only moves a few hundred px. The magnitude cap must be evaluated
+    // against the rendered delta, not the unclamped one, or exactly the
+    // long-output transitions this module exists to smooth get skipped.
+    function setDivergentHeights(el: HTMLElement, offset: number, scroll: number): void {
+        Object.defineProperty(el, "offsetHeight", { configurable: true, value: offset });
+        Object.defineProperty(el, "scrollHeight", { configurable: true, value: scroll });
+    }
+
+    it("withHeightContinuity: a huge scrollHeight delta still animates when the RENDERED delta is small", () => {
+        const el = document.createElement("div");
+        setDivergentHeights(el, 500, 15000); // scrollHeight delta will be ~14800 -> way past the cap
+        withHeightContinuity(
+            el,
+            () => setDivergentHeights(el, 220, 200), // rendered delta: 500 -> 220 = 280px, well under the cap
+            (e) => e.scrollHeight, // FLIP endpoints: the true content height
+            (e) => e.offsetHeight, // gating: the rendered, clamped height
+        );
+        // Must animate — a naive scrollHeight-gated version would see
+        // 15000 -> 200 (delta 14800, over MAX_ANIMATED_DELTA_PX) and skip.
+        expect(el.style.height).toBe("15000px");
+        flushRaf();
+        expect(el.style.height).toBe("200px");
+    });
+
+    it("withHeightContinuity: still respects the cap when the RENDERED delta is itself huge", () => {
+        const el = document.createElement("div");
+        setDivergentHeights(el, 40000, 40000); // both huge — a genuine whole-pane-scale collapse
+        withHeightContinuity(
+            el,
+            () => setDivergentHeights(el, 100, 100),
+            (e) => e.scrollHeight,
+            (e) => e.offsetHeight,
+        );
+        expect(el.style.height).toBe(""); // correctly skipped — the cap still means something
+    });
+
+    it("beginHeightContinuity: same gating behavior at capture + commit time", () => {
+        const el = document.createElement("div");
+        setDivergentHeights(el, 500, 15000);
+        const commit = beginHeightContinuity(el, (e) => e.scrollHeight, (e) => e.offsetHeight);
+        setDivergentHeights(el, 220, 200);
+        commit();
+        expect(el.style.height).toBe("15000px");
+        flushRaf();
+        expect(el.style.height).toBe("200px");
+    });
+
+    it("defaults measureForGating to measure itself when not given — existing single-measure callers are unaffected", () => {
+        const el = document.createElement("div");
+        // Only ONE measure function passed — must gate on the SAME values it
+        // animates between (the pre-existing behavior), not silently fall
+        // back to offsetHeight.
+        setDivergentHeights(el, 500, 15000);
+        withHeightContinuity(
+            el,
+            () => setDivergentHeights(el, 220, 200),
+            (e) => e.scrollHeight,
+            // no measureForGating — must default to the scrollHeight function above
+        );
+        // scrollHeight delta (15000 -> 200 = 14800) exceeds the cap, so this
+        // must NOT animate, proving the default didn't quietly become
+        // offsetHeight (which would have produced a small, animatable delta).
+        expect(el.style.height).toBe("");
+    });
+});
