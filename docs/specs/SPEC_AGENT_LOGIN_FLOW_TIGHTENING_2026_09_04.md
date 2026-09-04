@@ -102,6 +102,22 @@ In `useAgentControllerStatus.ts`:
    rare but is not impossible if a previous mismatched link existed): do
    nothing, leave the row as-is.
 
+**Amended 2026-09-04 (reagentx P1 on the implementation PR):** step 4's
+"if it still fails" is not a rare edge case — it is the FIRST attempt's
+default outcome. `agentidentities:changed` is published by the backend
+synchronously inside `LinkAgentIdentityCommand`'s handler, before it even
+responds to the RPC; RPC responses and WS events share one in-order
+connection, so this subscription fires before `bindAccountToAgent`'s own
+`SetMetaCommand` (which only runs after that same Link RPC resolves
+client-side) has refreshed `cmd:env` to the newly-bound account's dir. A
+single recheck races that refresh and loses almost every time. Fix: a
+short, bounded retry ladder (`recheck-after-bind.ts`,
+`retryRecheckAfterBind` — a few hundred ms to a couple seconds total),
+re-reading block meta fresh on each attempt so it converges the instant
+the real refresh lands, bailing early if the pane becomes unblocked through
+some other path first (e.g. a live turn arriving). Still never retries a
+turn (§2.3 is unaffected) — only the recheck itself is retried.
+
 ### 2.3 Explicit non-goal: do not auto-retry a turn
 
 "Free the user to work" means **unblocking send**, not **auto-resubmitting
@@ -268,6 +284,12 @@ narrowing of the terminal fallback.
 - Regression: `useAgentCommands`'s existing `canRetry`-gating tests
   (`useAgentCommands.test.ts:186,203,326`) still pass unchanged — the fix only
   adds a new writer of `canRetry(false)`, it doesn't change what reads it.
+- Unit (`recheck-after-bind.test.ts`, dependency-injected — no DOM/RPC mocking):
+  retries through N failures and picks up a later success; stops at the first
+  success and never calls `onHealthy` twice; gives up after exhausting the
+  ladder; bails early once `stillBlocked()` turns false mid-ladder; sleeps the
+  exact delay values in order. This is what actually pins the 2026-09-04
+  amendment to step 4 above — without it the race is invisible to any test.
 - Live: reproduce the operator's exact report — start an agent, hit the login
   prompt, bind an account from the Armory's Bind-to-Agent menu in a different
   window, confirm the pane's prompt clears **without switching back to it**

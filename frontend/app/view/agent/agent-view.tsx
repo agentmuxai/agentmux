@@ -59,6 +59,7 @@ import {
 import { holdLeafRevealGate, scheduleLeafRevealLift } from "@/app/store/tab-reveal";
 import { getTrail } from "@/log/render-trail";
 import { writeText as clipboardWriteText } from "@/util/clipboard";
+import { sleep } from "@/util/util";
 import { createEffect, createMemo, createSignal, on, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { earliestLiveAttachedStartMs } from "./activity/attached-task";
@@ -96,6 +97,7 @@ import { useAgentDecisions } from "./hooks/useAgentDecisions";
 import { useAgentDropAttach } from "./hooks/useAgentDropAttach";
 import { useAgentFailure } from "./hooks/useAgentFailure";
 import { computeAccountBindCandidates } from "./failure/bind-account-candidates";
+import { retryRecheckAfterBind } from "./failure/recheck-after-bind";
 import { decideSyntheticRow } from "./failure/synthetic-row";
 import { useAgentKeyboard } from "./hooks/useAgentKeyboard";
 import { useAgentQuestions } from "./hooks/useAgentQuestions";
@@ -1955,6 +1957,30 @@ const AgentPresentationView = ({
         }
     };
 
+    // Bounded retry around recheckAuthAfterBind — NOT a stylistic choice, a
+    // correctness fix. `agentidentities:changed` is published by the
+    // backend SYNCHRONOUSLY inside the `LinkAgentIdentityCommand` handler,
+    // before it even responds to the RPC (agent_handlers/identity.rs:590-611);
+    // RPC responses and WS events share one in-order connection, so this
+    // pane's subscription below fires before `bindAccountToAgent`'s own
+    // `SetMetaCommand` — which only runs AFTER that same Link RPC resolves
+    // client-side — has refreshed `cmd:env` to the newly-bound account's
+    // dir. The very first recheck therefore reads STALE env and fails on
+    // essentially every bind, not as an edge case but as the common case —
+    // reagentx P1 on PR #2969. Retry ladder lives in recheck-after-bind.ts,
+    // unit-tested there (dependency-injected, no DOM/RPC mocking needed) —
+    // kept out of this file for the same reason
+    // PLAN_LOGIN_CTA_SURFACE_CONSOLIDATION_2026_09_02.md's retrospective
+    // extracted decideSyntheticRow out of here after several P1s: inline
+    // logic in this component is unassertable by any existing harness.
+    const recheckAuthAfterBindWithRetry = () =>
+        retryRecheckAfterBind({
+            recheck: status.recheckAuthAfterBind,
+            stillBlocked: () => status.canRetry() || paneSnapshot(model.blockId)?.failure?.data.code === "auth",
+            sleep,
+            onHealthy: declareAuthHealthy,
+        });
+
     // Auto-unblock: a bind can happen from ANYWHERE (the Armory's
     // Bind-to-Agent menu, the per-agent Identity tab, or this pane's own
     // "Bind account" above) — this pane must notice regardless of source.
@@ -1974,9 +2000,7 @@ const AgentPresentationView = ({
                 void refreshLinkedAccountId();
                 const blocked = status.canRetry() || paneSnapshot(model.blockId)?.failure?.data.code === "auth";
                 if (!blocked) return;
-                void status.recheckAuthAfterBind().then((ok) => {
-                    if (ok) declareAuthHealthy();
-                });
+                void recheckAuthAfterBindWithRetry();
             },
         });
         onCleanup(unsub);
