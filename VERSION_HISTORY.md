@@ -1,5 +1,25 @@
 # AgentMux Version History
 
+## 0.55.33 — 2026-09-03
+
+- docs: record the OpenRouter Ori harness spike
+- fix(agent): Activity Dock settle waits for the real dock-data refresh, not a fixed 250ms guess
+- feat(bootstrap): task init now verifies the toolchain before npm install; new bootstrap.sh/bootstrap.ps1 install Task itself
+- feat(agent): label the agent pane tab strip's + button as "+ New Agent"
+- fix(dock): elapsed clock now grows hours and days fields instead of counting minutes past 60
+- fix(subagent): parse ISO-8601 event timestamps so replayed subagents stop flashing in the Activity Dock
+- docs: resolve the ori codex --json question
+- fix(agent): consolidate the two separate login buttons into one CTA
+- fix(agent-pane): drop accent-blue from the Working row, match thinking-text font, go bold
+- fix(agent): gate npm-based providers on Node.js prereq so a fresh machine gets a friendly install prompt instead of a raw npm-spawn crash
+- fix(agent-pane): hide bashwrap's internal starting-chunk from the tool log
+- fix(agent): track mouse Y in the hover-to-peek metadata panel
+- feat(agent): AskUserQuestion Cancel (real decline) and Accept Recommended buttons
+- feat(swarm): list each agent's todo checklist and in-flight tool under its name
+- fix(agent-pane): Edit diff preview vanished when syntax highlighting resolved
+- feat(agent-pane): land the shared content-resize contract (no call sites yet)
+
+
 ## 0.55.32 — 2026-09-02
 
 - docs: merge the top-level specs/ tree into docs/specs/ (cleanup batch C)
