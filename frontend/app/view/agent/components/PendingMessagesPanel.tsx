@@ -41,13 +41,14 @@ export const PendingMessagesPanel = (props: PendingMessagesPanelProps): JSX.Elem
     const queuedMessages = createMemo(() =>
         props.pendingMessages().filter((m) => m.enqueuedWhileBusy),
     );
-    // SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md Phase 1: once the
-    // TurnEnd reducer arm has marked an entry `flushing`, the turn it was
-    // queued behind is already Done — "sends at the agent's next step" is no
-    // longer true (there is no next step left to wait for), and the
-    // recall/edit affordance no longer applies to it. Only the still-open
-    // (non-flushing) count keeps the original copy; a flushing-only queue
-    // gets its own, honest wording instead of implying it's still waiting.
+    // SPEC_AGENT_WORKING_STATE_UNIFICATION_2026_09_04.md Phase 1: once
+    // flushHeldMessages has actually started delivering an entry
+    // (`PendingMessageFlushStarted`, dispatched right before its
+    // `deliverToBackend` call), "sends at the agent's next step" is no
+    // longer true — delivery is already in flight — and the recall/edit
+    // affordance no longer applies to it. Only the still-open (non-flushing)
+    // count keeps the original copy; a flushing-only queue gets its own,
+    // honest wording instead of implying it's still waiting.
     const stillQueuedCount = createMemo(
         () => queuedMessages().filter((m) => !m.flushing).length,
     );
