@@ -385,11 +385,27 @@
             // the global 4-wide (or the browser's 8-wide UA default,
             // wherever nothing overrides it) a tab-indented preview reads
             // noticeably wider than the same file's space-indented sibling.
-            // 2 matches this app's own soft-tab width elsewhere. Scoped to
-            // this shared tool-preview ancestor only, not reset.scss itself
-            // — the Editor pane's CodeMirror instance intentionally keeps
-            // the global default (its own tabSize facet already agrees
-            // with reset.scss's 4; changing that is a separate concern).
+            // Scoped to this shared tool-preview ancestor only, not
+            // reset.scss itself — the Editor pane's CodeMirror instance
+            // intentionally keeps the global default (its own tabSize facet
+            // already agrees with reset.scss's 4; changing that is a
+            // separate concern).
+            //
+            // 2 is now the SAME number as `PREVIEW_INDENT_UNIT` in dedent.ts,
+            // which rescales space indentation to 2 columns per level. That
+            // pairing is the point: this rule alone only ever moved
+            // tab-indented previews (measured: 0 of 127 indented lines in a
+            // real Read of this repo used tabs), so a space-indented file
+            // stayed at full width no matter what value went here. Keep the
+            // two in step — if one changes, the other must.
+            //
+            // This value used to fight the Read line-number gutter, whose
+            // `<N>\t` tab landed on a tab stop that depended on the number's
+            // digit count (col 2 for lines 1-9, col 4 for 10+), stepping the
+            // code's left edge sideways partway down every preview. dedent.ts
+            // now re-emits that gutter right-aligned with no tab at all, so
+            // the conflict is gone and this only governs real indentation.
+            // docs/analysis/tool-preview-indentation-and-wrapping-2026-09-02.md.
             tab-size: 2;
             // Quick smooth transition on all collapse-related properties.
             // Per 2026-05-26 user request — the prior instant-snap (no
@@ -689,6 +705,15 @@
         border-radius: 0;
         overflow-x: auto;
         font-size: 12px;
+        // Declared explicitly because the two render paths use DIFFERENT
+        // elements: the plain fallback is `<pre class="agent-diff">` (UA
+        // `white-space: pre`), the Shiki path is `<div class="agent-diff
+        // agent-diff--highlighted">` (UA `normal`). Without this, the file-path
+        // header — a direct child on both paths — scrolled before Shiki
+        // resolved and wrapped after, flipping layout mid-render. It also made
+        // any future direct text child silently wrap on one path only.
+        // DiffViewer.tsx:288 vs :306.
+        white-space: pre;
 
         .agent-diff-header {
             background: color-mix(in srgb, var(--main-text-color) 10%, transparent);
@@ -805,8 +830,14 @@
                 white-space: pre-wrap;
                 color: var(--accent-color);
                 // Force breaks inside long tokens (long paths, base64, etc.)
-                // so commands never overflow the portal width.
-                word-break: break-all;
+                // so commands never overflow the portal width — but only as a
+                // LAST resort. `word-break: break-all` (what this was) breaks
+                // greedily at whatever character hits the edge, splitting a
+                // path mid-name even when it would have fit whole on the next
+                // line. `overflow-wrap: anywhere` gives the same
+                // never-overflow guarantee while preferring normal break
+                // opportunities first.
+                overflow-wrap: anywhere;
 
                 :global(.line) {
                     display: inline;
@@ -1456,6 +1487,12 @@
             font-size: 11px;
             white-space: pre-wrap;
             overflow-wrap: anywhere;
+            // Hanging indent — see .agent-terminal-output > div for the
+            // rationale. JSON.stringify(_, 2) output is deeply indented and
+            // gets no dedent, so wrapped continuations restarting at column 0
+            // is exactly the readability problem this fixes.
+            padding-left: calc(var(--space-1-5) + 3ch);
+            text-indent: -3ch;
         }
     }
 }
@@ -1784,6 +1821,16 @@
         min-height: 1.45em;
         white-space: pre-wrap;
         overflow-wrap: anywhere;
+        // Hanging indent: a wrapped continuation restarts at column 0 without
+        // this, which is indistinguishable from a genuine new line and throws
+        // away whatever indentation the line had. Command output is one of the
+        // surfaces that gets NO dedent (it can carry meaningful alignment —
+        // SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §2), so it is also the most
+        // deeply-indented thing in the panel and the worst place to lose the
+        // distinction. 3ch reads as clearly-not-an-indent-level next to the
+        // 2-column unit dedent.ts normalises real indentation to.
+        padding-left: 3ch;
+        text-indent: -3ch;
     }
 }
 

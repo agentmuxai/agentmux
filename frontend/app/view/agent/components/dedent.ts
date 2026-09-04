@@ -2,19 +2,43 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Common-indentation stripping for tool previews (Read/Write/Edit). A
- * mid-file snippet — a Read at an offset, or an Edit hunk deep inside a
- * nested scope — carries the source file's original leading indentation on
- * every line even though the preview can't show the enclosing scopes that
- * indentation refers to. Stripping the indentation common to every
- * displayed line makes the shallowest line render flush-left while keeping
- * the *relative* indentation between lines — the part that actually
- * encodes structure.
+ * Indentation handling for tool previews (Read/Write/Edit). Three concerns,
+ * applied in this order by the `format*Preview` entry points at the bottom:
  *
- * SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md.
+ *  1. **Dedent** — a mid-file snippet (a Read at an offset, an Edit hunk deep
+ *     inside a nested scope) carries the source file's original leading
+ *     indentation on every line even though the preview can't show the
+ *     enclosing scopes that indentation refers to. Stripping the indentation
+ *     common to every displayed line makes the shallowest line render
+ *     flush-left while keeping the *relative* indentation between lines — the
+ *     part that actually encodes structure.
+ *
+ *  2. **Narrow** (`normalizeIndentWidth`) — dedent only removes what's
+ *     *common*, so a preview that includes a column-0 line keeps every deeper
+ *     line at full width. A 4-space-per-level file still spends 20 columns on
+ *     five levels of nesting, and no CSS property can narrow a space the way
+ *     `tab-size` narrows a tab. Rescaling the leading run to a 2-column unit
+ *     is the only lever that works on space-indented source.
+ *
+ *  3. **Gutter** (`splitNumberedGutter` / `renderNumberedGutter`) — Claude
+ *     Code's `Read` results are `<N>\t<code>` with the number LEFT-aligned
+ *     (`9\t` then `10\t`, verified against stored transcripts). Rendered
+ *     inline, that tab lands on a tab stop whose column depends on the line
+ *     number's digit count, so the code's left edge steps sideways partway
+ *     down the preview. Re-emitting the number right-aligned to a fixed width
+ *     removes the tab, and with it the raggedness.
+ *
+ * SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md,
+ * docs/analysis/tool-preview-indentation-and-wrapping-2026-09-02.md.
  */
 
 import { TRUNCATED_MARKER } from "./output-cap";
+
+/** Target width, in columns, of one level of indentation in a preview.
+ *  Matches the `tab-size: 2` this app already applies to tool previews
+ *  (`_document-nodes.scss`), so tab- and space-indented files finally render
+ *  at the same width as each other. */
+export const PREVIEW_INDENT_UNIT = 2;
 
 /** Leading run of spaces/tabs. `\r` is deliberately excluded so a CRLF
  *  line's trailing `\r` (see `splitLines`) never gets treated as part of
@@ -105,48 +129,186 @@ export function stripCommonIndent(text: string): string {
     return stripPrefixFromLines(lines, prefix).join("\n");
 }
 
+/** Greatest common divisor, for inferring a file's indent unit. */
+function gcd(a: number, b: number): number {
+    while (b !== 0) {
+        const t = b;
+        b = a % b;
+        a = t;
+    }
+    return a;
+}
+
 /**
- * Read-tool variant of {@link stripCommonIndent}: Claude Code's `Read`
- * result lines are `<N>\t<code>` (verified against real session
- * transcripts) — a plain whole-line dedent would see every line start with
- * a different digit and find no common prefix at all. When every non-blank
- * line matches that shape, this splits off the `<N>\t` prefix, dedents only
- * the code portions together (so relative indentation across lines is
- * still computed correctly), and rejoins. Any line that doesn't match the
- * numbered shape — including a completely unnumbered body, e.g. if this
- * ever runs on non-Read content — falls through to the plain
- * {@link stripCommonIndent} over the whole text, which is always safe (at
- * worst a no-op).
+ * Rescale each line's leading whitespace so one level of indentation renders
+ * `targetUnit` columns wide instead of whatever the source file used.
+ *
+ * The unit is inferred as the GCD of every non-zero leading-run width, which
+ * makes the transform **self-limiting in exactly the right way**: a file
+ * indented in clean multiples (4, 8) yields a GCD equal to its indent unit and
+ * gets rescaled, while a file containing continuation-alignment lines (`foo(a,`
+ * / 19 spaces / `b)`) yields a GCD of 1 and is left completely alone. Guessing
+ * a unit that isn't really there would shift aligned code out of alignment —
+ * so, exactly like {@link commonLeadingWhitespace}'s refusal to conflate tabs
+ * with spaces, this declines rather than guesses.
+ *
+ * A no-op (returns `text` unchanged) when: any leading run contains a tab (its
+ * rendered width is a CSS `tab-size` concern, not a character count — see the
+ * module header), no line is indented at all, or the inferred unit is already
+ * at or below `targetUnit`.
+ *
+ * Only the LEADING run is touched. Whitespace inside a line — aligned trailing
+ * comments, ASCII tables — is never rewritten.
  */
-export function stripCommonIndentNumbered(text: string): string {
+export function normalizeIndentWidth(text: string, targetUnit: number = PREVIEW_INDENT_UNIT): string {
     if (!text) return text;
     const lines = splitLines(text);
-    // Blank lines AND the truncation marker are excluded from the
-    // "every line is numbered" check, same rationale as everywhere else in
-    // this file: neither is real Read content, so requiring either to match
-    // the `<N>\t` shape would wrongly reject an otherwise-fully-numbered,
-    // truncated body and fall through to a whole-text dedent that finds no
-    // common prefix at all (every real line still starts with a digit).
-    const relevant = lines.filter((l) => !isIgnorableForIndent(l));
-    const allNumbered = relevant.length > 0 && relevant.every((l) => NUMBERED_LINE_RE.test(l));
-    if (!allNumbered) return stripCommonIndent(text);
 
-    const numberPrefixes: string[] = [];
+    const widths: number[] = [];
+    for (const line of lines) {
+        if (isIgnorableForIndent(line)) continue;
+        const indent = LEADING_WHITESPACE_RE.exec(line)![0];
+        if (indent.includes("\t")) return text; // tab width is CSS's business
+        if (indent.length > 0) widths.push(indent.length);
+    }
+    if (widths.length === 0) return text;
+
+    let unit = widths[0];
+    for (const w of widths) unit = gcd(unit, w);
+    if (unit <= targetUnit) return text;
+
+    return lines
+        .map((line) => {
+            if (isIgnorableForIndent(line)) return line;
+            const indent = LEADING_WHITESPACE_RE.exec(line)![0];
+            if (indent.length === 0) return line;
+            return " ".repeat((indent.length / unit) * targetUnit) + line.slice(indent.length);
+        })
+        .join("\n");
+}
+
+/** A `Read` body split into its line-number gutter and its code. */
+export interface NumberedSplit {
+    /** One entry per line of {@link body}. Empty string for lines that carry
+     *  no number (blank lines, the truncation marker) — kept positional so the
+     *  two arrays never drift out of step. */
+    numbers: string[];
+    /** The code with every `<N>\t` prefix removed, lines rejoined with `\n`. */
+    body: string;
+}
+
+/**
+ * Split Claude Code `Read` output (`<N>\t<code>` per line) into its
+ * line-number gutter and its code, so the code can be dedented and narrowed
+ * without the digits interfering and without the gutter's tab surviving into
+ * the rendered output.
+ *
+ * Returns `null` when the text isn't in that shape — including a completely
+ * unnumbered body — so callers fall back to treating it as plain code. Blank
+ * lines and the truncation marker are exempt from the "every line is numbered"
+ * check: neither is real Read content, and requiring either to match would
+ * wrongly reject an otherwise-fully-numbered (e.g. capped) body.
+ */
+export function splitNumberedGutter(text: string): NumberedSplit | null {
+    if (!text) return null;
+    const lines = splitLines(text);
+    const relevant = lines.filter((l) => !isIgnorableForIndent(l));
+    if (relevant.length === 0 || !relevant.every((l) => NUMBERED_LINE_RE.test(l))) return null;
+
+    const numbers: string[] = [];
     const codes: string[] = [];
     for (const line of lines) {
         if (isIgnorableForIndent(line)) {
-            numberPrefixes.push("");
+            numbers.push("");
             codes.push(line);
             continue;
         }
         const m = NUMBERED_LINE_RE.exec(line)!;
-        numberPrefixes.push(m[0]);
+        numbers.push(m[0].replace(/\s+$/, "").trim());
         codes.push(line.slice(m[0].length));
     }
-    const commonCodeIndent = commonLeadingWhitespace(codes);
-    if (commonCodeIndent === "") return text;
-    const dedentedCodes = stripPrefixFromLines(codes, commonCodeIndent);
-    return lines.map((_, i) => numberPrefixes[i] + dedentedCodes[i]).join("\n");
+    return { numbers, body: codes.join("\n") };
+}
+
+/**
+ * Re-attach a {@link splitNumberedGutter} gutter to (possibly rewritten) code,
+ * right-aligned to a fixed width and separated by a single space rather than
+ * the original tab.
+ *
+ * Fixed width is what kills the raggedness: with the original `<N>\t`, the code
+ * column depended on the number's digit count (`9\t` → column 2, `10\t` →
+ * column 4 at `tab-size: 2`), so the left edge stepped sideways at every
+ * digit-count boundary. Right-aligning to `max(digits)` puts every code line at
+ * the same column regardless.
+ *
+ * Lines with no number, and lines whose code is empty, get no trailing pad —
+ * the gutter still reads as a continuous right-aligned column, without
+ * emitting selectable trailing whitespace.
+ */
+export function renderNumberedGutter(numbers: readonly string[], body: string): string {
+    const codes = splitLines(body);
+    const width = numbers.reduce((w, n) => Math.max(w, n.length), 0);
+    if (width === 0) return body;
+    return codes
+        .map((code, i) => {
+            const n = numbers[i] ?? "";
+            if (n === "") return code;
+            const padded = n.padStart(width, " ");
+            return code === "" ? padded : `${padded} ${code}`;
+        })
+        .join("\n");
+}
+
+/**
+ * Full preview pipeline for non-Read code bodies (Write, and anything else
+ * that arrives as plain source): dedent to flush-left, then narrow the
+ * remaining relative indentation.
+ */
+export function formatCodePreview(text: string): string {
+    return normalizeIndentWidth(stripCommonIndent(text));
+}
+
+/**
+ * Preview pipeline for text that will be handed to a **Markdown renderer**:
+ * dedent only, **never** {@link normalizeIndentWidth}.
+ *
+ * Markdown is indentation-sensitive in a way source code is not. Four leading
+ * spaces make an indented code block; rescaling them to two turns that block
+ * into ordinary prose, and the same rescale silently re-nests nested lists.
+ * Width normalisation is a readability win for a syntax-highlighted source
+ * preview and a correctness bug for a rendered one (codex P2 on PR #2958).
+ *
+ * Dedent is kept because it only removes a prefix *common to every line*, which
+ * is the pre-existing behaviour for this path and does not change relative
+ * structure.
+ */
+export function formatMarkdownPreview(text: string): string {
+    return stripCommonIndent(text);
+}
+
+/**
+ * Full preview pipeline for a `Read` body. Splits the `<N>\t` gutter off,
+ * dedents and narrows the code, then re-emits the gutter right-aligned
+ * (see {@link renderNumberedGutter}).
+ *
+ * `withGutter` is what the code preview renders. `body` is the same code with
+ * no gutter at all — used by the markdown path, where a line-number column is
+ * meaningless and actively corrupts the render (a `1\t# Title` line is not a
+ * heading; SPEC_TOOL_PREVIEW_DEDENT_2026_08_08.md §2.1 flagged this).
+ *
+ * Unnumbered input degrades to {@link formatCodePreview} for both fields.
+ */
+export function formatReadPreview(text: string): { withGutter: string; body: string } {
+    if (!text) return { withGutter: text, body: text };
+    const split = splitNumberedGutter(text);
+    const raw = split ? split.body : text;
+    // `body` is dedent-only. It feeds the Markdown renderer, which is
+    // indentation-sensitive — see `formatMarkdownPreview`. Only `withGutter`,
+    // which feeds the syntax-highlighted source preview, gets the width
+    // normalisation. (codex P2 on PR #2958)
+    const body = formatMarkdownPreview(raw);
+    const code = formatCodePreview(raw);
+    return { withGutter: split ? renderNumberedGutter(split.numbers, code) : code, body };
 }
 
 /**
@@ -167,5 +329,30 @@ export function stripCommonIndentSharedPrefix(oldStr: string, newStr: string): {
     return {
         oldStr: stripPrefixFromLines(oldLines, prefix).join("\n"),
         newStr: stripPrefixFromLines(newLines, prefix).join("\n"),
+    };
+}
+
+/**
+ * Full preview pipeline for an Edit hunk: the shared-prefix dedent above,
+ * then the indent narrowing — with ONE unit inferred across both sides
+ * together, for exactly the same reason the dedent prefix is shared.
+ * Inferring per-side could pick a different unit for each (say `old` contains
+ * a continuation-alignment line that collapses its GCD to 1 while `new`
+ * doesn't) and rescale one side but not the other, manufacturing an
+ * indentation diff that was never part of the edit.
+ *
+ * Must run BEFORE the diff is built, while the two sides are still plain
+ * source: once `+`/`-` markers are prepended, the leading run every function
+ * in this module looks at is the marker, not the indentation.
+ */
+export function formatDiffSides(oldStr: string, newStr: string): { oldStr: string; newStr: string } {
+    const stripped = stripCommonIndentSharedPrefix(oldStr ?? "", newStr ?? "");
+    const oldLines = splitLines(stripped.oldStr);
+    const newLines = splitLines(stripped.newStr);
+    // Line count is preserved by normalizeIndentWidth, so the split is exact.
+    const combined = splitLines(normalizeIndentWidth([...oldLines, ...newLines].join("\n")));
+    return {
+        oldStr: combined.slice(0, oldLines.length).join("\n"),
+        newStr: combined.slice(oldLines.length).join("\n"),
     };
 }
