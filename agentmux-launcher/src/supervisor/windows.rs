@@ -503,7 +503,7 @@ pub(crate) async fn run_windows(
             // path, while still showing well before this gap's own
             // observed 18-30s+ worst case ends.
             //
-            // Gated on `host_pipe.has_registered_host()`, NOT on splash
+            // Gated on `host_pipe.is_connected()`, NOT on splash
             // dismiss timing — Codex P2, PR #2967: host IPC registration
             // (this timer's actual target) happens well before the splash
             // dismisses (that waits for CEF's `on_load_end`, i.e. full
