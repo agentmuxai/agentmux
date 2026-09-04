@@ -4,6 +4,7 @@
 **Author:** Camper
 **Severity:** Medium — no data lost, the instance's backend stayed healthy throughout, but the user's only recovery action (double-click the exe) produced no working window. On a real user's machine (not an agent-operated VM), this reads as "AgentMux is broken, I have to kill it in Task Manager."
 **Area:** `agentmux-launcher` single-instance forwarding (`other_instances.rs`), the `pool_respawn_on_promote` saga (`saga/pool_respawn.rs`), `agentmux-cef`'s `promote_pool_window` (`commands/window_pool.rs`), Windows/VM power management.
+**Status:** active — root cause identified and evidenced; the recommended fix (verify promoted/forwarded windows are actually alive, fall back to a fresh window otherwise) is not yet implemented.
 
 ---
 
