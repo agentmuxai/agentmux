@@ -114,9 +114,27 @@ and only in the state that needs it.
 ```rust
 pub fn needs_spawn(&self) -> bool {
     let inner = self.inner.lock().unwrap();
-    inner.stdin_tx.is_none() && !inner.spawning_in_progress
+    inner.stdin_tx.is_none() && !inner.spawning_in_progress && !inner.drain_claim
 }
 ```
+
+**The invariant:** `needs_spawn() == true` must imply a subsequent
+`send_message` takes `decide_send_action`'s `BecomeSpawner` branch. It must
+never be true in a state where that returns `SendAction::Queued`, because
+`Queued` returns `Ok(())` having delivered nothing, the reactive path maps that
+to `Ok(true)`, and `cloud_subscriber` only retries on `!success` — so a false
+success is a permanently lost message. Each excluded flag mirrors one of
+`decide_send_action`'s own guards, and there is a test asserting the implication
+directly across all four flag combinations.
+
+`!drain_claim` was **missed on the first cut** (reagent P1 on PR #2960) and is
+the subtle one. When a `RetryFlush` drain's target process dies mid-flush, the
+drain *deliberately retains* its claim for the fallback respawn while the exit
+handler clears `stdin_tx`. In that window the original predicate reported
+"needs spawn"; the fall-through then called `send_message`, which queued on the
+still-held claim and returned `Ok(())` — reporting a delivery that had not
+happened. That is the precise failure mode this whole area is built to avoid,
+reintroduced by the fix for it.
 
 `&& !spawning_in_progress` is load-bearing, not defensive tidying. A caller that
 has already claimed the spawn owns that round — see `spawning_in_progress`'s own
@@ -151,7 +169,7 @@ non-reentrant mutex the thread already holds.
 
 ## 5. Tests
 
-Three unit tests on the predicate, which is where the correctness lives (the
+Five unit tests on the predicate, which is where the correctness lives (the
 wiring is a two-line branch on it):
 
 | Test | Asserts |
@@ -159,6 +177,8 @@ wiring is a two-line branch on it):
 | `needs_spawn_is_true_for_a_freshly_registered_controller` | the post-restart state routes to a turn start |
 | `needs_spawn_is_false_once_a_process_is_live` | a running agent keeps the mid-turn steer, no second turn |
 | `needs_spawn_is_false_while_a_spawn_is_already_in_flight` | no second racing spawn; that window stays retryable |
+| `needs_spawn_is_false_while_a_retry_flush_drain_holds_its_claim` | the reagent P1: a held drain claim is not spawnable |
+| `needs_spawn_true_implies_decide_send_action_would_actually_spawn` | the invariant itself, across all four flag combinations |
 
 Full suite: 2963 `agentmux-srv` tests passing.
 

@@ -4106,20 +4106,43 @@ impl PersistentSubprocessController {
     /// tell those two situations apart. See
     /// `docs/reports/REPORT_JEKT_DELIVERY_DROPS_UNSPAWNED_PERSISTENT_AGENTS_2026_09_03.md`.
     ///
-    /// Deliberately `&& !spawning_in_progress`: a caller that has already
-    /// committed to spawning owns this round (see `spawning_in_progress`'s doc
-    /// comment on the concurrent-spawn TOCTOU race). Reporting "needs spawn"
-    /// during that window would invite a second, racing spawn — the exact
-    /// orphaned-child bug that field exists to prevent. That window instead
-    /// surfaces as "still starting up — try again shortly", which is retryable
-    /// by design.
+    /// **The invariant this must uphold:** `needs_spawn() == true` implies a
+    /// subsequent `send_message` takes `decide_send_action`'s `BecomeSpawner`
+    /// branch — i.e. it really spawns and delivers. It must never be true in a
+    /// state where `send_message` would instead return `SendAction::Queued`,
+    /// because `Queued` returns `Ok(())` having delivered nothing, the reactive
+    /// path maps that to `Ok(true)`, and the caller is told the message landed
+    /// when it is still sitting in the queue. `cloud_subscriber` only retries
+    /// on `!success`, so a false success is a permanently lost message.
+    ///
+    /// That is why all three exclusions are here, and each mirrors one of
+    /// `decide_send_action`'s own guards:
+    ///
+    /// - `stdin_tx.is_none()` — a live process is steerable; `inject_message`
+    ///   handles it and no turn start is wanted.
+    /// - `!spawning_in_progress` — a caller has already claimed this spawn
+    ///   round (see that field's doc comment on the concurrent-spawn TOCTOU
+    ///   race). Reporting "needs spawn" here would invite a second, racing
+    ///   spawn and orphan a child.
+    /// - `!drain_claim` — a `RetryFlush` drain owns the round. This one is
+    ///   subtle and was missed on the first cut (reagent P1 on PR #2960): when
+    ///   a drain's target process dies mid-flush, the drain **deliberately
+    ///   retains** its claim for the fallback respawn while the exit handler
+    ///   clears `stdin_tx`. Without this term, that window reports "needs
+    ///   spawn", `decide_send_action` then returns `Queued` on the
+    ///   still-held claim, and the message is silently queued while the caller
+    ///   is told it was delivered.
+    ///
+    /// Both excluded windows are retryable rather than lost: the caller gets
+    /// the original delivery error back, which is what lets it come again.
     ///
     /// Racy by nature, and safe to be: the process can exit the instant after
     /// this returns `false`. It is a routing hint, not a guarantee — the spawn
-    /// claim inside `send_message` is what actually serialises spawners.
+    /// claim inside `send_message` is what actually serialises spawners. What
+    /// it must not do is report `true` for a state that cannot spawn.
     pub fn needs_spawn(&self) -> bool {
         let inner = self.inner.lock().unwrap();
-        inner.stdin_tx.is_none() && !inner.spawning_in_progress
+        inner.stdin_tx.is_none() && !inner.spawning_in_progress && !inner.drain_claim
     }
 
     /// Ask this controller to restart itself once the current turn ends,
@@ -4509,6 +4532,59 @@ mod send_input_tests {
             !c.needs_spawn(),
             "must not invite a second spawn while one is already claimed",
         );
+    }
+
+    #[test]
+    fn needs_spawn_is_false_while_a_retry_flush_drain_holds_its_claim() {
+        // reagent P1 on PR #2960. When a RetryFlush drain's target process dies
+        // mid-flush, the drain DELIBERATELY retains `drain_claim` for the
+        // fallback respawn while the exit handler clears `stdin_tx`. Without
+        // the `!drain_claim` term this window reported "needs spawn"; the
+        // reactive path then called send_message, decide_send_action returned
+        // Queued on the still-held claim, send_message returned Ok(()) having
+        // delivered nothing, and the caller was told the message landed.
+        // cloud_subscriber only retries on !success — so that is a lost message.
+        let c = controller();
+        {
+            let mut inner = c.inner.lock().unwrap();
+            inner.stdin_tx = None;
+            inner.spawning_in_progress = false;
+            inner.drain_claim = true;
+        }
+        assert!(
+            !c.needs_spawn(),
+            "a held drain claim must not be reported as spawnable — send_message would only queue",
+        );
+    }
+
+    #[test]
+    fn needs_spawn_true_implies_decide_send_action_would_actually_spawn() {
+        // The invariant, asserted directly rather than trusted: whenever
+        // needs_spawn() is true, a real send must take the BecomeSpawner branch
+        // (which spawns and delivers) and never Queued (which returns Ok having
+        // delivered nothing). Covers all four flag combinations.
+        for (stdin, spawning, drain) in [
+            (false, false, false), // the only spawnable state
+            (false, false, true),
+            (false, true, false),
+            (true, false, false),
+        ] {
+            let c = controller();
+            let (tx, _rx) = mpsc::channel::<String>(4);
+            {
+                let mut inner = c.inner.lock().unwrap();
+                inner.stdin_tx = if stdin { Some(tx) } else { None };
+                inner.spawning_in_progress = spawning;
+                inner.drain_claim = drain;
+            }
+            if c.needs_spawn() {
+                assert!(
+                    matches!(c.decide_send_action("m", None), SendAction::BecomeSpawner { .. }),
+                    "needs_spawn() was true for (stdin={stdin}, spawning={spawning}, drain={drain}) \
+                     but a real send would not have spawned",
+                );
+            }
+        }
     }
 
     #[test]
