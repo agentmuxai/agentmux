@@ -128,6 +128,32 @@ render and respond to clicks once such a pump exists. That is the visual half
 of §7.2's acceptance criterion and needs a human with a screen; nothing above
 substitutes for it.
 
+### 7.5.1. There is already a tray-less way back to a window
+
+Worth knowing before building the tray, because it means Phase 1's
+`AGENTMUX_BACKGROUND_SERVICE` flag is usable on its own rather than a mode you
+can enter and not leave: with the flag on and zero windows open, **re-launching
+the exe reopens a window** through the existing single-instance forward
+(`second_instance.rs::forward_open_new_window`, an authenticated HTTP
+`open_new_window` to the host's IPC port).
+
+Each link verified by reading the code, since every one of them could
+plausibly have been torn down along with the last window:
+
+- The launcher holds the single-instance named pipe for its whole lifetime, so
+  a second launch forwards instead of starting a rival instance.
+- `lib.rs` removes the `ipc-port-<hash>` forwarding hint only *after*
+  `run_message_loop()` returns — exactly what this mode prevents — so the hint
+  survives.
+- The host's IPC server is bound at startup, independent of any window.
+- `open_new_window` still finds a **warm pool**: pool browsers are only
+  cascade-closed by `begin_drain_and_cascade`, which a suppressed drain never
+  reaches. So the reopen is an instant pool promote, not a cold start.
+
+Implication for the tray work: the tray's "open AgentMux" menu item does not
+need a new mechanism — it can invoke the same `open_new_window` path this
+forward already uses. That removes a chunk of assumed scope from Workstream 3.
+
 ## 8. What this spec does not decide
 
 - Does not pick a final visual design for the simplified tray panel — only that it should be a small CEF window reusing the pool-window mechanism, not a native menu or a separate process.

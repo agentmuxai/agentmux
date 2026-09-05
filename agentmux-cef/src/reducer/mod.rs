@@ -136,6 +136,25 @@ pub struct HostState {
     /// `HostState`, alongside `registered`/`draining`) so it does not treat
     /// the resulting "0 registered, not draining" steady state as a desync
     /// and force-quit a few seconds after the last window closes.
+    ///
+    /// **Getting a window back (there is no tray icon yet — Workstream 1):**
+    /// re-launching the exe reopens one, via the existing single-instance
+    /// forward. That keeps working at zero windows, verified end to end by
+    /// reading each link: the launcher holds the single-instance pipe for its
+    /// whole lifetime (so a second launch forwards rather than starting
+    /// fresh); `lib.rs` deletes the `ipc-port-<hash>` forwarding hint only
+    /// AFTER `run_message_loop()` returns, which this mode is precisely what
+    /// prevents, so the hint survives; the host's IPC server is bound at
+    /// startup independent of any window; and `open_new_window` still finds a
+    /// warm pool, because the pool is only cascade-closed by
+    /// `begin_drain_and_cascade`, which a suppressed drain never reaches.
+    /// So the reopen is a pool promote, not a cold start.
+    ///
+    /// That is also the recipe for this workstream's own acceptance test,
+    /// which has not been run live yet: enable the flag, close the last
+    /// window, confirm `srv`/`launcher`/`host` survive in `tasklist`/`ps` and
+    /// that an agent turn still completes with no window open, then
+    /// re-launch the exe and confirm a window comes back.
     pub background_service_enabled: bool,
 
     /// H.6 — top-level window creation runner state (queue, in-flight,
