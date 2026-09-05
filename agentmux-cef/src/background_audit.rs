@@ -142,6 +142,19 @@ pub struct BackgroundAudit {
     /// preserves order, so the file ends up in the same order the decisions
     /// were made.
     tx: Option<std::sync::mpsc::Sender<AuditEntry>>,
+    /// Guards every touch of the log and watermark FILES.
+    ///
+    /// `Mutex<BackgroundAudit>` is not enough: it serializes callers of these
+    /// methods, but the writer thread mutates the same two files completely
+    /// outside it. Without this, `take_unsurfaced` could snapshot the file,
+    /// have the writer compact underneath it, and then write back a watermark
+    /// computed from the stale pre-compaction length — pushing it past the end
+    /// of the now-shorter file and silently un-surfacing everything after
+    /// (ReAgent P1 on #3001).
+    ///
+    /// Held only around file I/O, never while `record` runs, so nothing here
+    /// can reach back into `host_state`.
+    io: Option<std::sync::Arc<std::sync::Mutex<()>>>,
 }
 
 impl BackgroundAudit {
@@ -163,6 +176,8 @@ impl BackgroundAudit {
     pub fn set_dir(&mut self, dir: &std::path::Path) {
         let path = dir.join("background-audit.jsonl");
         self.path = Some(path.clone());
+        let io = std::sync::Arc::new(std::sync::Mutex::new(()));
+        self.io = Some(io.clone());
         // Seed from the log so an unattended period that began before a host
         // crash is still correctly open — one read, at startup, off the hot
         // path.
@@ -181,6 +196,7 @@ impl BackgroundAudit {
             .spawn(move || {
                 // Ends when the sender is dropped (process exit).
                 while let Ok(entry) = rx.recv() {
+                    let _guard = io.lock().unwrap_or_else(|e| e.into_inner());
                     write_entry(&path, &watermark, &entry);
                 }
             })
@@ -196,6 +212,15 @@ impl BackgroundAudit {
     /// Malformed lines are skipped rather than failing the read: a torn final
     /// line (a crash mid-append) must not cost the entries before it.
     pub fn entries(&self) -> Vec<AuditEntry> {
+        let _guard = self.io.as_ref().map(|m| m.lock().unwrap_or_else(|e| e.into_inner()));
+        self.entries_unlocked()
+    }
+
+    /// `entries` without taking the file lock — for callers that already hold
+    /// it. Split out because `take_unsurfaced` must read the file and update
+    /// the watermark under ONE hold; calling the locking version there would
+    /// deadlock on the non-reentrant mutex.
+    fn entries_unlocked(&self) -> Vec<AuditEntry> {
         let Some(path) = &self.path else { return Vec::new() };
         let Ok(text) = std::fs::read_to_string(path) else {
             return Vec::new();
@@ -257,7 +282,12 @@ impl BackgroundAudit {
     /// not a deletion — which is what makes this an audit log rather than a
     /// queue.
     pub fn take_unsurfaced(&self) -> Vec<AuditEntry> {
-        let all = self.entries();
+        // ONE hold across read-then-write. Splitting them let the writer
+        // thread compact in between, after which the watermark computed from
+        // the stale length could exceed the file and silently un-surface
+        // everything thereafter.
+        let _guard = self.io.as_ref().map(|m| m.lock().unwrap_or_else(|e| e.into_inner()));
+        let all = self.entries_unlocked();
         let already = self.read_watermark();
         if already >= all.len() {
             return Vec::new();
@@ -274,9 +304,13 @@ impl BackgroundAudit {
             .unwrap_or(0)
     }
 
+    /// Written via temp + rename like every other file write in this module.
+    /// A torn watermark parses as 0 and re-shows already-surfaced entries —
+    /// the safe direction, but still wrong, and inconsistent with the
+    /// crash-safety discipline applied elsewhere here (ReAgent P2 on #3001).
     fn write_watermark(&self, n: usize) {
         if let Some(p) = self.watermark_path() {
-            let _ = std::fs::write(p, n.to_string());
+            write_atomic(&p, &n.to_string());
         }
     }
 }
@@ -339,7 +373,7 @@ fn compact_if_oversized(path: &std::path::Path, watermark: &std::path::Path) {
     // the old log or the new one, never a half-written one.
     let tmp = path.with_extension("jsonl.compacting");
     if std::fs::write(&tmp, format!("{}\n", kept)).is_ok() && std::fs::rename(&tmp, path).is_ok() {
-        let _ = std::fs::write(watermark, surfaced.saturating_sub(dropped).to_string());
+        write_atomic(watermark, &surfaced.saturating_sub(dropped).to_string());
         if unsurfaced_dropped > 0 {
             tracing::warn!(
                 target: "wrr",
@@ -352,6 +386,17 @@ fn compact_if_oversized(path: &std::path::Path, watermark: &std::path::Path) {
         }
     } else {
         let _ = std::fs::remove_file(&tmp);
+    }
+}
+
+/// Write `contents` to `path` via a temp file + rename, so a crash leaves
+/// either the old value or the new one and never a half-written one.
+fn write_atomic(path: &std::path::Path, contents: &str) {
+    let tmp = path.with_extension("tmp");
+    if std::fs::write(&tmp, contents).is_ok() {
+        if std::fs::rename(&tmp, path).is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
     }
 }
 
@@ -555,25 +600,28 @@ mod background_audit_tests {
         assert!(log.take_unsurfaced().is_empty());
     }
 
-    /// Compaction must never silently drop entries the user has not seen.
-    /// The original bug reset the watermark; the follow-up fixed only the
-    /// FIRST rotation, because `rename` clobbered the archive on the second
-    /// (ReAgent P1 on #3001, twice).
+    /// Below the cap, nothing is ever lost — including the very oldest entry.
+    ///
+    /// This is the guarantee that actually holds. An earlier version of this
+    /// test asserted the oldest entry survives even past the cap, which was
+    /// inherited from the two-file scheme where the archive kept everything.
+    /// With a hard bound that is not achievable: if more than `KEEP_LINES`
+    /// entries are unsurfaced, bounding the file necessarily drops some. The
+    /// real contract is "drop oldest-first, and say so loudly" — see
+    /// `compact_if_oversized`.
     #[test]
-    fn compaction_does_not_lose_unsurfaced_entries() {
+    fn nothing_is_lost_below_the_compaction_threshold() {
         let (_d, mut log) = temp_log();
-        let total = MAX_LINES + 10;
+        let total = MAX_LINES - 10;
         for i in 0..total {
             log.record(i % 2 == 0, i as u64);
         }
-        wait_for_lines(&log, MAX_LINES / 2);
+        let e = wait_for_lines(&log, total);
+        assert_eq!(e.len(), total, "no compaction should have run");
 
         let surfaced = log.take_unsurfaced();
-        assert!(
-            !surfaced.is_empty(),
-            "entries written before rotation must still be surfacable"
-        );
-        assert_eq!(surfaced[0].at_ms, 0, "oldest entry lost to rotation");
+        assert_eq!(surfaced.len(), total);
+        assert_eq!(surfaced[0].at_ms, 0, "the oldest entry must survive");
     }
 
     /// The specific case the previous fix missed: enough entries to compact
@@ -607,6 +655,42 @@ mod background_audit_tests {
             ts.windows(2).all(|w| w[0] < w[1]),
             "retained entries must stay ordered"
         );
+    }
+
+    /// The writer thread and `take_unsurfaced` both mutate the log and the
+    /// watermark. Without a shared file lock, a compaction landing between
+    /// `take_unsurfaced`'s read and its watermark write left the watermark
+    /// past the end of the now-shorter file — after which `already >= len`
+    /// was permanently true and NOTHING was ever surfaced again (ReAgent P1
+    /// on #3001).
+    ///
+    /// Races are not deterministic, so this asserts the invariant that
+    /// actually matters: after hammering both paths across many compactions,
+    /// surfacing still works.
+    #[test]
+    fn surfacing_still_works_after_racing_the_compacting_writer() {
+        let (_d, mut log) = temp_log();
+        for i in 0..(MAX_LINES * 2) {
+            log.record(i % 2 == 0, i as u64);
+            if i % 25 == 0 {
+                let _ = log.take_unsurfaced();
+            }
+        }
+        // Let the writer drain whatever is still queued.
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let _ = log.take_unsurfaced();
+
+        // A brand-new transition must still be surfacable. Under the bug the
+        // watermark sat past the file end and this returned empty forever.
+        let flip = !log.is_unattended();
+        log.record(flip, 9_999_999);
+        for _ in 0..200 {
+            if !log.take_unsurfaced().is_empty() {
+                return; // surfaced — invariant holds
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("watermark left the log permanently un-surfacable");
     }
 
     #[test]
