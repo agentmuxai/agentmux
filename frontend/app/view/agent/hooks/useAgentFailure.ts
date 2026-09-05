@@ -115,6 +115,18 @@ export interface UseAgentFailureOptions {
     onOpenArmory: () => void;
     /** Start a fresh agent session (context-window overflow recovery). */
     onNewSession: () => void;
+    /**
+     * Already-authenticated accounts for this agent's provider that could be
+     * bound in one click — see `computeAccountBindCandidates`
+     * (bind-account-candidates.ts). Reactive: the row re-derives its
+     * "Bind: <name>" / "Bind account" vs. "Armory → Accounts" action every
+     * time this changes. Optional so callers that haven't wired the account
+     * cache yet (e.g. tests) fall back to the pre-existing Armory-only
+     * behavior. See docs/specs/SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04.md §3.
+     */
+    bindCandidates?: Accessor<{ id: string; name: string }[]>;
+    /** Bind one of `bindCandidates` (or open a picker for 2+) to this agent. */
+    onBindAccount?: (e?: MouseEvent) => void;
 }
 
 export interface UseAgentFailureResult {
@@ -290,6 +302,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 // Selects the auth arm's "Log in" vs "Login Again" label and
                 // the row's accent — see failure-accessory's FailureViewState.
                 turnAttempted: pf.turnAttempted,
+                bindCandidates: opts.bindCandidates?.(),
             },
             {
                 retry: doRetry,
@@ -301,6 +314,7 @@ export function useAgentFailure(opts: UseAgentFailureOptions): UseAgentFailureRe
                 // Same single-source forwarding as loginAgain above.
                 loginViaTerminal: () => opts.onLoginViaTerminal(pf.turnAttempted ?? true),
                 openArmory: opts.onOpenArmory,
+                bindAccount: opts.onBindAccount ?? (() => {}),
                 newSession: opts.onNewSession,
                 toggleDetails: () => setExpanded((v) => !v),
                 dismiss: endEpisode,

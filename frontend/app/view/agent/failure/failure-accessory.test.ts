@@ -21,13 +21,14 @@ const mkView = (overrides: Partial<FailureViewState> = {}): FailureViewState => 
 });
 
 const mkActions = (): FailureActions & { _calls: Record<keyof FailureActions, number> } => {
-    const _calls = { retry: 0, loginAgain: 0, loginViaTerminal: 0, openArmory: 0, newSession: 0, toggleDetails: 0, dismiss: 0 };
+    const _calls = { retry: 0, loginAgain: 0, loginViaTerminal: 0, openArmory: 0, bindAccount: 0, newSession: 0, toggleDetails: 0, dismiss: 0 };
     return {
         _calls,
         retry: vi.fn(() => void _calls.retry++),
         loginAgain: vi.fn(() => void _calls.loginAgain++),
         loginViaTerminal: vi.fn(() => void _calls.loginViaTerminal++),
         openArmory: vi.fn(() => void _calls.openArmory++),
+        bindAccount: vi.fn(() => void _calls.bindAccount++),
         newSession: vi.fn(() => void _calls.newSession++),
         toggleDetails: vi.fn(() => void _calls.toggleDetails++),
         dismiss: vi.fn(() => void _calls.dismiss++),
@@ -234,5 +235,56 @@ describe("auth row: pre-launch vs post-turn (PLAN_LOGIN_CTA_SURFACE_CONSOLIDATIO
     it("leaves NON-auth failures on the error accent regardless of turnAttempted", () => {
         const ctx = mkFailure({ code: "context_exceeded", title: "Context full", detail: "" });
         expect(failureToRow(ctx, mkView({ turnAttempted: false }), mkActions()).accent).toBe("error");
+    });
+});
+
+describe("auth row: bind-account vs Armory (SPEC_AGENT_LOGIN_FLOW_TIGHTENING_2026_09_04)", () => {
+    const authFailure = () =>
+        mkFailure({ code: "auth", title: "Not authenticated", detail: "401", retryable: true });
+
+    it("shows Armory → Accounts and no bind action when there are zero candidates", () => {
+        const row = failureToRow(authFailure(), mkView({ bindCandidates: [] }), mkActions());
+        expect(action(row, "Armory → Accounts")).toBeTruthy();
+        expect(row.actions.some((a) => a.icon === "vault" && a.label !== "Armory → Accounts")).toBe(false);
+    });
+
+    it("shows Armory → Accounts when bindCandidates is omitted (default/back-compat)", () => {
+        const row = failureToRow(authFailure(), mkView(), mkActions());
+        expect(action(row, "Armory → Accounts")).toBeTruthy();
+    });
+
+    it("replaces Armory → Accounts with a named Bind action for exactly one candidate", () => {
+        const on = mkActions();
+        const row = failureToRow(
+            authFailure(),
+            mkView({ bindCandidates: [{ id: "acct-1", name: "work-claude" }] }),
+            on,
+        );
+        expect(action(row, "Armory → Accounts")).toBeUndefined();
+        const bind = action(row, "Bind: work-claude");
+        expect(bind).toBeTruthy();
+        expect(bind?.icon).toBe("vault");
+        bind?.onClick();
+        expect(on._calls.bindAccount).toBe(1);
+    });
+
+    it("shows a generic picker-opening Bind action for 2+ candidates", () => {
+        const on = mkActions();
+        const row = failureToRow(
+            authFailure(),
+            mkView({
+                bindCandidates: [
+                    { id: "acct-1", name: "work-claude" },
+                    { id: "acct-2", name: "personal-claude" },
+                ],
+            }),
+            on,
+        );
+        expect(action(row, "Armory → Accounts")).toBeUndefined();
+        expect(action(row, "Bind: work-claude")).toBeUndefined();
+        const bind = action(row, "Bind account");
+        expect(bind).toBeTruthy();
+        bind?.onClick();
+        expect(on._calls.bindAccount).toBe(1);
     });
 });
