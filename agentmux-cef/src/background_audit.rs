@@ -145,17 +145,39 @@ impl BackgroundAudit {
         self.path.as_ref().map(|p| p.with_extension("surfaced"))
     }
 
-    /// Every entry currently on disk, oldest first. Malformed lines are
-    /// skipped rather than failing the read: a torn final line (a crash
-    /// mid-append) must not make the whole log unreadable.
+    /// Every entry on disk, oldest first — **archive first, then the live
+    /// file**.
+    ///
+    /// Reading the archive is not optional. An earlier revision rotated the
+    /// live file to `.1` and read only the live file, so any entry that had
+    /// not been surfaced when rotation happened vanished from the surfacing
+    /// API entirely — the exact opposite of the "over-reporting, never
+    /// under-reporting" the rotation comment claimed (ReAgent P1 on #3001).
+    ///
+    /// Malformed lines are skipped rather than failing the read: a torn final
+    /// line (a crash mid-append) must not cost the entries before it.
     pub fn entries(&self) -> Vec<AuditEntry> {
-        let Some(path) = &self.path else {
-            return Vec::new();
-        };
+        let mut out = self.read_file(self.archive_path());
+        out.extend(self.read_file(self.path.clone()));
+        out
+    }
+
+    fn read_file(&self, path: Option<PathBuf>) -> Vec<AuditEntry> {
+        let Some(path) = path else { return Vec::new() };
         let Ok(text) = std::fs::read_to_string(path) else {
             return Vec::new();
         };
         text.lines().filter_map(parse_line).collect()
+    }
+
+    fn archive_path(&self) -> Option<PathBuf> {
+        self.path.as_ref().map(|p| p.with_extension("jsonl.1"))
+    }
+
+    /// Lines currently in the archive. Used to keep the watermark aligned
+    /// when an archive is discarded.
+    fn archive_len(&self) -> usize {
+        self.read_file(self.archive_path()).len()
     }
 
     /// Is the instance currently in an unattended period?
@@ -222,16 +244,22 @@ impl BackgroundAudit {
         if text.lines().count() < MAX_LINES {
             return;
         }
-        let archive = path.with_extension("jsonl.1");
+        let Some(archive) = self.archive_path() else { return };
+        // The archive we are about to overwrite is the only thing that gets
+        // discarded. `entries()` reads archive-then-live, so indices stay
+        // aligned if the watermark is reduced by exactly the number of lines
+        // leaving the concatenation — reducing it to 0 instead (an earlier
+        // revision) silently dropped every not-yet-surfaced entry.
+        let dropped = self.archive_len();
         if std::fs::rename(path, &archive).is_ok() {
-            // Line indices restart, so the watermark must too. Surfacing may
-            // then re-show a period the user already saw — over-reporting,
-            // never under-reporting, which is the safe direction for an
-            // accountability feature.
-            if let Some(w) = self.watermark_path() {
-                let _ = std::fs::remove_file(w);
-            }
-            tracing::info!(target: "wrr", "[audit] rotated to {}", archive.display());
+            let w = self.read_watermark().saturating_sub(dropped);
+            self.write_watermark(w);
+            tracing::info!(
+                target: "wrr",
+                dropped,
+                "[audit] rotated to {}",
+                archive.display()
+            );
         }
     }
 
@@ -429,6 +457,51 @@ mod background_audit_tests {
         assert!(log.entries().is_empty());
         assert!(!log.is_unattended());
         assert!(log.take_unsurfaced().is_empty());
+    }
+
+    /// ReAgent P1 on #3001: rotation used to reset the watermark while the
+    /// archive was never read, so anything unsurfaced at rotation time was
+    /// lost — under-reporting, in an accountability feature.
+    #[test]
+    fn rotation_does_not_lose_unsurfaced_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("background-audit.jsonl");
+        let log = BackgroundAudit::at(path.clone());
+
+        // Fill past the rotation threshold without ever surfacing.
+        for i in 0..(MAX_LINES as u64 + 10) {
+            if i % 2 == 0 {
+                log.went_unattended(i);
+            } else {
+                log.observed(i);
+            }
+        }
+
+        let surfaced = log.take_unsurfaced();
+        assert!(
+            !surfaced.is_empty(),
+            "entries written before rotation must still be surfacable"
+        );
+        // The very first entry must still be reachable through the archive.
+        assert_eq!(surfaced[0].at_ms, 0, "oldest entry lost to rotation");
+    }
+
+    #[test]
+    fn entries_include_the_archive_after_a_rotation() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("background-audit.jsonl");
+        let log = BackgroundAudit::at(path.clone());
+        for i in 0..(MAX_LINES as u64 + 4) {
+            if i % 2 == 0 { log.went_unattended(i) } else { log.observed(i) }
+        }
+        assert!(
+            path.with_extension("jsonl.1").exists(),
+            "expected a rotation to have happened"
+        );
+        assert!(
+            log.entries().len() > 4,
+            "entries() must span archive + live, not just live"
+        );
     }
 
     #[test]
