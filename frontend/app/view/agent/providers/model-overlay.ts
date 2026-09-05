@@ -42,7 +42,7 @@ function pickNewest(models: ProviderModel[]): ProviderModel {
 /** Family key for an id the curated list doesn't cover — its alphabetic tokens
  *  minus the "claude" prefix, e.g. "claude-fable-5" → "fable". Groups versions
  *  of a genuinely new family so we surface one (newest) entry for it. */
-function familyKey(id: string): string {
+export function familyKey(id: string): string {
     const alpha = id.split("-").filter((t) => /^[a-z]+$/i.test(t) && t.toLowerCase() !== "claude");
     return alpha.join("-").toLowerCase() || id.toLowerCase();
 }

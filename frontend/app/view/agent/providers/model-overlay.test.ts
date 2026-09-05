@@ -17,7 +17,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { getProvider, setProviderModels } from "./model-overlay";
+import { familyKey, getProvider, setProviderModels } from "./model-overlay";
 
 /** Shape the backend's `providers.models` RPC delivers. */
 const apiModels = (...ids: Array<[string, string]>) =>
@@ -102,5 +102,15 @@ describe("curated catalog", () => {
         // full model name for `--model` to resolve.
         const fable = claudeModels().find((m) => m.label.startsWith("Fable"));
         expect(fable!.value).toMatch(/^claude-fable-/);
+    });
+});
+
+describe("familyKey (exported for selection migration)", () => {
+    it("groups versions of the same family so a stale selection can be migrated", () => {
+        // AgentCreateFromTemplateModal uses this to move a user's touched
+        // selection when the overlay replaces a concrete value underneath it.
+        expect(familyKey("claude-fable-5")).toBe(familyKey("claude-fable-5-1"));
+        expect(familyKey("claude-fable-5")).not.toBe(familyKey("claude-opus-5"));
+        expect(familyKey("opus")).toBe("opus");
     });
 });
