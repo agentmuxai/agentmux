@@ -17,9 +17,28 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@solidjs/testing-li
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 function cardTitlesInOrder(container: HTMLElement): string[] {
-    return Array.from(container.querySelectorAll(".memory-agent-card-title")).map(
-        (el) => el.textContent ?? "",
+    return Array.from(container.querySelectorAll(".memory-agent-card-title")).map((el) => el.textContent ?? "");
+}
+
+/** Filenames currently rendered as tiles in the file grid, in DOM order.
+ *  The tile grid replaced the file `<select>` on 2026-09-04, so this is the
+ *  successor to the old `select.querySelectorAll("option")` assertions. */
+function fileTileNames(): string[] {
+    return Array.from(document.querySelectorAll<HTMLElement>(".memory-file-card")).map(
+        (el) => el.getAttribute("data-filename") ?? ""
     );
+}
+
+/** Drill into one file's version history by clicking its tile — the
+ *  successor to `fireEvent.change(select, ...)`. Waits for the tile to exist
+ *  first, since the file grid only paints once agent:memory:list resolves. */
+async function openFile(filename: string): Promise<void> {
+    const tile = await waitFor(() => {
+        const el = document.querySelector<HTMLElement>(`.memory-file-card[data-filename="${filename}"]`);
+        if (!el) throw new Error(`no file tile for ${filename}`);
+        return el;
+    });
+    fireEvent.click(tile);
 }
 
 const listAgentDefinitionsMock = vi.fn();
@@ -66,6 +85,7 @@ vi.mock("@/app/view/agent/components/NativeMemoryHistoryPanel", () => ({
     },
 }));
 
+import { fileMetaLabel, formatFileAge, formatFileSize } from "./MemoryFileCard";
 import { NativeMemoryManager } from "./native-memory-manager";
 
 function agent(id: string, name: string): AgentDefinition {
@@ -97,7 +117,7 @@ describe("NativeMemoryManager — agent grid", () => {
         nativeMemoryListMock.mockImplementation((_c: unknown, req: { agent_id: string }) =>
             req.agent_id === "a1"
                 ? Promise.resolve({ files: [{ filename: "MEMORY.md" }, { filename: "b.md" }] })
-                : Promise.resolve({ files: [{ filename: "only.md" }] }),
+                : Promise.resolve({ files: [{ filename: "only.md" }] })
         );
         render(() => <NativeMemoryManager />);
         expect(await screen.findByText("2 files")).toBeInTheDocument();
@@ -117,7 +137,7 @@ describe("NativeMemoryManager — agent grid", () => {
         nativeMemoryListMock.mockImplementation((_c: unknown, req: { agent_id: string }) =>
             req.agent_id === "a1"
                 ? Promise.reject(new Error("memory: agent manoz has no working directory"))
-                : Promise.resolve({ files: [] }),
+                : Promise.resolve({ files: [] })
         );
         render(() => <NativeMemoryManager />);
 
@@ -137,7 +157,7 @@ describe("NativeMemoryManager — agent grid", () => {
         listAgentDefinitionsMock.mockReturnValue(
             new Promise<AgentDefinition[]>((r) => {
                 resolveAgents = r;
-            }),
+            })
         );
         render(() => <NativeMemoryManager />);
 
@@ -158,7 +178,7 @@ describe("NativeMemoryManager — agent grid", () => {
         nativeMemoryListMock.mockImplementation((_c: unknown, req: { agent_id: string }) =>
             req.agent_id === "a1"
                 ? Promise.reject(new Error("boom"))
-                : Promise.resolve({ files: [{ filename: "only.md" }] }),
+                : Promise.resolve({ files: [{ filename: "only.md" }] })
         );
         render(() => <NativeMemoryManager />);
         expect(await screen.findByText("Couldn't read memories")).toBeInTheDocument();
@@ -169,11 +189,7 @@ describe("NativeMemoryManager — agent grid", () => {
 // docs/specs/SPEC_ARMORY_PERSONAL_MEMORY_FILTER_AND_SORT_2026_09_02.md
 describe("NativeMemoryManager — filter and sort", () => {
     test("filters the grid by name, case-insensitively", async () => {
-        listAgentDefinitionsMock.mockResolvedValue([
-            agent("a1", "Manoz"),
-            agent("a2", "AgentY"),
-            agent("a3", "Nark"),
-        ]);
+        listAgentDefinitionsMock.mockResolvedValue([agent("a1", "Manoz"), agent("a2", "AgentY"), agent("a3", "Nark")]);
         render(() => <NativeMemoryManager />);
         await screen.findByText("Manoz");
 
@@ -249,8 +265,7 @@ describe("NativeMemoryManager — filter and sort", () => {
     test("count sort ranks resolved counts first (descending), then loading, then error — never mixed", async () => {
         nativeMemoryListMock.mockImplementation((_c: unknown, req: { agent_id: string }) => {
             if (req.agent_id === "a1") return Promise.resolve({ files: [{ filename: "x" }] }); // 1 file
-            if (req.agent_id === "a2")
-                return Promise.resolve({ files: [{ filename: "x" }, { filename: "y" }] }); // 2 files
+            if (req.agent_id === "a2") return Promise.resolve({ files: [{ filename: "x" }, { filename: "y" }] }); // 2 files
             if (req.agent_id === "a3") return Promise.reject(new Error("boom")); // error
             return new Promise(() => {}); // a4: never resolves — stays "loading"
         });
@@ -309,7 +324,7 @@ describe("NativeMemoryManager — filter and sort", () => {
         expect((screen.getByTestId("memory-agent-sort-select") as HTMLSelectElement).value).toBe("provider");
         expect((screen.getByTestId("memory-agent-filter-input") as HTMLInputElement).value).toBe("");
         expect(
-            (screen.getByTestId("memory-agent-filter-toggle").querySelector("input") as HTMLInputElement).checked,
+            (screen.getByTestId("memory-agent-filter-toggle").querySelector("input") as HTMLInputElement).checked
         ).toBe(false);
     });
 
@@ -332,7 +347,7 @@ describe("NativeMemoryManager — reactive updates", () => {
         nativeMemoryListMock.mockImplementation((_c: unknown, req: { agent_id: string }) =>
             req.agent_id === "a1"
                 ? Promise.resolve({ files: [{ filename: "MEMORY.md" }] })
-                : Promise.resolve({ files: [] }),
+                : Promise.resolve({ files: [] })
         );
         wpsHub.handlers.get("agent:memory:changed:a1")?.({});
 
@@ -363,7 +378,7 @@ describe("NativeMemoryManager — reactive updates", () => {
                 () =>
                     new Promise((resolve) => {
                         resolveRefresh = resolve;
-                    }),
+                    })
             );
             wpsHub.handlers.get("agent:memory:changed:a1")?.({});
             // Past the 250ms debounce -- fetchCountFor has now actually been
@@ -377,7 +392,7 @@ describe("NativeMemoryManager — reactive updates", () => {
 
             resolveRefresh?.({ files: [{ filename: "MEMORY.md" }, { filename: "NOTES.md" }] });
             await vi.waitFor(() =>
-                expect(screen.getByText("Manoz").closest(".memory-agent-card")).toHaveTextContent("2 files"),
+                expect(screen.getByText("Manoz").closest(".memory-agent-card")).toHaveTextContent("2 files")
             );
         } finally {
             vi.useRealTimers();
@@ -386,7 +401,7 @@ describe("NativeMemoryManager — reactive updates", () => {
 
     test("an event refetches an agent even if its card previously errored", async () => {
         nativeMemoryListMock.mockImplementation((_c: unknown, req: { agent_id: string }) =>
-            req.agent_id === "a1" ? Promise.reject(new Error("boom")) : Promise.resolve({ files: [] }),
+            req.agent_id === "a1" ? Promise.reject(new Error("boom")) : Promise.resolve({ files: [] })
         );
         render(() => <NativeMemoryManager />);
         await screen.findByText("Couldn't read memories");
@@ -394,7 +409,9 @@ describe("NativeMemoryManager — reactive updates", () => {
         // Whatever broke is fixed now — the next event must get a fresh try,
         // not stay permanently errored until a full remount.
         nativeMemoryListMock.mockImplementation((_c: unknown, req: { agent_id: string }) =>
-            req.agent_id === "a1" ? Promise.resolve({ files: [{ filename: "MEMORY.md" }] }) : Promise.resolve({ files: [] }),
+            req.agent_id === "a1"
+                ? Promise.resolve({ files: [{ filename: "MEMORY.md" }] })
+                : Promise.resolve({ files: [] })
         );
         wpsHub.handlers.get("agent:memory:changed:a1")?.({});
 
@@ -425,27 +442,26 @@ describe("NativeMemoryManager — reactive updates", () => {
         nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md" }] });
         render(() => <NativeMemoryManager />);
         fireEvent.click(await screen.findByText("Manoz"));
-        const select = await screen.findByRole("combobox");
-        await waitFor(() => expect(select).not.toBeDisabled());
-        fireEvent.change(select, { target: { value: "MEMORY.md" } });
+        await openFile("MEMORY.md");
         expect(await screen.findByTestId("history-panel")).toHaveTextContent("a1:MEMORY.md");
 
         nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md" }, { filename: "NOTES.md" }] });
         wpsHub.handlers.get("agent:memory:changed:a1")?.({});
 
-        await waitFor(() =>
-            expect(Array.from(select.querySelectorAll("option")).map((o) => o.value)).toContain("NOTES.md"),
-        );
         // Still showing the same file's history — the event refreshed the
-        // list in place, it did not kick the user back to "pick a file".
+        // list in place, it did not kick the user back to the file grid.
         expect(screen.getByTestId("history-panel")).toHaveTextContent("a1:MEMORY.md");
+        // ...and stepping back one level shows the REFRESHED list, proving the
+        // in-place refresh actually landed rather than being merely harmless.
+        fireEvent.click(screen.getByText("← All files"));
+        await waitFor(() => expect(fileTileNames()).toContain("NOTES.md"));
     });
 
     test("an event for a DIFFERENT agent than the one open in detail view is ignored there", async () => {
         nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md" }] });
         render(() => <NativeMemoryManager />);
         fireEvent.click(await screen.findByText("Manoz")); // opens agent a1
-        await screen.findByRole("combobox");
+        await waitFor(() => expect(fileTileNames()).toEqual(["MEMORY.md"]));
 
         nativeMemoryListMock.mockClear();
         wpsHub.handlers.get("agent:memory:changed:a2")?.({});
@@ -462,17 +478,17 @@ describe("NativeMemoryManager — reactive updates", () => {
         nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md" }] });
         render(() => <NativeMemoryManager />);
         fireEvent.click(await screen.findByText("Manoz"));
-        const select = (await screen.findByRole("combobox")) as HTMLSelectElement;
-        await waitFor(() => expect(select).not.toBeDisabled());
-        fireEvent.change(select, { target: { value: "MEMORY.md" } });
+        await openFile("MEMORY.md");
         expect(await screen.findByTestId("history-panel")).toHaveTextContent("a1:MEMORY.md");
 
         // The file that was selected is gone in the refreshed list.
         nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "OTHER.md" }] });
         wpsHub.handlers.get("agent:memory:changed:a1")?.({});
 
-        await waitFor(() => expect(select.value).toBe(""));
-        expect(screen.queryByTestId("history-panel")).toBeNull();
+        // Falls back to the file grid rather than holding a history panel open
+        // on a file that no longer exists.
+        await waitFor(() => expect(screen.queryByTestId("history-panel")).toBeNull());
+        await waitFor(() => expect(fileTileNames()).toEqual(["OTHER.md"]));
     });
 
     test("subscriptions are re-registered when the agent set changes", async () => {
@@ -505,9 +521,7 @@ describe("NativeMemoryManager — reactive updates", () => {
         nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md" }] });
         render(() => <NativeMemoryManager />);
         fireEvent.click(await screen.findByText("Manoz"));
-        const select = await screen.findByRole("combobox");
-        await waitFor(() => expect(select).not.toBeDisabled());
-        fireEvent.change(select, { target: { value: "MEMORY.md" } });
+        await openFile("MEMORY.md");
         await screen.findByTestId("history-panel");
         const mountsBefore = historyPanelMountCount;
 
@@ -534,28 +548,29 @@ describe("NativeMemoryManager — reactive updates", () => {
             () =>
                 new Promise((resolve) => {
                     resolveInitial = resolve;
-                }),
+                })
         );
         render(() => <NativeMemoryManager />);
         fireEvent.click(await screen.findByText("Manoz")); // fires the initial (slow) fetch
 
-        const select = await screen.findByRole("combobox");
-        expect(select).toBeDisabled(); // still "Loading…" — initial fetch not resolved yet
+        // Still "Loading files…" — the initial fetch has not resolved yet.
+        expect(await screen.findByText("Loading files…")).toBeInTheDocument();
 
         // A change event's refetch fires and resolves BEFORE the initial
         // fetch does — it becomes the new latestRequestId.
         nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md" }] });
         wpsHub.handlers.get("agent:memory:changed:a1")?.({});
-        await waitFor(() => expect(select).not.toBeDisabled());
+        await waitFor(() => expect(fileTileNames()).toEqual(["MEMORY.md"]));
 
         // The original (now-superseded) initial fetch finally resolves.
         resolveInitial?.({ files: [] });
         await Promise.resolve();
 
-        // Must still reflect the newer, correct result -- not stuck loading,
-        // and not clobbered back to the stale initial (empty) result either.
-        expect(select).not.toBeDisabled();
-        expect(Array.from(select.querySelectorAll("option")).map((o) => o.value)).toContain("MEMORY.md");
+        // Must still reflect the newer, correct result -- not stuck on
+        // "Loading files…", and not clobbered back to the stale initial
+        // (empty) result either.
+        expect(screen.queryByText("Loading files…")).toBeNull();
+        expect(fileTileNames()).toEqual(["MEMORY.md"]);
     });
 
     // Codex P2, PR #2932: fetchCountFor previously guarded only "is this
@@ -579,7 +594,7 @@ describe("NativeMemoryManager — reactive updates", () => {
         nativeMemoryListMock.mockImplementation((_c: unknown, req: { agent_id: string }) =>
             req.agent_id === "a1"
                 ? Promise.resolve({ files: [{ filename: "MEMORY.md" }, { filename: "NOTES.md" }] })
-                : Promise.resolve({ files: [] }),
+                : Promise.resolve({ files: [] })
         );
         wpsHub.handlers.get("agent:memory:changed:a1")?.({});
         await screen.findByText("2 files");
@@ -615,7 +630,11 @@ describe("NativeMemoryManager — reactive updates", () => {
             // so triggering that here re-fetches the agent list for real,
             // exactly as it would from a genuine unrelated create/edit.
             wpsHub.handlers.get("agent:memory:changed:a1")?.({});
-            listAgentDefinitionsMock.mockResolvedValue([agent("a1", "Manoz"), agent("a2", "AgentY"), agent("a3", "Nark")]);
+            listAgentDefinitionsMock.mockResolvedValue([
+                agent("a1", "Manoz"),
+                agent("a2", "AgentY"),
+                agent("a3", "Nark"),
+            ]);
             wpsHub.handlers.get("agents:changed")?.({});
             await vi.waitFor(() => expect(screen.queryByText("Nark")).not.toBeNull());
 
@@ -650,10 +669,7 @@ describe("NativeMemoryManager — drill-in", () => {
         nativeMemoryListMock.mockResolvedValue({ files: [{ filename: "MEMORY.md" }] });
         render(() => <NativeMemoryManager />);
         fireEvent.click(await screen.findByText("Manoz"));
-
-        const select = await screen.findByRole("combobox");
-        await waitFor(() => expect(select).not.toBeDisabled());
-        fireEvent.change(select, { target: { value: "MEMORY.md" } });
+        await openFile("MEMORY.md");
 
         expect(await screen.findByTestId("history-panel")).toHaveTextContent("a1:MEMORY.md");
     });
@@ -664,5 +680,132 @@ describe("NativeMemoryManager — drill-in", () => {
         fireEvent.click(await screen.findByText("Manoz"));
 
         expect(await screen.findByText(/has no working directory/)).toBeInTheDocument();
+    });
+});
+
+// The file grid replaced the detail header's file `<select>` on 2026-09-04 —
+// second screen of the drill-down (agents → files → version history). The
+// dropdown could only ever show a filename; these cover what the tiles add on
+// top of that, and the extra navigation level they introduce.
+describe("NativeMemoryManager — file grid", () => {
+    /** A full NativeMemoryFileMeta. The older suites above pass bare
+     *  `{ filename }` on purpose (they only assert on navigation), but the
+     *  tiles render every field, so anything asserting on tile CONTENT needs
+     *  the real shape. */
+    function fileMeta(filename: string, over: Partial<NativeMemoryFileMeta> = {}): NativeMemoryFileMeta {
+        return {
+            filename,
+            is_index: false,
+            metadata_type: null,
+            size_bytes: 512,
+            modified_at: Date.now() - 2 * 86_400_000,
+            ...over,
+        };
+    }
+
+    async function openAgentWithFiles(files: NativeMemoryFileMeta[]): Promise<void> {
+        nativeMemoryListMock.mockResolvedValue({ files });
+        render(() => <NativeMemoryManager />);
+        fireEvent.click(await screen.findByText("Manoz"));
+        await waitFor(() => expect(document.querySelectorAll(".memory-file-card").length).toBe(files.length));
+    }
+
+    test("renders one tile per memory file instead of a dropdown", async () => {
+        await openAgentWithFiles([fileMeta("MEMORY.md"), fileMeta("notes.md")]);
+
+        expect(fileTileNames()).toEqual(["MEMORY.md", "notes.md"]);
+        // The <select> is gone, not merely hidden behind the tiles.
+        expect(screen.queryByRole("combobox")).toBeNull();
+    });
+
+    test("a tile carries the metadata the dropdown could not show", async () => {
+        await openAgentWithFiles([fileMeta("feedback_x.md", { metadata_type: "feedback", size_bytes: 2048 })]);
+
+        const tile = document.querySelector<HTMLElement>(".memory-file-card")!;
+        expect(tile.querySelector(".memory-file-card-badge")).toHaveTextContent("feedback");
+        expect(tile.querySelector(".memory-file-card-meta")).toHaveTextContent("2.0 KB · 2d ago");
+    });
+
+    test("the index file is marked and sorts first, whatever its name", async () => {
+        // Returned LAST and named to sort last alphabetically — so passing
+        // this can only be the explicit is_index rule, not incidental order.
+        await openAgentWithFiles([fileMeta("aaa.md"), fileMeta("zzz_index.md", { is_index: true })]);
+
+        expect(fileTileNames()).toEqual(["zzz_index.md", "aaa.md"]);
+        const first = document.querySelector<HTMLElement>(".memory-file-card")!;
+        expect(first).toHaveClass("memory-file-card--index");
+        expect(first.querySelector(".memory-file-card-badge--index")).toHaveTextContent("index");
+    });
+
+    test("keyboard activation opens a file, same as a click", async () => {
+        await openAgentWithFiles([fileMeta("MEMORY.md")]);
+
+        const tile = document.querySelector<HTMLElement>(".memory-file-card")!;
+        expect(tile).toHaveAttribute("role", "button");
+        fireEvent.keyDown(tile, { key: "Enter" });
+
+        expect(await screen.findByTestId("history-panel")).toHaveTextContent("a1:MEMORY.md");
+    });
+
+    test("back steps one level at a time: history → file grid → agent grid", async () => {
+        await openAgentWithFiles([fileMeta("MEMORY.md")]);
+        await openFile("MEMORY.md");
+        await screen.findByTestId("history-panel");
+
+        // First back returns to the file grid, NOT all the way to the agents.
+        fireEvent.click(screen.getByText("← All files"));
+        await waitFor(() => expect(fileTileNames()).toEqual(["MEMORY.md"]));
+        expect(screen.queryByTestId("history-panel")).toBeNull();
+        expect(screen.queryByText("AgentY")).toBeNull(); // still inside the agent
+
+        // Second back returns to the agent grid.
+        fireEvent.click(screen.getByText("← All agents"));
+        expect(await screen.findByText("AgentY")).toBeInTheDocument();
+    });
+
+    test("the open filename shows in the header only on the history screen", async () => {
+        await openAgentWithFiles([fileMeta("MEMORY.md")]);
+        expect(document.querySelector(".native-memory-manager-filename")).toBeNull();
+
+        await openFile("MEMORY.md");
+        await screen.findByTestId("history-panel");
+        expect(document.querySelector(".native-memory-manager-filename")).toHaveTextContent("MEMORY.md");
+    });
+
+    test("an agent with no files reads as empty, distinctly from a failed read", async () => {
+        nativeMemoryListMock.mockResolvedValue({ files: [] });
+        render(() => <NativeMemoryManager />);
+        fireEvent.click(await screen.findByText("Manoz"));
+
+        expect(await screen.findByText("This agent hasn't remembered anything yet.")).toBeInTheDocument();
+        expect(document.querySelectorAll(".memory-file-card").length).toBe(0);
+    });
+});
+
+// Pure helpers behind the tile's meta line. The grid test above covers the
+// ordinary case; these are the inputs a real memory dir actually produces
+// that have no sensible rendering (a brand-new empty file, a stat that came
+// back without a timestamp) and would otherwise surface as "0 B · 20790d ago".
+describe("MemoryFileCard — label helpers", () => {
+    test("formatFileSize scales through B/KB/MB", () => {
+        expect(formatFileSize(0)).toBe("0 B");
+        expect(formatFileSize(512)).toBe("512 B");
+        expect(formatFileSize(2048)).toBe("2.0 KB");
+        expect(formatFileSize(5 * 1024 * 1024)).toBe("5.0 MB");
+    });
+
+    test("formatFileAge buckets by magnitude and never renders epoch zero", () => {
+        expect(formatFileAge(Date.now() - 30_000)).toBe("just now");
+        expect(formatFileAge(Date.now() - 5 * 60_000)).toBe("5m ago");
+        expect(formatFileAge(Date.now() - 3 * 3_600_000)).toBe("3h ago");
+        expect(formatFileAge(Date.now() - 4 * 86_400_000)).toBe("4d ago");
+        // A missing timestamp is dropped, not rendered as 1970.
+        expect(formatFileAge(0)).toBe("");
+    });
+
+    test("fileMetaLabel omits segments it has no value for, rather than leaving a dangling separator", () => {
+        const base = { filename: "x.md", is_index: false, metadata_type: null };
+        expect(fileMetaLabel({ ...base, size_bytes: 100, modified_at: 0 })).toBe("100 B");
+        expect(fileMetaLabel({ ...base, size_bytes: 0, modified_at: 0 })).toBe("0 B");
     });
 });
