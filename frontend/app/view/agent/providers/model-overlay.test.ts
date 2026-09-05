@@ -13,22 +13,33 @@
  * row produces a picker entry that displays "Fable 5.1" while still passing
  * `claude-fable-5` to `--model` — advertising one model and selecting an older
  * one, with nothing in the UI indicating the mismatch.
+ *
+ * `setProviderModels` writes to a module-level signal, so every test re-imports
+ * the module through `vi.resetModules()` to get a clean catalog. Without that,
+ * the "curated catalog" assertions below would run against state left by
+ * earlier tests rather than the curated defaults they mean to check — passing
+ * or failing depending on execution order. reagent P2, PR #2990.
  */
 
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { familyKey, getProvider, setProviderModels } from "./model-overlay";
+type Overlay = typeof import("./model-overlay");
+let overlay: Overlay;
+
+beforeEach(async () => {
+    vi.resetModules();
+    overlay = await import("./model-overlay");
+});
 
 /** Shape the backend's `providers.models` RPC delivers. */
 const apiModels = (...ids: Array<[string, string]>) =>
     ids.map(([value, label]) => ({ value, label }));
 
-const claudeModels = () => getProvider("claude")!.models;
-const row = (value: string) => claudeModels().find((m) => m.value === value);
+const claudeModels = () => overlay.getProvider("claude")!.models;
 
 describe("setProviderModels", () => {
     it("refreshes an alias row's label without touching its value", () => {
-        setProviderModels("claude", apiModels(["claude-opus-6", "Claude Opus 6"]));
+        overlay.setProviderModels("claude", apiModels(["claude-opus-6", "Claude Opus 6"]));
         const opus = claudeModels().find((m) => m.label === "Opus 6");
         expect(opus).toBeDefined();
         // The alias must survive — the CLI resolves it to whatever is current.
@@ -36,7 +47,7 @@ describe("setProviderModels", () => {
     });
 
     it("refreshes a concrete row's value as well as its label", () => {
-        setProviderModels("claude", apiModels(["claude-fable-6", "Claude Fable 6"]));
+        overlay.setProviderModels("claude", apiModels(["claude-fable-6", "Claude Fable 6"]));
         const fable = claudeModels().find((m) => m.label === "Fable 6");
         expect(fable).toBeDefined();
         // Value moved with the label — no advertise-one/select-another gap.
@@ -44,7 +55,7 @@ describe("setProviderModels", () => {
     });
 
     it("picks the newest family member regardless of API ordering", () => {
-        setProviderModels(
+        overlay.setProviderModels(
             "claude",
             apiModels(
                 ["claude-fable-5-1", "Claude Fable 5.1"],
@@ -57,7 +68,7 @@ describe("setProviderModels", () => {
     });
 
     it("does not emit a duplicate row for a family it already covers", () => {
-        setProviderModels(
+        overlay.setProviderModels(
             "claude",
             apiModels(
                 ["claude-fable-5", "Claude Fable 5"],
@@ -69,7 +80,7 @@ describe("setProviderModels", () => {
     });
 
     it("appends an unseen family rather than dropping it", () => {
-        setProviderModels("claude", apiModels(["claude-mythos-5-1", "Claude Mythos 5.1"]));
+        overlay.setProviderModels("claude", apiModels(["claude-mythos-5-1", "Claude Mythos 5.1"]));
         const mythos = claudeModels().find((m) => m.value === "claude-mythos-5-1");
         expect(mythos).toBeDefined();
         expect(mythos!.label).toBe("Mythos 5.1");
@@ -77,18 +88,19 @@ describe("setProviderModels", () => {
 
     it("leaves the static catalog untouched when the API returns nothing", () => {
         const before = claudeModels().map((m) => m.value);
-        setProviderModels("claude", []);
+        overlay.setProviderModels("claude", []);
         expect(claudeModels().map((m) => m.value)).toEqual(before);
     });
 
     it("preserves the default marker through a refresh", () => {
-        setProviderModels("claude", apiModels(["claude-sonnet-6", "Claude Sonnet 6"]));
+        overlay.setProviderModels("claude", apiModels(["claude-sonnet-6", "Claude Sonnet 6"]));
         const dflt = claudeModels().find((m) => m.default);
         expect(dflt?.value).toBe("sonnet");
     });
 });
 
 describe("curated catalog", () => {
+    // These read the UNOVERLAID catalog — hence the per-test module reset.
     it("keeps version numbers out of descriptions so they cannot contradict labels", () => {
         // A description naming a version goes stale the moment the label is
         // refreshed — the "Fable 5.1 over Claude Fable 5" report.
@@ -103,14 +115,19 @@ describe("curated catalog", () => {
         const fable = claudeModels().find((m) => m.label.startsWith("Fable"));
         expect(fable!.value).toMatch(/^claude-fable-/);
     });
+
+    it("ships the current fable id, not the superseded one", () => {
+        const fable = claudeModels().find((m) => m.label.startsWith("Fable"));
+        expect(fable!.value).toBe("claude-fable-5-1");
+    });
 });
 
 describe("familyKey (exported for selection migration)", () => {
     it("groups versions of the same family so a stale selection can be migrated", () => {
-        // AgentCreateFromTemplateModal uses this to move a user's touched
-        // selection when the overlay replaces a concrete value underneath it.
-        expect(familyKey("claude-fable-5")).toBe(familyKey("claude-fable-5-1"));
-        expect(familyKey("claude-fable-5")).not.toBe(familyKey("claude-opus-5"));
-        expect(familyKey("opus")).toBe("opus");
+        // AgentCreateFromTemplateModal and AgentRuntimeDropup both use this to
+        // move a selection when the overlay replaces a concrete value.
+        expect(overlay.familyKey("claude-fable-5")).toBe(overlay.familyKey("claude-fable-5-1"));
+        expect(overlay.familyKey("claude-fable-5")).not.toBe(overlay.familyKey("claude-opus-5"));
+        expect(overlay.familyKey("opus")).toBe("opus");
     });
 });
