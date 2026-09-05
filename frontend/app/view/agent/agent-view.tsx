@@ -119,6 +119,7 @@ import { lastLinkedAccountId } from "./providers/provider-id-aliases";
 import { buildStartupPayload, resolveAccounts } from "./startup/buildStartupPayload";
 import type { SignalPair } from "./state";
 import { createAgentAtoms } from "./state";
+import { shouldShowTabStrip } from "./tab-strip-visibility";
 import type { DocumentNode } from "./types";
 import { useAgentStream } from "./useAgentStream";
 
@@ -545,33 +546,45 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
                         so the conversation renders, and can be scrolled,
                         underneath the rest of this row — unobstructed except
                         for wherever a real tab or the "+" actually sits. The
-                        "+" always renders — that's how you'd get to a second
-                        tab — but the tab pill itself stays hidden until
-                        there's something to switch BETWEEN (see visibleTabs
-                        above). */}
-                    <PaneTabStrip
-                        tabs={visibleTabs()}
-                        activeId={activeBlockId()}
-                        zoomFactor={tabStripZoomFactor}
-                        getId={(t) => t.blockId}
-                        getLabel={(t) => t.label}
-                        onActivate={handleTabSwitch}
-                        onClose={handleTabClose}
-                        onTabDoubleClick={(t) => t.definitionId && setRenamingBlockId(t.blockId)}
-                        renderLabel={(t) =>
-                            renamingBlockId() === t.blockId && t.definitionId ? (
-                                <PaneTabRenameInput
-                                    initialValue={t.label}
-                                    onConfirm={(title) => void handleTabRenameConfirm(t, title)}
-                                    onCancel={() => setRenamingBlockId(null)}
-                                />
-                            ) : (
-                                <span class="pane-tab-label">{t.label}</span>
-                            )
-                        }
-                        onAdd={() => void handleNewAgentTab()}
-                        addTitle="New agent"
-                    />
+                        tab pill itself stays hidden until there's something to
+                        switch BETWEEN (see visibleTabs above), and on a FRESH
+                        pane — picker showing, no agent launched yet — the
+                        whole strip (including its "+") is gone rather than
+                        floating a lone button over the picker. The "+" comes
+                        back the moment the pane is a real conversation; see
+                        shouldShowTabStrip for why a 2nd blank tab still keeps
+                        the strip up. */}
+                    <Show
+                        when={shouldShowTabStrip({
+                            visibleTabCount: visibleTabs().length,
+                            hasAgent: !!agentId(),
+                            isHistoryTab: isHistoryTab(),
+                        })}
+                    >
+                        <PaneTabStrip
+                            tabs={visibleTabs()}
+                            activeId={activeBlockId()}
+                            zoomFactor={tabStripZoomFactor}
+                            getId={(t) => t.blockId}
+                            getLabel={(t) => t.label}
+                            onActivate={handleTabSwitch}
+                            onClose={handleTabClose}
+                            onTabDoubleClick={(t) => t.definitionId && setRenamingBlockId(t.blockId)}
+                            renderLabel={(t) =>
+                                renamingBlockId() === t.blockId && t.definitionId ? (
+                                    <PaneTabRenameInput
+                                        initialValue={t.label}
+                                        onConfirm={(title) => void handleTabRenameConfirm(t, title)}
+                                        onCancel={() => setRenamingBlockId(null)}
+                                    />
+                                ) : (
+                                    <span class="pane-tab-label">{t.label}</span>
+                                )
+                            }
+                            onAdd={() => void handleNewAgentTab()}
+                            addTitle="New agent"
+                        />
+                    </Show>
                     <Show
                         when={isHistoryTab()}
                         fallback={
