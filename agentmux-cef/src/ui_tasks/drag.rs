@@ -323,10 +323,20 @@ unsafe fn run_macos_native_drag_loop(window: &Window, label: &str) {
 // per-move IPC. Full design + risks: SPEC_WINDOW_DRAG_MANUAL_MOVE_LOOP_2026_05_29.
 #[cfg(target_os = "windows")]
 wrap_task! {
+    // `after_unmaximize` is true on the re-posted second half of a drag that
+    // had to un-maximize first; `max_*` then carry the pre-restore maximized
+    // geometry needed to place the window under the cursor. See the
+    // `begin_unmaximize_for_drag` call site in `execute` for why this is
+    // split across two tasks.
+    // (Field-level doc comments don't compile inside `wrap_task!`.)
     pub struct Win32BeginMoveTask {
         hwnd: u64,
         state: Arc<AppState>,
         source_label: Option<String>,
+        after_unmaximize: bool,
+        max_left: i32,
+        max_top: i32,
+        max_width: i32,
     }
 
     impl Task {
@@ -357,6 +367,80 @@ wrap_task! {
                         self.hwnd
                     );
                     return;
+                }
+
+                // 0.5. Dragging a MAXIMIZED window restores it down under the
+                //      cursor first — Chrome/Windows both do this, and without
+                //      it a maximized window would either refuse to move or
+                //      slide around at full-screen size.
+                //
+                //      Done BEFORE taking capture, deliberately: ShowWindow
+                //      pumps messages and can disturb activation/capture, so
+                //      it must not run between SetCapture and the loop that
+                //      depends on that capture.
+                //
+                //      Then we RETURN and re-post ourselves on a short DELAY,
+                //      so the modal loop below doesn't start until the resize
+                //      has actually settled. This is load-bearing, not
+                //      tidiness: CEF runs its own integrated message loop
+                //      (`run_message_loop` in lib.rs), and the loop below
+                //      hijacks the UI thread with a nested `GetMessageW` pump.
+                //      Chromium defers non-nestable work while a nested native
+                //      loop is running, so the relayout/compositor work queued
+                //      by the `WM_SIZE` doesn't complete — the window frame
+                //      shrinks while the CONTENT keeps painting at its old
+                //      full-screen size for the whole drag, snapping right only
+                //      on release when the normal pump resumes (reported live
+                //      2026-09-05).
+                //
+                //      An earlier attempt yielded exactly ONE message-loop turn
+                //      here; that was not enough (the pipeline spans several
+                //      frames) and the bug survived. Hence a real delay.
+                //
+                //      Floaters are excluded for the same reason they're
+                //      excluded from the snap itself (SPEC §2.4): they are
+                //      borderless WS_POPUPs with no native maximize placement
+                //      — `toggle_floating_maximize` manages their geometry
+                //      through the reducer instead, so SW_RESTORE here would
+                //      desync that state.
+                if !self.after_unmaximize
+                    && !self
+                        .source_label
+                        .as_deref()
+                        .unwrap_or("main")
+                        .starts_with("floating-")
+                    {
+                    if let Some((max_left, max_top, max_width)) = begin_unmaximize_for_drag(h) {
+                        let mut task = Win32BeginMoveTask::new(
+                            self.hwnd,
+                            self.state.clone(),
+                            self.source_label.clone(),
+                            true,
+                            max_left,
+                            max_top,
+                            max_width,
+                        );
+                        post_delayed_task(
+                            ThreadId::UI,
+                            Some(&mut task),
+                            UNMAXIMIZE_SETTLE_MS,
+                        );
+                        return;
+                    }
+                }
+
+                // Second half of an un-maximize drag: the restore has settled,
+                // so place the (now smaller) window under the cursor before
+                // taking capture. Positioning is a pure MOVE — no resize — so
+                // unlike the restore it needs nothing from Chromium and is safe
+                // to do immediately before the modal loop.
+                if self.after_unmaximize {
+                    place_restored_window_under_cursor(
+                        h,
+                        self.max_left,
+                        self.max_top,
+                        self.max_width,
+                    );
                 }
 
                 // 1. Capture the mouse to THIS (UI) thread so WM_MOUSEMOVE /
@@ -393,6 +477,25 @@ wrap_task! {
                 // Pre-dated by 50ms so the first WM_MOUSEMOVE emits immediately.
                 let mut last_hover_emit = std::time::Instant::now()
                     - std::time::Duration::from_millis(50);
+
+                // Drag-to-top maximize (SPEC_WINDOW_SNAP_MAXIMIZE_2026_09_04 §2).
+                // Only for real top-level windows: floaters have their own
+                // top-of-screen semantics (redock / tear-back-in) that this
+                // must not collide with — see the spec's §2.4 scope note.
+                let snap_eligible = !self
+                    .source_label
+                    .as_deref()
+                    .unwrap_or("main")
+                    .starts_with("floating-");
+                // The preview rect currently on screen (None = hidden). Stored
+                // as the RECT rather than a bool so the preview also follows
+                // the cursor onto a different monitor: with side-by-side
+                // displays that share a work-area top, zone membership never
+                // changes as you cross between them, so a bool would leave the
+                // preview stranded on the monitor you left (reagentx P2).
+                // Comparing rects re-issues only when something actually
+                // differs, so this still doesn't fire per mousemove tick.
+                let mut snap_preview_rect: Option<(i32, i32, i32, i32)> = None;
 
                 // 3. Modal move loop on the UI thread.
                 let mut msg: MSG = std::mem::zeroed();
@@ -458,6 +561,40 @@ wrap_task! {
                                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
                                 );
                                 moves += 1;
+                                // Drag-to-top maximize: offer the snap while the
+                                // cursor sits in the work area's top zone. Keyed
+                                // off the CURSOR, not the window's own top edge —
+                                // the window is following the cursor at whatever
+                                // offset the user grabbed it, so its edge says
+                                // nothing about intent (see window_snap's
+                                // `cursor_in_top_maximize_zone` doc comment).
+                                if snap_eligible {
+                                    let zone = snap_work_area_for_cursor(cur.x, cur.y)
+                                        .map(|(wx, wy, ww, wh)| {
+                                            (
+                                                crate::client::window_snap::cursor_in_top_maximize_zone(
+                                                    cur.y,
+                                                    wy,
+                                                    crate::client::window_snap::SNAP_THRESHOLD_PX,
+                                                ),
+                                                (wx, wy, ww, wh),
+                                            )
+                                        });
+                                    if let Some((now_in_zone, work)) = zone {
+                                        let want = if now_in_zone { Some(work) } else { None };
+                                        if want != snap_preview_rect {
+                                            match want {
+                                                Some((wx, wy, ww, wh)) => {
+                                                    crate::ui_tasks::snap_preview::show(
+                                                        wx, wy, ww, wh,
+                                                    );
+                                                }
+                                                None => crate::ui_tasks::snap_preview::hide(),
+                                            }
+                                            snap_preview_rect = want;
+                                        }
+                                    }
+                                }
                                 // Floater: emit redock-hover at 50ms cadence so the
                                 // drop-target highlight tracks the cursor while the
                                 // renderer's mousemove listener is dark (§2.2 / §3.2).
@@ -504,6 +641,12 @@ wrap_task! {
                                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
                             );
                             cancelled = true;
+                            // Same for the snap preview: an Esc-cancelled drag
+                            // must not leave a maximize offer on screen, and
+                            // must not maximize on the eventual release (the
+                            // commit below re-checks `cancelled` too).
+                            snap_preview_rect = None;
+                            crate::ui_tasks::snap_preview::hide();
                             // Tear down the hover overlay immediately so the
                             // drop-target placeholder doesn't outlive the cancel.
                             let _ = crate::commands::window::clear_floating_redock_hover(
@@ -536,14 +679,62 @@ wrap_task! {
 
                 // 4. Stop the wake tick and release capture.
                 KillTimer(h, DRAG_TICK_ID);
+
+                // Drag-to-top maximize: commit iff the drag ended inside the
+                // zone and wasn't cancelled. Unconditionally hide the preview
+                // FIRST — this is the single exit path every `break` above
+                // funnels through, so clearing here is what guarantees the
+                // overlay can never outlive the drag regardless of how the
+                // loop ended (release, Esc-then-release, WM_QUIT, stolen
+                // capture via the wake-tick safety net).
+                crate::ui_tasks::snap_preview::hide();
                 // Capture cursor position before ReleaseCapture — this is the
                 // actual release point in physical screen px. Included in the
                 // window_drag_ended payload so the renderer can use these
                 // coordinates directly, eliminating the ordering race between
                 // the dispatched WM_LBUTTONUP (DOM mouseup) and this event
                 // (both travel async CEF IPC, relative arrival is not guaranteed).
+                //
+                // Read BEFORE the maximize decision below, which needs it too.
                 let mut release_cursor = POINT { x: 0, y: 0 };
                 GetCursorPos(&mut release_cursor);
+
+                // Drag-to-top maximize: commit iff the drag ENDED inside the
+                // zone and wasn't cancelled.
+                //
+                // Recomputed from the release cursor rather than reusing the
+                // cached `in_snap_zone` flag. That flag only reflects the last
+                // WM_MOUSEMOVE we actually processed, and the top-of-loop
+                // GetAsyncKeyState fast-path above can break out before the
+                // final mousemove for the true release point is ever dequeued
+                // (its own comment documents that physical button state leads
+                // the message queue). Committing off the cached value would
+                // therefore maximize — or fail to — based on a stale position
+                // whenever the user crosses the zone boundary quickly right
+                // before releasing. reagentx P1, raised across four review
+                // rounds. The flag stays authoritative for the PREVIEW, which
+                // is inherently about transitions during the drag.
+                let released_in_zone = !cancelled
+                    && snap_eligible
+                    && snap_work_area_for_cursor(release_cursor.x, release_cursor.y)
+                        .map(|(_, work_top, _, _)| {
+                            crate::client::window_snap::cursor_in_top_maximize_zone(
+                                release_cursor.y,
+                                work_top,
+                                crate::client::window_snap::SNAP_THRESHOLD_PX,
+                            )
+                        })
+                        .unwrap_or(false);
+                if released_in_zone {
+                    tracing::info!(
+                        "[start_window_drag] released in top snap zone — maximizing hwnd={:#x}",
+                        self.hwnd
+                    );
+                    // NOT the toggle variant: the gesture means "maximize",
+                    // and toggling would restore-down a window that was
+                    // already maximized when the drag began.
+                    crate::commands::window::maximize_hwnd(h as *mut std::ffi::c_void);
+                }
                 ReleaseCapture();
                 // Notify the renderer that the drag is done. cursor_x/cursor_y
                 // are physical screen px; renderer divides by posScale() (DPR on
@@ -567,8 +758,146 @@ wrap_task! {
     }
 }
 
+/// How long to let a `SW_RESTORE` settle before starting the modal drag
+/// loop. Roughly three 60Hz frames — enough for Chromium's
+/// resize→layout→commit→present pipeline to finish while the normal message
+/// loop is still running, short enough that the window feels like it starts
+/// following the cursor immediately.
+///
+/// **Empirical, and deliberately the smallest knob in this design.** An
+/// earlier attempt used a single message-loop turn (effectively 0ms) and the
+/// stale-paint bug survived; if it ever resurfaces this constant is the first
+/// thing to raise. See `SPEC_WINDOW_SNAP_MAXIMIZE_2026_09_04.md` §2.6.
+#[cfg(target_os = "windows")]
+const UNMAXIMIZE_SETTLE_MS: i64 = 48;
+
+/// Restore a maximized window at the START of a drag, returning the
+/// pre-restore maximized `(left, top, width)` the caller must hand to
+/// [`place_restored_window_under_cursor`] once the resize has settled.
+///
+/// Returns `None` — and does nothing — when the window isn't maximized (the
+/// overwhelmingly common case), so callers can invoke it unconditionally.
+///
+/// Split from the placement step on purpose: the RESTORE needs Chromium to
+/// relayout (which it can't do while a nested modal loop is running), while
+/// the placement is a pure move that needs nothing. See the call site.
+#[cfg(target_os = "windows")]
+unsafe fn begin_unmaximize_for_drag(
+    h: windows_sys::Win32::Foundation::HWND,
+) -> Option<(i32, i32, i32)> {
+    use windows_sys::Win32::Foundation::RECT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetWindowPlacement, GetWindowRect, ShowWindow, SW_MAXIMIZE, SW_RESTORE, WINDOWPLACEMENT,
+    };
+
+    let mut placement: WINDOWPLACEMENT = std::mem::zeroed();
+    placement.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
+    if GetWindowPlacement(h, &mut placement) == 0 || placement.showCmd != SW_MAXIMIZE as u32 {
+        return None;
+    }
+
+    let mut maximized: RECT = std::mem::zeroed();
+    if GetWindowRect(h, &mut maximized) == 0 {
+        return None;
+    }
+
+    ShowWindow(h, SW_RESTORE);
+    tracing::info!(
+        "[start_window_drag] restoring maximized window for drag hwnd={:p} — \
+         settling {}ms before the move loop",
+        h, UNMAXIMIZE_SETTLE_MS
+    );
+    Some((maximized.left, maximized.top, maximized.right - maximized.left))
+}
+
+/// Place a just-restored window under the CURRENT cursor, using the
+/// pre-restore maximized geometry to preserve the grab point — see
+/// `window_snap::unmaximize_drag_origin` for the placement rules and
+/// `SPEC_WINDOW_SNAP_MAXIMIZE_2026_09_04.md` §2.6.
+///
+/// Reads the cursor fresh (rather than reusing the mousedown position from
+/// before the settle delay) so the window lands exactly under wherever the
+/// pointer is NOW — otherwise every pixel the user moved during the settle
+/// would become a permanent grab-offset error for the rest of the drag.
+#[cfg(target_os = "windows")]
+unsafe fn place_restored_window_under_cursor(
+    h: windows_sys::Win32::Foundation::HWND,
+    max_left: i32,
+    max_top: i32,
+    max_width: i32,
+) {
+    use windows_sys::Win32::Foundation::{POINT, RECT};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetCursorPos, GetWindowRect, SetWindowPos, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
+    };
+
+    // Read the restored size back rather than trusting
+    // `WINDOWPLACEMENT.rcNormalPosition`: that field is documented in
+    // *workspace* coordinates, which diverge from screen coordinates in
+    // exactly the multi-monitor / taskbar setups this has to work in. A
+    // post-restore GetWindowRect is unambiguously screen coords.
+    let mut restored: RECT = std::mem::zeroed();
+    if GetWindowRect(h, &mut restored) == 0 {
+        return;
+    }
+    let mut cursor = POINT { x: 0, y: 0 };
+    GetCursorPos(&mut cursor);
+
+    let (new_x, new_y) = crate::client::window_snap::unmaximize_drag_origin(
+        cursor.x,
+        cursor.y,
+        max_left,
+        max_top,
+        max_width,
+        restored.right - restored.left,
+    );
+    SetWindowPos(
+        h,
+        std::ptr::null_mut(),
+        new_x,
+        new_y,
+        0,
+        0,
+        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+    );
+    tracing::info!(
+        "[start_window_drag] placed restored window under cursor hwnd={:p} -> ({},{})",
+        h, new_x, new_y
+    );
+}
+
+/// Work area (PHYSICAL px, `(x, y, width, height)`) of the monitor under the
+/// cursor, for the drag-to-top snap zone + preview rect.
+///
+/// `MONITOR_DEFAULTTONEAREST` so a cursor dragged slightly past the top of
+/// the screen still resolves to the monitor it just left rather than
+/// failing. Deliberately does NOT use `app::monitor::get_monitor_work_area`
+/// — that converts to DIP for CEF's `Window::set_bounds`, while this whole
+/// move loop is physical px ("no devicePixelRatio math", per its anchor
+/// comment above). Mixing them is the unit-confusion bug class called out in
+/// `client::window_snap`'s doc comment.
+#[cfg(target_os = "windows")]
+unsafe fn snap_work_area_for_cursor(x: i32, y: i32) -> Option<(i32, i32, i32, i32)> {
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    };
+
+    let hmonitor = MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONEAREST);
+    if hmonitor.is_null() {
+        return None;
+    }
+    let mut info: MONITORINFO = std::mem::zeroed();
+    info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+    if GetMonitorInfoW(hmonitor, &mut info) == 0 {
+        return None;
+    }
+    let rc = info.rcWork;
+    Some((rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top))
+}
+
 #[cfg(target_os = "windows")]
 pub fn post_win32_begin_move(hwnd: u64, state: Arc<AppState>, source_label: Option<String>) {
-    let mut task = Win32BeginMoveTask::new(hwnd, state, source_label);
+    let mut task = Win32BeginMoveTask::new(hwnd, state, source_label, false, 0, 0, 0);
     post_task(ThreadId::UI, Some(&mut task));
 }

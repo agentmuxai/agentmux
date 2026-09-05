@@ -191,6 +191,9 @@ pub async fn connect_to_launcher(
     // signal is needed). Phase 1 is observe-only: the reader task logs what
     // this would drive but doesn't recreate anything yet.
     request_snapshot();
+    // Workstream 0 Phase 1 — tell the launcher whether background-service
+    // mode is on, once per connect (see `report_background_service_enabled`).
+    report_background_service_enabled(state.host_state.lock().background_service_enabled);
     let writer_for_drain = Arc::clone(&writer);
     tokio::spawn(async move {
         while let Some(cmd) = rx.recv().await {
@@ -428,6 +431,8 @@ pub async fn connect_to_launcher(
     // SPEC_PILLAR1_STEP4 Phase 1 — see the Windows variant's identical call
     // for the rationale.
     request_snapshot();
+    // Workstream 0 Phase 1 — see the Windows variant's identical call.
+    report_background_service_enabled(state.host_state.lock().background_service_enabled);
     let writer_for_drain = Arc::clone(&writer);
     tokio::spawn(async move {
         while let Some(cmd) = rx.recv().await {

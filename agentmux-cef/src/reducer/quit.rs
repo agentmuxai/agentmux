@@ -159,19 +159,29 @@ pub(super) fn user_creation_in_flight(state: &HostState) -> bool {
 /// Pure decision: should the host begin draining NOW? `Some(reason)` iff the host
 /// is armed (a live user window has registered at least once this process —
 /// `HostState::saw_live_user_window`, §1.E of the sanitize-then-decide spec),
-/// `Running`, no live user-visible window remains, and no user-initiated
-/// creation is in flight. Unarmed covers the startup gap: main's creation path
-/// enqueues no `PendingWindowCreation`, so before its `RegisterBrowser` lands
-/// both other inputs read "drainable" — without the arming gate, any
-/// quit-relevant dispatch in that window would surface a spurious drain
-/// request. Safe to call after every transition — once `Draining`/`Quit` it
-/// returns `None` (the transition is monotonic — see `handle_begin_drain`).
-/// CEF-free so the full truth table is unit-testable.
+/// `Running`, no live user-visible window remains, no user-initiated
+/// creation is in flight, and background-service mode is not enabled. Unarmed
+/// covers the startup gap: main's creation path enqueues no
+/// `PendingWindowCreation`, so before its `RegisterBrowser` lands both other
+/// inputs read "drainable" — without the arming gate, any quit-relevant
+/// dispatch in that window would surface a spurious drain request. Safe to
+/// call after every transition — once `Draining`/`Quit` it returns `None`
+/// (the transition is monotonic — see `handle_begin_drain`). CEF-free so the
+/// full truth table is unit-testable.
+///
+/// `background_service_enabled` (Workstream 0 Phase 1,
+/// `SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md` §7) gates only the
+/// `LastWindowClosed` reason produced here — `QuitReason::LauncherRequested`
+/// and `QuitReason::External` are dispatched directly to `handle_begin_drain`
+/// (see `ui_tasks::window::begin_drain_and_cascade`'s callers), never through
+/// this function, so a genuine launcher-requested or external quit always
+/// works regardless of this flag.
 pub(super) fn should_begin_drain(
     armed: bool,
     live_user_windows: usize,
     user_creation_in_flight: bool,
     quit_state: &QuitState,
+    background_service_enabled: bool,
 ) -> Option<QuitReason> {
     if !armed {
         return None;
@@ -180,6 +190,9 @@ pub(super) fn should_begin_drain(
         return None;
     }
     if live_user_windows > 0 || user_creation_in_flight {
+        return None;
+    }
+    if background_service_enabled {
         return None;
     }
     Some(QuitReason::LastWindowClosed)
@@ -193,6 +206,7 @@ pub(super) fn reconcile_quit(state: &HostState) -> Option<QuitReason> {
         count_live_user_windows(state),
         user_creation_in_flight(state),
         &state.quit_state,
+        state.background_service_enabled,
     )
 }
 

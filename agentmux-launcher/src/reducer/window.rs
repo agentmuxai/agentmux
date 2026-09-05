@@ -247,7 +247,18 @@ pub(super) fn handle_report_window_closed(state: &mut State, label: String) -> V
     // saga-style HostShouldQuit so the host can reap pool and
     // quit cleanly. See B.9.3 in
     // docs/retro/next-steps-2026-04-29.md.
-    if state.windows.is_empty() && super::connection::host_is_running(state) {
+    //
+    // Workstream 0 Phase 1 — skip entirely when the host reported
+    // background-service mode: zero windows is that mode's intentional,
+    // possibly long-lived resting state, not an orphan. Emitting the drift
+    // event anyway would arm `teardown_backstop` for the whole resting
+    // period instead of the few seconds it's designed for, turning any
+    // later transient UI-thread probe miss into a fatal process-tree kill
+    // (PR #2983 review, Codex P2).
+    if state.windows.is_empty()
+        && !state.background_service_enabled
+        && super::connection::host_is_running(state)
+    {
         let v_drift = state.bump_version();
         out.push(Event::HwndDriftDetected {
             kind: HwndDriftKind::OrphanInstance,
@@ -262,4 +273,14 @@ pub(super) fn handle_report_window_closed(state: &mut State, label: String) -> V
         out.push(Event::HostShouldQuit { version: v_quit });
     }
     out
+}
+
+/// Workstream 0 Phase 1 — record the host's background-service opt-in.
+/// Sent once, right after connect (see `launcher_ipc::report_background_service_enabled`
+/// on the host side). Pure state update; no event needed — this is
+/// process-supervision state the launcher consults, not domain state any
+/// subscriber needs to observe.
+pub(super) fn handle_report_background_service_enabled(state: &mut State, enabled: bool) -> Vec<Event> {
+    state.background_service_enabled = enabled;
+    Vec::new()
 }

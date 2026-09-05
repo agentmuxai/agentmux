@@ -124,6 +124,50 @@ pub struct HostState {
     /// which is safe: once registered, the live count itself blocks drain).
     pub saw_live_user_window: bool,
 
+    /// Background-service mode (Workstream 0, `SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md`
+    /// §7 Phase 1). When true, `should_begin_drain` never arms a
+    /// `LastWindowClosed` drain — closing the last window hides the app
+    /// instead of tearing down `host`/`srv`/`launcher`. Read once at
+    /// process start from `AGENTMUX_BACKGROUND_SERVICE` (presence-based,
+    /// matching the `AGENTMUX_DEV` idiom elsewhere in this crate); there is
+    /// no live-toggle path yet. Defaults off, so today's close-quits-the-app
+    /// behavior is unchanged for anyone who hasn't opted in. `wrr::win_event`'s
+    /// quit watchdog (Windows) also reads this field (from the same locked
+    /// `HostState`, alongside `registered`/`draining`) so it does not treat
+    /// the resulting "0 registered, not draining" steady state as a desync
+    /// and force-quit a few seconds after the last window closes.
+    ///
+    /// **Getting a window back (there is no tray icon yet — Workstream 1):**
+    /// re-launching the app reopens one **on Windows and Linux**, via the
+    /// existing single-instance forward. That keeps working at zero windows,
+    /// verified end to end by reading each link: the launcher holds the
+    /// single-instance pipe for its whole lifetime (so a second launch
+    /// forwards rather than starting fresh); `lib.rs` deletes the
+    /// `ipc-port-<hash>` forwarding hint only AFTER `run_message_loop()`
+    /// returns, which this mode is precisely what prevents, so the hint
+    /// survives; the host's IPC server is bound at startup independent of any
+    /// window; and `open_new_window` still finds a warm pool, because the pool
+    /// is only cascade-closed by `begin_drain_and_cascade`, which a suppressed
+    /// drain never reaches. So the reopen is a pool promote, not a cold start.
+    ///
+    /// **macOS has a gap here — do not enable this mode there yet.**
+    /// LaunchServices delivers a Finder/`open` relaunch as a reopen Apple
+    /// Event to the running process instead of starting a second one, so
+    /// recovery depends on `splash_mac.rs`'s
+    /// `applicationShouldHandleReopen:` delegate, whose only install site is
+    /// inside `Splash::show`. With the splash disabled there is no
+    /// `NSApplication`, no pump, and no delegate — the reopen event has
+    /// nowhere to land and no second process spawns to forward, leaving the
+    /// user with no way back. See the design doc §7.5.1; it must be closed
+    /// with the Workstream 1 macOS work.
+    ///
+    /// That is also the recipe for this workstream's own acceptance test,
+    /// which has not been run live yet: enable the flag, close the last
+    /// window, confirm `srv`/`launcher`/`host` survive in `tasklist`/`ps` and
+    /// that an agent turn still completes with no window open, then
+    /// re-launch the exe and confirm a window comes back.
+    pub background_service_enabled: bool,
+
     /// H.6 — top-level window creation runner state (queue, in-flight,
     /// history). Event-driven; no watchdog. **Currently DORMANT** — the
     /// reducer arms (`EnqueueTopLevelWindow`, `TopLevelCallbackFired`,
@@ -187,6 +231,7 @@ impl Default for HostState {
             pane_pool: PanePoolState::default(),
             quit_state: QuitState::default(),
             saw_live_user_window: false,
+            background_service_enabled: std::env::var("AGENTMUX_BACKGROUND_SERVICE").is_ok(),
             top_level_creation: TopLevelCreationState::default(),
             window_opacities: HashMap::new(),
             pane_window_states: HashMap::new(),

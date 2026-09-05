@@ -108,6 +108,18 @@ pub enum Command {
     ReportWindowClosed {
         label: String,
     },
+    /// Workstream 0 Phase 1 (`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md`
+    /// §7) — host reports whether background-service mode
+    /// (`AGENTMUX_BACKGROUND_SERVICE`) is enabled for this process. Sent
+    /// once, right after connecting (mirrors `GetSnapshot`'s
+    /// once-per-connect timing). The launcher's own last-window
+    /// orphan-drift detection and the teardown backstop it arms must not
+    /// treat an intentionally-resting host (zero windows, by design, for
+    /// however long the user leaves it) as a stuck/orphaned one — see
+    /// PR #2983 review (Codex P2). Host-only.
+    ReportBackgroundServiceEnabled {
+        enabled: bool,
+    },
     /// Phase B.4 follow-up — host reports a pre-warmed pool window
     /// being added (`spawn_pool_window`). Pool windows live in a
     /// SEPARATE map from the user-visible window mirror; the host

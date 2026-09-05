@@ -1127,32 +1127,48 @@ fn is_live_user_window_classifies_by_is_pool_not_label() {
 fn should_begin_drain_truth_table() {
     // Armed + Running + zero user windows + no creation in flight → begin draining.
     assert_eq!(
-        should_begin_drain(true, 0, false, &QuitState::Running),
+        should_begin_drain(true, 0, false, &QuitState::Running, false),
         Some(QuitReason::LastWindowClosed)
     );
     // A live user window blocks drain.
-    assert_eq!(should_begin_drain(true, 1, false, &QuitState::Running), None);
+    assert_eq!(should_begin_drain(true, 1, false, &QuitState::Running, false), None);
     // §10.2 corner: a user creation in flight blocks drain even at zero
     // registered windows — never quit while the user's "New Window" is loading.
-    assert_eq!(should_begin_drain(true, 0, true, &QuitState::Running), None);
+    assert_eq!(should_begin_drain(true, 0, true, &QuitState::Running, false), None);
     // Already draining / quit → never re-drains (monotonic with handle_begin_drain).
     assert_eq!(
         should_begin_drain(
             true,
             0,
             false,
-            &QuitState::Draining { reason: QuitReason::LastWindowClosed }
+            &QuitState::Draining { reason: QuitReason::LastWindowClosed },
+            false,
         ),
         None
     );
-    assert_eq!(should_begin_drain(true, 0, false, &QuitState::Quit), None);
+    assert_eq!(should_begin_drain(true, 0, false, &QuitState::Quit, false), None);
     // UNARMED (sanitize-then-decide §1.E): the startup gap — no live user
     // window has ever registered — must never drain, even though every other
     // input reads "drainable" (main's creation path enqueues no pending entry,
     // so this exact input combination is live between process start and main's
     // RegisterBrowser).
-    assert_eq!(should_begin_drain(false, 0, false, &QuitState::Running), None);
-    assert_eq!(should_begin_drain(false, 0, true, &QuitState::Running), None);
+    assert_eq!(should_begin_drain(false, 0, false, &QuitState::Running, false), None);
+    assert_eq!(should_begin_drain(false, 0, true, &QuitState::Running, false), None);
+}
+
+/// Workstream 0 Phase 1 (`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md`
+/// §7): background-service mode suppresses ONLY the `LastWindowClosed`
+/// verdict — every other input in the truth table above is unaffected by it.
+#[test]
+fn should_begin_drain_background_service_suppresses_last_window_closed_only() {
+    // The one case that would otherwise drain now doesn't.
+    assert_eq!(should_begin_drain(true, 0, false, &QuitState::Running, true), None);
+    // Still correctly refuses to drain for every other reason, whether or
+    // not background-service mode is on — same answer either way.
+    assert_eq!(should_begin_drain(true, 1, false, &QuitState::Running, true), None);
+    assert_eq!(should_begin_drain(true, 0, true, &QuitState::Running, true), None);
+    assert_eq!(should_begin_drain(false, 0, false, &QuitState::Running, true), None);
+    assert_eq!(should_begin_drain(true, 0, false, &QuitState::Quit, true), None);
 }
 
 /// Only USER-initiated creations block drain; pool/pane background creations don't.
@@ -1235,6 +1251,22 @@ fn reconcile_quit_drains_despite_pending_pool_refill() {
         HostCommand::EnqueuePendingWindowCreation { entry: entry("window-pool-refill-1") },
     );
     assert_eq!(reconcile_quit(&state), Some(QuitReason::LastWindowClosed));
+}
+
+/// Workstream 0 Phase 1: with background-service mode on, closing the last
+/// window (armed, zero live windows, nothing pending) must NOT drain —
+/// `host` stays alive with zero windows instead of tearing itself (and, via
+/// the launcher's teardown-on-clean-exit, `srv`) down.
+#[test]
+fn reconcile_quit_never_drains_when_background_service_enabled() {
+    let mut state = HostState::default();
+    state.saw_live_user_window = true;
+    state.background_service_enabled = true;
+    assert_eq!(
+        reconcile_quit(&state),
+        None,
+        "background-service mode must suppress the last-window drain"
+    );
 }
 
 /// Idempotent: once draining, reconcile is a no-op (no double-drain).

@@ -20,7 +20,12 @@ use super::*;
 
 fn fixture_watcher() -> SubagentWatcher {
     let wstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
-    SubagentWatcher::new(Arc::new(EventBus::new()), wstore)
+    // id_store/identity_store don't need to be genuinely separate stores for
+    // these tests — none of them exercise real identity binding resolution
+    // (that's covered by identity::resolver::inject's own test suite);
+    // reusing `wstore` for all three mirrors the existing test-fixture
+    // convention elsewhere (server/agent_handlers/mod.rs, server/tests.rs).
+    SubagentWatcher::new(Arc::new(EventBus::new()), wstore.clone(), wstore.clone(), wstore)
 }
 
 /// Write a minimal terminated subagent JSONL file with an explicit mtime
@@ -1041,6 +1046,274 @@ async fn watch_agent_falls_back_to_nearest_existing_ancestor_when_config_dir_is_
     // bailing out — the old behavior returned early on the failed
     // notify::watch() call, before ever reaching this point.
     assert_eq!(watcher.watched_agents.lock().unwrap().len(), 1);
+
+    std::fs::remove_dir_all(&root).ok();
+}
+
+// ── recheck_config_dir / recheck_all_watched_agents (2026-09-04) ──
+//
+// Root cause: watch_agent's config-dir resolution runs exactly once, at
+// reactive-register time — before this agent's identity binding is
+// necessarily committed to the DB. If that race is lost, the watcher
+// permanently points at a stale/ambient directory for the rest of the
+// pane's life, since nothing else ever calls watch_agent again. These
+// tests cover recheck_config_dir, the repoint primitive called after an
+// identity-bind RPC succeeds (see server/app_api/identity.rs).
+
+#[tokio::test]
+async fn recheck_config_dir_is_a_noop_when_agent_is_not_watched() {
+    let watcher = Arc::new(fixture_watcher());
+    // Nothing registered at all — must not panic or create an entry.
+    watcher.recheck_config_dir("never-watched", PathBuf::from("/some/dir"));
+    assert_eq!(watcher.watched_agents.lock().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn recheck_config_dir_is_a_noop_when_the_directory_is_unchanged() {
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let root = home.join(format!("amx-recheck-noop-test-{}", now_millis()));
+    std::fs::create_dir_all(&root).unwrap();
+
+    let watcher = Arc::new(fixture_watcher());
+    watcher.watch_agent("agent-1", "block-1", root.clone());
+    assert_eq!(watcher.watched_agents.lock().unwrap().len(), 1);
+
+    // Same directory the agent is already watching — must not tear down
+    // and recreate the watch (which would be observable as a fresh entry
+    // even though nothing actually changed).
+    watcher.recheck_config_dir("agent-1", root.clone());
+    let watched = watcher.watched_agents.lock().unwrap();
+    assert_eq!(watched.len(), 1);
+    assert_eq!(watched[0].config_dir, root);
+
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[tokio::test]
+async fn recheck_config_dir_repoints_the_watch_to_the_new_directory() {
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let root = home.join(format!("amx-recheck-repoint-test-{}", now_millis()));
+    let old_dir = root.join("ambient");
+    let new_dir = root.join("identity-bound");
+    std::fs::create_dir_all(&old_dir).unwrap();
+    std::fs::create_dir_all(&new_dir).unwrap();
+
+    let watcher = Arc::new(fixture_watcher());
+    watcher.watch_agent("agent-1", "block-1", old_dir.clone());
+    assert_eq!(watcher.watched_agents.lock().unwrap()[0].config_dir, old_dir);
+
+    watcher.recheck_config_dir("agent-1", new_dir.clone());
+
+    let watched = watcher.watched_agents.lock().unwrap();
+    assert_eq!(watched.len(), 1, "repoint must replace, not add to, the entry");
+    assert_eq!(watched[0].config_dir, new_dir, "must now watch the corrected directory");
+    assert!(watched[0].parent_block_ids.contains("block-1"));
+
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[tokio::test]
+async fn recheck_config_dir_preserves_all_dependent_blocks_across_a_repoint() {
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let root = home.join(format!("amx-recheck-multiblock-test-{}", now_millis()));
+    let old_dir = root.join("ambient");
+    let new_dir = root.join("identity-bound");
+    std::fs::create_dir_all(&old_dir).unwrap();
+    std::fs::create_dir_all(&new_dir).unwrap();
+
+    let watcher = Arc::new(fixture_watcher());
+    // Two blocks sharing the same agent_id (e.g. two panes for one agent
+    // identity) — watch_agent's own dedup path adds the second as a
+    // dependent of the first's shared watcher.
+    watcher.watch_agent("agent-1", "block-1", old_dir.clone());
+    watcher.watch_agent("agent-1", "block-2", old_dir.clone());
+    assert_eq!(watcher.watched_agents.lock().unwrap().len(), 1);
+    assert_eq!(watcher.watched_agents.lock().unwrap()[0].parent_block_ids.len(), 2);
+
+    watcher.recheck_config_dir("agent-1", new_dir.clone());
+
+    let watched = watcher.watched_agents.lock().unwrap();
+    assert_eq!(watched.len(), 1);
+    assert_eq!(watched[0].config_dir, new_dir);
+    assert!(
+        watched[0].parent_block_ids.contains("block-1") && watched[0].parent_block_ids.contains("block-2"),
+        "repointing must not drop any of the agent's other dependent blocks: {:?}",
+        watched[0].parent_block_ids,
+    );
+
+    std::fs::remove_dir_all(&root).ok();
+}
+
+// Codex P3 on PR #2980: `primary_block_id` (the block whose id the live
+// consumer loop actually filters/attributes events against) must be
+// preserved EXACTLY across a repoint, never re-derived from the unordered
+// `parent_block_ids` set — a `HashSet` has no defined iteration order, so
+// picking "any" member could silently swap which pane's session
+// subsequent filesystem events get checked against.
+#[tokio::test]
+async fn recheck_config_dir_preserves_the_exact_primary_block_id_not_an_arbitrary_set_member() {
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let root = home.join(format!("amx-recheck-primary-test-{}", now_millis()));
+    let old_dir = root.join("ambient");
+    let new_dir = root.join("identity-bound");
+    std::fs::create_dir_all(&old_dir).unwrap();
+    std::fs::create_dir_all(&new_dir).unwrap();
+
+    let watcher = Arc::new(fixture_watcher());
+    // "block-1" registers FIRST — it must stay the primary no matter how
+    // many other blocks join afterward or what order a HashSet happens to
+    // iterate them in.
+    watcher.watch_agent("agent-1", "block-1", old_dir.clone());
+    for i in 2..=6 {
+        watcher.watch_agent("agent-1", &format!("block-{i}"), old_dir.clone());
+    }
+    assert_eq!(watcher.watched_agents.lock().unwrap()[0].primary_block_id, "block-1");
+
+    watcher.recheck_config_dir("agent-1", new_dir.clone());
+
+    let watched = watcher.watched_agents.lock().unwrap();
+    assert_eq!(watched.len(), 1);
+    assert_eq!(
+        watched[0].primary_block_id, "block-1",
+        "the ORIGINAL primary block must survive a repoint unchanged, not be re-picked from the dependent set"
+    );
+    assert_eq!(watched[0].parent_block_ids.len(), 6, "every dependent block must still be tracked");
+
+    std::fs::remove_dir_all(&root).ok();
+}
+
+// Codex P2 on PR #2980: if the replacement watch fails to build (a
+// transient resource/permission/filesystem error), the existing
+// (stale-but-working) watch must be left in place rather than lost —
+// losing it entirely would turn a transient error into a PERMANENT loss of
+// Swarm tracking for that agent, since `recheck_all_watched_agents` has
+// nothing left in `watched_agents` to find and retry.
+#[tokio::test]
+async fn recheck_config_dir_keeps_the_old_watch_when_the_replacement_fails_to_build() {
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let old_dir = home.join(format!("amx-recheck-buildfail-test-{}", now_millis()));
+    std::fs::create_dir_all(&old_dir).unwrap();
+
+    // `nearest_existing_ancestor` (this function's own doc comment) returns
+    // `None` outright for any path that isn't under the home directory at
+    // all — the only portable way to force that deterministically is a
+    // path rooted on a drive letter that doesn't exist on this machine.
+    // (`std::env::temp_dir()` does NOT work for this on Windows — it's
+    // `%LOCALAPPDATA%\Temp`, itself under home, so it always has an
+    // existing ancestor and `build_watch` would succeed for it.)
+    let missing_drive = ('D'..='Z')
+        .map(|d| format!("{d}:\\"))
+        .find(|root| !Path::new(root).exists())
+        .expect("test requires at least one unused drive letter");
+    let unwatchable_dir = Path::new(&missing_drive).join(format!("amx-recheck-unreachable-{}", now_millis()));
+
+    let watcher = Arc::new(fixture_watcher());
+    watcher.watch_agent("agent-1", "block-1", old_dir.clone());
+    assert_eq!(watcher.watched_agents.lock().unwrap().len(), 1);
+
+    watcher.recheck_config_dir("agent-1", unwatchable_dir);
+
+    let watched = watcher.watched_agents.lock().unwrap();
+    assert_eq!(watched.len(), 1, "a failed replacement must not remove the existing entry");
+    assert_eq!(watched[0].config_dir, old_dir, "must still be watching the original (working) directory");
+    assert!(watched[0].parent_block_ids.contains("block-1"));
+
+    std::fs::remove_dir_all(&old_dir).ok();
+}
+
+// ── recheck_all_watched_agents scoping (ReAgent P1, round 2, PR #2980) ──
+//
+// This is called on EVERY agent_identity_link write anywhere in the app,
+// with no scoping to the agent whose identity actually changed. Without a
+// guard, it would iterate agents whose config_dir was never derived from
+// identity resolution at all (the legacy `subagent.WatchAgent` RPC's
+// `parent_block_id: ""` entry point, or any block that no longer exists)
+// and silently repoint them via `resolve_claude_config_dir`'s last-resort
+// `derive_claude_config_dir` guess — the same failure class `watch_agent`'s
+// own (reverted) first-attempt self-check hit, one layer up.
+
+#[tokio::test]
+async fn recheck_all_watched_agents_skips_the_legacy_empty_block_id_entry_point() {
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let explicit_dir = home.join(format!("amx-recheck-all-empty-block-test-{}", now_millis()));
+    std::fs::create_dir_all(&explicit_dir).unwrap();
+
+    let watcher = Arc::new(fixture_watcher());
+    // Mirrors server/service/misc.rs's legacy manual RPC entry point.
+    watcher.watch_agent("manual-agent", "", explicit_dir.clone());
+
+    watcher.recheck_all_watched_agents();
+
+    let watched = watcher.watched_agents.lock().unwrap();
+    assert_eq!(watched.len(), 1);
+    assert_eq!(
+        watched[0].config_dir, explicit_dir,
+        "an empty-block_id entry must never be repointed by a blanket recheck"
+    );
+
+    std::fs::remove_dir_all(&explicit_dir).ok();
+}
+
+#[tokio::test]
+async fn recheck_all_watched_agents_skips_an_agent_whose_block_no_longer_exists() {
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let explicit_dir = home.join(format!("amx-recheck-all-no-block-test-{}", now_millis()));
+    std::fs::create_dir_all(&explicit_dir).unwrap();
+
+    let watcher = Arc::new(fixture_watcher());
+    // "block-ghost" is never inserted into wstore — simulates a closed
+    // pane, or any caller whose block_id doesn't correspond to a real row.
+    watcher.watch_agent("agent-1", "block-ghost", explicit_dir.clone());
+
+    watcher.recheck_all_watched_agents();
+
+    let watched = watcher.watched_agents.lock().unwrap();
+    assert_eq!(watched.len(), 1);
+    assert_eq!(
+        watched[0].config_dir, explicit_dir,
+        "an agent whose block no longer exists must never be repointed by a blanket recheck"
+    );
+
+    std::fs::remove_dir_all(&explicit_dir).ok();
+}
+
+#[tokio::test]
+async fn recheck_config_dir_backfills_subagents_missed_while_watching_the_wrong_directory() {
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let root = home.join(format!("amx-recheck-backfill-test-{}", now_millis()));
+    let old_dir = root.join("ambient");
+    let new_dir = root.join("identity-bound");
+    std::fs::create_dir_all(&old_dir).unwrap();
+    let session_id = "missed-session";
+    let subagents_dir = new_dir.join("projects").join("ws-enc").join(session_id).join("subagents");
+    std::fs::create_dir_all(&subagents_dir).unwrap();
+    std::fs::write(
+        subagents_dir.join("agent-missed.jsonl"),
+        "{\"type\":\"result\",\"result\":\"done\"}\n",
+    )
+    .unwrap();
+
+    let watcher = Arc::new(fixture_watcher());
+    // The block must persist the session id it's resuming, exactly as
+    // handle_reactive_register reads it for its own (first-registration)
+    // backfill call.
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    meta.insert(
+        crate::backend::blockcontroller::core::META_SESSION_ID.to_string(),
+        serde_json::Value::String(session_id.to_string()),
+    );
+    let mut block = crate::backend::obj::Block { oid: "block-1".to_string(), meta, ..Default::default() };
+    watcher.wstore.insert(&mut block).unwrap();
+
+    watcher.watch_agent("agent-1", "block-1", old_dir.clone());
+    assert_eq!(watcher.list_active().len(), 0, "nothing backfilled yet — watching the wrong dir");
+
+    watcher.recheck_config_dir("agent-1", new_dir.clone());
+
+    let active = watcher.list_active();
+    assert_eq!(active.len(), 1, "repoint must backfill this block's own persisted session, same as a fresh reactive-register would");
+    assert_eq!(active[0].agent_id, "missed");
+    assert_eq!(active[0].session_id, session_id);
 
     std::fs::remove_dir_all(&root).ok();
 }

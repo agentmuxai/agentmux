@@ -427,11 +427,11 @@ fn restore_last_session_survives_a_real_process_restart() {
         .iter()
         .map(|v| v.as_str().unwrap().to_string())
         .collect();
-    // The default seed is 4 blocks (agent/swarm/armory/sysinfo,
-    // SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md); our marker block was the
-    // 5th added before close, so a correct restore must bring all 5 back,
-    // not silently drop the one added after the initial seed.
-    assert_eq!(restored_block_ids.len(), 5, "expected all 5 original blocks to be restored");
+    // The default seed is 3 blocks (agent/sysinfo/swarm — see
+    // wcore::default_three_pane_tree); our marker block was the 4th added
+    // before close, so a correct restore must bring all 4 back, not
+    // silently drop the one added after the initial seed.
+    assert_eq!(restored_block_ids.len(), 4, "expected all 4 original blocks to be restored");
 
     let mut found_marker = false;
     for block_id in &restored_block_ids {

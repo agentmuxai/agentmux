@@ -884,14 +884,17 @@
 
 .swarm-agent-select-checkbox {
     flex-shrink: 0;
-    width: 13px;
-    height: 13px;
+    // Bumped from 13px — the previous size was hard to hit precisely at the
+    // row's usual zoom level; this is still small relative to the row but
+    // meaningfully easier to click without changing row height.
+    width: 18px;
+    height: 18px;
     margin: 0;
     cursor: pointer;
 }
 
 .swarm-agent-select-spacer {
-    width: 13px;
+    width: 18px;
     flex-shrink: 0;
 }
 
@@ -975,12 +978,15 @@
 }
 
 .swarm-fleet-group-dropdown {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    z-index: 5;
+    // Positioning (position/left/top/max-height/max-width) is inline,
+    // computed by `computeMenuPosition` and kept live via `autoUpdate` — see
+    // swarm-fleet-toolbar.tsx. Portaled to `document.body`, so this never
+    // sits inside `.swarm-view`'s `overflow: hidden` in the first place
+    // (the actual fix for the narrow-pane clipping bug; a fixed CSS anchor
+    // side alone can't handle every position a wrapped toolbar button can
+    // land on). Same pattern as flyoutmenu.tsx / popover-menu.tsx.
+    z-index: var(--z-flyout-menu);
     min-width: 200px;
-    max-height: 260px;
     overflow-y: auto;
     background: var(--main-bg-color);
     border: 1px solid var(--border-color, rgba(255, 255, 255, 0.15));

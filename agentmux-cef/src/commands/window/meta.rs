@@ -239,6 +239,22 @@ pub fn register_backend_window(state: &Arc<AppState>, args: &serde_json::Value) 
             });
         }
 
+        // Workstream 0 Phase 1 prerequisite #2 (issue #2977) — the SAME
+        // registration is also the liveness proof a promoted pool window is
+        // waiting for. Reuses this signal for exactly the reason the block
+        // above does: it proves the renderer loaded, ran JS, and
+        // round-tripped IPC. `confirm` is false for every ordinary
+        // (non-promoted) registration, which is the common case. See
+        // `state::promote_liveness` for why `IsWindow()` alone can't
+        // establish this and why `on_load_end` can't be used here.
+        if state.promote_liveness.lock().confirm(label) {
+            tracing::info!(
+                target: "dnd:tearoff:pool",
+                label = %label,
+                "[pool] promoted window confirmed live (renderer registered its backend window)"
+            );
+        }
+
         // SPEC_PILLAR1_STEP3 Phase 2 — write-through this window's kind +
         // parent linkage to srv now that its concrete window_id is known.
         // This is the first point in the window's life where the host has

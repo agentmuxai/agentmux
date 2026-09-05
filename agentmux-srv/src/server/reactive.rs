@@ -1189,6 +1189,41 @@ pub(super) async fn handle_reactive_register(
             if let Some(config_dir) = config_dir {
                 state.subagent_watcher.watch_agent(&req.agent_id, &req.block_id, config_dir.clone());
 
+                // Codex P1 on PR #2980: the resolution above and the
+                // `watch_agent` call are not atomic with an
+                // `agent_identity_link` write landing on a different
+                // thread — a bind can commit in the narrow window between
+                // computing `config_dir` and `watch_agent` actually
+                // installing the watch. If that happens, the bind's own
+                // `recheck_all_watched_agents` call can run and find
+                // nothing yet in `watched_agents` to correct, and no LATER
+                // bind event is guaranteed to retrigger it. Immediately
+                // re-resolving fresh right here — after the install has
+                // definitely committed — closes that window: if the bind
+                // already landed, this catches it on the spot instead of
+                // depending on an external trigger that might never come
+                // again. Safe/cheap to do unconditionally: `recheck_config_dir`
+                // is a same-ref no-op when nothing actually changed. Scoped
+                // to THIS call site specifically (not inside `watch_agent`
+                // itself) because this is the one place `config_dir` is
+                // actually derived from identity/binding resolution in the
+                // first place — see `watch_agent`'s own doc comment for why
+                // baking this into the shared primitive broke its other
+                // callers.
+                let fresh_bound_dir = crate::identity::resolver::resolve_bound_oauth_config_dir(
+                    &state.wstore,
+                    &state.id_store,
+                    &state.identity_store,
+                    &req.block_id,
+                );
+                if let Some(fresh_dir) = subagent_watcher::resolve_claude_config_dir(
+                    block.as_ref().map(|b| &b.meta).unwrap_or(&empty_meta),
+                    &req.agent_id,
+                    fresh_bound_dir,
+                ) {
+                    state.subagent_watcher.recheck_config_dir(&req.agent_id, fresh_dir);
+                }
+
                 // If this block already has a persisted session id, it's
                 // resuming a prior conversation (not starting fresh) —
                 // backfill just THAT session's own subagents, so a

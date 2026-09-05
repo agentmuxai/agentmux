@@ -605,6 +605,12 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                     persist: 0,
                     data: None,
                 });
+                // See app_api/identity.rs's identical call for why this is
+                // needed: watch_agent's one-shot config-dir resolution can
+                // race ahead of this exact binding.
+                if let Some(watcher) = crate::backend::subagent_watcher::global() {
+                    watcher.recheck_all_watched_agents();
+                }
                 Ok(None)
             })
         }),
