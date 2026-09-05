@@ -421,7 +421,7 @@ mod create_window_seed_tests {
 
     /// Regression for the 2nd-window-tear-off desync (#1681).
     ///
-    /// "Open another window" used to seed its four default blocks straight
+    /// "Open another window" used to seed its default blocks straight
     /// into SQLite (`seed_default_layout` → `create_block`), bypassing the
     /// reducer. The handler runs after bootstrap, so those blocks never
     /// reached the in-memory `srv_state`. The frontend rendered them (it reads
@@ -444,14 +444,14 @@ mod create_window_seed_tests {
             .expect("window has a workspaceid")
             .to_string();
 
-        // The fix: the four seed blocks are present in the in-memory reducer
+        // The fix: the seed blocks are present in the in-memory reducer
         // state, attached to the new window's tab.
         let (tab_id, block_id) = {
             let s = state.srv_state.lock().await;
             assert_eq!(
                 s.blocks.len(),
-                blocks_before + 4,
-                "the 4 seed blocks must be tracked in srv_state, not only SQLite"
+                blocks_before + 3,
+                "the 3 seed blocks must be tracked in srv_state, not only SQLite"
             );
             let ws = s
                 .workspaces
@@ -461,8 +461,8 @@ mod create_window_seed_tests {
             let tab = s.tabs.get(&tab_id).expect("new tab is in the reducer");
             assert_eq!(
                 tab.block_ids.len(),
-                4,
-                "the new window's tab must hold its 4 seed blocks in the reducer"
+                3,
+                "the new window's tab must hold its 3 seed blocks in the reducer"
             );
             (tab_id, tab.block_ids[0].clone())
         };
