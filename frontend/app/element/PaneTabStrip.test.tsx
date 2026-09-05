@@ -185,7 +185,17 @@ describe("PaneTabStrip", () => {
     // per-tab Tooltip) — the + button's tooltip uses the Portal-based
     // Tooltip component with delayMs={0} instead, so it shows essentially
     // immediately rather than after the component's own 300ms default.
-    it("shows the + button's tooltip almost immediately (delayMs={0}), not after the 300ms default", () => {
+    //
+    // reagent P2 on PR #2975: the first cut of this test only checked that
+    // the tooltip's text existed in document.body — but tooltip.tsx mounts
+    // that div (`isOpen`) synchronously on hover regardless of `delayMs`;
+    // only its OPACITY (`isVisible`, gated behind a `setTimeout(fn,
+    // delayMs())`) actually depends on the delay. That version would have
+    // passed identically even with the 300ms default, so it verified
+    // nothing. Asserting on the floating div's own `opacity` (via its
+    // `data-pane-overlay` marker, tooltip.tsx's own hook for this exact
+    // node) is what actually distinguishes delayMs={0} from the default.
+    it("shows the + button's tooltip almost immediately (delayMs={0}) — opacity flips well under the 300ms default", () => {
         vi.useFakeTimers();
         try {
             const { container } = render(() => (
@@ -202,10 +212,20 @@ describe("PaneTabStrip", () => {
             const wrapper = container.querySelector(".pane-tab-strip-add-tip") as HTMLElement;
             expect(wrapper).not.toBeNull();
             fireEvent.mouseEnter(wrapper);
-            // Advance far less than the Tooltip default (300ms) — if this
-            // still passed the default, the tooltip wouldn't be visible yet.
+            // isOpen flips synchronously on hover (mounts the Portal'd div),
+            // but isVisible/opacity is still gated behind the delayMs-
+            // scheduled timeout — not visible yet, even at delayMs={0}
+            // (still a real setTimeout(fn, 0), not synchronous).
+            let tip = document.body.querySelector("[data-pane-overlay]") as HTMLElement;
+            expect(tip).not.toBeNull();
+            expect(tip.getAttribute("style")).toContain("opacity: 0");
+            // Advance far less than the Tooltip's own 300ms default — with
+            // delayMs={0} this is enough for the showTimeout to fire; with
+            // the default it would not be, which is exactly what this test
+            // guards against regressing to.
             vi.advanceTimersByTime(10);
-            expect(document.body.textContent).toContain("New shell tab");
+            tip = document.body.querySelector("[data-pane-overlay]") as HTMLElement;
+            expect(tip.getAttribute("style")).toContain("opacity: 1");
         } finally {
             vi.useRealTimers();
         }
