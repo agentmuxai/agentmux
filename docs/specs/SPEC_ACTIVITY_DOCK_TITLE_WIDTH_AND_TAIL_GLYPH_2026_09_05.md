@@ -49,57 +49,88 @@ ellipsizes at 40% even when the sigil, elapsed clock, and stop/dismiss
 button leave most of the row visibly empty. This matches the report
 exactly ("truncation is too much, leaving plenty of space free").
 
-## 2. Fix: let title claim natural width first, tail take the leftover, title shrink only as a last resort
+## 2. Fix: a proportional flex-basis, not an absolute cap
+
+**Revised once during review (Codex P2, correct — see §2.2).** Final
+version:
 
 ```scss
 .agent-activity-title {
-    flex: 0 1 auto;
+    flex: 1 1 40%;
     min-width: 0;
     /* max-width: 40% removed */
     ...
 }
+.agent-activity-tail {
+    flex: 1 1 60%;
+    min-width: 0;
+    ...
+}
 ```
 
-- `flex-grow: 0` — text doesn't need to stretch to fill space; sizing to
-  content is correct once there's no artificial cap.
-- `flex-shrink: 1` (was `0`) + `min-width: 0` (was unset, which defaults
-  to `auto` — a flex item's own `min-width: auto` floors it at its
-  content's min-content width, which for a `white-space: nowrap` span is
-  its FULL text width, so shrink would never actually engage without
-  this) — together these let the title shrink, and its ellipsis fire,
-  but only when the row is genuinely out of room.
+Both items keep the same 40/60 split the old `max-width: 40%` implied,
+but as a `flex-basis` rather than a hard ceiling — the difference matters
+in exactly the case the report is about:
 
-Why this doesn't just make the title always show in full and break the
-ellipsis entirely: CSS flexbox distributes negative free space (when
-content overflows) proportionally to each item's `flex-shrink × flex-
-basis`. `.agent-activity-tail` already has `flex-basis: 0` — its
-contribution to that weighted distribution is `1 × 0 = 0`, so in a
-genuine overflow it absorbs none of the forced shrinkage (it's already
-sized from zero, growing only into space nothing else claims). The
-title's `flex-basis` is its actual content width, so it's the only item
-with a nonzero weight — meaning **when space is tight, 100% of the
-required shrink lands on the title**, exactly the desired "shrink only
-when there's truly no space left" behavior, and when space is NOT tight,
-title simply renders at its natural content width with no cap.
+- **Tail absent or short:** title is the only item actually competing for
+  space (or the least-hungry one), so `flex-grow: 1` lets it claim the
+  freed space and render in full — fixing the reported dead-space bug.
+  Growing a text span's box beyond its own content is invisible (no
+  border/background, left-aligned text) whenever the content already
+  fits, so this doesn't distort short titles either.
+- **Both genuinely long:** CSS flexbox distributes negative free space
+  proportionally to each item's `flex-shrink × flex-basis`. With title at
+  `40%` and tail at `60%`, both have a **nonzero** weight, so an overflow
+  shrinks both roughly in their 40/60 share — title's ellipsis engages,
+  but the tail keeps some visible width too, instead of one side taking
+  100% of the squeeze.
+
+`min-width: 0` on both (title's is new) overrides the flex-item default
+of `min-width: auto`, which would otherwise floor a `white-space: nowrap`
+span at its full text width and prevent shrinking — and hence the
+ellipsis — from ever engaging at all.
 
 Sigil, elapsed, remaining, and the stop/dismiss buttons stay `flex: 0 0
 auto` — fixed-content chrome that was never the problem.
 
 ### 2.1 Same bug, same fix, in the in-transcript persistent shell block
 
-`.agent-shell-title` (`_shell-node.scss:92-100`) is byte-for-byte the
-same `flex: 0 0 auto; max-width: 40%;` pattern, in
-`PersistentShellBlock.tsx` — the in-transcript rendering of a running
-shell (distinct from the dock's summary row, but intentionally styled as
-its structural twin: same sigil/title/elapsed/tail/stop layout, per the
-`_shell-node.scss` section grouping and `ActivityRow.tsx`'s own comment
-that it shares "the same cap + renderer as PersistentShellBlock"). Fixing
-only the dock's copy would newly make the two visibly inconsistent
-(dock shows a title in full, the in-transcript block for the exact same
-process still clips at 40%). Both get the identical fix:
-`.agent-shell-title` → `flex: 0 1 auto; min-width: 0;`, no `max-width`.
-`.agent-shell-live-tail` (`:109-118`) already has `flex: 1 1 0; min-width:
-0` — unchanged, same reasoning as `.agent-activity-tail`.
+`.agent-shell-title`/`.agent-shell-live-tail` (`_shell-node.scss:92-100`,
+`117-133`) are the byte-for-byte same `flex: 0 0 auto; max-width: 40%` /
+`flex: 1 1 0` pattern, in `PersistentShellBlock.tsx` — the in-transcript
+rendering of a running shell (distinct from the dock's summary row, but
+intentionally styled as its structural twin: same sigil/title/elapsed/
+tail/stop layout, per the `_shell-node.scss` section grouping and
+`ActivityRow.tsx`'s own comment that it shares "the same cap + renderer
+as PersistentShellBlock"). Fixing only the dock's copy would newly make
+the two visibly inconsistent. Both get the identical `flex: 1 1 40%` /
+`flex: 1 1 60%` fix.
+
+### 2.2 What was tried first, and why it changed
+
+**Attempt 1:** `.agent-activity-title { flex: 0 1 auto; min-width: 0; }`
+(flex-basis = content width) paired with the pre-existing
+`.agent-activity-tail { flex: 1 1 0; }` (flex-basis = 0). This fixes the
+reported "wasted space when tail is short/absent" case, but:
+
+- **Codex P2 (correct):** when title's own content is long enough to
+  overflow the row on its own — regardless of the tail — the shrink-
+  distribution weight is `flex-shrink × flex-basis`: title's is
+  `1 × (its full content width)`, tail's is `1 × 0 = 0`. Title absorbs
+  **100%** of the required shrink; tail, having zero weight, gets none —
+  it was already sized from zero and simply stays at 0. A genuinely long
+  title therefore squeezed the tail's status/live-output text out
+  entirely, even in a pane far wider than the 400px container-query
+  breakpoint that intentionally hides the tail on narrow panes. The old
+  `max-width: 40%` cap accidentally guaranteed the tail some space in
+  exactly this case (title could never claim more than 40% regardless of
+  its own content length) — attempt 1 traded that guarantee away.
+
+**Final (this spec):** give both a nonzero proportional `flex-basis`
+(§2) instead of one absolute (title) and one zero (tail) — this keeps
+attempt 1's fix for the reported case (short/absent tail) while
+restoring a guaranteed nonzero share for the tail when both are
+genuinely competing for space.
 
 ## 3. The glyph: `↳` (U+21B3) has weak font coverage; `→` (U+2192) is already proven safe here
 
