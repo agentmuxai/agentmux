@@ -673,8 +673,11 @@ mod tests {
         let reparsed: LayoutNode = serde_json::from_value(reserialized).unwrap();
         assert_eq!(leaf, reparsed);
 
-        // Shape 2 — first-launch four-pane (matches wcore::mod.rs —
-        // SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md).
+        // Shape 2 — a nested row/column tree with a multi-child right
+        // column. This was the first-launch four-pane layout when written;
+        // the default is now three panes (wcore::default_three_pane_tree),
+        // but the fixture is kept as-is: what it exercises is serde
+        // round-tripping of a nested LayoutNode, not the current default.
         let four_pane_json = serde_json::json!({
             "id": "root-id",
             "flexDirection": "row",

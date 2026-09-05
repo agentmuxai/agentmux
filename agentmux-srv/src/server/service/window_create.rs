@@ -178,10 +178,12 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
                 }
                 _ => None,
             }) {
-                // Dispatch the four seed blocks through the reducer, in the
-                // target display order (SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md).
+                // Dispatch the three seed blocks through the reducer. This
+                // order is the one `default_three_pane_tree` expects
+                // positionally (agent, swarm, sysinfo) — NOT top-to-bottom
+                // display order, since sysinfo renders above swarm.
                 let mut seeded_ids: Vec<String> = Vec::new();
-                for view in ["agent", "swarm", "armory", "sysinfo"] {
+                for view in ["agent", "swarm", "sysinfo"] {
                     let evs = dispatch_to_reducer(
                         state,
                         agentmux_common::ipc::Command::CreateBlock {
@@ -226,18 +228,17 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
                     block_seed_events.extend(evs);
                 }
 
-                if seeded_ids.len() == 4 {
+                if seeded_ids.len() == 3 {
                     // SPEC_864 Phase 3 — post-bootstrap seed routes
                     // through the reducer (single writer of
                     // db_layout); the tree shape is shared with the
                     // pre-bootstrap store-direct first-launch seed
-                    // via `default_four_pane_tree`.
+                    // via `default_three_pane_tree`.
                     let (tree, focused, leaforder) =
-                        crate::backend::wcore::default_four_pane_tree(
+                        crate::backend::wcore::default_three_pane_tree(
                             &seeded_ids[0],
                             &seeded_ids[1],
                             &seeded_ids[2],
-                            &seeded_ids[3],
                         );
                     if let Err(e) = super::reducer_helpers::seed_layout_via_reducer(
                         state,

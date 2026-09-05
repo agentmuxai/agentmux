@@ -8,7 +8,7 @@
 //! workspace/tabs/blocks (`e3a6f85c2`, wired to the last-window "main" case
 //! by `4cbf856b7` — see `docs/retro/retro-pane-layout-restore-was-a-leak-not-a-feature-2026-08-13.md`),
 //! so the next cold launch always finds `Client.windowids` empty and reseeds
-//! the hardcoded default 4-pane layout (`window_create::default_four_pane_tree`).
+//! the hardcoded default 3-pane layout (`window_create::default_three_pane_tree`).
 //!
 //! This module adds an independent, durable "what was open last" record —
 //! written just before that destroy cascade runs (`window_close::handle_close_window`)
