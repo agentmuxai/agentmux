@@ -795,20 +795,16 @@ impl AppState {
             // silently drop an `Observed` and leave the log stuck claiming an
             // unattended period that had already ended.
             //
-            // This does mean a small file append under `host_state`, which
-            // this codebase otherwise avoids. Acceptable HERE specifically:
-            // the branch is only taken on an attended/unattended transition —
-            // a handful of times per session, not per dispatch — so the
-            // lock-hold is rare and bounded. Not a precedent for I/O under
-            // `host_state` generally.
+            // `record` does NO I/O — it flips an in-memory flag and hands
+            // the entry to a writer thread — so `host_dispatch`'s documented
+            // "no I/O, sub-microsecond" contract still holds. That matters
+            // because this runs straight from CEF UI-thread callbacks
+            // (`wrr::win_event` dispatches `UnregisterBrowser` there, which is
+            // exactly this transition), where a disk stall would block the UI
+            // thread and every other concurrent dispatcher.
             if let Some(went_unattended) = out.background_attention {
                 let now = crate::background_audit::now_ms();
-                let audit = self.background_audit.lock();
-                if went_unattended {
-                    audit.went_unattended(now);
-                } else {
-                    audit.observed(now);
-                }
+                self.background_audit.lock().record(went_unattended, now);
             }
             out
         };

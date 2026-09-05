@@ -115,14 +115,30 @@ impl AuditKind {
 /// while bounding the live file.
 const MAX_LINES: usize = 2000;
 
-/// The audit log. All state lives in the files; this struct only knows where
-/// they are, which is what lets the log survive a host restart.
+/// The audit log.
+///
+/// Records are on disk (so they survive a host restart), but the **decision**
+/// to record is made from a small in-memory flag and the write is handed to a
+/// background thread. That split is what lets the transition be decided under
+/// the caller's lock — which is required for ordering — without doing any I/O
+/// there. See `record`.
 #[derive(Debug, Default)]
 pub struct BackgroundAudit {
-    /// `None` when no data dir could be resolved — the log then degrades to a
-    /// no-op rather than failing anything. An audit log that cannot be
+    /// `None` when no data dir has been resolved yet — the log then degrades
+    /// to a no-op rather than failing anything. An audit log that cannot be
     /// written must never take down the app it is auditing.
     path: Option<PathBuf>,
+    /// Whether the instance is currently in an unattended period.
+    ///
+    /// Held in memory so `record` can decide without touching the disk, and
+    /// seeded from the log in `set_dir` so it is still correct after a host
+    /// restart (the launcher restarts a crashed host while the background
+    /// service keeps running).
+    unattended: bool,
+    /// Hands entries to the writer thread. Sending is non-blocking and
+    /// preserves order, so the file ends up in the same order the decisions
+    /// were made.
+    tx: Option<std::sync::mpsc::Sender<AuditEntry>>,
 }
 
 impl BackgroundAudit {
@@ -142,12 +158,31 @@ impl BackgroundAudit {
     /// Until this is called the log is a no-op, which is harmless: no window
     /// has opened or closed yet, so there is no transition to record.
     pub fn set_dir(&mut self, dir: &std::path::Path) {
-        self.path = Some(dir.join("background-audit.jsonl"));
-    }
+        let path = dir.join("background-audit.jsonl");
+        self.path = Some(path.clone());
+        // Seed from the log so an unattended period that began before a host
+        // crash is still correctly open — one read, at startup, off the hot
+        // path.
+        self.unattended = matches!(
+            self.entries().last().map(|e| e.kind),
+            Some(AuditKind::WentUnattended)
+        );
 
-    #[cfg(test)]
-    fn at(path: PathBuf) -> Self {
-        Self { path: Some(path) }
+        // Writer thread. Entries are appended here, never by the caller, so
+        // no lock the reducer touches is ever held across file I/O.
+        let (tx, rx) = std::sync::mpsc::channel::<AuditEntry>();
+        self.tx = Some(tx);
+        let archive = path.with_extension("jsonl.1");
+        let watermark = path.with_extension("surfaced");
+        std::thread::Builder::new()
+            .name("agentmux-audit-writer".into())
+            .spawn(move || {
+                // Ends when the sender is dropped (process exit).
+                while let Ok(entry) = rx.recv() {
+                    write_entry(&path, &archive, &watermark, &entry);
+                }
+            })
+            .ok();
     }
 
     fn watermark_path(&self) -> Option<PathBuf> {
@@ -191,84 +226,49 @@ impl BackgroundAudit {
 
     /// Is the instance currently in an unattended period?
     ///
-    /// Derived from the last entry rather than a field, so it is correct
-    /// after a host restart — see the module docs.
+    /// Reads the in-memory flag, NOT the disk — this is called from
+    /// `record`, which runs under the caller's `host_state` lock.
     pub fn is_unattended(&self) -> bool {
-        matches!(
-            self.entries().last().map(|e| e.kind),
-            Some(AuditKind::WentUnattended)
-        )
+        self.unattended
     }
 
-    /// Record that the instance became unattended. No-op if it already is,
-    /// so the repeated zero-window dispatches a pool churn produces record
-    /// one period rather than a burst.
-    pub fn went_unattended(&self, at_ms: u64) {
-        if self.is_unattended() {
-            return;
+    /// Record an attended/unattended transition.
+    ///
+    /// `went_unattended == true` means the last window closed; `false` means a
+    /// window opened. No-ops when it would be redundant (a second
+    /// "unattended" for one period — the repeated zero-window dispatches pool
+    /// churn produces — or an "observed" during ordinary use).
+    ///
+    /// **Called under `host_state`, and therefore does NO I/O.** The decision
+    /// has to be serialized with the reducer that produced it, or two
+    /// concurrent dispatches can apply out of order and the no-op guards
+    /// silently drop an `Observed`, leaving the log stuck claiming a period
+    /// that had ended. But `host_dispatch` is invoked straight from CEF
+    /// UI-thread callbacks — `wrr::win_event` dispatches `UnregisterBrowser`
+    /// there, which is exactly the transition that fires this — and its
+    /// contract promises no I/O and sub-microsecond hold time
+    /// (SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md §6). A file write there would
+    /// stall the UI thread and every other concurrent dispatcher for however
+    /// long the disk (or an AV filter) takes (ReAgent P1 on PR #3001).
+    ///
+    /// So this only flips an in-memory flag and hands the entry to the writer
+    /// thread. Ordering is preserved because the channel is FIFO and the send
+    /// happens under the same lock as the decision.
+    pub fn record(&mut self, went_unattended: bool, at_ms: u64) {
+        if went_unattended == self.unattended {
+            return; // redundant — see above
         }
-        self.append(AuditEntry { at_ms, kind: AuditKind::WentUnattended });
-    }
-
-    /// Record that a window opened. No-op unless the instance was unattended,
-    /// so ordinary window-opening during normal use records nothing.
-    pub fn observed(&self, at_ms: u64) {
-        if !self.is_unattended() {
-            return;
-        }
-        self.append(AuditEntry { at_ms, kind: AuditKind::Observed });
-    }
-
-    fn append(&self, entry: AuditEntry) {
-        let Some(path) = &self.path else {
-            return;
+        self.unattended = went_unattended;
+        let kind = if went_unattended {
+            AuditKind::WentUnattended
+        } else {
+            AuditKind::Observed
         };
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        self.rotate_if_oversized();
-        let line = format!(
-            "{{\"at_ms\":{},\"kind\":\"{}\"}}\n",
-            entry.at_ms,
-            entry.kind.as_str()
-        );
-        // Failures are logged, never propagated: the audit log must not be
-        // able to break the app it audits.
-        match std::fs::OpenOptions::new().create(true).append(true).open(path) {
-            Ok(mut f) => {
-                if let Err(e) = f.write_all(line.as_bytes()) {
-                    tracing::warn!(target: "wrr", error = %e, "[audit] append failed");
-                }
-            }
-            Err(e) => tracing::warn!(target: "wrr", error = %e, "[audit] open failed"),
-        }
-    }
-
-    /// Archive the live file once it grows past `MAX_LINES`. The rotated
-    /// `.1` keeps the old records (immutability) while bounding the file the
-    /// hot path reads.
-    fn rotate_if_oversized(&self) {
-        let Some(path) = &self.path else { return };
-        let Ok(text) = std::fs::read_to_string(path) else { return };
-        if text.lines().count() < MAX_LINES {
-            return;
-        }
-        let Some(archive) = self.archive_path() else { return };
-        // The archive we are about to overwrite is the only thing that gets
-        // discarded. `entries()` reads archive-then-live, so indices stay
-        // aligned if the watermark is reduced by exactly the number of lines
-        // leaving the concatenation — reducing it to 0 instead (an earlier
-        // revision) silently dropped every not-yet-surfaced entry.
-        let dropped = self.archive_len();
-        if std::fs::rename(path, &archive).is_ok() {
-            let w = self.read_watermark().saturating_sub(dropped);
-            self.write_watermark(w);
-            tracing::info!(
-                target: "wrr",
-                dropped,
-                "[audit] rotated to {}",
-                archive.display()
-            );
+        if let Some(tx) = &self.tx {
+            // Unbounded channel: send cannot block. A closed channel (writer
+            // thread gone) is ignored — losing an informational record must
+            // never propagate into the reducer.
+            let _ = tx.send(AuditEntry { at_ms, kind });
         }
     }
 
@@ -299,6 +299,63 @@ impl BackgroundAudit {
         if let Some(p) = self.watermark_path() {
             let _ = std::fs::write(p, n.to_string());
         }
+    }
+}
+
+/// Append one entry, rotating first if the live file has grown past the cap.
+///
+/// Runs on the writer thread only, so all of this I/O is off every lock the
+/// reducer touches.
+fn write_entry(
+    path: &std::path::Path,
+    archive: &std::path::Path,
+    watermark: &std::path::Path,
+    entry: &AuditEntry,
+) {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    rotate_if_oversized(path, archive, watermark);
+    let line = format!(
+        "{{\"at_ms\":{},\"kind\":\"{}\"}}\n",
+        entry.at_ms,
+        entry.kind.as_str()
+    );
+    match std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        Ok(mut f) => {
+            if let Err(e) = f.write_all(line.as_bytes()) {
+                tracing::warn!(target: "wrr", error = %e, "[audit] append failed");
+            }
+        }
+        Err(e) => tracing::warn!(target: "wrr", error = %e, "[audit] open failed"),
+    }
+}
+
+/// Archive the live file once it grows past `MAX_LINES`.
+///
+/// The archive keeps the old records (immutability) while bounding the file
+/// the hot path reads. The watermark is shifted down by exactly the number of
+/// lines leaving the archive-then-live concatenation, NOT reset — resetting it
+/// silently dropped every not-yet-surfaced entry.
+fn rotate_if_oversized(
+    path: &std::path::Path,
+    archive: &std::path::Path,
+    watermark: &std::path::Path,
+) {
+    let Ok(text) = std::fs::read_to_string(path) else { return };
+    if text.lines().count() < MAX_LINES {
+        return;
+    }
+    let dropped = std::fs::read_to_string(archive)
+        .map(|t| t.lines().count())
+        .unwrap_or(0);
+    if std::fs::rename(path, archive).is_ok() {
+        let current: usize = std::fs::read_to_string(watermark)
+            .ok()
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0);
+        let _ = std::fs::write(watermark, current.saturating_sub(dropped).to_string());
+        tracing::info!(target: "wrr", dropped, "[audit] rotated");
     }
 }
 
@@ -352,18 +409,35 @@ pub fn background_audit_take(
 mod background_audit_tests {
     use super::*;
 
+    /// Build a log rooted in a temp dir, exercising the real `set_dir` path
+    /// (which is what seeds state and starts the writer thread).
     fn temp_log() -> (tempfile::TempDir, BackgroundAudit) {
         let dir = tempfile::tempdir().expect("tempdir");
-        let log = BackgroundAudit::at(dir.path().join("background-audit.jsonl"));
+        let mut log = BackgroundAudit::default();
+        log.set_dir(dir.path());
         (dir, log)
+    }
+
+    /// Writes go through a background thread, so tests wait for the file to
+    /// reach the expected length rather than assuming it is already there.
+    /// Bounded so a genuine failure fails the test instead of hanging.
+    fn wait_for_lines(log: &BackgroundAudit, want: usize) -> Vec<AuditEntry> {
+        for _ in 0..200 {
+            let e = log.entries();
+            if e.len() >= want {
+                return e;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        log.entries()
     }
 
     #[test]
     fn records_an_unattended_period_as_a_pair() {
-        let (_d, log) = temp_log();
-        log.went_unattended(1_000);
-        log.observed(5_000);
-        let e = log.entries();
+        let (_d, mut log) = temp_log();
+        log.record(true, 1_000);
+        log.record(false, 5_000);
+        let e = wait_for_lines(&log, 2);
         assert_eq!(e.len(), 2);
         assert_eq!(e[0], AuditEntry { at_ms: 1_000, kind: AuditKind::WentUnattended });
         assert_eq!(e[1], AuditEntry { at_ms: 5_000, kind: AuditKind::Observed });
@@ -373,27 +447,43 @@ mod background_audit_tests {
     fn a_single_unattended_period_is_recorded_once() {
         // Pool churn re-reports a zero-window state; the user should see one
         // period, not a burst.
-        let (_d, log) = temp_log();
-        log.went_unattended(1_000);
-        log.went_unattended(1_100);
-        log.went_unattended(1_200);
-        assert_eq!(log.entries().len(), 1);
+        let (_d, mut log) = temp_log();
+        log.record(true, 1_000);
+        log.record(true, 1_100);
+        log.record(true, 1_200);
+        assert_eq!(wait_for_lines(&log, 1).len(), 1);
     }
 
     #[test]
     fn opening_a_window_during_normal_use_records_nothing() {
-        let (_d, log) = temp_log();
-        log.observed(1_000);
-        log.observed(2_000);
+        let (_d, mut log) = temp_log();
+        log.record(false, 1_000);
+        log.record(false, 2_000);
+        std::thread::sleep(std::time::Duration::from_millis(50));
         assert!(log.entries().is_empty());
+    }
+
+    /// The reason `record` exists in this shape: it must be callable under
+    /// `host_state` without touching the disk, because `host_dispatch` runs
+    /// on the CEF UI thread (ReAgent P1 on #3001).
+    #[test]
+    fn recording_does_not_touch_the_disk_synchronously() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut log = BackgroundAudit::default();
+        log.set_dir(dir.path());
+        log.record(true, 1);
+        // The decision is visible immediately from memory...
+        assert!(log.is_unattended());
+        // ...and the write lands later, off the caller's thread.
+        assert_eq!(wait_for_lines(&log, 1).len(), 1);
     }
 
     #[test]
     fn surfacing_is_non_destructive_and_advances_a_watermark() {
-        // The immutability requirement: reading must not erase.
-        let (_d, log) = temp_log();
-        log.went_unattended(1);
-        log.observed(2);
+        let (_d, mut log) = temp_log();
+        log.record(true, 1);
+        log.record(false, 2);
+        wait_for_lines(&log, 2);
         assert_eq!(log.take_unsurfaced().len(), 2);
         assert!(
             log.take_unsurfaced().is_empty(),
@@ -408,35 +498,37 @@ mod background_audit_tests {
 
     #[test]
     fn only_entries_added_since_the_last_surfacing_are_returned() {
-        let (_d, log) = temp_log();
-        log.went_unattended(1);
-        log.observed(2);
+        let (_d, mut log) = temp_log();
+        log.record(true, 1);
+        log.record(false, 2);
+        wait_for_lines(&log, 2);
         let _ = log.take_unsurfaced();
-        log.went_unattended(3);
+        log.record(true, 3);
+        wait_for_lines(&log, 3);
         let fresh = log.take_unsurfaced();
         assert_eq!(fresh.len(), 1);
         assert_eq!(fresh[0].at_ms, 3);
     }
 
-    /// The restart case Codex flagged: the launcher restarts a crashed host
-    /// while the background service stays alive. A fresh `BackgroundAudit`
-    /// over the same path must still know it is mid-unattended-period, or
-    /// the eventual `Observed` is dropped and the user never learns the
-    /// period ended.
+    /// The launcher restarts a crashed host while the background service
+    /// stays alive. A fresh log over the same directory must still know it is
+    /// mid-period, or the eventual `Observed` is dropped by the no-op guard
+    /// and the user never learns the period ended.
     #[test]
     fn unattended_state_survives_a_host_restart() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("background-audit.jsonl");
-
-        let before = BackgroundAudit::at(path.clone());
-        before.went_unattended(1_000);
+        let mut before = BackgroundAudit::default();
+        before.set_dir(dir.path());
+        before.record(true, 1_000);
+        wait_for_lines(&before, 1);
         assert!(before.is_unattended());
         drop(before); // host crashes
 
-        let after = BackgroundAudit::at(path.clone());
-        assert!(after.is_unattended(), "state must be derived from the log, not memory");
-        after.observed(9_000);
-        let e = after.entries();
+        let mut after = BackgroundAudit::default();
+        after.set_dir(dir.path());
+        assert!(after.is_unattended(), "state must be seeded from the log, not memory");
+        after.record(false, 9_000);
+        let e = wait_for_lines(&after, 2);
         assert_eq!(e.len(), 2);
         assert_eq!(e[1].kind, AuditKind::Observed);
     }
@@ -446,71 +538,45 @@ mod background_audit_tests {
         // A crash mid-append can leave a partial line. Skipping it must not
         // cost the entries written before it.
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("background-audit.jsonl");
         std::fs::write(
-            &path,
+            dir.path().join("background-audit.jsonl"),
             "{\"at_ms\":1,\"kind\":\"went_unattended\"}\n{\"at_ms\":2,\"ki",
         )
         .unwrap();
-        let log = BackgroundAudit::at(path);
+        let mut log = BackgroundAudit::default();
+        log.set_dir(dir.path());
         assert_eq!(log.entries().len(), 1);
-        assert!(log.is_unattended());
+        assert!(log.is_unattended(), "seeded from the last VALID entry");
     }
 
     #[test]
     fn a_missing_data_dir_degrades_to_a_no_op_rather_than_failing() {
-        // An audit log that cannot be written must never take down the app
-        // it audits.
-        let log = BackgroundAudit::default();
-        log.went_unattended(1);
+        // Before `set_dir`, and if it is never called: an audit log that
+        // cannot be written must never take down the app it audits.
+        let mut log = BackgroundAudit::default();
+        log.record(true, 1);
         assert!(log.entries().is_empty());
-        assert!(!log.is_unattended());
         assert!(log.take_unsurfaced().is_empty());
     }
 
-    /// ReAgent P1 on #3001: rotation used to reset the watermark while the
-    /// archive was never read, so anything unsurfaced at rotation time was
-    /// lost — under-reporting, in an accountability feature.
+    /// Rotation used to reset the watermark while the archive was never read,
+    /// so anything unsurfaced at rotation time was lost — under-reporting, in
+    /// an accountability feature (ReAgent P1 on #3001).
     #[test]
     fn rotation_does_not_lose_unsurfaced_entries() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("background-audit.jsonl");
-        let log = BackgroundAudit::at(path.clone());
-
-        // Fill past the rotation threshold without ever surfacing.
-        for i in 0..(MAX_LINES as u64 + 10) {
-            if i % 2 == 0 {
-                log.went_unattended(i);
-            } else {
-                log.observed(i);
-            }
+        let (_d, mut log) = temp_log();
+        let total = MAX_LINES + 10;
+        for i in 0..total {
+            log.record(i % 2 == 0, i as u64);
         }
+        wait_for_lines(&log, MAX_LINES / 2);
 
         let surfaced = log.take_unsurfaced();
         assert!(
             !surfaced.is_empty(),
             "entries written before rotation must still be surfacable"
         );
-        // The very first entry must still be reachable through the archive.
         assert_eq!(surfaced[0].at_ms, 0, "oldest entry lost to rotation");
-    }
-
-    #[test]
-    fn entries_include_the_archive_after_a_rotation() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("background-audit.jsonl");
-        let log = BackgroundAudit::at(path.clone());
-        for i in 0..(MAX_LINES as u64 + 4) {
-            if i % 2 == 0 { log.went_unattended(i) } else { log.observed(i) }
-        }
-        assert!(
-            path.with_extension("jsonl.1").exists(),
-            "expected a rotation to have happened"
-        );
-        assert!(
-            log.entries().len() > 4,
-            "entries() must span archive + live, not just live"
-        );
     }
 
     #[test]
