@@ -234,6 +234,17 @@ struct WindowEdgeResizeHookEntry {
     original: isize,
     install_label: String,
     session_began: bool,
+    /// The window's `(top, bottom)` in PHYSICAL px as of the start of the
+    /// current native size loop, captured lazily on its first `WM_SIZING`
+    /// tick and cleared on `WM_EXITSIZEMOVE`.
+    ///
+    /// Needed to back OUT of a vertical snap: once
+    /// `window_snap::snap_vertical_fill` has moved the non-dragged edge to
+    /// the work-area edge, nothing would ever move it back (a native resize
+    /// only ever moves the edge under the cursor), so dragging away from the
+    /// screen edge would leave it stranded. See
+    /// `window_snap::unsnap_restore_opposite_edge`.
+    session_origin_top_bottom: Option<(i32, i32)>,
 }
 
 /// Map of top-level HWND -> hook entry for the Shift+window-edge-resize
@@ -367,6 +378,12 @@ unsafe extern "system" fn window_edge_resize_wndproc(
     } else if msg == WM_EXITSIZEMOVE {
         let ended = WINDOW_EDGE_RESIZE_WNDPROCS.lock().ok().and_then(|mut m| {
             m.get_mut(&(hwnd as usize)).and_then(|entry| {
+                // Always drop the snap origin — this loop is over either way,
+                // and a stale origin leaking into the NEXT drag would restore
+                // an edge to a rect that no longer exists. Cleared outside the
+                // session_began branch because a plain move loop never sets
+                // that flag but must still not leave state behind.
+                entry.session_origin_top_bottom = None;
                 if entry.session_began {
                     entry.session_began = false;
                     Some(entry.install_label.clone())
@@ -411,15 +428,52 @@ unsafe extern "system" fn window_edge_resize_wndproc(
         if let Some(edge) = crate::client::window_snap::vertical_edge_for_wmsz(wparam) {
             let rect = lparam as *mut windows_sys::Win32::Foundation::RECT;
             let proposed = *rect;
+            // Remember where this drag STARTED so a snap can be backed out of
+            // (see `session_origin_top_bottom`). Captured lazily from the
+            // live window rect on the first tick rather than from
+            // WM_ENTERSIZEMOVE: the window hasn't been resized yet at this
+            // point, so GetWindowRect is still the pre-drag geometry, and
+            // this doesn't depend on ENTERSIZEMOVE arriving at all.
+            let origin = {
+                let mut guard = WINDOW_EDGE_RESIZE_WNDPROCS.lock().ok();
+                let entry = guard.as_mut().and_then(|m| m.get_mut(&(hwnd as usize)));
+                entry.and_then(|e| {
+                    if e.session_origin_top_bottom.is_none() {
+                        let mut live: windows_sys::Win32::Foundation::RECT = std::mem::zeroed();
+                        if windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect(
+                            hwnd, &mut live,
+                        ) != 0
+                        {
+                            e.session_origin_top_bottom = Some((live.top, live.bottom));
+                        }
+                    }
+                    e.session_origin_top_bottom
+                })
+            };
             if let Some((work_top, work_bottom)) = work_area_vertical_for_rect(&proposed) {
-                if let Some((top, bottom)) = crate::client::window_snap::snap_vertical_fill(
+                let adjusted = crate::client::window_snap::snap_vertical_fill(
                     edge,
                     proposed.top,
                     proposed.bottom,
                     work_top,
                     work_bottom,
                     crate::client::window_snap::SNAP_THRESHOLD_PX,
-                ) {
+                )
+                .or_else(|| {
+                    // Not (or no longer) in the snap zone. If an earlier tick
+                    // of THIS drag snapped, put the non-dragged edge back
+                    // where it started; otherwise this is a no-op.
+                    origin.and_then(|(origin_top, origin_bottom)| {
+                        crate::client::window_snap::unsnap_restore_opposite_edge(
+                            edge,
+                            proposed.top,
+                            proposed.bottom,
+                            origin_top,
+                            origin_bottom,
+                        )
+                    })
+                });
+                if let Some((top, bottom)) = adjusted {
                     // Vertical axis ONLY — left/right are untouched by
                     // construction, which is what keeps this a vertical snap
                     // rather than an accidental maximize.
@@ -530,6 +584,7 @@ pub(crate) unsafe fn install_window_edge_resize_hook(
                     original,
                     install_label: label.to_string(),
                     session_began: false,
+                    session_origin_top_bottom: None,
                 },
             );
         }
