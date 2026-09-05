@@ -182,8 +182,11 @@ describe("ToolBlock — panel mode", () => {
     });
 
     // ── Command tooltip — narrower than the removed hover-to-peek system:
-    // static text only (the bare command), no expansion, suppressed once
-    // the panel is already expanded. See ToolBlock.tsx's header comment.
+    // static text only (the bare command), no expansion. Only the command
+    // LINE is suppressed once the panel is already expanded (redundant with
+    // the visible body) — the overlay itself, and its time/estimate lines,
+    // show regardless of expand state. See ToolBlock.tsx's header comment
+    // and REPORT_TOOL_CALL_PEEK_SUPPRESSED_WHEN_EXPANDED_2026_09_04.md.
     describe("command tooltip", () => {
         // The peek overlay is Portal-rendered at document.body (PeekOverlay.tsx
         // — escapes each virtualized row's own CSS stacking context, see that
@@ -252,14 +255,24 @@ describe("ToolBlock — panel mode", () => {
             }
         });
 
-        it("expanded (pinned): hovering the name shows no overlay — command is visible in the panel already", () => {
+        // REPORT_TOOL_CALL_PEEK_SUPPRESSED_WHEN_EXPANDED_2026_09_04.md: the
+        // overlay used to be fully suppressed while expanded, on the (wrong)
+        // premise that time/estimate were "visible in context" in the panel
+        // body — they aren't, only the command is. Only the command line
+        // stays suppressed now; time/estimate still show.
+        it("expanded (pinned): hovering still shows the overlay's time/estimate, but not the redundant command line", () => {
             vi.useFakeTimers();
             try {
                 const { container } = render(() => (
                     <ToolBlock node={baseTool} pinned={true} onTogglePin={() => {}} />
                 ));
                 hoverToolName(container);
-                expect(document.body.querySelector(".agent-node-peek-overlay")).toBeNull();
+                expect(document.body.querySelector(".agent-node-peek-overlay")).not.toBeNull();
+                expect(document.body.querySelector(".agent-node-peek-tooltip-body")).toBeNull();
+                // baseTool has no timestamp, so just the token estimate line.
+                const metaLines = document.body.querySelectorAll(".agent-node-peek-tooltip-meta");
+                expect(metaLines.length).toBe(1);
+                expect(metaLines[0].textContent).toMatch(/~\d+ tok \(est\.\)/);
             } finally {
                 vi.useRealTimers();
             }
@@ -307,8 +320,8 @@ describe("ToolBlock — panel mode", () => {
 
         // ToolBlock instances are reused across status transitions via
         // index-based virtualization (no remount) -- this asserts the
-        // suppression is reactive to a live status/pin change on an
-        // ALREADY-MOUNTED instance, not just correct on first render.
+        // command-line suppression is reactive to a live status/pin change
+        // on an ALREADY-MOUNTED instance, not just correct on first render.
         //
         // Behavior change from SPEC_TRANSCRIPT_NODE_HOVER_PEEK_ALL_KINDS_2026_08_25:
         // the peek anchor used to be a narrow inner span, separate from the
@@ -320,14 +333,15 @@ describe("ToolBlock — panel mode", () => {
         // show. Now that peek fires from anywhere in the row (the whole
         // point of "always fires"), the SAME hover also engages
         // `userHolding` while the panel is auto-expanded — so it now stays
-        // held open (correctly: the user is visibly still reading it) and
-        // the peek correctly stays suppressed the whole time, per the
-        // existing "peek is redundant once the detail is already visible in
-        // the expanded panel" rule. Leaving and re-hovering afterward (a
-        // genuinely fresh hover over the now-collapsed row) still shows the
-        // peek — the "always fires" contract holds for real hover, not for
-        // a use hovering session that never actually revisits the row.
-        it("keeps a running tool's panel held open through completion when the cursor never moves, so the peek stays suppressed until a fresh hover", () => {
+        // held open (correctly: the user is visibly still reading it).
+        //
+        // REPORT_TOOL_CALL_PEEK_SUPPRESSED_WHEN_EXPANDED_2026_09_04.md: only
+        // the command LINE stays suppressed while held open (redundant with
+        // the visible panel body) — the overlay itself, and its time/
+        // estimate lines, now show throughout. Leaving and re-hovering
+        // afterward (a genuinely fresh hover over the now-collapsed row)
+        // shows the command line too, since the panel is no longer expanded.
+        it("keeps a running tool's command line suppressed through completion when the cursor never moves, revealing it again only on a fresh hover", () => {
             const [node, setNode] = createSignal<ToolNode>({ ...baseTool, status: "running" });
             vi.useFakeTimers();
             try {
@@ -337,17 +351,20 @@ describe("ToolBlock — panel mode", () => {
                 const row = container.querySelector(".agent-tool-block") as HTMLElement;
                 fireEvent.mouseEnter(row); // cursor arrives while still running (panel auto-expanded)
                 vi.advanceTimersByTime(100);
-                expect(document.body.querySelector(".agent-node-peek-overlay")).toBeNull();
+                expect(document.body.querySelector(".agent-node-peek-overlay")).not.toBeNull();
+                expect(document.body.querySelector(".agent-node-peek-tooltip-body")).toBeNull();
                 setNode({ ...baseTool, status: "success" }); // completes; cursor never moves
                 // Held open by userHolding (engaged at the mouseenter above,
-                // since the panel WAS auto-expanded at that moment) — no
-                // peek while the detail is already visible in-flow.
+                // since the panel WAS auto-expanded at that moment) — command
+                // line stays suppressed while the detail is visible in-flow,
+                // but the overlay itself (time/estimate) keeps showing.
                 const panel = container.querySelector(".agent-tool-panel") as HTMLElement;
                 expect(panel.classList.contains("agent-tool-panel--flow")).toBe(true);
-                expect(document.body.querySelector(".agent-node-peek-overlay")).toBeNull();
+                expect(document.body.querySelector(".agent-node-peek-overlay")).not.toBeNull();
+                expect(document.body.querySelector(".agent-node-peek-tooltip-body")).toBeNull();
 
                 // A genuine fresh hover (leave, then re-enter) after the row
-                // has actually collapsed still shows the peek.
+                // has actually collapsed shows the command line again too.
                 fireEvent.mouseLeave(row);
                 fireEvent.mouseEnter(row);
                 vi.advanceTimersByTime(100);
@@ -359,7 +376,7 @@ describe("ToolBlock — panel mode", () => {
             }
         });
 
-        it("hides the overlay the instant an already-hovered tool gets pinned open, with no mouseleave", () => {
+        it("hides only the command line — not the whole overlay — the instant an already-hovered tool gets pinned open, with no mouseleave", () => {
             const [pinned, setPinned] = createSignal(false);
             vi.useFakeTimers();
             try {
@@ -368,8 +385,10 @@ describe("ToolBlock — panel mode", () => {
                 ));
                 hoverToolName(container);
                 expect(document.body.querySelector(".agent-node-peek-overlay")).not.toBeNull();
+                expect(document.body.querySelector(".agent-node-peek-tooltip-body")).not.toBeNull();
                 setPinned(true); // user clicks elsewhere to pin the panel open; cursor stays put
-                expect(document.body.querySelector(".agent-node-peek-overlay")).toBeNull();
+                expect(document.body.querySelector(".agent-node-peek-overlay")).not.toBeNull();
+                expect(document.body.querySelector(".agent-node-peek-tooltip-body")).toBeNull();
             } finally {
                 vi.useRealTimers();
             }
