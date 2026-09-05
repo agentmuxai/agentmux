@@ -46,74 +46,11 @@ export function FleetToolbar({
     const [maxFailPercentage, setMaxFailPercentage] = createSignal(DEFAULT_MAX_FAIL_PERCENTAGE);
     const [groupPickerOpen, setGroupPickerOpen] = createSignal(false);
     const [savingGroupName, setSavingGroupName] = createSignal<string | null>(null);
-
-    // The groups dropdown is portaled + floating-ui-positioned rather than a
-    // plain `position: absolute` child of the toolbar (reagent/Codex on this
-    // PR's review: a 200px-wide flyout anchored to a button inside a narrow,
-    // `overflow: hidden` Swarm pane can render past the visible edge and get
-    // invisibly clipped — no fixed CSS anchor side fixes this in general,
-    // since the trigger button's position varies with toolbar wrapping).
-    // Mirrors FlyoutMenu/PopoverMenu's established pattern (see
-    // frontend/app/element/flyoutmenu.tsx, scripts/check-menu-positioning.sh).
+    // Set once, synchronously, by the button's own `ref` callback during
+    // FleetToolbar's initial render — already valid by the time a user
+    // could possibly click it open, so plain top-level state (not a signal)
+    // is enough here.
     let groupPickerButtonRef: HTMLButtonElement | undefined;
-    const [groupsMenuEl, setGroupsMenuEl] = createSignal<HTMLDivElement | null>(null);
-    const [groupsMenuStyle, setGroupsMenuStyle] = createSignal<JSX.CSSProperties>({
-        position: "fixed",
-        left: "0px",
-        top: "0px",
-        visibility: "hidden",
-    });
-    usePaneOverlay(groupsMenuEl);
-    let cleanupGroupsMenuAutoUpdate: (() => void) | null = null;
-
-    const updateGroupsMenuPosition = async (): Promise<void> => {
-        const btn = groupPickerButtonRef;
-        const menu = groupsMenuEl();
-        if (!btn || !menu) return;
-        const pos = await computeMenuPosition({ anchor: btn, placement: "bottom-start" }, menu);
-        setGroupsMenuStyle({
-            ...pos.style,
-            "max-height": `${pos.maxHeight}px`,
-            "max-width": `${pos.maxWidth}px`,
-            "overflow-y": "auto",
-        });
-    };
-
-    const registerGroupsMenu = (el: HTMLDivElement): void => {
-        setGroupsMenuEl(el);
-        requestAnimationFrame(() => {
-            if (!groupPickerButtonRef || !(el instanceof Element)) return;
-            cleanupGroupsMenuAutoUpdate?.();
-            cleanupGroupsMenuAutoUpdate = autoUpdate(groupPickerButtonRef, el, updateGroupsMenuPosition);
-            assertMenuInPaintableArea(el, "swarm-fleet-group-dropdown");
-        });
-    };
-
-    const closeGroupPicker = (): void => {
-        setGroupPickerOpen(false);
-        cleanupGroupsMenuAutoUpdate?.();
-        cleanupGroupsMenuAutoUpdate = null;
-    };
-
-    const handleGroupPickerOutsideClick = (e: MouseEvent): void => {
-        if (!groupPickerOpen()) return;
-        const t = e.target as Node;
-        if (groupPickerButtonRef?.contains(t) || groupsMenuEl()?.contains(t)) return;
-        closeGroupPicker();
-    };
-    const handleGroupPickerEscape = (e: KeyboardEvent): void => {
-        if (e.key === "Escape" && groupPickerOpen()) closeGroupPicker();
-    };
-
-    onMount(() => {
-        document.addEventListener("mousedown", handleGroupPickerOutsideClick, true);
-        document.addEventListener("keydown", handleGroupPickerEscape);
-    });
-    onCleanup(() => {
-        document.removeEventListener("mousedown", handleGroupPickerOutsideClick, true);
-        document.removeEventListener("keydown", handleGroupPickerEscape);
-        cleanupGroupsMenuAutoUpdate?.();
-    });
 
     const sendBroadcast = async (): Promise<void> => {
         const message = broadcastText().trim();
@@ -230,84 +167,29 @@ export function FleetToolbar({
                         type="button"
                         class="swarm-fleet-btn"
                         ref={(el) => (groupPickerButtonRef = el)}
-                        onClick={() => (groupPickerOpen() ? closeGroupPicker() : setGroupPickerOpen(true))}
+                        onClick={() => setGroupPickerOpen((v) => !v)}
                     >
                         Groups <i class="fa-solid fa-chevron-down" />
                     </button>
+                    {/* A fresh GroupsDropdown instance mounts each time this
+                        flips true (Solid's <Show> unmounts/remounts its child
+                        on a boolean transition) — required so its own
+                        usePaneOverlay/onMount re-registers on every open,
+                        matching FlyoutMenu/PopoverMenu's pattern. Calling
+                        usePaneOverlay directly in FleetToolbar's body instead
+                        would only ever mount once for the whole Swarm pane's
+                        lifetime, while groupsMenuEl was still null — reagent
+                        P1 on this PR's previous revision. */}
                     <Show when={groupPickerOpen()}>
-                        {/* Portaled + floating-ui-positioned (see the state block
-                            above) instead of a plain absolutely-positioned child —
-                            escapes `.swarm-view`'s `overflow: hidden` so a narrow,
-                            wrapped toolbar can never invisibly clip this dropdown
-                            off the visible pane, regardless of where the trigger
-                            button lands. */}
-                        <Portal mount={document.body}>
-                            <div
-                                ref={registerGroupsMenu}
-                                class="swarm-fleet-group-dropdown"
-                                data-pane-overlay
-                                style={groupsMenuStyle()}
-                            >
-                                {/* Saving only makes sense against a non-empty
-                                    selection — applying/deleting an EXISTING
-                                    group below never requires one. */}
-                                <Show when={count() > 0}>
-                                    <Show
-                                        when={savingGroupName() !== null}
-                                        fallback={
-                                            <button
-                                                type="button"
-                                                class="swarm-fleet-group-dropdown-item swarm-fleet-group-dropdown-item--action"
-                                                onClick={() => setSavingGroupName("")}
-                                            >
-                                                Save selection as group…
-                                            </button>
-                                        }
-                                    >
-                                        <div class="swarm-fleet-group-save-inline">
-                                            <input
-                                                type="text"
-                                                placeholder="Group name"
-                                                value={savingGroupName() ?? ""}
-                                                onInput={(e) => setSavingGroupName(e.currentTarget.value)}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === "Enter") void submitSaveGroup();
-                                                    if (e.key === "Escape") setSavingGroupName(null);
-                                                }}
-                                                autofocus
-                                            />
-                                            <button type="button" class="swarm-fleet-btn swarm-fleet-btn--primary" onClick={() => void submitSaveGroup()}>
-                                                Save
-                                            </button>
-                                        </div>
-                                    </Show>
-                                </Show>
-                                <Show when={model.fleetGroupsAtom().length > 0} fallback={<div class="swarm-fleet-group-dropdown-empty">No saved groups yet</div>}>
-                                    <For each={model.fleetGroupsAtom()}>
-                                        {(group) => (
-                                            <div class="swarm-fleet-group-dropdown-item">
-                                                <button
-                                                    type="button"
-                                                    class="swarm-fleet-group-dropdown-item-apply"
-                                                    onClick={() => { model.applyGroupAsSelection(group); closeGroupPicker(); }}
-                                                    title={`Select this group's ${group.member_ids.length} agent(s)`}
-                                                >
-                                                    {group.name} <span class="swarm-fleet-group-dropdown-item-count">({group.member_ids.length})</span>
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    class="swarm-fleet-group-dropdown-item-delete"
-                                                    title="Delete group"
-                                                    onClick={() => void model.deleteFleetGroup(group.id)}
-                                                >
-                                                    <i class="fa-solid fa-xmark" />
-                                                </button>
-                                            </div>
-                                        )}
-                                    </For>
-                                </Show>
-                            </div>
-                        </Portal>
+                        <GroupsDropdown
+                            triggerEl={groupPickerButtonRef!}
+                            model={model}
+                            hasSelection={count() > 0}
+                            savingGroupName={savingGroupName}
+                            setSavingGroupName={setSavingGroupName}
+                            submitSaveGroup={submitSaveGroup}
+                            onClose={() => setGroupPickerOpen(false)}
+                        />
                     </Show>
                 </div>
 
@@ -361,6 +243,147 @@ export function FleetToolbar({
                 </Show>
             </ConfirmModal>
         </Show>
+    );
+}
+
+/**
+ * Saved-groups flyout for the fleet toolbar — a separate component (not
+ * inline JSX in `FleetToolbar`) specifically so it mounts fresh every time
+ * the picker opens. `usePaneOverlay`'s registration happens in `onMount`,
+ * which in Solid fires once per component instance — a `<Show>` toggling a
+ * boolean unmounts/remounts its child on each transition, so a genuinely
+ * separate component here gets a fresh `onMount` (and the working pane-clip
+ * registration that depends on it) every open. Calling `usePaneOverlay`
+ * directly in `FleetToolbar`'s own body would only ever run once, for the
+ * whole Swarm pane's lifetime — see the call site's comment.
+ *
+ * Portaled to `document.body` and positioned via `computeMenuPosition`
+ * (floating-ui, kept live via `autoUpdate`), the same primitive
+ * `flyoutmenu.tsx`/`popover-menu.tsx` use — escapes `.swarm-view`'s
+ * `overflow: hidden` entirely, so it can't be clipped regardless of where
+ * the trigger button lands after the toolbar wraps.
+ */
+function GroupsDropdown(props: {
+    triggerEl: HTMLButtonElement;
+    model: SwarmViewModel;
+    hasSelection: boolean;
+    savingGroupName: () => string | null;
+    setSavingGroupName: (v: string | null) => void;
+    submitSaveGroup: () => Promise<void>;
+    onClose: () => void;
+}): JSX.Element {
+    const [menuEl, setMenuEl] = createSignal<HTMLDivElement | null>(null);
+    const [menuStyle, setMenuStyle] = createSignal<JSX.CSSProperties>({
+        position: "fixed",
+        left: "0px",
+        top: "0px",
+        visibility: "hidden",
+    });
+    usePaneOverlay(menuEl);
+    let cleanupAutoUpdate: (() => void) | null = null;
+
+    const updatePosition = async (): Promise<void> => {
+        const menu = menuEl();
+        if (!menu) return;
+        const pos = await computeMenuPosition({ anchor: props.triggerEl, placement: "bottom-start" }, menu);
+        setMenuStyle({
+            ...pos.style,
+            "max-height": `${pos.maxHeight}px`,
+            "max-width": `${pos.maxWidth}px`,
+            "overflow-y": "auto",
+        });
+    };
+
+    const registerMenu = (el: HTMLDivElement): void => {
+        setMenuEl(el);
+        requestAnimationFrame(() => {
+            if (!(el instanceof Element)) return;
+            cleanupAutoUpdate = autoUpdate(props.triggerEl, el, updatePosition);
+            assertMenuInPaintableArea(el, "swarm-fleet-group-dropdown");
+        });
+    };
+
+    const handleOutsideClick = (e: MouseEvent): void => {
+        const t = e.target as Node;
+        if (props.triggerEl.contains(t) || menuEl()?.contains(t)) return;
+        props.onClose();
+    };
+    const handleEscape = (e: KeyboardEvent): void => {
+        if (e.key === "Escape") props.onClose();
+    };
+
+    onMount(() => {
+        document.addEventListener("mousedown", handleOutsideClick, true);
+        document.addEventListener("keydown", handleEscape);
+    });
+    onCleanup(() => {
+        document.removeEventListener("mousedown", handleOutsideClick, true);
+        document.removeEventListener("keydown", handleEscape);
+        cleanupAutoUpdate?.();
+    });
+
+    return (
+        <Portal mount={document.body}>
+            <div ref={registerMenu} class="swarm-fleet-group-dropdown" data-pane-overlay style={menuStyle()}>
+                {/* Saving only makes sense against a non-empty selection —
+                    applying/deleting an EXISTING group below never requires one. */}
+                <Show when={props.hasSelection}>
+                    <Show
+                        when={props.savingGroupName() !== null}
+                        fallback={
+                            <button
+                                type="button"
+                                class="swarm-fleet-group-dropdown-item swarm-fleet-group-dropdown-item--action"
+                                onClick={() => props.setSavingGroupName("")}
+                            >
+                                Save selection as group…
+                            </button>
+                        }
+                    >
+                        <div class="swarm-fleet-group-save-inline">
+                            <input
+                                type="text"
+                                placeholder="Group name"
+                                value={props.savingGroupName() ?? ""}
+                                onInput={(e) => props.setSavingGroupName(e.currentTarget.value)}
+                                onKeyDown={(e) => {
+                                    if (e.key === "Enter") void props.submitSaveGroup();
+                                    if (e.key === "Escape") props.setSavingGroupName(null);
+                                }}
+                                autofocus
+                            />
+                            <button type="button" class="swarm-fleet-btn swarm-fleet-btn--primary" onClick={() => void props.submitSaveGroup()}>
+                                Save
+                            </button>
+                        </div>
+                    </Show>
+                </Show>
+                <Show when={props.model.fleetGroupsAtom().length > 0} fallback={<div class="swarm-fleet-group-dropdown-empty">No saved groups yet</div>}>
+                    <For each={props.model.fleetGroupsAtom()}>
+                        {(group) => (
+                            <div class="swarm-fleet-group-dropdown-item">
+                                <button
+                                    type="button"
+                                    class="swarm-fleet-group-dropdown-item-apply"
+                                    onClick={() => { props.model.applyGroupAsSelection(group); props.onClose(); }}
+                                    title={`Select this group's ${group.member_ids.length} agent(s)`}
+                                >
+                                    {group.name} <span class="swarm-fleet-group-dropdown-item-count">({group.member_ids.length})</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    class="swarm-fleet-group-dropdown-item-delete"
+                                    title="Delete group"
+                                    onClick={() => void props.model.deleteFleetGroup(group.id)}
+                                >
+                                    <i class="fa-solid fa-xmark" />
+                                </button>
+                            </div>
+                        )}
+                    </For>
+                </Show>
+            </div>
+        </Portal>
     );
 }
 
