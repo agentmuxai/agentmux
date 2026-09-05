@@ -32,7 +32,7 @@ import { snapshot as paneSnapshot } from "@/app/store/agent-pane-state-store";
 import { workingFromPhase, type PaneFailure } from "@/app/store/agent-pane-state/types";
 import type { AgentPaneModel } from "@/app/store/agent-pane-registration";
 import { buildRuntimeArgs, getRuntimeConfig } from "../buildRuntimeArgs";
-import { selectLaunchArgs } from "../launch-args";
+import { PROVIDER_FLAGS_META_KEY, selectLaunchArgs, withProviderFlags } from "../launch-args";
 import { dispatchSlashCommand } from "../commands/dispatch";
 import { buildRegistry } from "../commands/registry";
 import type { SlashCommand, SlashCommandContext, SlashPickerSpec } from "../commands/types";
@@ -1311,9 +1311,19 @@ export function useAgentCommands(opts: UseAgentCommandsOptions): UseAgentCommand
             // it rewrote the bad flags into cmd:args on every turn regardless
             // of what launch time had chosen (reagent P1 on PR #2867 — the
             // fourth copy of this rule, and the one that fires most often).
-            const agentMode = opts.block()?.meta?.["agentMode"] as string | undefined;
+            const meta = opts.block()?.meta;
+            const agentMode = meta?.["agentMode"] as string | undefined;
             const baseArgs = selectLaunchArgs(prov, agentMode);
-            const updatedArgs = buildRuntimeArgs(baseArgs, runtimeConfig, prov.id);
+            // Reapply the agent's own provider_flags. This rebuild starts from
+            // the provider CATALOG, so anything the launch path appended is
+            // otherwise dropped here — permanently, on the very first send
+            // (#2872). `--fork-session` is intentionally not restored: it is a
+            // one-shot launch intent, and reapplying it every turn would fork
+            // the session again on each one.
+            const updatedArgs = withProviderFlags(
+                buildRuntimeArgs(baseArgs, runtimeConfig, prov.id),
+                meta?.[PROVIDER_FLAGS_META_KEY],
+            );
             try {
                 await RpcApi.SetMetaCommand(TabRpcClient, {
                     oref: WOS.makeORef("block", opts.blockId),

@@ -42,7 +42,7 @@ async function updateRuntime(
         // the change applies to the running agent. Shared with the GUI control
         // bar via applyRuntimeChange — the persistent rebuild/restart used to
         // live only here (#1503), so the dropdown silently no-op'd.
-        await applyRuntimeChange(ctx.blockId, ctx.provider(), updated, ctx.block()?.meta?.["agentMode"] as string | undefined);
+        await applyRuntimeChange(ctx.blockId, ctx.provider(), updated, ctx.block()?.meta);
         return { ok: true, updated };
     } catch (err: any) {
         return { ok: false, error: err?.message ?? String(err) };
