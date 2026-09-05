@@ -160,7 +160,7 @@ export function FleetToolbar({
                         class="swarm-fleet-btn"
                         onClick={() => (allSelected() ? model.clearSelection() : model.selectAll(allBlockIds()))}
                     >
-                        <i class={allSelected() ? "fa-solid fa-square-check" : "fa-regular fa-square"} />{" "}
+                        <i class={allSelected() ? "fa-solid fa-square-check" : "fa-sharp fa-regular fa-square"} />{" "}
                         {allSelected() ? "Select none" : "Select all"}
                     </button>
                 </Show>
