@@ -160,6 +160,13 @@ pub(crate) fn spawn_host_unix(
         // agentmux-cef/src/main.rs::launcher_is_genuine_parent.
         .env("AGENTMUX_LAUNCHER_PID", std::process::id().to_string())
         .envs(host_env.iter().cloned())
+        // Auto-start (issue #2977 WS2) — same translation as the Windows
+        // spawn path. macOS and Linux are the platforms whose generated
+        // artifacts (LaunchAgent, XDG .desktop) actually pass `--background`,
+        // so omitting it here left two of the three shipped platforms with an
+        // inert flag (ReAgent P1 on PR #2999, catching that my first fix for
+        // this was wired into the Windows spawn only).
+        .envs(crate::autostart::background_env_for(args))
         // We reap children ourselves on shutdown (SIGTERM, then SIGKILL
         // backstop) — kill_on_drop would SIGKILL the host the moment the
         // Child is dropped, robbing CEF of the chance to reap its render
