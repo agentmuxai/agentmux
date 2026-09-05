@@ -32,7 +32,7 @@ wedged shutdown be told apart from a fast one.
 ## 1. Current shutdown, condensed (full trace with citations is the
 research record behind this spec; key facts only, here)
 
-- **No quit menu item, no OS shutdown/logoff handler, no `SetConsoleCtrlHandler`, anywhere.** The only real trigger is the user closing the last top-level window (`WM_CLOSE` → CEF `do_close` → `on_before_close`, `agentmux-cef/src/client/lifecycle.rs:538,893`). Unix signals (SIGINT/TERM/HUP) reach the **launcher**; Windows has **no signal arm at all** (`agentmux-launcher/src/supervisor/windows.rs:799-800` — shutdown flows via host/srv only).
+- **Two distinct quit triggers exist, not one.** On Windows/Linux the only real trigger is the user closing the last top-level window (`WM_CLOSE` → CEF `do_close` → `on_before_close`, `agentmux-cef/src/client/lifecycle.rs:538,893`). **macOS additionally has a native `Quit {name}` menu item bound to Cmd+Q**, wired to the standard `terminate:` selector (`agentmux-cef/src/macos_menu.rs:325`, installed at startup by `agentmux-cef/src/lib.rs`) — an entirely separate path from `do_close` that goes straight through `NSApplication`'s own termination sequence. Neither platform has an OS shutdown/logoff handler or `SetConsoleCtrlHandler`. Unix signals (SIGINT/TERM/HUP) reach the **launcher**; Windows has **no signal arm at all** (`agentmux-launcher/src/supervisor/windows.rs:799-800` — shutdown flows via host/srv only). **Any design centered only on `do_close` silently bypasses the countdown on macOS's Cmd+Q/menu Quit — see §2's revised trigger design, which the application-termination path must also participate in.**
 - **`on_before_close` alone does real synchronous work** before anything is torn down: cascade-closes OAuth popups, evicts window/floater state, cancels parked credential approvals, reports to the launcher — then Stage 1 posts `WM_CLOSE` to every warm-pool browser (`ui_tasks/window.rs:589-660`), each running its own `on_before_close`.
 - **`backend_close_window`** opens a raw TCP socket to srv with a **2000ms** timeout (`client/helpers.rs:100-104`), and only *after* that thread finishes does the host post `QuitMessageLoopTask` back to the UI thread (the 2026-07-16 last-window-close race fix).
 - **srv's `window.CloseWindow`** does the heavy lifting on the final close: saves a session-restore snapshot (`window_close.rs:222-232`), then runs the `delete_workspace` saga, which kills every block's PTY controller.
@@ -95,34 +95,101 @@ cascade fires before the srv round trip even starts).
   That exact pattern — *"the launcher reports on the thing because the
   thing can't report on itself"* — is arguably even more true for shutdown
   than for startup.
+- **What doesn't carry over: the splash window cannot take input today.**
+  `spawn_splash`'s re-invocation mechanism and `apply_event`'s rendering are
+  reusable; the window itself is not. On Windows it's registered with
+  `lpfnWndProc: DefWindowProcW` — no custom message handling at all — and
+  `WS_EX_NOACTIVATE` (can't take keyboard focus), on top of
+  `WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW` (`splash.rs:269,288`).
+  It is a pure display surface: no hit-testing, no mouse/keyboard handling,
+  no result channel back to the launcher's state machine — because nothing
+  has ever needed to click on it. "Close now"/"Cancel" require genuinely new,
+  per-platform work: a real WndProc with button hit-testing against the
+  software-drawn layout, a focus/activation story for the countdown phase
+  specifically (the display-only progress phase that follows can likely stay
+  non-activating), keyboard handling (Escape/Enter as accelerators), and a
+  result channel carrying the user's choice back out — none of which
+  `StartupEventSink` provides today (it's one-directional: launcher/host →
+  window only). Treat this as an interactive-shutdown-window design task in
+  its own right, not a "new stage keys" extension of the existing splash.
 
 ### What this requires that doesn't exist yet
 
-The trigger today is host-side and immediate: `do_close` → straight into
-teardown. For a launcher-owned modal with a real Cancel, the host needs to
-**defer** the close and ask the launcher first:
+The trigger today is host-side, per-browser, and immediate: `do_close` runs
+for **every** browser close — ordinary secondary windows, pane browsers,
+warm-pool browsers, and OAuth popups, not just "the user is quitting"
+(`lifecycle.rs:538`, e.g. the OAuth-popup teardown handled right at its top).
+The reliable "was that the last user-visible window" answer is computed
+**after the fact**, in the launcher's reducer, once the closed window has
+already been unregistered (`state.windows.is_empty()`,
+`reducer/window.rs:250`) — `do_close` itself has no such visibility. A
+design that defers every `do_close` call to ask the launcher would veto
+routine pane/popup/warm-pool closes too, and would hang indefinitely
+whenever no launcher is reachable to answer at all (`task dev:standalone`,
+or an already-disconnected launcher pipe) — both real, reachable failure
+modes, not edge cases. The corrected sequence:
 
-1. `do_close` sends a new IPC message (`quit_requested`) to the launcher
-   **instead of proceeding**, and returns `true` from the CEF callback
-   (standard CEF pattern: `true` suppresses the default close, the app
-   closes for real later via an explicit browser-close call once granted).
-2. Launcher spawns the shutdown modal via `spawn_splash`'s reuse path,
-   starting in **countdown phase**: "Shutting down in 5…", Close now /
-   Cancel.
-3. **Cancel** → launcher IPCs `quit_cancelled` back to the host; host does
-   not proceed with `on_before_close`'s teardown; the modal dismisses;
-   nothing else changes. This is the first real implementation of
-   `window:confirmclose`'s spirit, though not its literal settings key —
-   see §6.
-4. **Close now**, or the countdown reaching 0, → launcher IPCs
-   `quit_confirmed`; host resumes the exact existing teardown sequence
-   (§1's steps A–G, unchanged), and **switches the modal from countdown
-   phase to progress phase** — same window, same channel, `StageBegin`/
-   `StageEnd` rows narrating the real steps as they happen (window-close
-   cascade, srv notify, session snapshot, agent shutdown), exactly the way
-   the splash narrates `dlopen`/`cef_init`/`paint` today.
-5. Modal dismisses when the launcher observes host exit — it already does
-   this today (`supervisor/windows.rs:721-741`); no new detection needed.
+1. `do_close` first classifies the closing browser using the host's own
+   existing kind information (pane/warm-pool/OAuth-popup/secondary vs. a
+   real top-level user window — the same distinction `is_browser_pane`/
+   `is_agent_pane` and friends already encode). **For anything that isn't a
+   candidate top-level user window, behavior is unchanged**: return `false`
+   immediately, exactly as today. This is the fix for vetoing routine closes.
+2. Only for a candidate top-level user window, `do_close` sends a new,
+   bounded (short timeout — tens of ms, this is a local IPC round trip),
+   synchronous query to the launcher: *"if this window closes, does
+   `state.windows` become empty?"* — answerable immediately from the same
+   tracking the reducer's post-hoc check already uses, just asked one step
+   earlier, before the browser unregisters, and accounting for a window
+   creation already in flight (don't answer "yes" out from under a pending
+   new window).
+3. **Fail open, unconditionally, on anything other than a definite "yes, and
+   I'm showing the modal."** No launcher reachable, pipe disconnected, query
+   times out, or the answer is "no, other windows remain" → `do_close`
+   returns `false` immediately and the browser closes exactly as it does
+   today. There is no code path in this design where a missing or
+   unresponsive launcher blocks a window close — every uncertain outcome
+   resolves to *today's* behavior, not to waiting.
+4. Only on a confirmed "yes" does `do_close` return `true` (deferring the
+   real close — standard CEF pattern: the app closes for real later via an
+   explicit browser-close call once granted) and the launcher spawns the
+   interactive shutdown window (per the interactivity note above), starting
+   in **countdown phase**: "Shutting down in 5…", Close now / Cancel.
+5. **Cancel** → launcher tells the host to abandon the deferred close;
+   `on_before_close`'s teardown never starts; the modal dismisses; nothing
+   else changes. First real implementation of `window:confirmclose`'s
+   spirit, though not its literal settings key — see §6.
+6. **Close now**, or the countdown reaching 0, → launcher confirms; host
+   resumes the exact existing teardown sequence (§1's steps A–G, unchanged),
+   and the **same window** switches from countdown phase to progress phase
+   — `StageBegin`/`StageEnd` rows narrating the real steps as they happen,
+   exactly the way the splash narrates `dlopen`/`cef_init`/`paint` today.
+7. **On macOS, the native `Quit`/Cmd+Q path (§1) must run through the same
+   predicate and query as step 1-3**, as a companion hook alongside
+   `do_close` rather than a parallel, unguarded path straight to
+   `terminate:` — otherwise Cmd+Q silently bypasses the entire feature on
+   that platform.
+8. Modal dismisses only once the launcher has a real completion signal for
+   the teardown it's narrating — see the timing gap called out immediately
+   below, which affects exactly this step.
+
+**A real timing gap in step 6/8, not yet resolved by this spec:** the host's
+`backend_close_window` TCP round trip to srv has a **2000ms** timeout
+(`helpers.rs:100-104`), but `delete_workspace`'s per-shell teardown grace is
+**5000ms** per shell (`KILL_GRACE_SECS`). A shell that needs its full grace
+window outlives the host's own patience for that call — the host proceeds
+to exit while srv is still mid-teardown, and the Windows supervisor's
+existing job-drop/force-kill-srv behavior on host exit
+(`supervisor/windows.rs:1104-1121`) would then cut srv off before it
+finishes the very work the progress modal just claimed to narrate. Fixing
+this needs a **launcher-visible srv-completion acknowledgement** — the
+launcher's own teardown sequencing must wait for that ack (bounded by the
+existing `TEARDOWN_GRACE`/watchdog constants as the ultimate backstop, per
+§0) rather than treating host-process-exit alone as "done." This is real,
+non-trivial synchronization work across host/srv/launcher that this spec
+flags as required but does not fully design — an implementer should treat
+it as a blocking prerequisite for step 8, not a detail to sort out during
+implementation.
 
 ## 3. What actually gets narrated (the honest version)
 
