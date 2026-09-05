@@ -178,7 +178,7 @@ are doing history". Everything else is here; the completeness
 assertion in the generator fails the build rather than emit a
 partial list.
 
-### implemented (133)
+### implemented (134)
 
 | Spec | Title |
 |---|---|
@@ -295,6 +295,7 @@ partial list.
 | [`SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24`](SPEC_SYSTEM_TOOLCHAIN_INSTALLER_2026_08_24.md) | SPEC: One-click system-toolchain installer (git, Node/npm, and friends) across Windows/macOS/Linux |
 | [`SPEC_TAB_COLOR_DESATURATION_2026_08_13`](SPEC_TAB_COLOR_DESATURATION_2026_08_13.md) | Spec: Desaturate tab colors, keep agent pane border colors as-is |
 | [`SPEC_TAB_CONTENT_REVEAL_GATE`](SPEC_TAB_CONTENT_REVEAL_GATE.md) | Tab content reveal gate |
+| [`SPEC_TAB_SWITCH_DECOUPLE_SELECT_FROM_PAINT_2026_09_04`](SPEC_TAB_SWITCH_DECOUPLE_SELECT_FROM_PAINT_2026_09_04.md) | Instant tab-bar selection, decoupled from destination-pane reveal cost (window-level tabs) |
 | [`SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19`](SPEC_TERMINAL_LATENCY_BENCHMARK_2026_05_19.md) | SPEC: Terminal Input Echo-Latency Benchmark |
 | [`SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23`](SPEC_TERMINAL_SCROLLBACK_PERSISTENCE_2026_07_23.md) | SPEC: Terminal scrollback doesn't survive reconnect (all `view:"term"` panes) |
 | [`SPEC_TERM_DOUBLE_RAF_TEAROUT_2026_05_30`](SPEC_TERM_DOUBLE_RAF_TEAROUT_2026_05_30.md) | SPEC: Remove the terminal Stage-1 RAF write-coalescer (double-rAF) |
