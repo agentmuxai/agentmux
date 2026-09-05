@@ -16,6 +16,7 @@ mod pool;
 mod quit;
 mod top_level_creation;
 mod pending_reproject;
+mod promote_liveness;
 mod ui_thread_gate;
 
 pub use drag::{DragType, DragPayload, DragSession};
@@ -32,6 +33,9 @@ pub use top_level_creation::{
     PendingBrowserPaneCreate, FloatingRedockGhostState,
 };
 pub use pending_reproject::PendingReprojectClosures;
+pub use promote_liveness::{
+    PromoteLivenessWatches, should_open_fallback, PROMOTE_LIVENESS_TIMEOUT,
+};
 pub use ui_thread_gate::{UiThreadGate, MainReadyAction, SnapshotAction};
 
 // Phase B.5e — `WindowInstanceRegistry` struct deleted. Sequential
@@ -655,6 +659,16 @@ pub struct AppState {
     /// (safe, if imperfect) fallback behavior as before this whole cleanup
     /// existed: the old data lingers, but is never lost.
     pub pending_reproject_closures: Mutex<PendingReprojectClosures>,
+
+    /// Workstream 0 Phase 1 prerequisite #2 (issue #2977) — armed
+    /// post-promote liveness watches, keyed by window label. A promoted pool
+    /// window that never reaches `register_backend_window` within
+    /// `PROMOTE_LIVENESS_TIMEOUT` is treated as having handed back a corpse
+    /// (`IsWindow()` can't tell a live renderer from a suspended-then-dead
+    /// one — see the module's own docs), and the promote falls back to a
+    /// fresh cold-path window. Shares the confirmation signal, and the
+    /// stage/confirm shape, with `pending_reproject_closures` directly above.
+    pub promote_liveness: Mutex<PromoteLivenessWatches>,
 }
 
 impl Default for AppState {
@@ -742,6 +756,7 @@ impl Default for AppState {
             window_transparent: std::sync::atomic::AtomicBool::new(false),
             ui_thread_gate: Mutex::new(UiThreadGate::default()),
             pending_reproject_closures: Mutex::new(PendingReprojectClosures::default()),
+            promote_liveness: Mutex::new(PromoteLivenessWatches::default()),
         }
     }
 }
