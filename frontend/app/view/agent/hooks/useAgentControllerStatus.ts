@@ -1368,6 +1368,7 @@ export function useAgentControllerStatus(
         // counter (and therefore the fast-fail send guard) sees this as an
         // in-flight recovery, same as every other entry point.
         beginRecoveryFlow();
+        setAuthNotice(null);
         try {
             const candidate: BindCandidate = {
                 agentId: agentDefinitionId,
@@ -1377,6 +1378,20 @@ export function useAgentControllerStatus(
                 boundElsewhereName: null,
             };
             await bindAccountToAgent(account, candidate);
+        } catch (e: any) {
+            // bindAccountToAgent throws on a failed link upsert (its own
+            // live-apply steps are already best-effort/non-throwing — see
+            // its doc comment). Surface it the same way every other failed
+            // recovery action in this hook does: `authNotice`, not a
+            // console-only log or an unhandled rejection at the caller
+            // (agent-view.tsx's `void status.bindExistingAccount(...)` call
+            // sites don't — and shouldn't have to — attach their own
+            // `.catch()`). reagentx P2 on PR #2971: the Armory's own
+            // Bind-to-Agent menu surfaces this via `onBindError`; this entry
+            // point had no equivalent until now.
+            const msg = `Couldn't bind "${account.name}": ${e?.message ?? String(e)}`;
+            opts.log("auth", msg, "error");
+            setAuthNotice(msg);
         } finally {
             endRecoveryFlow();
         }

@@ -231,11 +231,25 @@ From `SPEC_ACCOUNT_ADOPTION_PIGGYBACK_LOGIN_2026_08_09.md` §2.3, unchanged:
 - OAuth-class accounts only (`secret_ref.backend == "oauth_config_dir"`).
   API-key accounts don't gate spawns the same way and are out of scope for
   this button (they're already handled by direct linking elsewhere).
-- Sort `status == "valid"` first, then most-recently-updated; show the status
-  dot (an expired account is still selectable — adopting then re-logging is
-  still fewer steps than fresh OAuth — but visibly marked).
 - Exclude the account already linked to *this* agent for this provider
   (nothing to adopt).
+
+**Amended 2026-09-05 (reagentx P1) — `status === "valid"` only, no
+expired-but-selectable allowance.** The piggyback spec's original rule
+("expired account is still selectable — adopting then re-logging is still
+fewer steps than fresh OAuth — but visibly marked") is dropped. Two
+problems: the "visibly marked" status dot was never actually built (no such
+concept exists on `PaneRowAction`), and independent of that gap, issue #1's
+`recheckAuthAfterBind` trusts `CheckCliAuthCommand`'s `authenticated` flag
+— which this codebase already documented as capable of an
+"expired-but-present false positive" (`resolveCliForRecovery`'s doc
+comment, `retro-agent-auth-relogin-noop-2026-07-01` H2 — the exact reason
+`relogin()` never trusts that check for its own success). Offering a
+KNOWN-expired account as a one-click "fix" risked `declareAuthHealthy()`
+clearing the failure row on a false positive while the next real turn
+still failed. Restricting to valid-only removes the self-inflicted case
+entirely; the lost convenience (skip a fresh OAuth for an expired account)
+is a smaller cost than a row that lies about being fixed.
 
 ### 3.4 Adopt action
 
@@ -254,6 +268,15 @@ is the same bind, from a different entry point — do not reimplement it):
    user (or the row's own now-relevant Retry button) drives anything further.
    This is the intended convergence: issue #2's button doesn't need its own
    unblock logic, because issue #1 already provides it for *any* bind source.
+5. **A failed link upsert must surface to the user, not just the logs.**
+   Added 2026-09-05 (reagentx P2): `bindExistingAccount` catches whatever
+   `bindAccountToAgent` throws and reports it via `authNotice` (the same
+   user-visible recovery-failure surface every other action in
+   `useAgentControllerStatus.ts` already uses) — mirroring the Armory's own
+   Bind-to-Agent menu, which passes `onBindError` for the identical case.
+   Without this, `agent-view.tsx`'s `void status.bindExistingAccount(...)`
+   call sites would produce an unhandled promise rejection with no
+   user-facing indication anything went wrong.
 
 ### 3.5 Non-goals (repeated from the piggyback spec, still correct)
 

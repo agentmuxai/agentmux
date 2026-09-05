@@ -58,16 +58,19 @@ describe("computeAccountBindCandidates", () => {
         expect(result.map((a) => a.id)).toEqual(["acct-2"]);
     });
 
-    it("sorts valid accounts before expired/invalid ones", () => {
-        const accounts = [
-            mkAccount({ id: "expired", status: "expired", updated_at: "2026-03-01T00:00:00Z" }),
-            mkAccount({ id: "valid", status: "valid", updated_at: "2026-01-01T00:00:00Z" }),
-        ];
-        const result = computeAccountBindCandidates("claude", accounts);
-        expect(result.map((a) => a.id)).toEqual(["valid", "expired"]);
+    it("excludes expired/invalid/unknown/checking accounts entirely, not just deprioritizes them", () => {
+        // Amended 2026-09-05 (reagentx P1): offering a KNOWN-bad account as a
+        // one-click "fix" interacts badly with recheckAuthAfterBind's trust
+        // in CheckCliAuthCommand's expired-but-present false positive — see
+        // this module's own doc comment. An expired candidate must not
+        // appear at all, not just sort after valid ones.
+        const accounts = (["expired", "invalid", "unknown", "checking"] as const).map((status) =>
+            mkAccount({ id: status, status }),
+        );
+        expect(computeAccountBindCandidates("claude", accounts)).toEqual([]);
     });
 
-    it("within the same validity bucket, sorts most-recently-updated first", () => {
+    it("sorts most-recently-updated first among valid accounts", () => {
         const accounts = [
             mkAccount({ id: "older", updated_at: "2026-01-01T00:00:00Z" }),
             mkAccount({ id: "newer", updated_at: "2026-02-01T00:00:00Z" }),
