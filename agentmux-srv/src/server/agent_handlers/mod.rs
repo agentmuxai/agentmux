@@ -341,7 +341,7 @@ mod recent_sessions_tests {
             host_ipc: Arc::new(tokio::sync::Mutex::new(None)),
             host_reg_secret: None,
             local_web_url: String::new(),
-            subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus.clone(), wstore.clone())),
+            subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus.clone(), wstore.clone(), wstore.clone(), wstore.clone())),
             history_service: Arc::new(crate::backend::history::HistoryService::new()),
             lan_discovery: Arc::new(crate::backend::lan_discovery::LanDiscoveryController::new(
                 "test-instance".to_string(),
@@ -679,7 +679,7 @@ mod recent_sessions_tests {
             host_ipc: Arc::new(tokio::sync::Mutex::new(None)),
             host_reg_secret: None,
             local_web_url: String::new(),
-            subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus.clone(), wstore.clone())),
+            subagent_watcher: Arc::new(crate::backend::subagent_watcher::SubagentWatcher::new(event_bus.clone(), wstore.clone(), wstore.clone(), wstore.clone())),
             history_service: Arc::new(crate::backend::history::HistoryService::new()),
             lan_discovery: Arc::new(crate::backend::lan_discovery::LanDiscoveryController::new(
                 "test-instance".to_string(),

@@ -69,7 +69,12 @@ async fn main() {
     let stores = bootstrap::open_stores_and_migrate(&config, &version, &build_time);
 
     // Event infrastructure + every background task that doesn't need AppState yet.
-    let bg = bootstrap::spawn_background_subsystems(&stores.wstore, &stores.filestore, &stores.id_store);
+    let bg = bootstrap::spawn_background_subsystems(
+        &stores.wstore,
+        &stores.filestore,
+        &stores.id_store,
+        &stores.identity_store,
+    );
 
     // 5. Bind TCP listeners, bring up LAN discovery / LSP supervisor / process tracker.
     let net = bootstrap::bind_listeners_and_network(
