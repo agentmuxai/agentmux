@@ -130,15 +130,19 @@ substitutes for it.
 
 ### 7.5.1. There is already a tray-less way back to a window
 
-Worth knowing before building the tray, because it means Phase 1's
-`AGENTMUX_BACKGROUND_SERVICE` flag is usable on its own rather than a mode you
-can enter and not leave: with the flag on and zero windows open, **re-launching
-the exe reopens a window** through the existing single-instance forward
-(`second_instance.rs::forward_open_new_window`, an authenticated HTTP
-`open_new_window` to the host's IPC port).
+Worth knowing before building the tray, because it bears on whether Phase 1's
+`AGENTMUX_BACKGROUND_SERVICE` flag is usable on its own or is a mode you can
+enter and not leave. With the flag on and zero windows open, re-launching the
+app reopens a window — **on Windows and Linux. macOS has a real gap in one
+configuration**, see below.
 
-Each link verified by reading the code, since every one of them could
-plausibly have been torn down along with the last window:
+Both routes end at the same place: an authenticated HTTP `open_new_window` to
+the host's IPC port (`second_instance.rs::forward_open_new_window`). What
+differs is what triggers it.
+
+**Windows / Linux — a genuine second process forwards.** Each link verified by
+reading the code, since every one could plausibly have been torn down with the
+last window:
 
 - The launcher holds the single-instance named pipe for its whole lifetime, so
   a second launch forwards instead of starting a rival instance.
@@ -150,9 +154,34 @@ plausibly have been torn down along with the last window:
   cascade-closed by `begin_drain_and_cascade`, which a suppressed drain never
   reaches. So the reopen is an instant pool promote, not a cold start.
 
+**macOS — not a second process at all.** LaunchServices delivers a Finder
+double-click or `open -a` on an already-running bundle as a *reopen Apple
+Event* to the existing process; no second process starts, so nothing reaches
+the forward on its own. What actually recovers the window is an in-process
+delegate — `splash_mac.rs`'s `applicationShouldHandleReopen:` hook, which calls
+`forward_open_new_window` itself
+(`SPEC_MACOS_REOPEN_NEW_WINDOW_2026_06_22.md`).
+
+**The gap: that delegate is installed only by `Splash::show`.**
+`install_reopen_handler()` has exactly one call site, inside `Splash::show`,
+immediately after `build_window()` creates the `NSApplication`. With the splash
+disabled, `main()` runs the supervisor directly on the main thread via
+`block_on` — no `NSApplication`, no pump (§7.5), and no delegate. So on
+**macOS + splash disabled + background-service mode, a user who closes their
+last window has no way back**: the reopen event has no handler, and no second
+process spawns to forward. (Launching the raw binary from a terminal still
+forwards, but that is not how anyone opens a packaged app.)
+
+That combination must be closed before background-service mode is offered to
+macOS users — either by installing the reopen handler (and a minimal NSApp
+pump) independently of the splash, or by refusing to enable background-service
+mode when the splash is disabled. Flagged here rather than fixed because it is
+a code change on a platform this finding could not be exercised on; it belongs
+with the Workstream 1 macOS work.
+
 Implication for the tray work: the tray's "open AgentMux" menu item does not
-need a new mechanism — it can invoke the same `open_new_window` path this
-forward already uses. That removes a chunk of assumed scope from Workstream 3.
+need a new mechanism — it can invoke the same `open_new_window` path both
+routes already use. That removes a chunk of assumed scope from Workstream 3.
 
 ## 8. What this spec does not decide
 

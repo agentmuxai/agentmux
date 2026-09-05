@@ -138,17 +138,28 @@ pub struct HostState {
     /// and force-quit a few seconds after the last window closes.
     ///
     /// **Getting a window back (there is no tray icon yet — Workstream 1):**
-    /// re-launching the exe reopens one, via the existing single-instance
-    /// forward. That keeps working at zero windows, verified end to end by
-    /// reading each link: the launcher holds the single-instance pipe for its
-    /// whole lifetime (so a second launch forwards rather than starting
-    /// fresh); `lib.rs` deletes the `ipc-port-<hash>` forwarding hint only
-    /// AFTER `run_message_loop()` returns, which this mode is precisely what
-    /// prevents, so the hint survives; the host's IPC server is bound at
-    /// startup independent of any window; and `open_new_window` still finds a
-    /// warm pool, because the pool is only cascade-closed by
-    /// `begin_drain_and_cascade`, which a suppressed drain never reaches.
-    /// So the reopen is a pool promote, not a cold start.
+    /// re-launching the app reopens one **on Windows and Linux**, via the
+    /// existing single-instance forward. That keeps working at zero windows,
+    /// verified end to end by reading each link: the launcher holds the
+    /// single-instance pipe for its whole lifetime (so a second launch
+    /// forwards rather than starting fresh); `lib.rs` deletes the
+    /// `ipc-port-<hash>` forwarding hint only AFTER `run_message_loop()`
+    /// returns, which this mode is precisely what prevents, so the hint
+    /// survives; the host's IPC server is bound at startup independent of any
+    /// window; and `open_new_window` still finds a warm pool, because the pool
+    /// is only cascade-closed by `begin_drain_and_cascade`, which a suppressed
+    /// drain never reaches. So the reopen is a pool promote, not a cold start.
+    ///
+    /// **macOS has a gap here — do not enable this mode there yet.**
+    /// LaunchServices delivers a Finder/`open` relaunch as a reopen Apple
+    /// Event to the running process instead of starting a second one, so
+    /// recovery depends on `splash_mac.rs`'s
+    /// `applicationShouldHandleReopen:` delegate, whose only install site is
+    /// inside `Splash::show`. With the splash disabled there is no
+    /// `NSApplication`, no pump, and no delegate — the reopen event has
+    /// nowhere to land and no second process spawns to forward, leaving the
+    /// user with no way back. See the design doc §7.5.1; it must be closed
+    /// with the Workstream 1 macOS work.
     ///
     /// That is also the recipe for this workstream's own acceptance test,
     /// which has not been run live yet: enable the flag, close the last
