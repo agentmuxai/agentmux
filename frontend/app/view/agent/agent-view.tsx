@@ -571,7 +571,6 @@ export const AgentViewWrapper = ({ model }: { model: AgentViewModel }): JSX.Elem
                         }
                         onAdd={() => void handleNewAgentTab()}
                         addTitle="New agent"
-                        addLabel="New Agent"
                     />
                     <Show
                         when={isHistoryTab()}
