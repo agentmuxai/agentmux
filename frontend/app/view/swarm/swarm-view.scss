@@ -978,19 +978,15 @@
 }
 
 .swarm-fleet-group-dropdown {
-    position: absolute;
-    top: calc(100% + 4px);
-    // Anchored from the right, not the left: Swarm is typically docked as a
-    // narrow column, and `.swarm-view` clips overflow — a 200px-wide panel
-    // opening left-to-right from a button positioned anywhere past a pane's
-    // narrow width can render past the right edge and get invisibly clipped
-    // (looks exactly like "the dropdown doesn't work"). Growing leftward
-    // from the button's own right edge stays inside a narrow pane instead.
-    right: 0;
-    z-index: 5;
+    // Positioning (position/left/top/max-height/max-width) is inline,
+    // computed by `computeMenuPosition` and kept live via `autoUpdate` — see
+    // swarm-fleet-toolbar.tsx. Portaled to `document.body`, so this never
+    // sits inside `.swarm-view`'s `overflow: hidden` in the first place
+    // (the actual fix for the narrow-pane clipping bug; a fixed CSS anchor
+    // side alone can't handle every position a wrapped toolbar button can
+    // land on). Same pattern as flyoutmenu.tsx / popover-menu.tsx.
+    z-index: var(--z-flyout-menu);
     min-width: 200px;
-    max-width: calc(100vw - 16px);
-    max-height: 260px;
     overflow-y: auto;
     background: var(--main-bg-color);
     border: 1px solid var(--border-color, rgba(255, 255, 255, 0.15));

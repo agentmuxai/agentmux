@@ -6,7 +6,7 @@
  * through the actual `FleetToolbar` component.
  */
 
-import { cleanup, fireEvent, render } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -15,7 +15,8 @@ vi.mock("@/app/element/confirm-modal", () => ({
 }));
 
 import { FleetToolbar } from "./swarm-fleet-toolbar";
-import type { FleetGroup, SwarmViewModel } from "./swarm-model";
+import type { SwarmViewModel } from "./swarm-model";
+import type { FleetGroup } from "@/app/store/rpc-api";
 
 afterEach(() => cleanup());
 
@@ -29,7 +30,7 @@ function modelStub(initialSelected: string[] = []) {
         fleetGroupsAtom: groups,
         fleetActionInFlightAtom: inFlight,
         selectAll: vi.fn((ids: string[]) => setSelected(new Set(ids))),
-        clearSelection: vi.fn(() => setSelected(new Set())),
+        clearSelection: vi.fn(() => setSelected(new Set<string>())),
         toggleSelected: () => {},
         isSelected: (id: string) => selected().has(id),
         broadcastToSelection: vi.fn(),
@@ -72,6 +73,22 @@ describe("FleetToolbar — select all", () => {
         const model = modelStub([]);
         const { container } = render(() => <FleetToolbar model={model} allBlockIds={() => []} />);
         expect(container.querySelector(".swarm-fleet-toolbar")).toBeNull();
+    });
+});
+
+describe("FleetToolbar — groups dropdown", () => {
+    it("opens without throwing (portaled + floating-ui positioned)", async () => {
+        const model = modelStub(["a"]);
+        const { getByText } = render(() => (
+            <FleetToolbar model={model} allBlockIds={() => ["a"]} />
+        ));
+
+        fireEvent.click(getByText("Groups"));
+        // computeMenuPosition resolves asynchronously, and the dropdown is
+        // portaled to document.body (not a descendant of the render
+        // container) — `screen` queries the whole document, unlike the
+        // container-scoped queries `render()` returns.
+        expect(await screen.findByText("No saved groups yet")).not.toBeNull();
     });
 });
 
