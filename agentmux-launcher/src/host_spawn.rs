@@ -47,6 +47,15 @@ pub(crate) fn spawn_host_supervised(
         .env("AGENTMUX_HOST_REG_SECRET", &srv.host_reg_secret)
         .env("AGENTMUX_INSTANCE_ID", &srv.instance_id)
         .envs(host_env.iter().cloned())
+        // Auto-start (issue #2977 WS2): translate the launcher's own
+        // `--background` flag into the env the HOST actually reads. The flag
+        // is forwarded to the host in `args` too, but nothing there consumes
+        // it — `AGENTMUX_BACKGROUND_SERVICE` is the real switch, so without
+        // this an auto-started instance would open a normal foreground window
+        // and still quit on last-window-close (Codex P1 on PR #2999).
+        // `background_env_for` also sets `AGENTMUX_TRAY`; see its doc for why
+        // the indicator is not optional in this particular context.
+        .envs(crate::autostart::background_env_for(args))
         .env("AGENTMUX_LAUNCHER_PIPE", pipe_path)
         // Explicit stdio instead of inheriting the launcher's own —
         // `CreateProcess(..., CREATE_SUSPENDED, ...)` for this GUI-subsystem

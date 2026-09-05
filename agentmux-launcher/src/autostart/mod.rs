@@ -19,11 +19,21 @@
 //!   Windows Service (needs admin to register, and Session-0 isolation means
 //!   it structurally cannot show a tray icon), and not a bare `Run` registry
 //!   key (no crash supervision, no delay control).
-//! - **macOS — LaunchAgent plist.** `SMAppService` is the modern API but is
-//!   only callable from inside a signed, bundled app via its ObjC/Swift
-//!   interface; the launcher writes the LaunchAgent directly so the same code
-//!   path works for the portable build too. Both land in the same place from
-//!   `launchd`'s point of view.
+//! - **macOS — LaunchAgent plist. This DEVIATES from the governing spec, and
+//!   the deviation has a user-visible consequence.**
+//!   `SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md` §4 calls
+//!   `SMAppService` "unambiguously current best practice" and notes it is the
+//!   only path that surfaces correctly in **System Settings → Login Items &
+//!   Extensions**. Writing the LaunchAgent directly means the entry may not
+//!   appear there the way a user expects, which matters more than usual here:
+//!   Workstream 4 requires that a user be able to *see* and remove a
+//!   background service, and Login Items is where they will look.
+//!   `SMAppService` is only callable through its ObjC interface from inside a
+//!   **bundled, signed** app, so adopting it means objc2 bindings plus a
+//!   bundle identifier that matches the registered agent — real work that
+//!   cannot be written blind or verified on a non-macOS machine. Recorded as
+//!   a known gap rather than pretended away: macOS auto-start should move to
+//!   `SMAppService` before it is offered to users. (ReAgent P1 on PR #2999.)
 //! - **Linux — XDG autostart `.desktop`.** `systemd --user` is deliberately
 //!   NOT the default: surviving logout needs `loginctl enable-linger`, which
 //!   is a separate, consequential decision the issue says must never be
@@ -46,6 +56,46 @@
 //! touching the machine's real login configuration.
 
 use std::path::Path;
+
+/// The flag every generated artifact passes to the launcher.
+///
+/// This is the ONLY thing that makes an auto-started instance behave like a
+/// background service. Without it being interpreted, an auto-start entry
+/// would just open an ordinary foreground window at login and still quit when
+/// the user closed it — i.e. the feature would silently not work (Codex P1 on
+/// PR #2999).
+pub const BACKGROUND_FLAG: &str = "--background";
+
+/// Did the launcher get started in background mode?
+///
+/// Pure so the argv parsing is testable. Callers turn this into the env the
+/// host actually reads (`AGENTMUX_BACKGROUND_SERVICE`, plus `AGENTMUX_TRAY` —
+/// see `background_env_for`).
+pub fn background_requested(args: &[String]) -> bool {
+    args.iter().any(|a| a == BACKGROUND_FLAG)
+}
+
+/// Environment the host must receive when the launcher was started with
+/// `--background`.
+///
+/// Sets BOTH switches deliberately. Background mode without a tray icon is
+/// the precise anti-pattern Workstream 4 exists to prevent: a process that
+/// starts itself at login, keeps running with no window, and offers the user
+/// no visible indicator that it is there or any way to stop it. Auto-start is
+/// the one context where the indicator is not optional, so `--background`
+/// implies the tray rather than leaving them independently settable.
+///
+/// Returns pairs rather than mutating a `Command` so the mapping is testable.
+pub fn background_env_for(args: &[String]) -> Vec<(&'static str, &'static str)> {
+    if background_requested(args) {
+        vec![
+            ("AGENTMUX_BACKGROUND_SERVICE", "1"),
+            ("AGENTMUX_TRAY", "1"),
+        ]
+    } else {
+        Vec::new()
+    }
+}
 
 /// Identifier used for the artifact on every platform: the Scheduled Task
 /// name, the LaunchAgent label's suffix, and the `.desktop` filename stem.
@@ -166,19 +216,55 @@ pub fn launch_agent_plist(exe: &Path) -> String {
 /// missing value as disabled. `Terminal=false` keeps it from spawning a
 /// console window on desktops that honor it.
 pub fn xdg_desktop_entry(exe: &Path) -> String {
-    // Desktop-entry values are newline-delimited; a newline in the path would
-    // otherwise inject a second key. Paths containing newlines are pathological
-    // but cheap to neutralize.
-    let exe = exe.display().to_string().replace(['\n', '\r'], "");
     format!(
         "[Desktop Entry]\n\
          Type=Application\n\
          Name=AgentMux\n\
          Comment=Starts AgentMux in the background at login\n\
-         Exec=\"{exe}\" --background\n\
+         Exec=\"{exe}\" {flag}\n\
          Terminal=false\n\
-         X-GNOME-Autostart-enabled=true\n"
+         X-GNOME-Autostart-enabled=true\n",
+        exe = desktop_exec_escape(exe),
+        flag = BACKGROUND_FLAG,
     )
+}
+
+/// Escape a path for use inside a **quoted argument** of a desktop entry's
+/// `Exec=` value.
+///
+/// Stripping newlines is not enough (ReAgent/Codex P2 on PR #2999). All of
+/// these are legal in a Unix path and all of them change how the desktop-entry
+/// parser tokenizes the command:
+///
+/// - `"` terminates the quoted argument — the rest of the path becomes
+///   separate argv entries, so the app is launched with the wrong executable.
+/// - `\`, `` ` ``, `$` are reserved inside quoted arguments per the
+///   Desktop Entry Specification and must be backslash-escaped.
+/// - `%` introduces a **field code** (`%f`, `%U`, …); an unescaped one is
+///   substituted by the launcher. The spec's escape for a literal is `%%`.
+/// - newline/CR would end the `Exec=` line entirely and let the remainder be
+///   parsed as further desktop-entry keys (the original guard, kept).
+///
+/// Same injection class the XML path already handles via `xml_escape`; this
+/// is the desktop-entry grammar's version of it.
+fn desktop_exec_escape(exe: &Path) -> String {
+    let raw = exe.display().to_string();
+    let mut out = String::with_capacity(raw.len());
+    for c in raw.chars() {
+        match c {
+            // Reserved inside a quoted argument — escape with a backslash.
+            '"' | '\\' | '`' | '$' => {
+                out.push('\\');
+                out.push(c);
+            }
+            // Field-code introducer; `%%` is the literal.
+            '%' => out.push_str("%%"),
+            // Would terminate the Exec= line and allow key injection.
+            '\n' | '\r' => {}
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 /// Minimal XML text escaping for the two generated XML documents.
@@ -357,6 +443,59 @@ pub fn disable() -> Result<(), String> {
     }
 }
 
+/// Handle the auto-start CLI verbs, if present. Returns `true` when one was
+/// handled and the process should exit.
+///
+/// Without this the module would be unreachable in a shipped build — nothing
+/// could opt in, query, or remove the registration (Codex P1 on PR #2999).
+/// A CLI surface rather than only a UI toggle is deliberate: it gives an
+/// **uninstaller** something to call, which is precisely what Workstream 4's
+/// "one complete, independently-testable uninstall path" needs. A GUI toggle
+/// can be layered on later and should call the same functions.
+///
+/// Verbs (checked before any heavy startup work, so they are cheap and cannot
+/// disturb a running instance):
+/// - `--enable-autostart`  — register, using this executable's own path
+/// - `--disable-autostart` — remove; idempotent, safe to run unconditionally
+/// - `--autostart-status`  — print `enabled` / `disabled`, exit 0 either way
+pub fn handle_cli(args: &[String]) -> bool {
+    let has = |v: &str| args.iter().any(|a| a == v);
+
+    if has("--autostart-status") {
+        println!("{}", if is_enabled() { "enabled" } else { "disabled" });
+        return true;
+    }
+    if has("--enable-autostart") {
+        // Register the CURRENT executable, so an install that moved keeps a
+        // correct entry after the user re-runs this.
+        match std::env::current_exe() {
+            Ok(exe) => match enable(&exe) {
+                Ok(()) => println!("auto-start enabled ({})", exe.display()),
+                Err(e) => {
+                    eprintln!("failed to enable auto-start: {}", e);
+                    std::process::exit(1);
+                }
+            },
+            Err(e) => {
+                eprintln!("failed to resolve current executable: {}", e);
+                std::process::exit(1);
+            }
+        }
+        return true;
+    }
+    if has("--disable-autostart") {
+        match disable() {
+            Ok(()) => println!("auto-start disabled"),
+            Err(e) => {
+                eprintln!("failed to disable auto-start: {}", e);
+                std::process::exit(1);
+            }
+        }
+        return true;
+    }
+    false
+}
+
 #[cfg(test)]
 mod autostart_tests {
     use super::*;
@@ -483,6 +622,53 @@ mod autostart_tests {
 
         // Safe to call unconditionally — the property an uninstaller needs.
         disable().expect("disable must be idempotent");
+    }
+
+    /// Codex P1 on PR #2999: `--background` was forwarded but interpreted
+    /// nowhere, so an auto-started instance would open an ordinary foreground
+    /// window and still quit on last-window-close. The flag must map onto the
+    /// env the host actually reads.
+    #[test]
+    fn the_background_flag_maps_onto_the_env_the_host_actually_reads() {
+        let args = vec!["agentmux.exe".to_string(), BACKGROUND_FLAG.to_string()];
+        assert!(background_requested(&args));
+        let env = background_env_for(&args);
+        assert!(
+            env.contains(&("AGENTMUX_BACKGROUND_SERVICE", "1")),
+            "without this the auto-start entry is inert"
+        );
+    }
+
+    /// Auto-start is the one context where the indicator is not optional:
+    /// a process that starts itself at login and runs with no window and no
+    /// icon is exactly the invisible-background-agent pattern WS4 exists to
+    /// prevent. So `--background` implies the tray.
+    #[test]
+    fn background_mode_also_forces_the_visible_indicator_on() {
+        let args = vec![BACKGROUND_FLAG.to_string()];
+        assert!(background_env_for(&args).contains(&("AGENTMUX_TRAY", "1")));
+    }
+
+    #[test]
+    fn a_normal_launch_sets_no_background_env() {
+        let args = vec!["agentmux.exe".to_string(), "--url=http://x".to_string()];
+        assert!(!background_requested(&args));
+        assert!(
+            background_env_for(&args).is_empty(),
+            "an ordinary launch must be completely unaffected"
+        );
+    }
+
+    #[test]
+    fn exec_escaping_covers_the_desktop_entry_grammar() {
+        // Every one of these is legal in a Unix path and each changes how the
+        // Exec value tokenizes if left raw.
+        let d = xdg_desktop_entry(Path::new(r#"/opt/a"b\c`d$e%f/agentmux"#));
+        assert!(d.contains(r#"\"b"#), "quote must be escaped, not end the argument");
+        assert!(d.contains(r"\\c"), "backslash must be escaped");
+        assert!(d.contains(r"\`d"), "backtick must be escaped");
+        assert!(d.contains(r"\$e"), "dollar must be escaped");
+        assert!(d.contains("%%f"), "percent must be doubled or it reads as a field code");
     }
 
     #[test]

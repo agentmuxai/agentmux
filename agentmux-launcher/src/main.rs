@@ -109,6 +109,17 @@ fn main() {
         return;
     }
 
+    // Auto-start control verbs (issue #2977 WS2). Handled before any heavy
+    // startup work — they must not spawn srv/host or disturb a running
+    // instance. Gives an uninstaller a callable removal path, which is what
+    // Workstream 4 requires.
+    {
+        let args: Vec<String> = std::env::args().collect();
+        if autostart::handle_cli(&args) {
+            return;
+        }
+    }
+
     // macOS: paint the splash FIRST, on the main thread, before any heavy work
     // — this is the whole reason the splash lives in the small fast launcher
     // rather than the slow CEF host. AppKit must own the main thread, so the
