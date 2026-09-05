@@ -252,6 +252,15 @@ pub(super) struct DispatchState {
 #[allow(dead_code)]
 pub(super) struct WatchedAgent {
     pub(super) agent_id: String,
+    /// The block whose id the live consumer loop's closure actually
+    /// captured (`session_belongs_to_block` filtering, and whatever
+    /// `parent_block_id` gets stamped on emitted subagent events) — the
+    /// FIRST block to register this agent_id, preserved explicitly across
+    /// a `recheck_config_dir` repoint so a rebind can never silently swap
+    /// which pane's session subsequent filesystem events get attributed
+    /// to. Deliberately NOT re-derived from `parent_block_ids` (a
+    /// `HashSet` has no defined iteration order) — Codex P2 on PR #2980.
+    pub(super) primary_block_id: String,
     /// Every block currently depending on this shared watcher. `watch_agent`
     /// dedupes by `agent_id` — a second block registering the same agent_id
     /// gets no watcher of its own, it just adds itself here. `unwatch_block`

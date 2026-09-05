@@ -234,6 +234,17 @@ struct WindowEdgeResizeHookEntry {
     original: isize,
     install_label: String,
     session_began: bool,
+    /// The window's `(top, bottom)` in PHYSICAL px as of the start of the
+    /// current native size loop, captured lazily on its first `WM_SIZING`
+    /// tick and cleared on `WM_EXITSIZEMOVE`.
+    ///
+    /// Needed to back OUT of a vertical snap: once
+    /// `window_snap::snap_vertical_fill` has moved the non-dragged edge to
+    /// the work-area edge, nothing would ever move it back (a native resize
+    /// only ever moves the edge under the cursor), so dragging away from the
+    /// screen edge would leave it stranded. See
+    /// `window_snap::unsnap_restore_opposite_edge`.
+    session_origin_top_bottom: Option<(i32, i32)>,
 }
 
 /// Map of top-level HWND -> hook entry for the Shift+window-edge-resize
@@ -290,10 +301,26 @@ fn emit_window_edge_resize_event(
 ///
 /// The renderer computes the pixel delta itself from its own container
 /// rect (no coordinates are forwarded — that sidesteps every
-/// physical-px/DPR/zoom unit question). Pure observer: every message
-/// ALWAYS passes through to the original WndProc.
+/// physical-px/DPR/zoom unit question).
 ///
-/// Spec: `docs/specs/SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26.md` §3.4.
+/// **No longer a pure observer for `WM_SIZING`.** As of
+/// `SPEC_WINDOW_SNAP_MAXIMIZE_2026_09_04.md` §3 this hook also implements
+/// Chrome-style border-drag vertical snap by CLAMPING the proposed rect
+/// (`lParam`) when a top/bottom drag lands near the monitor's work-area
+/// edge — the documented `WM_SIZING` contract explicitly allows the handler
+/// to adjust that rect, and it is the only per-tick point during a NATIVE
+/// resize loop where the app can influence the outcome. Every message still
+/// always reaches the original WndProc; the clamp is applied to the rect
+/// AFTER that passthrough (see the call site for why that order).
+///
+/// Windows' own Snap Assist does not fire for this window because it is a
+/// CEF Views *frameless* window (`AgentMuxWindowDelegate::is_frameless`),
+/// which hands non-client behavior to Chromium's internal
+/// `HWNDMessageHandler` — hence re-implementing the gesture here.
+///
+/// Specs: `docs/specs/SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26.md` §3.4
+/// (the observer half), `docs/specs/SPEC_WINDOW_SNAP_MAXIMIZE_2026_09_04.md` §3
+/// (the snap clamp).
 #[cfg(target_os = "windows")]
 unsafe extern "system" fn window_edge_resize_wndproc(
     hwnd: *mut std::ffi::c_void,
@@ -351,6 +378,12 @@ unsafe extern "system" fn window_edge_resize_wndproc(
     } else if msg == WM_EXITSIZEMOVE {
         let ended = WINDOW_EDGE_RESIZE_WNDPROCS.lock().ok().and_then(|mut m| {
             m.get_mut(&(hwnd as usize)).and_then(|entry| {
+                // Always drop the snap origin — this loop is over either way,
+                // and a stale origin leaking into the NEXT drag would restore
+                // an edge to a rect that no longer exists. Cleared outside the
+                // session_began branch because a plain move loop never sets
+                // that flag but must still not leave state behind.
+                entry.session_origin_top_bottom = None;
                 if entry.session_began {
                     entry.session_began = false;
                     Some(entry.install_label.clone())
@@ -369,17 +402,90 @@ unsafe extern "system" fn window_edge_resize_wndproc(
         }
     }
 
-    // ALWAYS pass through — pure observer, CEF still owns every message.
+    // ALWAYS pass through — CEF still owns every message (the WM_SIZING
+    // rect clamp below adjusts the result, it never swallows the message).
     let original = WINDOW_EDGE_RESIZE_WNDPROCS
         .lock()
         .ok()
         .and_then(|m| m.get(&(hwnd as usize)).map(|e| e.original))
         .unwrap_or(0);
-    let result = if original != 0 {
+    let mut result = if original != 0 {
         CallWindowProcW(Some(std::mem::transmute(original)), hwnd, msg, wparam, lparam)
     } else {
         DefWindowProcW(hwnd, msg, wparam, lparam)
     };
+
+    // Chrome-style border-drag vertical snap (SPEC_WINDOW_SNAP_MAXIMIZE §3).
+    //
+    // Applied AFTER the passthrough, deliberately: Chromium's own WM_SIZING
+    // handling may rewrite the proposed rect (min-size and aspect-ratio
+    // constraints live there), so clamping BEFORE would let it silently
+    // discard the snap. Clamping after makes this the final word for the
+    // vertical axis only. The clamp can only ever move an edge by at most
+    // SNAP_THRESHOLD_PX, so it cannot push the window under Chromium's
+    // minimum height in any realistic configuration.
+    if msg == WM_SIZING && !lparam_is_null(lparam) {
+        if let Some(edge) = crate::client::window_snap::vertical_edge_for_wmsz(wparam) {
+            let rect = lparam as *mut windows_sys::Win32::Foundation::RECT;
+            let proposed = *rect;
+            // Remember where this drag STARTED so a snap can be backed out of
+            // (see `session_origin_top_bottom`). Captured lazily from the
+            // live window rect on the first tick rather than from
+            // WM_ENTERSIZEMOVE: the window hasn't been resized yet at this
+            // point, so GetWindowRect is still the pre-drag geometry, and
+            // this doesn't depend on ENTERSIZEMOVE arriving at all.
+            let origin = {
+                let mut guard = WINDOW_EDGE_RESIZE_WNDPROCS.lock().ok();
+                let entry = guard.as_mut().and_then(|m| m.get_mut(&(hwnd as usize)));
+                entry.and_then(|e| {
+                    if e.session_origin_top_bottom.is_none() {
+                        let mut live: windows_sys::Win32::Foundation::RECT = std::mem::zeroed();
+                        if windows_sys::Win32::UI::WindowsAndMessaging::GetWindowRect(
+                            hwnd, &mut live,
+                        ) != 0
+                        {
+                            e.session_origin_top_bottom = Some((live.top, live.bottom));
+                        }
+                    }
+                    e.session_origin_top_bottom
+                })
+            };
+            if let Some((work_top, work_bottom)) = work_area_vertical_for_drag(&proposed) {
+                let adjusted = crate::client::window_snap::snap_vertical_fill(
+                    edge,
+                    proposed.top,
+                    proposed.bottom,
+                    work_top,
+                    work_bottom,
+                    crate::client::window_snap::SNAP_THRESHOLD_PX,
+                )
+                .or_else(|| {
+                    // Not (or no longer) in the snap zone. If an earlier tick
+                    // of THIS drag snapped, put the non-dragged edge back
+                    // where it started; otherwise this is a no-op.
+                    origin.and_then(|(origin_top, origin_bottom)| {
+                        crate::client::window_snap::unsnap_restore_opposite_edge(
+                            edge,
+                            proposed.top,
+                            proposed.bottom,
+                            origin_top,
+                            origin_bottom,
+                        )
+                    })
+                });
+                if let Some((top, bottom)) = adjusted {
+                    // Vertical axis ONLY — left/right are untouched by
+                    // construction, which is what keeps this a vertical snap
+                    // rather than an accidental maximize.
+                    (*rect).top = top;
+                    (*rect).bottom = bottom;
+                    // TRUE = "the application processed this message" (and
+                    // adjusted the rect), per WM_SIZING's contract.
+                    result = 1;
+                }
+            }
+        }
+    }
 
     // Prune AFTER passthrough so the original proc still receives
     // WM_NCDESTROY (HWND-reuse safety, same as close_routing_wndproc).
@@ -390,6 +496,66 @@ unsafe extern "system" fn window_edge_resize_wndproc(
     }
 
     result
+}
+
+#[cfg(target_os = "windows")]
+fn lparam_is_null(lparam: isize) -> bool {
+    lparam == 0
+}
+
+/// Work-area top/bottom (PHYSICAL px) of the monitor to snap against during
+/// a `WM_SIZING` border drag.
+///
+/// Resolved from the **cursor**, not from the rect. An earlier version keyed
+/// off the rect's center, which picks the wrong monitor whenever a window
+/// straddles two side-by-side displays with different work areas: the center
+/// can still be on monitor A while the edge being dragged is already over
+/// monitor B, so the clamp would fill against A's geometry (reagentx P2).
+/// Using a corner instead is no better — during a top-edge drag the top
+/// corner is the very point crossing the screen boundary, so it flips to the
+/// monitor *above* exactly when the snap should engage.
+///
+/// The cursor sidesteps both: it is physically on the edge being dragged, it
+/// is unambiguous when the window spans monitors, and it is what Windows
+/// itself uses to decide snap targets — which also makes this consistent
+/// with the drag-to-top gesture, whose zone detection is cursor-based for
+/// the same reason.
+///
+/// Falls back to the rect's center if the cursor can't be read, so a
+/// GetCursorPos failure degrades to the old behavior rather than disabling
+/// the snap.
+///
+/// Deliberately does NOT use `app::monitor::get_monitor_work_area` — that
+/// helper converts to DIP for CEF's `Window::set_bounds`, while `WM_SIZING`
+/// rects are physical px. Mixing the two is the unit-confusion bug class
+/// called out in `client::window_snap`'s doc comment.
+#[cfg(target_os = "windows")]
+unsafe fn work_area_vertical_for_drag(
+    rect: &windows_sys::Win32::Foundation::RECT,
+) -> Option<(i32, i32)> {
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+    let mut probe = POINT { x: 0, y: 0 };
+    if GetCursorPos(&mut probe) == 0 {
+        probe = POINT {
+            x: rect.left + (rect.right - rect.left) / 2,
+            y: rect.top + (rect.bottom - rect.top) / 2,
+        };
+    }
+    let hmonitor = MonitorFromPoint(probe, MONITOR_DEFAULTTONEAREST);
+    if hmonitor.is_null() {
+        return None;
+    }
+    let mut info: MONITORINFO = std::mem::zeroed();
+    info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+    if GetMonitorInfoW(hmonitor, &mut info) == 0 {
+        return None;
+    }
+    Some((info.rcWork.top, info.rcWork.bottom))
 }
 
 /// Subclass a top-level window's WndProc to observe the native size loop
@@ -435,6 +601,7 @@ pub(crate) unsafe fn install_window_edge_resize_hook(
                     original,
                     install_label: label.to_string(),
                     session_began: false,
+                    session_origin_top_bottom: None,
                 },
             );
         }

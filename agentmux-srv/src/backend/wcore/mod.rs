@@ -111,27 +111,33 @@ pub fn ensure_initial_data(store: &Store) -> Result<bool, StoreError> {
     // Create initial tab in workspace (pinned, matching Go's isInitialLaunch=true)
     let tab = create_tab_with_opts(store, &ws.oid, "", true)?;
 
-    // Seed the default 4-pane launch layout (agent + swarm + armory +
-    // sysinfo). Shared with the new-window path so "Open another window"
+    // Seed the default 3-pane launch layout (agent + sysinfo + swarm).
+    // Shared with the new-window path so "Open another window"
     // matches first launch.
     seed_default_layout(store, &tab.oid)?;
 
     Ok(first_launch)
 }
 
-/// Seed a tab with the default 4-pane launch layout (agent + swarm + armory
-/// + sysinfo — SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md):
+/// Seed a tab with the default 3-pane launch layout (agent + sysinfo + swarm):
 ///
 /// ```text
 ///   ┌────────────────┬──────────────┐
-///   │                │    swarm     │  size 4 of 10 ≈ 40%
-///   │     agent      ├──────────────┤
-///   │    (tall)      │   armory     │  size 4 of 10 ≈ 40%
-///   │                ├──────────────┤
 ///   │                │   sysinfo    │  size 2 of 10 ≈ 20%
+///   │     agent      ├──────────────┤
+///   │    (tall)      │              │
+///   │                │    swarm     │  size 8 of 10 ≈ 80%
+///   │                │              │
 ///   └────────────────┴──────────────┘
 ///        50% width         50% width
 /// ```
+///
+/// Armory was dropped from the starter set (it's still one click away in the
+/// widget bar) and sysinfo moved above swarm, keeping its previous 20% share
+/// of the right column. Supersedes the 4-pane arrangement from
+/// SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md. Only affects tabs seeded from
+/// here — first launch and newly-created windows; an existing persisted
+/// layout is untouched.
 ///
 /// Shared by first-launch bootstrap (`ensure_initial_data`) and the new-window
 /// path (`server::service`'s `CreateWindow` with an empty workspace) so "Open
@@ -155,27 +161,16 @@ pub(crate) fn seed_default_layout(store: &Store, tab_id: &str) -> Result<(), Sto
     swarm_meta.insert("view".to_string(), serde_json::json!("swarm"));
     let swarm_block = create_block(store, &tab.oid, swarm_meta)?;
 
-    let mut armory_meta = MetaMapType::new();
-    armory_meta.insert("view".to_string(), serde_json::json!("armory"));
-    let armory_block = create_block(store, &tab.oid, armory_meta)?;
-
     let mut sysinfo_meta = MetaMapType::new();
     sysinfo_meta.insert("view".to_string(), serde_json::json!("sysinfo"));
     let sysinfo_block = create_block(store, &tab.oid, sysinfo_meta)?;
 
-    write_default_four_pane_layout(
-        store,
-        tab_id,
-        &agent_block.oid,
-        &swarm_block.oid,
-        &armory_block.oid,
-        &sysinfo_block.oid,
-    )
+    write_default_three_pane_layout(store, tab_id, &agent_block.oid, &swarm_block.oid, &sysinfo_block.oid)
 }
 
-/// Write the default 4-pane launch layout (`agent | [swarm / armory /
-/// sysinfo]`) into `tab_id`'s `LayoutState`, wrapping four block IDs that
-/// the caller has ALREADY created.
+/// Write the default 3-pane launch layout (`agent | [sysinfo / swarm]`) into
+/// `tab_id`'s `LayoutState`, wrapping three block IDs that the caller has
+/// ALREADY created.
 ///
 /// Split out of `seed_default_layout` for the 2nd-window-tear-off desync fix
 /// (#1681). `seed_default_layout` creates its blocks store-only via
@@ -187,17 +182,16 @@ pub(crate) fn seed_default_layout(store: &Store, tab_id: &str) -> Result<(), Sto
 /// them, and `TearOffBlock` rejects them as "block not found" (the reducer never
 /// saw them). Both callers share this one function for the tree shape so the
 /// layout can never drift between the two paths.
-pub(crate) fn write_default_four_pane_layout(
+pub(crate) fn write_default_three_pane_layout(
     store: &Store,
     tab_id: &str,
     agent_block_id: &str,
     swarm_block_id: &str,
-    armory_block_id: &str,
     sysinfo_block_id: &str,
 ) -> Result<(), StoreError> {
     let tab = store.must_get::<Tab>(tab_id)?;
     let (rootnode, focused_node_id, leaforder) =
-        default_four_pane_tree(agent_block_id, swarm_block_id, armory_block_id, sysinfo_block_id);
+        default_three_pane_tree(agent_block_id, swarm_block_id, sysinfo_block_id);
     let mut layout = store.must_get::<LayoutState>(&tab.layoutstate)?;
     layout.rootnode = Some(rootnode);
     layout.focusednodeid = focused_node_id;
@@ -207,23 +201,26 @@ pub(crate) fn write_default_four_pane_layout(
     Ok(())
 }
 
-/// Pure builder for the default 4-pane tree (`agent | [swarm / armory /
-/// sysinfo]`). Returns `(rootnode, focused_node_id, leaforder)`. Shared by
+/// Pure builder for the default 3-pane tree (`agent | [sysinfo / swarm]`).
+/// Returns `(rootnode, focused_node_id, leaforder)`. Shared by
 /// the pre-bootstrap store-direct writer above (first launch — reducer not
 /// hydrated yet) and the post-bootstrap reducer-routed CreateWindow seed
 /// (SPEC_864 Phase 3, `seed_layout_via_reducer`), so the layout shape can
 /// never drift between the two paths.
-pub(crate) fn default_four_pane_tree(
+///
+/// Parameter order is semantic (agent/swarm/sysinfo), NOT top-to-bottom
+/// display order — sysinfo renders above swarm in the right column. Callers
+/// that build their block list positionally must keep passing them by
+/// meaning, not by visual position.
+pub(crate) fn default_three_pane_tree(
     agent_block_id: &str,
     swarm_block_id: &str,
-    armory_block_id: &str,
     sysinfo_block_id: &str,
 ) -> (LayoutNode, String, Vec<LeafOrderEntry>) {
     // Node IDs for each tree position. Leaves get their own node IDs distinct
     // from the block IDs they wrap.
     let agent_node_id = Uuid::new_v4().to_string();
     let swarm_node_id = Uuid::new_v4().to_string();
-    let armory_node_id = Uuid::new_v4().to_string();
     let sysinfo_node_id = Uuid::new_v4().to_string();
     let right_col_id = Uuid::new_v4().to_string();
     let root_id = Uuid::new_v4().to_string();
@@ -251,28 +248,8 @@ pub(crate) fn default_four_pane_tree(
                 flex_direction: FlexDirection::Column,
                 size: 5.0,
                 children: vec![
-                    LayoutNode {
-                        id: swarm_node_id.clone(),
-                        flex_direction: FlexDirection::Row,
-                        size: 4.0,
-                        children: Vec::new(),
-                        data: Some(LayoutNodeData {
-                            block_id: swarm_block_id.to_string(),
-                            ..Default::default()
-                        }),
-                        ..Default::default()
-                    },
-                    LayoutNode {
-                        id: armory_node_id.clone(),
-                        flex_direction: FlexDirection::Row,
-                        size: 4.0,
-                        children: Vec::new(),
-                        data: Some(LayoutNodeData {
-                            block_id: armory_block_id.to_string(),
-                            ..Default::default()
-                        }),
-                        ..Default::default()
-                    },
+                    // sysinfo (CPU) sits ABOVE swarm, keeping the same 20%
+                    // share of the right column it had in the 4-pane layout.
                     LayoutNode {
                         id: sysinfo_node_id.clone(),
                         flex_direction: FlexDirection::Row,
@@ -280,6 +257,17 @@ pub(crate) fn default_four_pane_tree(
                         children: Vec::new(),
                         data: Some(LayoutNodeData {
                             block_id: sysinfo_block_id.to_string(),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                    LayoutNode {
+                        id: swarm_node_id.clone(),
+                        flex_direction: FlexDirection::Row,
+                        size: 8.0,
+                        children: Vec::new(),
+                        data: Some(LayoutNodeData {
+                            block_id: swarm_block_id.to_string(),
                             ..Default::default()
                         }),
                         ..Default::default()
@@ -292,11 +280,11 @@ pub(crate) fn default_four_pane_tree(
         ..Default::default()
     };
 
+    // Display order (agent, then the right column top-to-bottom).
     let leaforder = vec![
         LeafOrderEntry { nodeid: agent_node_id.clone(), blockid: agent_block_id.to_string() },
-        LeafOrderEntry { nodeid: swarm_node_id, blockid: swarm_block_id.to_string() },
-        LeafOrderEntry { nodeid: armory_node_id, blockid: armory_block_id.to_string() },
         LeafOrderEntry { nodeid: sysinfo_node_id, blockid: sysinfo_block_id.to_string() },
+        LeafOrderEntry { nodeid: swarm_node_id, blockid: swarm_block_id.to_string() },
     ];
     (rootnode, agent_node_id, leaforder)
 }
@@ -447,7 +435,7 @@ mod tests {
     }
 
     #[test]
-    fn seed_default_layout_creates_four_pane_layout() {
+    fn seed_default_layout_creates_three_pane_layout() {
         // Regression: "Open another window" opened blank because new windows
         // never received the default layout (only first launch did). This is
         // the shared primitive both paths now use.
@@ -461,9 +449,10 @@ mod tests {
 
         seed_default_layout(&store, &tab.oid).unwrap();
 
-        // 4 blocks: agent + swarm + armory + sysinfo (SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md).
+        // 3 blocks: agent + swarm + sysinfo. Armory is deliberately NOT
+        // seeded any more — it stays reachable from the widget bar.
         let tab = store.must_get::<Tab>(&tab.oid).unwrap();
-        assert_eq!(tab.blockids.len(), 4, "agent + swarm + armory + sysinfo");
+        assert_eq!(tab.blockids.len(), 3, "agent + swarm + sysinfo");
         let views: Vec<String> = tab
             .blockids
             .iter()
@@ -480,13 +469,38 @@ mod tests {
             .collect();
         assert!(views.contains(&"agent".to_string()));
         assert!(views.contains(&"swarm".to_string()));
-        assert!(views.contains(&"armory".to_string()));
         assert!(views.contains(&"sysinfo".to_string()));
+        assert!(!views.contains(&"armory".to_string()), "armory must not be seeded");
 
         // Layout populated (the regression was new windows getting rootnode=None).
         let layout = store.must_get::<LayoutState>(&tab.layoutstate).unwrap();
         assert!(layout.rootnode.is_some(), "rootnode must be populated, not blank");
-        assert_eq!(layout.leaforder.as_ref().unwrap().len(), 4);
+        assert_eq!(layout.leaforder.as_ref().unwrap().len(), 3);
+    }
+
+    /// The right column is `[sysinfo, swarm]` top-to-bottom — CPU above
+    /// swarm, not below it — and sysinfo keeps the 20% share it had in the
+    /// old 4-pane layout. Asserted on the tree directly, since `leaforder`
+    /// alone wouldn't catch the two being swapped in `children`.
+    #[test]
+    fn default_three_pane_tree_puts_sysinfo_above_swarm() {
+        let (root, focused, leaforder) = default_three_pane_tree("b-agent", "b-swarm", "b-sysinfo");
+
+        assert_eq!(root.children.len(), 2, "agent | right-column");
+        let agent = &root.children[0];
+        assert_eq!(agent.data.as_ref().unwrap().block_id, "b-agent");
+        assert_eq!(focused, agent.id, "agent pane starts focused");
+
+        let right = &root.children[1];
+        assert_eq!(right.flex_direction, FlexDirection::Column);
+        assert_eq!(right.children.len(), 2, "sysinfo + swarm only — no armory");
+        assert_eq!(right.children[0].data.as_ref().unwrap().block_id, "b-sysinfo", "sysinfo on top");
+        assert_eq!(right.children[1].data.as_ref().unwrap().block_id, "b-swarm", "swarm below");
+        assert_eq!(right.children[0].size, 2.0);
+        assert_eq!(right.children[1].size, 8.0);
+
+        let order: Vec<&str> = leaforder.iter().map(|e| e.blockid.as_str()).collect();
+        assert_eq!(order, vec!["b-agent", "b-sysinfo", "b-swarm"]);
     }
 
     #[test]

@@ -385,13 +385,39 @@ fn should_quit_on_last_window(armed: bool, draining: bool, visible: usize, regis
     armed && draining && visible == 0 && registered == 0
 }
 
+/// Workstream 0 Phase 1 (`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md`
+/// §7): true iff `registered == 0 && !draining` is the INTENTIONAL
+/// background-service resting state, not a desync. With background-service
+/// mode on, `should_begin_drain` (reducer/quit.rs) permanently declines to
+/// arm a `LastWindowClosed` drain, so `host` can sit at zero registered
+/// windows with `QuitState::Running` (`!draining`) indefinitely — the
+/// designed steady state once the user closes their last window, not a
+/// missed `request_drain` consumption site. `registered > 0` is excluded
+/// deliberately: a live window nobody asked to close is still a real desync
+/// regardless of this mode.
+fn is_background_service_resting(background_service_enabled: bool, draining: bool, registered: usize) -> bool {
+    background_service_enabled && registered == 0 && !draining
+}
+
 /// Companion pure decision: the OS says every window is gone but the reducer
 /// hasn't finished agreeing — either its count still shows a live window (an
 /// UnregisterBrowser dispatch in flight, or a close path that never
 /// dispatched), or (Phase 3) the count reads zero but no drain decision was
 /// ever consumed (`!draining` — a missed Phase-2 consumption site). Both
 /// flavors are the failure mode Step D's watchdog exists to bound.
-fn is_reducer_lagging_os(armed: bool, draining: bool, visible: usize, registered: usize) -> bool {
+/// Excludes the background-service resting state (see
+/// `is_background_service_resting`) from the `!draining` flavor — that state
+/// is intentional, not lagging.
+fn is_reducer_lagging_os(
+    armed: bool,
+    draining: bool,
+    visible: usize,
+    registered: usize,
+    background_service_enabled: bool,
+) -> bool {
+    if is_background_service_resting(background_service_enabled, draining, registered) {
+        return false;
+    }
     armed && visible == 0 && (registered > 0 || !draining)
 }
 
@@ -462,11 +488,12 @@ cef::wrap_task! {
             if QUIT_INITIATED.load(SeqCst) {
                 return;
             }
-            let (registered, draining) = {
+            let (registered, draining, background_service_enabled) = {
                 let st = self.state.host_state.lock();
                 (
                     crate::reducer::count_live_user_windows(&st),
                     st.quit_state != crate::state::QuitState::Running,
+                    st.background_service_enabled,
                 )
             };
             let visible = unsafe { count_visible_user_windows() };
@@ -496,6 +523,21 @@ cef::wrap_task! {
                     target: "wrr",
                     "[wrr] quit watchdog: {} window(s) visible again — stand down",
                     visible
+                );
+                return;
+            }
+            // Workstream 0 Phase 1: 0 visible + 0 registered + not draining is
+            // the intentional background-service resting state (see
+            // `is_background_service_resting`), not a missed `request_drain`
+            // consumption site — stand down instead of falling through to the
+            // forced `quit_message_loop()` below, which would otherwise defeat
+            // the whole point of the mode a few seconds after every last-window
+            // close.
+            if is_background_service_resting(background_service_enabled, draining, registered) {
+                WATCHDOG_LAG_RETRY_COUNT.store(0, SeqCst);
+                tracing::info!(
+                    target: "wrr",
+                    "[wrr] quit watchdog: 0 visible, 0 registered, background-service mode — standing down (resting, not quitting)",
                 );
                 return;
             }
@@ -580,7 +622,7 @@ unsafe fn maybe_quit_on_last_user_window() {
     // `HAD_VISIBLE_USER_WINDOW` is set only on EVENT_OBJECT_SHOW, so it stays
     // false until the page actually loads and the host calls ShowWindow — the
     // correct moment to arm the last-window quit.
-    let (registered, draining) = app_state()
+    let (registered, draining, background_service_enabled) = app_state()
         .get()
         .map(|s| {
             // One lock scope so the count and the drain decision are read
@@ -591,9 +633,9 @@ unsafe fn maybe_quit_on_last_user_window() {
             // (Draining or Quit — both mean a reconcile_quit verdict was
             // consumed at a Phase-2 dispatch site).
             let draining = st.quit_state != crate::state::QuitState::Running;
-            (registered, draining)
+            (registered, draining, st.background_service_enabled)
         })
-        .unwrap_or((0, false));
+        .unwrap_or((0, false, false));
     let armed = HAD_VISIBLE_USER_WINDOW.load(SeqCst);
     if !armed {
         return;
@@ -605,7 +647,7 @@ unsafe fn maybe_quit_on_last_user_window() {
         registered, visible, draining
     );
     if !should_quit_on_last_window(armed, draining, visible, registered) {
-        if is_reducer_lagging_os(armed, draining, visible, registered) {
+        if is_reducer_lagging_os(armed, draining, visible, registered, background_service_enabled) {
             arm_quit_watchdog(registered);
         }
         return;
@@ -667,18 +709,40 @@ mod should_quit_tests {
         use super::is_reducer_lagging_os;
         // Flavor 1 (Step D's original target): OS says gone, reducer count
         // disagrees.
-        assert!(is_reducer_lagging_os(true, true, 0, 1));
-        assert!(is_reducer_lagging_os(true, false, 0, 1));
+        assert!(is_reducer_lagging_os(true, true, 0, 1, false));
+        assert!(is_reducer_lagging_os(true, false, 0, 1, false));
         // Flavor 2 (Phase 3): counts agree at zero but no drain decision was
         // consumed — a missed consumption site; bounded by the same watchdog.
-        assert!(is_reducer_lagging_os(true, false, 0, 0));
+        assert!(is_reducer_lagging_os(true, false, 0, 0, false));
         // Clean quit state (should_quit handles it instead)…
-        assert!(!is_reducer_lagging_os(true, true, 0, 0));
+        assert!(!is_reducer_lagging_os(true, true, 0, 0, false));
         // …windows still visible…
-        assert!(!is_reducer_lagging_os(true, true, 3, 1));
-        assert!(!is_reducer_lagging_os(true, false, 3, 1));
+        assert!(!is_reducer_lagging_os(true, true, 3, 1, false));
+        assert!(!is_reducer_lagging_os(true, false, 3, 1, false));
         // …or before any user window was ever shown (startup).
-        assert!(!is_reducer_lagging_os(false, false, 0, 1));
+        assert!(!is_reducer_lagging_os(false, false, 0, 1, false));
+    }
+
+    #[test]
+    fn watchdog_does_not_arm_for_background_service_resting_state() {
+        use super::is_reducer_lagging_os;
+        // Workstream 0 Phase 1: the exact "Flavor 2" combination above
+        // (0 registered, not draining) is the intentional background-service
+        // resting state when the mode is on — must not arm the watchdog.
+        assert!(!is_reducer_lagging_os(true, false, 0, 0, true));
+        // A genuinely live, un-asked-to-close window still lags regardless of
+        // background-service mode — that flavor is never excused.
+        assert!(is_reducer_lagging_os(true, false, 0, 1, true));
+        assert!(is_reducer_lagging_os(true, true, 0, 1, true));
+    }
+
+    #[test]
+    fn is_background_service_resting_requires_all_three_conditions() {
+        use super::is_background_service_resting;
+        assert!(is_background_service_resting(true, false, 0));
+        assert!(!is_background_service_resting(false, false, 0), "mode must be on");
+        assert!(!is_background_service_resting(true, true, 0), "not while draining");
+        assert!(!is_background_service_resting(true, false, 1), "not with a live window");
     }
 
     #[test]

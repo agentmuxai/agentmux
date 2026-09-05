@@ -31,7 +31,7 @@ import { autoUpdate } from "@floating-ui/dom";
 import { createEffect, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { getRuntimeConfig } from "../buildRuntimeArgs";
-import { getProvider, type ProviderModel } from "../providers";
+import { familyKey, getProvider, type ProviderModel } from "../providers";
 import { applyRuntimeChange } from "../runtime-apply";
 import type { AgentRuntimeConfig, EffortLevel, PermissionMode } from "../types";
 
@@ -110,7 +110,7 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
                 props.blockId,
                 getProvider(props.providerId),
                 { ...runtime(), ...patch },
-                props.blockAtom()?.meta?.["agentMode"] as string | undefined,
+                props.blockAtom()?.meta,
             );
         } catch {
             // Silent — settings retry on next change (matches the prior
@@ -119,6 +119,30 @@ export const AgentRuntimeDropup = (props: AgentRuntimeDropupProps): JSX.Element 
     };
 
     const modelOptions = (): ProviderModel[] => getProvider(props.providerId)?.models ?? FALLBACK_MODEL_OPTIONS;
+
+    // Migrate a persisted model id the live-catalog overlay has superseded.
+    //
+    // `setProviderModels` refreshes CONCRETE (version-pinned) option values
+    // when the authoritative catalog resolves, so an agent configured before
+    // such a bump holds an id that is no longer present in `modelOptions()`.
+    // Left alone, `modelLabel()` falls back to rendering the raw id and
+    // `build()` marks no row `current` — the dropdown silently loses its
+    // selection display for that agent.
+    //
+    // This migrates the PERSISTED value rather than making the lookups
+    // family-tolerant. A display-only fix would show the new row as selected
+    // while block meta still held the old id — reintroducing exactly the
+    // advertise-one/select-another mismatch this PR exists to remove, one
+    // layer further down. Alias values ("opus"/"sonnet") are never superseded,
+    // so they never enter this path. reagent P1, PR #2990.
+    createEffect(() => {
+        const opts = modelOptions();
+        const current = runtime().model;
+        if (!current || opts.length === 0) return;
+        if (opts.some((o) => o.value === current)) return;
+        const replacement = opts.find((o) => familyKey(o.value) === familyKey(current));
+        if (replacement) void updateRuntime({ model: replacement.value });
+    });
 
     const modelLabel = (value: string): string => modelOptions().find((o) => o.value === value)?.label ?? value;
     const effortLabel = (value: string): string => EFFORT_OPTIONS.find((o) => o.value === value)?.label ?? value;

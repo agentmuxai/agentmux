@@ -38,7 +38,7 @@ import { TabRpcClient } from "@/app/store/rpc-util";
 import * as WOS from "@/app/store/wos";
 import { staticTabId } from "@/app/store/global";
 import { buildRuntimeArgs } from "./buildRuntimeArgs";
-import { isPersistentLaunch, selectLaunchArgs } from "./launch-args";
+import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY, selectLaunchArgs, withProviderFlags } from "./launch-args";
 import type { AgentRuntimeConfig } from "./types";
 import type { ProviderDefinition } from "./providers";
 
@@ -52,19 +52,26 @@ export async function applyRuntimeChange(
     provider: ProviderDefinition | undefined,
     updated: AgentRuntimeConfig,
     /**
-     * `block.meta["agentMode"]` — "host" or "container". REQUIRED for
-     * correctness on container agents, defaulted only so existing callers
-     * that predate it keep compiling.
+     * The block's own `meta`. Two things are read from it, and both are
+     * REQUIRED for correctness — it takes the whole object rather than one
+     * extracted field so a third such fact doesn't mean a third parameter:
      *
-     * This function used to branch on `provider.controllerType === "persistent"`
-     * alone — a third, unmigrated copy of the rule `launch-args.ts` now owns
-     * (reagent P1 on PR #2867). On a container agent that rewrote
-     * `--input-format stream-json` straight back into persisted `cmd:args` on
-     * every /model, /effort or /mode change, undoing the launch-time fix, and
-     * forced a controller restart the container path never needed.
+     * - `agentMode` ("host" / "container"). This function used to branch on
+     *   `provider.controllerType === "persistent"` alone — an unmigrated copy
+     *   of the rule `launch-args.ts` now owns (reagent P1 on PR #2867). On a
+     *   container agent that rewrote `--input-format stream-json` straight back
+     *   into persisted `cmd:args` on every /model, /effort or /mode change,
+     *   undoing the launch-time fix, and forced a controller restart the
+     *   container path never needed.
+     * - `agent:provider_flags`. The rebuild below starts from the provider
+     *   catalog, so without reapplying these the user's flags are dropped from
+     *   `cmd:args` by the first runtime change (#2872).
+     *
+     * Optional only so callers predating it keep compiling.
      */
-    agentMode?: string,
+    blockMeta?: Record<string, unknown>,
 ): Promise<void> {
+    const agentMode = blockMeta?.["agentMode"] as string | undefined;
     const oref = WOS.makeORef("block", blockId);
     await RpcApi.SetMetaCommand(TabRpcClient, {
         oref,
@@ -77,7 +84,13 @@ export async function applyRuntimeChange(
     // one with no controller churn at all.
     if (provider && isPersistentLaunch(provider, agentMode)) {
         const baseArgs = selectLaunchArgs(provider, agentMode);
-        const updatedArgs = buildRuntimeArgs(baseArgs, updated, provider.id);
+        // `--fork-session` is deliberately not reapplied — it is a one-shot
+        // launch intent, unlike provider_flags which describe how this agent
+        // always runs. See withProviderFlags' own doc.
+        const updatedArgs = withProviderFlags(
+            buildRuntimeArgs(baseArgs, updated, provider.id),
+            blockMeta?.[PROVIDER_FLAGS_META_KEY],
+        );
         await RpcApi.SetMetaCommand(TabRpcClient, {
             oref,
             meta: { "cmd:args": updatedArgs },

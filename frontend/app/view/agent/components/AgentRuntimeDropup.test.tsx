@@ -137,3 +137,66 @@ describe("AgentRuntimeDropup — click outside", () => {
         expect(screen.getByRole("listbox")).toBeInTheDocument();
     });
 });
+
+describe("AgentRuntimeDropup — superseded persisted model migration", () => {
+    // The live-catalog overlay refreshes CONCRETE option values, so an agent
+    // configured before such a bump holds an id no longer in modelOptions().
+    // Without migration `modelLabel()` renders the raw id and no row is marked
+    // current — the dropdown silently loses its selection display.
+    // reagent P1, PR #2990.
+    // getRuntimeConfig reads a nested object under "agent:runtime", not
+    // dotted keys — see buildRuntimeArgs.ts:153.
+    const metaWith = (model: string) => ({
+        "agent:runtime": { model, permissionMode: "default", effort: "high" },
+    });
+
+    it("migrates a superseded concrete id to its current family member", async () => {
+        const { applyRuntimeChange } = await import("../runtime-apply");
+        vi.mocked(applyRuntimeChange).mockClear();
+
+        render(() => (
+            <AgentRuntimeDropup
+                blockId="block-1"
+                blockAtom={() => ({ meta: metaWith("claude-fable-5") }) as any}
+                providerId="claude"
+            />
+        ));
+
+        await vi.waitFor(() => expect(applyRuntimeChange).toHaveBeenCalled());
+        const cfg = vi.mocked(applyRuntimeChange).mock.calls[0][2] as { model: string };
+        expect(cfg.model).toMatch(/^claude-fable-5-1$/);
+    });
+
+    it("leaves an alias selection untouched", async () => {
+        const { applyRuntimeChange } = await import("../runtime-apply");
+        vi.mocked(applyRuntimeChange).mockClear();
+
+        render(() => (
+            <AgentRuntimeDropup
+                blockId="block-1"
+                blockAtom={() => ({ meta: metaWith("sonnet") }) as any}
+                providerId="claude"
+            />
+        ));
+
+        // Aliases are never superseded, so nothing should be rewritten.
+        await new Promise((r) => setTimeout(r, 20));
+        expect(applyRuntimeChange).not.toHaveBeenCalled();
+    });
+
+    it("leaves an unrecognised id alone rather than guessing a family", async () => {
+        const { applyRuntimeChange } = await import("../runtime-apply");
+        vi.mocked(applyRuntimeChange).mockClear();
+
+        render(() => (
+            <AgentRuntimeDropup
+                blockId="block-1"
+                blockAtom={() => ({ meta: metaWith("some-other-vendor-model-9") }) as any}
+                providerId="claude"
+            />
+        ));
+
+        await new Promise((r) => setTimeout(r, 20));
+        expect(applyRuntimeChange).not.toHaveBeenCalled();
+    });
+});

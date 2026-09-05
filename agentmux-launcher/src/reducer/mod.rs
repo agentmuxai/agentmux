@@ -122,6 +122,14 @@ pub fn update(state: &mut State, cmd: Command, ctx: &Ctx) -> Vec<Event> {
             }
             window::handle_report_window_closed(state, label)
         }
+        Command::ReportBackgroundServiceEnabled { enabled } => {
+            if let Some(err) =
+                connection::enforce_host_only(state, ctx, "ReportBackgroundServiceEnabled")
+            {
+                return vec![err];
+            }
+            window::handle_report_background_service_enabled(state, enabled)
+        }
         Command::ReportPoolWindowAdded { label, saga_id } => {
             if let Some(err) = connection::enforce_host_only(state, ctx, "ReportPoolWindowAdded") {
                 return vec![err];

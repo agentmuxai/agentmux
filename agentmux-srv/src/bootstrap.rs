@@ -919,6 +919,7 @@ pub fn spawn_background_subsystems(
     wstore: &Arc<Store>,
     filestore: &Arc<FileStore>,
     id_store: &Arc<Store>,
+    identity_store: &Arc<Store>,
 ) -> BackgroundSubsystems {
     // Event infrastructure
     let event_bus = Arc::new(EventBus::new());
@@ -1219,7 +1220,12 @@ pub fn spawn_background_subsystems(
     let messagebus = Arc::new(backend::messagebus::MessageBus::new());
 
     // Subagent watcher — monitors Claude Code session dirs for spawned subagents
-    let subagent_watcher = backend::subagent_watcher::SubagentWatcher::spawn(event_bus.clone(), wstore.clone());
+    let subagent_watcher = backend::subagent_watcher::SubagentWatcher::spawn(
+        event_bus.clone(),
+        wstore.clone(),
+        id_store.clone(),
+        identity_store.clone(),
+    );
     // Wires `subagent:backfill_status` (scoped, persisted WPS event) — see
     // `SubagentWatcher`'s `broker` field doc comment for why this is a
     // post-construction setter rather than a constructor parameter.
