@@ -233,6 +233,18 @@
     }
 }
 
+// Tooltip wrapper for the "+" button — same reasoning as .pane-tab-tip
+// above: the Tooltip component wraps its child in a plain unstyled <div>,
+// which would otherwise sit as the flex child instead of the button itself
+// (breaking .pane-tab-strip-add's own `flex: 0 0 auto`, below). Just the
+// flex passthrough — no min/max-width clamp needed here, unlike the
+// per-tab wrapper, since this button's content never needs truncating.
+.pane-tab-strip-add-tip {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: stretch;
+}
+
 // The far-right "+" — always the strip's last flex child (rendered after
 // the <For> in PaneTabStrip.tsx), so it stays pinned at the visual end of
 // the row regardless of tab count.
