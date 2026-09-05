@@ -60,13 +60,36 @@ use cef::{ImplBrowser, ImplBrowserHost};
 /// normally. Nothing here special-cases the quit; it just supplies the drain
 /// decision those gates were already waiting for.
 ///
-/// Runs on the IPC thread, so both steps are posted to the UI thread (CEF
-/// window work is UI-thread-only; see `promote_pool_window`'s own note that
-/// the promote path runs on the IPC thread, not the UI thread).
+/// Runs on the IPC thread (see `promote_pool_window`'s own note that the
+/// promote path runs there, not on the UI thread). The drain flip is done
+/// synchronously here because it only needs the `host_state` lock; the CEF
+/// window work — pool cascade and per-window closes — is posted, because that
+/// genuinely is UI-thread-only.
 pub fn quit_app(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
-    // Snapshot the labels under one short lock, then drop it before posting —
-    // the snapshot-and-drop discipline this codebase uses everywhere for
-    // host_state (never hold it across CEF calls).
+    // 1. Flip QuitState -> Draining{LauncherRequested} FIRST, synchronously,
+    //    on this thread. `BeginDrain` is a pure reducer arm — it only needs
+    //    the `host_state` lock, not the UI thread — and doing it here rather
+    //    than inside the posted task is what makes step 2 gapless.
+    //
+    //    ORDERING IS LOAD-BEARING (ReAgent P1 on PR #2996). Posting the flip
+    //    and then snapshotting left a hole: a creation that had already
+    //    queued its `CreateWindowTask` on the UI thread would run BEFORE the
+    //    posted drain task, so it registered while `quit_state` was still
+    //    `Running` — not flagged by `should_close_on_arrival`, and not in the
+    //    snapshot either, because it had not registered when the snapshot was
+    //    taken. An explicit Quit could silently leave that window open.
+    //
+    //    Flipping first closes it by construction: registration
+    //    (`handle_register_browser`) and this flip both go through the same
+    //    `host_state` mutex, so every user window is on exactly one side of
+    //    it — already registered (and therefore in step 2's snapshot), or
+    //    registering later (and therefore flagged for close-on-arrival).
+    //    There is no interval where a window is neither.
+    state.host_dispatch(crate::reducer::HostCommand::BeginDrain {
+        reason: crate::state::QuitReason::LauncherRequested,
+    });
+
+    // 2. Snapshot AFTER the flip — see above for why the order matters.
     let labels: Vec<String> = {
         let st = state.host_state.lock();
         crate::reducer::live_user_window_labels(&st)
@@ -75,22 +98,25 @@ pub fn quit_app(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
     tracing::warn!(
         target: "wrr",
         window_count = labels.len(),
-        "[quit] explicit quit requested (tray/launcher) — draining with LauncherRequested"
+        "[quit] explicit quit requested (tray/launcher) — drained with LauncherRequested"
     );
 
-    // 1. Flip QuitState -> Draining{LauncherRequested} and cascade-close the
-    //    warm pool. Posted, not called: `begin_drain_and_cascade` is
-    //    UI-thread-only.
+    // 3. Cascade-close the warm pool and re-run the Stage-2 gate. Posted:
+    //    that part IS UI-thread-only. Its own `BeginDrain` is idempotent
+    //    (`handle_begin_drain` returns early when not `Running`), so
+    //    re-dispatching after step 1 is a no-op.
+    //
+    //    This also completes the quit when there are no user windows at all
+    //    (background-service mode resting at zero — the case the tray exists
+    //    for): `BeginDrainCascadeTask` ends in `reevaluate_last_window_quit`,
+    //    which is why that re-check lives inside it.
     let mut drain = crate::ui_tasks::BeginDrainCascadeTask::new(
         state.clone(),
         crate::state::QuitReason::LauncherRequested,
     );
     cef::post_task(cef::ThreadId::UI, Some(&mut drain));
 
-    // 2. Close the user's windows. If there are none (background-service mode
-    //    resting with zero windows — the case the tray exists for), step 1's
-    //    own `reevaluate_last_window_quit` is what completes the quit, which
-    //    is why that re-check lives inside BeginDrainCascadeTask.
+    // 4. Close the user's windows.
     for label in &labels {
         crate::ui_tasks::post_close_window(state, label);
     }
