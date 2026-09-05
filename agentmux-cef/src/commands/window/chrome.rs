@@ -47,17 +47,9 @@ pub fn maximize_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
     let label = args.get("label").and_then(|v| v.as_str()).unwrap_or("main");
     #[cfg(target_os = "windows")]
     unsafe {
-        use windows_sys::Win32::UI::WindowsAndMessaging::*;
         let hwnd = resolve_window_hwnd(state, label);
         if !hwnd.is_null() {
-            let mut placement: WINDOWPLACEMENT = std::mem::zeroed();
-            placement.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
-            GetWindowPlacement(hwnd, &mut placement);
-            if placement.showCmd == SW_MAXIMIZE as u32 {
-                ShowWindow(hwnd, SW_RESTORE);
-            } else {
-                ShowWindow(hwnd, SW_MAXIMIZE);
-            }
+            toggle_maximize_hwnd(hwnd);
             return Ok(serde_json::Value::Null);
         }
     }
@@ -65,6 +57,49 @@ pub fn maximize_window(state: &Arc<AppState>, args: &serde_json::Value) -> Resul
     crate::ui_tasks::post_maximize_window(state, label);
     let _ = (state, args, label);
     Ok(serde_json::Value::Null)
+}
+
+/// Toggle maximize/restore on an already-resolved HWND.
+///
+/// Split out of [`maximize_window`] so callers that ALREADY hold the raw
+/// HWND on the UI thread can reuse the exact placement logic without
+/// round-tripping through label resolution and JSON args — specifically the
+/// drag-to-top snap in `ui_tasks::drag`'s move loop
+/// (`SPEC_WINDOW_SNAP_MAXIMIZE_2026_09_04.md` §2.3), which runs inside a
+/// modal message loop where re-resolving a label would be both pointless
+/// and (given `resolve_window_hwnd` takes `&AppState` locks) needless
+/// contention.
+///
+/// Caller must be on the thread owning the window (Win32 `ShowWindow`
+/// rules); both current call sites are.
+#[cfg(target_os = "windows")]
+pub(crate) unsafe fn toggle_maximize_hwnd(hwnd: *mut std::ffi::c_void) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::*;
+    let mut placement: WINDOWPLACEMENT = std::mem::zeroed();
+    placement.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
+    GetWindowPlacement(hwnd, &mut placement);
+    if placement.showCmd == SW_MAXIMIZE as u32 {
+        ShowWindow(hwnd, SW_RESTORE);
+    } else {
+        ShowWindow(hwnd, SW_MAXIMIZE);
+    }
+}
+
+/// Maximize an already-resolved HWND, with no toggle — a window that is
+/// already maximized stays maximized.
+///
+/// The drag-to-top gesture needs this rather than [`toggle_maximize_hwnd`].
+/// The gesture means "maximize", unconditionally: a toggle would be a
+/// latent trap, silently restoring-down instead on any path where the
+/// window is still maximized at release. That path is not currently
+/// reachable — `ui_tasks::drag::unmaximize_for_drag` restores a maximized
+/// window at drag START, so by release it is never maximized — but the
+/// gesture's meaning does not depend on that invariant holding, and this
+/// function is what keeps the two independent.
+#[cfg(target_os = "windows")]
+pub(crate) unsafe fn maximize_hwnd(hwnd: *mut std::ffi::c_void) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_MAXIMIZE};
+    ShowWindow(hwnd, SW_MAXIMIZE);
 }
 
 /// Toggle a FLOATING pane's OS-window maximize via the pane-state reducer.
