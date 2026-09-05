@@ -132,6 +132,20 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
     let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(10));
     ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
+    // Fairly-ordered priority-lane events awaiting their turn to be sent, one
+    // per `'ws` loop iteration (see the priority-lane branch below and the
+    // pending-priority-flush branch after it). Reagent P1 on this PR's first
+    // revision: forwarding an entire drained batch inside one `select!`
+    // branch body — even a fairly-ordered one — starves `socket.recv()`
+    // (this connection's OWN incoming keystrokes) for the whole batch, since
+    // `select!` only re-polls sibling branches after the chosen branch's body
+    // returns. Trickling the batch out one event per iteration keeps every
+    // send interleaved with a fresh `socket.recv()` poll, exactly like the
+    // pre-fix one-event-per-iteration cadence, while still applying the fair
+    // pane ordering to however the batch is drained.
+    let mut pending_priority: std::collections::VecDeque<serde_json::Value> =
+        std::collections::VecDeque::new();
+
     'ws: loop {
         tokio::select! {
             // Biased: poll branches top-to-bottom so interactive terminal I/O
@@ -201,9 +215,38 @@ async fn handle_ws_connection(mut socket: WebSocket, state: AppState) {
             //   2. Direct broadcasts (e.g., SetMeta's obj:update) — raw
             //      { eventtype: "waveobj:update", oref: "block:xxx", data: ... }
             // This carries terminal echo output and all interactive events.
-            Some(event) = priority_rx.recv() => {
-                if forward_event(&mut socket, event).await {
-                    break;
+            //
+            // Fairness: this lane is shared by EVERY pane on the connection, not
+            // just one. A single FIFO here means a noisy pane (heavy PTY output)
+            // can queue an unbounded number of frames ahead of a different pane's
+            // own keystroke echo, which arrives in the same channel. Draining all
+            // immediately-available events and round-robining them by pane (see
+            // `fair_drain_priority`) bounds that delay to one "round" per distinct
+            // active pane instead of the length of the noisy pane's backlog. See
+            // docs/analysis/ANALYSIS_CROSS_PANE_INPUT_DELAY_UNDER_OUTPUT_LOAD_2026_09_04.md.
+            //
+            // Only drains a fresh batch when `pending_priority` is empty — while
+            // it's still being flushed (one per iteration, below), this branch
+            // stays disabled so we don't pull more out of `priority_rx` than
+            // we've finished sending.
+            Some(event) = priority_rx.recv(), if pending_priority.is_empty() => {
+                let mut fair = fair_drain_priority(event, &mut priority_rx);
+                // `fair` always has >= 1 element (it contains at least `event`).
+                let first = fair.remove(0);
+                pending_priority.extend(fair);
+                if forward_event(&mut socket, first).await {
+                    break 'ws;
+                }
+            }
+
+            // Flush one fairly-ordered priority event per iteration. A no-op
+            // branch guarded on `pending_priority` being non-empty — see the
+            // comment on `pending_priority`'s declaration above for why this
+            // is its own branch instead of a loop in the arm above.
+            _ = std::future::ready(()), if !pending_priority.is_empty() => {
+                let ev = pending_priority.pop_front().expect("guarded non-empty");
+                if forward_event(&mut socket, ev).await {
+                    break 'ws;
                 }
             }
 
@@ -338,6 +381,120 @@ fn coalesce_background(
         map.insert(k, next);
     }
     order.into_iter().filter_map(|k| map.remove(&k)).collect()
+}
+
+/// Sentinel key for every priority-lane event that is NOT a `blockfile`
+/// (terminal/PTY output) event. Not a valid `block:<id>` scope string, so it
+/// can never collide with a real pane key.
+const NON_PANE_EVENT_KEY: &str = "\u{0}non-pane-event";
+
+/// Extract a fairness key so a flood of PTY output from one pane can't queue
+/// an unbounded number of frames ahead of a different pane's own keystroke
+/// echo sitting in the same lane.
+///
+/// Reordering is scoped to `blockfile` events ONLY — that's the one event
+/// type a single pane can flood the shared lane with, and PTY bytes from
+/// different panes are causally independent (only same-pane ordering
+/// matters, which each key's own FIFO group preserves). Every OTHER event
+/// type on this lane (`waveobj:update`, `waveobj:batchedupdates`, the initial
+/// `config` push, RPC replies) returns the same `NON_PANE_EVENT_KEY` and so
+/// stays in ONE FIFO group, never reordered relative to each other.
+///
+/// This restriction is load-bearing, not a simplification: a `waveobj:update`
+/// for object X and a LATER `waveobj:batchedupdates` that also touches X must
+/// never be reordered relative to each other, but an unscoped batch has no
+/// single object id to key on — an earlier version of this function keyed
+/// updates by their individual `oref`/scope and left unscoped batches in
+/// their own group, which let round-robin interleave `[update, delete]` into
+/// `[update, delete, update]`-style reorderings; the frontend doesn't
+/// version-guard deletes, so a resurrected-then-redeleted object could render
+/// as resurrected until reload. See the review discussion on the PR that
+/// introduced this function.
+fn priority_pane_key(event: &serde_json::Value) -> Option<String> {
+    if event["eventtype"] != "rpc" {
+        // Raw (non-rpc) events on this lane are always object-model
+        // broadcasts (e.g. SetMeta's `waveobj:update`), never blockfile —
+        // see `forward_event`'s shape comment.
+        return Some(NON_PANE_EVENT_KEY.to_string());
+    }
+    let inner = event.get("data").and_then(|d| d.get("data"));
+    let is_blockfile = inner.and_then(|d| d.get("event")).and_then(|e| e.as_str())
+        == Some(crate::backend::wps::EVENT_BLOCK_FILE);
+    if !is_blockfile {
+        return Some(NON_PANE_EVENT_KEY.to_string());
+    }
+    inner
+        .and_then(|d| d.get("scopes"))
+        .and_then(|s| s.get(0))
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| Some(NON_PANE_EVENT_KEY.to_string()))
+}
+
+fn enqueue_priority_event(
+    order: &mut Vec<String>,
+    groups: &mut std::collections::HashMap<String, std::collections::VecDeque<serde_json::Value>>,
+    event: serde_json::Value,
+) {
+    let key = priority_pane_key(&event).unwrap_or_default();
+    if !groups.contains_key(&key) {
+        order.push(key.clone());
+    }
+    groups.entry(key).or_default().push_back(event);
+}
+
+/// Drain all immediately-available events from `rx` (including `first`) and
+/// interleave them round-robin by pane (`priority_pane_key`), instead of
+/// forwarding in raw arrival order. Without this, a pane producing output
+/// faster than the socket can flush it fills this same lane with its own
+/// frames, and a different pane's keystroke-echo frame — queued in the same
+/// FIFO — waits behind the entire backlog. Round-robining bounds that wait to
+/// one slot per OTHER distinct pane with events currently queued, regardless
+/// of how deep any single pane's backlog is.
+///
+/// Ordering guarantee: events for the SAME pane are never reordered relative
+/// to each other (each pane's VecDeque is FIFO); only the INTERLEAVING across
+/// different panes changes.
+fn fair_drain_priority(
+    first: serde_json::Value,
+    rx: &mut tokio::sync::mpsc::Receiver<serde_json::Value>,
+) -> Vec<serde_json::Value> {
+    let mut order: Vec<String> = Vec::new();
+    let mut groups: std::collections::HashMap<String, std::collections::VecDeque<serde_json::Value>> =
+        std::collections::HashMap::new();
+
+    enqueue_priority_event(&mut order, &mut groups, first);
+    while let Ok(next) = rx.try_recv() {
+        enqueue_priority_event(&mut order, &mut groups, next);
+    }
+
+    // Common case — only one pane (or only one event) queued this round.
+    // Skip the round-robin bookkeeping and preserve arrival order directly.
+    if order.len() <= 1 {
+        return order
+            .into_iter()
+            .filter_map(|k| groups.remove(&k))
+            .flat_map(|q| q.into_iter())
+            .collect();
+    }
+
+    let total: usize = groups.values().map(|q| q.len()).sum();
+    let mut out = Vec::with_capacity(total);
+    loop {
+        let mut progressed = false;
+        for key in &order {
+            if let Some(q) = groups.get_mut(key) {
+                if let Some(ev) = q.pop_front() {
+                    out.push(ev);
+                    progressed = true;
+                }
+            }
+        }
+        if !progressed {
+            break;
+        }
+    }
+    out
 }
 
 /// Handle an incoming text message.
@@ -1511,4 +1668,156 @@ fn parse_block_input(
         return Ok(blockcontroller::BlockInputUnion::resize(ts));
     }
     Err("controllerinput: no input data, signal, or termsize".to_string())
+}
+
+// ====================================================================
+// Tests
+// ====================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rpc_event(block_id: &str) -> serde_json::Value {
+        json!({
+            "eventtype": "rpc",
+            "data": {
+                "command": "eventrecv",
+                "data": {
+                    "event": "blockfile",
+                    "scopes": [format!("block:{block_id}")],
+                    "data": {"data64": "aGk="},
+                },
+            },
+        })
+    }
+
+    fn raw_waveobj_update(oref: &str) -> serde_json::Value {
+        json!({
+            "eventtype": "waveobj:update",
+            "oref": oref,
+            "data": {},
+        })
+    }
+
+    fn batched_updates_event() -> serde_json::Value {
+        json!({
+            "eventtype": "waveobj:batchedupdates",
+            "data": [],
+        })
+    }
+
+    #[test]
+    fn test_priority_pane_key_from_rpc_blockfile_scopes() {
+        let event = rpc_event("abc123");
+        assert_eq!(priority_pane_key(&event), Some("block:abc123".to_string()));
+    }
+
+    /// Raw (non-rpc) object-model broadcasts are NEVER split by pane —
+    /// splitting them would let round-robin reorder them relative to other
+    /// object updates for the same object (see `priority_pane_key`'s doc
+    /// comment for the concrete resurrected-object failure this prevents).
+    #[test]
+    fn test_priority_pane_key_raw_waveobj_update_is_non_pane() {
+        let event = raw_waveobj_update("block:xyz789");
+        assert_eq!(priority_pane_key(&event), Some(NON_PANE_EVENT_KEY.to_string()));
+    }
+
+    #[test]
+    fn test_priority_pane_key_non_pane_for_batched_updates() {
+        let event = batched_updates_event();
+        assert_eq!(priority_pane_key(&event), Some(NON_PANE_EVENT_KEY.to_string()));
+    }
+
+    /// The core regression this exists to prevent: a noisy pane (A) producing
+    /// many queued frames must not delay a quiet pane's (B) single frame by
+    /// the full length of A's backlog. Round-robin interleaving means B's
+    /// frame comes out within one "round" (bounded by the number of DISTINCT
+    /// panes with queued output), not after every one of A's frames.
+    #[tokio::test]
+    async fn test_fair_drain_priority_interleaves_noisy_and_quiet_panes() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+
+        // Pane A floods 10 frames; pane B contributes exactly 1, queued
+        // in the middle of A's backlog (mirrors real arrival: B's keystroke
+        // echo lands while A's flood is still being drained into the lane).
+        for i in 0..5 {
+            tx.try_send(rpc_event("A")).unwrap();
+            let _ = i;
+        }
+        tx.try_send(rpc_event("B")).unwrap();
+        for _ in 0..5 {
+            tx.try_send(rpc_event("A")).unwrap();
+        }
+
+        let first = rx.recv().await.unwrap();
+        let drained = fair_drain_priority(first, &mut rx);
+
+        assert_eq!(drained.len(), 11, "all 11 queued events must be returned, none dropped");
+
+        // Find B's position in the fairly-drained output — it must appear
+        // near the front (within the first "round" across 2 distinct panes),
+        // not at position 6 where naive FIFO would place it.
+        let b_pos = drained
+            .iter()
+            .position(|e| priority_pane_key(e).as_deref() == Some("block:B"))
+            .expect("pane B's event must be present");
+        assert!(
+            b_pos <= 1,
+            "pane B's frame should be at most 1 slot behind pane A in round-robin order, was at position {b_pos}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_fair_drain_priority_single_pane_preserves_order() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+        for _ in 0..4 {
+            tx.try_send(rpc_event("A")).unwrap();
+        }
+        let first = rx.recv().await.unwrap();
+        let drained = fair_drain_priority(first, &mut rx);
+        assert_eq!(drained.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn test_fair_drain_priority_no_events_lost_across_many_panes() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(256);
+        let pane_ids = ["A", "B", "C", "D"];
+        for (i, pane) in pane_ids.iter().cycle().take(40).enumerate() {
+            let _ = i;
+            tx.try_send(rpc_event(pane)).unwrap();
+        }
+        let first = rx.recv().await.unwrap();
+        let drained = fair_drain_priority(first, &mut rx);
+        assert_eq!(drained.len(), 40);
+    }
+
+    /// Regression test for the object-ordering bug caught in review: a
+    /// `waveobj:update` for object X followed by a LATER
+    /// `waveobj:batchedupdates` that also touches X must come out in the
+    /// same relative order they arrived in. An earlier version of
+    /// `priority_pane_key` keyed the individual update by its oref and left
+    /// the unscoped batch in its own group, so round-robin turned
+    /// `[update1, update2, batch]` into `[update1, batch, update2]` —
+    /// resurrecting a deleted object on the frontend until reload (the
+    /// frontend doesn't version-guard deletes). Object-model events must
+    /// never be split by pane key, only `blockfile` (terminal output) events
+    /// may be.
+    #[tokio::test]
+    async fn test_fair_drain_priority_preserves_object_update_order() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(64);
+
+        let update1 = raw_waveobj_update("tab:X");
+        let update2 = raw_waveobj_update("tab:X");
+        let batch_delete = batched_updates_event();
+
+        tx.try_send(update1.clone()).unwrap();
+        tx.try_send(update2.clone()).unwrap();
+        tx.try_send(batch_delete.clone()).unwrap();
+
+        let first = rx.recv().await.unwrap();
+        let drained = fair_drain_priority(first, &mut rx);
+
+        assert_eq!(drained, vec![update1, update2, batch_delete], "object-model events must stay in pure arrival order, never reordered by round-robin");
+    }
 }
