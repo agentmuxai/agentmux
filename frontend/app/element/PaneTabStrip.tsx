@@ -208,21 +208,27 @@ export function PaneTabStrip<T>(props: PaneTabStripProps<T>): JSX.Element {
                     )}
                 </For>
                 <Show when={props.onAdd}>
-                    <button
-                        type="button"
-                        class={`pane-tab-strip-add${props.addLabel ? " pane-tab-strip-add-labeled" : ""}`}
-                        title={props.addTitle ?? "New tab"}
-                        aria-label={props.addLabel ?? props.addTitle ?? "New tab"}
-                        onClick={() => props.onAdd!()}
-                    >
-                        {/* Wrapped so the glyph itself can be nudged (PaneTabStrip.scss's
-                            .pane-tab-strip-add-glyph) without moving the button's own
-                            box/hover-background/border — see that rule's comment. */}
-                        <span class="pane-tab-strip-add-glyph">+</span>
-                        <Show when={props.addLabel}>
-                            <span class="pane-tab-strip-add-label">{props.addLabel}</span>
-                        </Show>
-                    </button>
+                    {/* Tooltip (Portal-based), same reason as the per-tab one
+                        above: native `title` is slow/inconsistent in CEF.
+                        delayMs={0} — instant, matching the status bar's own
+                        tooltip feel (that one's a separate data-tip/Portal
+                        system, but the same "no perceptible delay" intent). */}
+                    <Tooltip divClassName="pane-tab-strip-add-tip" content={props.addTitle ?? "New tab"} delayMs={0}>
+                        <button
+                            type="button"
+                            class={`pane-tab-strip-add${props.addLabel ? " pane-tab-strip-add-labeled" : ""}`}
+                            aria-label={props.addLabel ?? props.addTitle ?? "New tab"}
+                            onClick={() => props.onAdd!()}
+                        >
+                            {/* Wrapped so the glyph itself can be nudged (PaneTabStrip.scss's
+                                .pane-tab-strip-add-glyph) without moving the button's own
+                                box/hover-background/border — see that rule's comment. */}
+                            <span class="pane-tab-strip-add-glyph">+</span>
+                            <Show when={props.addLabel}>
+                                <span class="pane-tab-strip-add-label">{props.addLabel}</span>
+                            </Show>
+                        </button>
+                    </Tooltip>
                 </Show>
             </div>
         </div>

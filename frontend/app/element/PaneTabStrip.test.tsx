@@ -6,7 +6,7 @@
  * Spec: docs/specs/SPEC_PANE_TAB_STRIP_AGENT_TERMINAL_2026_07_20.md §3.1.
  */
 
-import { cleanup, render, screen } from "@solidjs/testing-library";
+import { cleanup, fireEvent, render, screen } from "@solidjs/testing-library";
 import userEvent from "@testing-library/user-event";
 import { createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -170,11 +170,45 @@ describe("PaneTabStrip", () => {
         // layout as of
         // docs/specs/SPEC_PANE_TAB_STRIP_CHROME_ZOOM_AND_SCROLL_CLEARANCE_2026_08_12.md
         // §A.2 — the outer box now only wraps that one inner layer.
+        // The button itself is wrapped in the Tooltip's own div
+        // (.pane-tab-strip-add-tip, instant delayMs={0} — same reasoning as
+        // the per-tab Tooltip above it), so the flex-last child is that
+        // wrapper, not addBtn directly; assert it CONTAINS addBtn instead.
         const inner = container.querySelector(".pane-tab-strip-inner");
-        expect(inner?.lastElementChild).toBe(addBtn);
+        expect(inner?.lastElementChild).toContainElement(addBtn);
         const user = userEvent.setup();
         await user.click(addBtn);
         expect(onAdd).toHaveBeenCalledTimes(1);
+    });
+
+    // Native `title` is slow/inconsistent in CEF (same reasoning as the
+    // per-tab Tooltip) — the + button's tooltip uses the Portal-based
+    // Tooltip component with delayMs={0} instead, so it shows essentially
+    // immediately rather than after the component's own 300ms default.
+    it("shows the + button's tooltip almost immediately (delayMs={0}), not after the 300ms default", () => {
+        vi.useFakeTimers();
+        try {
+            const { container } = render(() => (
+                <PaneTabStrip
+                    tabs={TABS}
+                    activeId="a"
+                    getId={(t: T) => t.id}
+                    getLabel={(t: T) => t.label}
+                    onActivate={vi.fn()}
+                    onAdd={vi.fn()}
+                    addTitle="New shell tab"
+                />
+            ));
+            const wrapper = container.querySelector(".pane-tab-strip-add-tip") as HTMLElement;
+            expect(wrapper).not.toBeNull();
+            fireEvent.mouseEnter(wrapper);
+            // Advance far less than the Tooltip default (300ms) — if this
+            // still passed the default, the tooltip wouldn't be visible yet.
+            vi.advanceTimersByTime(10);
+            expect(document.body.textContent).toContain("New shell tab");
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     // The agent pane's "+ New Agent". Opt-in per pane so the editor and
