@@ -99,8 +99,7 @@ impl AgentMuxHandler {
         }
 
         // Phase 1 diagnostic tracing — find the exact line that silences the
-        // UI thread under concurrent window creation. See
-        // docs/specs/SPEC_HOST_WINDOW_CREATION_RUNNER_2026-05-02.md.
+        // UI thread under concurrent window creation.
         let t0 = std::time::Instant::now();
 
         // Phase B.5 (window_meta step d) — pop the pre-create
