@@ -22,14 +22,14 @@
  * universal modal system per `feedback_use_universal_modal_system`.
  */
 
-import { createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show, type JSX } from "solid-js";
+import { createEffect, createMemo, createResource, createSignal, For, onCleanup, onMount, Show, untrack, type JSX } from "solid-js";
 
 import { Button } from "@/element/button";
 import { RpcApi } from "@/app/store/rpc-api";
 import { TabRpcClient } from "@/app/store/rpc-util";
 import { getCliCatalogEntry } from "../defaults/cli-catalog";
 import { PROVIDERS } from "../providers/catalog";
-import { getProvider } from "../providers";
+import { familyKey, getProvider } from "../providers";
 import { resolveEffectiveLaunchProvider } from "../agent-launch-env";
 import { providerSupportsModelFlag } from "../buildRuntimeArgs";
 import { isAvailable, watchCapability } from "@/app/store/toolchain-capabilities";
@@ -144,8 +144,24 @@ export const AgentCreateFromTemplateModalPanel = (
     // (modelTouched), mirroring runtimeTouched below.
     let modelTouched = false;
     createEffect(() => {
-        if (modelTouched) return;
-        setModel(modelOptions().find((m) => m.default)?.value ?? modelOptions()[0]?.value ?? "");
+        const opts = modelOptions();
+        if (!modelTouched) {
+            setModel(opts.find((m) => m.default)?.value ?? opts[0]?.value ?? "");
+            return;
+        }
+        // The user has chosen, so we normally leave their pick alone — but a
+        // CONCRETE (version-pinned) option value can be *replaced* underneath
+        // them: `setProviderModels` refreshes those values when the live
+        // catalog resolves, which can land after a selection is made. Without
+        // this, the list would show the refreshed row while `model()` still
+        // held the old id, and submit sends `model()` — creating the exact
+        // advertise-one/select-another gap this PR set out to close.
+        // Alias rows are unaffected (their values never change). Codex P2,
+        // PR #2990.
+        const current = untrack(model);
+        if (!current || opts.some((m) => m.value === current)) return;
+        const replacement = opts.find((m) => familyKey(m.value) === familyKey(current));
+        if (replacement) setModel(replacement.value);
     });
     const pickModel = (v: string) => {
         modelTouched = true;
