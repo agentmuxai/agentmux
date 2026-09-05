@@ -134,13 +134,16 @@ pub fn background_service_from_env() -> bool {
 /// Non-fatal by construction: a tray that fails to start must never take the
 /// app down with it. The launcher supervises `srv` and `host`; a cosmetic
 /// icon is the least important thing it owns.
-pub fn start_if_enabled() -> Option<mpsc::Receiver<TrayAction>> {
+pub fn start_if_enabled(
+    _data_dir: std::path::PathBuf,
+    _dir_hash: String,
+) -> Option<mpsc::Receiver<TrayAction>> {
     if !should_enable(tray_opt_in_from_env(), background_service_from_env()) {
         return None;
     }
     #[cfg(target_os = "windows")]
     {
-        match windows::spawn() {
+        match windows::spawn(_data_dir, _dir_hash) {
             Ok(rx) => {
                 crate::log("tray: started (windows)");
                 Some(rx)

@@ -42,13 +42,16 @@ use super::TrayAction;
 /// Errors are returned rather than panicking: `start_if_enabled` degrades to
 /// "no tray" on failure, because a cosmetic icon must never take down the
 /// process that supervises `srv` and `host`.
-pub fn spawn() -> Result<mpsc::Receiver<TrayAction>, String> {
+pub fn spawn(
+    data_dir: std::path::PathBuf,
+    dir_hash: String,
+) -> Result<mpsc::Receiver<TrayAction>, String> {
     let (tx, rx) = mpsc::channel::<TrayAction>();
 
     std::thread::Builder::new()
         .name("agentmux-tray".into())
         .spawn(move || {
-            if let Err(e) = run(tx) {
+            if let Err(e) = run(tx, data_dir, dir_hash) {
                 crate::log(&format!("tray: thread exiting: {}", e));
             }
         })
@@ -57,41 +60,123 @@ pub fn spawn() -> Result<mpsc::Receiver<TrayAction>, String> {
     Ok(rx)
 }
 
+/// Custom message telling the tray thread that service reachability changed.
+/// `WM_APP` is the documented base for application-private messages.
+const WM_AGENTMUX_STATUS: u32 = windows_sys::Win32::UI::WindowsAndMessaging::WM_APP + 1;
+
+/// How often to re-check whether the background service is actually
+/// reachable. Cheap (a loopback connect with a short timeout) and slow enough
+/// to be invisible; the icon is a status indicator, not a monitor.
+const STATUS_POLL: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Is the background service actually reachable *right now*?
+///
+/// Deliberately the same question `forward_host_cmd` has to answer — port file
+/// readable AND the host's IPC port accepting a connection — because that is
+/// what the indicator should mean: "would Open work if you clicked it?".
+/// Checking only that the port file exists would keep claiming "running" after
+/// a host crash, since the file outlives a hard exit (see `lib.rs`, which
+/// removes it only on a clean `run_message_loop` return).
+fn service_reachable(data_dir: &std::path::Path, dir_hash: &str) -> bool {
+    let port_file = data_dir.join(format!("ipc-port-{}", dir_hash));
+    let Ok(contents) = std::fs::read_to_string(&port_file) else {
+        return false;
+    };
+    let Some((port_str, _token)) = contents.trim().split_once(':') else {
+        return false;
+    };
+    let Ok(port) = port_str.parse::<u16>() else {
+        return false;
+    };
+    let addr: std::net::SocketAddr = ([127, 0, 0, 1], port).into();
+    std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_millis(400)).is_ok()
+}
+
 /// Create the icon and pump messages until the process ends.
 ///
 /// Everything here runs on the tray thread. `tray-icon` and `muda` both
 /// require that their objects be created on, and pumped by, the same thread —
 /// hence construction happens inside this function rather than being passed
 /// in from `spawn`.
-fn run(tx: mpsc::Sender<TrayAction>) -> Result<(), String> {
+fn run(
+    tx: mpsc::Sender<TrayAction>,
+    data_dir: std::path::PathBuf,
+    dir_hash: String,
+) -> Result<(), String> {
     use muda::{Menu, MenuEvent, MenuItem as MudaItem};
     use tray_icon::{TrayIconBuilder, TrayIconEvent};
 
-    // Build the menu from the platform-neutral model so the labels/ordering
-    // are the ones covered by `tray_model_tests`, not a second copy.
-    // `running` is true here: the tray only starts when background-service
-    // mode is on and the launcher is up, which is exactly "running".
-    let model = super::menu_model(true);
+    // Start from the REAL state, not an assumption. The tray is created
+    // before `srv`/`host` are spawned, so hard-coding "running" here would
+    // make the icon claim the service is up during the entire startup window
+    // — and again during every restart. WS4 requires this icon be a
+    // *reliable* indicator, so it is driven from `service_reachable`
+    // throughout (Codex P2 on PR #2996).
+    let mut running = service_reachable(&data_dir, &dir_hash);
+    let model = super::menu_model(running);
     let menu = Menu::new();
     // Keep the muda items alive alongside their action, so a menu event's id
     // can be mapped back to the action it came from. muda identifies
     // selections by item id, not by index.
     let mut items: Vec<(muda::MenuId, TrayAction)> = Vec::new();
+    // The first item's label tracks running-state, so keep a handle to it.
+    let mut open_item: Option<MudaItem> = None;
     for entry in &model {
         let item = MudaItem::new(&entry.label, true, None);
         items.push((item.id().clone(), entry.action));
         menu.append(&item)
             .map_err(|e| format!("append menu item {:?}: {}", entry.label, e))?;
+        if entry.action == TrayAction::OpenWindow {
+            open_item = Some(item);
+        }
     }
 
-    let _tray = TrayIconBuilder::new()
+    let tray = TrayIconBuilder::new()
         .with_menu(Box::new(menu))
-        .with_tooltip(super::tooltip(true))
+        .with_tooltip(super::tooltip(running))
         .with_icon(icon())
         .build()
         .map_err(|e| format!("build tray icon: {}", e))?;
 
-    crate::log("tray: icon created; entering message pump");
+    // Status poller. Runs off the tray thread (it does blocking I/O and must
+    // not stall the pump), and nudges the pump via a thread message when the
+    // answer changes. `PostThreadMessageW` is delivered to `GetMessageW` with
+    // a null hwnd, which is exactly what the pump below already does — so the
+    // pump we had to introduce for the icon also earns its keep here.
+    unsafe {
+        use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+        use windows_sys::Win32::UI::WindowsAndMessaging::PostThreadMessageW;
+        let tray_thread = GetCurrentThreadId();
+        let poll_dir = data_dir.clone();
+        let poll_hash = dir_hash.clone();
+        std::thread::Builder::new()
+            .name("agentmux-tray-status".into())
+            .spawn(move || {
+                let mut last = running;
+                loop {
+                    std::thread::sleep(STATUS_POLL);
+                    let now = service_reachable(&poll_dir, &poll_hash);
+                    if now != last {
+                        last = now;
+                        // wparam carries the new state; the pump reads it
+                        // rather than re-probing, so the displayed value is
+                        // exactly the one that was observed.
+                        PostThreadMessageW(
+                            tray_thread,
+                            WM_AGENTMUX_STATUS,
+                            now as usize,
+                            0,
+                        );
+                    }
+                }
+            })
+            .ok();
+    }
+
+    crate::log(&format!(
+        "tray: icon created (service_reachable={}); entering message pump",
+        running
+    ));
 
     // The pump. This is the launcher's first, and deliberately only, Win32
     // message loop (§7.5). `GetMessageW` blocks, so this thread costs nothing
@@ -108,6 +193,27 @@ fn run(tx: mpsc::Sender<TrayAction>) -> Result<(), String> {
             if got == 0 || got == -1 {
                 break;
             }
+
+            // Reachability changed — refresh both surfaces the user reads.
+            // Handled here (not in the poller) because muda/tray-icon objects
+            // must only be touched on the thread that created them.
+            if msg.message == WM_AGENTMUX_STATUS {
+                running = msg.wParam != 0;
+                let _ = tray.set_tooltip(Some(super::tooltip(running)));
+                if let Some(item) = &open_item {
+                    // Reuse the shared model so the label wording stays in one
+                    // place (and stays covered by `tray_model_tests`).
+                    if let Some(entry) = super::menu_model(running)
+                        .into_iter()
+                        .find(|e| e.action == TrayAction::OpenWindow)
+                    {
+                        item.set_text(entry.label);
+                    }
+                }
+                crate::log(&format!("tray: service_reachable -> {}", running));
+                continue;
+            }
+
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
 

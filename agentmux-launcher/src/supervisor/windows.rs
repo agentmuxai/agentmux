@@ -14,6 +14,52 @@ use crate::{
     second_instance, srv_spawner, startup_events, state, tray,
 };
 
+/// Forward a tray action to the host, retrying while the failure is
+/// `Transient`.
+///
+/// The tray starts as soon as the single-instance pipe is claimed — before
+/// `srv`/`host` are spawned, and well before the host publishes
+/// `ipc-port-<hash>`. So a user who clicks Quit (or Open) during startup hits
+/// exactly the `Transient` case `ForwardError` already distinguishes: "the
+/// instance is alive but not serving IPC yet". Dropping that request meant a
+/// startup-time Quit silently did nothing and the app carried on booting
+/// (Codex P2 on PR #2996).
+///
+/// Retries only `Transient`. `Fatal` means the port file was readable but the
+/// HTTP path failed — a hung or genuinely broken host, where retrying just
+/// hides the problem, so it is logged once and dropped.
+///
+/// The budget covers a slow cold start (first-run Defender scan, CEF init)
+/// without leaving a click queued forever: a request the user made a minute
+/// ago is no longer one they want acted on.
+fn forward_tray_cmd(data_dir: &std::path::Path, dir_hash: &str, cmd: &str) {
+    const MAX_ATTEMPTS: u32 = 30;
+    const DELAY: std::time::Duration = std::time::Duration::from_secs(1);
+
+    for attempt in 1..=MAX_ATTEMPTS {
+        match second_instance::forward_host_cmd(data_dir, dir_hash, cmd) {
+            Ok(()) => {
+                log(&format!("tray: {} forwarded (attempt {})", cmd, attempt));
+                return;
+            }
+            Err(ForwardError::Transient(e)) => {
+                if attempt == MAX_ATTEMPTS {
+                    log(&format!(
+                        "tray: {} gave up after {} transient failures ({}) — host never became reachable",
+                        cmd, MAX_ATTEMPTS, e
+                    ));
+                    return;
+                }
+                std::thread::sleep(DELAY);
+            }
+            Err(ForwardError::Fatal(e)) => {
+                log(&format!("tray: {} failed fatally, not retrying: {}", cmd, e));
+                return;
+            }
+        }
+    }
+}
+
 /// SPEC_PILLAR1_STEP4 Phase 4 — re-arm the pre-splash for a crash-restart.
 /// Not a no-op wrapper around `spawn_splash`: it exists so both restart
 /// branches (OOM, Abnormal) share one call site rather than duplicating the
@@ -265,7 +311,7 @@ pub(crate) async fn run_windows(
     // tray is off (the default) or fails to start, and the action loop below
     // is a detached thread. A cosmetic icon must never be able to stall or
     // kill the supervisor that owns srv + host.
-    if let Some(tray_rx) = tray::start_if_enabled() {
+    if let Some(tray_rx) = tray::start_if_enabled(paths.data_dir.clone(), dir_hash.clone()) {
         let tray_data_dir = paths.data_dir.clone();
         let tray_dir_hash = dir_hash.clone();
         std::thread::Builder::new()
@@ -274,35 +320,17 @@ pub(crate) async fn run_windows(
                 // Blocks on recv; ends when the tray thread drops its sender
                 // (i.e. at process exit).
                 while let Ok(action) = tray_rx.recv() {
-                    match action {
-                        tray::TrayAction::OpenWindow => {
-                            // Exactly the path a second launch / the macOS
-                            // reopen delegate uses — see design doc §7.5.1.
-                            match second_instance::forward_host_cmd(
-                                &tray_data_dir,
-                                &tray_dir_hash,
-                                "open_new_window",
-                            ) {
-                                Ok(()) => log("tray: open_new_window forwarded"),
-                                Err(_) => log("tray: open_new_window forward failed"),
-                            }
-                        }
-                        tray::TrayAction::Quit => {
-                            // Graceful: `quit_app` drains with
-                            // LauncherRequested so srv still gets its
-                            // per-window cleanup. Killing the job object here
-                            // instead would leak srv rows and resurrect ghost
-                            // windows on next launch.
-                            match second_instance::forward_host_cmd(
-                                &tray_data_dir,
-                                &tray_dir_hash,
-                                "quit_app",
-                            ) {
-                                Ok(()) => log("tray: quit_app forwarded"),
-                                Err(_) => log("tray: quit_app forward failed"),
-                            }
-                        }
-                    }
+                    let cmd = match action {
+                        // Exactly the path a second launch / the macOS reopen
+                        // delegate uses — see design doc §7.5.1.
+                        tray::TrayAction::OpenWindow => "open_new_window",
+                        // Graceful: `quit_app` drains with LauncherRequested
+                        // so srv still gets its per-window cleanup. Killing
+                        // the job object here instead would leak srv rows and
+                        // resurrect ghost windows on next launch.
+                        tray::TrayAction::Quit => "quit_app",
+                    };
+                    forward_tray_cmd(&tray_data_dir, &tray_dir_hash, cmd);
                 }
                 log("tray: action loop ended");
             })

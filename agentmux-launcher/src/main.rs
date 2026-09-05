@@ -23,6 +23,7 @@
     windows_subsystem = "windows"
 )]
 
+mod autostart;
 mod binary_resolution;
 mod data_dir;
 mod diag;
