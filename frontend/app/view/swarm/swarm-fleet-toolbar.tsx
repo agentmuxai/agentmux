@@ -16,9 +16,23 @@ const STAGING_ELIGIBLE_AT = 5;
 const DEFAULT_BATCH_SIZE = 3;
 const DEFAULT_MAX_FAIL_PERCENTAGE = 50;
 
-export function FleetToolbar({ model }: { model: SwarmViewModel }): JSX.Element {
+export function FleetToolbar({
+    model,
+    allBlockIds,
+}: {
+    model: SwarmViewModel;
+    /** Every currently-listed agent's blockId, for "Select all". Passed down
+     *  rather than read via `model.buildTree()` here — SwarmView already
+     *  computes this from the same memo the row list renders from, so the
+     *  toolbar and the rows never disagree about what's selectable. */
+    allBlockIds: () => string[];
+}): JSX.Element {
     const selected = () => model.selectedBlockIdsAtom();
     const count = () => selected().size;
+    const allSelected = () => {
+        const ids = allBlockIds();
+        return ids.length > 0 && ids.every((id) => selected().has(id));
+    };
 
     const [broadcastOpen, setBroadcastOpen] = createSignal(false);
     const [broadcastText, setBroadcastText] = createSignal("");
@@ -52,17 +66,33 @@ export function FleetToolbar({ model }: { model: SwarmViewModel }): JSX.Element 
         await model.saveSelectionAsGroup(name);
     };
 
-    // Shown whenever there's either a live selection to act on OR a saved
-    // group to offer — a saved group must stay reachable as a one-click way
-    // to RESTORE a selection even when nothing is currently checked (Codex
-    // P2, PR #2687 review: the whole toolbar, including the group picker,
-    // used to be gated on count() > 0, so a group could never be the FIRST
-    // thing a user reached for).
-    const showToolbar = () => count() > 0 || model.fleetGroupsAtom().length > 0;
+    // Shown whenever there's at least one agent to select, a live selection
+    // to act on, OR a saved group to offer — a saved group must stay
+    // reachable as a one-click way to RESTORE a selection even when nothing
+    // is currently checked (Codex P2, PR #2687 review: the whole toolbar,
+    // including the group picker, used to be gated on count() > 0, so a
+    // group could never be the FIRST thing a user reached for). "Select all"
+    // needs the same always-reachable treatment — it's the other way to
+    // start a selection from zero.
+    const showToolbar = () => allBlockIds().length > 0 || count() > 0 || model.fleetGroupsAtom().length > 0;
 
     return (
         <Show when={showToolbar()}>
             <div class="swarm-fleet-toolbar">
+                {/* Select all / none is reachable independent of the current
+                    count — it's how a selection gets started OR cleared in
+                    one click, not an action that requires one first. */}
+                <Show when={allBlockIds().length > 0}>
+                    <button
+                        type="button"
+                        class="swarm-fleet-btn"
+                        onClick={() => (allSelected() ? model.clearSelection() : model.selectAll(allBlockIds()))}
+                    >
+                        <i class={allSelected() ? "fa-solid fa-square-check" : "fa-regular fa-square"} />{" "}
+                        {allSelected() ? "Select none" : "Select all"}
+                    </button>
+                </Show>
+
                 {/* Never "act on selected" without stating the concrete count
                     first (spec §3: hidden scope is the top accidental-broadcast
                     cause). Selection-dependent actions below are gated on
@@ -106,14 +136,21 @@ export function FleetToolbar({ model }: { model: SwarmViewModel }): JSX.Element 
                         </button>
                     </Show>
 
-                    <button
-                        type="button"
-                        class="swarm-fleet-btn swarm-fleet-btn--destructive"
-                        disabled={model.fleetActionInFlightAtom()}
-                        onClick={() => setStopConfirmOpen(true)}
-                    >
-                        <i class="fa-solid fa-stop" /> Stop {count()}
-                    </button>
+                    {/* Hidden while the broadcast composer is open — two
+                        destructive-adjacent actions competing for the same
+                        row invites mis-clicks, and Stop's own confirm modal
+                        already covers the "changed my mind" path once this
+                        reappears (Cancel closes the composer, not Stop). */}
+                    <Show when={!broadcastOpen()}>
+                        <button
+                            type="button"
+                            class="swarm-fleet-btn swarm-fleet-btn--destructive"
+                            disabled={model.fleetActionInFlightAtom()}
+                            onClick={() => setStopConfirmOpen(true)}
+                        >
+                            <i class="fa-solid fa-stop" /> Stop {count()}
+                        </button>
+                    </Show>
                 </Show>
 
                 <div class="swarm-fleet-group-picker">

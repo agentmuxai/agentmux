@@ -884,14 +884,17 @@
 
 .swarm-agent-select-checkbox {
     flex-shrink: 0;
-    width: 13px;
-    height: 13px;
+    // Bumped from 13px — the previous size was hard to hit precisely at the
+    // row's usual zoom level; this is still small relative to the row but
+    // meaningfully easier to click without changing row height.
+    width: 18px;
+    height: 18px;
     margin: 0;
     cursor: pointer;
 }
 
 .swarm-agent-select-spacer {
-    width: 13px;
+    width: 18px;
     flex-shrink: 0;
 }
 
@@ -977,9 +980,16 @@
 .swarm-fleet-group-dropdown {
     position: absolute;
     top: calc(100% + 4px);
-    left: 0;
+    // Anchored from the right, not the left: Swarm is typically docked as a
+    // narrow column, and `.swarm-view` clips overflow — a 200px-wide panel
+    // opening left-to-right from a button positioned anywhere past a pane's
+    // narrow width can render past the right edge and get invisibly clipped
+    // (looks exactly like "the dropdown doesn't work"). Growing leftward
+    // from the button's own right edge stays inside a narrow pane instead.
+    right: 0;
     z-index: 5;
     min-width: 200px;
+    max-width: calc(100vw - 16px);
     max-height: 260px;
     overflow-y: auto;
     background: var(--main-bg-color);
