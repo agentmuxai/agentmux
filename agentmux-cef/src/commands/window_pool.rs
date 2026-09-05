@@ -146,7 +146,7 @@ const TITLE_BAR_OFFSET_PX: i32 = 16;
 /// off-screen (the 2026-06-21 "blank new window" bug: a window parked at the
 /// DPI-scaled `POOL_OFFSCREEN`, e.g. `-25600 = -32000 × 0.8` at 125%). Pure — the
 /// work-area rect is passed in — so the placement logic is unit-tested without
-/// Win32. See docs/specs/PLAN_POOL_NEW_WINDOW_DPI_POSITIONING_2026_06_21.md.
+/// Win32. See docs/specs/archive/PLAN_POOL_NEW_WINDOW_DPI_POSITIONING_2026_06_21.md.
 pub(crate) fn clamp_rect_within(
     x: i32,
     y: i32,
