@@ -319,7 +319,11 @@ pub fn apply_hwnd_destroyed(state: &mut State, hwnd: u64, host_running: bool) ->
         // browsers stay alive and the host doesn't quit. Caller passes
         // `host_running` so wrr stays out of the connection module's
         // private API.
-        if state.windows.is_empty() && host_running {
+        //
+        // Workstream 0 Phase 1 — same background-service exclusion as the
+        // normal close path (see its comment): don't arm the orphan/
+        // teardown-backstop machinery for an intentionally-resting host.
+        if state.windows.is_empty() && !state.background_service_enabled && host_running {
             let v_drift = state.bump_version();
             out.push(Event::HwndDriftDetected {
                 kind: HwndDriftKind::OrphanInstance,

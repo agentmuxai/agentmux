@@ -2817,6 +2817,58 @@ fn wrr_orphan_destroy_runs_even_with_stale_pending_entry() {
     );
 }
 
+/// Workstream 0 Phase 1 (PR #2983 review, Codex P2) — the crash-detected
+/// twin of `host_should_quit_suppressed_when_background_service_enabled`:
+/// a renderer crash that destroys the last window's HWND must also skip
+/// `OrphanInstance`/`HostShouldQuit` once the host has reported
+/// background-service mode enabled, exactly like a clean close does.
+#[test]
+fn wrr_orphan_instance_suppressed_when_background_service_enabled() {
+    let (mut state, c) = registered_host_state();
+    let _ = update(
+        &mut state,
+        Command::ReportBackgroundServiceEnabled { enabled: true },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportWindowOpened {
+            label: "w1".into(),
+            kind: WindowKind::FullInstance,
+            parent_label: None,
+        },
+        &c,
+    );
+    let _ = update(
+        &mut state,
+        Command::ReportHwndOpened {
+            hwnd: 0xAA,
+            class_name: "Chrome_WidgetWin_1".into(),
+            title: "".into(),
+            label_hint: Some("w1".into()),
+        },
+        &c,
+    );
+    let evs = update(&mut state, Command::ReportHwndDestroyed { hwnd: 0xAA }, &c);
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, Event::HwndDriftDetected { kind: HwndDriftKind::OrphanDestroy, .. })),
+        "OrphanDestroy must still fire — that's a genuine renderer crash, unrelated to this mode, got {:?}",
+        evs
+    );
+    assert!(
+        !evs.iter()
+            .any(|e| matches!(e, Event::HwndDriftDetected { kind: HwndDriftKind::OrphanInstance, .. })),
+        "OrphanInstance must NOT fire when background-service mode is enabled, got {:?}",
+        evs
+    );
+    assert!(
+        !evs.iter().any(|e| matches!(e, Event::HostShouldQuit { .. })),
+        "HostShouldQuit must NOT fire when background-service mode is enabled, got {:?}",
+        evs
+    );
+}
+
 #[test]
 fn wrr_burst_creates_with_drain_then_repair() {
     // PR #664 codex P1 round 2 — drain-on-open RESTORED as fallback
@@ -3546,6 +3598,35 @@ proptest! {
                     "HostShouldQuit emitted but no Host in Running state"
                 );
             }
+        }
+    }
+
+    /// Workstream 0 Phase 1 (`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md`
+    /// §7, PR #2983 review Codex P2): once the host reports
+    /// background-service mode enabled, closing the last window must NOT
+    /// emit `HwndDriftDetected{OrphanInstance}` or `HostShouldQuit` — that
+    /// combination is what arms `teardown_backstop.rs`'s process-tree-kill
+    /// machinery, which must not fire for an intentionally-resting host.
+    #[test]
+    fn host_should_quit_suppressed_when_background_service_enabled(
+        cmds in proptest::collection::vec(arb_b8_host_command(), 1..80)
+    ) {
+        let (mut state, host_ctx) = registered_host_state();
+        let _ = update(
+            &mut state,
+            Command::ReportBackgroundServiceEnabled { enabled: true },
+            &host_ctx,
+        );
+        for cmd in cmds {
+            let evs = update(&mut state, cmd, &host_ctx);
+            prop_assert!(
+                !evs.iter().any(|e| matches!(
+                    e,
+                    Event::HostShouldQuit { .. }
+                        | Event::HwndDriftDetected { kind: HwndDriftKind::OrphanInstance, .. }
+                )),
+                "background-service mode must suppress OrphanInstance/HostShouldQuit, got {:?}", evs
+            );
         }
     }
 
