@@ -194,6 +194,18 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
                     scopes: vec![], sender: String::new(), persist: 0, data: None,
                 });
 
+                // The subagent watcher's config-dir resolution for this
+                // agent's pane(s) can have raced ahead of this exact
+                // binding (fired at reactive-register time, before the
+                // launch flow's own account-bind write necessarily lands)
+                // and be permanently stuck watching a stale/ambient
+                // directory with no other correction mechanism — see
+                // `recheck_config_dir`'s own doc comment. Cheap, safe
+                // no-op when nothing changed or nothing needs re-pointing.
+                if let Some(watcher) = crate::backend::subagent_watcher::global() {
+                    watcher.recheck_all_watched_agents(id_store, identity_store);
+                }
+
                 Ok(Some(json!({
                     "account_id":  account_id,
                     "provider":    req.provider,

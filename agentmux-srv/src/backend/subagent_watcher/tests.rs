@@ -1045,6 +1045,141 @@ async fn watch_agent_falls_back_to_nearest_existing_ancestor_when_config_dir_is_
     std::fs::remove_dir_all(&root).ok();
 }
 
+// ── recheck_config_dir / recheck_all_watched_agents (2026-09-04) ──
+//
+// Root cause: watch_agent's config-dir resolution runs exactly once, at
+// reactive-register time — before this agent's identity binding is
+// necessarily committed to the DB. If that race is lost, the watcher
+// permanently points at a stale/ambient directory for the rest of the
+// pane's life, since nothing else ever calls watch_agent again. These
+// tests cover recheck_config_dir, the repoint primitive called after an
+// identity-bind RPC succeeds (see server/app_api/identity.rs).
+
+#[tokio::test]
+async fn recheck_config_dir_is_a_noop_when_agent_is_not_watched() {
+    let watcher = Arc::new(fixture_watcher());
+    // Nothing registered at all — must not panic or create an entry.
+    watcher.recheck_config_dir("never-watched", PathBuf::from("/some/dir"));
+    assert_eq!(watcher.watched_agents.lock().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn recheck_config_dir_is_a_noop_when_the_directory_is_unchanged() {
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let root = home.join(format!("amx-recheck-noop-test-{}", now_millis()));
+    std::fs::create_dir_all(&root).unwrap();
+
+    let watcher = Arc::new(fixture_watcher());
+    watcher.watch_agent("agent-1", "block-1", root.clone());
+    assert_eq!(watcher.watched_agents.lock().unwrap().len(), 1);
+
+    // Same directory the agent is already watching — must not tear down
+    // and recreate the watch (which would be observable as a fresh entry
+    // even though nothing actually changed).
+    watcher.recheck_config_dir("agent-1", root.clone());
+    let watched = watcher.watched_agents.lock().unwrap();
+    assert_eq!(watched.len(), 1);
+    assert_eq!(watched[0].config_dir, root);
+
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[tokio::test]
+async fn recheck_config_dir_repoints_the_watch_to_the_new_directory() {
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let root = home.join(format!("amx-recheck-repoint-test-{}", now_millis()));
+    let old_dir = root.join("ambient");
+    let new_dir = root.join("identity-bound");
+    std::fs::create_dir_all(&old_dir).unwrap();
+    std::fs::create_dir_all(&new_dir).unwrap();
+
+    let watcher = Arc::new(fixture_watcher());
+    watcher.watch_agent("agent-1", "block-1", old_dir.clone());
+    assert_eq!(watcher.watched_agents.lock().unwrap()[0].config_dir, old_dir);
+
+    watcher.recheck_config_dir("agent-1", new_dir.clone());
+
+    let watched = watcher.watched_agents.lock().unwrap();
+    assert_eq!(watched.len(), 1, "repoint must replace, not add to, the entry");
+    assert_eq!(watched[0].config_dir, new_dir, "must now watch the corrected directory");
+    assert!(watched[0].parent_block_ids.contains("block-1"));
+
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[tokio::test]
+async fn recheck_config_dir_preserves_all_dependent_blocks_across_a_repoint() {
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let root = home.join(format!("amx-recheck-multiblock-test-{}", now_millis()));
+    let old_dir = root.join("ambient");
+    let new_dir = root.join("identity-bound");
+    std::fs::create_dir_all(&old_dir).unwrap();
+    std::fs::create_dir_all(&new_dir).unwrap();
+
+    let watcher = Arc::new(fixture_watcher());
+    // Two blocks sharing the same agent_id (e.g. two panes for one agent
+    // identity) — watch_agent's own dedup path adds the second as a
+    // dependent of the first's shared watcher.
+    watcher.watch_agent("agent-1", "block-1", old_dir.clone());
+    watcher.watch_agent("agent-1", "block-2", old_dir.clone());
+    assert_eq!(watcher.watched_agents.lock().unwrap().len(), 1);
+    assert_eq!(watcher.watched_agents.lock().unwrap()[0].parent_block_ids.len(), 2);
+
+    watcher.recheck_config_dir("agent-1", new_dir.clone());
+
+    let watched = watcher.watched_agents.lock().unwrap();
+    assert_eq!(watched.len(), 1);
+    assert_eq!(watched[0].config_dir, new_dir);
+    assert!(
+        watched[0].parent_block_ids.contains("block-1") && watched[0].parent_block_ids.contains("block-2"),
+        "repointing must not drop any of the agent's other dependent blocks: {:?}",
+        watched[0].parent_block_ids,
+    );
+
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[tokio::test]
+async fn recheck_config_dir_backfills_subagents_missed_while_watching_the_wrong_directory() {
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let root = home.join(format!("amx-recheck-backfill-test-{}", now_millis()));
+    let old_dir = root.join("ambient");
+    let new_dir = root.join("identity-bound");
+    std::fs::create_dir_all(&old_dir).unwrap();
+    let session_id = "missed-session";
+    let subagents_dir = new_dir.join("projects").join("ws-enc").join(session_id).join("subagents");
+    std::fs::create_dir_all(&subagents_dir).unwrap();
+    std::fs::write(
+        subagents_dir.join("agent-missed.jsonl"),
+        "{\"type\":\"result\",\"result\":\"done\"}\n",
+    )
+    .unwrap();
+
+    let watcher = Arc::new(fixture_watcher());
+    // The block must persist the session id it's resuming, exactly as
+    // handle_reactive_register reads it for its own (first-registration)
+    // backfill call.
+    let mut meta = crate::backend::obj::MetaMapType::new();
+    meta.insert(
+        crate::backend::blockcontroller::core::META_SESSION_ID.to_string(),
+        serde_json::Value::String(session_id.to_string()),
+    );
+    let mut block = crate::backend::obj::Block { oid: "block-1".to_string(), meta, ..Default::default() };
+    watcher.wstore.insert(&mut block).unwrap();
+
+    watcher.watch_agent("agent-1", "block-1", old_dir.clone());
+    assert_eq!(watcher.list_active().len(), 0, "nothing backfilled yet — watching the wrong dir");
+
+    watcher.recheck_config_dir("agent-1", new_dir.clone());
+
+    let active = watcher.list_active();
+    assert_eq!(active.len(), 1, "repoint must backfill this block's own persisted session, same as a fresh reactive-register would");
+    assert_eq!(active[0].agent_id, "missed");
+    assert_eq!(active[0].session_id, session_id);
+
+    std::fs::remove_dir_all(&root).ok();
+}
+
 #[tokio::test]
 async fn prune_block_also_tears_down_that_blocks_filesystem_watcher() {
     // Regression test for docs/retro/retro-subagent-watcher-shared-dir-

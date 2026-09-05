@@ -227,16 +227,6 @@ impl SubagentWatcher {
     /// leak — a terminal Claude's subagents showing up in unrelated agent panes —
     /// is fully fixed because the terminal block id never matches an agent pane.
     pub fn watch_agent(self: &Arc<Self>, agent_id: &str, parent_block_id: &str, config_dir: PathBuf) {
-        // Derive the projects directory where Claude stores session data
-        let projects_dir = config_dir.join("projects");
-        if !projects_dir.exists() {
-            tracing::debug!(
-                agent = %agent_id,
-                dir = %projects_dir.display(),
-                "projects dir does not exist yet, will watch when created"
-            );
-        }
-
         // Check if already watching this agent. A second block registering
         // the same agent_id adds itself as a dependent of the existing
         // shared watcher (see WatchedAgent::parent_block_ids) instead of
@@ -250,6 +240,138 @@ impl SubagentWatcher {
                 tracing::debug!(agent = %agent_id, parent_block_id = %parent_block_id, "already watching this agent");
                 return;
             }
+        }
+        self.start_watch(agent_id, parent_block_id, config_dir);
+    }
+
+    /// Re-resolve and, if the answer changed, re-point an already-watched
+    /// agent's filesystem watch at a corrected directory. `watch_agent`'s
+    /// own config-dir resolution only ever runs ONCE per agent, at the
+    /// reactive-register handshake — before this agent's identity binding
+    /// is necessarily committed to the DB yet (a genuinely observed race:
+    /// a fresh agent launch's reactive-register can fire before the launch
+    /// flow's own account-bind write lands, landing on a stale/ambient
+    /// `cmd:env` snapshot instead of the real identity-bound directory).
+    /// If that race is lost, the watcher previously had no correction
+    /// mechanism at all — nothing else ever calls `watch_agent` again for
+    /// an already-registered pane, so it silently watched the wrong
+    /// directory, forever, for the rest of that pane's life. Called from
+    /// the identity-bind RPC handlers (`server/app_api/identity.rs`,
+    /// `server/agent_handlers/identity.rs`) via `recheck_all_watched_agents`
+    /// below, right after a successful `agent_identity_link` write.
+    ///
+    /// No-op if `agent_id` isn't currently watched (nothing to correct —
+    /// its next real registration resolves fresh, by-then-committed
+    /// bindings correctly on its own) or if the newly-resolved directory
+    /// is unchanged. See
+    /// docs/reports/REPORT_SWARM_SUBAGENT_WATCHER_ONE_SHOT_RESOLUTION_RACE_2026_09_04.md.
+    pub fn recheck_config_dir(self: &Arc<Self>, agent_id: &str, new_config_dir: PathBuf) {
+        let (primary_block_id, all_block_ids, old_dir) = {
+            let mut watched = self.watched_agents.lock().unwrap();
+            let Some(idx) = watched.iter().position(|w| w.agent_id == agent_id) else {
+                return;
+            };
+            if watched[idx].config_dir == new_config_dir {
+                return;
+            }
+            // Removing (not just mutating) drops the old entry's `_watcher`
+            // field here, which stops the stale `notify` subscription —
+            // the same RAII teardown `unwatch_agent`/`unwatch_block` rely on.
+            let removed = watched.remove(idx);
+            let primary = removed.parent_block_ids.iter().next().cloned().unwrap_or_default();
+            (primary, removed.parent_block_ids, removed.config_dir)
+        };
+        tracing::info!(
+            agent = %agent_id,
+            old_dir = %old_dir.display(),
+            new_dir = %new_config_dir.display(),
+            "identity rebind changed this agent's Claude config dir — re-pointing subagent watch"
+        );
+        self.start_watch(agent_id, &primary_block_id, new_config_dir.clone());
+        // `start_watch` always creates a fresh entry with a single-element
+        // `parent_block_ids` (whichever block seeded the new consumer
+        // loop — see `watch_agent`'s own doc comment on that pre-existing
+        // single-primary-block limitation). Restore every OTHER block that
+        // depended on the old entry so a multi-block agent doesn't lose
+        // its other dependents across a repoint.
+        {
+            let mut watched = self.watched_agents.lock().unwrap();
+            if let Some(w) = watched.iter_mut().find(|w| w.agent_id == agent_id) {
+                w.parent_block_ids = all_block_ids.clone();
+            }
+        }
+        // Backfill anything genuinely missed while the watch was pointed at
+        // the wrong directory — same session-scoped mechanism, and the same
+        // reason for scoping it, as `handle_reactive_register`'s own
+        // backfill call: a blind scan-everything would flood Swarm with
+        // every session this identity has ever run, not just this pane's.
+        for block_id in &all_block_ids {
+            let Ok(Some(block)) = self.wstore.get::<crate::backend::obj::Block>(block_id) else {
+                continue;
+            };
+            let session_id = crate::backend::obj::meta_get_string(
+                &block.meta,
+                crate::backend::blockcontroller::core::META_SESSION_ID,
+                "",
+            );
+            if !session_id.is_empty() {
+                self.scan_session_subagents(agent_id, block_id, &new_config_dir, &session_id);
+            }
+        }
+    }
+
+    /// Re-check every currently-watched agent's Claude config dir against a
+    /// fresh identity resolution, re-pointing (`recheck_config_dir`) any
+    /// whose resolution changed. Cheap and safe to call from anywhere an
+    /// identity/account binding just changed — the number of currently-
+    /// watched agents on a single instance is small, and this only runs on
+    /// the rare bind/rebind path, never per-turn.
+    pub fn recheck_all_watched_agents(
+        self: &Arc<Self>,
+        id_store: &Arc<crate::backend::storage::store::Store>,
+        identity_store: &Arc<crate::backend::storage::store::Store>,
+    ) {
+        let candidates: Vec<(String, String)> = {
+            let watched = self.watched_agents.lock().unwrap();
+            watched
+                .iter()
+                .filter_map(|w| w.parent_block_ids.iter().next().map(|b| (w.agent_id.clone(), b.clone())))
+                .collect()
+        };
+        for (agent_id, block_id) in candidates {
+            let bound_dir = crate::identity::resolver::resolve_bound_oauth_config_dir(
+                &self.wstore,
+                id_store,
+                identity_store,
+                &block_id,
+            );
+            let block = self.wstore.get::<crate::backend::obj::Block>(&block_id).ok().flatten();
+            let empty_meta = crate::backend::obj::MetaMapType::new();
+            let new_dir = resolve_claude_config_dir(
+                block.as_ref().map(|b| &b.meta).unwrap_or(&empty_meta),
+                &agent_id,
+                bound_dir,
+            );
+            if let Some(new_dir) = new_dir {
+                self.recheck_config_dir(&agent_id, new_dir);
+            }
+        }
+    }
+
+    /// Shared setup: create the `notify` watcher, filter/dispatch closure,
+    /// and the debounced consumer task, then register the resulting
+    /// `WatchedAgent`. Called from `watch_agent` (first registration for an
+    /// agent_id) and `recheck_config_dir` (re-pointing an existing one at a
+    /// corrected directory) — identical mechanics either way.
+    fn start_watch(self: &Arc<Self>, agent_id: &str, parent_block_id: &str, config_dir: PathBuf) {
+        // Derive the projects directory where Claude stores session data
+        let projects_dir = config_dir.join("projects");
+        if !projects_dir.exists() {
+            tracing::debug!(
+                agent = %agent_id,
+                dir = %projects_dir.display(),
+                "projects dir does not exist yet, will watch when created"
+            );
         }
 
         let (tx, mut rx) = mpsc::unbounded_channel::<PathBuf>();
@@ -385,7 +507,7 @@ impl SubagentWatcher {
         // `handle_reactive_register` when the block's persisted
         // `agent:sessionid` meta says which exact session this pane is
         // resuming. See
-        // docs/specs/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md.
+        // docs/specs/archive/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md.
 
         // Spawn async task to process file change notifications
         let self_clone = Arc::clone(self);
