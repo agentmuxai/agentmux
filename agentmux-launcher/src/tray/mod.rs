@@ -49,6 +49,10 @@ pub enum TrayAction {
     /// second way to make a window (see §7.5.1: the reopen path already exists
     /// and is what the macOS reopen delegate uses).
     OpenWindow,
+    /// "Show Panel" — the small companion window (issue #2977 WS3). A real
+    /// CEF window reusing the pool promote path, NOT a native menu: the spec
+    /// rejects a native menu as "too limited for agent chat".
+    ShowPanel,
     /// "Quit AgentMux" — a genuine, user-intended full shutdown, distinct from
     /// closing the last window while background-service mode is on.
     Quit,
@@ -82,6 +86,10 @@ pub fn menu_model(running: bool) -> Vec<MenuItem> {
                 "Start AgentMux".to_string()
             },
             action: TrayAction::OpenWindow,
+        },
+        MenuItem {
+            label: "Show Panel".to_string(),
+            action: TrayAction::ShowPanel,
         },
         MenuItem {
             label: "Quit AgentMux".to_string(),
@@ -181,11 +189,12 @@ mod tray_model_tests {
     }
 
     #[test]
-    fn menu_offers_open_and_quit_in_that_order() {
+    fn menu_offers_open_panel_and_quit_in_that_order() {
         let m = menu_model(true);
-        assert_eq!(m.len(), 2, "menu is deliberately minimal — the panel is WS3");
+        assert_eq!(m.len(), 3, "menu is deliberately minimal");
         assert_eq!(m[0].action, TrayAction::OpenWindow);
-        assert_eq!(m[1].action, TrayAction::Quit);
+        assert_eq!(m[1].action, TrayAction::ShowPanel);
+        assert_eq!(m[2].action, TrayAction::Quit);
     }
 
     #[test]

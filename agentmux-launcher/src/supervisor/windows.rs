@@ -328,6 +328,8 @@ pub(crate) async fn run_windows(
                         // so srv still gets its per-window cleanup. Killing
                         // the job object here instead would leak srv rows and
                         // resurrect ghost windows on next launch.
+                        // Issue #2977 WS3 — small companion window, pool-first.
+                        tray::TrayAction::ShowPanel => "open_panel",
                         tray::TrayAction::Quit => "quit_app",
                     };
                     forward_tray_cmd(&tray_data_dir, &tray_dir_hash, cmd);
