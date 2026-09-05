@@ -110,7 +110,7 @@ export function SwarmView(props: ViewComponentProps<SwarmViewModel>): JSX.Elemen
                         </div>
                     }
                 >
-                    <FleetToolbar model={model} />
+                    <FleetToolbar model={model} allBlockIds={() => tree().flatMap((n) => (n.blockId ? [n.blockId] : []))} />
                     <FleetResultPanel model={model} />
                     <Show when={clearableCount() > 0}>
                         <div class="swarm-toolbar">
