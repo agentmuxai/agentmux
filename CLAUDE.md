@@ -51,6 +51,38 @@ On Windows, `task dev` builds a production-parallel layout in `dist/cef-dev/` (l
 
 #### Launching `task dev` from an agent / MCP Shell (Windows)
 
+**Never append a shell `&` when launching `task dev` from the Bash tool.** This
+is the single most common way to lose the build. Two launch paths DO work —
+pick either:
+
+- **`mcp__agentmux__Shell`** (preferred for `task dev`) — runs server-side via
+  `ShellNodeRunner`, independent lifetime, and gives you a `shell_id` for
+  `ShellStatus`/`ShellStop`.
+- **The Bash tool with `run_in_background: true` and NO `&`** — also genuinely
+  detached: `agentmux-bashwrap` threads the flag through as
+  `--declared-background` (`hook.rs`), which `setsid()`s into a brand-new
+  session with no controlling terminal and exempts the task from the idle-kill
+  timeout (`bash_wrap.rs::effective_idle_timeout`).
+
+**Why `&` breaks both of them:** `cmd &` returns immediately, so the
+*tracked/detached* process is the trivial launcher shell that exits in
+milliseconds — the real `task dev` is orphaned out from under the very
+protection you asked for. Without `run_in_background` it's worse: the job stays
+in the tool call's process group and is **signalled** when the call returns
+(seconds), while `task dev` needs minutes.
+
+This fails **intermittently**, which is the trap: an orphan sometimes survives
+long enough to come up, so one success does not mean the method works. See the
+`^C` + `exit status 58` signature under "Diagnosing failed shells" below and
+`docs/retro/retro-task-dev-bash-tool-sigint-and-worktree-mutation-2026-09-05.md`.
+
+**Separately — never `git checkout` / `git merge` / `gh pr merge` while a build
+is running against the same worktree.** Merging swaps tracked files out from
+under a live `cargo build` / `npm install` and corrupts it (same retro). This is
+a *different* failure from the signal case above and does **not** produce a
+`^C`; expect inconsistent-input errors instead. Stop the build first, or use a
+separate `git worktree`.
+
 `task dev` requires `bash.exe` to be on the Windows PATH (go-task's Taskfile calls `bash -c '...'` for build steps via cmd.exe). The registry PATH has `Git\cmd` (shims) but not `Git\bin` (bash.exe). Two additional traps exist when launching from an agent's MCP Shell:
 
 - **Gap A:** MSYS2 bash won't resolve `.cmd` files from bare command names — `bash -c "task dev"` exits with "command not found".
@@ -85,7 +117,20 @@ diagnoses:
 grep "shell\." ~/.agentmux/logs/agentmuxsrv-*.log.$(date +%Y-%m-%d)
 # line_count:2  + exit:1   + <100ms  → Gap A (bash cmd not found in MSYS2)
 # line_count:53 + exit:200 + <500ms  → AMBIGUOUS, see below
+# ^C in log   + exit:58  + MINUTES  → build was SIGNALLED, not broken (see below)
 ```
+
+**`^C` in the log + `exit status 58`, minutes in** — the build started fine and
+was **signalled**, not rejected. Distinguishing feature: a bare `error: could
+not compile` with **no `error[EXXXX]:` diagnostic above it**. A real compile
+error always names a file and line; a signalled one doesn't. The `^C` means
+something delivered an interrupt — in practice, a Bash-tool launch using `&`
+(see the top of this section). A mid-build `git checkout`/`merge` is a
+*separate* hazard that cannot inject this signal: it corrupts build inputs and
+surfaces as inconsistent-state errors, with **no** `^C`. Don't read one
+signature as evidence of the other. To confirm the build itself is healthy, run
+`cargo build --release -p agentmux-srv` directly — it either reproduces a real
+diagnostic or exits 0 and proves the failure was external.
 
 `line_count:53 + exit:200` was previously documented as meaning Gap B
 (`bash.exe` not in cmd.exe PATH). It has (at least) **two** causes: an invalid
