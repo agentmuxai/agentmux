@@ -2,6 +2,8 @@
 
 **Date:** 2026-09-05
 **Status:** Draft — design, pre-implementation. **Q4 resolved; no longer blocked.**
+One design question outstanding: whether §4.1a's Kind B is needed at all
+(recommendation: no).
 **Author:** Agent2
 
 > **Filename kept deliberately.** This file was created earlier today as
@@ -115,10 +117,37 @@ the guard test in §7 exists to stop it being reintroduced.)
 
 **Why this is no longer a limitation.** Under v1's framing, "Kind B only works
 for Claude" was a hole in a provider-agnostic feature. Now it isn't: Global
-Memory already reaches **every** provider through Kind A. Kind B is an
-*additional* path that makes the content visible to Claude Code's own
-user-level discovery. A provider without a verified Kind B destination loses
-nothing.
+Memory already reaches **every** provider through Kind A. A provider without a
+verified Kind B destination loses nothing.
+
+### 4.1a ⚠ Is Kind B needed at all? (Codex P2 — likely not)
+
+Both paths are read by Claude. Kind A already injects
+`format_global_brain_block` into `<work_dir>/CLAUDE.md`
+(`agent_open.rs:752-766`), and the isolation report establishes
+`$CLAUDE_CONFIG_DIR/CLAUDE.md` is *also* read. **Adding Kind B therefore puts the
+same Global Memory text into a Claude agent's context twice** — wasted context,
+and duplicated directives can read as emphasis to a model.
+
+The operator's requirement was *"Global Memory that behind the scenes gets into
+the provider's special file."* Kind A **already satisfies that literally**:
+`CLAUDE.md` *is* Claude's file, `AGENTS.md` is Codex's, and so on — the
+per-provider filename comes from `startup_instructions_filename`, which is
+exactly the "behind the scenes, right file per provider" behaviour asked for. It
+has worked for every provider since before this spec.
+
+**Recommendation: drop Kind B.** Section B of this spec then reduces to
+"already done — verify and document it," and the real work is §3 (delete the
+surface) plus §5 (versioning + agent authorship).
+
+**What must NOT be dropped with it:** the placeholder seeding in the provider
+config dir (§4.3). That is an isolation control, not a content-delivery
+mechanism, and it stays regardless of Kind B's fate.
+
+If Kind B is kept anyway — e.g. to reach Claude's *user-level* memory tier
+specifically, which has different precedence from project memory — the spec must
+define deduplication so the content is not emitted twice. Do not ship both paths
+without resolving this.
 
 ### 4.2 Identity-bound agents
 
@@ -190,6 +219,20 @@ CREATE INDEX IF NOT EXISTS idx_bundle_versions_lookup
     ON db_bundle_versions(bundle_id, created_at);
 ```
 
+**Declare it in all three schemas and bump all three counters (Codex P2).**
+Verified: `db_bundles` is declared three times in `migrations.rs`
+(`:472`, `:1125`, `:1411`) — shared `store.db`, the per-channel `objects.db`
+fallback, and `identity-store.db` for parity — and the precedent table
+`db_agent_native_memory_versions` is likewise declared three times
+(`:778`, `:1237`, `:1557`). Declaring the new table in only one schema makes
+history calls fail with `no such table` depending on which store `id_store`
+resolved to — a bug that reproduces only in the fallback configuration, i.e.
+the one least likely to be tested.
+
+Required: add the table to **all three** schema definitions and bump
+`SHARED_STORE_SCHEMA_VERSION` (`:59`), `OBJECT_SCHEMA_VERSION` (`:270`) and
+`IDENTITY_STORE_SCHEMA_VERSION`, with coverage for each open mode (§7).
+
 Keyed per bundle, because Global Memory genuinely *is* multiple bundles the user
 orders — unlike v1's singleton, this key is real, not speculative.
 `source` defaults to `'user'` (Armory bundles are user-authored by default),
@@ -212,9 +255,30 @@ New MCP tools, named so the *scope difference* from the existing per-agent
 | `GlobalMemoryWrite` | create/replace → new version, `source='agent'` |
 | `GlobalMemoryHistory` / `GlobalMemoryDiff` / `GlobalMemoryRevert` | audit + undo |
 
-**Security posture — operator-decided (2026-09-05): any agent may write, fully
-audited.** This is now writing content *every other agent* loads at launch, so
-auditability is the only control and these are requirements, not niceties:
+**🔒 System-tier bundles are OFF LIMITS to agents (Codex P1, PR #2997).**
+`bundle_memory_list_global()` returns `is_system` rows too — it selects
+`WHERE is_global = 1` and merely *orders* by `is_system DESC`
+(`memory_bundles.rs:161-170`). Those rows carry an existing invariant that only
+`bundle_memory_upsert_system` / `bundle_memory_delete_system` may modify them.
+Defining the agent tools over "all global bundles" would hand an agent the
+operator-controlled, highest-priority tier — and a `GlobalMemoryRevert` modelled
+directly on native-memory revert would write the row straight past the generic
+upsert guard.
+
+Required:
+
+- `GlobalMemoryWrite` / `GlobalMemoryRevert` **must reject any `is_system`
+  bundle**, explicitly, at the tool boundary — not rely on a lower-layer guard
+  a revert path might bypass.
+- `GlobalMemoryList` / `Read` may include system bundles (visibility is fine and
+  useful), but must mark them read-only.
+- A rejection test per mutating tool (§7). This is a privilege boundary, so it
+  needs a test that fails loudly if someone later "simplifies" the filter.
+
+**Security posture — operator-decided (2026-09-05): any agent may write
+non-system global bundles, fully audited.** This is content *every other agent*
+loads at launch, so auditability is the only control and these are requirements,
+not niceties:
 
 - unattributable writes are **rejected**, never recorded as anonymous;
 - history is strictly append-only — revert creates a new version, so an agent
@@ -267,6 +331,13 @@ existing `MemoryWrite` description's `provenance` pattern (source `human` /
 - Revert creates a new version; history is never rewritten.
 - `GlobalMemoryWrite` records `source='agent'` + `agent_id`; an unattributable
   write is rejected.
+- **`GlobalMemoryWrite` and `GlobalMemoryRevert` REJECT an `is_system` bundle**
+  — one test each. Privilege boundary; must fail loudly if the filter is ever
+  "simplified" away.
+- **Schema parity:** history works in all three open modes (shared `store.db`,
+  per-channel `objects.db` fallback, `identity-store.db`) — the fallback mode
+  especially, since that's where a single-schema declaration would silently
+  produce `no such table`.
 
 **Manual**
 - Edit Global Memory, launch a Claude agent, confirm the content is present —
