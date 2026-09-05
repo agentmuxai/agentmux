@@ -146,7 +146,7 @@ const TITLE_BAR_OFFSET_PX: i32 = 16;
 /// off-screen (the 2026-06-21 "blank new window" bug: a window parked at the
 /// DPI-scaled `POOL_OFFSCREEN`, e.g. `-25600 = -32000 × 0.8` at 125%). Pure — the
 /// work-area rect is passed in — so the placement logic is unit-tested without
-/// Win32. See docs/specs/PLAN_POOL_NEW_WINDOW_DPI_POSITIONING_2026_06_21.md.
+/// Win32. See docs/specs/archive/PLAN_POOL_NEW_WINDOW_DPI_POSITIONING_2026_06_21.md.
 pub(crate) fn clamp_rect_within(
     x: i32,
     y: i32,
@@ -529,6 +529,22 @@ fn set_taskbar_hidden(hwnd: *mut std::ffi::c_void, hidden: bool) {
 pub fn on_pool_window_destroyed(state: &Arc<AppState>, label: &str) {
     if !label.starts_with("window-pool-") {
         return;
+    }
+    // Workstream 0 Phase 1 prereq #2 (ReAgent P1 on PR #2987) — this path
+    // also runs for POST-promote closes (see the `take_pool_window_view`
+    // comment below, and `pool_destroyed_was_unpromoted` further down, which
+    // exist precisely to tell the two cases apart). A promoted window that
+    // the user closes inside `PROMOTE_LIVENESS_TIMEOUT` must not leave an
+    // armed watch behind that then pops a replacement window at them.
+    // Eager cancellation; `should_open_fallback`'s own registered-check is
+    // the level-triggered backstop that makes correctness independent of
+    // having instrumented every close path.
+    if state.promote_liveness.lock().cancel(label) {
+        tracing::info!(
+            target: "dnd:tearoff:pool",
+            label = %label,
+            "[pool] promoted window closed before confirming — cancelling its liveness watch"
+        );
     }
     // Drop the cached HWND so the map can't grow unbounded across the
     // process lifetime. Idempotent — fine if the entry isn't present
@@ -998,6 +1014,176 @@ pub fn init_pool(state: &Arc<AppState>) {
     spawn_pool_window(state);
 }
 
+/// What the promote-liveness fallback needs in order to recreate what this
+/// promote was supposed to deliver. Grouped into a struct rather than passed
+/// as loose parameters because the tear-off case has to carry enough to
+/// rebuild a real tear-off (`workspace_id` above all — see the fallback's own
+/// comment on why losing it is data-loss-shaped).
+struct PromoteFallback {
+    /// The srv workspace the promoted window was meant to attach. Empty for
+    /// the new-window (Cmd+N) promote, non-empty for a tab tear-off — which
+    /// is exactly the discriminator the fallback branches on.
+    workspace_id: String,
+    initial_view: Option<String>,
+    initial_meta: Option<String>,
+    /// Where the promoted window was placed. Used only by the tear-off
+    /// branch, in the same units that platform's promote used (physical px
+    /// on Windows, DIP elsewhere) — matching what `post_create_window`
+    /// expects on each.
+    pos_x: i32,
+    pos_y: i32,
+    width: i32,
+    height: i32,
+}
+
+/// Workstream 0 Phase 1 prerequisite #2 (issue #2977) — arm a bounded
+/// liveness watch on a just-promoted pool window, and fall back to a fresh
+/// cold-path window if the promote never proves itself alive.
+///
+/// MUST be called BEFORE the promote event is emitted/posted. The renderer's
+/// `register_backend_window` is handled concurrently on another thread, so
+/// arming after the emit leaves a window in which a confirmation can arrive
+/// with no watch to consume it — that confirmation is silently dropped and
+/// the later-armed watch then opens a duplicate window despite a perfectly
+/// healthy promote (Codex P2 on PR #2987). Arming first is free: the epoch
+/// guard still handles a superseding promote, and the only cost is that the
+/// 10s budget starts microseconds earlier.
+///
+/// WHY this exists at all:
+/// `docs/retro/retro-fresh-vm-suspend-orphaned-frontend-2026-09-03.md`
+/// documents that neither HWND-resolution branch above proves the RENDERER
+/// is alive — `IsWindow()` (and CEF's own `window_handle()`) survive a
+/// suspend/resume that left the page dead, so a promote can hand the user a
+/// corpse while every check logs success. The only trustworthy signal is one
+/// the renderer itself produces after the promote; see
+/// `state::promote_liveness` for why `register_backend_window` is that
+/// signal and why `on_load_end` is not.
+///
+/// THREADING: runs on the caller's thread (the IPC thread for the promote
+/// paths — NOT the CEF UI thread; see the Views-show call site's own comment
+/// in the Windows variant). Only touches a `parking_lot::Mutex` and spawns a
+/// plain timer thread. The fallback calls `open_window_with_kind`, which is
+/// safe off the UI thread by construction — it does reducer bookkeeping then
+/// posts `CreateWindowTask` to the UI thread itself, and is already invoked
+/// from a non-UI tokio task by the reproject driver
+/// (`launcher_ipc`'s `reproject_from_snapshot_and_stage_closures` call).
+/// Deliberately NOT a `wrap_task!`/`post_task` UI hop: nothing here needs the
+/// UI thread, and a posted task can be silently dropped during teardown.
+///
+/// The fallback does NOT close the unconfirmed window. That window may be
+/// merely slow rather than dead, and destroying a live-but-late window would
+/// lose user state; an extra window is the honest, recoverable cost the
+/// retro's own recommendation #2 accepts. It also deliberately passes
+/// `explicit_rect: None` so the fresh window takes the cold path's normal
+/// offset placement instead of landing exactly on top of the suspect one —
+/// the retro describes stacked, indistinguishable windows as its own
+/// usability failure.
+fn arm_promote_liveness(state: &Arc<AppState>, label: &str, fallback: PromoteFallback) {
+    let epoch = state.promote_liveness.lock().arm(label.to_string());
+    let state = Arc::clone(state);
+    let label = label.to_string();
+    std::thread::spawn(move || {
+        std::thread::sleep(crate::state::PROMOTE_LIVENESS_TIMEOUT);
+
+        // Snapshot-and-drop: never hold the watches lock across the
+        // fallback's own state work.
+        let unconfirmed = {
+            let mut watches = state.promote_liveness.lock();
+            watches.take_if_unconfirmed(&label, epoch)
+        };
+        if !unconfirmed {
+            return; // confirmed live, or superseded by a newer promote
+        }
+
+        // Drain + still-exists interlocks — see
+        // `promote_liveness::should_open_fallback` for why the "is it still
+        // registered" check lives here (level-triggered) rather than only in
+        // the close paths.
+        let quit_state = state.host_state.lock().quit_state.clone();
+        let browser_still_registered = state.get_browser(&label).is_some();
+        if !crate::state::should_open_fallback(unconfirmed, &quit_state, browser_still_registered) {
+            tracing::warn!(
+                target: "dnd:tearoff:pool",
+                label = %label,
+                still_registered = browser_still_registered,
+                "[pool] promote unconfirmed, but the window is already gone or the \
+                 instance is draining — skipping fallback (nothing to replace)"
+            );
+            return;
+        }
+
+        tracing::error!(
+            target: "dnd:tearoff:pool",
+            label = %label,
+            timeout_ms = crate::state::PROMOTE_LIVENESS_TIMEOUT.as_millis(),
+            workspace_id = %fallback.workspace_id,
+            "[pool] promoted window never confirmed its renderer is alive — \
+             opening a fresh cold-path window instead of leaving the user with a possibly-dead one"
+        );
+
+        let result = if fallback.workspace_id.is_empty() {
+            // New-window promote (Cmd+N / File → New Window): no workspace to
+            // reattach, the frontend creates a fresh one. Position is
+            // arbitrary here, so take the cold path's normal offset placement
+            // rather than stacking exactly on the suspect window — the retro
+            // calls out indistinguishable stacked windows as its own failure.
+            crate::commands::window::open_window_with_kind(
+                &state,
+                WindowKind::FullInstance,
+                None,
+                fallback.initial_view.as_deref(),
+                fallback.initial_meta.as_deref(),
+                None,
+                false,
+            )
+        } else {
+            // Tear-off promote: the tab has ALREADY been moved into
+            // `workspace_id` by the frontend before this promote ran (see
+            // `tear_off_sc_move_handshake`'s doc comment). `open_window_with_kind`
+            // has no workspace parameter and its URL therefore creates a
+            // FRESH workspace — using it here would strand the torn-off tab
+            // in a workspace no window displays and hand the user an
+            // unrelated empty window, turning a recoverable failure into
+            // apparent data loss (Codex P1 on PR #2987). Reuse the real
+            // tear-off cold path, which appends `&workspaceId=`.
+            //
+            // Position IS meaningful for a tear-off (the user dropped the tab
+            // somewhere specific), so unlike the new-window branch above this
+            // honors the drop point via the tab anchor, accepting overlap with
+            // the suspect window — the fresh window is created on top, and a
+            // window that appears where the user dropped is worth more than
+            // avoiding an overlap with a corpse they are about to close.
+            crate::commands::drag::open_window_at_position(
+                &state,
+                &serde_json::json!({
+                    "workspaceId": fallback.workspace_id,
+                    "screenX": fallback.pos_x,
+                    "screenY": fallback.pos_y,
+                    "tabAnchorX": fallback.pos_x,
+                    "tabAnchorY": fallback.pos_y,
+                    "width": fallback.width,
+                    "height": fallback.height,
+                }),
+            )
+        };
+
+        match result {
+            Ok(_) => tracing::warn!(
+                target: "dnd:tearoff:pool",
+                label = %label,
+                "[pool] cold-path fallback window requested after unconfirmed promote"
+            ),
+            Err(e) => tracing::error!(
+                target: "dnd:tearoff:pool",
+                label = %label,
+                error = %e,
+                "[pool] cold-path fallback after unconfirmed promote FAILED — \
+                 user may be left with no working window"
+            ),
+        }
+    });
+}
+
 /// Promote a pool window for tear-off. Pops a label, sends a
 /// move-and-show task to the CEF UI thread, and emits
 /// `pool:promote` to the renderer with the workspace ID. Returns
@@ -1418,6 +1604,24 @@ pub fn promote_pool_window(
     // Phase B.7.3.3 — the launcher's typed events drive the
     // InstancePanel atoms via the CEF JS bridge. No sync emit here.
 
+    // Workstream 0 Phase 1 prerequisite #2 — everything above proved the
+    // HWND exists, not that the renderer we are about to hand the workspace
+    // to is alive to receive it. Armed BEFORE the emit so a fast
+    // confirmation can't race past an unarmed watch (see the fn's doc).
+    arm_promote_liveness(
+        state,
+        &label,
+        PromoteFallback {
+            workspace_id: workspace_id.to_string(),
+            initial_view: initial_view.clone(),
+            initial_meta: initial_meta.clone(),
+            pos_x,
+            pos_y,
+            width: win_w,
+            height: win_h,
+        },
+    );
+
     // Now tell the pool window's renderer to bootstrap the workspace.
     crate::events::emit_event_to_window(
         state,
@@ -1529,8 +1733,8 @@ pub fn promote_pool_window(
     height: Option<i32>,
     tab_anchor_x: Option<i32>,
     tab_anchor_y: Option<i32>,
-    _initial_view: Option<String>,
-    _initial_meta: Option<String>,
+    initial_view: Option<String>,
+    initial_meta: Option<String>,
 ) -> Option<String> {
     // Atomic pop from the pool queue via reducer. Returns None if empty
     // — caller falls back to cold path.
@@ -1567,6 +1771,26 @@ pub fn promote_pool_window(
     let y = tab_anchor_y.unwrap_or(screen_y);
     let w = width.unwrap_or(POOL_WIDTH);
     let h = height.unwrap_or(POOL_HEIGHT);
+
+    // Workstream 0 Phase 1 prerequisite #2 — same rationale as the Windows
+    // variant, and armed before the post for the same reason. The retro
+    // documented this against the Windows `IsWindow()` path, but the gap is
+    // platform-neutral: "CEF state presence" (this variant's check, above)
+    // is an even weaker liveness signal than `IsWindow()`, and says nothing
+    // about the renderer either.
+    arm_promote_liveness(
+        state,
+        &label,
+        PromoteFallback {
+            workspace_id: workspace_id.to_string(),
+            initial_view,
+            initial_meta,
+            pos_x: x,
+            pos_y: y,
+            width: w,
+            height: h,
+        },
+    );
 
     // Reposition + emit pool:promote on the CEF UI thread.
     crate::ui_tasks::post_promote_pool_window(state, &label, workspace_id, x, y, w, h);
@@ -1677,6 +1901,26 @@ pub fn promote_pool_window_for_new_window(
             cleanup_failed_promote_orphan_cross_platform(state, &label);
             return None;
         }
+
+        // Workstream 0 Phase 1 prerequisite #2 — the `pool:new-window`
+        // promote reaches the same renderer-side path (`awaitPoolPromote`
+        // → `initHostNewWindow` → `registerBackendWindow`), so it needs the
+        // same liveness confirmation as `pool:promote`. Empty workspace_id:
+        // this path deliberately creates a fresh workspace, so the fallback
+        // takes its new-window branch.
+        arm_promote_liveness(
+            state,
+            &label,
+            PromoteFallback {
+                workspace_id: String::new(),
+                initial_view: initial_view.clone(),
+                initial_meta: initial_meta.clone(),
+                pos_x,
+                pos_y,
+                width,
+                height,
+            },
+        );
 
         crate::ui_tasks::post_promote_pool_window_for_new_window(
             state, &label, pos_x, pos_y, width, height, initial_view, initial_meta,
