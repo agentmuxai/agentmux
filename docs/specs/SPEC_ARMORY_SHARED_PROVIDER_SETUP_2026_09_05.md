@@ -1,436 +1,404 @@
-# SPEC: Armory — Shared Provider Setup (provider-agnostic, versioned, dual-authored)
+# SPEC: Global Memory is the only concept — remove shared provider config, materialize into the provider's file
 
 **Date:** 2026-09-05
-**Status:** Draft — design, pre-implementation. **Blocked on §6 Q4** (see below).
-Supersedes the buildout options in
-`docs/reports/REPORT_SHARED_PROVIDER_CONFIG_STATE_AND_BUILDOUT_2026_09_05.md` §4
-(that report recommended keeping the surface read-only; the operator directed
-otherwise — see §0).
-**Revised 2026-09-05 after Codex review of PR #2994** (2×P1, 2×P2, all accepted):
-the materialization target was wrong for non-Claude providers (§2.1/§3.3),
-identity-bound agents were missed (§3.3), storage was keyed incoherently
-(§3.2), and migration created an ownership deadlock (§4). The first P1 also
-collapsed the distinction between this feature and Global Memory for every
-non-Claude provider, which is why Q4 is now blocking rather than advisory.
+**Status:** Draft — design, pre-implementation. **Q4 resolved; no longer blocked.**
+One design question outstanding: whether §4.1a's Kind B is needed at all
+(recommendation: no).
 **Author:** Agent2
 
----
-
-## 0. The ask, verbatim
-
-> inside the armory, we dont need to know it is for Claude Code, or any of the
-> .md files. The user is interested in only shared provider setup. It is global,
-> applies to all agents. behind the scenes, you setup the right provider's file.
-> we want change managemenet, make it updateable by the user, and the agent.
-
-Five requirements, each load-bearing:
-
-1. **Provider-agnostic UI** — no "Claude Code" branding, no `.md` filenames, no
-   paths in the primary surface.
-2. **One concept: "shared provider setup"** — global, applies to every agent.
-3. **AgentMux resolves the target file per provider**, invisibly.
-4. **Change management** — versioned, auditable, revertible.
-5. **Writable by both the user (UI) and the agent (tool).**
-
-This replaces today's read-only preview (`REPORT_…_2026_09_05.md` §1.2), which
-shows the badge *"Claude Code — shared provider config"* and a raw
-`~/.agentmux/shared/providers/claude/CLAUDE.md` path — i.e. exactly the two
-things requirement 1 removes.
+> **Filename kept deliberately.** This file was created earlier today as
+> "Armory — Shared Provider Setup" and is already referenced by PR #2994 and its
+> commits. Same precedent as
+> `SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md`, which kept its name after
+> §5 changed what it targeted. **The concept named in the old title is now
+> deleted by this spec** — read the title above, not the filename.
 
 ---
 
-## 1. Current state (verified 2026-09-05)
+## 0. Revision history of this spec (short, because it matters)
 
-- **Storage:** none. One hand-maintained file per provider dir; no table, no
-  schema.
-- **UI:** a single read-only block under Armory → Memory → Global
-  (`global-brain-manager.tsx:163-192`) — path + `<pre>`, no editor.
-- **RPC:** `getclaudeglobalconfig` (read-only, no write counterpart by design).
-- **Reach:** the Claude CLI reads `$CLAUDE_CONFIG_DIR/CLAUDE.md` itself. AgentMux
-  never injects it — unlike Global Memory / skills / MCP, which are all
-  materialized per-agent at launch.
-- **Scope:** Claude only. The seeding helper early-returns for any provider whose
-  `auth_dir_name != "claude"` (`providers.rs:679-681`).
+1. **v1** — proposed a new "Shared Provider Setup" feature alongside Global
+   Memory: own tables, own UI, own MCP tools.
+2. **v2** (Codex review, PR #2994) — the materialization target was wrong for
+   every non-Claude provider, which collapsed the destination distinction
+   between the new feature and Global Memory. Q4 ("what *is* the difference?")
+   became blocking.
+3. **v3 — this version.** Operator resolved it:
+
+> right, Global memory and shared provider config are the same thing, that is
+> what appears on the Memory -> Global page .. are you saying they are coded
+> seperately?
+
+> get rid of the shared provider config entirely .. we just need the concept of
+> Global Memory that behind the scenes gets into the provider's special file
+
+They were coded separately (§1). They should not be. **v1's entire proposed
+feature is deleted; what remains is a deletion plus two additions to Global
+Memory.**
 
 ---
 
-## 2. What already exists that this must reuse
+## 1. Why this was confusing — verified
 
-Three pieces of infrastructure make this mostly composition, not invention.
+Two unrelated mechanisms render on one page (Armory → Memory → Global) and both
+end in a file named `CLAUDE.md`:
 
-### 2.1 Provider→filename resolution exists — but for the *working directory*, not the provider home
+| | **Global Memory** | **Shared provider config** |
+|---|---|---|
+| Storage | `db_bundles WHERE is_global = 1` (`memory_bundles.rs:161`) | a file on disk, `~/.agentmux/shared/providers/claude/CLAUDE.md` |
+| Authored via | Armory editor — create / edit / order | nothing; hand-edited on disk |
+| RPC | `bundle_memory_*` (full CRUD) | `getclaudeglobalconfig` — read-only, no write counterpart |
+| Reaches the agent | AgentMux **composes** it into `<work_dir>/CLAUDE.md` at launch (`agent_open.rs:757-766`) | AgentMux never touches it; the CLI reads it via `CLAUDE_CONFIG_DIR` |
+| Applies to | every agent | default (non-identity-bound) Claude agents only |
 
-`ProviderConfig::startup_instructions_filename: Option<&'static str>`
-(`providers.rs:120`) maps every provider to its instructions file: `CLAUDE.md`
-(`:220`), `AGENTS.md` (`:252`), `GEMINI.md` (`:279`), `QWEN.md` (`:323`),
-`.pi/APPEND_SYSTEM.md`, and `None` (`:364`) where no native convention is
-confirmed.
+The page's own heading admits the split — *"Claude Code provider config —
+reference only, not part of Global Memory"* — which is honest and still
+misleading: a read-only, hand-maintained, Claude-only artifact sits directly
+beneath a managed, all-agents one.
 
-> **⚠ Corrected after review (Codex P1, PR #2994).** The first draft treated this
-> field as a provider-*home* filename and proposed writing
-> `<provider_auth_dir>/<startup_instructions_filename>`. **That is wrong.** The
-> field's contract (`providers.rs:111-119`) states the path is *"relative to the
-> agent's working directory"*, and `build_config_files` writes it there. Nothing
-> establishes those filenames as provider-home read paths — OpenClaw's own entry
-> (`providers.rs:400-408`) explicitly flags `AGENTS.md` as an *unverified*
-> workspace bootstrap. Reusing the field as proposed would let saves succeed
-> while non-Claude agents never receive the setup.
->
-> The field also carries an explicit discipline — *"Set only where independently
-> verified against the provider's own docs, not guessed"* — which the original
-> proposal quietly violated by inferring a second meaning for it.
+---
 
-**What is actually verified today:**
+## 2. Target state
 
-| Destination | Verified? |
+**One user-facing concept: Global Memory.** Global, applies to every agent,
+authored in Armory. Where its content physically lands is an implementation
+detail the user never sees — including the provider's own config file.
+
+Three pieces of work:
+
+- **A. Delete** the shared-provider-config surface (§3).
+- **B. Materialize** Global Memory into the provider's special file (§4).
+- **C. Add change management + an agent write path** to Global Memory (§5) —
+  the two requirements from the original ask that Global Memory does **not**
+  have today (verified: `db_bundles` has no versions table, and the `Memory*`
+  MCP tools target the agent's *own* native brain, not global bundles).
+
+---
+
+## 3. A — Delete the shared provider config surface
+
+Remove:
+
+- the read-only block and its section heading (`global-brain-manager.tsx:163-192`),
+- `getclaudeglobalconfig` + `COMMAND_GET_CLAUDE_GLOBAL_CONFIG` (`commands.rs:254`,
+  handler `agent_handlers/memory.rs:240-250`),
+- `GetClaudeGlobalConfigCommand` (`rpc-api/memory.ts:81-87`) and the
+  `claudeGlobalConfigAtom` / fetch in `global-brain-model.ts`.
+
+**Keep `read_claude_global_config`** if any other caller remains (check before
+deleting — it was written as a generic dir+filename reader).
+
+**Do NOT delete `seed_claude_md_placeholder_if_missing`.** It is unrelated to
+the UI surface and is load-bearing — see §4.3. This is the single most likely
+thing to be "cleaned up" by mistake while doing A.
+
+The on-disk file is not deleted; it becomes a generated artifact (§4) with a
+one-time adoption of any pre-existing content (§6).
+
+---
+
+## 4. B — Materialize Global Memory into the provider's file
+
+### 4.1 Two destinations, both already understood
+
+**Kind A — working directory** (`<work_dir>/<startup_instructions_filename>`).
+Already implemented for every provider. Unchanged by this spec.
+
+**Kind B — provider config dir.** New. Only where a provider is *independently
+verified* to read from it. Today that is **Claude only**
+(`$CLAUDE_CONFIG_DIR/CLAUDE.md`, measured in
+`REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md` §2).
+
+`startup_instructions_filename` must **not** be reused to derive Kind B — its
+contract (`providers.rs:111-119`) is explicitly working-directory-relative, and
+it carries a "set only where independently verified, not guessed" discipline.
+Kind B needs its own verified per-provider mapping. (This was Codex's P1 on v2;
+the guard test in §7 exists to stop it being reintroduced.)
+
+**Why this is no longer a limitation.** Under v1's framing, "Kind B only works
+for Claude" was a hole in a provider-agnostic feature. Now it isn't: Global
+Memory already reaches **every** provider through Kind A. A provider without a
+verified Kind B destination loses nothing.
+
+### 4.1a ⚠ Is Kind B needed at all? (Codex P2 — likely not)
+
+Both paths are read by Claude. Kind A already injects
+`format_global_brain_block` into `<work_dir>/CLAUDE.md`
+(`agent_open.rs:752-766`), and the isolation report establishes
+`$CLAUDE_CONFIG_DIR/CLAUDE.md` is *also* read. **Adding Kind B therefore puts the
+same Global Memory text into a Claude agent's context twice** — wasted context,
+and duplicated directives can read as emphasis to a model.
+
+The operator's requirement was *"Global Memory that behind the scenes gets into
+the provider's special file."* Kind A **already satisfies that literally**:
+`CLAUDE.md` *is* Claude's file, `AGENTS.md` is Codex's, and so on — the
+per-provider filename comes from `startup_instructions_filename`, which is
+exactly the "behind the scenes, right file per provider" behaviour asked for. It
+has worked for every provider since before this spec.
+
+**Recommendation: drop Kind B.** Section B of this spec then reduces to
+"already done — verify and document it," and the real work is §3 (delete the
+surface) plus §5 (versioning + agent authorship).
+
+**What must NOT be dropped with it:** the placeholder seeding in the provider
+config dir (§4.3). That is an isolation control, not a content-delivery
+mechanism, and it stays regardless of Kind B's fate.
+
+If Kind B is kept anyway — e.g. to reach Claude's *user-level* memory tier
+specifically, which has different precedence from project memory — the spec must
+define deduplication so the content is not emitted twice. Do not ship both paths
+without resolving this.
+
+> **Scope marker for everything below (ReAgent P2).** §4.2 and the "composed
+> content" rows of §4.3 apply **only if Kind B ships**, which §4.1a recommends
+> against. They are retained, clearly marked, because the decision is the
+> operator's and re-deriving them later would be wasted work — not because Kind
+> B is assumed. **§4.3's placeholder requirement is unconditional** and applies
+> either way.
+
+### 4.2 Identity-bound agents — *only if Kind B ships*
+
+An agent bound to an OAuth account has its provider config env var overwritten
+with that account's own dir (`inject.rs:591-598, 667`) — the default shared dir
+is never read. Kind B would therefore have to be reconciled into the **resolved**
+config dir at first-turn injection (`inject.rs`, alongside the existing seed
+call), not only written once to the shared dir. Otherwise identity-bound agents
+silently keep a stale file while the UI says Global Memory applies to everyone.
+
+If Kind B is dropped, this section is moot: Kind A writes to the agent's working
+directory, which is unaffected by identity binding.
+
+### 4.3 The isolation invariant — must not regress *(placeholder half is unconditional)*
+
+`seed_claude_md_placeholder_if_missing` exists because an isolated
+`CLAUDE_CONFIG_DIR` with **no** `CLAUDE.md` falls through to the operator's
+personal `~/.claude/CLAUDE.md` — measured, not inferred
+(`REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md` §2).
+
+**If Kind B is dropped (recommended):** nothing changes here at all. The provider
+config dir keeps getting the placeholder and only the placeholder, exactly as
+today. §3's deletion work must not disturb it.
+
+**If Kind B ships:** real content satisfies the same invariant, and the seeder
+already no-ops when a file exists (`providers.rs:697`), so the two compose —
+but when Global Memory is empty the placeholder is still the only thing
+preventing the leak:
+
+| Global Memory | `$CLAUDE_CONFIG_DIR/CLAUDE.md` |
 |---|---|
-| `<work_dir>/<startup_instructions_filename>` | **Yes** — the field's own contract; `build_config_files` already writes here for every provider |
-| `$CLAUDE_CONFIG_DIR/CLAUDE.md` (Claude provider home) | **Yes** — measured in `REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md` §2 |
-| `<any other provider's home>/<file>` | **No** — unverified for every non-Claude provider |
+| non-empty | the composed content |
+| empty | the placeholder |
+| emptied after being non-empty | **revert to the placeholder — never leave it absent or zero-length** |
 
-`None` remains meaningful and must not be papered over: that provider gets
-nothing, and the UI must say so rather than silently no-op.
+That third row is the dangerous one and needs an explicit test (§7).
 
-**Consequence for this spec: the destination is now an explicit, per-provider,
-independently-verified mapping — see §3.3.** It is not derivable from
-`startup_instructions_filename` alone.
+### 4.4 Ownership
 
-### 2.2 Change management has a working precedent — mirror it
-
-`db_agent_native_memory` + `db_agent_native_memory_versions`
-(`migrations.rs:760-798`, `SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md`)
-is exactly requirements 4+5 already solved for a sibling surface:
-
-- content table (current state) + append-only `_versions` table (history),
-- `content_hash`, `parent_version_id`, `created_at`,
-- **`source TEXT NOT NULL DEFAULT 'agent_inferred'` + `source_detail` +
-  `session_id`** — i.e. *who wrote this, user or agent* is already a modelled
-  column, not something to invent,
-- backing impls `memory_history_impl` / `memory_diff_impl` / `memory_revert_impl`
-  (`app_api/mod.rs:1032-1188`),
-- agent-facing MCP tools `MemoryRead/Write/List/History/Diff/Revert`.
-
-**Do not design a second versioning scheme.** Mirror this one, including its
-hard-won details (`app_api/mod.rs:958` — history/diff/revert hard-fail rather
-than silently degrade; `:988`/`:1151` — reagent P1 fixes around revert staleness
-that a fresh implementation would rediscover the hard way).
-
-### 2.3 Launch-time materialization has a precedent
-
-`agent_config.rs` already writes a provider-resolved instructions file, skills,
-`.claude/settings.json` and `.mcp.json` into the working directory at launch,
-and `write_claude_md_respecting_ownership` (`agent_config.rs:1106`) already
-solves "don't clobber a file the user owns" via `CLAUDE_MD_MANAGED_MARKER`.
+Written with the managed marker (`CLAUDE_MD_MANAGED_MARKER`,
+`agent_config.rs:904`) so a hand-maintained file is never silently clobbered,
+subject to the adoption step in §6.
 
 ---
 
-## 3. Design
+## 5. C — Change management and agent authorship for Global Memory
 
-### 3.1 Concept and naming
+Both are genuine gaps today, not existing behaviour to reuse:
 
-One Armory rail entry: **"Provider Setup"**.
+- `db_bundles` has **no** version history table.
+- The `Memory*` MCP tools (`agentmux-mcp/src/main.rs:623-660`) are scoped to
+  *"your own native memory (brain) markdown files"* — `db_agent_native_memory`,
+  per-agent. They cannot touch global bundles.
 
-- Global. Applies to every agent. Stated in the UI in those words.
-- No provider branding in the primary view, no filenames, no paths.
-- Provider specificity is an *advanced* detail, not the headline (§3.4).
+### 5.1 Versioning
 
-### 3.2 Data model
-
-Two new tables, mirroring §2.2 field-for-field where the semantics match:
-
-**Content model — decided (operator, 2026-09-05): one shared body, materialized
-everywhere.** The user authors once; AgentMux writes that same body into each
-provider's own instructions file. Per-provider content is explicitly *not* in
-scope for v1.
-
-> **Corrected after review (Codex P2).** The first draft keyed both tables by
-> `provider_id` "for future flexibility" while exposing one shared body and
-> provider-less read/write APIs. That is incoherent: with N provider rows there
-> is no canonical value to read or revert, and the spec contradicted itself —
-> §3.3 required writing every provider row while the test plan required exactly
-> one version row per save. Worse, rows could silently diverge after a partial
-> write failure. **Fixed: a single canonical content/version stream; providers
-> are materialization targets only, never storage keys.**
+Mirror `db_agent_native_memory_versions` (`migrations.rs:778-798`) — do not
+invent a second scheme. That table already models `content_hash`,
+`parent_version_id`, `source`, `source_detail`, `session_id`, and its
+history/diff/revert impls (`app_api/mod.rs:1032-1188`) carry reagent-P1 fixes a
+fresh implementation would rediscover the hard way.
 
 ```sql
--- Singleton: exactly one row, id = 'shared'. Providers are materialization
--- targets (§3.3), not storage keys — there is one canonical body to read,
--- diff and revert.
-CREATE TABLE IF NOT EXISTS db_provider_setup (
-    id            TEXT PRIMARY KEY,          -- always 'shared' in v1
-    content       TEXT NOT NULL,
-    size_bytes    INTEGER NOT NULL DEFAULT 0,
-    updated_at    INTEGER NOT NULL DEFAULT 0
-);
-
--- Append-only history for that single stream. Same shape and same reasons as
--- db_agent_native_memory_versions. No provider_id: one save = exactly one
--- version, matching the read/revert API and the test plan.
-CREATE TABLE IF NOT EXISTS db_provider_setup_versions (
+CREATE TABLE IF NOT EXISTS db_bundle_versions (
     id                TEXT PRIMARY KEY,
-    setup_id          TEXT NOT NULL,                  -- always 'shared' in v1
-    content           TEXT NOT NULL,
+    bundle_id         TEXT NOT NULL,
+    content           TEXT NOT NULL,          -- the bundle's instructions
     content_hash      TEXT NOT NULL,
     parent_version_id TEXT,
     source            TEXT NOT NULL DEFAULT 'user',   -- 'user' | 'agent' | 'import'
-    source_detail     TEXT NOT NULL DEFAULT '{}',     -- {agent_id, tool, …}
+    source_detail     TEXT NOT NULL DEFAULT '{}',
     session_id        TEXT NOT NULL DEFAULT '',
     created_at        INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX IF NOT EXISTS idx_provider_setup_versions_lookup
-    ON db_provider_setup_versions(setup_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_bundle_versions_lookup
+    ON db_bundle_versions(bundle_id, created_at);
 ```
 
-**Per-provider content, if ever wanted, is a v2 migration** — adding a
-`provider_id` column and a grouped-version concept. Carrying the key now without
-grouped-version semantics buys nothing and creates the divergence risk above.
-The `setup_id` column exists so that migration doesn't have to reshape the
-primary key.
+**Declare it in all three schemas and bump all three counters (Codex P2).**
+Verified: `db_bundles` is declared three times in `migrations.rs`
+(`:472`, `:1125`, `:1411`) — shared `store.db`, the per-channel `objects.db`
+fallback, and `identity-store.db` for parity — and the precedent table
+`db_agent_native_memory_versions` is likewise declared three times
+(`:778`, `:1237`, `:1557`). Declaring the new table in only one schema makes
+history calls fail with `no such table` depending on which store `id_store`
+resolved to — a bug that reproduces only in the fallback configuration, i.e.
+the one least likely to be tested.
 
-**Materialization is not atomic with the DB write.** Writing N files can
-partially fail. The DB commit is the source of truth and succeeds or fails
-alone; file writes are a best-effort projection, retried by the launch-time
-reconcile (§6 Q3). A partial file write therefore self-heals and can never
-corrupt history — which is the main reason storage must not be keyed per
-provider.
+Required: add the table to **all three** schema definitions and bump
+`SHARED_STORE_SCHEMA_VERSION` (`:59`), `OBJECT_SCHEMA_VERSION` (`:270`) and
+`IDENTITY_STORE_SCHEMA_VERSION`, with coverage for each open mode (§7).
 
-Note the one deliberate divergence: `source` defaults to `'user'` here, not
-`'agent_inferred'`. Native memory is *primarily* agent-written with the user
-occasionally intervening; provider setup is the reverse. A wrong default here
-silently mis-attributes the audit trail, which is the whole point of the table.
+Keyed per bundle, because Global Memory genuinely *is* multiple bundles the user
+orders — unlike v1's singleton, this key is real, not speculative.
+`source` defaults to `'user'` (Armory bundles are user-authored by default),
+inverting the native-memory default.
 
-**DB is the source of truth. The on-disk file becomes a build artifact.** That
-is the substantive change from today, and it's what makes versioning meaningful
-— you cannot revert a file that anything else is free to overwrite.
+Scope note: this versions **bundles**, which includes non-global ones. That is
+the right seam — versioning `is_global` bundles only would be an odd carve-out
+in the same table — but it means the UI must not imply history is a
+global-only feature.
 
-### 3.3 Materialization — two destination *kinds*, only one of which is verified everywhere
+### 5.2 Agent write path
 
-Reworked after Codex P1 ×2. A destination is only legitimate if the provider is
-**independently verified** to read from it.
-
-**Kind A — working-directory instructions file (verified for every provider).**
-`<work_dir>/<startup_instructions_filename>`, composed at launch by the existing
-`build_config_files`. This already works, for every provider, today.
-
-**Kind B — provider home / config dir (verified for Claude only).**
-`$CLAUDE_CONFIG_DIR/CLAUDE.md`, measured in
-`REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md` §2. **No equivalent
-is verified for any other provider**, and per §2.1's discipline none may be
-assumed.
-
-**Rule:** shared setup materializes to Kind A for all providers, and
-*additionally* to Kind B where a verified home path exists (today: Claude only).
-Adding a Kind B destination for another provider requires the same evidentiary
-bar — a documented read path, ideally measured — and is a per-provider change,
-not a config tweak.
-
-> This means Kind A is the load-bearing path for non-Claude providers, and Kind A
-> is *also* where Global Memory composes. **§6 Q4 is therefore no longer
-> optional** — see there.
-
-**Identity-bound agents (Codex P1).** An agent with an explicit OAuth account has
-its provider config env var **overwritten** with that account's own
-`SecretRef::OAuthConfigDir` (`inject.rs:591-598, 667`) — the default
-`provider_auth_dir` is never read. Materializing only to the shared dir would
-leave those agents on a stale file or bare placeholder while the UI claims the
-setup "applies to all agents." Since identity dirs are created and seeded at
-first-turn injection, **Kind B materialization must be reconciled into the
-resolved identity directory at that same point** (`inject.rs`, alongside the
-existing seed call), not only written once to the shared dir on save. The
-shared-dir write remains correct for default, non-identity-bound agents.
-
-Both kinds are written with a managed-ownership marker, reusing the
-`CLAUDE_MD_MANAGED_MARKER` pattern (`agent_config.rs:904`), so a hand-edited file
-is never silently clobbered — subject to the adoption rule in §4.
-
-**Interaction with the isolation seeding (important):**
-`seed_claude_md_placeholder_if_missing` exists so an isolated `CLAUDE_CONFIG_DIR`
-never falls through to the operator's personal `~/.claude/CLAUDE.md` — measured,
-not inferred (`REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md` §2).
-Writing **real** shared-setup content to that same path satisfies the same
-invariant: the seeding function already no-ops when a file exists
-(`providers.rs:697`), so this composes correctly. It must stay a no-op-if-present
-and must not be "simplified" away — with shared setup empty, the placeholder is
-still the only thing standing between an agent and the operator's personal file.
-
-### 3.4 UI
-
-Armory → **Provider Setup**:
-
-- A single editor for the shared setup content. Markdown, same editing affordance
-  as Global Memory bundles.
-- Save writes a new version (`source='user'`).
-- **History panel** — versions list, diff against any prior version, revert.
-  Reuse the Global Memory audit UI wholesale rather than building a second one.
-- Status line: *"Applies to all agents"* + how many providers it materializes to
-  — **not** the filenames.
-- **Advanced/disclosure only:** the resolved per-provider destination paths, and
-  an explicit callout for any configured provider whose
-  `startup_instructions_filename` is `None` (§2.1) — those agents will *not*
-  receive shared setup, and hiding that would be a silent lie.
-
-The existing read-only "Claude Code — shared provider config" block is removed;
-this replaces it.
-
-### 3.5 Agent write path
-
-New MCP tools, named and shaped after the `Memory*` family so there is one
-mental model:
+New MCP tools, named so the *scope difference* from the existing per-agent
+`Memory*` family is unmissable:
 
 | Tool | Purpose |
 |---|---|
-| `ProviderSetupRead` | current content |
-| `ProviderSetupWrite` | replace content → new version, `source='agent'`, `source_detail` carries `agent_id` |
-| `ProviderSetupHistory` | version list |
-| `ProviderSetupDiff` | diff two versions |
-| `ProviderSetupRevert` | revert to a version |
+| `GlobalMemoryList` | list global bundles |
+| `GlobalMemoryRead` | read one |
+| `GlobalMemoryWrite` | create/replace → new version, `source='agent'` |
+| `GlobalMemoryHistory` / `GlobalMemoryDiff` / `GlobalMemoryRevert` | audit + undo |
 
-Every agent write is attributed and revertible by construction — that is what
-makes "updateable by the agent" safe to grant.
+**🔒 System-tier bundles are OFF LIMITS to agents (Codex P1, PR #2997).**
+`bundle_memory_list_global()` returns `is_system` rows too — it selects
+`WHERE is_global = 1` and merely *orders* by `is_system DESC`
+(`memory_bundles.rs:161-170`). Those rows carry an existing invariant that only
+`bundle_memory_upsert_system` / `bundle_memory_delete_system` may modify them.
+Defining the agent tools over "all global bundles" would hand an agent the
+operator-controlled, highest-priority tier — and a `GlobalMemoryRevert` modelled
+directly on native-memory revert would write the row straight past the generic
+upsert guard.
 
-**Security posture — decided (operator, 2026-09-05): any agent may write, fully
-audited.** No per-agent gating, no allowlist.
+**Invariant (not an enumeration):** *no agent-invocable code path may create,
+modify, revert, reorder or delete an `is_system` bundle.* Stated as a blanket
+rule deliberately — listing "Write and Revert" would leave any later tool
+(delete, bulk-import, reorder) outside the guard by default, which is how this
+kind of boundary erodes.
 
-This is a *global* surface: an agent with `ProviderSetupWrite` changes
-instructions every other agent reads on next launch. That is a real privilege
-vector — an agent editing what all its peers are told — and the decision is to
-accept it in exchange for capability, with auditability as the control. That
-places weight on the audit trail actually being trustworthy, so these are
-requirements, not nice-to-haves:
+Required:
 
-- **Every write is attributed.** `source='agent'`, `source_detail` carries
-  `agent_id` and tool name, `session_id` populated. A write that cannot be
-  attributed must be rejected, not recorded as anonymous.
-- **History is append-only.** Revert creates a *new* version; nothing rewrites or
-  deletes history, so an agent cannot cover its tracks through the same API.
-- **The UI must surface agent-authored changes.** An agent-written version that
-  looks identical to a user-written one in the history list defeats the control
-  — show the author, and consider surfacing recent agent writes proactively
-  rather than only on request.
-- **Content is instructions, not code.** It is read by a model, not executed —
-  which bounds the damage to influence rather than arbitrary execution. Worth
-  stating plainly so nobody later assumes a stronger guarantee than exists.
+- **Enforcement sits at the tool boundary, in every mutating tool**, checked
+  against the target bundle's own `is_system` flag before any store call. A
+  lower-layer guard alone is insufficient: `bundle_memory_upsert_system` is the
+  only guarded write today, and a revert built on the native-memory pattern
+  writes through a different path that never reaches it.
+- Any *new* `GlobalMemory*` tool that mutates must add the same check; a shared
+  helper (e.g. `reject_if_system(bundle_id)`) called first in each mutating
+  handler is preferred over per-tool ad-hoc filtering, so the rule is one thing
+  to audit rather than N.
+- `GlobalMemoryList` / `Read` may include system bundles (visibility is useful),
+  but must mark them read-only.
+- A rejection test **per mutating tool** (§7), so the boundary fails loudly if a
+  filter is later "simplified" away or a new tool forgets it.
 
----
+**Security posture — operator-decided (2026-09-05): any agent may write
+non-system global bundles, fully audited.** This is content *every other agent*
+loads at launch, so auditability is the only control and these are requirements,
+not niceties:
 
-## 4. Migration and adoption
+- unattributable writes are **rejected**, never recorded as anonymous;
+- history is strictly append-only — revert creates a new version, so an agent
+  cannot erase its own trail through the same API;
+- the UI must visibly distinguish agent-authored versions from user-authored;
+- content is instructions read by a model, not executed — this bounds the
+  exposure to influence, not arbitrary execution, and should be stated plainly
+  rather than assumed stronger.
 
-> **Corrected after review (Codex P2).** The first draft imported a pre-existing
-> file's content but left the file **unmarked**. The §3.3 writer then treats an
-> unmarked file as user-owned and refuses to overwrite it — so every later save
-> would update the DB and history while the file the provider actually reads
-> never changed. A silent, permanent divergence. Import must therefore include an
-> explicit *adoption* step.
-
-1. On first run, for each verified destination (§3.3), if a file exists and is
-   **not** the placeholder: import its content as version 1 with
-   `source='import'`, **and adopt the file** — rewrite it with the managed marker
-   prepended, content otherwise byte-identical. Adoption is what makes subsequent
-   writes legal.
-2. If it is the placeholder, or absent: start empty and leave the placeholder in
-   place. The placeholder is not user content and must never become version 1.
-3. **Adoption is one-time and must be visible**, not silent — AgentMux is taking
-   ownership of a file the user may have hand-maintained. Surface it in the UI
-   (and the version's `source_detail` records the adopted path). If the operator
-   declines, the alternative is the side-file composition path
-   (`SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md`'s `@import` +
-   `AGENTMUX_MEMORY.md` companion), which leaves the original untouched — that
-   pattern already exists and should be reused rather than reinvented.
-4. After adoption the file is regenerated from the DB on every save/reconcile.
+Tool descriptions must say the content is global and affects every agent. The
+existing `MemoryWrite` description's `provenance` pattern (source `human` /
+`jekt` / default `agent_inferred`) is a good model to copy for attribution.
 
 ---
 
-## 5. Test plan
+## 6. Migration and adoption
 
-**Rust**
-- Destination resolution covers each registry entry, including `None`, and
-  **asserts no Kind B destination exists for a non-Claude provider** — a guard
-  against the exact §2.1 mistake being reintroduced.
-- Write creates **exactly one** version row (singleton stream) with correct
-  `source`/`content_hash`/`parent_version_id`.
-- Revert produces a *new* version (never rewrites history) — mirror the existing
-  native-memory revert tests, including the staleness case from
-  `app_api/mod.rs:1151`.
-- Materialization writes Kind A for every non-`None` provider and Kind B only
-  for Claude; `None` providers are skipped without erroring.
-- **Partial materialization failure** leaves the DB/history intact and is
-  repaired by the reconcile pass — no divergence, no orphaned version.
-- **Identity-bound reconcile:** an agent with an OAuth account gets the current
-  setup in *its own* resolved config dir, not a stale file or bare placeholder.
-- **Isolation regression:** with shared setup empty, an isolated dir still gets
-  the placeholder; with content, the real content. Neither state leaves the dir
-  without a file.
-- **Adoption:** importing a pre-existing unmarked file marks it, and a
-  subsequent save actually rewrites it (the §4 deadlock, pinned).
-- Ownership: an unmanaged, *un-adopted* file is not clobbered.
+1. On first run, if a Kind B destination holds a non-placeholder file, import it
+   as a global bundle (`source='import'`) **and adopt the file** — rewrite with
+   the managed marker, content byte-identical. Without adoption the writer would
+   treat it as user-owned forever, so the DB would advance while the file the
+   provider reads never changed (Codex P2 on v2).
+2. Placeholder or absent → import nothing, leave the placeholder.
+3. Adoption is one-time and **user-visible**; AgentMux is taking ownership of a
+   file the user may have maintained by hand. The `@import` side-file pattern
+   (`SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md`) is the opt-out.
 
-**Frontend**
-- Editor saves → new version appears in history.
-- Diff/revert against the version list.
-- A `None`-filename provider is disclosed, not hidden.
+---
+
+## 7. Test plan
+
+**Deletion (A)**
+- No reference to `getclaudeglobalconfig` remains; the Armory page renders
+  without the block.
+- `seed_claude_md_placeholder_if_missing` still exists and is still called.
+
+**Materialization (B) — unconditional**
+- Global Memory reaches agents of **every** provider via Kind A (regression
+  guard on existing behaviour, which is the whole of B if Kind B is dropped).
+- The provider config dir still contains the placeholder after A's deletion
+  work — i.e. nothing in §3 removed the isolation control.
+
+**Materialization (B) — *only if Kind B ships***
+- Kind B destination resolution **asserts no non-Claude provider has one** —
+  the guard against reintroducing v2's P1.
+- Identity-bound agent gets current Global Memory in *its own* resolved dir.
+- **Isolation matrix (§4.3), all three rows** — especially emptying Global
+  Memory restoring the placeholder.
+- No duplication: a Claude agent does not receive the same Global Memory text
+  from both Kind A and Kind B (§4.1a).
+- Partial file-write failure leaves DB/history intact and self-heals on
+  reconcile.
+- An un-adopted hand-edited file is not clobbered; an adopted one is updated.
+
+**Change management (C)**
+- One save → exactly one version row, correct `source`/`hash`/`parent`.
+- Revert creates a new version; history is never rewritten.
+- `GlobalMemoryWrite` records `source='agent'` + `agent_id`; an unattributable
+  write is rejected.
+- **Every mutating `GlobalMemory*` tool REJECTS an `is_system` bundle** — one
+  test per mutating tool, not just Write/Revert. Privilege boundary; must fail
+  loudly if a filter is "simplified" away or a newly-added tool omits it.
+- **Schema parity:** history works in all three open modes (shared `store.db`,
+  per-channel `objects.db` fallback, `identity-store.db`) — the fallback mode
+  especially, since that's where a single-schema declaration would silently
+  produce `no such table`.
 
 **Manual**
-- Edit setup in Armory, launch an agent, confirm the agent's context reflects it
-  — using the calibrated arm-3 prompt from
-  `REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md` §1, not a yes/no
-  question. That report's own first pass got a false null from an uncalibrated
-  instrument; anyone verifying this must not repeat it.
+- Edit Global Memory, launch a Claude agent, confirm the content is present —
+  using the calibrated arm-3 prompt from
+  `REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md` §1, **not** a
+  yes/no question. That report's own first pass got a false null from an
+  uncalibrated instrument.
 
 ---
 
-## 6. Decisions and remaining questions
+## 8. Open
 
-### Decided (operator, 2026-09-05)
+**Q3 (carried).** Materialize on write, at launch, or both? Recommend **both** —
+write-through on save so disk matches the DB immediately, plus a launch-time
+reconcile so a hand-deleted file self-heals. Kind B for identity-bound agents is
+necessarily launch-time regardless (§4.2).
 
-- **Agent writes: any agent, fully audited.** No gating. See §3.5 for the
-  auditability requirements this decision makes load-bearing.
-- **Content: one shared body, materialized to every provider's file.**
-  Per-provider content deferred; schema already accommodates it. See §3.2.
-
-### Still open
-
-**Q3. Materialize on write, or at launch?**
-On-write is simpler to reason about and makes the disk state match the DB
-immediately. At-launch matches how every other shared resource behaves. Recommend
-**both**: write-through on save, plus a launch-time reconcile so a hand-deleted
-file self-heals.
-
-**Q4. Relationship to Global Memory — now BLOCKING (upgraded after Codex P1).**
-
-The original framing was "they differ by destination: Global Memory → working
-directory, provider setup → provider config dir," and that distinction is what
-made two features defensible. **§2.1's correction removes it for every provider
-except Claude.** Since only Claude has a verified provider-home read path, shared
-setup for all other providers must materialize into the working-directory
-instructions file — which is exactly where Global Memory already composes.
-
-So for non-Claude providers the two features are, mechanically, the same feature
-writing to the same file. That has to be resolved before implementation, not
-after:
-
-- **(a) Merge.** Shared provider setup becomes a section of Global Memory —
-  arguably what the operator's *"only shared provider setup"* framing already
-  describes, with the versioning/agent-write requirements applied to Global
-  Memory instead.
-- **(b) Keep separate, define composition order.** Two authored bodies, one
-  destination file, with an explicit and documented precedence.
-- **(c) Claude-only v1.** Ship against the one verified Kind B path and defer
-  other providers until their home paths are verified — honest, but directly
-  contradicts the provider-agnostic requirement.
-
-**Recommendation: (a) or (b), not (c)** — (c) reintroduces the Claude-specificity
-the operator explicitly asked to remove. This is the one decision that should be
-made before any code is written, and it is precisely the conflation that made the
-predecessor chain (`SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md`) need three
-self-corrections.
+*(Q4 — the Global Memory relationship — is resolved by this revision: there is
+no second concept.)*
 
 ---
 
-## 7. Related
+## 9. Related
 
-- `docs/reports/REPORT_SHARED_PROVIDER_CONFIG_STATE_AND_BUILDOUT_2026_09_05.md` — current-state audit this builds on
-- `SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md` — the versioning pattern to mirror
-- `SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md` + `REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md` — the isolation invariant §3.3 must preserve
-- `SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md` — the managed-marker pattern
-- `SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md` — what this replaces
-- `SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md` — `startup_instructions_filename`'s own spec
+- `docs/reports/REPORT_SHARED_PROVIDER_CONFIG_STATE_AND_BUILDOUT_2026_09_05.md` — current-state audit
+- `SPEC_MEMORY_VERSION_CONTROL_AND_ARMORY_AUDIT_2026_08_19.md` — versioning pattern to mirror
+- `SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md` + `REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md` — the §4.3 invariant
+- `SPEC_CLAUDE_MD_OWNERSHIP_PROTECTION_2026_08_22.md` — managed marker / `@import` opt-out
+- `SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md` — the spec chain that created the deleted surface
+- `SPEC_GLOBAL_MEMORY_SYSTEM_TIER_2026_08_24.md` — Global Memory's system tier (note: contains a known-wrong path claim)
+- `SPEC_PROVIDER_AWARE_STARTUP_INSTRUCTIONS_2026_08_24.md` — `startup_instructions_filename`'s contract
