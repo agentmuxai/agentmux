@@ -30,6 +30,74 @@ use crate::state::AppState;
 #[cfg(target_os = "windows")]
 use cef::{ImplBrowser, ImplBrowserHost};
 
+/// Explicit, user-initiated application quit — issue #2977 Workstream 1, the
+/// tray's "Quit AgentMux" item.
+///
+/// **Why this cannot go through the ordinary last-window path.** Background-
+/// service mode (`AGENTMUX_BACKGROUND_SERVICE`, PR #2983) makes
+/// `should_begin_drain` refuse to arm a `LastWindowClosed` drain — that is the
+/// entire point of the mode, and it also makes the launcher's
+/// `Event::HostShouldQuit` a no-op, since the host's orphan reconciler routes
+/// through that same verdict. So a background-mode instance has no automatic
+/// route to quitting, by design; an explicit request needs one that bypasses
+/// the gate rather than fighting it.
+///
+/// `QuitReason::LauncherRequested` is exactly that route, and this is its
+/// first production use. As documented on `should_begin_drain`, the
+/// `LauncherRequested`/`External` reasons are dispatched *straight* to
+/// `handle_begin_drain` and never consult `should_begin_drain`, so the
+/// background-service gate cannot suppress them.
+///
+/// **Order matters, and composes with the Stage-2 gates rather than working
+/// around them.** Draining is flipped FIRST, then every live user window is
+/// closed. Each window then runs its normal `on_before_close` (so
+/// `backend_close_window` still tells srv to clean up its
+/// window/workspace/tabs — a quit that skipped that would leak rows and
+/// resurrect ghost windows on next launch). Because `QuitState` is already
+/// `Draining` by the time the last one closes, both Stage-2 gates —
+/// `client::lifecycle::is_last_window_close` and WRR's
+/// `should_quit_on_last_window`, which each require `draining` — fire
+/// normally. Nothing here special-cases the quit; it just supplies the drain
+/// decision those gates were already waiting for.
+///
+/// Runs on the IPC thread, so both steps are posted to the UI thread (CEF
+/// window work is UI-thread-only; see `promote_pool_window`'s own note that
+/// the promote path runs on the IPC thread, not the UI thread).
+pub fn quit_app(state: &Arc<AppState>) -> Result<serde_json::Value, String> {
+    // Snapshot the labels under one short lock, then drop it before posting —
+    // the snapshot-and-drop discipline this codebase uses everywhere for
+    // host_state (never hold it across CEF calls).
+    let labels: Vec<String> = {
+        let st = state.host_state.lock();
+        crate::reducer::live_user_window_labels(&st)
+    };
+
+    tracing::warn!(
+        target: "wrr",
+        window_count = labels.len(),
+        "[quit] explicit quit requested (tray/launcher) — draining with LauncherRequested"
+    );
+
+    // 1. Flip QuitState -> Draining{LauncherRequested} and cascade-close the
+    //    warm pool. Posted, not called: `begin_drain_and_cascade` is
+    //    UI-thread-only.
+    let mut drain = crate::ui_tasks::BeginDrainCascadeTask::new(
+        state.clone(),
+        crate::state::QuitReason::LauncherRequested,
+    );
+    cef::post_task(cef::ThreadId::UI, Some(&mut drain));
+
+    // 2. Close the user's windows. If there are none (background-service mode
+    //    resting with zero windows — the case the tray exists for), step 1's
+    //    own `reevaluate_last_window_quit` is what completes the quit, which
+    //    is why that re-check lives inside BeginDrainCascadeTask.
+    for label in &labels {
+        crate::ui_tasks::post_close_window(state, label);
+    }
+
+    Ok(serde_json::json!({ "closing": labels.len() }))
+}
+
 /// Close the window. Args: optional `{ "label": string }`; defaults to "main".
 /// Routes by label via `resolve_window_hwnd` — without that the floater
 /// (owned, drawn above its owner in Z-order) would always swallow the

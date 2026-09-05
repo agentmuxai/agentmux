@@ -100,6 +100,22 @@ x11rb = { version = "0.13", features = ["randr"] }
 # Wayland sessions (the default since #1611). No GPU/EGL. wayland-client is used
 # via sctk's reexport so the protocol versions can't skew.
 smithay-client-toolkit = "0.19"
+# Optional tray icon (issue #2977 Workstream 1). `ksni` — NOT `tray-icon` —
+# on Linux, per SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md §2:
+# tray-icon's Linux path needs a GTK3 main loop running alongside CEF's own
+# GLib loop, which is why `tray-icon`/`muda` below are scoped to
+# Windows+macOS only and pulled with default-features = false (their
+# defaults enable `gtk`/`libxdo`, which would drag GTK back in). `ksni` is
+# pure D-Bus StatusNotifierItem with no toolkit loop, and its `tokio`
+# feature matches the runtime the launcher already runs.
+ksni = { version = "0.3", default-features = false, features = ["tokio"] }
+
+[target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
+# Optional tray icon (issue #2977 Workstream 1). default-features = false
+# keeps the `gtk`/`libxdo` defaults off — they are Linux-only concerns and
+# Linux uses `ksni` instead (see above).
+tray-icon = { version = "0.24", default-features = false }
+muda = { version = "0.19", default-features = false }
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winres = "0.1"

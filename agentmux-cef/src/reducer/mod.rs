@@ -1035,7 +1035,7 @@ mod top_level;
 /// Shared with `AppState::count_live_user_windows` (the live last-window quit
 /// gate) so the count has a single definition. (`is_live_user_window` stays
 /// internal to `quit` — used by `count_live_user_windows` and its tests.)
-pub(crate) use quit::count_live_user_windows;
+pub(crate) use quit::{count_live_user_windows, live_user_window_labels};
 
 /// Whether a command can change the quit decision's inputs — the live
 /// user-window count (`browsers`), pending user-initiated creations, or

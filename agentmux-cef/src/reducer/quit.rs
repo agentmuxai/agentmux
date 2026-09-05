@@ -143,6 +143,32 @@ pub(crate) fn count_live_user_windows(state: &HostState) -> usize {
         .count()
 }
 
+/// Labels of every live, user-visible top-level window, by the same
+/// `is_live_user_window` classification `count_live_user_windows` uses.
+///
+/// Exists so an explicit quit (`commands::window::quit_app`, the tray's "Quit
+/// AgentMux") can close exactly the windows that count, without
+/// `is_live_user_window` having to leave this module — the classification
+/// stays here, callers get purpose-built accessors. Same reason
+/// `count_live_user_windows` is shaped the way it is.
+/// Split from the `HostState` wrapper below so the classification is
+/// unit-testable: a `BrowserHandle` owns a real `cef::Browser`, which no test
+/// can construct, so anything reading `state.browsers` directly is untestable
+/// by construction. Same pure-core/thin-wrapper shape as `should_begin_drain`
+/// vs `reconcile_quit`.
+pub(crate) fn live_user_window_labels_from<'a>(
+    entries: impl Iterator<Item = (&'a String, &'a BrowserKind)>,
+) -> Vec<String> {
+    entries
+        .filter(|(_, kind)| is_live_user_window(kind))
+        .map(|(label, _)| label.clone())
+        .collect()
+}
+
+pub(crate) fn live_user_window_labels(state: &HostState) -> Vec<String> {
+    live_user_window_labels_from(state.browsers.iter().map(|(label, h)| (label, &h.kind)))
+}
+
 /// Whether a USER-initiated top-level window creation is in flight (enqueued but
 /// not yet registered). Such a creation has no registered browser yet — so it is
 /// invisible to `count_live_user_windows` — which is exactly why the gate must

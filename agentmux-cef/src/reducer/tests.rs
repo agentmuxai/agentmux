@@ -1253,6 +1253,39 @@ fn reconcile_quit_drains_despite_pending_pool_refill() {
     assert_eq!(reconcile_quit(&state), Some(QuitReason::LastWindowClosed));
 }
 
+/// `live_user_window_labels` must classify by the same rule as
+/// `count_live_user_windows` — the explicit-quit path (`quit_app`) closes
+/// exactly what it returns, so a pool window or pane leaking into the list
+/// would have the tray's Quit closing background inventory as if it were the
+/// user's windows.
+#[test]
+fn live_user_window_labels_matches_the_live_count_classification() {
+    let entries: Vec<(String, BrowserKind)> = vec![
+        ("main".into(), BrowserKind::TopLevel { is_pool: false }),
+        ("window-abc".into(), BrowserKind::TopLevel { is_pool: false }),
+        // A promoted pool window keeps its `window-pool-` label forever but
+        // has is_pool: false — it IS a real user window and must be closed
+        // by an explicit quit (classification is by type, never by label).
+        ("window-pool-promoted".into(), BrowserKind::TopLevel { is_pool: false }),
+        ("window-pool-1".into(), BrowserKind::TopLevel { is_pool: true }),
+        ("floating-xyz".into(), BrowserKind::Floater { is_pool: false }),
+        ("browser-pane-b1-1".into(), BrowserKind::Pane { block_id: "b1".into() }),
+    ];
+    let mut labels = super::quit::live_user_window_labels_from(
+        entries.iter().map(|(l, k)| (l, k)),
+    );
+    labels.sort();
+    assert_eq!(
+        labels,
+        vec![
+            "main".to_string(),
+            "window-abc".to_string(),
+            "window-pool-promoted".to_string(),
+        ],
+        "only real user top-levels; unpromoted pool windows, floaters and panes excluded"
+    );
+}
+
 /// Workstream 0 Phase 1: with background-service mode on, closing the last
 /// window (armed, zero live windows, nothing pending) must NOT drain —
 /// `host` stays alive with zero windows instead of tearing itself (and, via
