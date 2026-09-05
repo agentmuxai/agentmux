@@ -175,6 +175,33 @@ impl BackgroundAudit {
     /// has opened or closed yet, so there is no transition to record.
     pub fn set_dir(&mut self, dir: &std::path::Path) {
         let path = dir.join("background-audit.jsonl");
+
+        // IDEMPOTENT. This is a repeat-call path, not a one-shot: `sidecar`
+        // calls it from both `use_launcher_endpoints` and `spawn_backend`, and
+        // `spawn_backend` is re-invoked by the user-facing `restart_backend`
+        // IPC and by crash auto-restart. Re-initialising would spawn a SECOND
+        // writer thread holding a brand-new `io` mutex while the old thread
+        // kept draining its queue under the old one — two writers on the same
+        // files under unrelated locks, reopening the very race the file lock
+        // exists to close (ReAgent P1 on #3001).
+        //
+        // The host process is not restarting in that scenario, so the
+        // in-memory `unattended` flag is still valid and must NOT be reseeded.
+        if let Some(existing) = &self.path {
+            if existing != &path {
+                // A data dir that changes mid-process is not a thing that
+                // happens; keeping the existing writer is strictly safer than
+                // running two.
+                tracing::warn!(
+                    target: "wrr",
+                    old = %existing.display(),
+                    new = %path.display(),
+                    "[audit] ignoring a data-dir change — keeping the existing log"
+                );
+            }
+            return;
+        }
+
         self.path = Some(path.clone());
         let io = std::sync::Arc::new(std::sync::Mutex::new(()));
         self.io = Some(io.clone());
@@ -691,6 +718,34 @@ mod background_audit_tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         panic!("watermark left the log permanently un-surfacable");
+    }
+
+    /// `set_dir` is re-invoked on every backend restart (`restart_backend`
+    /// IPC, crash auto-restart). It must not stand up a second writer thread
+    /// with its own lock over the same files, and it must not clobber the
+    /// in-memory state the running host still owns (ReAgent P1 on #3001).
+    #[test]
+    fn re_initialising_on_backend_restart_is_a_no_op() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut log = BackgroundAudit::default();
+        log.set_dir(dir.path());
+        log.record(true, 1);
+        wait_for_lines(&log, 1);
+        assert!(log.is_unattended());
+
+        // Backend restart: same host process, same data dir.
+        log.set_dir(dir.path());
+        assert!(
+            log.is_unattended(),
+            "the running host's state must survive a backend restart"
+        );
+
+        // Recording still works, and lands exactly once.
+        log.record(false, 2);
+        let e = wait_for_lines(&log, 2);
+        assert_eq!(e.len(), 2, "a second writer would corrupt or duplicate this");
+        assert_eq!(e[0].kind, AuditKind::WentUnattended);
+        assert_eq!(e[1].kind, AuditKind::Observed);
     }
 
     #[test]
