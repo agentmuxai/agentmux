@@ -4,9 +4,41 @@
 **Author:** Camper
 **Severity:** Medium — no data lost, the instance's backend stayed healthy throughout, but the user's only recovery action (double-click the exe) produced no working window. On a real user's machine (not an agent-operated VM), this reads as "AgentMux is broken, I have to kill it in Task Manager."
 **Area:** `agentmux-launcher` single-instance forwarding (`other_instances.rs`), the `pool_respawn_on_promote` saga (`saga/pool_respawn.rs`), `agentmux-cef`'s `promote_pool_window` (`commands/window_pool.rs`), Windows/VM power management.
-**Status:** active — root cause identified and evidenced; the recommended fix (verify promoted/forwarded windows are actually alive, fall back to a fresh window otherwise) is not yet implemented.
+**Status:** historical — see Update 2026-09-04 below. The root cause originally documented in this retro is no longer believed to be what actually happened; the code-level observations remain accurate readings of the code but are not proven to be what caused the original symptom.
 
 ---
+
+## Update 2026-09-04 — the real root cause was investigation tooling, not the app
+
+**The VM-suspend/stale-pool-window narrative below is very likely wrong about what actually happened, though it's an honest record of what the evidence available at the time supported.** Discovered while trying to reproduce the "double-click does nothing" symptom again, live, with the repo owner watching their own screen at the same time as the investigation:
+
+Every AgentMux instance launched via `vmrun runProgramInGuest` throughout this investigation — including the very first one, the one whose sleep/wake cycle this retro describes — ran in **Windows Session 0** (the non-interactive services session), not **Session 1** (the real interactive console session the repo owner actually sees via Parsec). Confirmed directly:
+
+```
+> query session
+ SESSIONNAME               USERNAME                 ID  STATE   TYPE        DEVICE
+>services                                            0  Disc
+ console                   Flor                      1  Active
+
+agentmux pid=11052 SessionId=0
+explorer pid=5596 SessionId=1
+winlogon pid=732 SessionId=1
+```
+
+This is a known VMware/VIX limitation, not an AgentMux bug: guest automation via `vmrun` runs through the VMware Tools guest service, and processes it spawns land in Session 0 regardless of the `-activeWindow` flag or real guest credentials (`-gu`/`-gp`) passed to it. Session 0 has had no user-visible desktop since Windows Vista's session-0-isolation change — nothing running there can ever paint a window a real user sees, no matter how correctly the app itself behaves.
+
+AgentMux's single-instance enforcement uses a named pipe, which **is** global across sessions in Windows. So once a Session-0 instance existed and held that pipe, every subsequent launch attempt — including the repo owner's own genuine double-clicks, from their real Session 1 desktop — correctly detected "already running" and forwarded an `open_new_window` request to the Session-0 instance, which correctly ran its promote/refill saga and correctly connected a new WebSocket, all while being structurally incapable of ever showing the result to anyone. That's why every log signal this retro's original investigation checked looked healthy (clean disconnect handling, working reconnect logic, a real Windows `IsWindow()` liveness check, a fast forward, a completed saga, a fast WebSocket setup) while the user's screen showed nothing at all.
+
+**Resolution:** killed the Session-0 instance (`killProcessInGuest`), confirmed zero AgentMux processes remained anywhere on the VM, then had the repo owner double-click the exe themselves from their own session. It opened correctly on the first try.
+
+**What this changes about the analysis above:**
+
+- The specific claim that a VM sleep/wake cycle left a promoted pool window carrying a dead connection is **no longer supported** — the instance being investigated was never in a session where anyone could observe whether that was true, and the actual explanation for "nothing visible happens" (a Session-0 zombie holding the single-instance pipe) doesn't require the sleep/wake cycle at all. A single `vmrun`-launched instance sitting untouched would have produced the exact same "double-click does nothing" symptom with no sleep involved.
+- **What still stands, as a general observation about the code, independent of what caused this specific incident:** `promote_pool_window`'s Windows-specific liveness check (`IsWindow()` against a cached HWND) validates that the OS hasn't destroyed a window handle — it does not and cannot validate that the *session* holding that handle is one any user can observe, or that the renderer behind it is responsive. That's a real, accurate reading of the code. It just isn't what happened here.
+- **The recommendation to verify (not just dispatch) before considering `open_new_window` satisfied is downgraded from "fixes a confirmed incident" to "reasonable additional hardening, motivated by a code-level gap rather than by this specific incident."** Not retracted, but should not be cited as proof this failure mode occurs in normal (non-agent-automated) use.
+- The ops-layer power-timer finding (VM's DC/battery sleep timer firing despite the AC timer showing "never") is unaffected by this correction and remains accurate as recorded — it was independently confirmed by direct `powercfg` inspection, twice, and has since been fixed on this VM (disabled on both AC and DC).
+
+**Lesson for future agent-driven VM testing, recorded so this doesn't repeat:** don't use `vmrun`/VIX guest automation to launch or interact with anything meant to be visible to a human on that VM. It's fine for file transfer, running scripts, and querying state, but any GUI process it spawns lands in a session the human can never see. For anything meant to be seen or clicked, have the human do it, or restrict agent involvement to read-only inspection (logs, `query session`, process listing) rather than driving the app directly.
 
 ## Summary
 
