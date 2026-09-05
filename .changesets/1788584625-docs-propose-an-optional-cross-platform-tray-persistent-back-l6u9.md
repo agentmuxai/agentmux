@@ -1,0 +1,5 @@
+---
+type: minor
+---
+
+docs: propose an optional cross-platform tray + persistent background service
