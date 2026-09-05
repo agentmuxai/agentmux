@@ -219,6 +219,9 @@ async fn route_command(
         "run_migrations" => commands::backend::run_migrations(state.clone()).await,
         "run_saga_vacuum" => commands::backend::run_saga_vacuum(state.clone()).await,
         "close_window" => commands::window::close_window(state, args),
+        // Issue #2977 WS4 — hand the frontend whatever the background
+        // service did while no window was open, so it can tell the user.
+        "background_audit_take" => crate::background_audit::background_audit_take(state),
         "minimize_window" => commands::window::minimize_window(state, args),
         "maximize_window" => commands::window::maximize_window(state, args),
         "toggle_floating_maximize" => commands::window::toggle_floating_maximize(state, args),

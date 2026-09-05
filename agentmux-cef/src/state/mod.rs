@@ -669,6 +669,12 @@ pub struct AppState {
     /// fresh cold-path window. Shares the confirmation signal, and the
     /// stage/confirm shape, with `pending_reproject_closures` directly above.
     pub promote_liveness: Mutex<PromoteLivenessWatches>,
+
+    /// Issue #2977 WS4 — what the background service did while the user had
+    /// no window open, surfaced the next time one opens. Written by
+    /// `host_dispatch` from the reducer's attended/unattended transition;
+    /// drained by the `background_audit_take` IPC command.
+    pub background_audit: Mutex<crate::background_audit::BackgroundAudit>,
 }
 
 impl Default for AppState {
@@ -756,6 +762,7 @@ impl Default for AppState {
             window_transparent: std::sync::atomic::AtomicBool::new(false),
             ui_thread_gate: Mutex::new(UiThreadGate::default()),
             pending_reproject_closures: Mutex::new(PendingReprojectClosures::default()),
+            background_audit: Mutex::new(crate::background_audit::BackgroundAudit::default()),
             promote_liveness: Mutex::new(PromoteLivenessWatches::default()),
         }
     }
@@ -780,6 +787,24 @@ impl AppState {
         };
         for ev in &out.events {
             log_host_event(ev);
+        }
+        // Issue #2977 WS4 — record attended/unattended transitions for the
+        // audit log the user is shown when a window next opens. Done here,
+        // where every dispatch funnels through, rather than at the individual
+        // close/open sites; the reducer already decided (see
+        // `background_attention_transition`), this only writes it down.
+        //
+        // Deliberately NOT inside the lock scope above: the audit log has its
+        // own mutex, and nesting it under `host_state` would create a second
+        // lock-ordering edge for what is pure bookkeeping.
+        if let Some(went_unattended) = out.background_attention {
+            let now = crate::background_audit::now_ms();
+            let mut audit = self.background_audit.lock();
+            if went_unattended {
+                audit.went_unattended(now);
+            } else {
+                audit.observed(now);
+            }
         }
         out
     }

@@ -981,6 +981,17 @@ pub struct DispatchOutput {
     /// concurrent pool-refill race (SPEC_PILLAR2_WIRE_RECONCILE_QUIT_2026_06_29.md).
     pub request_drain: Option<crate::state::QuitReason>,
 
+    /// Issue #2977 WS4 — the instance crossed the attended/unattended
+    /// boundary on this dispatch. `Some(true)` = the last window closed and
+    /// the instance is now running unobserved; `Some(false)` = a window
+    /// opened and it is observed again. `None` for everything else, including
+    /// every dispatch when background-service mode is off (where zero windows
+    /// means exiting, not resting).
+    ///
+    /// Consumed by `AppState::host_dispatch`, which records it into the
+    /// background audit log for surfacing when a window next opens.
+    pub background_attention: Option<bool>,
+
     /// Set `true` by `RelabelBrowser` when the rename succeeded (or was a
     /// no-op because `old_label == new_label`). Stays `false` on failure
     /// (old label absent, or new label already registered — e.g. a
@@ -1068,6 +1079,15 @@ fn is_quit_relevant(cmd: &HostCommand) -> bool {
 
 pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
     let quit_relevant = is_quit_relevant(&cmd);
+    // Sampled BEFORE the arm runs so the attended/unattended transition can be
+    // computed as a genuine before→after edge (issue #2977 WS4). Cheap: a
+    // filtered count over a small map, and only when the command could move
+    // it — the same gate `reconcile_quit` already uses.
+    let live_before = if quit_relevant {
+        quit::count_live_user_windows(state)
+    } else {
+        0
+    };
     let mut out = match cmd {
         HostCommand::EnqueuePendingWindowCreation { entry } => {
             handle_enqueue_pending_window_creation(state, entry)
@@ -1169,6 +1189,17 @@ pub fn update(state: &mut HostState, cmd: HostCommand) -> DispatchOutput {
     // once Draining/Quit it returns None, so this can't re-fire or loop.
     if quit_relevant {
         out.request_drain = quit::reconcile_quit(state);
+        // WS4 audit log: report crossing the attended/unattended boundary, so
+        // the host can record what the user missed and surface it when a
+        // window next opens. Computed here rather than at the close/open call
+        // sites for the same reason `request_drain` is — one place that sees
+        // every transition, instead of N sites that each have to remember.
+        out.background_attention =
+            quit::background_attention_transition(
+                state.background_service_enabled,
+                live_before,
+                quit::count_live_user_windows(state),
+            );
     }
     out
 }

@@ -1269,6 +1269,32 @@ fn reconcile_quit_never_drains_when_background_service_enabled() {
     );
 }
 
+/// Issue #2977 WS4 — the audit log needs a genuine before→after edge, not a
+/// level, or it would record an unattended period on every dispatch that
+/// happens to see zero windows.
+#[test]
+fn attention_transition_fires_only_on_the_edges() {
+    use super::quit::background_attention_transition as t;
+    // Last window closed → now unattended.
+    assert_eq!(t(true, 1, 0), Some(true));
+    // A window opened → observed again.
+    assert_eq!(t(true, 0, 1), Some(false));
+    // No crossing: steady states report nothing.
+    assert_eq!(t(true, 0, 0), None, "still unattended is not a new event");
+    assert_eq!(t(true, 2, 1), None, "closing one of several is not going away");
+    assert_eq!(t(true, 1, 2), None, "opening a second window is not being re-observed");
+}
+
+/// With background-service mode off, reaching zero windows means the app is
+/// EXITING, not resting — there is no unattended period to tell the user
+/// about, and recording one would be actively misleading.
+#[test]
+fn no_attention_transitions_when_background_service_is_off() {
+    use super::quit::background_attention_transition as t;
+    assert_eq!(t(false, 1, 0), None);
+    assert_eq!(t(false, 0, 1), None);
+}
+
 /// Idempotent: once draining, reconcile is a no-op (no double-drain).
 #[test]
 fn reconcile_quit_noop_once_draining() {

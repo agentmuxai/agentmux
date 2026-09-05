@@ -149,6 +149,33 @@ pub(crate) fn count_live_user_windows(state: &HostState) -> usize {
 /// consult the PRE-registration `pending_window_creations` queue (spec §10.2):
 /// draining while a user's "New Window" is still loading would quit the instance
 /// out from under it. Background creations (pool refill / panes) do not block drain.
+/// Did this dispatch move the instance across the attended/unattended
+/// boundary? Workstream 4's audit log (issue #2977) needs to know when a
+/// background-mode instance stopped being observed and when it was observed
+/// again, so the user can be told afterwards what ran while they were away.
+///
+/// `Some(true)` = just went unattended, `Some(false)` = just became observed,
+/// `None` = no transition.
+///
+/// Only meaningful in background-service mode: without it, reaching zero user
+/// windows means the app is exiting, not resting, so there is no unattended
+/// period to report. Pure and separate from its caller for the usual reason —
+/// it is a decision, and decisions in this module are unit-tested.
+pub(crate) fn background_attention_transition(
+    background_service_enabled: bool,
+    live_before: usize,
+    live_after: usize,
+) -> Option<bool> {
+    if !background_service_enabled {
+        return None;
+    }
+    match (live_before, live_after) {
+        (b, 0) if b > 0 => Some(true),
+        (0, a) if a > 0 => Some(false),
+        _ => None,
+    }
+}
+
 pub(super) fn user_creation_in_flight(state: &HostState) -> bool {
     state
         .pending_window_creations
