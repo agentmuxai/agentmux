@@ -14,6 +14,7 @@ import { fireAndForget } from "@/util/util";
 import type { JSX } from "solid-js";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { WorkspaceService } from "../store/services";
+import { resolveDisplayActiveTabId } from "./active-tab-display";
 import { DroppableTab } from "./droppable-tab";
 import { TabCloseConfirmModal } from "./tab-close-confirm-modal";
 import { registerTabCloseRequestHandler } from "./tab-close-request";
@@ -74,26 +75,51 @@ function TabBar(props: TabBarProps): JSX.Element {
         return allTabIds().filter((id) => !hidden.has(id));
     };
 
-    // While the REAL active tab is optimistically hidden (mid-close), the
-    // strip highlights the neighbor the backend is about to promote —
-    // next tab in the list, else previous, mirroring handle_delete_tab's
-    // `tab_ids.get(pos) ?? pos-1` (agentmux-srv/src/reducer/tab.rs). The
-    // strip therefore shows the FINAL post-close state from the first
-    // frame; the backend's update then changes nothing visibly.
-    const displayActiveTabId = () => {
-        const real = activeTabId();
-        const hidden = pendingHiddenTabIds();
-        if (!hidden.has(real)) return real;
-        const all = allTabIds();
-        const idx = all.indexOf(real);
-        for (let i = idx + 1; i < all.length; i++) if (!hidden.has(all[i])) return all[i];
-        for (let i = idx - 1; i >= 0; i--) if (!hidden.has(all[i])) return all[i];
-        return real;
-    };
+    // Optimistic select (SPEC_TAB_SWITCH_DECOUPLE_SELECT_FROM_PAINT_2026_09_04):
+    // the tab the user just clicked, held until its SetActiveTab RPC settles.
+    // Without this the pill waits on `activeTabId()` — which is
+    // backend-authoritative, so it cannot move until the RPC round-trips, and
+    // its arrival is also what flips the destination's `display:none → flex`
+    // in the same Solid flush. That reveal owes the browser layout for a whole
+    // newly-displayed subtree before anything can paint, including the pill;
+    // SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md measured 500-600ms of it
+    // for a large tab. Hence "the bigger the destination, the longer the tab
+    // takes to even look selected."
+    const [pendingSelectedTabId, setPendingSelectedTabId] = createSignal<string | null>(null);
+
+    // What the strip highlights — see active-tab-display.ts for the full
+    // precedence (optimistic select, then the close-flow neighbor promotion).
+    // Deliberately NOT used by workspace.tsx's content reveal, which keeps
+    // reading the raw backend-authoritative atom.
+    const displayActiveTabId = () =>
+        resolveDisplayActiveTabId({
+            realActiveTabId: activeTabId(),
+            allTabIds: allTabIds(),
+            hiddenTabIds: pendingHiddenTabIds(),
+            pendingSelectedTabId: pendingSelectedTabId(),
+        });
 
     const handleSelect = (tabId: string) => {
         if (tabId === activeTabId()) return;
-        setActiveTab(tabId);
+        // Commit the highlight BEFORE issuing the RPC so the pill paints on
+        // its own cheap schedule rather than behind the destination's reveal.
+        setPendingSelectedTabId(tabId);
+        fireAndForget(async () => {
+            try {
+                await setActiveTab(tabId);
+            } finally {
+                // Clear only if this call's own target is still the pending
+                // one — a newer click during the RPC owns the value now, and
+                // clearing it here would drop the strip back to the stale
+                // committed id until that newer RPC lands. Same
+                // stale-generation discipline as tab-reveal.ts's gates.
+                //
+                // Runs on the throw path too: a select that failed must not
+                // leave a phantom highlight on a tab the backend never
+                // activated (mirrors handleClose's own unhideTab in finally).
+                setPendingSelectedTabId((cur) => (cur === tabId ? null : cur));
+            }
+        });
     };
 
     const handleClose = (tabId: string) => {
@@ -118,6 +144,17 @@ function TabBar(props: TabBarProps): JSX.Element {
         // once it becomes active, until it settles) — an untargeted hold
         // here blanked the whole content region at confirm-click, which
         // read as the neighbor pane "flashing".
+        //
+        // Reads the same displayActiveTabId() as the pill, so an in-flight
+        // optimistic select (added by
+        // SPEC_TAB_SWITCH_DECOUPLE_SELECT_FROM_PAINT_2026_09_04) can win here
+        // too. Identical to the old behaviour whenever no select is pending,
+        // which is the overwhelmingly common case. When one IS pending the two
+        // candidates (clicked tab vs. close-promoted neighbor) are already
+        // racing two concurrent RPCs on the backend, so neither is reliably
+        // "the" next active tab — gating the tab the user actually clicked is
+        // at least as good a guess as the inferred neighbor, and the gate's
+        // own 800ms cap bounds the cost of guessing wrong either way.
         const promotedTabId = closingActiveTab ? displayActiveTabId() : null;
         fireAndForget(async () => {
             if (closingActiveTab) holdRevealGate(promotedTabId);
