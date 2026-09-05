@@ -165,7 +165,10 @@ TODAY="$(date +%Y-%m-%d)"
     for d in "${DESCRIPTIONS[@]}"; do
         echo "- $d"
     done
-    echo
+    # No extra `echo` here: `tail -n +2` below already reproduces the blank
+    # line that separated the old heading from its first entry — an extra
+    # one here doubles it before every subsequent "## " heading (reagent
+    # P2 on PR #2982).
     tail -n +2 "$HISTORY"
 } >"$TMP"
 mv "$TMP" "$HISTORY"
