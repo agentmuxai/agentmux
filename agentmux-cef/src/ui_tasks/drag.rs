@@ -324,14 +324,19 @@ unsafe fn run_macos_native_drag_loop(window: &Window, label: &str) {
 #[cfg(target_os = "windows")]
 wrap_task! {
     // `after_unmaximize` is true on the re-posted second half of a drag that
-    // had to un-maximize first — see the `unmaximize_for_drag` call site in
-    // `execute` for why that is split across two message-loop turns.
+    // had to un-maximize first; `max_*` then carry the pre-restore maximized
+    // geometry needed to place the window under the cursor. See the
+    // `begin_unmaximize_for_drag` call site in `execute` for why this is
+    // split across two tasks.
     // (Field-level doc comments don't compile inside `wrap_task!`.)
     pub struct Win32BeginMoveTask {
         hwnd: u64,
         state: Arc<AppState>,
         source_label: Option<String>,
         after_unmaximize: bool,
+        max_left: i32,
+        max_top: i32,
+        max_width: i32,
     }
 
     impl Task {
@@ -374,20 +379,23 @@ wrap_task! {
                 //      it must not run between SetCapture and the loop that
                 //      depends on that capture.
                 //
-                //      Then we RETURN and re-post ourselves, so the modal loop
-                //      below starts on the NEXT message-loop turn instead of
-                //      immediately. This is load-bearing, not tidiness: CEF
-                //      runs its own integrated message loop (`run_message_loop`
-                //      in lib.rs), and the loop below hijacks the UI thread
-                //      with a nested `GetMessageW` pump. Starting it in the
-                //      same turn as the resize starves Chromium of the
-                //      relayout/compositor work the `WM_SIZE` just queued, so
-                //      the window frame shrinks while the CONTENT keeps
-                //      painting at its old full-screen size — visibly wrong
-                //      for the whole drag, snapping right only on release when
-                //      the normal pump resumes (reported live 2026-09-05).
-                //      Yielding one turn costs well under a frame and the
-                //      button is still down, so the drag is unaffected.
+                //      Then we RETURN and re-post ourselves on a short DELAY,
+                //      so the modal loop below doesn't start until the resize
+                //      has actually settled. This is load-bearing, not
+                //      tidiness: CEF runs its own integrated message loop
+                //      (`run_message_loop` in lib.rs), and the loop below
+                //      hijacks the UI thread with a nested `GetMessageW` pump.
+                //      Chromium defers non-nestable work while a nested native
+                //      loop is running, so the relayout/compositor work queued
+                //      by the `WM_SIZE` doesn't complete — the window frame
+                //      shrinks while the CONTENT keeps painting at its old
+                //      full-screen size for the whole drag, snapping right only
+                //      on release when the normal pump resumes (reported live
+                //      2026-09-05).
+                //
+                //      An earlier attempt yielded exactly ONE message-loop turn
+                //      here; that was not enough (the pipeline spans several
+                //      frames) and the bug survived. Hence a real delay.
                 //
                 //      Floaters are excluded for the same reason they're
                 //      excluded from the snap itself (SPEC §2.4): they are
@@ -401,16 +409,38 @@ wrap_task! {
                         .as_deref()
                         .unwrap_or("main")
                         .starts_with("floating-")
-                    && unmaximize_for_drag(h)
-                {
-                    let mut task = Win32BeginMoveTask::new(
-                        self.hwnd,
-                        self.state.clone(),
-                        self.source_label.clone(),
-                        true,
+                    {
+                    if let Some((max_left, max_top, max_width)) = begin_unmaximize_for_drag(h) {
+                        let mut task = Win32BeginMoveTask::new(
+                            self.hwnd,
+                            self.state.clone(),
+                            self.source_label.clone(),
+                            true,
+                            max_left,
+                            max_top,
+                            max_width,
+                        );
+                        post_delayed_task(
+                            ThreadId::UI,
+                            Some(&mut task),
+                            UNMAXIMIZE_SETTLE_MS,
+                        );
+                        return;
+                    }
+                }
+
+                // Second half of an un-maximize drag: the restore has settled,
+                // so place the (now smaller) window under the cursor before
+                // taking capture. Positioning is a pure MOVE — no resize — so
+                // unlike the restore it needs nothing from Chromium and is safe
+                // to do immediately before the modal loop.
+                if self.after_unmaximize {
+                    place_restored_window_under_cursor(
+                        h,
+                        self.max_left,
+                        self.max_top,
+                        self.max_width,
                     );
-                    post_task(ThreadId::UI, Some(&mut task));
-                    return;
                 }
 
                 // 1. Capture the mouse to THIS (UI) thread so WM_MOUSEMOVE /
@@ -691,57 +721,97 @@ wrap_task! {
     }
 }
 
-/// If `hwnd` is maximized, restore it and reposition it under the cursor so
-/// the drag can continue naturally — see
-/// `window_snap::unmaximize_drag_origin` for the placement rules and
-/// `SPEC_WINDOW_SNAP_MAXIMIZE_2026_09_04.md` §2.6.
+/// How long to let a `SW_RESTORE` settle before starting the modal drag
+/// loop. Roughly three 60Hz frames — enough for Chromium's
+/// resize→layout→commit→present pipeline to finish while the normal message
+/// loop is still running, short enough that the window feels like it starts
+/// following the cursor immediately.
 ///
-/// No-op for a window that isn't maximized (the overwhelmingly common case),
-/// so callers can invoke it unconditionally at drag start.
-///
-/// Returns `true` only when it actually restored a maximized window — the
-/// caller uses that to decide whether it needs to yield a message-loop turn
-/// before starting the modal drag loop (see the call site).
+/// **Empirical, and deliberately the smallest knob in this design.** An
+/// earlier attempt used a single message-loop turn (effectively 0ms) and the
+/// stale-paint bug survived; if it ever resurfaces this constant is the first
+/// thing to raise. See `SPEC_WINDOW_SNAP_MAXIMIZE_2026_09_04.md` §2.6.
 #[cfg(target_os = "windows")]
-unsafe fn unmaximize_for_drag(h: windows_sys::Win32::Foundation::HWND) -> bool {
-    use windows_sys::Win32::Foundation::{POINT, RECT};
+const UNMAXIMIZE_SETTLE_MS: i64 = 48;
+
+/// Restore a maximized window at the START of a drag, returning the
+/// pre-restore maximized `(left, top, width)` the caller must hand to
+/// [`place_restored_window_under_cursor`] once the resize has settled.
+///
+/// Returns `None` — and does nothing — when the window isn't maximized (the
+/// overwhelmingly common case), so callers can invoke it unconditionally.
+///
+/// Split from the placement step on purpose: the RESTORE needs Chromium to
+/// relayout (which it can't do while a nested modal loop is running), while
+/// the placement is a pure move that needs nothing. See the call site.
+#[cfg(target_os = "windows")]
+unsafe fn begin_unmaximize_for_drag(
+    h: windows_sys::Win32::Foundation::HWND,
+) -> Option<(i32, i32, i32)> {
+    use windows_sys::Win32::Foundation::RECT;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetCursorPos, GetWindowPlacement, GetWindowRect, SetWindowPos, ShowWindow, SW_MAXIMIZE,
-        SW_RESTORE, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, WINDOWPLACEMENT,
+        GetWindowPlacement, GetWindowRect, ShowWindow, SW_MAXIMIZE, SW_RESTORE, WINDOWPLACEMENT,
     };
 
     let mut placement: WINDOWPLACEMENT = std::mem::zeroed();
     placement.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
     if GetWindowPlacement(h, &mut placement) == 0 || placement.showCmd != SW_MAXIMIZE as u32 {
-        return false;
+        return None;
     }
 
     let mut maximized: RECT = std::mem::zeroed();
     if GetWindowRect(h, &mut maximized) == 0 {
-        return false;
+        return None;
+    }
+
+    ShowWindow(h, SW_RESTORE);
+    tracing::info!(
+        "[start_window_drag] restoring maximized window for drag hwnd={:p} — \
+         settling {}ms before the move loop",
+        h, UNMAXIMIZE_SETTLE_MS
+    );
+    Some((maximized.left, maximized.top, maximized.right - maximized.left))
+}
+
+/// Place a just-restored window under the CURRENT cursor, using the
+/// pre-restore maximized geometry to preserve the grab point — see
+/// `window_snap::unmaximize_drag_origin` for the placement rules and
+/// `SPEC_WINDOW_SNAP_MAXIMIZE_2026_09_04.md` §2.6.
+///
+/// Reads the cursor fresh (rather than reusing the mousedown position from
+/// before the settle delay) so the window lands exactly under wherever the
+/// pointer is NOW — otherwise every pixel the user moved during the settle
+/// would become a permanent grab-offset error for the rest of the drag.
+#[cfg(target_os = "windows")]
+unsafe fn place_restored_window_under_cursor(
+    h: windows_sys::Win32::Foundation::HWND,
+    max_left: i32,
+    max_top: i32,
+    max_width: i32,
+) {
+    use windows_sys::Win32::Foundation::{POINT, RECT};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetCursorPos, GetWindowRect, SetWindowPos, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
+    };
+
+    // Read the restored size back rather than trusting
+    // `WINDOWPLACEMENT.rcNormalPosition`: that field is documented in
+    // *workspace* coordinates, which diverge from screen coordinates in
+    // exactly the multi-monitor / taskbar setups this has to work in. A
+    // post-restore GetWindowRect is unambiguously screen coords.
+    let mut restored: RECT = std::mem::zeroed();
+    if GetWindowRect(h, &mut restored) == 0 {
+        return;
     }
     let mut cursor = POINT { x: 0, y: 0 };
     GetCursorPos(&mut cursor);
 
-    ShowWindow(h, SW_RESTORE);
-
-    // Read the restored size back rather than trusting
-    // `placement.rcNormalPosition`: that field is documented in *workspace*
-    // coordinates, which diverge from screen coordinates in exactly the
-    // multi-monitor / taskbar setups this feature has to work in. The
-    // post-restore GetWindowRect is unambiguously screen coords.
-    let mut restored: RECT = std::mem::zeroed();
-    if GetWindowRect(h, &mut restored) == 0 {
-        // Already un-maximized by ShowWindow above, so the caller still needs
-        // to yield a turn for the relayout even though placement failed.
-        return true;
-    }
     let (new_x, new_y) = crate::client::window_snap::unmaximize_drag_origin(
         cursor.x,
         cursor.y,
-        maximized.left,
-        maximized.top,
-        maximized.right - maximized.left,
+        max_left,
+        max_top,
+        max_width,
         restored.right - restored.left,
     );
     SetWindowPos(
@@ -754,10 +824,9 @@ unsafe fn unmaximize_for_drag(h: windows_sys::Win32::Foundation::HWND) -> bool {
         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
     );
     tracing::info!(
-        "[start_window_drag] un-maximized for drag hwnd={:p} -> ({},{})",
+        "[start_window_drag] placed restored window under cursor hwnd={:p} -> ({},{})",
         h, new_x, new_y
     );
-    true
 }
 
 /// Work area (PHYSICAL px, `(x, y, width, height)`) of the monitor under the
@@ -792,6 +861,6 @@ unsafe fn snap_work_area_for_cursor(x: i32, y: i32) -> Option<(i32, i32, i32, i3
 
 #[cfg(target_os = "windows")]
 pub fn post_win32_begin_move(hwnd: u64, state: Arc<AppState>, source_label: Option<String>) {
-    let mut task = Win32BeginMoveTask::new(hwnd, state, source_label, false);
+    let mut task = Win32BeginMoveTask::new(hwnd, state, source_label, false, 0, 0, 0);
     post_task(ThreadId::UI, Some(&mut task));
 }
