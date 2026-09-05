@@ -16,7 +16,6 @@
 - fix(swarm): re-resolve and re-point subagent-watcher config dir after identity rebind
 - docs: propose a formal shutdown countdown modal + splash-style progress narration
 
-
 ## 0.55.34 — 2026-09-03
 
 - fix(agent-pane): tool-preview code previews waste half their width on indentation
