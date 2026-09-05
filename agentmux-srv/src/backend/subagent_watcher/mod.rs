@@ -400,19 +400,41 @@ impl SubagentWatcher {
             watched.iter().map(|w| (w.agent_id.clone(), w.primary_block_id.clone())).collect()
         };
         for (agent_id, block_id) in candidates {
+            // ReAgent P1 on PR #2980, round 2: this is called on EVERY
+            // `agent_identity_link` write anywhere in the app, with no
+            // scoping to the agent whose identity actually changed, and it
+            // used to iterate every `WatchedAgent` regardless of whether
+            // that entry's `config_dir` was ever derived from identity
+            // resolution in the first place. An agent registered via the
+            // still-live legacy `subagent.WatchAgent` RPC
+            // (`server/service/misc.rs`) passes `parent_block_id: ""` and
+            // an arbitrary caller-supplied `config_dir` that has nothing to
+            // do with identity binding — exactly the shape `watch_agent`'s
+            // own doc comment already documents as needing to stay outside
+            // identity resolution's reach. Without this guard, a resolve
+            // against a nonexistent block falls through
+            // `resolve_claude_config_dir`'s last-resort
+            // `derive_claude_config_dir` guess and silently repoints that
+            // agent away from its caller's explicit choice — the SAME
+            // failure class the P1 fix's first (reverted) attempt already
+            // hit once inside `watch_agent` itself, reappearing here one
+            // layer up. Skip any candidate with no real, resolvable block:
+            // an empty id can never correspond to one, and a nonexistent
+            // block means there is nothing for identity resolution to
+            // legitimately apply to.
+            if block_id.is_empty() {
+                continue;
+            }
+            let Some(block) = self.wstore.get::<crate::backend::obj::Block>(&block_id).ok().flatten() else {
+                continue;
+            };
             let bound_dir = crate::identity::resolver::resolve_bound_oauth_config_dir(
                 &self.wstore,
                 &self.id_store,
                 &self.identity_store,
                 &block_id,
             );
-            let block = self.wstore.get::<crate::backend::obj::Block>(&block_id).ok().flatten();
-            let empty_meta = crate::backend::obj::MetaMapType::new();
-            let new_dir = resolve_claude_config_dir(
-                block.as_ref().map(|b| &b.meta).unwrap_or(&empty_meta),
-                &agent_id,
-                bound_dir,
-            );
+            let new_dir = resolve_claude_config_dir(&block.meta, &agent_id, bound_dir);
             if let Some(new_dir) = new_dir {
                 self.recheck_config_dir(&agent_id, new_dir);
             }
@@ -556,12 +578,12 @@ impl SubagentWatcher {
     /// First-time registration for an agent_id: build the watch and, if it
     /// succeeds, install it (`WatchedAgent`, with `parent_block_id` as both
     /// the initial `primary_block_id` and sole member of `parent_block_ids`)
-    /// and spawn its consumer loop. Returns whether installation succeeded
-    /// — `watch_agent` uses this to decide whether a post-insert self-check
-    /// (`recheck_config_dir`) has anything to check.
-    fn start_watch(self: &Arc<Self>, agent_id: &str, parent_block_id: &str, config_dir: PathBuf) -> bool {
+    /// and spawn its consumer loop. A no-op (nothing installed, nothing
+    /// spawned) if `build_watch` fails — already logs its own reason,
+    /// nothing further to report here.
+    fn start_watch(self: &Arc<Self>, agent_id: &str, parent_block_id: &str, config_dir: PathBuf) {
         let Some((watcher, rx)) = self.build_watch(agent_id, &config_dir) else {
-            return false;
+            return;
         };
         {
             let mut watched = self.watched_agents.lock().unwrap();
@@ -591,7 +613,6 @@ impl SubagentWatcher {
         // resuming. See
         // docs/specs/archive/REPORT_SWARM_SUBAGENT_HISTORY_FLOOD_2026_07_07.md.
         self.spawn_consumer_loop(agent_id, parent_block_id, rx);
-        true
     }
 
     /// Spawn the debounced background task that consumes raw filesystem

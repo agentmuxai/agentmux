@@ -1221,6 +1221,62 @@ async fn recheck_config_dir_keeps_the_old_watch_when_the_replacement_fails_to_bu
     std::fs::remove_dir_all(&old_dir).ok();
 }
 
+// ── recheck_all_watched_agents scoping (ReAgent P1, round 2, PR #2980) ──
+//
+// This is called on EVERY agent_identity_link write anywhere in the app,
+// with no scoping to the agent whose identity actually changed. Without a
+// guard, it would iterate agents whose config_dir was never derived from
+// identity resolution at all (the legacy `subagent.WatchAgent` RPC's
+// `parent_block_id: ""` entry point, or any block that no longer exists)
+// and silently repoint them via `resolve_claude_config_dir`'s last-resort
+// `derive_claude_config_dir` guess — the same failure class `watch_agent`'s
+// own (reverted) first-attempt self-check hit, one layer up.
+
+#[tokio::test]
+async fn recheck_all_watched_agents_skips_the_legacy_empty_block_id_entry_point() {
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let explicit_dir = home.join(format!("amx-recheck-all-empty-block-test-{}", now_millis()));
+    std::fs::create_dir_all(&explicit_dir).unwrap();
+
+    let watcher = Arc::new(fixture_watcher());
+    // Mirrors server/service/misc.rs's legacy manual RPC entry point.
+    watcher.watch_agent("manual-agent", "", explicit_dir.clone());
+
+    watcher.recheck_all_watched_agents();
+
+    let watched = watcher.watched_agents.lock().unwrap();
+    assert_eq!(watched.len(), 1);
+    assert_eq!(
+        watched[0].config_dir, explicit_dir,
+        "an empty-block_id entry must never be repointed by a blanket recheck"
+    );
+
+    std::fs::remove_dir_all(&explicit_dir).ok();
+}
+
+#[tokio::test]
+async fn recheck_all_watched_agents_skips_an_agent_whose_block_no_longer_exists() {
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let explicit_dir = home.join(format!("amx-recheck-all-no-block-test-{}", now_millis()));
+    std::fs::create_dir_all(&explicit_dir).unwrap();
+
+    let watcher = Arc::new(fixture_watcher());
+    // "block-ghost" is never inserted into wstore — simulates a closed
+    // pane, or any caller whose block_id doesn't correspond to a real row.
+    watcher.watch_agent("agent-1", "block-ghost", explicit_dir.clone());
+
+    watcher.recheck_all_watched_agents();
+
+    let watched = watcher.watched_agents.lock().unwrap();
+    assert_eq!(watched.len(), 1);
+    assert_eq!(
+        watched[0].config_dir, explicit_dir,
+        "an agent whose block no longer exists must never be repointed by a blanket recheck"
+    );
+
+    std::fs::remove_dir_all(&explicit_dir).ok();
+}
+
 #[tokio::test]
 async fn recheck_config_dir_backfills_subagents_missed_while_watching_the_wrong_directory() {
     let home = dirs::home_dir().expect("test requires a resolvable home dir");
