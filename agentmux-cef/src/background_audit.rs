@@ -108,12 +108,15 @@ impl AuditKind {
     }
 }
 
-/// Cap on retained lines. At two lines per unattended period this is ~1000
-/// periods; a background instance running for months must not grow the file
-/// without bound. On exceeding it the file is rotated to `.1` — the old
-/// records are archived rather than deleted, keeping the "immutable" property
-/// while bounding the live file.
+/// Hard cap on retained lines. At two lines per unattended period this is
+/// ~1000 periods; a background instance running for months must not grow the
+/// file without bound.
 const MAX_LINES: usize = 2000;
+
+/// How many lines survive a compaction. Keeping only the most recent half
+/// means compaction is amortised (one rewrite per `MAX_LINES / 2` appends)
+/// rather than happening on every append once the cap is reached.
+const KEEP_LINES: usize = MAX_LINES / 2;
 
 /// The audit log.
 ///
@@ -172,14 +175,13 @@ impl BackgroundAudit {
         // no lock the reducer touches is ever held across file I/O.
         let (tx, rx) = std::sync::mpsc::channel::<AuditEntry>();
         self.tx = Some(tx);
-        let archive = path.with_extension("jsonl.1");
         let watermark = path.with_extension("surfaced");
         std::thread::Builder::new()
             .name("agentmux-audit-writer".into())
             .spawn(move || {
                 // Ends when the sender is dropped (process exit).
                 while let Ok(entry) = rx.recv() {
-                    write_entry(&path, &archive, &watermark, &entry);
+                    write_entry(&path, &watermark, &entry);
                 }
             })
             .ok();
@@ -189,39 +191,16 @@ impl BackgroundAudit {
         self.path.as_ref().map(|p| p.with_extension("surfaced"))
     }
 
-    /// Every entry on disk, oldest first — **archive first, then the live
-    /// file**.
-    ///
-    /// Reading the archive is not optional. An earlier revision rotated the
-    /// live file to `.1` and read only the live file, so any entry that had
-    /// not been surfaced when rotation happened vanished from the surfacing
-    /// API entirely — the exact opposite of the "over-reporting, never
-    /// under-reporting" the rotation comment claimed (ReAgent P1 on #3001).
+    /// Every entry on disk, oldest first.
     ///
     /// Malformed lines are skipped rather than failing the read: a torn final
     /// line (a crash mid-append) must not cost the entries before it.
     pub fn entries(&self) -> Vec<AuditEntry> {
-        let mut out = self.read_file(self.archive_path());
-        out.extend(self.read_file(self.path.clone()));
-        out
-    }
-
-    fn read_file(&self, path: Option<PathBuf>) -> Vec<AuditEntry> {
-        let Some(path) = path else { return Vec::new() };
+        let Some(path) = &self.path else { return Vec::new() };
         let Ok(text) = std::fs::read_to_string(path) else {
             return Vec::new();
         };
         text.lines().filter_map(parse_line).collect()
-    }
-
-    fn archive_path(&self) -> Option<PathBuf> {
-        self.path.as_ref().map(|p| p.with_extension("jsonl.1"))
-    }
-
-    /// Lines currently in the archive. Used to keep the watermark aligned
-    /// when an archive is discarded.
-    fn archive_len(&self) -> usize {
-        self.read_file(self.archive_path()).len()
     }
 
     /// Is the instance currently in an unattended period?
@@ -302,20 +281,15 @@ impl BackgroundAudit {
     }
 }
 
-/// Append one entry, rotating first if the live file has grown past the cap.
+/// Append one entry, compacting first if the file has grown past the cap.
 ///
 /// Runs on the writer thread only, so all of this I/O is off every lock the
 /// reducer touches.
-fn write_entry(
-    path: &std::path::Path,
-    archive: &std::path::Path,
-    watermark: &std::path::Path,
-    entry: &AuditEntry,
-) {
+fn write_entry(path: &std::path::Path, watermark: &std::path::Path, entry: &AuditEntry) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    rotate_if_oversized(path, archive, watermark);
+    compact_if_oversized(path, watermark);
     let line = format!(
         "{{\"at_ms\":{},\"kind\":\"{}\"}}\n",
         entry.at_ms,
@@ -331,31 +305,53 @@ fn write_entry(
     }
 }
 
-/// Archive the live file once it grows past `MAX_LINES`.
+/// Bound the log by dropping the OLDEST entries, in place.
 ///
-/// The archive keeps the old records (immutability) while bounding the file
-/// the hot path reads. The watermark is shifted down by exactly the number of
-/// lines leaving the archive-then-live concatenation, NOT reset — resetting it
-/// silently dropped every not-yet-surfaced entry.
-fn rotate_if_oversized(
-    path: &std::path::Path,
-    archive: &std::path::Path,
-    watermark: &std::path::Path,
-) {
+/// Deliberately a single file rather than rotating to a `.jsonl.1` archive.
+/// Rotation via `rename` replaces the archive wholesale, so the SECOND
+/// rotation silently discarded everything the first one had archived —
+/// including entries the watermark had never advanced past. That is the same
+/// under-reporting bug as before, just deferred to `2 * MAX_LINES` entries,
+/// and the first-rotation-only test did not reach it (ReAgent P1 on #3001).
+/// One file with an explicit retention rule has no second copy to clobber.
+///
+/// The watermark is shifted down by exactly the number of lines dropped so
+/// surfacing positions stay aligned. Dropping entries the user has never been
+/// shown is possible only if they have not opened a window in `KEEP_LINES`
+/// transitions; that is logged loudly rather than passing silently, because
+/// silent loss is the failure mode this whole function keeps getting wrong.
+fn compact_if_oversized(path: &std::path::Path, watermark: &std::path::Path) {
     let Ok(text) = std::fs::read_to_string(path) else { return };
-    if text.lines().count() < MAX_LINES {
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.len() < MAX_LINES {
         return;
     }
-    let dropped = std::fs::read_to_string(archive)
-        .map(|t| t.lines().count())
+
+    let dropped = lines.len().saturating_sub(KEEP_LINES);
+    let surfaced: usize = std::fs::read_to_string(watermark)
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
         .unwrap_or(0);
-    if std::fs::rename(path, archive).is_ok() {
-        let current: usize = std::fs::read_to_string(watermark)
-            .ok()
-            .and_then(|s| s.trim().parse().ok())
-            .unwrap_or(0);
-        let _ = std::fs::write(watermark, current.saturating_sub(dropped).to_string());
-        tracing::info!(target: "wrr", dropped, "[audit] rotated");
+    let unsurfaced_dropped = dropped.saturating_sub(surfaced);
+
+    let kept = lines[dropped..].join("\n");
+    // Write via a temp file + rename so a crash mid-compaction leaves either
+    // the old log or the new one, never a half-written one.
+    let tmp = path.with_extension("jsonl.compacting");
+    if std::fs::write(&tmp, format!("{}\n", kept)).is_ok() && std::fs::rename(&tmp, path).is_ok() {
+        let _ = std::fs::write(watermark, surfaced.saturating_sub(dropped).to_string());
+        if unsurfaced_dropped > 0 {
+            tracing::warn!(
+                target: "wrr",
+                unsurfaced_dropped,
+                "[audit] compaction dropped entries the user was never shown \
+                 (no window opened in a very long time)"
+            );
+        } else {
+            tracing::info!(target: "wrr", dropped, "[audit] compacted");
+        }
+    } else {
+        let _ = std::fs::remove_file(&tmp);
     }
 }
 
@@ -559,11 +555,12 @@ mod background_audit_tests {
         assert!(log.take_unsurfaced().is_empty());
     }
 
-    /// Rotation used to reset the watermark while the archive was never read,
-    /// so anything unsurfaced at rotation time was lost — under-reporting, in
-    /// an accountability feature (ReAgent P1 on #3001).
+    /// Compaction must never silently drop entries the user has not seen.
+    /// The original bug reset the watermark; the follow-up fixed only the
+    /// FIRST rotation, because `rename` clobbered the archive on the second
+    /// (ReAgent P1 on #3001, twice).
     #[test]
-    fn rotation_does_not_lose_unsurfaced_entries() {
+    fn compaction_does_not_lose_unsurfaced_entries() {
         let (_d, mut log) = temp_log();
         let total = MAX_LINES + 10;
         for i in 0..total {
@@ -577,6 +574,39 @@ mod background_audit_tests {
             "entries written before rotation must still be surfacable"
         );
         assert_eq!(surfaced[0].at_ms, 0, "oldest entry lost to rotation");
+    }
+
+    /// The specific case the previous fix missed: enough entries to compact
+    /// MORE THAN ONCE. The old two-file rotation lost everything archived by
+    /// the first rotation as soon as the second one ran.
+    #[test]
+    fn repeated_compaction_keeps_the_log_bounded_and_recent() {
+        let (_d, mut log) = temp_log();
+        let total = MAX_LINES * 3;
+        for i in 0..total {
+            log.record(i % 2 == 0, i as u64);
+        }
+        // Let the writer drain.
+        for _ in 0..400 {
+            if log.entries().len() >= KEEP_LINES {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let e = log.entries();
+        assert!(
+            e.len() <= MAX_LINES,
+            "log must stay bounded across repeated compaction, got {}",
+            e.len()
+        );
+        assert!(!e.is_empty(), "repeated compaction must not empty the log");
+        // Oldest-first retention: what survives is the RECENT tail, and it is
+        // still contiguous and readable (not a half-clobbered file).
+        let ts: Vec<u64> = e.iter().map(|x| x.at_ms).collect();
+        assert!(
+            ts.windows(2).all(|w| w[0] < w[1]),
+            "retained entries must stay ordered"
+        );
     }
 
     #[test]
