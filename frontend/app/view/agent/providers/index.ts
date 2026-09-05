@@ -11,4 +11,4 @@ export type { ProviderModel, ProviderDefinition } from "./types";
 
 export { GIT_PREREQ, PROVIDERS, PROVIDER_ALIASES, resolveProviderAlias } from "./catalog";
 
-export { setProviderModels, getProvider, getProviderList } from "./model-overlay";
+export { setProviderModels, getProvider, getProviderList, familyKey } from "./model-overlay";

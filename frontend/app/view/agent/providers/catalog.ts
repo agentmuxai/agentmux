@@ -164,16 +164,23 @@ export const PROVIDERS: Record<string, ProviderDefinition> = {
         // which is `sonnet` (faster default for routine turns). A mismatch here
         // desyncs the strip's Model dropdown from the actual default and is a
         // trap for any `models.find(m => m.default)` reader.
+        // Descriptions are deliberately VERSION-FREE. The label carries the
+        // version and is refreshed from the live catalog by `setProviderModels`;
+        // a description that also named one could contradict it, which is
+        // exactly what users saw — a row reading "Fable 5.1" above the text
+        // "Claude Fable 5". Keep version numbers in `label` only.
         models: [
-            { value: "opus", label: "Opus 5", description: "Claude Opus 5 — highest quality", aliases: ["claude-opus"] },
-            { value: "sonnet", label: "Sonnet 5", default: true, description: "Claude Sonnet 5 — balanced", aliases: ["claude-sonnet"] },
-            { value: "haiku", label: "Haiku 4.5", description: "Claude Haiku 4.5 — fastest", aliases: ["claude-haiku"] },
-            // No confirmed generic "fable" alias (unlike opus/sonnet/haiku above), so this
-            // pins the concrete model id directly — same id already relied on by
-            // context-window.ts's 1M-context-window band. Kept current here so the
-            // offline/API-failure fallback still shows it (see setProviderModels below
-            // for how this stays in sync with the live catalog once reachable).
-            { value: "claude-fable-5", label: "Fable 5", description: "Claude Fable 5" },
+            { value: "opus", label: "Opus 5", description: "Highest quality", aliases: ["claude-opus"] },
+            { value: "sonnet", label: "Sonnet 5", default: true, description: "Balanced speed and quality", aliases: ["claude-sonnet"] },
+            { value: "haiku", label: "Haiku 4.5", description: "Fastest", aliases: ["claude-haiku"] },
+            // No confirmed generic "fable" alias (unlike opus/sonnet/haiku above) —
+            // `claude --help` documents `--model` as taking "an alias for the latest
+            // model (e.g. 'sonnet' or 'opus') or a model's full name", and lists no
+            // fable shorthand — so this pins the concrete model id directly. Same id
+            // family already relied on by context-window.ts's 1M band. Unlike the
+            // alias rows above, a concrete id does NOT self-resolve, so
+            // `setProviderModels` refreshes this row's `value` as well as its label.
+            { value: "claude-fable-5-1", label: "Fable 5.1", description: "Most capable for long-horizon work" },
         ],
     },
     codex: {
