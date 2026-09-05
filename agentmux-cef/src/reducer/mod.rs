@@ -981,6 +981,18 @@ pub struct DispatchOutput {
     /// concurrent pool-refill race (SPEC_PILLAR2_WIRE_RECONCILE_QUIT_2026_06_29.md).
     pub request_drain: Option<crate::state::QuitReason>,
 
+    /// Set `true` by `RegisterBrowser` when a live USER window registered
+    /// while `QuitState` had already left `Running` — i.e. a window creation
+    /// that was already in flight when a quit began (ReAgent P1 on PR #2996).
+    ///
+    /// The caller (`client::on_after_created`) MUST close that browser
+    /// immediately. The pre-checks on the creation paths narrow this race but
+    /// cannot close it — registration is the last step, so this is the only
+    /// point that cannot be raced. Leaving it open means a live window
+    /// stranded in a draining host, which the WRR watchdog then force-kills
+    /// seconds later in front of the user.
+    pub registered_during_drain: bool,
+
     /// Set `true` by `RelabelBrowser` when the rename succeeded (or was a
     /// no-op because `old_label == new_label`). Stays `false` on failure
     /// (old label absent, or new label already registered — e.g. a

@@ -1258,6 +1258,54 @@ fn reconcile_quit_drains_despite_pending_pool_refill() {
 /// exactly what it returns, so a pool window or pane leaking into the list
 /// would have the tray's Quit closing background inventory as if it were the
 /// user's windows.
+/// ReAgent P1 on PR #2996: the creation-path guards narrow the
+/// quit-vs-create race but cannot close it — a creation already in flight
+/// when the drain begins still reaches registration. Registration is the
+/// LAST step, so flagging it here is the only unraceable point.
+#[test]
+fn a_user_window_arriving_mid_drain_is_closed_on_arrival() {
+    use super::quit::should_close_on_arrival;
+    let user = BrowserKind::TopLevel { is_pool: false };
+    for reason in [QuitReason::LauncherRequested, QuitReason::LastWindowClosed] {
+        assert!(
+            should_close_on_arrival(&user, &QuitState::Draining { reason: reason.clone() }),
+            "a user window registering mid-drain must be closed on arrival"
+        );
+    }
+    assert!(should_close_on_arrival(&user, &QuitState::Quit));
+}
+
+/// The normal case must stay untouched: registering while Running never
+/// flags, or every window the app opens would immediately close itself.
+#[test]
+fn registering_while_running_is_never_closed_on_arrival() {
+    use super::quit::should_close_on_arrival;
+    assert!(!should_close_on_arrival(
+        &BrowserKind::TopLevel { is_pool: false },
+        &QuitState::Running
+    ));
+}
+
+/// Pool browsers legitimately register during a drain — the drain cascade
+/// closes them itself — so closing them here would fight that machinery.
+/// Panes and floaters are not top-level windows the quit owns either.
+#[test]
+fn background_browsers_arriving_mid_drain_are_left_alone() {
+    use super::quit::should_close_on_arrival;
+    let draining = QuitState::Draining { reason: QuitReason::LauncherRequested };
+    for kind in [
+        BrowserKind::TopLevel { is_pool: true },
+        BrowserKind::Floater { is_pool: false },
+        BrowserKind::Pane { block_id: "b1".into() },
+    ] {
+        assert!(
+            !should_close_on_arrival(&kind, &draining),
+            "{:?} is background inventory, not a user window the quit owns",
+            kind
+        );
+    }
+}
+
 #[test]
 fn live_user_window_labels_matches_the_live_count_classification() {
     let entries: Vec<(String, BrowserKind)> = vec![

@@ -143,6 +143,25 @@ pub(crate) fn count_live_user_windows(state: &HostState) -> usize {
         .count()
 }
 
+/// Should a browser that is registering RIGHT NOW be closed on arrival?
+///
+/// True only for a live user window arriving while the instance has already
+/// left `Running` — a creation that was in flight when a quit began
+/// (ReAgent P1 on PR #2996). The pre-checks on the creation paths narrow that
+/// race but cannot close it; registration is the last step, so this is the
+/// only unraceable point to decide.
+///
+/// Background browsers are deliberately excluded: pool browsers legitimately
+/// register during a drain (the drain cascade closes them itself), and
+/// panes/floaters are not top-level windows the quit is responsible for.
+///
+/// Pure, and separate from `handle_register_browser`, because that arm takes
+/// a real `cef::Browser` which no test can construct — same reason
+/// `live_user_window_labels_from` exists.
+pub(crate) fn should_close_on_arrival(kind: &BrowserKind, quit_state: &QuitState) -> bool {
+    is_live_user_window(kind) && !matches!(quit_state, QuitState::Running)
+}
+
 /// Labels of every live, user-visible top-level window, by the same
 /// `is_live_user_window` classification `count_live_user_windows` uses.
 ///
