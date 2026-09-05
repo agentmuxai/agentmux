@@ -285,7 +285,16 @@ function GroupsDropdown(props: {
     const updatePosition = async (): Promise<void> => {
         const menu = menuEl();
         if (!menu) return;
-        const pos = await computeMenuPosition({ anchor: props.triggerEl, placement: "bottom-start" }, menu);
+        // avoidNativePanes: false — this menu always renders with
+        // data-pane-overlay (below), which clips a hole through any native
+        // browser-pane HWND so the DOM menu shows on top. It should open in
+        // place at its anchor, not be pushed into the largest pane-free rect
+        // (the default when a Browser pane sits under/near the anchor).
+        // Matches flyoutmenu.tsx's identical combination.
+        const pos = await computeMenuPosition(
+            { anchor: props.triggerEl, placement: "bottom-start", avoidNativePanes: false },
+            menu,
+        );
         setMenuStyle({
             ...pos.style,
             "max-height": `${pos.maxHeight}px`,
