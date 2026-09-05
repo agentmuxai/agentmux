@@ -94,6 +94,40 @@ pub(crate) fn snap_vertical_fill(
     Some((work_top, work_bottom))
 }
 
+/// Undo a vertical snap when the drag leaves the snap zone: restore the
+/// **non-dragged** edge to where it was before this drag started.
+///
+/// Without this, backing out of a snap is one-way — [`snap_vertical_fill`]
+/// moved the opposite edge to the work-area edge, and simply declining to
+/// snap on later ticks leaves it stranded there (the native resize only ever
+/// moves the edge under the cursor, so nothing else would ever put it back).
+/// Chrome/Windows both restore it, which is the behavior being matched.
+///
+/// Only the opposite edge is restored — the dragged edge stays wherever the
+/// cursor currently puts it.
+///
+/// Returns the `(top, bottom)` to apply, or `None` when the opposite edge is
+/// already at its pre-drag value (the common case: every tick of a drag that
+/// never snapped at all, where this must be a no-op rather than a redundant
+/// rect write).
+pub(crate) fn unsnap_restore_opposite_edge(
+    edge: VerticalEdge,
+    current_top: i32,
+    current_bottom: i32,
+    origin_top: i32,
+    origin_bottom: i32,
+) -> Option<(i32, i32)> {
+    match edge {
+        VerticalEdge::Top if current_bottom != origin_bottom => {
+            Some((current_top, origin_bottom))
+        }
+        VerticalEdge::Bottom if current_top != origin_top => {
+            Some((origin_top, current_bottom))
+        }
+        _ => None,
+    }
+}
+
 /// Whether a drag-to-top *move* (not resize) is currently in the
 /// maximize-offer zone: the cursor at/above the work area's top edge.
 ///
@@ -229,6 +263,53 @@ mod tests {
     fn threshold_boundary_is_inclusive() {
         assert_eq!(snap_vertical_fill(VerticalEdge::Top, 12, 600, 0, 1000, 12), Some((0, 1000)));
         assert_eq!(snap_vertical_fill(VerticalEdge::Top, 13, 600, 0, 1000, 12), None);
+    }
+
+    /// The reported bug: drag the top edge up to snap (bottom moves to the
+    /// work-area bottom), then drag back down out of the zone — the bottom
+    /// must return to where it was before the drag, not stay stranded at the
+    /// screen edge.
+    #[test]
+    fn dragging_back_out_of_a_snap_restores_the_opposite_edge() {
+        // Pre-drag window was 300..600. A snap moved it to 0..1000. The user
+        // has now dragged the top back down to 250.
+        let got = unsnap_restore_opposite_edge(VerticalEdge::Top, 250, 1000, 300, 600);
+        assert_eq!(got, Some((250, 600)), "bottom must revert to its pre-drag 600");
+    }
+
+    #[test]
+    fn dragging_back_out_of_a_bottom_snap_restores_the_top() {
+        // Mirror: pre-drag 300..600, snapped to 0..1000, bottom dragged to 700.
+        let got = unsnap_restore_opposite_edge(VerticalEdge::Bottom, 0, 700, 300, 600);
+        assert_eq!(got, Some((300, 700)), "top must revert to its pre-drag 300");
+    }
+
+    /// Every tick of an ordinary drag that never snapped hits this path — it
+    /// must be a no-op, not a redundant rect write on every WM_SIZING.
+    #[test]
+    fn restore_is_a_no_op_when_the_opposite_edge_never_moved() {
+        assert_eq!(
+            unsnap_restore_opposite_edge(VerticalEdge::Top, 250, 600, 300, 600),
+            None,
+        );
+        assert_eq!(
+            unsnap_restore_opposite_edge(VerticalEdge::Bottom, 300, 700, 300, 600),
+            None,
+        );
+    }
+
+    /// The dragged edge is never restored — only the opposite one. A top
+    /// drag must keep whatever the cursor currently dictates for `top`, even
+    /// though it differs wildly from the origin.
+    #[test]
+    fn restore_never_touches_the_edge_being_dragged() {
+        let (top, _bottom) =
+            unsnap_restore_opposite_edge(VerticalEdge::Top, 250, 1000, 300, 600).unwrap();
+        assert_eq!(top, 250, "dragged edge must follow the cursor, not the origin");
+
+        let (_top, bottom) =
+            unsnap_restore_opposite_edge(VerticalEdge::Bottom, 0, 700, 300, 600).unwrap();
+        assert_eq!(bottom, 700);
     }
 
     #[test]
