@@ -26,6 +26,8 @@ mod window;
 mod drag;
 mod pool;
 mod pane_geometry;
+#[cfg(target_os = "windows")]
+mod snap_preview;
 #[cfg(target_os = "macos")]
 pub mod pane_hole_mask;
 mod platform_macos;
