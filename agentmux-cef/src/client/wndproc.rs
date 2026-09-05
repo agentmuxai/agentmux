@@ -450,7 +450,7 @@ unsafe extern "system" fn window_edge_resize_wndproc(
                     e.session_origin_top_bottom
                 })
             };
-            if let Some((work_top, work_bottom)) = work_area_vertical_for_rect(&proposed) {
+            if let Some((work_top, work_bottom)) = work_area_vertical_for_drag(&proposed) {
                 let adjusted = crate::client::window_snap::snap_vertical_fill(
                     edge,
                     proposed.top,
@@ -503,33 +503,50 @@ fn lparam_is_null(lparam: isize) -> bool {
     lparam == 0
 }
 
-/// Work-area top/bottom (PHYSICAL px) of the monitor the proposed rect sits
-/// on, for the `WM_SIZING` snap clamp.
+/// Work-area top/bottom (PHYSICAL px) of the monitor to snap against during
+/// a `WM_SIZING` border drag.
 ///
-/// Resolved from the rect's own CENTER rather than a corner: during a
-/// top-edge drag the top corner is exactly the point being dragged past the
-/// screen edge, so keying off it would flip to the monitor *above* right at
-/// the moment the snap should engage. `MONITOR_DEFAULTTONEAREST` then keeps
-/// a rect dragged fully off-screen resolving to something sane.
+/// Resolved from the **cursor**, not from the rect. An earlier version keyed
+/// off the rect's center, which picks the wrong monitor whenever a window
+/// straddles two side-by-side displays with different work areas: the center
+/// can still be on monitor A while the edge being dragged is already over
+/// monitor B, so the clamp would fill against A's geometry (reagentx P2).
+/// Using a corner instead is no better — during a top-edge drag the top
+/// corner is the very point crossing the screen boundary, so it flips to the
+/// monitor *above* exactly when the snap should engage.
+///
+/// The cursor sidesteps both: it is physically on the edge being dragged, it
+/// is unambiguous when the window spans monitors, and it is what Windows
+/// itself uses to decide snap targets — which also makes this consistent
+/// with the drag-to-top gesture, whose zone detection is cursor-based for
+/// the same reason.
+///
+/// Falls back to the rect's center if the cursor can't be read, so a
+/// GetCursorPos failure degrades to the old behavior rather than disabling
+/// the snap.
 ///
 /// Deliberately does NOT use `app::monitor::get_monitor_work_area` — that
 /// helper converts to DIP for CEF's `Window::set_bounds`, while `WM_SIZING`
 /// rects are physical px. Mixing the two is the unit-confusion bug class
 /// called out in `client::window_snap`'s doc comment.
 #[cfg(target_os = "windows")]
-unsafe fn work_area_vertical_for_rect(
+unsafe fn work_area_vertical_for_drag(
     rect: &windows_sys::Win32::Foundation::RECT,
 ) -> Option<(i32, i32)> {
     use windows_sys::Win32::Foundation::POINT;
     use windows_sys::Win32::Graphics::Gdi::{
         GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
     };
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
-    let center = POINT {
-        x: rect.left + (rect.right - rect.left) / 2,
-        y: rect.top + (rect.bottom - rect.top) / 2,
-    };
-    let hmonitor = MonitorFromPoint(center, MONITOR_DEFAULTTONEAREST);
+    let mut probe = POINT { x: 0, y: 0 };
+    if GetCursorPos(&mut probe) == 0 {
+        probe = POINT {
+            x: rect.left + (rect.right - rect.left) / 2,
+            y: rect.top + (rect.bottom - rect.top) / 2,
+        };
+    }
+    let hmonitor = MonitorFromPoint(probe, MONITOR_DEFAULTTONEAREST);
     if hmonitor.is_null() {
         return None;
     }

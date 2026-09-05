@@ -487,9 +487,15 @@ wrap_task! {
                     .as_deref()
                     .unwrap_or("main")
                     .starts_with("floating-");
-                // Tracks zone membership so the preview is shown/hidden on
-                // TRANSITIONS only, not re-issued on every mousemove tick.
-                let mut in_snap_zone = false;
+                // The preview rect currently on screen (None = hidden). Stored
+                // as the RECT rather than a bool so the preview also follows
+                // the cursor onto a different monitor: with side-by-side
+                // displays that share a work-area top, zone membership never
+                // changes as you cross between them, so a bool would leave the
+                // preview stranded on the monitor you left (reagentx P2).
+                // Comparing rects re-issues only when something actually
+                // differs, so this still doesn't fire per mousemove tick.
+                let mut snap_preview_rect: Option<(i32, i32, i32, i32)> = None;
 
                 // 3. Modal move loop on the UI thread.
                 let mut msg: MSG = std::mem::zeroed();
@@ -575,15 +581,17 @@ wrap_task! {
                                             )
                                         });
                                     if let Some((now_in_zone, work)) = zone {
-                                        if now_in_zone != in_snap_zone {
-                                            in_snap_zone = now_in_zone;
-                                            if now_in_zone {
-                                                crate::ui_tasks::snap_preview::show(
-                                                    work.0, work.1, work.2, work.3,
-                                                );
-                                            } else {
-                                                crate::ui_tasks::snap_preview::hide();
+                                        let want = if now_in_zone { Some(work) } else { None };
+                                        if want != snap_preview_rect {
+                                            match want {
+                                                Some((wx, wy, ww, wh)) => {
+                                                    crate::ui_tasks::snap_preview::show(
+                                                        wx, wy, ww, wh,
+                                                    );
+                                                }
+                                                None => crate::ui_tasks::snap_preview::hide(),
                                             }
+                                            snap_preview_rect = want;
                                         }
                                     }
                                 }
@@ -637,7 +645,7 @@ wrap_task! {
                             // must not leave a maximize offer on screen, and
                             // must not maximize on the eventual release (the
                             // commit below re-checks `cancelled` too).
-                            in_snap_zone = false;
+                            snap_preview_rect = None;
                             crate::ui_tasks::snap_preview::hide();
                             // Tear down the hover overlay immediately so the
                             // drop-target placeholder doesn't outlive the cancel.
@@ -680,7 +688,44 @@ wrap_task! {
                 // loop ended (release, Esc-then-release, WM_QUIT, stolen
                 // capture via the wake-tick safety net).
                 crate::ui_tasks::snap_preview::hide();
-                if in_snap_zone && !cancelled {
+                // Capture cursor position before ReleaseCapture — this is the
+                // actual release point in physical screen px. Included in the
+                // window_drag_ended payload so the renderer can use these
+                // coordinates directly, eliminating the ordering race between
+                // the dispatched WM_LBUTTONUP (DOM mouseup) and this event
+                // (both travel async CEF IPC, relative arrival is not guaranteed).
+                //
+                // Read BEFORE the maximize decision below, which needs it too.
+                let mut release_cursor = POINT { x: 0, y: 0 };
+                GetCursorPos(&mut release_cursor);
+
+                // Drag-to-top maximize: commit iff the drag ENDED inside the
+                // zone and wasn't cancelled.
+                //
+                // Recomputed from the release cursor rather than reusing the
+                // cached `in_snap_zone` flag. That flag only reflects the last
+                // WM_MOUSEMOVE we actually processed, and the top-of-loop
+                // GetAsyncKeyState fast-path above can break out before the
+                // final mousemove for the true release point is ever dequeued
+                // (its own comment documents that physical button state leads
+                // the message queue). Committing off the cached value would
+                // therefore maximize — or fail to — based on a stale position
+                // whenever the user crosses the zone boundary quickly right
+                // before releasing. reagentx P1, raised across four review
+                // rounds. The flag stays authoritative for the PREVIEW, which
+                // is inherently about transitions during the drag.
+                let released_in_zone = !cancelled
+                    && snap_eligible
+                    && snap_work_area_for_cursor(release_cursor.x, release_cursor.y)
+                        .map(|(_, work_top, _, _)| {
+                            crate::client::window_snap::cursor_in_top_maximize_zone(
+                                release_cursor.y,
+                                work_top,
+                                crate::client::window_snap::SNAP_THRESHOLD_PX,
+                            )
+                        })
+                        .unwrap_or(false);
+                if released_in_zone {
                     tracing::info!(
                         "[start_window_drag] released in top snap zone — maximizing hwnd={:#x}",
                         self.hwnd
@@ -690,14 +735,6 @@ wrap_task! {
                     // already maximized when the drag began.
                     crate::commands::window::maximize_hwnd(h as *mut std::ffi::c_void);
                 }
-                // Capture cursor position before ReleaseCapture — this is the
-                // actual release point in physical screen px. Included in the
-                // window_drag_ended payload so the renderer can use these
-                // coordinates directly, eliminating the ordering race between
-                // the dispatched WM_LBUTTONUP (DOM mouseup) and this event
-                // (both travel async CEF IPC, relative arrival is not guaranteed).
-                let mut release_cursor = POINT { x: 0, y: 0 };
-                GetCursorPos(&mut release_cursor);
                 ReleaseCapture();
                 // Notify the renderer that the drag is done. cursor_x/cursor_y
                 // are physical screen px; renderer divides by posScale() (DPR on
