@@ -394,6 +394,19 @@ wrap_task! {
                 let mut last_hover_emit = std::time::Instant::now()
                     - std::time::Duration::from_millis(50);
 
+                // Drag-to-top maximize (SPEC_WINDOW_SNAP_MAXIMIZE_2026_09_04 §2).
+                // Only for real top-level windows: floaters have their own
+                // top-of-screen semantics (redock / tear-back-in) that this
+                // must not collide with — see the spec's §2.4 scope note.
+                let snap_eligible = !self
+                    .source_label
+                    .as_deref()
+                    .unwrap_or("main")
+                    .starts_with("floating-");
+                // Tracks zone membership so the preview is shown/hidden on
+                // TRANSITIONS only, not re-issued on every mousemove tick.
+                let mut in_snap_zone = false;
+
                 // 3. Modal move loop on the UI thread.
                 let mut msg: MSG = std::mem::zeroed();
                 let mut moves: u32 = 0;
@@ -458,6 +471,38 @@ wrap_task! {
                                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
                                 );
                                 moves += 1;
+                                // Drag-to-top maximize: offer the snap while the
+                                // cursor sits in the work area's top zone. Keyed
+                                // off the CURSOR, not the window's own top edge —
+                                // the window is following the cursor at whatever
+                                // offset the user grabbed it, so its edge says
+                                // nothing about intent (see window_snap's
+                                // `cursor_in_top_maximize_zone` doc comment).
+                                if snap_eligible {
+                                    let zone = snap_work_area_for_cursor(cur.x, cur.y)
+                                        .map(|(wx, wy, ww, wh)| {
+                                            (
+                                                crate::client::window_snap::cursor_in_top_maximize_zone(
+                                                    cur.y,
+                                                    wy,
+                                                    crate::client::window_snap::SNAP_THRESHOLD_PX,
+                                                ),
+                                                (wx, wy, ww, wh),
+                                            )
+                                        });
+                                    if let Some((now_in_zone, work)) = zone {
+                                        if now_in_zone != in_snap_zone {
+                                            in_snap_zone = now_in_zone;
+                                            if now_in_zone {
+                                                crate::ui_tasks::snap_preview::show(
+                                                    work.0, work.1, work.2, work.3,
+                                                );
+                                            } else {
+                                                crate::ui_tasks::snap_preview::hide();
+                                            }
+                                        }
+                                    }
+                                }
                                 // Floater: emit redock-hover at 50ms cadence so the
                                 // drop-target highlight tracks the cursor while the
                                 // renderer's mousemove listener is dark (§2.2 / §3.2).
@@ -504,6 +549,12 @@ wrap_task! {
                                 SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
                             );
                             cancelled = true;
+                            // Same for the snap preview: an Esc-cancelled drag
+                            // must not leave a maximize offer on screen, and
+                            // must not maximize on the eventual release (the
+                            // commit below re-checks `cancelled` too).
+                            in_snap_zone = false;
+                            crate::ui_tasks::snap_preview::hide();
                             // Tear down the hover overlay immediately so the
                             // drop-target placeholder doesn't outlive the cancel.
                             let _ = crate::commands::window::clear_floating_redock_hover(
@@ -536,6 +587,25 @@ wrap_task! {
 
                 // 4. Stop the wake tick and release capture.
                 KillTimer(h, DRAG_TICK_ID);
+
+                // Drag-to-top maximize: commit iff the drag ended inside the
+                // zone and wasn't cancelled. Unconditionally hide the preview
+                // FIRST — this is the single exit path every `break` above
+                // funnels through, so clearing here is what guarantees the
+                // overlay can never outlive the drag regardless of how the
+                // loop ended (release, Esc-then-release, WM_QUIT, stolen
+                // capture via the wake-tick safety net).
+                crate::ui_tasks::snap_preview::hide();
+                if in_snap_zone && !cancelled {
+                    tracing::info!(
+                        "[start_window_drag] released in top snap zone — maximizing hwnd={:#x}",
+                        self.hwnd
+                    );
+                    // NOT the toggle variant: the gesture means "maximize",
+                    // and toggling would restore-down a window that was
+                    // already maximized when the drag began.
+                    crate::commands::window::maximize_hwnd(h as *mut std::ffi::c_void);
+                }
                 // Capture cursor position before ReleaseCapture — this is the
                 // actual release point in physical screen px. Included in the
                 // window_drag_ended payload so the renderer can use these
@@ -565,6 +635,36 @@ wrap_task! {
             }
         }
     }
+}
+
+/// Work area (PHYSICAL px, `(x, y, width, height)`) of the monitor under the
+/// cursor, for the drag-to-top snap zone + preview rect.
+///
+/// `MONITOR_DEFAULTTONEAREST` so a cursor dragged slightly past the top of
+/// the screen still resolves to the monitor it just left rather than
+/// failing. Deliberately does NOT use `app::monitor::get_monitor_work_area`
+/// — that converts to DIP for CEF's `Window::set_bounds`, while this whole
+/// move loop is physical px ("no devicePixelRatio math", per its anchor
+/// comment above). Mixing them is the unit-confusion bug class called out in
+/// `client::window_snap`'s doc comment.
+#[cfg(target_os = "windows")]
+unsafe fn snap_work_area_for_cursor(x: i32, y: i32) -> Option<(i32, i32, i32, i32)> {
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    };
+
+    let hmonitor = MonitorFromPoint(POINT { x, y }, MONITOR_DEFAULTTONEAREST);
+    if hmonitor.is_null() {
+        return None;
+    }
+    let mut info: MONITORINFO = std::mem::zeroed();
+    info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+    if GetMonitorInfoW(hmonitor, &mut info) == 0 {
+        return None;
+    }
+    let rc = info.rcWork;
+    Some((rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top))
 }
 
 #[cfg(target_os = "windows")]

@@ -58,6 +58,10 @@ mod crash_recovery;
 mod recovery_pages;
 pub(crate) mod error_catalog;
 mod context_menu;
+// Deliberately NOT windows-gated even though both call sites are: it is pure
+// integer geometry with no Win32 types, so its tests run on every CI target
+// instead of only windows-latest. See the module's own doc comment.
+pub(crate) mod window_snap;
 #[cfg(target_os = "windows")]
 mod wndproc;
 #[cfg(target_os = "windows")]

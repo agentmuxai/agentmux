@@ -290,10 +290,26 @@ fn emit_window_edge_resize_event(
 ///
 /// The renderer computes the pixel delta itself from its own container
 /// rect (no coordinates are forwarded — that sidesteps every
-/// physical-px/DPR/zoom unit question). Pure observer: every message
-/// ALWAYS passes through to the original WndProc.
+/// physical-px/DPR/zoom unit question).
 ///
-/// Spec: `docs/specs/SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26.md` §3.4.
+/// **No longer a pure observer for `WM_SIZING`.** As of
+/// `SPEC_WINDOW_SNAP_MAXIMIZE_2026_09_04.md` §3 this hook also implements
+/// Chrome-style border-drag vertical snap by CLAMPING the proposed rect
+/// (`lParam`) when a top/bottom drag lands near the monitor's work-area
+/// edge — the documented `WM_SIZING` contract explicitly allows the handler
+/// to adjust that rect, and it is the only per-tick point during a NATIVE
+/// resize loop where the app can influence the outcome. Every message still
+/// always reaches the original WndProc; the clamp is applied to the rect
+/// AFTER that passthrough (see the call site for why that order).
+///
+/// Windows' own Snap Assist does not fire for this window because it is a
+/// CEF Views *frameless* window (`AgentMuxWindowDelegate::is_frameless`),
+/// which hands non-client behavior to Chromium's internal
+/// `HWNDMessageHandler` — hence re-implementing the gesture here.
+///
+/// Specs: `docs/specs/SPEC_RESIZE_DEFAULT_FLIP_AND_WINDOW_EDGE_SHIFT_2026_08_26.md` §3.4
+/// (the observer half), `docs/specs/SPEC_WINDOW_SNAP_MAXIMIZE_2026_09_04.md` §3
+/// (the snap clamp).
 #[cfg(target_os = "windows")]
 unsafe extern "system" fn window_edge_resize_wndproc(
     hwnd: *mut std::ffi::c_void,
@@ -369,17 +385,53 @@ unsafe extern "system" fn window_edge_resize_wndproc(
         }
     }
 
-    // ALWAYS pass through — pure observer, CEF still owns every message.
+    // ALWAYS pass through — CEF still owns every message (the WM_SIZING
+    // rect clamp below adjusts the result, it never swallows the message).
     let original = WINDOW_EDGE_RESIZE_WNDPROCS
         .lock()
         .ok()
         .and_then(|m| m.get(&(hwnd as usize)).map(|e| e.original))
         .unwrap_or(0);
-    let result = if original != 0 {
+    let mut result = if original != 0 {
         CallWindowProcW(Some(std::mem::transmute(original)), hwnd, msg, wparam, lparam)
     } else {
         DefWindowProcW(hwnd, msg, wparam, lparam)
     };
+
+    // Chrome-style border-drag vertical snap (SPEC_WINDOW_SNAP_MAXIMIZE §3).
+    //
+    // Applied AFTER the passthrough, deliberately: Chromium's own WM_SIZING
+    // handling may rewrite the proposed rect (min-size and aspect-ratio
+    // constraints live there), so clamping BEFORE would let it silently
+    // discard the snap. Clamping after makes this the final word for the
+    // vertical axis only. The clamp can only ever move an edge by at most
+    // SNAP_THRESHOLD_PX, so it cannot push the window under Chromium's
+    // minimum height in any realistic configuration.
+    if msg == WM_SIZING && !lparam_is_null(lparam) {
+        if let Some(edge) = crate::client::window_snap::vertical_edge_for_wmsz(wparam) {
+            let rect = lparam as *mut windows_sys::Win32::Foundation::RECT;
+            let proposed = *rect;
+            if let Some((work_top, work_bottom)) = work_area_vertical_for_rect(&proposed) {
+                if let Some((top, bottom)) = crate::client::window_snap::snap_vertical_fill(
+                    edge,
+                    proposed.top,
+                    proposed.bottom,
+                    work_top,
+                    work_bottom,
+                    crate::client::window_snap::SNAP_THRESHOLD_PX,
+                ) {
+                    // Vertical axis ONLY — left/right are untouched by
+                    // construction, which is what keeps this a vertical snap
+                    // rather than an accidental maximize.
+                    (*rect).top = top;
+                    (*rect).bottom = bottom;
+                    // TRUE = "the application processed this message" (and
+                    // adjusted the rect), per WM_SIZING's contract.
+                    result = 1;
+                }
+            }
+        }
+    }
 
     // Prune AFTER passthrough so the original proc still receives
     // WM_NCDESTROY (HWND-reuse safety, same as close_routing_wndproc).
@@ -390,6 +442,49 @@ unsafe extern "system" fn window_edge_resize_wndproc(
     }
 
     result
+}
+
+#[cfg(target_os = "windows")]
+fn lparam_is_null(lparam: isize) -> bool {
+    lparam == 0
+}
+
+/// Work-area top/bottom (PHYSICAL px) of the monitor the proposed rect sits
+/// on, for the `WM_SIZING` snap clamp.
+///
+/// Resolved from the rect's own CENTER rather than a corner: during a
+/// top-edge drag the top corner is exactly the point being dragged past the
+/// screen edge, so keying off it would flip to the monitor *above* right at
+/// the moment the snap should engage. `MONITOR_DEFAULTTONEAREST` then keeps
+/// a rect dragged fully off-screen resolving to something sane.
+///
+/// Deliberately does NOT use `app::monitor::get_monitor_work_area` — that
+/// helper converts to DIP for CEF's `Window::set_bounds`, while `WM_SIZING`
+/// rects are physical px. Mixing the two is the unit-confusion bug class
+/// called out in `client::window_snap`'s doc comment.
+#[cfg(target_os = "windows")]
+unsafe fn work_area_vertical_for_rect(
+    rect: &windows_sys::Win32::Foundation::RECT,
+) -> Option<(i32, i32)> {
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+    };
+
+    let center = POINT {
+        x: rect.left + (rect.right - rect.left) / 2,
+        y: rect.top + (rect.bottom - rect.top) / 2,
+    };
+    let hmonitor = MonitorFromPoint(center, MONITOR_DEFAULTTONEAREST);
+    if hmonitor.is_null() {
+        return None;
+    }
+    let mut info: MONITORINFO = std::mem::zeroed();
+    info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+    if GetMonitorInfoW(hmonitor, &mut info) == 0 {
+        return None;
+    }
+    Some((info.rcWork.top, info.rcWork.bottom))
 }
 
 /// Subclass a top-level window's WndProc to observe the native size loop
