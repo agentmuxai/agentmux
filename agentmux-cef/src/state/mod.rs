@@ -762,7 +762,7 @@ impl Default for AppState {
             window_transparent: std::sync::atomic::AtomicBool::new(false),
             ui_thread_gate: Mutex::new(UiThreadGate::default()),
             pending_reproject_closures: Mutex::new(PendingReprojectClosures::default()),
-            background_audit: Mutex::new(crate::background_audit::BackgroundAudit::from_env()),
+            background_audit: Mutex::new(crate::background_audit::BackgroundAudit::default()),
             promote_liveness: Mutex::new(PromoteLivenessWatches::default()),
         }
     }

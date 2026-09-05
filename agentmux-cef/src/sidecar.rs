@@ -98,6 +98,13 @@ pub fn use_launcher_endpoints(
         *state.host_reg_secret.lock() = host_reg_secret;
         *state.backend_pid.lock() = Some(pid);
         *state.backend_started_at.lock() = Some(chrono::Utc::now().to_rfc3339());
+        // Issue #2977 WS4 — point the background audit log at the RESOLVED
+        // (dev-aware) data dir, not the raw env var. See
+        // `BackgroundAudit::set_dir`.
+        state
+            .background_audit
+            .lock()
+            .set_dir(std::path::Path::new(&data_dir));
         *state.version_data_dir.lock() = Some(data_dir);
         *state.version_config_dir.lock() = Some(config_dir);
         *state.user_home_dir.lock() = Some(user_home_dir);
@@ -183,6 +190,8 @@ pub async fn spawn_backend(state: &Arc<AppState>) -> Result<BackendSpawnResult, 
         .map_err(|e| format!("Failed to ensure data dirs: {}", e))?;
 
     // Store version-specific paths in AppState for frontend IPC commands.
+    // Issue #2977 WS4 — see the sibling call above.
+    state.background_audit.lock().set_dir(&data_dir);
     *state.version_data_dir.lock() = Some(data_dir.to_string_lossy().to_string());
     *state.version_config_dir.lock() = Some(config_dir.to_string_lossy().to_string());
     // Frontend "user home" → the AgentMux root (`~/.agentmux/`).

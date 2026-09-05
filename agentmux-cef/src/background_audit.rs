@@ -126,14 +126,23 @@ pub struct BackgroundAudit {
 }
 
 impl BackgroundAudit {
-    /// Resolve from `AGENTMUX_DATA_DIR` (set by the launcher; inherited in
-    /// dev). Returns a no-op log when unset.
-    pub fn from_env() -> Self {
-        let path = std::env::var_os("AGENTMUX_DATA_DIR")
-            .map(PathBuf::from)
-            .filter(|p| !p.as_os_str().is_empty())
-            .map(|d| d.join("background-audit.jsonl"));
-        Self { path }
+    /// Point the log at this instance's data directory.
+    ///
+    /// Called once startup has resolved the **dev-aware** data dir (the same
+    /// value stored in `AppState::version_data_dir`), NOT from the raw
+    /// `AGENTMUX_DATA_DIR` env var. That distinction is load-bearing: a
+    /// `task dev` host launched from inside a parent AgentMux pane inherits
+    /// the parent's `AGENTMUX_DATA_DIR` unscrubbed, which is exactly why
+    /// `lib.rs` resolves the real dir through
+    /// `is_dev_build_exe`/`resolve_path_only` instead. Reading the env
+    /// directly here would have written a dev instance's unattended-period
+    /// records into the parent instance's log, mixing two instances'
+    /// histories (ReAgent P1 on PR #3001).
+    ///
+    /// Until this is called the log is a no-op, which is harmless: no window
+    /// has opened or closed yet, so there is no transition to record.
+    pub fn set_dir(&mut self, dir: &std::path::Path) {
+        self.path = Some(dir.join("background-audit.jsonl"));
     }
 
     #[cfg(test)]
