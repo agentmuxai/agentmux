@@ -102,6 +102,18 @@ impl PromoteLivenessWatches {
         self.armed.remove(label).is_some()
     }
 
+    /// The watched window went away (closed by the user, or destroyed) before
+    /// it ever confirmed. Returns true iff a watch was actually cancelled.
+    ///
+    /// Distinct from `confirm` only in intent and logging: confirm means
+    /// "proved alive", cancel means "no longer exists, so there is nothing
+    /// to replace". Both must stop the timer from opening a window — a
+    /// deliberate close within the timeout is not the corpse scenario this
+    /// feature targets (ReAgent P1 on PR #2987).
+    pub fn cancel(&mut self, label: &str) -> bool {
+        self.armed.remove(label).is_some()
+    }
+
     /// Timer expiry. Returns true iff a watch for `label` at exactly
     /// `epoch` is still armed — meaning the promote was never confirmed and
     /// the caller should fall back. Removes it, so the fallback fires at
@@ -127,14 +139,40 @@ impl PromoteLivenessWatches {
 /// Pure decision: given an expired, unconfirmed watch, should the fallback
 /// actually open a replacement window?
 ///
-/// Split out of the timer thread so the drain interlock is testable without
-/// a live instance. `quit_state != Running` means a drain/quit began inside
-/// the timeout window — opening a window then would both surprise the user
-/// mid-shutdown and race teardown with a cold-path spawn (the pool is
-/// already draining, so it would take the slow path). The instance is going
-/// away regardless; an unconfirmed promote no longer needs replacing.
-pub fn should_open_fallback(unconfirmed: bool, quit_state: &super::QuitState) -> bool {
-    unconfirmed && matches!(quit_state, super::QuitState::Running)
+/// Split out of the timer thread so all three interlocks are testable
+/// without a live instance.
+///
+/// - `unconfirmed` — the watch survived to expiry (see `take_if_unconfirmed`).
+/// - `quit_state != Running` — a drain/quit began inside the timeout window.
+///   Opening a window then would both surprise the user mid-shutdown and
+///   race teardown with a cold-path spawn. The instance is going away
+///   regardless; an unconfirmed promote no longer needs replacing.
+/// - `browser_still_registered` — the promoted window still exists in the
+///   host's browser registry. This is the LEVEL-TRIGGERED guard for
+///   "the user closed (or crashed) the torn-off window inside the timeout"
+///   (ReAgent P1 on PR #2987): a deliberate close is not the corpse scenario,
+///   and replacing a window the user just dismissed is exactly the spurious
+///   extra window this feature must not cause.
+///
+///   Checked here at the decision point rather than relying solely on
+///   cancelling from each close path, deliberately: this codebase already
+///   learned that lesson once, when an EDGE-triggered quit gate missed close
+///   paths and orphaned the process tree — `reducer/quit.rs`'s header
+///   documents the level-triggered `reconcile_quit` rewrite that replaced it.
+///   A promoted window can leave through several paths (`on_before_close`,
+///   Windows parking close, WRR crash-destroy, orphan cleanup), and this
+///   check cannot miss one, now or after a future refactor.
+///   `on_pool_window_destroyed` *also* cancels eagerly (cheap, and it closes
+///   the narrow window where a close lands between expiry and this read),
+///   but correctness does not depend on having found every such site.
+pub fn should_open_fallback(
+    unconfirmed: bool,
+    quit_state: &super::QuitState,
+    browser_still_registered: bool,
+) -> bool {
+    unconfirmed
+        && browser_still_registered
+        && matches!(quit_state, super::QuitState::Running)
 }
 
 #[cfg(test)]
@@ -233,10 +271,10 @@ mod promote_liveness_tests {
     #[test]
     fn fallback_opens_only_for_an_unconfirmed_watch_on_a_running_instance() {
         use crate::state::QuitState;
-        assert!(should_open_fallback(true, &QuitState::Running));
+        assert!(should_open_fallback(true, &QuitState::Running, true));
         // A confirmed promote never opens a replacement, whatever the
         // instance is doing.
-        assert!(!should_open_fallback(false, &QuitState::Running));
+        assert!(!should_open_fallback(false, &QuitState::Running, true));
     }
 
     #[test]
@@ -246,12 +284,46 @@ mod promote_liveness_tests {
         // window must not get a surprise window racing teardown.
         assert!(!should_open_fallback(
             true,
-            &QuitState::Draining { reason: QuitReason::LastWindowClosed }
+            &QuitState::Draining { reason: QuitReason::LastWindowClosed },
+            true,
         ));
         assert!(!should_open_fallback(
             true,
-            &QuitState::Draining { reason: QuitReason::LauncherRequested }
+            &QuitState::Draining { reason: QuitReason::LauncherRequested },
+            true,
         ));
-        assert!(!should_open_fallback(true, &QuitState::Quit));
+        assert!(!should_open_fallback(true, &QuitState::Quit, true));
+    }
+
+    /// ReAgent P1 on PR #2987: tear off a window, then close it (or it
+    /// crashes) inside the 10s timeout, before it ever registered. That
+    /// close is intentional, not the suspend/corpse scenario — replacing it
+    /// would pop an unwanted window on a user who just dismissed one.
+    #[test]
+    fn fallback_never_replaces_a_window_the_user_already_closed() {
+        use crate::state::QuitState;
+        assert!(
+            !should_open_fallback(true, &QuitState::Running, false),
+            "a promoted window that is no longer registered must not be replaced"
+        );
+    }
+
+    #[test]
+    fn cancel_stops_the_timer_from_opening_a_window() {
+        let mut w = PromoteLivenessWatches::default();
+        let epoch = w.arm("window-pool-abc".to_string());
+        assert!(w.cancel("window-pool-abc"), "cancel reports it was armed");
+        assert!(
+            !w.take_if_unconfirmed("window-pool-abc", epoch),
+            "a cancelled watch must not fall back when its timer fires"
+        );
+    }
+
+    #[test]
+    fn cancel_is_false_for_a_window_that_was_never_promoted() {
+        // on_pool_window_destroyed runs for PRE-promote pool deaths too —
+        // those never armed a watch and must be a silent no-op.
+        let mut w = PromoteLivenessWatches::default();
+        assert!(!w.cancel("window-pool-never-promoted"));
     }
 }
