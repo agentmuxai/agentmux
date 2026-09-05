@@ -31,29 +31,45 @@
 //! watermark instead of deleting: entries stay on disk, and "what you
 //! missed" means "entries past the watermark".
 //!
-//! ## Ordering
+//! ## Ordering, and why the hot path takes no lock
 //!
-//! Writes are performed by `AppState::host_dispatch` **while it still holds
-//! the `host_state` lock**, so audit writes are serialized in the same order
-//! as the reducer decisions that produced them. Doing the write after
-//! releasing the lock (the first cut again) let two concurrent dispatches
-//! apply out of order — and because `observed` no-ops when the log is not in
-//! an unattended state, a reordered pair could silently drop an `Observed`
-//! and leave the log stuck claiming an unattended period that had ended.
+//! Two things must both hold, and earlier revisions of this module kept
+//! trading one for the other:
 //!
-//! Holding the lock across a small file append is acceptable *here
-//! specifically* because these events only occur on an attended/unattended
-//! transition — a handful of times in a session, not per dispatch. Paying a
-//! rare, bounded lock-hold to remove a correctness hole is the right trade;
-//! this is not a precedent for doing I/O under `host_state` generally.
+//! 1. **Ordering.** The transition must be applied in the order the reducer
+//!    decided it. Out of order, the redundancy guard swallows an `Observed`
+//!    and the log is left claiming an unattended period that had ended.
+//! 2. **No stalling the UI thread.** `host_dispatch` is called straight from
+//!    CEF UI-thread callbacks — `wrr::win_event` dispatches `UnregisterBrowser`
+//!    there, which is exactly the transition recorded here — and its contract
+//!    promises no I/O and sub-microsecond hold time
+//!    (SPEC_PHASE_F_HOST_REDUCER_2026-05-01.md §6).
 //!
-//! ## State is derived from the log, not held in memory
+//! Writing the file under `host_state` satisfied (1) and broke (2). Moving
+//! the write to a thread but reaching it through this struct's mutex still
+//! broke (2), because *acquiring* that mutex can block behind
+//! `background_audit_take` holding it across a full file read.
 //!
-//! Whether the instance is currently unattended is read from the **last
-//! recorded entry**, not a field. That is what makes the state survive a host
-//! restart: a host that crashed mid-unattended-period restarts with no
-//! memory, but the log still ends in `WentUnattended`, so the eventual
-//! `Observed` is still recorded and the user still learns the period existed.
+//! The current split satisfies both structurally:
+//!
+//! - `HostState::background_unattended` holds the state, so the reducer
+//!   decides the transition AND applies it under the lock it already holds.
+//! - The writer's `Sender` lives on `AppState` OUTSIDE this struct's mutex
+//!   (`AppState::background_audit_tx`), so `host_dispatch` enqueues with a
+//!   `OnceLock` read and an unbounded `send` — no I/O, no lock acquisition.
+//! - A dedicated writer thread performs every append and compaction, under a
+//!   file lock it shares with the reader.
+//!
+//! So `host_dispatch` holds `host_state` and nothing else. **Do not
+//! reintroduce file I/O, or any second lock, on that path.**
+//!
+//! ## State survives a host restart
+//!
+//! `HostState::background_unattended` is seeded from the **last entry in the
+//! log** at `init` time. The launcher deliberately restarts a crashed host
+//! while the background service keeps running, so a period that began before
+//! the crash is still open and its eventual `Observed` must still be
+//! recorded rather than suppressed as redundant.
 //!
 //! ## Scope, stated honestly
 //!
