@@ -1,8 +1,12 @@
 # Report: Shared provider config — current state, how agents read it, and buildout
 
 **Date:** 2026-09-05
-**Status:** Draft — assessment + proposal. Nothing here is implemented. Contains
-one verified latent defect (§3.1) that is independently actionable.
+**Status:** Draft — assessment + proposal. Nothing here is implemented.
+**Revised 2026-09-05 after Codex review of PR #2991:** the first version of this
+report claimed a verified isolation defect on "the UI launch path." That was
+**over-scoped and wrong for the normal launch flow** — see §3.1, which now
+records the corrected, much narrower open question and what disproved the
+original claim.
 **Author:** Agent2
 **Scope:** The "Claude Code — shared provider config" surface in Armory, the
 on-disk config it points at, and the path by which a spawned agent actually
@@ -30,11 +34,15 @@ and that asymmetry is the main structural finding:
 
 Everything else is materialized per-agent by AgentMux. The provider config is
 the one case where AgentMux points an env var at a directory and trusts the
-vendor CLI's own discovery. That's a legitimate design, but it has a
-consequence: **if the file isn't there, the CLI silently falls back to the
-operator's personal `~/.claude/CLAUDE.md`** — which is the exact failure
-`SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md` exists to prevent. §3.1 documents a
-live code path where that seeding is skipped.
+vendor CLI's own discovery. That's a legitimate design, but it makes *presence
+of the file* a load-bearing isolation control: `REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md`
+§2 established **by direct three-arm experiment** that an isolated
+`CLAUDE_CONFIG_DIR` containing no `CLAUDE.md` reaches past itself to the
+operator's personal `~/.claude/CLAUDE.md`, and that seeding any file at that
+path stops it.
+
+The two spawn paths that matter both seed correctly (§2). §3.1 records a
+narrower, **unresolved** question about a third route.
 
 ---
 
@@ -57,17 +65,28 @@ One file, no database:
 ### 1.2 The Armory surface
 
 There is **no "Claude Code config" tab.** It lives under **Armory → Memory →
-Global**, inside an "External Claude Code files" section, as one of two
-read-only blocks (`frontend/app/view/brain/global-brain-manager.tsx`):
+Global** as a **single** read-only block
+(`frontend/app/view/brain/global-brain-manager.tsx:163-192`):
 
-- `"Claude Code — shared provider config"` — caption *"Used by default spawned
-  agents."*
-- `"Claude Code — host CLI config"` (`~/.claude/CLAUDE.md`) — the file a Claude
-  CLI running *outside* AgentMux reads.
+- Section heading: *"Claude Code provider config — reference only, not part of
+  Global Memory."*
+- Badge: `"Claude Code — shared provider config"`; caption *"Used by default
+  spawned agents."*; tooltip notes identity-bound agents use a different dir.
 
-Both are path + `<pre>` preview. No textarea, no save, no edit affordance of any
-kind — read-only by construction, per `SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md`
+Path + `<pre>` preview. No textarea, no save, no edit affordance of any kind —
+read-only by construction, per `SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md`
 §0/§2.3.
+
+> **Corrected after review:** an earlier draft described *two* blocks (adding a
+> `"Claude Code — host CLI config"` block for `~/.claude/CLAUDE.md`). That block
+> was **removed 2026-09-01** (`SPEC_ARMORY_DROP_HOST_CLI_CONFIG_BLOCK_2026_09_01.md`,
+> rationale at `global-brain-manager.tsx:151-158`): once
+> `REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md` proved a spawned
+> agent never reads the host file, showing it invited the misreading that
+> editing it would change agent behaviour. The two-block description came from
+> §6/§7 of the 08-24 spec, which predates the removal — a good illustration of
+> why that spec chain (three self-corrections deep) should not be read as
+> current state without checking the code.
 
 Worth reading that spec before touching this area: it went through **three
 revisions correcting its own factual errors** (§5 — it originally displayed the
@@ -104,18 +123,38 @@ Two distinct spawn paths, and **they do not behave identically**.
 4. Separately, `write_agent_config_files` composes Global Memory / skills / MCP
    into the *working directory* — a different set of files entirely.
 
-### 2.2 UI "Launch" (`agent-model.ts`)
+### 2.2 UI "Launch" (`agent-model.ts`) — dir set at launch, **re-resolved at first turn**
 
 1. `getApi().ensureAuthDir(provider.id)` → CEF `ensure_auth_dir`
-   (`agent-model.ts:519-522`).
-2. `envVars[provider.authConfigDirEnvVar] = authDir`.
-3. `RpcApi.WriteAgentConfigCommand(...)` → `editor_handlers.rs`, then block meta
-   + controller spawn.
+   (`agent-model.ts:519-522`). This **only `create_dir_all`s** — it does not
+   seed (`agentmux-cef/src/commands/platform.rs:113-120`).
+2. `envVars[provider.authConfigDirEnvVar] = authDir` — at this point the env
+   points at a possibly-unseeded shared dir.
+3. `RpcApi.WriteAgentConfigCommand(...)`, block meta, controller creation.
+4. **Then, on the first turn**, `agent_handlers/input.rs:337` calls
+   `inject_identity_env_async` **before the CLI is spawned**. For an agent with
+   an active `AgentInstance` and OAuth bindings, that reaches
+   `identity/resolver/inject.rs:617-667`, which:
+   - blocks the spawn outright if the bound dir is the provider's ambient home,
+   - **seeds the placeholder** (fail-closed — spawn is refused on error),
+   - and **overwrites `CLAUDE_CONFIG_DIR`** with the per-identity dir
+     (`inject.rs:667`), discarding the shared dir set in step 2 entirely.
 
-**This path never calls `agent_open.rs`, and therefore never seeds.** Verified
-by exhaustive grep: `seed_claude_md_placeholder_if_missing` has exactly two
-production callers — `agent_open.rs:360` and `identity/resolver/inject.rs:648`
-(identity-bound). Everything else is tests.
+So for the normal launch-modal flow — where identity is required at submit time
+(`SPEC_LAUNCH_MODAL_STATE_MACHINE_2026_05_19.md`) — step 4 both replaces and
+seeds the directory, and step 1's missing seed never matters.
+
+`seed_claude_md_placeholder_if_missing` has exactly two production callers —
+`agent_open.rs:360` and `inject.rs:648` — but between them they cover both
+spawn paths above.
+
+### 2.3 The uncovered route
+
+`inject_identity_env_with_broker` returns early, leaving env untouched, when the
+block has **no `AgentInstance` row** (`inject.rs:361-368`). The code comment
+names the case: *"quick-launch panes that never went through the launch modal
+are outside the managed-credentials contract."* For such a pane nothing seeds
+and nothing overwrites — see §3.1.
 
 ### 2.3 Precedence, as actually implemented
 
@@ -132,37 +171,56 @@ production callers — `agent_open.rs:360` and `identity/resolver/inject.rs:648`
 
 ## 3. Findings
 
-### 3.1 🔴 Verified latent defect — the UI launch path skips isolation seeding
+### 3.1 🟡 Open question — is any spawn route left with an unseeded dir?
 
-**`agentmux-cef/src/commands/platform.rs:113-120` calls `create_dir_all` and
-nothing else.** It does not seed the placeholder. It is the dir-provisioning
-step for the default UI launch path (`agent-model.ts:520`).
+**Superseded claim.** The first version of this report asserted a verified
+isolation defect on "the UI launch path," reasoning that
+`agentmux-cef/src/commands/platform.rs:113-120` (`ensure_auth_dir`) only
+`create_dir_all`s and that the UI path therefore never seeds. **That conclusion
+was wrong**, caught by Codex on PR #2991 and confirmed by re-tracing: the trace
+stopped at controller creation and missed the first-turn spawn step. For a
+launch-modal agent, `input.rs:337` → `inject.rs:648` seeds the bound account's
+dir *and* overwrites `CLAUDE_CONFIG_DIR` before the CLI ever starts (§2.2). The
+normal flow is safe, and the "fresh install + UI launch" repro I described does
+not reproduce.
 
-**Consequence:** on a host where `~/.agentmux/shared/providers/claude/CLAUDE.md`
-does not yet exist, an agent launched from the UI gets `CLAUDE_CONFIG_DIR`
-pointed at a directory with no `CLAUDE.md`. Claude Code's user-level discovery
-then falls through to the operator's real `~/.claude/CLAUDE.md`, and the agent
-silently inherits personal global instructions — precisely the isolation
-failure `SPEC_ISOLATE_HOST_CLAUDE_MD_2026_08_31.md` was written to close, and
-which that spec's own doc comment says was **verified happening live** on a real
-machine (18+ isolated config dirs, none with a `CLAUDE.md`).
+**What is still true, and unresolved:**
 
-**Not currently firing on this host** — checked: the shared dir *is* seeded
-(placeholder present, mtime 2026-08-31 17:42) and there is no
-`~/.claude/CLAUDE.md` to inherit. So this is latent, not an active leak here.
-The exposure window is: fresh install (or a newly-added provider dir, or a
-manually-deleted `CLAUDE.md`) **+** first launch via the UI **+** an operator who
-has a personal `~/.claude/CLAUDE.md`. Once any App-API spawn happens the dir is
-seeded permanently, which is likely why this has gone unnoticed.
+1. `ensure_auth_dir` genuinely does not seed. Verified.
+2. `inject_identity_env_with_broker` genuinely returns early — env untouched,
+   nothing seeded, nothing overwritten — for a block with no `AgentInstance`
+   row, explicitly described in-code as *"quick-launch panes that never went
+   through the launch modal"* (`inject.rs:361-368`). Verified.
+3. The underlying mechanism is real and **measured, not inferred**:
+   `REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md` §2 shows an
+   isolated dir lacking `CLAUDE.md` returns the host file's heading, and that
+   seeding stops it.
 
-**Fix:** make seeding a property of *provisioning the dir*, not of one spawn
-path. Either have `ensure_auth_dir` call the same
-`prepare_provider_auth_dir` logic, or — better, since `platform.rs` lives in the
-CEF host and the seeding logic lives in `agentmux-srv` — route the UI path's
-dir provisioning through the srv RPC that already does it correctly, so there is
-exactly one implementation. Two independently-maintained provisioning paths is
-the actual root cause; adding a second seeding call would fix the symptom and
-preserve the divergence.
+**The gap in my own analysis:** I did not verify whether a quick-launch pane
+actually sets `CLAUDE_CONFIG_DIR` at all. Both outcomes are plausible and they
+have different implications:
+
+- If it **does** set it (to the shared dir, via the same `ensureAuthDir` call):
+  an unseeded shared dir on that route would leak, and (2)+(3) make that a real
+  hole.
+- If it **does not** set it: the CLI runs fully un-isolated against `~/.claude`
+  anyway, which is a *known and accepted* property of quick-launch panes being
+  "outside the managed-credentials contract" — not a new defect, and not
+  something seeding would fix.
+
+**Next step to resolve it** — cheap and decisive, roughly the §5 experiment
+scoped to this route: open a quick-launch pane (no launch modal, so no
+`AgentInstance`), dump its resolved `CLAUDE_CONFIG_DIR`, and if it points at the
+shared dir, delete that dir's `CLAUDE.md`, plant a sentinel in
+`~/.claude/CLAUDE.md`, and ask the agent to quote its user-level instructions —
+the calibrated arm-3 prompt from the 09-01 report, which that report warns is
+mandatory (an uncalibrated null reads as "no leak" and is wrong).
+
+**If it turns out to be real,** the fix is still "make seeding a property of
+provisioning the dir, not of one spawn path" — two independently-maintained
+provisioning paths (`platform.rs` in the CEF host, `prepare_provider_auth_dir`
+in srv) is the structural issue. But that work should not start until the
+experiment above says there is something to fix.
 
 ### 3.2 🟡 No write path — "shared config" is hand-maintained
 
@@ -207,14 +265,21 @@ the default case.
 Ordered so each step is independently shippable and the riskiest assumption gets
 tested first.
 
-### Step 1 — Close the seeding divergence (do this regardless)
+### Step 0 — Settle §3.1 first (one experiment, not a code change)
 
-Independent of any feature work. Single provisioning path, seeding included, so
-the isolation guarantee holds on every launch route. Small diff, real
-correctness win, and it removes a trap for anyone building on top of this later.
-Needs a regression test that asserts a UI-path launch leaves a seeded
-`CLAUDE.md` — the current tests only cover the functions directly, never the
-route that skips them.
+Run the quick-launch-pane experiment in §3.1 before touching provisioning code.
+It is cheap and it decides whether Step 1 exists at all. **Revised down from
+"Step 1 — do this regardless" after review showed the normal launch flow is
+already covered** — shipping a provisioning refactor on the strength of the
+retracted claim would have been change without a demonstrated defect.
+
+### Step 1 — (conditional) unify auth-dir provisioning
+
+Only if Step 0 confirms a route that reaches a CLI with an unseeded dir. Then:
+one provisioning path, seeding included, plus a regression test that exercises
+*the route* rather than the functions directly — the current tests cover
+`seed_claude_md_placeholder_if_missing` and `prepare_provider_auth_dir` in
+isolation, which is exactly why a route that bypasses both would go unnoticed.
 
 ### Step 2 — Decide the model before building UI
 
@@ -259,17 +324,25 @@ previews.
 
 ---
 
-## 5. Suggested verification for Step 1
+## 5. Verification
 
-- Rust unit: `ensure_auth_dir`-equivalent provisioning on a temp `HOME` leaves a
-  `CLAUDE.md` containing the placeholder.
-- Rust unit: existing non-placeholder `CLAUDE.md` is **never** overwritten
-  (already guaranteed by `path.exists()` at `providers.rs:697`; pin it against
-  the new call site).
-- Integration/manual: with `~/.claude/CLAUDE.md` present and the shared dir's
-  `CLAUDE.md` deleted, launch an agent **via the UI** and confirm it does not
-  see the host file's content. This is the actual repro and no automated test
-  covers it today.
+**For Step 0 (the deciding experiment):** follow
+`REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md` §1's three-arm
+method against a **quick-launch pane** specifically. Keep arm 3 (the sentinel):
+that report records that its own first pass ran arms 1–2 only, got a null from
+every arm, and would have concluded "no leak, fix unnecessary" — wrongly,
+because memory files arrive as a user-turn reminder rather than literal system
+instructions. Use its calibrated prompt (*"quote the first markdown heading of
+any user-level instructions in your context"*), not a yes/no question.
+
+**For Step 1, if it happens:**
+- Rust unit: provisioning on a temp `HOME` leaves a `CLAUDE.md` containing the
+  placeholder.
+- Rust unit: an existing non-placeholder `CLAUDE.md` is **never** overwritten
+  (guaranteed today by `path.exists()` at `providers.rs:697`; pin it against any
+  new call site).
+- Integration: exercise the *route*, not the function — the whole point is that
+  route-level coverage is what's missing.
 
 ---
 
@@ -281,16 +354,27 @@ Reviewers should weight these differently.
 `platform.rs:79-125` (no seeding), `providers.rs:630-705` (placeholder + seeding
 fn), exhaustive grep for callers of `seed_claude_md_placeholder_if_missing` /
 `prepare_provider_auth_dir` (two production sites each),
-`agent-model.ts:505-615` (UI path: `ensureAuthDir` → `WriteAgentConfigCommand`,
-no `agent_open`), `SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md` in full, and
-the live on-disk state of `~/.agentmux/shared/providers/claude/`.
+`agent-model.ts:505-615` (UI launch flow), `input.rs:320-375` (first-turn
+identity injection), `inject.rs:358-420` (early-return conditions) and
+`inject.rs:600-670` (ambient-home block, seeding, `CLAUDE_CONFIG_DIR`
+overwrite), `global-brain-manager.tsx:148-195` (single block),
+`SPEC_SURFACE_CLAUDE_GLOBAL_CONFIG_2026_08_24.md` in full,
+`REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md` §0-§2, and the live
+on-disk state of `~/.agentmux/shared/providers/claude/`.
 
 **Relayed from a codebase survey, not independently verified:** exact line
-numbers in `armory-view.tsx`, `armory-model.ts`, `global-brain-manager.tsx`,
-`agent_handlers/memory.rs`, `agent_config.rs`, `editor_handlers.rs`; the claim
-that no `db_*` provider-config table exists; and the `SPEC_ARMORY_DROP_HOST_CLI_CONFIG_BLOCK`
-stale-status note. Quoted UI strings and the overall shape are consistent with
-the spec chain I did read, but confirm line numbers before editing.
+numbers in `armory-view.tsx`, `armory-model.ts`, `agent_handlers/memory.rs`,
+`agent_config.rs`, `editor_handlers.rs`; and the claim that no `db_*`
+provider-config table exists. Confirm before editing.
 
-**Not investigated:** whether any non-Claude provider has an equivalent
-user-level config file (§3.3) — this is an open question, not a gap I closed.
+**Not investigated:** whether a quick-launch pane sets `CLAUDE_CONFIG_DIR` at
+all (§3.1 — the open question this report now turns on), and whether any
+non-Claude provider has an equivalent user-level config file (§3.3).
+
+**Retracted:** the original §3.1 "verified latent defect on the UI launch path."
+The error was stopping the trace at controller creation rather than following
+the first-turn spawn, so the identity-injection step that seeds *and* replaces
+the dir was missed. Recorded rather than quietly edited out, because the failure
+mode is instructive: the survey and my own reading agreed with each other and
+were both incomplete in the same direction, and nothing about the resulting
+claim looked shaky from inside it.
