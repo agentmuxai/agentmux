@@ -20,7 +20,12 @@ use super::*;
 
 fn fixture_watcher() -> SubagentWatcher {
     let wstore = Arc::new(crate::backend::storage::store::Store::open_in_memory().unwrap());
-    SubagentWatcher::new(Arc::new(EventBus::new()), wstore)
+    // id_store/identity_store don't need to be genuinely separate stores for
+    // these tests — none of them exercise real identity binding resolution
+    // (that's covered by identity::resolver::inject's own test suite);
+    // reusing `wstore` for all three mirrors the existing test-fixture
+    // convention elsewhere (server/agent_handlers/mod.rs, server/tests.rs).
+    SubagentWatcher::new(Arc::new(EventBus::new()), wstore.clone(), wstore.clone(), wstore)
 }
 
 /// Write a minimal terminated subagent JSONL file with an explicit mtime
@@ -1137,6 +1142,83 @@ async fn recheck_config_dir_preserves_all_dependent_blocks_across_a_repoint() {
     );
 
     std::fs::remove_dir_all(&root).ok();
+}
+
+// Codex P3 on PR #2980: `primary_block_id` (the block whose id the live
+// consumer loop actually filters/attributes events against) must be
+// preserved EXACTLY across a repoint, never re-derived from the unordered
+// `parent_block_ids` set — a `HashSet` has no defined iteration order, so
+// picking "any" member could silently swap which pane's session
+// subsequent filesystem events get checked against.
+#[tokio::test]
+async fn recheck_config_dir_preserves_the_exact_primary_block_id_not_an_arbitrary_set_member() {
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let root = home.join(format!("amx-recheck-primary-test-{}", now_millis()));
+    let old_dir = root.join("ambient");
+    let new_dir = root.join("identity-bound");
+    std::fs::create_dir_all(&old_dir).unwrap();
+    std::fs::create_dir_all(&new_dir).unwrap();
+
+    let watcher = Arc::new(fixture_watcher());
+    // "block-1" registers FIRST — it must stay the primary no matter how
+    // many other blocks join afterward or what order a HashSet happens to
+    // iterate them in.
+    watcher.watch_agent("agent-1", "block-1", old_dir.clone());
+    for i in 2..=6 {
+        watcher.watch_agent("agent-1", &format!("block-{i}"), old_dir.clone());
+    }
+    assert_eq!(watcher.watched_agents.lock().unwrap()[0].primary_block_id, "block-1");
+
+    watcher.recheck_config_dir("agent-1", new_dir.clone());
+
+    let watched = watcher.watched_agents.lock().unwrap();
+    assert_eq!(watched.len(), 1);
+    assert_eq!(
+        watched[0].primary_block_id, "block-1",
+        "the ORIGINAL primary block must survive a repoint unchanged, not be re-picked from the dependent set"
+    );
+    assert_eq!(watched[0].parent_block_ids.len(), 6, "every dependent block must still be tracked");
+
+    std::fs::remove_dir_all(&root).ok();
+}
+
+// Codex P2 on PR #2980: if the replacement watch fails to build (a
+// transient resource/permission/filesystem error), the existing
+// (stale-but-working) watch must be left in place rather than lost —
+// losing it entirely would turn a transient error into a PERMANENT loss of
+// Swarm tracking for that agent, since `recheck_all_watched_agents` has
+// nothing left in `watched_agents` to find and retry.
+#[tokio::test]
+async fn recheck_config_dir_keeps_the_old_watch_when_the_replacement_fails_to_build() {
+    let home = dirs::home_dir().expect("test requires a resolvable home dir");
+    let old_dir = home.join(format!("amx-recheck-buildfail-test-{}", now_millis()));
+    std::fs::create_dir_all(&old_dir).unwrap();
+
+    // `nearest_existing_ancestor` (this function's own doc comment) returns
+    // `None` outright for any path that isn't under the home directory at
+    // all — the only portable way to force that deterministically is a
+    // path rooted on a drive letter that doesn't exist on this machine.
+    // (`std::env::temp_dir()` does NOT work for this on Windows — it's
+    // `%LOCALAPPDATA%\Temp`, itself under home, so it always has an
+    // existing ancestor and `build_watch` would succeed for it.)
+    let missing_drive = ('D'..='Z')
+        .map(|d| format!("{d}:\\"))
+        .find(|root| !Path::new(root).exists())
+        .expect("test requires at least one unused drive letter");
+    let unwatchable_dir = Path::new(&missing_drive).join(format!("amx-recheck-unreachable-{}", now_millis()));
+
+    let watcher = Arc::new(fixture_watcher());
+    watcher.watch_agent("agent-1", "block-1", old_dir.clone());
+    assert_eq!(watcher.watched_agents.lock().unwrap().len(), 1);
+
+    watcher.recheck_config_dir("agent-1", unwatchable_dir);
+
+    let watched = watcher.watched_agents.lock().unwrap();
+    assert_eq!(watched.len(), 1, "a failed replacement must not remove the existing entry");
+    assert_eq!(watched[0].config_dir, old_dir, "must still be watching the original (working) directory");
+    assert!(watched[0].parent_block_ids.contains("block-1"));
+
+    std::fs::remove_dir_all(&old_dir).ok();
 }
 
 #[tokio::test]

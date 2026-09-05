@@ -36,18 +36,28 @@ This is the same class of gap `SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2
 ## Fix
 
 `agentmux-srv/src/backend/subagent_watcher/mod.rs`:
-- Extracted `watch_agent`'s filesystem-watch setup into a private `start_watch` helper (pure relocation, no behavior change — verified via the full pre-existing 87-test suite passing unchanged).
-- Added `recheck_config_dir(agent_id, new_config_dir)`: no-op if the agent isn't currently watched or the resolved directory is unchanged; otherwise tears down the stale watch (dropping its `notify::RecommendedWatcher`) and re-points it at the corrected directory via `start_watch`, preserving every dependent block, then backfills each dependent block's own persisted session (the same scoped mechanism `handle_reactive_register`'s first-registration backfill already uses, to avoid flooding Swarm with every session that identity has ever run).
-- Added `recheck_all_watched_agents(id_store, identity_store)`: re-resolves every currently-watched agent's config dir fresh and calls `recheck_config_dir` for any whose answer changed. Cheap — runs only on the rare identity-bind path, never per-turn.
+- Split the old `watch_agent`/`start_watch` into three pieces: `build_watch` (pure construction — creates the `notify` watcher and its dispatch channel, returns `None` on any failure, **no side effect on `watched_agents`**), `start_watch` (first-time registration: build, then install + spawn), and `spawn_consumer_loop` (the debounced file-event dispatch task, shared by both first-time and repoint paths).
+- Added `recheck_config_dir(agent_id, new_config_dir)`: no-op if the agent isn't currently watched or the resolved directory is unchanged; otherwise **builds the replacement watch first**, and only if that succeeds does it atomically swap the old entry for the new one — preserving the *exact* original `primary_block_id` and full dependent-block set — then backfills each dependent block's own persisted session.
+- Added `recheck_all_watched_agents()`: re-resolves every currently-watched agent's config dir fresh (using `id_store`/`identity_store`, now held on `SubagentWatcher` itself) and calls `recheck_config_dir` for any whose answer changed. Cheap — runs only on the rare identity-bind path, never per-turn.
+- `WatchedAgent` gained a `primary_block_id: String` field — the block whose id the live consumer loop actually filters/attributes events against, tracked explicitly rather than re-derived from the unordered `parent_block_ids` set.
 
-Wired into both production call sites that write an `agent_identity_link` row (`server/app_api/identity.rs`'s account-upsert handler, `server/agent_handlers/identity.rs`'s direct link RPC), right after the write succeeds — the same point each already publishes an `agentidentities:changed:*` WPS event. Reached via the existing `subagent_watcher::global()` singleton accessor (the same pattern `blockcontroller/persistent.rs` already uses to reach this module from elsewhere), so neither identity handler needed `AppState` plumbing changes beyond capturing one more already-existing `Arc` clone.
+Wired into both production call sites that write an `agent_identity_link` row (`server/app_api/identity.rs`'s account-upsert handler, `server/agent_handlers/identity.rs`'s direct link RPC) via `subagent_watcher::global()`, and into `handle_reactive_register` itself (`server/reactive.rs`) right after its own `watch_agent` call — closing the narrowest version of the race, where a bind lands in the exact window between that handler resolving `config_dir` and `watch_agent` installing it.
+
+### Review round: three real findings from Codex, one self-caught design error while addressing them
+
+Codex flagged three issues on the first version of this fix, all confirmed valid:
+- **P1** — the resolve-then-install window in `handle_reactive_register` itself wasn't covered; an `agent_identity_link` write landing in that exact window had no later trigger, since `watch_agent` only ever runs once per pane.
+- **P2** — `recheck_config_dir` removed the old (working) watch *before* attempting to build the replacement; a transient build/watch failure would have turned a temporary error into a permanent loss of Swarm tracking for that agent.
+- **P3** — the repoint picked an arbitrary member of the unordered `parent_block_ids` `HashSet` as the new primary, risking silently attributing subsequent filesystem events to a different pane than before.
+
+Fixing P1 took two attempts. The first version added a post-insert self-check *inside* `watch_agent` itself (re-resolve identity, repoint if changed, right after every install). Running the full pre-existing test suite immediately caught that this was wrong: `watch_agent` is a generic primitive with other callers whose `config_dir` isn't backed by a resolvable instance/binding row at all — the legacy manual `subagent.WatchAgent` RPC entry point (`server/service/misc.rs`) deliberately passes `parent_block_id: ""`, and the self-check's blind re-resolution fell through to `derive_claude_config_dir`'s last-resort fallback and silently repointed the watch away from that caller's own explicit choice, breaking `live_fs_event_with_empty_block_id_bypasses_the_ownership_check` and `live_fs_event_is_not_misattributed_to_a_block_that_does_not_own_the_session`. Relocated the self-check to `handle_reactive_register` instead — the one call site that actually derives `config_dir` from identity/binding resolution in the first place, so a fresh re-resolve there can only ever mean "the DB state changed since I last read it," never "this caller never intended identity resolution to apply here at all."
 
 ## Verification
 
-- 5 new tests covering: no-op when unwatched, no-op when unchanged, repoint replaces the entry, repoint preserves multiple dependent blocks, repoint backfills a session's subagents missed while watching the wrong directory.
-- Falsified by neutering `recheck_config_dir` to an early return and confirming exactly the 3 behavioral tests fail (the 2 no-op tests correctly still pass — indistinguishable from a stub); restored, diff clean.
-- Full pre-existing 87-test `subagent_watcher` suite passes unchanged (confirms the `start_watch` extraction is a pure relocation).
-- Full `agentmux-srv` suite: 3014/3014 passing (3002 unit + 5 integration + 7 subprocess-io), zero regressions.
+- 7 new tests: no-op when unwatched, no-op when unchanged, repoint replaces the entry, repoint preserves multiple dependent blocks, repoint backfills a session's subagents missed while watching the wrong directory, repoint preserves the *exact* original `primary_block_id` across 6 dependent blocks (not an arbitrary set member), repoint keeps the old watch when the replacement fails to build.
+- Falsified three times: (1) neutered `recheck_config_dir` to an early return, confirmed exactly the 3 original behavioral tests fail; (2) reproduced the P2 bug (remove-before-build ordering), confirmed the new "keeps the old watch on failure" test fails; (3) the P1 self-check design error was caught live by the pre-existing suite itself, not a deliberate falsification — see above. Every case restored, diffs clean.
+- Full `subagent_watcher` suite: 94/94 (87 pre-existing + 7 new), confirming the three-way split (`build_watch`/`start_watch`/`spawn_consumer_loop`) is behavior-preserving.
+- Full `agentmux-srv` suite: 3016/3016 passing, zero regressions.
 - `cargo clippy -p agentmux-srv`: no new warnings at any touched line.
 
 ## What this does not fix
@@ -65,5 +75,6 @@ Wired into both production call sites that write an `agent_identity_link` row (`
 | `agentmux-srv/src/server/app_api/identity.rs` | Call site 1 (account upsert/bind) |
 | `agentmux-srv/src/server/agent_handlers/identity.rs` | Call site 2 (direct link RPC) |
 | `agentmux-srv/src/identity/resolver/inject.rs` | `resolve_bound_oauth_config_dir`, `resolve_claude_config_dir`'s fallback chain (unmodified, read for diagnosis) |
-| `agentmux-srv/src/server/reactive.rs` | `handle_reactive_register` — the one-shot call site this fix compensates for (unmodified) |
+| `agentmux-srv/src/server/reactive.rs` | `handle_reactive_register` — call site 3 (the P1 self-check, closing the resolve-then-install window) |
+| `agentmux-srv/src/bootstrap.rs`, `agentmux-srv/src/main.rs` | Threading `id_store`/`identity_store` into `SubagentWatcher::new`/`spawn` and `spawn_background_subsystems` |
 | `docs/specs/SPEC_SUBAGENT_WATCHER_IDENTITY_BOUND_CONFIG_DIR_2026_08_22.md` | The adjacent, earlier fix for the "identity already resolvable at registration" case |

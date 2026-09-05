@@ -203,7 +203,7 @@ fn register_identity_account_upsert(engine: &Arc<WshRpcEngine>, state: &AppState
                 // `recheck_config_dir`'s own doc comment. Cheap, safe
                 // no-op when nothing changed or nothing needs re-pointing.
                 if let Some(watcher) = crate::backend::subagent_watcher::global() {
-                    watcher.recheck_all_watched_agents(id_store, identity_store);
+                    watcher.recheck_all_watched_agents();
                 }
 
                 Ok(Some(json!({

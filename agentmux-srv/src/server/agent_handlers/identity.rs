@@ -586,13 +586,11 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
     // ---- Agent ↔ Identity junction ----
 
     let wstore = state.identity_store.clone();
-    let id_store = state.id_store.clone();
     let broker = state.broker.clone();
     engine.register_handler(
         COMMAND_LINK_AGENT_IDENTITY,
         Box::new(move |data, _ctx| {
             let wstore = wstore.clone();
-            let id_store = id_store.clone();
             let broker = broker.clone();
             Box::pin(async move {
                 let cmd: CommandLinkAgentIdentityData = serde_json::from_value(data)
@@ -611,7 +609,7 @@ pub fn register(engine: &Arc<WshRpcEngine>, state: &AppState) {
                 // needed: watch_agent's one-shot config-dir resolution can
                 // race ahead of this exact binding.
                 if let Some(watcher) = crate::backend::subagent_watcher::global() {
-                    watcher.recheck_all_watched_agents(&id_store, &wstore);
+                    watcher.recheck_all_watched_agents();
                 }
                 Ok(None)
             })
