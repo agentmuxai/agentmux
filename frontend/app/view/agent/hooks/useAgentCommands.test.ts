@@ -2787,8 +2787,8 @@ describe("useAgentCommands — pre-turn cmd:args honours agentMode, not just con
         ],
     } as any;
 
-    /** Run one send with the given agentMode and return the persisted cmd:args. */
-    const argsWrittenFor = async (agentMode: string | undefined): Promise<string[]> => {
+    /** Run one send with the given block meta and return the persisted cmd:args. */
+    const argsWrittenForMeta = async (meta: Record<string, unknown>): Promise<string[]> => {
         const model = registerPane(BLOCK_ID, fullRegistration());
         model.dispatchPane({ type: "InitReady", at: Date.now() }, "system");
         model.dispatchPane({ type: "StreamSubscribe", at: Date.now() }, "system");
@@ -2800,7 +2800,7 @@ describe("useAgentCommands — pre-turn cmd:args honours agentMode, not just con
             const commands = useAgentCommands({
                 blockId: BLOCK_ID,
                 model,
-                block: () => ({ meta: { agentMode } }) as any,
+                block: () => ({ meta }) as any,
                 provider: () => claudeProvider,
                 documentAtom: [() => [], () => {}] as any,
                 log: () => {},
@@ -2826,6 +2826,9 @@ describe("useAgentCommands — pre-turn cmd:args honours agentMode, not just con
         return written;
     };
 
+    const argsWrittenFor = (agentMode: string | undefined): Promise<string[]> =>
+        argsWrittenForMeta({ agentMode });
+
     /** The whole point: this is the flag that killed every container agent. */
     it("never writes --input-format for a container agent", async () => {
         expect(await argsWrittenFor("container")).not.toContain("--input-format");
@@ -2843,6 +2846,38 @@ describe("useAgentCommands — pre-turn cmd:args honours agentMode, not just con
     /** Blocks predating the agentMode meta key must keep host behaviour. */
     it("treats a block with no agentMode as a host agent", async () => {
         expect(await argsWrittenFor(undefined)).toContain("--input-format");
+    });
+
+    /** #2872: this rebuild runs before EVERY send and derives its base from the
+     *  provider catalog, so the agent's own provider_flags — appended by the
+     *  launch path, which the catalog knows nothing about — were dropped on the
+     *  first send and never came back, for host agents as much as container
+     *  ones. */
+    it("reapplies the agent's provider_flags on every send", async () => {
+        const args = await argsWrittenForMeta({
+            agentMode: "host",
+            "agent:provider_flags": "--my-flag 7",
+        });
+        expect(args).toContain("--my-flag");
+        expect(args[args.indexOf("--my-flag") + 1]).toBe("7");
+    });
+
+    /** …and must not resurrect the one-shot launch intent alongside them.
+     *  `--fork-session` forks the session being resumed; reapplying it every
+     *  turn would fork again on each one. */
+    it("does NOT reapply --fork-session", async () => {
+        const args = await argsWrittenForMeta({
+            agentMode: "host",
+            "agent:provider_flags": "--my-flag",
+        });
+        expect(args).not.toContain("--fork-session");
+    });
+
+    /** A pane launched before the meta key existed must still send. */
+    it("sends normally when provider_flags meta is absent", async () => {
+        const args = await argsWrittenForMeta({ agentMode: "host" });
+        expect(args).toContain("--input-format");
+        expect(args.some((a) => a.startsWith("--my"))).toBe(false);
     });
 });
 

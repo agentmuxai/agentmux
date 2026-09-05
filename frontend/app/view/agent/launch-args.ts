@@ -56,3 +56,42 @@ export function selectLaunchArgs(provider: LaunchArgsProvider, agentMode: string
         ? [...provider.persistentLaunchArgs]
         : [...provider.launchArgs];
 }
+
+/**
+ * Block-meta key holding the agent definition's `provider_flags` verbatim.
+ *
+ * Persisted at launch so the per-turn `cmd:args` rebuild can reapply it. The
+ * rebuild derives its base from the provider CATALOG, which by construction
+ * knows nothing the launch path appended afterwards — so without this the
+ * user's flags survive exactly until the first send and are then gone for the
+ * life of the pane (#2872).
+ */
+export const PROVIDER_FLAGS_META_KEY = "agent:provider_flags";
+
+/**
+ * Split an agent definition's `provider_flags` into argv tokens.
+ *
+ * Whitespace-separated, matching how the launch path has always split it.
+ * Anything non-string (absent meta on a pane launched before the key existed)
+ * is no flags rather than an error.
+ */
+export function parseProviderFlags(raw: unknown): string[] {
+    return typeof raw === "string" ? raw.split(/\s+/).filter(Boolean) : [];
+}
+
+/**
+ * Reapply the user's `provider_flags` to a freshly rebuilt argv.
+ *
+ * These are DURABLE args: they describe how this agent always runs, so every
+ * turn needs them. That is what distinguishes them from `--fork-session`, the
+ * other thing the launch path appends — which is a ONE-SHOT intent (fork the
+ * session being resumed at launch) and is deliberately NOT reapplied. Carrying
+ * it forward would pair `--fork-session` with the `--resume <sid>` srv adds on
+ * every subsequent turn, forking again each time instead of once.
+ *
+ * Appends only; the catalog base can never already contain these.
+ */
+export function withProviderFlags(args: string[], raw: unknown): string[] {
+    const flags = parseProviderFlags(raw);
+    return flags.length > 0 ? [...args, ...flags] : args;
+}

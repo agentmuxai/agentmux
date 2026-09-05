@@ -25,7 +25,7 @@ import { parseSeedZoom } from "./agent-zoom-seed";
 import { resolveForkSessionArgs } from "./fork-session-args";
 import { HISTORY_TAB_FOR_META_KEY, openOrFocusHistoryTab } from "./open-history-tab";
 import { quickForkAgent } from "./quick-fork";
-import { isPersistentLaunch, selectLaunchArgs } from "./launch-args";
+import { isPersistentLaunch, PROVIDER_FLAGS_META_KEY, selectLaunchArgs } from "./launch-args";
 
 export class AgentViewModel implements ViewModel {
     viewType = "agent";
@@ -688,6 +688,13 @@ export class AgentViewModel implements ViewModel {
                 // expression, so the controller/args choice and the mode this
                 // block advertises can never disagree.
                 agentMode,
+                // Persisted so the per-turn cmd:args rebuild can reapply it.
+                // That rebuild starts from the provider catalog, which knows
+                // nothing about what the launch path appended, so without this
+                // the user's flags are dropped on the first send and never come
+                // back (#2872). `--fork-session` is deliberately NOT persisted
+                // here — it is a one-shot launch intent, not a durable arg.
+                [PROVIDER_FLAGS_META_KEY]: agent.provider_flags ?? "",
                 ...(overrides?.containerImage || agent.container_image ? { "agent:container_image": overrides?.containerImage || agent.container_image } : {}),
                 controller: isPersistent ? "persistent" : "subprocess",
                 cmd: cliBin,
