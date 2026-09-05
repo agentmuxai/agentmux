@@ -229,13 +229,33 @@ impl AgentMuxHandler {
         } else {
             crate::state::BrowserKind::TopLevel { is_pool: false }
         };
-        self.state.host_dispatch(
+        let register_out = self.state.host_dispatch(
             crate::reducer::HostCommand::RegisterBrowser {
                 label: label.clone(),
                 browser: browser.clone(),
                 kind,
             },
         );
+
+        // A user window that arrived after the instance already decided to
+        // quit (ReAgent P1 on PR #2996). Its creation was in flight before
+        // the drain began, so the creation-path guards could not catch it and
+        // `quit_app`'s snapshot never knew to close it. Close it now, at the
+        // one point that cannot be raced — otherwise it sits live in a
+        // draining host until the WRR watchdog force-kills it seconds later,
+        // in front of the user.
+        //
+        // Posted, not closed inline: this runs inside `on_after_created`, and
+        // re-entering CEF's close machinery from within a lifecycle callback
+        // is exactly what `ClosePoolBrowserTask` exists to avoid.
+        if register_out.registered_during_drain {
+            tracing::warn!(
+                target: "wrr",
+                label = %label,
+                "[quit] window registered after drain began — closing it immediately"
+            );
+            crate::ui_tasks::post_close_window(&self.state, &label);
+        }
 
         // Phase B.5 (window_meta step d, refined) — write host's
         // local `window_meta` ONCE here, synchronously from the

@@ -41,6 +41,7 @@ mod saga;
 mod second_instance;
 mod supervisor;
 mod teardown_backstop;
+mod tray;
 mod ui_liveness;
 #[cfg(target_os = "windows")]
 mod splash;

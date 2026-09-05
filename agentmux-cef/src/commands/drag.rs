@@ -419,6 +419,20 @@ pub fn open_window_at_position(state: &Arc<AppState>, args: &serde_json::Value) 
         return Err("a pane is currently closing; retry shortly".to_string());
     }
 
+    // Same draining guard as `open_window_with_kind` — a tear-off racing an
+    // explicit quit would otherwise strand a live window in a draining host
+    // (Codex P2 on PR #2996).
+    if !matches!(
+        state.host_state.lock().quit_state,
+        crate::state::QuitState::Running
+    ) {
+        tracing::warn!(
+            target: "wfr:gate",
+            "[wfr:gate] open_window_at_position refused — instance is draining/quitting"
+        );
+        return Err("the app is shutting down".to_string());
+    }
+
     let screen_x = args.get("screenX").and_then(|v| v.as_f64()).unwrap_or(0.0);
     let screen_y = args.get("screenY").and_then(|v| v.as_f64()).unwrap_or(0.0);
     let workspace_id = args.get("workspaceId").and_then(|v| v.as_str()).unwrap_or("").to_string();
