@@ -762,7 +762,7 @@ impl Default for AppState {
             window_transparent: std::sync::atomic::AtomicBool::new(false),
             ui_thread_gate: Mutex::new(UiThreadGate::default()),
             pending_reproject_closures: Mutex::new(PendingReprojectClosures::default()),
-            background_audit: Mutex::new(crate::background_audit::BackgroundAudit::default()),
+            background_audit: Mutex::new(crate::background_audit::BackgroundAudit::from_env()),
             promote_liveness: Mutex::new(PromoteLivenessWatches::default()),
         }
     }
@@ -783,28 +783,37 @@ impl AppState {
     pub fn host_dispatch(&self, cmd: crate::reducer::HostCommand) -> crate::reducer::DispatchOutput {
         let out = {
             let mut state = self.host_state.lock();
-            crate::reducer::update(&mut state, cmd)
+            let out = crate::reducer::update(&mut state, cmd);
+            // Issue #2977 WS4 — record attended/unattended transitions for the
+            // audit log the user is shown when a window next opens.
+            //
+            // Written INSIDE the `host_state` scope on purpose (ReAgent P1 /
+            // Codex P2 on PR #3001). The reducer decides the transition under
+            // this lock; applying it after releasing let two concurrent
+            // dispatches land out of order, and because `observed` no-ops when
+            // the log is not in an unattended state, a reordered pair could
+            // silently drop an `Observed` and leave the log stuck claiming an
+            // unattended period that had already ended.
+            //
+            // This does mean a small file append under `host_state`, which
+            // this codebase otherwise avoids. Acceptable HERE specifically:
+            // the branch is only taken on an attended/unattended transition —
+            // a handful of times per session, not per dispatch — so the
+            // lock-hold is rare and bounded. Not a precedent for I/O under
+            // `host_state` generally.
+            if let Some(went_unattended) = out.background_attention {
+                let now = crate::background_audit::now_ms();
+                let audit = self.background_audit.lock();
+                if went_unattended {
+                    audit.went_unattended(now);
+                } else {
+                    audit.observed(now);
+                }
+            }
+            out
         };
         for ev in &out.events {
             log_host_event(ev);
-        }
-        // Issue #2977 WS4 — record attended/unattended transitions for the
-        // audit log the user is shown when a window next opens. Done here,
-        // where every dispatch funnels through, rather than at the individual
-        // close/open sites; the reducer already decided (see
-        // `background_attention_transition`), this only writes it down.
-        //
-        // Deliberately NOT inside the lock scope above: the audit log has its
-        // own mutex, and nesting it under `host_state` would create a second
-        // lock-ordering edge for what is pure bookkeeping.
-        if let Some(went_unattended) = out.background_attention {
-            let now = crate::background_audit::now_ms();
-            let mut audit = self.background_audit.lock();
-            if went_unattended {
-                audit.went_unattended(now);
-            } else {
-                audit.observed(now);
-            }
         }
         out
     }

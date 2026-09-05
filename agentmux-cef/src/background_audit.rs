@@ -6,39 +6,75 @@
 //!
 //! ## What this is for
 //!
-//! WS4 requires an "audit log of what the background service did while
-//! unattended, surfaced next time a window/panel opens". The point is
+//! WS4 requires "**immutable** audit logging of what the background service
+//! did while unattended, surfaced the next time a window (or the tray panel)
+//! opens — the direct answer to 'there was no one watching.'" The point is
 //! accountability, not diagnostics: once AgentMux can keep running with no
-//! window, the user loses the ability to see what it did, and the design doc's
-//! §6 cites real precedents (Zoom 2019, Recall 2024) where a background
-//! component acting unobserved was the whole problem. So the contract is
-//! specifically **"tell the user afterwards"**, which is why entries are
-//! consumed on read rather than merely written to a log file nobody opens.
+//! window, the user loses the ability to see what it did, and §6 cites real
+//! precedents (Zoom 2019, Recall 2024) where a background component acting
+//! unobserved *was* the problem.
 //!
-//! ## Why the host owns it
+//! ## Append-only on disk, and why the first cut was wrong
 //!
-//! The host is the only process that knows both halves: it decides when the
-//! instance enters background mode (its own suppressed-drain gate), and it is
-//! what the frontend talks to when a window appears. Putting it in the
-//! launcher would need a second IPC hop for no benefit.
+//! An earlier revision of this module kept the log in memory and **erased**
+//! entries when they were read. Review (#3001) caught that this contradicts
+//! the spec twice over:
 //!
-//! ## Scope, honestly
+//! - **Not immutable.** Consuming on read means the record cannot be
+//!   re-examined, which is the opposite of an audit log.
+//! - **Lost exactly when it matters.** The launcher deliberately restarts a
+//!   crashed host while keeping the background service alive, so an
+//!   in-memory log is wiped precisely in the failure scenario where
+//!   accountability matters most.
 //!
-//! This records the **lifecycle** of unattended periods — when the instance
-//! went unattended and when it was observed again. It does not yet enumerate
-//! individual agent turns that ran during the window, because that data lives
-//! in `srv` and would need a new host→srv query; the entry carries the period
-//! so that enrichment can be added without changing the surfacing contract.
-//! Recorded as a deliberate first cut rather than implied to be complete.
+//! So the log is now an append-only JSONL file. Surfacing advances a
+//! watermark instead of deleting: entries stay on disk, and "what you
+//! missed" means "entries past the watermark".
+//!
+//! ## Ordering
+//!
+//! Writes are performed by `AppState::host_dispatch` **while it still holds
+//! the `host_state` lock**, so audit writes are serialized in the same order
+//! as the reducer decisions that produced them. Doing the write after
+//! releasing the lock (the first cut again) let two concurrent dispatches
+//! apply out of order — and because `observed` no-ops when the log is not in
+//! an unattended state, a reordered pair could silently drop an `Observed`
+//! and leave the log stuck claiming an unattended period that had ended.
+//!
+//! Holding the lock across a small file append is acceptable *here
+//! specifically* because these events only occur on an attended/unattended
+//! transition — a handful of times in a session, not per dispatch. Paying a
+//! rare, bounded lock-hold to remove a correctness hole is the right trade;
+//! this is not a precedent for doing I/O under `host_state` generally.
+//!
+//! ## State is derived from the log, not held in memory
+//!
+//! Whether the instance is currently unattended is read from the **last
+//! recorded entry**, not a field. That is what makes the state survive a host
+//! restart: a host that crashed mid-unattended-period restarts with no
+//! memory, but the log still ends in `WentUnattended`, so the eventual
+//! `Observed` is still recorded and the user still learns the period existed.
+//!
+//! ## Scope, stated honestly
+//!
+//! This records the **lifecycle of unattended periods** — when the instance
+//! stopped being observed and when it was observed again. It does **not** yet
+//! enumerate the individual agent turns, commands, or tool executions that
+//! ran during the window; that data lives in `srv` and needs a host→srv query
+//! that does not exist. Review (#3001) is right that this alone does not
+//! fully satisfy §6's "what the background service did", so the WS4 checkbox
+//! stays open. The entry format is a flat `{ at_ms, kind }` specifically so
+//! richer kinds extend it without reshaping the surfacing contract.
 
-use std::collections::VecDeque;
+use std::io::Write;
+use std::path::PathBuf;
 
 /// One thing the background service did (or had happen to it) while the user
 /// had no window open.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuditEntry {
-    /// Milliseconds since the Unix epoch. Stored as a plain number rather
-    /// than a formatted string so the frontend can localize it.
+    /// Milliseconds since the Unix epoch. A number, not a formatted string,
+    /// so the frontend can localize it.
     pub at_ms: u64,
     pub kind: AuditKind,
 }
@@ -53,94 +89,192 @@ pub enum AuditKind {
 }
 
 impl AuditKind {
-    /// Stable identifier for the IPC payload. Explicit rather than derived so
-    /// renaming a variant can't silently change the wire format the frontend
-    /// matches on.
+    /// Stable wire/disk identifier. Explicit rather than derived so renaming
+    /// a variant cannot silently invalidate previously written log files or
+    /// change what the frontend matches on.
     pub fn as_str(self) -> &'static str {
         match self {
             AuditKind::WentUnattended => "went_unattended",
             AuditKind::Observed => "observed",
         }
     }
+
+    fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "went_unattended" => Some(AuditKind::WentUnattended),
+            "observed" => Some(AuditKind::Observed),
+            _ => None,
+        }
+    }
 }
 
-/// How many entries to retain. An unattended period produces two entries, so
-/// this is ~64 unattended stretches — far more than a user will ever be shown
-/// at once, and bounded so a long-lived background instance cannot grow this
-/// without limit. Oldest are dropped first.
-const MAX_ENTRIES: usize = 128;
+/// Cap on retained lines. At two lines per unattended period this is ~1000
+/// periods; a background instance running for months must not grow the file
+/// without bound. On exceeding it the file is rotated to `.1` — the old
+/// records are archived rather than deleted, keeping the "immutable" property
+/// while bounding the live file.
+const MAX_LINES: usize = 2000;
 
-/// The audit log itself.
-///
-/// In memory only, by design. Persisting it would turn "what happened while
-/// you were away" into a durable record of usage patterns surviving restarts
-/// — more data at rest than the feature needs, and §6's whole concern is user
-/// trust. A restart is also a natural boundary: the user was present to cause
-/// it, so anything before it is no longer "while unattended".
+/// The audit log. All state lives in the files; this struct only knows where
+/// they are, which is what lets the log survive a host restart.
 #[derive(Debug, Default)]
 pub struct BackgroundAudit {
-    entries: VecDeque<AuditEntry>,
-    /// True between `WentUnattended` and the next `Observed`. Guards against
-    /// recording a second `WentUnattended` for one unattended period — the
-    /// reducer can report a zero-window transition more than once (e.g. a
-    /// pool window churns) and the user should see one period, not several.
-    unattended: bool,
+    /// `None` when no data dir could be resolved — the log then degrades to a
+    /// no-op rather than failing anything. An audit log that cannot be
+    /// written must never take down the app it is auditing.
+    path: Option<PathBuf>,
 }
 
 impl BackgroundAudit {
-    /// Record that the instance just became unattended. No-op if it already
-    /// is — see `unattended`.
-    pub fn went_unattended(&mut self, at_ms: u64) {
-        if self.unattended {
-            return;
-        }
-        self.unattended = true;
-        self.push(AuditEntry { at_ms, kind: AuditKind::WentUnattended });
-    }
-
-    /// Record that a window opened. No-op if the instance was not unattended,
-    /// so ordinary window-opening during normal use records nothing.
-    pub fn observed(&mut self, at_ms: u64) {
-        if !self.unattended {
-            return;
-        }
-        self.unattended = false;
-        self.push(AuditEntry { at_ms, kind: AuditKind::Observed });
-    }
-
-    fn push(&mut self, entry: AuditEntry) {
-        if self.entries.len() == MAX_ENTRIES {
-            self.entries.pop_front();
-        }
-        self.entries.push_back(entry);
-    }
-
-    /// Take everything recorded so far, clearing it.
-    ///
-    /// Consuming (rather than peeking) is the surfacing contract: WS4 asks for
-    /// the log to be *shown* next time a window opens, so once the frontend
-    /// has it, it has been surfaced. A peek would either re-show the same
-    /// events on every window open or need separate read-state bookkeeping.
-    pub fn take(&mut self) -> Vec<AuditEntry> {
-        self.entries.drain(..).collect()
-    }
-
-    /// Whether the instance is currently in an unattended period. Exposed for
-    /// the surfacing path, which wants to tell the user "you were away" only
-    /// when there is something to say.
-    pub fn is_unattended(&self) -> bool {
-        self.unattended
+    /// Resolve from `AGENTMUX_DATA_DIR` (set by the launcher; inherited in
+    /// dev). Returns a no-op log when unset.
+    pub fn from_env() -> Self {
+        let path = std::env::var_os("AGENTMUX_DATA_DIR")
+            .map(PathBuf::from)
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(|d| d.join("background-audit.jsonl"));
+        Self { path }
     }
 
     #[cfg(test)]
-    fn len(&self) -> usize {
-        self.entries.len()
+    fn at(path: PathBuf) -> Self {
+        Self { path: Some(path) }
+    }
+
+    fn watermark_path(&self) -> Option<PathBuf> {
+        self.path.as_ref().map(|p| p.with_extension("surfaced"))
+    }
+
+    /// Every entry currently on disk, oldest first. Malformed lines are
+    /// skipped rather than failing the read: a torn final line (a crash
+    /// mid-append) must not make the whole log unreadable.
+    pub fn entries(&self) -> Vec<AuditEntry> {
+        let Some(path) = &self.path else {
+            return Vec::new();
+        };
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return Vec::new();
+        };
+        text.lines().filter_map(parse_line).collect()
+    }
+
+    /// Is the instance currently in an unattended period?
+    ///
+    /// Derived from the last entry rather than a field, so it is correct
+    /// after a host restart — see the module docs.
+    pub fn is_unattended(&self) -> bool {
+        matches!(
+            self.entries().last().map(|e| e.kind),
+            Some(AuditKind::WentUnattended)
+        )
+    }
+
+    /// Record that the instance became unattended. No-op if it already is,
+    /// so the repeated zero-window dispatches a pool churn produces record
+    /// one period rather than a burst.
+    pub fn went_unattended(&self, at_ms: u64) {
+        if self.is_unattended() {
+            return;
+        }
+        self.append(AuditEntry { at_ms, kind: AuditKind::WentUnattended });
+    }
+
+    /// Record that a window opened. No-op unless the instance was unattended,
+    /// so ordinary window-opening during normal use records nothing.
+    pub fn observed(&self, at_ms: u64) {
+        if !self.is_unattended() {
+            return;
+        }
+        self.append(AuditEntry { at_ms, kind: AuditKind::Observed });
+    }
+
+    fn append(&self, entry: AuditEntry) {
+        let Some(path) = &self.path else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        self.rotate_if_oversized();
+        let line = format!(
+            "{{\"at_ms\":{},\"kind\":\"{}\"}}\n",
+            entry.at_ms,
+            entry.kind.as_str()
+        );
+        // Failures are logged, never propagated: the audit log must not be
+        // able to break the app it audits.
+        match std::fs::OpenOptions::new().create(true).append(true).open(path) {
+            Ok(mut f) => {
+                if let Err(e) = f.write_all(line.as_bytes()) {
+                    tracing::warn!(target: "wrr", error = %e, "[audit] append failed");
+                }
+            }
+            Err(e) => tracing::warn!(target: "wrr", error = %e, "[audit] open failed"),
+        }
+    }
+
+    /// Archive the live file once it grows past `MAX_LINES`. The rotated
+    /// `.1` keeps the old records (immutability) while bounding the file the
+    /// hot path reads.
+    fn rotate_if_oversized(&self) {
+        let Some(path) = &self.path else { return };
+        let Ok(text) = std::fs::read_to_string(path) else { return };
+        if text.lines().count() < MAX_LINES {
+            return;
+        }
+        let archive = path.with_extension("jsonl.1");
+        if std::fs::rename(path, &archive).is_ok() {
+            // Line indices restart, so the watermark must too. Surfacing may
+            // then re-show a period the user already saw — over-reporting,
+            // never under-reporting, which is the safe direction for an
+            // accountability feature.
+            if let Some(w) = self.watermark_path() {
+                let _ = std::fs::remove_file(w);
+            }
+            tracing::info!(target: "wrr", "[audit] rotated to {}", archive.display());
+        }
+    }
+
+    /// Entries the user has not been shown yet, advancing the watermark.
+    ///
+    /// Non-destructive: the log keeps everything. "Surfaced" is a position,
+    /// not a deletion — which is what makes this an audit log rather than a
+    /// queue.
+    pub fn take_unsurfaced(&self) -> Vec<AuditEntry> {
+        let all = self.entries();
+        let already = self.read_watermark();
+        if already >= all.len() {
+            return Vec::new();
+        }
+        let fresh = all[already..].to_vec();
+        self.write_watermark(all.len());
+        fresh
+    }
+
+    fn read_watermark(&self) -> usize {
+        self.watermark_path()
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0)
+    }
+
+    fn write_watermark(&self, n: usize) {
+        if let Some(p) = self.watermark_path() {
+            let _ = std::fs::write(p, n.to_string());
+        }
     }
 }
 
-/// Wall-clock milliseconds since the Unix epoch, or 0 if the clock is before
-/// the epoch (which would mean a badly misconfigured machine; a zero
-/// timestamp is a visible oddity rather than a panic).
+fn parse_line(line: &str) -> Option<AuditEntry> {
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    Some(AuditEntry {
+        at_ms: v.get("at_ms")?.as_u64()?,
+        kind: AuditKind::from_str(v.get("kind")?.as_str()?)?,
+    })
+}
+
+/// Wall-clock milliseconds since the Unix epoch, or 0 if the clock predates
+/// it (a badly misconfigured machine — a visibly odd timestamp beats a panic).
 pub fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -148,24 +282,19 @@ pub fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// IPC handler: take everything the background service recorded while
-/// unattended, as JSON for the frontend to display.
+/// IPC handler: hand the frontend everything recorded since it last looked.
 ///
-/// This is WS4's "surfaced next time a window/panel opens" half. The frontend
-/// calls it during init; an empty `entries` array means there is nothing to
-/// tell the user, which is the overwhelmingly common case (background-service
-/// mode off, or no unattended period since the last time it was shown).
-///
-/// Shape is stable and flat on purpose — `{ entries: [{ at_ms, kind }], … }` —
-/// so adding richer per-turn detail later (which needs a host→srv query, see
-/// the module docs) extends entries rather than reshaping the payload.
+/// This is WS4's "surfaced next time a window/panel opens" half. An empty
+/// `entries` array means there is nothing to tell the user, which is the
+/// common case.
 pub fn background_audit_take(
     state: &std::sync::Arc<crate::state::AppState>,
 ) -> Result<serde_json::Value, String> {
-    let (entries, unattended) = {
-        let mut audit = state.background_audit.lock();
-        (audit.take(), audit.is_unattended())
-    };
+    let audit = state.background_audit.lock();
+    let entries = audit.take_unsurfaced();
+    let unattended = audit.is_unattended();
+    drop(audit);
+
     if !entries.is_empty() {
         tracing::info!(
             target: "wrr",
@@ -178,10 +307,6 @@ pub fn background_audit_take(
             .iter()
             .map(|e| serde_json::json!({ "at_ms": e.at_ms, "kind": e.kind.as_str() }))
             .collect::<Vec<_>>(),
-        // True when the instance is STILL unattended as far as the audit log
-        // knows — i.e. this window's own `observed` transition has not landed
-        // yet. Lets the frontend distinguish "here is what you missed" from
-        // "you are looking at it now".
         "unattended": unattended,
     }))
 }
@@ -190,98 +315,129 @@ pub fn background_audit_take(
 mod background_audit_tests {
     use super::*;
 
+    fn temp_log() -> (tempfile::TempDir, BackgroundAudit) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let log = BackgroundAudit::at(dir.path().join("background-audit.jsonl"));
+        (dir, log)
+    }
+
     #[test]
     fn records_an_unattended_period_as_a_pair() {
-        let mut a = BackgroundAudit::default();
-        a.went_unattended(1_000);
-        a.observed(5_000);
-        let entries = a.take();
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].kind, AuditKind::WentUnattended);
-        assert_eq!(entries[0].at_ms, 1_000);
-        assert_eq!(entries[1].kind, AuditKind::Observed);
-        assert_eq!(entries[1].at_ms, 5_000);
+        let (_d, log) = temp_log();
+        log.went_unattended(1_000);
+        log.observed(5_000);
+        let e = log.entries();
+        assert_eq!(e.len(), 2);
+        assert_eq!(e[0], AuditEntry { at_ms: 1_000, kind: AuditKind::WentUnattended });
+        assert_eq!(e[1], AuditEntry { at_ms: 5_000, kind: AuditKind::Observed });
     }
 
     #[test]
     fn a_single_unattended_period_is_recorded_once() {
-        // The reducer can report a zero-window state more than once for one
-        // period (pool churn, repeated reconciles). The user should see one
+        // Pool churn re-reports a zero-window state; the user should see one
         // period, not a burst.
-        let mut a = BackgroundAudit::default();
-        a.went_unattended(1_000);
-        a.went_unattended(1_100);
-        a.went_unattended(1_200);
-        assert_eq!(a.len(), 1);
+        let (_d, log) = temp_log();
+        log.went_unattended(1_000);
+        log.went_unattended(1_100);
+        log.went_unattended(1_200);
+        assert_eq!(log.entries().len(), 1);
     }
 
     #[test]
     fn opening_a_window_during_normal_use_records_nothing() {
-        // `observed` fires on every window open; it must only mean something
-        // if the instance was actually unattended first.
-        let mut a = BackgroundAudit::default();
-        a.observed(1_000);
-        a.observed(2_000);
-        assert!(a.take().is_empty());
+        let (_d, log) = temp_log();
+        log.observed(1_000);
+        log.observed(2_000);
+        assert!(log.entries().is_empty());
     }
 
     #[test]
-    fn periods_alternate_correctly_across_several_cycles() {
-        let mut a = BackgroundAudit::default();
-        for i in 0..3u64 {
-            a.went_unattended(i * 100);
-            assert!(a.is_unattended());
-            a.observed(i * 100 + 50);
-            assert!(!a.is_unattended());
-        }
-        assert_eq!(a.take().len(), 6, "three complete periods");
-    }
-
-    #[test]
-    fn taking_clears_so_the_same_events_are_not_surfaced_twice() {
-        let mut a = BackgroundAudit::default();
-        a.went_unattended(1);
-        assert_eq!(a.take().len(), 1);
+    fn surfacing_is_non_destructive_and_advances_a_watermark() {
+        // The immutability requirement: reading must not erase.
+        let (_d, log) = temp_log();
+        log.went_unattended(1);
+        log.observed(2);
+        assert_eq!(log.take_unsurfaced().len(), 2);
         assert!(
-            a.take().is_empty(),
-            "a second window opening must not re-show what was already shown"
+            log.take_unsurfaced().is_empty(),
+            "a second window must not be re-shown what was already surfaced"
+        );
+        assert_eq!(
+            log.entries().len(),
+            2,
+            "entries must remain on disk — surfacing is a position, not a deletion"
         );
     }
 
     #[test]
-    fn take_does_not_end_the_unattended_period() {
-        // Surfacing is about the ENTRIES, not the state. A window opening
-        // calls `observed` separately; if `take` also cleared the flag, the
-        // matching `Observed` entry would never be recorded.
-        let mut a = BackgroundAudit::default();
-        a.went_unattended(1);
-        let _ = a.take();
-        assert!(a.is_unattended());
-        a.observed(2);
-        assert_eq!(a.take()[0].kind, AuditKind::Observed);
+    fn only_entries_added_since_the_last_surfacing_are_returned() {
+        let (_d, log) = temp_log();
+        log.went_unattended(1);
+        log.observed(2);
+        let _ = log.take_unsurfaced();
+        log.went_unattended(3);
+        let fresh = log.take_unsurfaced();
+        assert_eq!(fresh.len(), 1);
+        assert_eq!(fresh[0].at_ms, 3);
+    }
+
+    /// The restart case Codex flagged: the launcher restarts a crashed host
+    /// while the background service stays alive. A fresh `BackgroundAudit`
+    /// over the same path must still know it is mid-unattended-period, or
+    /// the eventual `Observed` is dropped and the user never learns the
+    /// period ended.
+    #[test]
+    fn unattended_state_survives_a_host_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("background-audit.jsonl");
+
+        let before = BackgroundAudit::at(path.clone());
+        before.went_unattended(1_000);
+        assert!(before.is_unattended());
+        drop(before); // host crashes
+
+        let after = BackgroundAudit::at(path.clone());
+        assert!(after.is_unattended(), "state must be derived from the log, not memory");
+        after.observed(9_000);
+        let e = after.entries();
+        assert_eq!(e.len(), 2);
+        assert_eq!(e[1].kind, AuditKind::Observed);
     }
 
     #[test]
-    fn the_log_is_bounded_and_drops_oldest_first() {
-        let mut a = BackgroundAudit::default();
-        // Two entries per cycle, so this overshoots MAX_ENTRIES.
-        for i in 0..(MAX_ENTRIES as u64) {
-            a.went_unattended(i * 10);
-            a.observed(i * 10 + 1);
-        }
-        assert_eq!(a.len(), MAX_ENTRIES, "a long-lived instance must not grow this forever");
-        let entries = a.take();
-        assert!(
-            entries[0].at_ms > 0,
-            "the earliest entries should have been dropped, not the latest"
-        );
+    fn a_torn_final_line_does_not_make_the_log_unreadable() {
+        // A crash mid-append can leave a partial line. Skipping it must not
+        // cost the entries written before it.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("background-audit.jsonl");
+        std::fs::write(
+            &path,
+            "{\"at_ms\":1,\"kind\":\"went_unattended\"}\n{\"at_ms\":2,\"ki",
+        )
+        .unwrap();
+        let log = BackgroundAudit::at(path);
+        assert_eq!(log.entries().len(), 1);
+        assert!(log.is_unattended());
+    }
+
+    #[test]
+    fn a_missing_data_dir_degrades_to_a_no_op_rather_than_failing() {
+        // An audit log that cannot be written must never take down the app
+        // it audits.
+        let log = BackgroundAudit::default();
+        log.went_unattended(1);
+        assert!(log.entries().is_empty());
+        assert!(!log.is_unattended());
+        assert!(log.take_unsurfaced().is_empty());
     }
 
     #[test]
     fn wire_identifiers_are_stable() {
-        // The frontend matches on these strings; a variant rename must not
-        // silently change them.
+        // These strings are both the on-disk format and what the frontend
+        // matches on — a variant rename must not change them.
         assert_eq!(AuditKind::WentUnattended.as_str(), "went_unattended");
         assert_eq!(AuditKind::Observed.as_str(), "observed");
+        assert_eq!(AuditKind::from_str("observed"), Some(AuditKind::Observed));
+        assert_eq!(AuditKind::from_str("nonsense"), None);
     }
 }
