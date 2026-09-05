@@ -53,6 +53,17 @@ function cleanLabel(label: string): string {
     return label.replace(/^claude\s+/i, "").trim();
 }
 
+/** Whether a curated `value` is a family ALIAS rather than a concrete model id.
+ *
+ *  An alias carries no version digits ("opus", "sonnet", "haiku") and is
+ *  resolved by the CLI at call time, so it must keep its curated value — that
+ *  self-resolution is the entire point. A concrete id ("claude-fable-5-1") does
+ *  NOT self-resolve, so its value has to be refreshed alongside its label or the
+ *  row ends up advertising a model it doesn't actually select. */
+function isAliasValue(value: string): boolean {
+    return !/\d/.test(value);
+}
+
 /**
  * Fold the authoritative catalog into a provider's model list. Behavior-
  * preserving by design:
@@ -83,13 +94,20 @@ export function setProviderModels(id: string, apiModels: ProviderModel[]): void 
 
     const consumed = new Set<string>();
 
-    // 1. Refresh curated family labels from the newest API model in that family.
+    // 1. Refresh curated family entries from the newest API model in that family.
     const curated = base.models.map((m) => {
         const family = familyKey(m.value);
         const matches = apiModels.filter((a) => familyKey(a.value) === family);
         if (matches.length === 0) return m;
         matches.forEach((a) => consumed.add(a.value)); // don't re-surface as an "extra"
-        return { ...m, label: cleanLabel(pickNewest(matches).label) };
+        const newest = pickNewest(matches);
+        const label = cleanLabel(newest.label);
+        // Alias rows keep their curated value (the CLI resolves it); concrete
+        // version-pinned rows must have their value refreshed too. Refreshing
+        // only the label there produced a row that displayed "Fable 5.1" while
+        // still passing `claude-fable-5` to `--model` — advertising one model
+        // and selecting an older one.
+        return isAliasValue(m.value) ? { ...m, label } : { ...m, value: newest.value, label };
     });
 
     // 2. Surface families the curated list misses (grouped, newest per family).
