@@ -1,6 +1,9 @@
 # Retro: `task dev` killed 4× — Bash-tool SIGINT + mid-build worktree mutation
 
 **Date:** 2026-09-05
+**Status:** Implemented — root-caused, verified live (`task dev` launched
+successfully via `mcp__agentmux__Shell`), and the CLAUDE.md guidance hardened
+in the same PR. No code change was needed: the build system was never broken.
 **Severity:** Low (build system was never broken) / Medium as a time sink — ~50 minutes of agent time burned, and the agent wrongly told the user the build system was at fault
 **Observed by:** Agent2 (Claude agent) during the cross-pane-input-delay session (PRs #2973, #2976)
 **Related retros:**
