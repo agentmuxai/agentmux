@@ -568,12 +568,12 @@ export function NativeMemoryManager(): JSX.Element {
                         >
                             <div class="native-memory-manager-body">
                                 {/* Keyed on agentId:filename:refreshNonce. The first two force
-                                    a clean remount when switching agent/file \u2014
+                                    a clean remount when switching agent/file —
                                     NativeMemoryHistoryPanel's own doc comment: it does not
                                     react to prop changes after mount by design. refreshNonce
                                     additionally forces a remount when a reactive
                                     agent:memory:changed refresh lands for the SAME file
-                                    (Codex P1, PR #2932) \u2014 without it, a live write to the
+                                    (Codex P1, PR #2932) — without it, a live write to the
                                     file you're already looking at never showed up, since
                                     neither agentId nor filename actually changed. */}
                                 <Show when={`${agent().id}:${selectedFilename()}:${refreshNonce()}`} keyed>
