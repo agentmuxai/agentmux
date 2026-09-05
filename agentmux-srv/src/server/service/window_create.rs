@@ -149,9 +149,9 @@ pub(crate) async fn handle_create_window(state: &AppState, call: &WebCallType) -
                     ));
                 }
             }
-            // Seed the default 4-pane launch layout (agent + swarm +
-            // armory + sysinfo) into the fresh tab so "Open another
-            // window" matches first launch instead of opening blank. Only this
+            // Seed the default 3-pane launch layout (agent | sysinfo /
+            // swarm) into the fresh tab so "Open another window" matches
+            // first launch instead of opening blank. Only this
             // fresh-workspace branch seeds; tear-off (existing workspace,
             // the `else` arm) reattaches its populated workspace as-is.
             // Non-fatal: a seed failure leaves an empty tab (the prior

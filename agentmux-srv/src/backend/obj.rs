@@ -650,8 +650,8 @@ mod tests {
     /// the frontend produces today MUST yield the typed LayoutNode, and
     /// reserializing MUST produce equivalent JSON. The shapes here cover:
     ///   1. Single-leaf root (dnd / tear-off shape)
-    ///   2. The first-launch four-pane shape (deep nesting + mixed
-    ///      group/leaf nodes)
+    ///   2. A multi-pane shape (deep nesting + mixed group/leaf nodes) —
+    ///      the former first-launch four-pane layout, see below
     ///   3. Edge: missing `children` array for leaves
     #[test]
     fn test_layout_node_serde_compat_with_frontend_shapes() {
