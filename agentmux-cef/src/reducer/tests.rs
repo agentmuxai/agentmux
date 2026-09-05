@@ -1253,6 +1253,87 @@ fn reconcile_quit_drains_despite_pending_pool_refill() {
     assert_eq!(reconcile_quit(&state), Some(QuitReason::LastWindowClosed));
 }
 
+/// `live_user_window_labels` must classify by the same rule as
+/// `count_live_user_windows` — the explicit-quit path (`quit_app`) closes
+/// exactly what it returns, so a pool window or pane leaking into the list
+/// would have the tray's Quit closing background inventory as if it were the
+/// user's windows.
+/// ReAgent P1 on PR #2996: the creation-path guards narrow the
+/// quit-vs-create race but cannot close it — a creation already in flight
+/// when the drain begins still reaches registration. Registration is the
+/// LAST step, so flagging it here is the only unraceable point.
+#[test]
+fn a_user_window_arriving_mid_drain_is_closed_on_arrival() {
+    use super::quit::should_close_on_arrival;
+    let user = BrowserKind::TopLevel { is_pool: false };
+    for reason in [QuitReason::LauncherRequested, QuitReason::LastWindowClosed] {
+        assert!(
+            should_close_on_arrival(&user, &QuitState::Draining { reason: reason.clone() }),
+            "a user window registering mid-drain must be closed on arrival"
+        );
+    }
+    assert!(should_close_on_arrival(&user, &QuitState::Quit));
+}
+
+/// The normal case must stay untouched: registering while Running never
+/// flags, or every window the app opens would immediately close itself.
+#[test]
+fn registering_while_running_is_never_closed_on_arrival() {
+    use super::quit::should_close_on_arrival;
+    assert!(!should_close_on_arrival(
+        &BrowserKind::TopLevel { is_pool: false },
+        &QuitState::Running
+    ));
+}
+
+/// Pool browsers legitimately register during a drain — the drain cascade
+/// closes them itself — so closing them here would fight that machinery.
+/// Panes and floaters are not top-level windows the quit owns either.
+#[test]
+fn background_browsers_arriving_mid_drain_are_left_alone() {
+    use super::quit::should_close_on_arrival;
+    let draining = QuitState::Draining { reason: QuitReason::LauncherRequested };
+    for kind in [
+        BrowserKind::TopLevel { is_pool: true },
+        BrowserKind::Floater { is_pool: false },
+        BrowserKind::Pane { block_id: "b1".into() },
+    ] {
+        assert!(
+            !should_close_on_arrival(&kind, &draining),
+            "{:?} is background inventory, not a user window the quit owns",
+            kind
+        );
+    }
+}
+
+#[test]
+fn live_user_window_labels_matches_the_live_count_classification() {
+    let entries: Vec<(String, BrowserKind)> = vec![
+        ("main".into(), BrowserKind::TopLevel { is_pool: false }),
+        ("window-abc".into(), BrowserKind::TopLevel { is_pool: false }),
+        // A promoted pool window keeps its `window-pool-` label forever but
+        // has is_pool: false — it IS a real user window and must be closed
+        // by an explicit quit (classification is by type, never by label).
+        ("window-pool-promoted".into(), BrowserKind::TopLevel { is_pool: false }),
+        ("window-pool-1".into(), BrowserKind::TopLevel { is_pool: true }),
+        ("floating-xyz".into(), BrowserKind::Floater { is_pool: false }),
+        ("browser-pane-b1-1".into(), BrowserKind::Pane { block_id: "b1".into() }),
+    ];
+    let mut labels = super::quit::live_user_window_labels_from(
+        entries.iter().map(|(l, k)| (l, k)),
+    );
+    labels.sort();
+    assert_eq!(
+        labels,
+        vec![
+            "main".to_string(),
+            "window-abc".to_string(),
+            "window-pool-promoted".to_string(),
+        ],
+        "only real user top-levels; unpromoted pool windows, floaters and panes excluded"
+    );
+}
+
 /// Workstream 0 Phase 1: with background-service mode on, closing the last
 /// window (armed, zero live windows, nothing pending) must NOT drain —
 /// `host` stays alive with zero windows instead of tearing itself (and, via
