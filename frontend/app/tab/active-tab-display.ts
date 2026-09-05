@@ -87,3 +87,49 @@ export function resolveDisplayActiveTabId(input: ActiveTabDisplayInput): string 
     }
     return realActiveTabId;
 }
+
+/**
+ * Drive the backend toward the user's LATEST selection intent.
+ *
+ * A single `setActiveTab` call per click is not sufficient once the strip
+ * shows an optimistic selection, because two guards conspire to drop the
+ * newer of two rapid clicks (Codex P2 on PR #2993):
+ *
+ *   1. `handleSelect`'s own guard — fixed separately by comparing against the
+ *      DISPLAYED tab rather than the committed one, so clicking back to the
+ *      committed tab during a pending switch is no longer a no-op.
+ *   2. `setActiveTab`'s guard (`store/tab-actions.ts`: `if (fromTabId ===
+ *      tabId) return`). With committed still A and a switch to B in flight,
+ *      re-issuing for A returns immediately WITHOUT an RPC — so B's in-flight
+ *      call would still land and win, leaving the content on the tab the user
+ *      had already clicked away from.
+ *
+ * So the switch is a loop, not a call: after each `setActive` resolves,
+ * re-read the intent. If a newer click arrived meanwhile, the committed id
+ * has by then moved off it, so the next `setActive` is a real RPC rather than
+ * an early return, and the loop converges on the last tab the user clicked.
+ *
+ * Terminates: each iteration either returns (intent reached, or unchanged
+ * across a completed `setActive`) or observes a NEW intent, which only a
+ * fresh user click can produce.
+ */
+export interface TabSelectionDeps {
+    /** The newest tab the user clicked; null once nothing is pending. */
+    latestIntent: () => string | null;
+    /** The workspace's committed `activetabid`, re-read each iteration. */
+    committed: () => string;
+    /** `setActiveTab` — resolves once the workspace update has been applied. */
+    setActive: (tabId: string) => Promise<void>;
+}
+
+export async function driveTabSelection(deps: TabSelectionDeps): Promise<void> {
+    for (;;) {
+        const target = deps.latestIntent();
+        if (target == null || target === deps.committed()) return;
+        await deps.setActive(target);
+        // Unchanged intent across a completed switch means we are done. A
+        // CHANGED one is a click that landed mid-flight — loop again to honour
+        // it, now that `committed` has moved and setActiveTab won't no-op.
+        if (deps.latestIntent() === target) return;
+    }
+}

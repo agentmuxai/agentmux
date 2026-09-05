@@ -14,7 +14,7 @@ import { fireAndForget } from "@/util/util";
 import type { JSX } from "solid-js";
 import { createSignal, For, onCleanup, onMount, Show } from "solid-js";
 import { WorkspaceService } from "../store/services";
-import { resolveDisplayActiveTabId } from "./active-tab-display";
+import { driveTabSelection, resolveDisplayActiveTabId } from "./active-tab-display";
 import { DroppableTab } from "./droppable-tab";
 import { TabCloseConfirmModal } from "./tab-close-confirm-modal";
 import { registerTabCloseRequestHandler } from "./tab-close-request";
@@ -99,25 +99,40 @@ function TabBar(props: TabBarProps): JSX.Element {
             pendingSelectedTabId: pendingSelectedTabId(),
         });
 
+    // Whether a switch loop is already draining `pendingSelectedTabId`. Not a
+    // signal — nothing renders off it; it only stops a second click from
+    // starting a competing loop, since the running one re-reads the intent
+    // and will pick the newer target up itself.
+    let switchLoopRunning = false;
+
     const handleSelect = (tabId: string) => {
-        if (tabId === activeTabId()) return;
+        // Guard on the DISPLAYED tab, not the committed one. With an
+        // optimistic selection in flight the two differ, and comparing
+        // against `activeTabId()` made a click back to the committed tab a
+        // silent no-op — the in-flight switch then won over the user's newer
+        // click (Codex P2 on PR #2993).
+        if (tabId === displayActiveTabId()) return;
         // Commit the highlight BEFORE issuing the RPC so the pill paints on
         // its own cheap schedule rather than behind the destination's reveal.
         setPendingSelectedTabId(tabId);
+        if (switchLoopRunning) return;
+        switchLoopRunning = true;
         fireAndForget(async () => {
             try {
-                await setActiveTab(tabId);
+                await driveTabSelection({
+                    latestIntent: pendingSelectedTabId,
+                    committed: activeTabId,
+                    setActive: setActiveTab,
+                });
             } finally {
-                // Clear only if this call's own target is still the pending
-                // one — a newer click during the RPC owns the value now, and
-                // clearing it here would drop the strip back to the stale
-                // committed id until that newer RPC lands. Same
-                // stale-generation discipline as tab-reveal.ts's gates.
-                //
-                // Runs on the throw path too: a select that failed must not
-                // leave a phantom highlight on a tab the backend never
-                // activated (mirrors handleClose's own unhideTab in finally).
-                setPendingSelectedTabId((cur) => (cur === tabId ? null : cur));
+                // The loop only returns once the committed id has caught up
+                // with the latest intent, so dropping the override here hands
+                // the strip back to backend state with nothing visibly
+                // changing. On the throw path it un-sticks a phantom
+                // highlight for a tab the backend never activated (mirrors
+                // handleClose's own unhideTab in finally).
+                switchLoopRunning = false;
+                setPendingSelectedTabId(null);
             }
         });
     };

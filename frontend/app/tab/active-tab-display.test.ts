@@ -13,7 +13,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { resolveDisplayActiveTabId } from "./active-tab-display";
+import { driveTabSelection, resolveDisplayActiveTabId } from "./active-tab-display";
 
 const resolve = (i: Partial<Parameters<typeof resolveDisplayActiveTabId>[0]>) =>
     resolveDisplayActiveTabId({
@@ -97,5 +97,99 @@ describe("resolveDisplayActiveTabId", () => {
                 }),
             ).toBe("a");
         });
+    });
+});
+
+describe("driveTabSelection (Codex P2 on PR #2993)", () => {
+    /**
+     * Fake of the real pair: a committed id that only moves when setActive
+     * actually issues, and setActiveTab's OWN early-return guard, which is
+     * what makes the naive one-call-per-click version lose the second click.
+     */
+    function harness(initialCommitted: string) {
+        let committed = initialCommitted;
+        let intent: string | null = null;
+        const issued: string[] = [];
+        let resolveGate: (() => void) | null = null;
+
+        const setActive = async (tabId: string): Promise<void> => {
+            // Mirrors store/tab-actions.ts: `if (fromTabId === tabId) return;`
+            if (committed === tabId) return;
+            issued.push(tabId);
+            if (resolveGate) {
+                await new Promise<void>((r) => {
+                    const prev = resolveGate!;
+                    resolveGate = () => {
+                        prev();
+                        r();
+                    };
+                });
+            }
+            committed = tabId;
+        };
+
+        return {
+            issued,
+            committed: () => committed,
+            latestIntent: () => intent,
+            click: (id: string) => (intent = id),
+            deps: () => ({ latestIntent: () => intent, committed: () => committed, setActive }),
+        };
+    }
+
+    it("a plain switch issues exactly one RPC and lands on the target", async () => {
+        const h = harness("a");
+        h.click("b");
+        await driveTabSelection(h.deps());
+        expect(h.issued).toEqual(["b"]);
+        expect(h.committed()).toBe("b");
+    });
+
+    it("honours a click BACK to the committed tab made mid-flight", async () => {
+        // THE Codex case. Committed is "a"; user clicks "b", then clicks "a"
+        // again before b's RPC resolves. The naive version fires setActive(b),
+        // and the second click is lost twice over: handleSelect's guard saw
+        // committed === "a", and setActiveTab's own guard would have no-op'd
+        // an "a" re-issue anyway. Content ended on "b" against the user's
+        // last click.
+        const h = harness("a");
+        h.click("b");
+        const running = driveTabSelection(h.deps());
+        h.click("a"); // lands while setActive("b") is still in flight
+        await running;
+        expect(h.committed()).toBe("a");
+        expect(h.issued).toEqual(["b", "a"]);
+    });
+
+    it("converges on the LAST of several mid-flight clicks", async () => {
+        const h = harness("a");
+        h.click("b");
+        const running = driveTabSelection(h.deps());
+        h.click("c");
+        await running;
+        expect(h.committed()).toBe("c");
+    });
+
+    it("does nothing when the intent already matches the committed tab", async () => {
+        const h = harness("a");
+        h.click("a");
+        await driveTabSelection(h.deps());
+        expect(h.issued).toEqual([]);
+    });
+
+    it("does nothing when there is no pending intent", async () => {
+        const h = harness("a");
+        await driveTabSelection(h.deps());
+        expect(h.issued).toEqual([]);
+    });
+
+    it("propagates a failing switch rather than looping on it", async () => {
+        let intent: string | null = "b";
+        const deps = {
+            latestIntent: () => intent,
+            committed: () => "a",
+            setActive: () => Promise.reject(new Error("rpc failed")),
+        };
+        await expect(driveTabSelection(deps)).rejects.toThrow("rpc failed");
     });
 });

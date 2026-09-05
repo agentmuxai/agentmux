@@ -218,3 +218,32 @@ mechanism is verified by construction (the pill no longer reads a value that req
 RPC, so it cannot be gated on it) and the cost it sidesteps is the 500-600ms browser-side
 layout+paint `SPEC_AGENT_PANE_TAB_SWITCH_PERF_2026_05_27.md` §"Phase 1 (revised)" already
 measured — but a before/after profile on a large tab has not been run.
+
+## 10. Follow-up: honouring the latest click (Codex P2 on PR #2993)
+
+The first cut shipped one `setActiveTab` per click and guarded on the committed
+id. Review caught that this loses the newer of two rapid clicks, via **two**
+guards, not one:
+
+1. `handleSelect`'s own `if (tabId === activeTabId()) return`. Once the strip can
+   display an optimistic selection, displayed and committed diverge — so with
+   committed `A` and a pending switch to `B`, clicking `A` again hit this guard
+   and did nothing. Fixed by comparing against `displayActiveTabId()`.
+2. `setActiveTab`'s own `if (fromTabId === tabId) return` (`tab-actions.ts`).
+   Fixing (1) alone is **not** sufficient: re-issuing for `A` while committed is
+   still `A` returns without an RPC, so the in-flight `B` call would still land
+   and win. The user's last click loses either way.
+
+So a switch is now a loop (`driveTabSelection`), not a call: after each
+`setActive` resolves, re-read the intent, and if a newer click arrived, go
+again — by then committed has moved off it, so the next call is a real RPC
+rather than an early return. It terminates because each iteration either
+returns or observes a new intent, which only a fresh user click produces.
+
+`switchLoopRunning` (a plain `let`, not a signal — nothing renders off it) stops
+a second click starting a competing loop; the running one picks up the newer
+target itself.
+
+Tests: 6 more, mutation-checked against a naive single-call implementation —
+exactly the two mid-flight-click cases fail there, including Codex's reported
+scenario verbatim, while the other 14 pass.
