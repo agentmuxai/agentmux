@@ -1,5 +1,22 @@
 # AgentMux Version History
 
+## 0.55.35 — 2026-09-04
+
+- fix(toolchain): persist system-tool install success across stale-PATH refresh, show live version and collapsible install details
+- feat(launcher): show a reassurance message in the splash screen when host startup runs long (first-run Defender scan, issue #2940)
+- fix(startup): port the Linux paint gate to Windows so the window never shows blank, and report the gap in splash telemetry
+- fix(term): round-robin priority-lane egress across panes to stop cross-pane input delay
+- fix(agent-pane): stop showing 'Queued' copy after a turn ends; log the attached-task axis for diagnosis
+- feat(agent): auto-unblock on external auth bind, one-click Bind account
+- fix(agent): show the hover-to-peek time/token panel on expanded tool calls too
+- fix(agent-pane): skip the blank gap between Thinking… and tool output
+- fix(agent): revert the tab strip's + button to a bare glyph, keep the tooltip
+- feat(swarm): larger select checkboxes, select-all, hide Stop during broadcast, fix groups dropdown overflow
+- docs: propose an optional cross-platform tray + persistent background service
+- fix(swarm): re-resolve and re-point subagent-watcher config dir after identity rebind
+- docs: propose a formal shutdown countdown modal + splash-style progress narration
+
+
 ## 0.55.34 — 2026-09-03
 
 - fix(agent-pane): tool-preview code previews waste half their width on indentation
