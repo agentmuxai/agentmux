@@ -675,6 +675,15 @@ pub struct AppState {
     /// `host_dispatch` from the reducer's attended/unattended transition;
     /// drained by the `background_audit_take` IPC command.
     pub background_audit: Mutex<crate::background_audit::BackgroundAudit>,
+
+    /// Sender into the audit writer thread, held OUTSIDE `background_audit`'s
+    /// mutex on purpose. `host_dispatch` enqueues while holding `host_state`;
+    /// if that required the audit mutex, a concurrent `background_audit_take`
+    /// (which holds it across disk I/O) would stall the UI thread through lock
+    /// contention — the same hazard as doing the I/O inline. A `OnceLock` read
+    /// plus an unbounded `send` is allocation-free and never blocks.
+    pub background_audit_tx:
+        std::sync::OnceLock<std::sync::mpsc::Sender<crate::background_audit::AuditEntry>>,
 }
 
 impl Default for AppState {
@@ -763,6 +772,7 @@ impl Default for AppState {
             ui_thread_gate: Mutex::new(UiThreadGate::default()),
             pending_reproject_closures: Mutex::new(PendingReprojectClosures::default()),
             background_audit: Mutex::new(crate::background_audit::BackgroundAudit::default()),
+            background_audit_tx: std::sync::OnceLock::new(),
             promote_liveness: Mutex::new(PromoteLivenessWatches::default()),
         }
     }
@@ -795,16 +805,29 @@ impl AppState {
             // silently drop an `Observed` and leave the log stuck claiming an
             // unattended period that had already ended.
             //
-            // `record` does NO I/O — it flips an in-memory flag and hands
-            // the entry to a writer thread — so `host_dispatch`'s documented
-            // "no I/O, sub-microsecond" contract still holds. That matters
-            // because this runs straight from CEF UI-thread callbacks
+            // No I/O and NO LOCK ACQUISITION here, so `host_dispatch`'s
+            // documented "no I/O, sub-microsecond" contract still holds. Both
+            // halves matter: this runs straight from CEF UI-thread callbacks
             // (`wrr::win_event` dispatches `UnregisterBrowser` there, which is
-            // exactly this transition), where a disk stall would block the UI
-            // thread and every other concurrent dispatcher.
+            // exactly this transition), and an earlier version that merely
+            // avoided I/O still stalled the UI thread by blocking on the audit
+            // mutex behind a concurrent `background_audit_take`'s disk read.
             if let Some(went_unattended) = out.background_attention {
-                let now = crate::background_audit::now_ms();
-                self.background_audit.lock().record(went_unattended, now);
+                if let Some(tx) = self.background_audit_tx.get() {
+                    // Lock-free and non-blocking: a `OnceLock` read and an
+                    // unbounded `send`. The transition was already decided AND
+                    // applied to `HostState` by the reducer above, under this
+                    // same lock, so enqueueing here preserves decision order in
+                    // the file without taking any further lock.
+                    let _ = tx.send(crate::background_audit::AuditEntry {
+                        at_ms: crate::background_audit::now_ms(),
+                        kind: if went_unattended {
+                            crate::background_audit::AuditKind::WentUnattended
+                        } else {
+                            crate::background_audit::AuditKind::Observed
+                        },
+                    });
+                }
             }
             out
         };

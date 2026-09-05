@@ -157,23 +157,30 @@ pub(crate) fn count_live_user_windows(state: &HostState) -> usize {
 /// `Some(true)` = just went unattended, `Some(false)` = just became observed,
 /// `None` = no transition.
 ///
+/// Compared against the CURRENT state (`HostState::background_unattended`)
+/// rather than a before/after window count. That makes it level-triggered and
+/// idempotent — the same reasoning `reconcile_quit` is built on — and, more
+/// importantly, it lets the decision AND the state update happen together
+/// under `host_state`, which is what guarantees two concurrent dispatches
+/// cannot apply out of order.
+///
 /// Only meaningful in background-service mode: without it, reaching zero user
 /// windows means the app is exiting, not resting, so there is no unattended
 /// period to report. Pure and separate from its caller for the usual reason —
 /// it is a decision, and decisions in this module are unit-tested.
 pub(crate) fn background_attention_transition(
     background_service_enabled: bool,
-    live_before: usize,
+    currently_unattended: bool,
     live_after: usize,
 ) -> Option<bool> {
     if !background_service_enabled {
         return None;
     }
-    match (live_before, live_after) {
-        (b, 0) if b > 0 => Some(true),
-        (0, a) if a > 0 => Some(false),
-        _ => None,
+    let now_unattended = live_after == 0;
+    if now_unattended == currently_unattended {
+        return None; // no crossing
     }
+    Some(now_unattended)
 }
 
 pub(super) fn user_creation_in_flight(state: &HostState) -> bool {
