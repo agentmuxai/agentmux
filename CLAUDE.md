@@ -51,6 +51,24 @@ On Windows, `task dev` builds a production-parallel layout in `dist/cef-dev/` (l
 
 #### Launching `task dev` from an agent / MCP Shell (Windows)
 
+**Use `mcp__agentmux__Shell`. The Bash tool CANNOT launch `task dev`** — not
+with `&`, not with `run_in_background`, not with `nohup`/`disown`. A Bash-tool
+background job belongs to that tool call's process group, and the group is
+terminated when the call returns (seconds), while `task dev` needs minutes.
+`mcp__agentmux__Shell` runs server-side via `ShellNodeRunner` with an
+independent lifetime, which is the whole reason it exists.
+
+This fails **intermittently**, which is the trap: an orphaned child sometimes
+survives long enough to come up, so one success does not mean the method
+works. See the `^C` + `exit status 58` signature under "Diagnosing failed
+shells" below and
+`docs/retro/retro-task-dev-bash-tool-sigint-and-worktree-mutation-2026-09-05.md`.
+
+**Also: never `git checkout` / `git merge` / `gh pr merge` while a build is
+running against the same worktree.** Merging swaps tracked files out from under
+a live `cargo build` / `npm install` and corrupts it (same retro). Stop the
+build first, or use a separate `git worktree`.
+
 `task dev` requires `bash.exe` to be on the Windows PATH (go-task's Taskfile calls `bash -c '...'` for build steps via cmd.exe). The registry PATH has `Git\cmd` (shims) but not `Git\bin` (bash.exe). Two additional traps exist when launching from an agent's MCP Shell:
 
 - **Gap A:** MSYS2 bash won't resolve `.cmd` files from bare command names — `bash -c "task dev"` exits with "command not found".
@@ -85,7 +103,17 @@ diagnoses:
 grep "shell\." ~/.agentmux/logs/agentmuxsrv-*.log.$(date +%Y-%m-%d)
 # line_count:2  + exit:1   + <100ms  → Gap A (bash cmd not found in MSYS2)
 # line_count:53 + exit:200 + <500ms  → AMBIGUOUS, see below
+# ^C in log   + exit:58  + MINUTES  → build was SIGNALLED, not broken (see below)
 ```
+
+**`^C` in the log + `exit status 58`, minutes in** — the build started fine and
+was **killed**, not rejected. Distinguishing feature: a bare `error: could not
+compile` with **no `error[EXXXX]:` diagnostic above it**. A real compile error
+always names a file and line; a signalled one doesn't. Near-always means the
+build was launched from the Bash tool (see the top of this section) or the
+worktree was mutated mid-build by a merge/checkout. To confirm the build itself
+is healthy, run `cargo build --release -p agentmux-srv` directly — it either
+reproduces a real diagnostic or exits 0 and proves the failure was external.
 
 `line_count:53 + exit:200` was previously documented as meaning Gap B
 (`bash.exe` not in cmd.exe PATH). It has (at least) **two** causes: an invalid
