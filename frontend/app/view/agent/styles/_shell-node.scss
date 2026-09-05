@@ -90,13 +90,21 @@
 }
 
 .agent-shell-title {
-    flex: 0 0 auto;
+    // flex: 0 1 auto + min-width: 0 (was flex: 0 0 auto + max-width: 40%,
+    // a fixed ceiling regardless of what siblings actually needed — left
+    // visible dead space whenever .agent-shell-live-tail's content was
+    // short/absent). .agent-shell-live-tail's flex-basis is 0, so it
+    // contributes nothing to the flexbox shrink-distribution weighting;
+    // this title only shrinks (engaging the ellipsis below) once space is
+    // truly exhausted, otherwise it renders at its natural content width.
+    // See SPEC_ACTIVITY_DOCK_TITLE_WIDTH_AND_TAIL_GLYPH_2026_09_05.md §2.1.
+    flex: 0 1 auto;
+    min-width: 0;
     font-size: 12px;
     font-weight: 500;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 40%;
 }
 
 .agent-shell-elapsed {
@@ -250,14 +258,16 @@
 }
 
 .agent-activity-title {
-    flex: 0 0 auto;
+    // See .agent-shell-title's identical comment above — same fix, same
+    // reasoning. SPEC_ACTIVITY_DOCK_TITLE_WIDTH_AND_TAIL_GLYPH_2026_09_05.md §2.
+    flex: 0 1 auto;
+    min-width: 0;
     font-size: 12px;
     font-weight: 600;
     color: var(--main-text-color);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 40%;
 }
 
 .agent-activity-elapsed {
