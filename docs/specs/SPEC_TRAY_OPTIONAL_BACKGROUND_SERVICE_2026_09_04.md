@@ -70,9 +70,63 @@ Synthesized from OWASP's Agentic Security Initiative guidance plus three caution
 ## 7. Phased rollout (recommended sequencing)
 
 1. **Prerequisite, ship first, independent of tray work**: fix the `promote_pool_window` liveness gap (§5.1) and decouple `host`'s clean-exit path from srv/launcher teardown (§1) — both are required underpinnings, neither requires a tray icon to exist yet, and both are independently testable today.
-2. **Throwaway prototype, not a shipped feature**: verify `tray-icon`+`muda` actually coexists with `agentmux-launcher`'s own event loop on Windows and macOS specifically — NOT `host`'s CEF loop, since §2 places tray ownership in `launcher` precisely so the icon persists across `host` crashes/restarts. (Codex P2 on this PR's own review caught this document's Phase-2 wording pointing at the wrong process — the coexistence risk that actually matters is with whatever message pump `launcher` already runs for its splash window, not CEF's.) This is the one genuinely unverified architectural assumption in this whole design; don't commit further engineering to the approach before confirming it.
+2. **Throwaway prototype, not a shipped feature**: verify `tray-icon`+`muda` actually coexists with `agentmux-launcher`'s own event loop on Windows and macOS specifically — NOT `host`'s CEF loop, since §2 places tray ownership in `launcher` precisely so the icon persists across `host` crashes/restarts. (Codex P2 on this PR's own review caught this document's Phase-2 wording pointing at the wrong process — the coexistence risk that actually matters is with `launcher`, not CEF.) **Superseded in part by §7.5 (2026-09-05):** the architectural half is now answered from code, and this sentence's original premise — that `launcher` already runs a message pump for its splash — is **false on Windows**. Read §7.5 before starting this item; what remains genuinely unverified is only whether the icon renders and responds to clicks, which needs a human with a screen.
 3. **Windows first** (most mature crate support, code-signing pipeline most likely already needed regardless), then macOS (notarization prerequisite, `SMAppService` consent UX), then Linux (`ksni`, with the GNOME-extension caveat documented up front).
 4. **Auto-start registration itself ships last, opt-in, and off by default even after the tray icon exists** — a user can have "close-to-tray keeps it running for this session" without "starts automatically at every login" being bundled into the same toggle; keep those two decisions separate in the UI.
+
+## 7.5. Event-loop findings (2026-09-05) — the §7.2 assumption, answered at the code level
+
+§7.2 called the tray/launcher event-loop coexistence "the one genuinely
+unverified architectural assumption in this whole design." The **architectural**
+half of that question is now answered by reading `agentmux-launcher`, ahead of
+the visual prototype. The answer differs sharply per platform, and the
+premise §7.2 was written on is **false on Windows**:
+
+> "the coexistence risk that actually matters is with whatever message pump
+> `launcher` already runs for its splash window"
+
+**There is no such pump on Windows.** Verified: zero occurrences of
+`GetMessage`/`PeekMessage`/`DispatchMessage`/`TranslateMessage` anywhere in
+`agentmux-launcher/src/`. The Windows splash (`splash.rs::run_splash`) creates
+a real `CreateWindowExW` window but registers `DefWindowProcW` as its window
+proc and then runs a **polling loop** (`try_recv` + `WaitForSingleObject` +
+`UpdateLayeredWindow`), never dispatching a message. That works only because
+the splash is `WS_EX_LAYERED | WS_EX_NOACTIVATE` and takes no input:
+`UpdateLayeredWindow` composites directly, with no `WM_PAINT` round trip.
+The launcher's actual "event loop" is a **Tokio `select!` loop** in
+`supervisor/windows.rs`, not an OS message loop.
+
+Consequence for Workstream 1: adopting `tray-icon`+`muda` on Windows is **not**
+"wire the crate into the loop the launcher already runs" — it requires
+*introducing* a Win32 message pump (a dedicated thread owning the icon, with a
+real window proc, since `Shell_NotifyIcon` delivers clicks as window messages
+and `muda` needs message dispatch). That is a larger change than §7.2 implies,
+though it is well isolated: a pump thread has no interaction with the Tokio
+supervisor beyond a channel. Note `windows_subsystem = "windows"` is already
+set, so the process *can* own windows — that part of the assumption holds.
+
+**macOS: the assumption does hold**, for a reason §7.2 didn't identify. The
+main thread already pumps a real `NSApplication` event loop for the entire
+process lifetime — `splash_mac.rs::run_until_dismissed` ends in an unbounded
+`loop { pump_app_events(0.2); sleep(50ms) }`, kept alive deliberately so reopen
+Apple Events keep reaching the delegate. (Its own comment says the main thread
+"parks forever", which reads as *stops* pumping; it does not — it parks *in* a
+pump. Worth knowing before trusting that comment.) So a menu-bar item has a
+viable, already-running host loop.
+**Caveat:** this is conditional on the splash being enabled. With the splash
+disabled, `main()` runs the supervisor directly on the main thread via
+`block_on` and there is **no NSApp pump at all** — a menu-bar item would have
+no runloop in that configuration.
+
+**Linux** is unaffected by all of the above: `ksni` is pure D-Bus
+StatusNotifierItem and needs no toolkit event loop, which is a further point in
+favor of the §2 recommendation to use it directly rather than `tray-icon`'s GTK
+path.
+
+**Still unverified, and still gating:** whether `tray-icon`/`muda` actually
+render and respond to clicks once such a pump exists. That is the visual half
+of §7.2's acceptance criterion and needs a human with a screen; nothing above
+substitutes for it.
 
 ## 8. What this spec does not decide
 
