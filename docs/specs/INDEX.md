@@ -335,7 +335,7 @@ partial list.
 | [`SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29`](SPEC_MUXBUS_MULTI_TIER_DISCOVERY_AND_REMOTE_INVOCATION_2026_07_29.md) | Spec: multi-tier discovery + remote API invocation over muxbus |
 | [`SPEC_WINDOW_NAME_API_HARDENING_2026_08_08`](SPEC_WINDOW_NAME_API_HARDENING_2026_08_08.md) | SPEC: Window-name App API hardening (phantom-id success + status codes) |
 
-### proposed (91)
+### proposed (92)
 
 | Spec | Title |
 |---|---|
@@ -352,6 +352,7 @@ partial list.
 | [`SPEC_ARMORY_DROP_HOST_CLI_CONFIG_BLOCK_2026_09_01`](SPEC_ARMORY_DROP_HOST_CLI_CONFIG_BLOCK_2026_09_01.md) | Spec: Drop the "Claude Code — host CLI config" block from Armory Global Memory |
 | [`SPEC_ARMORY_MEMORY_TAB_MERGE_2026_08_30`](SPEC_ARMORY_MEMORY_TAB_MERGE_2026_08_30.md) | Spec: Armory rail — merge "Global Memory" + "Personal Memory" into one "Memory" tab |
 | [`SPEC_ARMORY_PERSONAL_MEMORY_AGENT_BLOCKS_2026_09_01`](SPEC_ARMORY_PERSONAL_MEMORY_AGENT_BLOCKS_2026_09_01.md) | Spec: Armory → Memory → Personal — browse by agent block, not a dropdown |
+| [`SPEC_ARMORY_PERSONAL_MEMORY_FILE_TILES_2026_09_04`](SPEC_ARMORY_PERSONAL_MEMORY_FILE_TILES_2026_09_04.md) | Spec: Armory → Memory → Personal — file tiles, not a dropdown |
 | [`SPEC_ARMORY_PERSONAL_MEMORY_FILTER_AND_SORT_2026_09_02`](SPEC_ARMORY_PERSONAL_MEMORY_FILTER_AND_SORT_2026_09_02.md) | Spec: find/filter and sort for Armory → Memory → Personal |
 | [`SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02`](SPEC_ARMORY_REACTIVE_UPDATES_2026_09_02.md) | Spec: reactive updates across the Armory |
 | [`SPEC_ASK_USER_QUESTION_TIMEOUT_KEYBOARD_PAUSE_2026_08_20`](SPEC_ASK_USER_QUESTION_TIMEOUT_KEYBOARD_PAUSE_2026_08_20.md) | SPEC: Keyboard-driven pause for the AskUserQuestion auto-timeout countdown |
