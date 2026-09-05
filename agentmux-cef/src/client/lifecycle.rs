@@ -51,6 +51,21 @@ pub(crate) fn retry_backend_window_id_lookup(
     None
 }
 
+/// Pure decision: does THIS `on_before_close` call fire Stage 2's
+/// `quit_message_loop()`? Workstream 0 Phase 1
+/// (`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md` §7) closed a gap
+/// where `browser_list.is_empty() && !is_browser_pane` alone was an
+/// independent quit authority — the same class of bug already fixed for
+/// Windows' WRR path (`should_quit_on_last_window` requires `draining`).
+/// `draining` here means `QuitState::Draining`, which `begin_drain_and_cascade`
+/// always sets (via the reducer's `should_begin_drain`) before this runs on
+/// the call that empties `browser_list` — so requiring it is a no-op for the
+/// normal (background-service off) path, and only withholds the forced quit
+/// when Stage 1 never ran because background-service mode declined to drain.
+pub(crate) fn is_last_window_close(browser_list_empty: bool, is_browser_pane: bool, draining: bool) -> bool {
+    browser_list_empty && !is_browser_pane && draining
+}
+
 impl AgentMuxHandler {
     pub(crate) fn on_after_created(&mut self, browser: Option<&mut Browser>) {
         debug_assert_ne!(currently_on(ThreadId::UI), 0);
@@ -1328,7 +1343,22 @@ impl AgentMuxHandler {
         // this is the last window, quit_message_loop is deferred until that
         // notify work finishes, posted back to the UI thread (it must run
         // there — see the comment above about deadlocking on a nested call).
-        let is_last_window = self.browser_list.is_empty() && !self.is_browser_pane;
+        // Workstream 0 Phase 1 (`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md`
+        // §7): `browser_list.is_empty()` alone used to be sufficient to fire
+        // Stage 2's `quit_message_loop()` — but that makes THIS check an
+        // independent quit authority, the same architectural gap already
+        // closed for Windows' WRR path (`should_quit_on_last_window` requires
+        // `draining`). Require it here too: `begin_drain_and_cascade` (just
+        // above, when `request_drain.is_some()`) always flips `QuitState` to
+        // `Draining` before this line runs on the SAME call that empties the
+        // list, so this is a no-op change for the normal (background-service
+        // off) path — it only prevents the forced quit when Stage 1 never ran
+        // because `should_begin_drain` declined (background-service mode).
+        let draining = matches!(
+            self.state.host_state.lock().quit_state,
+            crate::state::QuitState::Draining { .. }
+        );
+        let is_last_window = is_last_window_close(self.browser_list.is_empty(), self.is_browser_pane, draining);
 
         // Phase B.7.3.3 — `Event::WindowClosed` +
         // `Event::WindowInstanceReleased` from the launcher
@@ -1541,5 +1571,35 @@ mod backend_window_id_retry_tests {
         }, no_sleep);
         assert_eq!(result, Some("wid-fast".to_string()));
         assert_eq!(*calls.borrow(), 1);
+    }
+}
+
+#[cfg(test)]
+mod is_last_window_close_tests {
+    use super::is_last_window_close;
+
+    #[test]
+    fn fires_when_empty_main_handler_and_draining() {
+        assert!(is_last_window_close(true, false, true));
+    }
+
+    #[test]
+    fn does_not_fire_for_a_browser_pane_handler() {
+        assert!(!is_last_window_close(true, true, true));
+    }
+
+    #[test]
+    fn does_not_fire_while_browsers_remain() {
+        assert!(!is_last_window_close(false, false, true));
+    }
+
+    /// Workstream 0 Phase 1: the gap this predicate closes — an empty
+    /// browser_list on the main handler must NOT alone trigger
+    /// `quit_message_loop()`. Reached when `should_begin_drain` declined to
+    /// drain (background-service mode enabled, or any other reason
+    /// `QuitState` never left `Running`).
+    #[test]
+    fn does_not_fire_without_a_drain_decision_even_if_list_is_empty() {
+        assert!(!is_last_window_close(true, false, false));
     }
 }
