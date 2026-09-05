@@ -128,6 +128,48 @@ pub(crate) fn unsnap_restore_opposite_edge(
     }
 }
 
+/// Where to place a window that is being un-maximized because the user
+/// started dragging it — the other half of the drag-to-top gesture, and what
+/// Chrome/Windows both do when you drag a maximized title bar.
+///
+/// The window must land *under the cursor*, or the drag would feel like it
+/// teleported: the restored window is smaller than the maximized one, so
+/// keeping its top-left fixed would leave the cursor somewhere else entirely
+/// (often outside the window). Two rules, matching the OS:
+///
+/// - **Horizontally, proportional.** The cursor keeps the same *fractional*
+///   position along the title bar it had while maximized — grab the middle
+///   of a maximized title bar and you're still holding the middle of the
+///   restored one. Absolute-offset would drop the cursor off the right edge
+///   whenever the restored window is much narrower.
+/// - **Vertically, same absolute offset.** Title bars are a fixed height, so
+///   preserving "N px below the window top" keeps the grab point on the same
+///   part of the chrome. Proportional here would slide the grab off the
+///   title bar entirely for a short window.
+///
+/// All inputs/outputs are PHYSICAL px. Returns the restored window's new
+/// `(x, y)` top-left.
+pub(crate) fn unmaximize_drag_origin(
+    cursor_x: i32,
+    cursor_y: i32,
+    maximized_left: i32,
+    maximized_top: i32,
+    maximized_width: i32,
+    restored_width: i32,
+) -> (i32, i32) {
+    // Guard the degenerate case rather than dividing by zero — a zero-width
+    // maximized rect shouldn't be reachable, but this runs inside a drag
+    // loop where a panic would wedge the UI thread mid-gesture.
+    let ratio = if maximized_width > 0 {
+        (cursor_x - maximized_left) as f64 / maximized_width as f64
+    } else {
+        0.5
+    };
+    let new_x = cursor_x - (restored_width as f64 * ratio).round() as i32;
+    let new_y = cursor_y - (cursor_y - maximized_top);
+    (new_x, new_y)
+}
+
 /// Whether a drag-to-top *move* (not resize) is currently in the
 /// maximize-offer zone: the cursor at/above the work area's top edge.
 ///
@@ -310,6 +352,51 @@ mod tests {
         let (_top, bottom) =
             unsnap_restore_opposite_edge(VerticalEdge::Bottom, 0, 700, 300, 600).unwrap();
         assert_eq!(bottom, 700);
+    }
+
+    #[test]
+    fn unmaximize_keeps_the_cursor_proportionally_along_the_title_bar() {
+        // Maximized 0..1920, cursor at the midpoint (960). Restored width 800
+        // → cursor should still be at the restored window's midpoint, so the
+        // window's left edge lands 400px left of the cursor.
+        let (x, _y) = unmaximize_drag_origin(960, 10, 0, 0, 1920, 800);
+        assert_eq!(x, 560);
+        assert_eq!(960 - x, 400, "cursor stays at the restored midpoint");
+    }
+
+    #[test]
+    fn unmaximize_handles_a_grab_near_the_right_end_of_the_title_bar() {
+        // Grabbed at 90% across. An absolute-offset scheme would put the
+        // window left edge at 1728-... far off-screen and drop the cursor
+        // past the right edge; proportional keeps it at 90% of 800 = 720.
+        let (x, _y) = unmaximize_drag_origin(1728, 10, 0, 0, 1920, 800);
+        assert_eq!(x, 1008);
+        assert_eq!(1728 - x, 720);
+    }
+
+    #[test]
+    fn unmaximize_preserves_the_absolute_vertical_grab_offset() {
+        // Cursor 18px below the maximized window's top → the restored window
+        // must also sit 18px above the cursor, keeping the grab on the title bar.
+        let (_x, y) = unmaximize_drag_origin(500, 58, 0, 40, 1920, 800);
+        assert_eq!(y, 40);
+        assert_eq!(58 - y, 18);
+    }
+
+    #[test]
+    fn unmaximize_respects_a_non_zero_maximized_origin() {
+        // Secondary monitor at x=1920, taskbar making top=40.
+        let (x, y) = unmaximize_drag_origin(2880, 60, 1920, 40, 1920, 800);
+        assert_eq!(x, 2480, "midpoint grab → 400px left of cursor");
+        assert_eq!(y, 40);
+    }
+
+    /// Must not panic or divide by zero inside a modal drag loop.
+    #[test]
+    fn unmaximize_survives_a_degenerate_zero_width_maximized_rect() {
+        let (x, y) = unmaximize_drag_origin(500, 30, 0, 0, 0, 800);
+        assert_eq!(x, 100, "falls back to a centered grab");
+        assert_eq!(y, 0);
     }
 
     #[test]
