@@ -124,6 +124,20 @@ pub struct HostState {
     /// which is safe: once registered, the live count itself blocks drain).
     pub saw_live_user_window: bool,
 
+    /// Background-service mode (Workstream 0, `SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md`
+    /// §7 Phase 1). When true, `should_begin_drain` never arms a
+    /// `LastWindowClosed` drain — closing the last window hides the app
+    /// instead of tearing down `host`/`srv`/`launcher`. Read once at
+    /// process start from `AGENTMUX_BACKGROUND_SERVICE` (presence-based,
+    /// matching the `AGENTMUX_DEV` idiom elsewhere in this crate); there is
+    /// no live-toggle path yet. Defaults off, so today's close-quits-the-app
+    /// behavior is unchanged for anyone who hasn't opted in. `wrr::win_event`'s
+    /// quit watchdog (Windows) also reads this field (from the same locked
+    /// `HostState`, alongside `registered`/`draining`) so it does not treat
+    /// the resulting "0 registered, not draining" steady state as a desync
+    /// and force-quit a few seconds after the last window closes.
+    pub background_service_enabled: bool,
+
     /// H.6 — top-level window creation runner state (queue, in-flight,
     /// history). Event-driven; no watchdog. **Currently DORMANT** — the
     /// reducer arms (`EnqueueTopLevelWindow`, `TopLevelCallbackFired`,
@@ -187,6 +201,7 @@ impl Default for HostState {
             pane_pool: PanePoolState::default(),
             quit_state: QuitState::default(),
             saw_live_user_window: false,
+            background_service_enabled: std::env::var("AGENTMUX_BACKGROUND_SERVICE").is_ok(),
             top_level_creation: TopLevelCreationState::default(),
             window_opacities: HashMap::new(),
             pane_window_states: HashMap::new(),

@@ -251,6 +251,20 @@ pub struct State {
     /// `ReportWindowClosed` if open never arrived (bounded leak).
     /// See `docs/specs/ANALYSIS_DRIFT_STORM_RENDERER_CRASH_2026-05-06.md`.
     pub just_promoted_labels: HashSet<String>,
+    /// Workstream 0 Phase 1 (`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md`
+    /// §7) — mirrors the host's `AGENTMUX_BACKGROUND_SERVICE` opt-in, set
+    /// once via `Command::ReportBackgroundServiceEnabled` right after
+    /// connect. Defaults false (today's behavior unchanged) until the host
+    /// reports otherwise. Consulted by `handle_report_window_closed` and
+    /// `wrr`'s crash-detected twin so an intentionally-resting host (zero
+    /// windows, by design) doesn't get classified as `OrphanInstance` and
+    /// arm the `teardown_backstop` — see PR #2983 review (Codex P2): without
+    /// this, a host correctly staying alive on purpose would still get its
+    /// whole process tree killed by the backstop after a transient UI-thread
+    /// probe hiccup, since "armed" would otherwise last for the entire
+    /// (now potentially long) resting period instead of the few seconds it
+    /// used to.
+    pub background_service_enabled: bool,
     // F.7 cleanup audit: removed unused `launcher_start_ms: Option<u64>`
     // field. It was set in Default but no reducer arm or consumer
     // ever read it — the WRR observability path uses the OnceLock-
@@ -292,6 +306,7 @@ impl Default for State {
             monitors: Vec::new(),
             pending_hwnds: HashMap::new(),
             just_promoted_labels: HashSet::new(),
+            background_service_enabled: false,
         }
     }
 }

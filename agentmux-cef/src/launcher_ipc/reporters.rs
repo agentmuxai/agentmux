@@ -18,6 +18,28 @@
 
 use agentmux_common::ipc::Command;
 
+/// Workstream 0 Phase 1 (`SPEC_TRAY_OPTIONAL_BACKGROUND_SERVICE_2026_09_04.md`
+/// §7) — tell the launcher whether background-service mode
+/// (`AGENTMUX_BACKGROUND_SERVICE`) is enabled for this host process. Called
+/// once, right after connecting (see `connect_to_launcher`'s
+/// `request_snapshot()` call for the sibling once-per-connect signal). The
+/// launcher's last-window orphan-drift detection and the teardown backstop
+/// it arms must know this to avoid treating an intentionally-resting host
+/// as a stuck/orphaned one — see PR #2983 review (Codex P2). Same
+/// no-op-if-disconnected semantics as every other `report_*` helper.
+pub fn report_background_service_enabled(enabled: bool) {
+    let Some(tx) = super::COMMAND_TX.get() else {
+        return;
+    };
+    let cmd = Command::ReportBackgroundServiceEnabled { enabled };
+    if let Err(e) = tx.send(cmd) {
+        tracing::warn!(
+            "[launcher-ipc] report_background_service_enabled: channel closed ({})",
+            e
+        );
+    }
+}
+
 /// Phase B.4 — sync API: report a window open to the launcher's
 /// state mirror. Called from CEF lifecycle callbacks on the UI
 /// thread. No-op if the launcher pipe isn't connected (`task dev`
