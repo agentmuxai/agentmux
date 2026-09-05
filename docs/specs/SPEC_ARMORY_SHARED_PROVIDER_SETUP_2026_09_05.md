@@ -149,26 +149,40 @@ specifically, which has different precedence from project memory — the spec mu
 define deduplication so the content is not emitted twice. Do not ship both paths
 without resolving this.
 
-### 4.2 Identity-bound agents
+> **Scope marker for everything below (ReAgent P2).** §4.2 and the "composed
+> content" rows of §4.3 apply **only if Kind B ships**, which §4.1a recommends
+> against. They are retained, clearly marked, because the decision is the
+> operator's and re-deriving them later would be wasted work — not because Kind
+> B is assumed. **§4.3's placeholder requirement is unconditional** and applies
+> either way.
+
+### 4.2 Identity-bound agents — *only if Kind B ships*
 
 An agent bound to an OAuth account has its provider config env var overwritten
 with that account's own dir (`inject.rs:591-598, 667`) — the default shared dir
-is never read. Kind B must therefore be reconciled into the **resolved** config
-dir at first-turn injection (`inject.rs`, alongside the existing seed call), not
-only written once to the shared dir. Otherwise identity-bound agents silently
-keep a stale file while the UI says Global Memory applies to everyone.
+is never read. Kind B would therefore have to be reconciled into the **resolved**
+config dir at first-turn injection (`inject.rs`, alongside the existing seed
+call), not only written once to the shared dir. Otherwise identity-bound agents
+silently keep a stale file while the UI says Global Memory applies to everyone.
 
-### 4.3 The isolation invariant — must not regress
+If Kind B is dropped, this section is moot: Kind A writes to the agent's working
+directory, which is unaffected by identity binding.
+
+### 4.3 The isolation invariant — must not regress *(placeholder half is unconditional)*
 
 `seed_claude_md_placeholder_if_missing` exists because an isolated
 `CLAUDE_CONFIG_DIR` with **no** `CLAUDE.md` falls through to the operator's
 personal `~/.claude/CLAUDE.md` — measured, not inferred
 (`REPORT_CLAUDE_CONFIG_DIR_ISOLATION_EVIDENCE_2026_09_01.md` §2).
 
-Writing real Global Memory content to that path satisfies the same invariant,
-and the seeder already no-ops when a file exists (`providers.rs:697`), so the
-two compose. **But when Global Memory is empty, the placeholder is still the
-only thing preventing the leak.** Required behaviour:
+**If Kind B is dropped (recommended):** nothing changes here at all. The provider
+config dir keeps getting the placeholder and only the placeholder, exactly as
+today. §3's deletion work must not disturb it.
+
+**If Kind B ships:** real content satisfies the same invariant, and the seeder
+already no-ops when a file exists (`providers.rs:697`), so the two compose —
+but when Global Memory is empty the placeholder is still the only thing
+preventing the leak:
 
 | Global Memory | `$CLAUDE_CONFIG_DIR/CLAUDE.md` |
 |---|---|
@@ -265,15 +279,27 @@ operator-controlled, highest-priority tier — and a `GlobalMemoryRevert` modell
 directly on native-memory revert would write the row straight past the generic
 upsert guard.
 
+**Invariant (not an enumeration):** *no agent-invocable code path may create,
+modify, revert, reorder or delete an `is_system` bundle.* Stated as a blanket
+rule deliberately — listing "Write and Revert" would leave any later tool
+(delete, bulk-import, reorder) outside the guard by default, which is how this
+kind of boundary erodes.
+
 Required:
 
-- `GlobalMemoryWrite` / `GlobalMemoryRevert` **must reject any `is_system`
-  bundle**, explicitly, at the tool boundary — not rely on a lower-layer guard
-  a revert path might bypass.
-- `GlobalMemoryList` / `Read` may include system bundles (visibility is fine and
-  useful), but must mark them read-only.
-- A rejection test per mutating tool (§7). This is a privilege boundary, so it
-  needs a test that fails loudly if someone later "simplifies" the filter.
+- **Enforcement sits at the tool boundary, in every mutating tool**, checked
+  against the target bundle's own `is_system` flag before any store call. A
+  lower-layer guard alone is insufficient: `bundle_memory_upsert_system` is the
+  only guarded write today, and a revert built on the native-memory pattern
+  writes through a different path that never reaches it.
+- Any *new* `GlobalMemory*` tool that mutates must add the same check; a shared
+  helper (e.g. `reject_if_system(bundle_id)`) called first in each mutating
+  handler is preferred over per-tool ad-hoc filtering, so the rule is one thing
+  to audit rather than N.
+- `GlobalMemoryList` / `Read` may include system bundles (visibility is useful),
+  but must mark them read-only.
+- A rejection test **per mutating tool** (§7), so the boundary fails loudly if a
+  filter is later "simplified" away or a new tool forgets it.
 
 **Security posture — operator-decided (2026-09-05): any agent may write
 non-system global bundles, fully audited.** This is content *every other agent*
@@ -315,13 +341,20 @@ existing `MemoryWrite` description's `provenance` pattern (source `human` /
   without the block.
 - `seed_claude_md_placeholder_if_missing` still exists and is still called.
 
-**Materialization (B)**
+**Materialization (B) — unconditional**
+- Global Memory reaches agents of **every** provider via Kind A (regression
+  guard on existing behaviour, which is the whole of B if Kind B is dropped).
+- The provider config dir still contains the placeholder after A's deletion
+  work — i.e. nothing in §3 removed the isolation control.
+
+**Materialization (B) — *only if Kind B ships***
 - Kind B destination resolution **asserts no non-Claude provider has one** —
   the guard against reintroducing v2's P1.
-- Non-Claude agents still receive Global Memory via Kind A (unchanged).
 - Identity-bound agent gets current Global Memory in *its own* resolved dir.
 - **Isolation matrix (§4.3), all three rows** — especially emptying Global
   Memory restoring the placeholder.
+- No duplication: a Claude agent does not receive the same Global Memory text
+  from both Kind A and Kind B (§4.1a).
 - Partial file-write failure leaves DB/history intact and self-heals on
   reconcile.
 - An un-adopted hand-edited file is not clobbered; an adopted one is updated.
@@ -331,9 +364,9 @@ existing `MemoryWrite` description's `provenance` pattern (source `human` /
 - Revert creates a new version; history is never rewritten.
 - `GlobalMemoryWrite` records `source='agent'` + `agent_id`; an unattributable
   write is rejected.
-- **`GlobalMemoryWrite` and `GlobalMemoryRevert` REJECT an `is_system` bundle**
-  — one test each. Privilege boundary; must fail loudly if the filter is ever
-  "simplified" away.
+- **Every mutating `GlobalMemory*` tool REJECTS an `is_system` bundle** — one
+  test per mutating tool, not just Write/Revert. Privilege boundary; must fail
+  loudly if a filter is "simplified" away or a newly-added tool omits it.
 - **Schema parity:** history works in all three open modes (shared `store.db`,
   per-channel `objects.db` fallback, `identity-store.db`) — the fallback mode
   especially, since that's where a single-schema declaration would silently
