@@ -196,6 +196,34 @@ clear any visible snap preview immediately, same as the existing
 `clear_floating_redock_hover` call in that same arm does for the floater
 case.
 
+### 2.6 The inverse gesture: dragging a maximized window restores it
+
+**Added 2026-09-05 after live testing** — drag-to-top maximize shipped
+working, but the round trip didn't: dragging the now-maximized window again
+left it maximized. Chrome/Windows both restore a maximized window down the
+moment you start dragging its title bar, and the window has to land *under
+the cursor* or the drag feels like it teleported.
+
+Implemented in `ui_tasks::drag::unmaximize_for_drag`, called at drag start:
+
+- **Before taking capture**, deliberately. `ShowWindow` pumps messages and
+  can disturb activation/capture; running it between `SetCapture` and the
+  loop that depends on that capture is exactly the kind of ordering the
+  move loop's existing `GetCapture()` sanity check exists to catch.
+- **Placement rules** (`window_snap::unmaximize_drag_origin`, unit-tested):
+  horizontally the cursor keeps its *fractional* position along the title
+  bar (absolute offset would drop the cursor past the right edge whenever
+  the restored window is much narrower); vertically it keeps its *absolute*
+  offset (title bars are a fixed height, so proportional would slide the
+  grab off the chrome on a short window).
+- **Restored size is read back via `GetWindowRect` after `SW_RESTORE`**, not
+  from `WINDOWPLACEMENT.rcNormalPosition` — that field is documented in
+  *workspace* coordinates, which diverge from screen coordinates in exactly
+  the multi-monitor/taskbar setups this has to work in.
+- Floaters excluded, same reason as §2.4: borderless `WS_POPUP`s have no
+  native maximize placement and their geometry is reducer-owned
+  (`toggle_floating_maximize`), so `SW_RESTORE` would desync that state.
+
 ## 3. Design — Feature B: border-drag vertical snap
 
 Confirmed broken (§0.2). Fix by **intercepting the native resize, not

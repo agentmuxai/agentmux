@@ -359,6 +359,31 @@ wrap_task! {
                     return;
                 }
 
+                // 0.5. Dragging a MAXIMIZED window restores it down under the
+                //      cursor first — Chrome/Windows both do this, and without
+                //      it a maximized window would either refuse to move or
+                //      slide around at full-screen size.
+                //
+                //      Done BEFORE taking capture, deliberately: ShowWindow
+                //      pumps messages and can disturb activation/capture, so
+                //      it must not run between SetCapture and the loop that
+                //      depends on that capture.
+                //
+                //      Floaters are excluded for the same reason they're
+                //      excluded from the snap itself (SPEC §2.4): they are
+                //      borderless WS_POPUPs with no native maximize placement
+                //      — `toggle_floating_maximize` manages their geometry
+                //      through the reducer instead, so SW_RESTORE here would
+                //      desync that state.
+                if !self
+                    .source_label
+                    .as_deref()
+                    .unwrap_or("main")
+                    .starts_with("floating-")
+                {
+                    unmaximize_for_drag(h);
+                }
+
                 // 1. Capture the mouse to THIS (UI) thread so WM_MOUSEMOVE /
                 //    WM_LBUTTONUP route to our GetMessage loop. ReleaseCapture
                 //    first to drop any capture Chromium set on the press.
@@ -635,6 +660,68 @@ wrap_task! {
             }
         }
     }
+}
+
+/// If `hwnd` is maximized, restore it and reposition it under the cursor so
+/// the drag can continue naturally — see
+/// `window_snap::unmaximize_drag_origin` for the placement rules and
+/// `SPEC_WINDOW_SNAP_MAXIMIZE_2026_09_04.md` §2.6.
+///
+/// No-op for a window that isn't maximized (the overwhelmingly common case),
+/// so callers can invoke it unconditionally at drag start.
+#[cfg(target_os = "windows")]
+unsafe fn unmaximize_for_drag(h: windows_sys::Win32::Foundation::HWND) {
+    use windows_sys::Win32::Foundation::{POINT, RECT};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetCursorPos, GetWindowPlacement, GetWindowRect, SetWindowPos, ShowWindow, SW_MAXIMIZE,
+        SW_RESTORE, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, WINDOWPLACEMENT,
+    };
+
+    let mut placement: WINDOWPLACEMENT = std::mem::zeroed();
+    placement.length = std::mem::size_of::<WINDOWPLACEMENT>() as u32;
+    if GetWindowPlacement(h, &mut placement) == 0 || placement.showCmd != SW_MAXIMIZE as u32 {
+        return;
+    }
+
+    let mut maximized: RECT = std::mem::zeroed();
+    if GetWindowRect(h, &mut maximized) == 0 {
+        return;
+    }
+    let mut cursor = POINT { x: 0, y: 0 };
+    GetCursorPos(&mut cursor);
+
+    ShowWindow(h, SW_RESTORE);
+
+    // Read the restored size back rather than trusting
+    // `placement.rcNormalPosition`: that field is documented in *workspace*
+    // coordinates, which diverge from screen coordinates in exactly the
+    // multi-monitor / taskbar setups this feature has to work in. The
+    // post-restore GetWindowRect is unambiguously screen coords.
+    let mut restored: RECT = std::mem::zeroed();
+    if GetWindowRect(h, &mut restored) == 0 {
+        return;
+    }
+    let (new_x, new_y) = crate::client::window_snap::unmaximize_drag_origin(
+        cursor.x,
+        cursor.y,
+        maximized.left,
+        maximized.top,
+        maximized.right - maximized.left,
+        restored.right - restored.left,
+    );
+    SetWindowPos(
+        h,
+        std::ptr::null_mut(),
+        new_x,
+        new_y,
+        0,
+        0,
+        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+    );
+    tracing::info!(
+        "[start_window_drag] un-maximized for drag hwnd={:p} -> ({},{})",
+        h, new_x, new_y
+    );
 }
 
 /// Work area (PHYSICAL px, `(x, y, width, height)`) of the monitor under the
