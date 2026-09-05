@@ -39,11 +39,18 @@ export type PresetNode = LeafNode | SplitNode;
 
 // ─── The default new-tab preset ──────────────────────────────────────────────
 //
-// agent on the left half; swarm / armory / sysinfo stacked top-to-bottom on
-// the right half (SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md — matches the
-// window-bootstrap default in agentmux-srv/src/backend/wcore/mod.rs's
-// default_four_pane_tree, a separate mechanism kept in sync by convention,
-// not shared code).
+// agent on the left half; sysinfo (CPU) above swarm on the right half.
+// Matches the window-bootstrap default in
+// agentmux-srv/src/backend/wcore/mod.rs's `default_three_pane_tree` — a
+// SEPARATE mechanism kept in sync by convention, not shared code, so a
+// change to either one has to be mirrored here by hand. Armory was dropped
+// from the starter set (still one click away in the widget bar),
+// superseding SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md's arrangement.
+//
+// Note this preset can't express the backend's 20/80 size split — the
+// applier only emits even splits — so the right column starts 50/50 here
+// and the backend seed is the one that carries the sizing.
+//
 // To change the defaults, edit *only* this constant — the applier and
 // every consumer of `createTab()` pick it up automatically.
 
@@ -53,11 +60,7 @@ export const DEFAULT_TAB_PRESET: PresetNode = {
         { widget: "defwidget@agent" },
         {
             split: "vertical",
-            children: [
-                { widget: "defwidget@swarm" },
-                { widget: "defwidget@armory" },
-                { widget: "defwidget@sysinfo" },
-            ],
+            children: [{ widget: "defwidget@sysinfo" }, { widget: "defwidget@swarm" }],
         },
     ],
 };

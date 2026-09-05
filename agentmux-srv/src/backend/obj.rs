@@ -650,8 +650,8 @@ mod tests {
     /// the frontend produces today MUST yield the typed LayoutNode, and
     /// reserializing MUST produce equivalent JSON. The shapes here cover:
     ///   1. Single-leaf root (dnd / tear-off shape)
-    ///   2. The first-launch four-pane shape (deep nesting + mixed
-    ///      group/leaf nodes)
+    ///   2. A multi-pane shape (deep nesting + mixed group/leaf nodes) —
+    ///      the former first-launch four-pane layout, see below
     ///   3. Edge: missing `children` array for leaves
     #[test]
     fn test_layout_node_serde_compat_with_frontend_shapes() {
@@ -673,8 +673,11 @@ mod tests {
         let reparsed: LayoutNode = serde_json::from_value(reserialized).unwrap();
         assert_eq!(leaf, reparsed);
 
-        // Shape 2 — first-launch four-pane (matches wcore::mod.rs —
-        // SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md).
+        // Shape 2 — a nested row/column tree with a multi-child right
+        // column. This was the first-launch four-pane layout when written;
+        // the default is now three panes (wcore::default_three_pane_tree),
+        // but the fixture is kept as-is: what it exercises is serde
+        // round-tripping of a nested LayoutNode, not the current default.
         let four_pane_json = serde_json::json!({
             "id": "root-id",
             "flexDirection": "row",
