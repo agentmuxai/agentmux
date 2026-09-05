@@ -224,6 +224,8 @@ async fn route_command(
         // (see `quit_app`'s doc for why the ordinary last-window path and
         // `Event::HostShouldQuit` both cannot serve here).
         "quit_app" => commands::window::quit_app(state),
+        // Issue #2977 WS3 — the tray panel: a small top-level window, pool-first.
+        "open_panel" => commands::window::open_panel(state),
         "minimize_window" => commands::window::minimize_window(state, args),
         "maximize_window" => commands::window::maximize_window(state, args),
         "toggle_floating_maximize" => commands::window::toggle_floating_maximize(state, args),

@@ -391,6 +391,7 @@ pub fn tear_off_pool_promote(
         tab_anchor_y,
         None,
         None,
+        false, // tab tear-off, not a tray panel
     ) {
         Some(label) => Ok(serde_json::json!(label)),
         None => {
