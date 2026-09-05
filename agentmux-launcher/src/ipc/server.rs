@@ -845,6 +845,9 @@ async fn enforce_register_first(
         Command::ReportWindowOpened { .. } => {
             ("ReportWindowOpened before Register".to_string(), true)
         }
+        Command::ReportBackgroundServiceEnabled { .. } => {
+            ("ReportBackgroundServiceEnabled before Register".to_string(), true)
+        }
         Command::ReportWindowClosed { .. } => {
             ("ReportWindowClosed before Register".to_string(), true)
         }
