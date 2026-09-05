@@ -9,6 +9,13 @@
  * only surfaced once DEFAULT_TAB_PRESET grew a 3-child vertical split
  * (swarm/armory/sysinfo, SPEC_DEFAULT_WIDGETS_REORDER_2026_08_25.md) — a
  * 2-child split can't distinguish "first child" from "previous child".
+ *
+ * DEFAULT_TAB_PRESET is back down to a 2-child right column (sysinfo above
+ * swarm; armory dropped from the starter set), so the shipped default no
+ * longer exercises this path. The fixtures below are deliberately local
+ * and stay 3-child: the applier still supports N children, and this is the
+ * only thing guarding that ordering — don't retire it just because the
+ * current default happens not to hit it.
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
